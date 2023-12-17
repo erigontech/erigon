@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -35,14 +36,9 @@ func main() {
 				Name:  "snapshot_path",
 				Usage: "pathname of the snapshot file",
 			},
-			&cli.IntFlag{
-				Name:  "snapshot.version",
-				Usage: "Snapshot files version.",
-				Value: 1,
-			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			return buildIndex(cCtx, cCtx.String("datadir"), uint8(cCtx.Int("snapshot.version")), cCtx.StringSlice("snapshot_path"), 0)
+			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"), 0)
 		},
 	}
 
@@ -60,7 +56,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 	return snaptype.FileInfo{}, false // Return zero value and false if not found
 }
 
-func buildIndex(cliCtx *cli.Context, dataDir string, version uint8, snapshotPaths []string, minBlock uint64) error {
+func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
 	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -80,7 +76,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, version uint8, snapshotPath
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	segments, _, err := freezeblocks.Segments(dirs.Snap, version, minBlock)
+	segments, _, err := freezeblocks.Segments(dirs.Snap, snapcfg.KnownCfg(chainConfig.ChainName, nil, nil).Version, minBlock)
 	if err != nil {
 		return err
 	}

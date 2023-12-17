@@ -140,11 +140,6 @@ var (
 		Usage: `Default: use snapshots "true" for Mainnet, Goerli, Gnosis Chain and Chiado. use snapshots "false" in all other cases`,
 		Value: true,
 	}
-	SnapshotVersionFlag = cli.IntFlag{
-		Name:  "snapshot.version",
-		Usage: `Which version of snapshot files to use`,
-		Value: 1,
-	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
 		Usage: "Enables internal consensus",
@@ -1614,7 +1609,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli
 		cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
 	}
-	cfg.Sync.SnapshotVersion = uint8(ctx.Int(SnapshotVersionFlag.Name))
 
 	cfg.Dirs = nodeConfig.Dirs
 	cfg.Snapshot.KeepBlocks = ctx.Bool(SnapKeepBlocksFlag.Name)

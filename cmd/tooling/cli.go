@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/net/context"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -36,8 +37,7 @@ type chainCfg struct {
 // }
 
 type withDatadir struct {
-	Datadir         string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
-	SnapshotVersion uint8  `help:"snapshot.version" default:"1"`
+	Datadir string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
 }
 
 // func (w *withPPROF) withProfile() {
@@ -79,7 +79,10 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 	tickerTriggerer := time.NewTicker(c.UploadPeriod)
 	defer tickerTriggerer.Stop()
 	// do the checking at first run
-	if err := checkSnapshots(ctx, beaconConfig, dirs, c.SnapshotVersion); err != nil {
+
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil).Version
+
+	if err := checkSnapshots(ctx, beaconConfig, dirs, snapshotVersion); err != nil {
 		return err
 	}
 	log.Info("Uploading snapshots to R2 bucket")
@@ -94,7 +97,9 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 		select {
 		case <-tickerTriggerer.C:
 			log.Info("Checking snapshots")
-			if err := checkSnapshots(ctx, beaconConfig, dirs, c.SnapshotVersion); err != nil {
+			snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil).Version
+
+			if err := checkSnapshots(ctx, beaconConfig, dirs, snapshotVersion); err != nil {
 				return err
 			}
 			log.Info("Finishing snapshots")

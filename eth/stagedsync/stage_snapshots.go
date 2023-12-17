@@ -58,7 +58,6 @@ type SnapshotsCfg struct {
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 
-	version          uint8
 	historyV3        bool
 	caplin           bool
 	agg              *state.AggregatorV3
@@ -69,7 +68,6 @@ type SnapshotsCfg struct {
 func StageSnapshotsCfg(db kv.RwDB,
 	chainConfig chain.Config,
 	dirs datadir.Dirs,
-	version uint8,
 	blockRetire services.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
@@ -83,7 +81,6 @@ func StageSnapshotsCfg(db kv.RwDB,
 		db:                 db,
 		chainConfig:        chainConfig,
 		dirs:               dirs,
-		version:            version,
 		blockRetire:        blockRetire,
 		snapshotDownloader: snapshotDownloader,
 		blockReader:        blockReader,
@@ -96,7 +93,10 @@ func StageSnapshotsCfg(db kv.RwDB,
 
 	if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
 
-		cfg.snapshotUploader = &snapshotUploader{cfg: &cfg, uploadFs: uploadFs}
+		cfg.snapshotUploader = &snapshotUploader{
+			cfg:      &cfg,
+			uploadFs: uploadFs,
+			version:  snapcfg.KnownCfg(chainConfig.ChainName, []string{}, []string{}).Version}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 
@@ -196,7 +196,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		u.init(ctx, logger)
 
 		if !dbg.UploadAllSnapshots() {
-			u.downloadLatestSnapshots(ctx, cfg.version)
+			u.downloadLatestSnapshots(ctx, u.version)
 		}
 
 		if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
@@ -228,7 +228,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			cfg.notifier.Events.OnNewSnapshot()
 		}
 	} else {
-		if err := snapshotsync.WaitForDownloader(ctx, cfg.version, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 			return err
 		}
 	}
@@ -509,6 +509,7 @@ type snapshotUploader struct {
 	uploadScheduled  atomic.Bool
 	uploading        atomic.Bool
 	manifestMutex    sync.Mutex
+	version          uint8
 }
 
 func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
@@ -715,7 +716,7 @@ func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
 		} else {
 			info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, fi.Name())
 
-			if !ok || info.Version != u.cfg.version {
+			if !ok || info.Version != u.version {
 				continue
 			}
 
@@ -817,7 +818,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version 
 func (u *snapshotUploader) maxSeedableHeader() uint64 {
 	var max uint64
 
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version); err == nil {
+	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.version); err == nil {
 		for _, info := range list {
 			if u.seedable(info) && info.T == snaptype.Headers && info.To > max {
 				max = info.To
@@ -831,7 +832,7 @@ func (u *snapshotUploader) maxSeedableHeader() uint64 {
 func (u *snapshotUploader) minBlockNumber() uint64 {
 	var min uint64
 
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version); err == nil {
+	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.version); err == nil {
 		for _, info := range list {
 			if u.seedable(info) && min == 0 || info.From < min {
 				min = info.From
@@ -921,7 +922,7 @@ func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.Logger
 }
 
 func (u *snapshotUploader) removeBefore(before uint64) {
-	list, err := snaptype.Segments(u.cfg.dirs.Snap, u.cfg.version)
+	list, err := snaptype.Segments(u.cfg.dirs.Snap, u.version)
 
 	if err != nil {
 		return

@@ -362,3 +362,19 @@ func FrozenBlockLimit() uint64 {
 	})
 	return frozenBlockLimit
 }
+
+var (
+	snapshotVersion     uint8
+	snapshotVersionOnce sync.Once
+)
+
+func SnapshotVersion() uint8 {
+	snapshotVersionOnce.Do(func() {
+		v, _ := os.LookupEnv("SNAPSHOT_VERSION")
+		if i, _ := strconv.ParseUint(v, 10, 8); i > 0 {
+			snapshotVersion = uint8(i)
+			log.Info("[Experiment]", "SNAPSHOT_VERSION", snapshotVersion)
+		}
+	})
+	return snapshotVersion
+}

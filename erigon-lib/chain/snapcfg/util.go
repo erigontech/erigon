@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
 	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
@@ -60,12 +61,35 @@ var (
 	ChiadoChainSnapshotCfg     = newCfg(Chiado)
 )
 
+const (
+	SnapshotVersion uint8 = 1
+)
+
 func newCfg(preverified Preverified) *Cfg {
-	return &Cfg{ExpectBlocks: maxBlockNum(preverified), Preverified: preverified}
+	version := SnapshotVersion
+
+	if override := dbg.SnapshotVersion(); override != 0 {
+		version = override
+	}
+
+	var pv Preverified
+
+	for _, p := range preverified {
+		if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
+			if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
+				pv = append(pv, p)
+			}
+		}
+	}
+
+	maxBlockNum, version := cfgInfo(pv, version)
+	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, Version: version}
 }
 
-func maxBlockNum(preverified Preverified) uint64 {
+func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 	max := uint64(0)
+	version := defaultVersion
+
 	for _, p := range preverified {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
@@ -84,15 +108,22 @@ func maxBlockNum(preverified Preverified) uint64 {
 		if max < to {
 			max = to
 		}
+
+		if vp := parts[0]; strings.HasPrefix(vp, "v") {
+			if v, err := strconv.ParseUint(vp[1:], 10, 8); err == nil {
+				version = uint8(v)
+			}
+		}
 	}
 	if max == 0 { // to prevent underflow
-		return 0
+		return 0, version
 	}
-	return max*1_000 - 1
+	return max*1_000 - 1, version
 }
 
 type Cfg struct {
 	ExpectBlocks uint64
+	Version      uint8
 	Preverified  Preverified
 }
 

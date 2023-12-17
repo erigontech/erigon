@@ -111,9 +111,4 @@ var (
 		Usage: "Path to the token that ensures safe connection between CL and EL",
 		Value: "",
 	}
-	SnapshotVersion = cli.IntFlag{
-		Name:  "snapshot.version",
-		Usage: `Which version of snapshot files to use`,
-		Value: 1,
-	}
 )
