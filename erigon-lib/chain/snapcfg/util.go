@@ -70,19 +70,21 @@ func newCfg(preverified Preverified) *Cfg {
 
 	if override := dbg.SnapshotVersion(); override != 0 {
 		version = override
-	}
 
-	var pv Preverified
+		var pv Preverified
 
-	for _, p := range preverified {
-		if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
-			if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
-				pv = append(pv, p)
+		for _, p := range preverified {
+			if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
+				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
+					pv = append(pv, p)
+				}
 			}
 		}
+
+		preverified = pv
 	}
 
-	maxBlockNum, version := cfgInfo(pv, version)
+	maxBlockNum, version := cfgInfo(preverified, version)
 	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, Version: version}
 }
 
