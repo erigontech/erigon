@@ -214,7 +214,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			// Collect genesis state if we are at genesis
-			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, checkpoints, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, currentSyncCommittee, nextSyncCommittee, slashings, checkpoints, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 				return err
 			}
 		} else {
