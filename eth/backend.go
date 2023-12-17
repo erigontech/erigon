@@ -45,6 +45,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
+	"github.com/ledgerwatch/erigon/common"
 
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
@@ -669,7 +670,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// Initialize ethbackend
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// intiialize engine backend
-	var engine *execution_client.ExecutionClientDirect
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.notifications.Events, logger)
 
@@ -809,9 +809,22 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		false,
 		config.Miner.EnabledPOS)
 	backend.engineBackendRPC = engineBackendRPC
-	engine, err = execution_client.NewExecutionClientDirect(ctx, eth1_chain_reader.NewChainReaderEth1(ctx, chainConfig, executionRpc, 1000))
-	if err != nil {
-		return nil, err
+	var engine execution_client.ExecutionEngine
+	if config.NetworkID == uint64(clparams.GnosisNetwork) {
+		// Read the jwt secret
+		jwtSecret, err := readJwtSecret(stack.Config().Http.JWTSecretPath)
+		if err != nil {
+			return nil, err
+		}
+		engine, err = execution_client.NewExecutionClientRPC(ctx, jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		engine, err = execution_client.NewExecutionClientDirect(ctx, eth1_chain_reader.NewChainReaderEth1(ctx, chainConfig, executionRpc, 1000))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// If we choose not to run a consensus layer, run our embedded.
@@ -1480,4 +1493,21 @@ func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader ser
 
 func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
 	return s.sentinel
+}
+
+func readJwtSecret(path string) ([]byte, error) {
+	if len(strings.TrimSpace(path)) == 0 {
+		return nil, errors.New("Missing jwt secret path")
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	jwtSecret := common.FromHex(strings.TrimSpace(string(data)))
+	if len(jwtSecret) == 32 {
+		return jwtSecret, nil
+	}
+
+	return nil, fmt.Errorf("Invalid JWT secret at %s, invalid size", path)
 }
