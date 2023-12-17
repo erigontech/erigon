@@ -214,10 +214,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			// Collect genesis state if we are at genesis
-			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, checkpoints, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
 				return err
 			}
-			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		} else {
 			start := time.Now()
 			// progress not 0? we need to load the state from the DB
@@ -232,8 +231,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
-			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+
 		}
+		s.balances32 = s.balances32[:0]
+		s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 	}
 
 	logLvl := log.LvlInfo
@@ -379,6 +380,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 					return err
 				}
+				s.balances32 = s.balances32[:0]
+				s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			} else if slot%s.cfg.SlotsPerEpoch == 0 {
 				if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 					return err
@@ -400,9 +403,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, fullValidation); err != nil {
 			return err
 		}
+
 		first = false
 
-		// dump the whole sla
+		// dump the whole slashings vector.
 		if slashingOccured {
 			if err := s.antiquateFullUint64List(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
 				return err
@@ -424,6 +428,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 				return err
 			}
+			// Reset it as we antiquated it.
+			s.balances32 = s.balances32[:0]
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			continue
 		}
 
@@ -679,7 +686,7 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, checkpoints, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -710,6 +717,15 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 	}
 	var commonBuffer bytes.Buffer
 	if err := s.antiquateFullUint64List(slashings, roundedSlotToDump, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
+		return err
+	}
+
+	k := base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot))
+	v := make([]byte, solid.CheckpointSize*3)
+	copy(v, state.CurrentJustifiedCheckpoint())
+	copy(v[solid.CheckpointSize:], state.PreviousJustifiedCheckpoint())
+	copy(v[solid.CheckpointSize*2:], state.FinalizedCheckpoint())
+	if err := checkpoints.Collect(k, v); err != nil {
 		return err
 	}
 
@@ -764,7 +780,6 @@ func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.B
 // 	if err := os.WriteFile("b.txt", b, 0644); err != nil {
 // 		s.logger.Error("Failed to write full beacon state", "err", err)
 // 	}
-
 // }
 
 func flattenRandaoMixes(hashes []libcommon.Hash) []byte {

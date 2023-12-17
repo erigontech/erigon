@@ -41,7 +41,8 @@ type SnapshotDownloadStatistics struct {
 	Alloc                uint64                               `json:"alloc"`
 	Sys                  uint64                               `json:"sys"`
 	DownloadFinished     bool                                 `json:"downloadFinished"`
-	Segments             map[string]SegmentDownloadStatistics `json:"segments"`
+	SegmentsDownloading  map[string]SegmentDownloadStatistics `json:"segmentsDownloading"`
+	SegmentIndexing      SnapshotIndexingStatistics           `json:"segmentsIndexing"`
 	TorrentMetadataReady int32                                `json:"torrentMetadataReady"`
 }
 
@@ -55,10 +56,19 @@ type SegmentDownloadStatistics struct {
 	PeersRate       uint64 `json:"peersRate"`
 }
 
+type SnapshotIndexingStatistics struct {
+	Segments    map[string]int `json:"segments"`
+	TimeElapsed float64        `json:"timeElapsed"`
+}
+
 func (ti SnapshotDownloadStatistics) Type() Type {
 	return TypeOf(ti)
 }
 
 func (ti SegmentDownloadStatistics) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti SnapshotIndexingStatistics) Type() Type {
 	return TypeOf(ti)
 }
