@@ -286,12 +286,13 @@ func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error)
 	// Code here
 	currentSyncCommittee, nextSyncCommittee, ok := a.forkchoiceStore.GetSyncCommittees(blockRoot)
 	if !ok {
+		syncCommitteeSlot := a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(*slot)
 		// Check the main database if it cannot be found in the forkchoice store
-		currentSyncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, *slot)
+		currentSyncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, syncCommitteeSlot)
 		if err != nil {
 			return nil, err
 		}
-		nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(tx, *slot)
+		nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(tx, syncCommitteeSlot)
 		if err != nil {
 			return nil, err
 		}
