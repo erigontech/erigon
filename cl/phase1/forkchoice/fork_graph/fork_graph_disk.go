@@ -115,6 +115,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 		currentState:          anchorState,
 		currentStateBlockRoot: anchorRoot,
 		saveStates:            make(map[libcommon.Hash]savedStateRecord),
+		syncCommittees:        make(map[libcommon.Hash]syncCommittees),
 		// checkpoints trackers
 		currentJustifiedCheckpoints: make(map[libcommon.Hash]solid.Checkpoint),
 		finalizedCheckpoints:        make(map[libcommon.Hash]solid.Checkpoint),
