@@ -29,10 +29,37 @@ var (
 )
 
 var Command = cli.Command{
-	Action:    manifest,
-	Name:      "manifest",
-	Usage:     "manifest utilities - list, update, verify",
-	ArgsUsage: "<cmd>",
+	Action: func(cliCtx *cli.Context) error {
+		return manifest(cliCtx, "list")
+	},
+	Name:  "manifest",
+	Usage: "manifest utilities",
+	Subcommands: []*cli.Command{
+		{
+			Action: func(cliCtx *cli.Context) error {
+				return manifest(cliCtx, "list")
+			},
+			Name:      "list",
+			Usage:     "list manifest from storage location",
+			ArgsUsage: "<location>",
+		},
+		{
+			Action: func(cliCtx *cli.Context) error {
+				return manifest(cliCtx, "update")
+			},
+			Name:      "update",
+			Usage:     "update the manifest to match the files available at its storage location",
+			ArgsUsage: "<location>",
+		},
+		{
+			Action: func(cliCtx *cli.Context) error {
+				return manifest(cliCtx, "verify")
+			},
+			Name:      "verify",
+			Usage:     "verify that manifest matches the files available at its storage location",
+			ArgsUsage: "<location>",
+		},
+	},
 	Flags: []cli.Flag{
 		&VersionFlag,
 		&logging.LogVerbosityFlag,
@@ -42,7 +69,7 @@ var Command = cli.Command{
 	Description: ``,
 }
 
-func manifest(cliCtx *cli.Context) error {
+func manifest(cliCtx *cli.Context, command string) error {
 	logger := sync.Logger(cliCtx.Context)
 
 	var src *sync.Locator
@@ -50,21 +77,13 @@ func manifest(cliCtx *cli.Context) error {
 
 	var rcCli *downloader.RCloneClient
 
-	command := "list"
 	pos := 0
 
 	if cliCtx.Args().Len() == 0 {
-		return fmt.Errorf("unknown manifest command")
+		return fmt.Errorf("missing manifest location")
 	}
 
 	arg := cliCtx.Args().Get(pos)
-
-	switch arg {
-	case "update", "verify":
-		command = arg
-		pos++
-		arg = cliCtx.Args().Get(pos)
-	}
 
 	if src, err = sync.ParseLocator(arg); err != nil {
 		return err

@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/snapshots/flags"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 )
 
@@ -55,10 +54,6 @@ var Command = cli.Command{
 		&TorrentsFlag,
 		&HashesFlag,
 		&ManifestFlag,
-		&utils.DataDirFlag,
-		&logging.LogVerbosityFlag,
-		&logging.LogConsoleVerbosityFlag,
-		&logging.LogDirVerbosityFlag,
 		&utils.WebSeedsFlag,
 		&utils.NATFlag,
 		&utils.DisableIPV6,

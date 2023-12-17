@@ -23,6 +23,9 @@ import (
 )
 
 func main() {
+	logging.LogVerbosityFlag.Value = log.LvlError.String()
+	logging.LogConsoleVerbosityFlag.Value = log.LvlError.String()
+
 	app := cli.NewApp()
 	app.Name = "snapshots"
 	app.Version = params.VersionWithCommit(params.GitCommit)
@@ -36,6 +39,7 @@ func main() {
 	}
 
 	app.Flags = []cli.Flag{
+		&utils.DataDirFlag,
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
 		&logging.LogDirVerbosityFlag,
@@ -56,22 +60,24 @@ func main() {
 		return nil
 	}
 
-	app.Before = func(ctx *cli.Context) error {
-		debug.RaiseFdLimit()
+	for _, command := range app.Commands {
+		command.Before = func(ctx *cli.Context) error {
+			debug.RaiseFdLimit()
 
-		logger, err := setupLogger(ctx)
+			logger, err := setupLogger(ctx)
 
-		if err != nil {
-			return err
+			if err != nil {
+				return err
+			}
+
+			var cancel context.CancelFunc
+
+			ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger))
+
+			go handleTerminationSignals(cancel, logger)
+
+			return nil
 		}
-
-		var cancel context.CancelFunc
-
-		ctx.Context, cancel = context.WithCancel(sync.WithLogger(ctx.Context, logger))
-
-		go handleTerminationSignals(cancel, logger)
-
-		return nil
 	}
 
 	if err := app.Run(os.Args); err != nil {
@@ -82,13 +88,16 @@ func main() {
 
 func setupLogger(ctx *cli.Context) (log.Logger, error) {
 	dataDir := ctx.String(utils.DataDirFlag.Name)
-	logsDir := filepath.Join(dataDir, "logs")
 
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		return nil, err
+	if len(dataDir) > 0 {
+		logsDir := filepath.Join(dataDir, "logs")
+
+		if err := os.MkdirAll(logsDir, 0755); err != nil {
+			return nil, err
+		}
 	}
 
-	logger := logging.SetupLoggerCtx("snapshot", ctx, log.LvlError, log.LvlInfo, false)
+	logger := logging.SetupLoggerCtx("snapshots-"+ctx.Command.Name, ctx, log.LvlError, log.LvlInfo, false)
 
 	return logger, nil
 }

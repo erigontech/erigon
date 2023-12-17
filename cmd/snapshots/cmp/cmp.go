@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -35,10 +34,6 @@ var Command = cli.Command{
 	Usage:     "Compare snapshot segments",
 	ArgsUsage: "<start block (000's)> <end block (000's)>",
 	Flags: []cli.Flag{
-		&utils.DataDirFlag,
-		&logging.LogVerbosityFlag,
-		&logging.LogConsoleVerbosityFlag,
-		&logging.LogDirVerbosityFlag,
 		&flags.SegTypes,
 		&utils.WebSeedsFlag,
 		&utils.NATFlag,

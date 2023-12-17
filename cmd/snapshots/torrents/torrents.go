@@ -19,26 +19,56 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/snapshots/manifest"
 	"github.com/ledgerwatch/erigon/cmd/snapshots/sync"
 	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 )
 
 var Command = cli.Command{
-	Action:    torrents,
-	Name:      "torrent",
-	Usage:     "torrent utilities - list, hashes, update, verify",
-	ArgsUsage: "<cmd> <start block> <end block>",
-	Flags: []cli.Flag{
-		&utils.DataDirFlag,
-		&logging.LogVerbosityFlag,
-		&logging.LogConsoleVerbosityFlag,
-		&logging.LogDirVerbosityFlag,
+	Action: func(cliCtx *cli.Context) error {
+		return torrents(cliCtx, "list")
 	},
+	Name:      "torrent",
+	Usage:     "torrent utilities",
+	ArgsUsage: "<cmd>",
+	Subcommands: []*cli.Command{
+		{
+			Action: func(cliCtx *cli.Context) error {
+				return torrents(cliCtx, "list")
+			},
+			Name:      "list",
+			Usage:     "list torrents available at the specified storage location",
+			ArgsUsage: "<location>",
+		},
+		{
+			Action: func(cliCtx *cli.Context) error {
+				return torrents(cliCtx, "hashes")
+			},
+			Name:      "hashes",
+			Usage:     "list the hashes (in toml format) at the specified storage location",
+			ArgsUsage: "<location> <start block> <end block>",
+		},
+		{
+			Action: func(cliCtx *cli.Context) error {
+				return torrents(cliCtx, "update")
+			},
+			Name:      "update",
+			Usage:     "update re-create the torrents for the contents available at its storage location",
+			ArgsUsage: "<location> <start block> <end block>",
+		},
+		{
+			Action: func(cliCtx *cli.Context) error {
+				return torrents(cliCtx, "verify")
+			},
+			Name:      "verify",
+			Usage:     "verify that manifest contents are available at its storage location",
+			ArgsUsage: "<location> <start block> <end block>",
+		},
+	},
+	Flags:       []cli.Flag{},
 	Description: ``,
 }
 
-func torrents(cliCtx *cli.Context) error {
+func torrents(cliCtx *cli.Context, command string) error {
 	logger := sync.Logger(cliCtx.Context)
 
 	var src *sync.Locator
@@ -46,23 +76,9 @@ func torrents(cliCtx *cli.Context) error {
 
 	var firstBlock, lastBlock uint64
 
-	command := "list"
 	pos := 0
 
-	if cliCtx.Args().Len() == 0 {
-		return fmt.Errorf("unknown torrent command")
-	}
-
-	arg := cliCtx.Args().Get(pos)
-
-	switch arg {
-	case "update", "hashes", "verify":
-		command = arg
-		pos++
-		arg = cliCtx.Args().Get(pos)
-	}
-
-	if src, err = sync.ParseLocator(arg); err != nil {
+	if src, err = sync.ParseLocator(cliCtx.Args().Get(pos)); err != nil {
 		return err
 	}
 
