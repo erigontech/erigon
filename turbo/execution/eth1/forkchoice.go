@@ -395,7 +395,10 @@ TooBigJumpStep:
 			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
 		}
 
-		if err := e.db.Update(ctx, func(tx kv.RwTx) error { return e.executionPipeline.RunPrune(e.db, tx, false) }); err != nil {
+		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
+			initialCycle := tooBigJump // prune more aggressively after big jump
+			return e.executionPipeline.RunPrune(e.db, tx, initialCycle)
+		}); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
