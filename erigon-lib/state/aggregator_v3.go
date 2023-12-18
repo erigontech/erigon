@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
 	"golang.org/x/sync/errgroup"
@@ -48,10 +47,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
 var (
-	mxPruneTookAgg = metrics.GetOrCreateHistogram(`prune_seconds{type="state"}`)
+	mxPruneTookAgg = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
 )
 
 type AggregatorV3 struct {

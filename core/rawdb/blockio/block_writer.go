@@ -106,8 +106,8 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 }
 
 var (
-	mxPruneTookBlocks = metrics.GetOrCreateHistogram(`prune_seconds{type="blocks"}`)
-	mxPruneTookBor    = metrics.GetOrCreateHistogram(`prune_seconds{type="bor"}`)
+	mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
+	mxPruneTookBor    = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
 )
 
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
