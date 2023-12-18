@@ -370,28 +370,26 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				zeroProgress = append(zeroProgress, t.Name())
 			}
 
-			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
-			if d.verbosity >= log.LvlInfo || isDiagEnabled {
-				webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile)
-				rates, peersRates := getPeersRatesForlogs(peersOfThisFile)
-				// more detailed statistic: download rate of each peer (for each file)
-				if !t.Complete.Bool() && progress != 0 {
-					d.logger.Info(fmt.Sprintf("[snapshots] webseed peers file=%s", t.Name()), webseedRates...)
-					d.logger.Info(fmt.Sprintf("[snapshots] bittorrent peers file=%s", t.Name()), rates...)
-				}
+			webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile, t.Name())
+			rates, peersRates := getPeersRatesForlogs(peersOfThisFile, t.Name())
+			// more detailed statistic: download rate of each peer (for each file)
+			if !t.Complete.Bool() && progress != 0 {
+				d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+				d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
+				d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
+			}
 
-				if isDiagEnabled {
-					diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-						Name:            t.Name(),
-						TotalBytes:      uint64(t.Length()),
-						DownloadedBytes: uint64(t.BytesCompleted()),
-						WebseedsCount:   len(weebseedPeersOfThisFile),
-						PeersCount:      len(peersOfThisFile),
-						WebseedsRate:    websRates,
-						PeersRate:       peersRates,
-					})
-				}
+			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
+			if isDiagEnabled {
+				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+					Name:            t.Name(),
+					TotalBytes:      uint64(t.Length()),
+					DownloadedBytes: uint64(t.BytesCompleted()),
+					WebseedsCount:   len(weebseedPeersOfThisFile),
+					PeersCount:      len(peersOfThisFile),
+					WebseedsRate:    websRates,
+					PeersRate:       peersRates,
+				})
 			}
 
 		default:
@@ -433,10 +431,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer) ([]interface{}, uint64) {
+func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string) ([]interface{}, uint64) {
 	totalRate := uint64(0)
 	averageRate := uint64(0)
 	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
+	webseedRates = append(webseedRates, "file", fName)
 	for _, peer := range weebseedPeersOfThisFile {
 		urlS := strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
 		if urlObj, err := url.Parse(urlS); err == nil {
@@ -456,10 +455,11 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer) ([]interfa
 	return webseedRates, averageRate
 }
 
-func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn) ([]interface{}, uint64) {
+func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, uint64) {
 	totalRate := uint64(0)
 	averageRate := uint64(0)
 	rates := make([]interface{}, 0, len(peersOfThisFile)*2)
+	rates = append(rates, "file", fName)
 
 	for _, peer := range peersOfThisFile {
 		dr := uint64(peer.DownloadRate())

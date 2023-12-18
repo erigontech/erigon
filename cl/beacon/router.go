@@ -1,6 +1,7 @@
 package beacon
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"strings"
@@ -39,7 +40,8 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 	mux.HandleFunc("/eth/*", func(w http.ResponseWriter, r *http.Request) {
 		nfw := &notFoundNoWriter{rw: w}
 		beaconHandler.ValidatorApi.ServeHTTP(nfw, r)
-		if nfw.code == 404 || nfw.code == 0 {
+		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
+		if isNotFound(nfw.code) || nfw.code == 0 {
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
 		}
 	})
@@ -64,15 +66,4 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		return err
 	}
 	return nil
-}
-
-func newBeaconMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		contentType := r.Header.Get("Content-Type")
-		if contentType != "application/json" && contentType != "" {
-			http.Error(w, "Content-Type header must be application/json", http.StatusUnsupportedMediaType)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }

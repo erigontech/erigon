@@ -11,11 +11,18 @@ type notFoundNoWriter struct {
 	headers http.Header
 }
 
+func isNotFound(code int) bool {
+	return code == 404 || code == 405
+}
+
 func (f *notFoundNoWriter) Header() http.Header {
-	if f.code == 404 {
+	if isNotFound(f.code) {
 		return make(http.Header)
 	}
-	return f.rw.Header()
+	if f.headers == nil {
+		f.headers = make(http.Header)
+	}
+	return f.headers
 }
 
 func (f *notFoundNoWriter) Write(xs []byte) (int, error) {
@@ -23,7 +30,7 @@ func (f *notFoundNoWriter) Write(xs []byte) (int, error) {
 	if f.code == 0 {
 		f.WriteHeader(200)
 	}
-	if f.code == 404 {
+	if isNotFound(f.code) {
 		return 0, nil
 	}
 	// pass on the write
@@ -34,9 +41,19 @@ func (f *notFoundNoWriter) WriteHeader(statusCode int) {
 	if f.code != 0 {
 		return
 	}
-	if f.code != 404 {
-		f.rw.WriteHeader(statusCode)
-	}
-	// if it's a 404 and we are not at our last handler, set the target to an io.Discard
 	f.code = statusCode
+	if isNotFound(statusCode) {
+		f.headers = nil
+		return
+	}
+	f.rw.WriteHeader(statusCode)
+	// if we get here, it means it is a successful write.
+	if f.headers != nil {
+		for k, v := range f.headers {
+			for _, x := range v {
+				f.rw.Header().Add(k, x)
+			}
+		}
+	}
+	f.headers = f.rw.Header()
 }

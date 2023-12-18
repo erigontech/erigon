@@ -26,6 +26,12 @@ const (
 	allowedCachedStates = 8
 )
 
+type finalityCheckpoints struct {
+	finalizedCheckpoint         solid.Checkpoint
+	currentJustifiedCheckpoint  solid.Checkpoint
+	previousJustifiedCheckpoint solid.Checkpoint
+}
+
 type preverifiedAppendListsSizes struct {
 	validatorLength           uint64
 	historicalRootsLength     uint64
@@ -55,8 +61,9 @@ type ForkChoiceStore struct {
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
-	// preverifid sizes
-	preverifiedSizes *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
+	// preverifid sizes and other data collection
+	preverifiedSizes    *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
+	finalityCheckpoints *lru.Cache[libcommon.Hash, finalityCheckpoints]
 
 	mu sync.Mutex
 	// EL
@@ -93,6 +100,12 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	if err != nil {
 		return nil, err
 	}
+
+	finalityCheckpoints, err := lru.New[libcommon.Hash, finalityCheckpoints](checkpointsPerCache)
+	if err != nil {
+		return nil, err
+	}
+
 	anchorPublicKeys := make([]byte, anchorState.ValidatorLength()*length.Bytes48)
 	for idx := 0; idx < anchorState.ValidatorLength(); idx++ {
 		pk, err := anchorState.ValidatorPublicKey(idx)
@@ -133,6 +146,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		beaconCfg:                     anchorState.BeaconConfig(),
 		childrens:                     make(map[libcommon.Hash]childrens),
 		preverifiedSizes:              preverifiedSizes,
+		finalityCheckpoints:           finalityCheckpoints,
 	}, nil
 }
 
@@ -272,4 +286,19 @@ func (f *ForkChoiceStore) PreverifiedHistoricalSummaries(blockRoot libcommon.Has
 		return ret.historicalSummariesLength
 	}
 	return 0
+}
+
+func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if ret, ok := f.finalityCheckpoints.Get(blockRoot); ok {
+		return true, ret.finalizedCheckpoint, ret.currentJustifiedCheckpoint, ret.previousJustifiedCheckpoint
+	}
+	return false, solid.Checkpoint{}, solid.Checkpoint{}, solid.Checkpoint{}
+}
+
+func (f *ForkChoiceStore) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetSyncCommittees(blockRoot)
 }

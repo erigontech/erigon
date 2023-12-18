@@ -17,18 +17,18 @@ type ValidatorApiHandler struct {
 	GenesisCfg     *clparams.GenesisConfig
 
 	o   sync.Once
-	mux chi.Router
+	mux *chi.Mux
 }
 
 func (v *ValidatorApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	v.o.Do(func() {
 		v.mux = chi.NewRouter()
-		v.init(v.mux)
+		v.Route(v.mux)
 	})
 	v.mux.ServeHTTP(w, r)
 }
 
-func (v *ValidatorApiHandler) init(r chi.Router) {
+func (v *ValidatorApiHandler) Route(r chi.Router) {
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
 			r.Route("/beacon", func(r chi.Router) {
