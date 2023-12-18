@@ -42,7 +42,7 @@ var cmdResetState = &cobra.Command{
 		defer borSn.Close()
 		defer agg.Close()
 
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -58,7 +58,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -97,7 +97,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.AggregatorV3) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblocks.BorRoSnapshots, agg *state.AggregatorV3) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -121,7 +121,8 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.Aggre
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks.v2: %t, segments=%d, indices=%d\n\n", snapshots.Cfg().Enabled, snapshots.SegmentsMax(), snapshots.IndicesMax())
+	fmt.Fprintf(w, "blocks.v2: %t, segments=%d, indices=%d\n", snapshots.Cfg().Enabled, snapshots.SegmentsMax(), snapshots.IndicesMax())
+	fmt.Fprintf(w, "blocks.bor.v2: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
 	h3, err := kvcfg.HistoryV3.Enabled(tx)
 	if err != nil {
 		return err
