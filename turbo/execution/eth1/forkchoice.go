@@ -308,6 +308,11 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 TooBigJumpStep:
+	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
+	if err != nil {
+		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+		return
+	}
 	tooBigJump = finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore && fcuHeader.Number.Uint64()-finishProgressBefore > 1_000
 	if tooBigJump { //jump forward by 1K blocks
 		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+1_000, "bigJumpTo", fcuHeader.Number.Uint64())
