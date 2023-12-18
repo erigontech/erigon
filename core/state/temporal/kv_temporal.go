@@ -309,21 +309,21 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 		return nil
 	})
 
+	var err error
+	agg, err = state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	if err != nil {
+		panic(err)
+	}
+	if err := agg.OpenFolder(false); err != nil {
+		panic(err)
+	}
+
+	var sc map[common.Address][]common.CodeRecord
+	if gspec != nil {
+		sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
+	}
+
 	if historyV3 {
-		var err error
-		agg, err = state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
-		if err != nil {
-			panic(err)
-		}
-		if err := agg.OpenFolder(false); err != nil {
-			panic(err)
-		}
-
-		var sc map[common.Address][]common.CodeRecord
-		if gspec != nil {
-			sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
-		}
-
 		db, err = New(db, agg, sc)
 		if err != nil {
 			panic(err)
