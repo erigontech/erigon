@@ -370,12 +370,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				zeroProgress = append(zeroProgress, t.Name())
 			}
 
-			d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
 			webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile, t.Name())
 			rates, peersRates := getPeersRatesForlogs(peersOfThisFile, t.Name())
 			// more detailed statistic: download rate of each peer (for each file)
 			if !t.Complete.Bool() && progress != 0 {
+				d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 				d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
 				d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
 			}
