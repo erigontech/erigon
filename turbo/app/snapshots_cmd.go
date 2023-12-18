@@ -258,40 +258,28 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-		return err
-	}
-	if err := freezeblocks.BuildBorMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-		return err
-	}
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	defer agg.Close()
-	err = agg.OpenFolder()
-	if err != nil {
-		return err
-	}
-	err = agg.BuildMissedIndices(ctx, indexWorkers)
-	if err != nil {
-		return err
-	}
-
 	cfg := ethconfig.NewSnapCfg(true, true, false)
-	blockSnaps, borSnaps, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()
 	defer borSnaps.Close()
 	defer agg.Close()
+	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
+		return err
+	}
+	err = agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers())
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, agg *libstate.AggregatorV3, err error) {
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
+) {
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
@@ -306,16 +294,19 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	agg, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
-		return nil, nil, nil, err
+		return
 	}
 	defer agg.Close()
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	err = agg.OpenFolder()
 	if err != nil {
-		return nil, nil, nil, err
+		return
 	}
 
-	return nil, nil, nil, nil
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
+	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, nil, logger)
+	return
 }
 
 func doUncompress(cliCtx *cli.Context) error {
@@ -438,7 +429,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnaps, borSnaps, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -446,11 +437,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer borSnaps.Close()
 	defer agg.Close()
 
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
-	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
+	chainConfig := fromdb.ChainConfig(db)
+	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
+		return err
+	}
 
-	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	agg.CleanDir()
 
 	if to == 0 {
@@ -459,6 +450,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err
 		})
+		blockReader, _ := br.IO()
 		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks())
 		if ok {
 			from, to, every = from2, to2, to2-from2
@@ -466,36 +458,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	{
-		logEvery := time.NewTicker(10 * time.Second)
-		defer logEvery.Stop()
-
-		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-			if err := db.Update(ctx, func(tx kv.RwTx) error {
-				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
-					return err
-				}
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
-					if err != nil {
-						return err
-					}
-					if len(firstNonGenesisHeader) > 0 {
-						logger.Info("Prunning old blocks", "progress", binary.BigEndian.Uint64(firstNonGenesisHeader))
-					}
-				default:
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-		}
-	}
-
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
 			panic(err)
@@ -504,6 +466,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			panic(err)
 		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			blockReader, _ := br.IO()
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
 				return err
 			}
