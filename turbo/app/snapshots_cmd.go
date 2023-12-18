@@ -296,7 +296,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	if err != nil {
 		return
 	}
-	defer agg.Close()
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	err = agg.OpenFolder()
 	if err != nil {
