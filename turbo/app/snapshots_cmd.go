@@ -382,7 +382,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 
-	cfg := ethconfig.NewSnapCfg(true, true, false)
+	cfg := ethconfig.NewSnapCfg(true, false, true)
 	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
