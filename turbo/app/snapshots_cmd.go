@@ -309,6 +309,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return nil, nil, nil, err
 	}
 	defer agg.Close()
+	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	err = agg.OpenFolder()
 	if err != nil {
 		return nil, nil, nil, err
@@ -437,23 +438,18 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
-	borSnapshots := freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
-	if err := blockSnapshots.ReopenFolder(); err != nil {
+	blockSnaps, borBlockSnaps, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
+	if err != nil {
 		return err
 	}
-	blockReader := freezeblocks.NewBlockReader(blockSnapshots, borSnapshots)
+	defer blockSnaps.Close()
+	defer borBlockSnaps.Close()
+	defer agg.Close()
+
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borBlockSnaps)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
 	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
-	if err != nil {
-		return err
-	}
-	err = agg.OpenFolder()
-	if err != nil {
-		return err
-	}
 	agg.SetWorkers(estimate.CompressSnapshot.Workers())
 	agg.CleanDir()
 
@@ -567,7 +563,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteSnapshots(tx, blockSnapshots.Files(), agg.Files())
+		return rawdb.WriteSnapshots(tx, blockSnaps.Files(), agg.Files())
 	}); err != nil {
 		return err
 	}
@@ -586,7 +582,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 	logger.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteSnapshots(tx, blockSnapshots.Files(), agg.Files())
+		return rawdb.WriteSnapshots(tx, blockSnaps.Files(), agg.Files())
 	}); err != nil {
 		return err
 	}
