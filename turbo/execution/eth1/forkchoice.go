@@ -308,6 +308,14 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 TooBigJumpStep:
+	if tx == nil {
+		tx, err = e.db.BeginRwNosync(ctx)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		defer tx.Rollback()
+	}
 	finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -396,6 +404,8 @@ TooBigJumpStep:
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		tx = nil
+
 		if e.hook != nil {
 			if err := e.db.View(ctx, func(tx kv.Tx) error {
 				return e.hook.AfterRun(tx, finishProgressBefore)
