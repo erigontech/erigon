@@ -149,7 +149,7 @@ TooBigJumpStep:
 		return
 	}
 
-	tooBigJump := finishProgressBefore > 0 && finishProgressBefore > e.blockReader.FrozenBlocks() && fcuHeader.Number.Uint64()-finishProgressBefore > 1_000
+	tooBigJump := finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > 1_000
 	if tooBigJump { //jump forward by 1K blocks
 		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+1_000)
 		if err != nil {
