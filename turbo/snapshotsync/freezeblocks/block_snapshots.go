@@ -1373,68 +1373,78 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64,
 }
 
 func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	if err := br.buildMissedIndicesIfNeed(ctx, logPrefix, notifier, cc); err != nil {
+		return err
+	}
+
+	if err := br.buildBorMissedIndicesIfNeed(ctx, logPrefix, notifier, cc); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
 	snapshots := br.snapshots()
-	snapshots.LogStat()
-
-	// Create .idx files
 	if snapshots.IndicesMax() < snapshots.SegmentsMax() {
-
+		snapshots.LogStat()
 		if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
 			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 		}
-		if snapshots.Cfg().Produce {
-			if !snapshots.SegmentsReady() {
-				return fmt.Errorf("not all snapshot segments are available")
-			}
+		if !snapshots.Cfg().Produce {
+			return nil
+		}
+		if !snapshots.SegmentsReady() {
+			return fmt.Errorf("not all snapshot segments are available")
+		}
 
-			// wait for Downloader service to download all expected snapshots
-			if snapshots.IndicesMax() < snapshots.SegmentsMax() {
-				indexWorkers := estimate.IndexSnapshot.Workers()
-				if err := BuildMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
-					return fmt.Errorf("BuildMissedIndices: %w", err)
-				}
-			}
+		// wait for Downloader service to download all expected snapshots
+		indexWorkers := estimate.IndexSnapshot.Workers()
+		if err := BuildMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+			return fmt.Errorf("BuildMissedIndices: %w", err)
+		}
 
-			if err := snapshots.ReopenFolder(); err != nil {
-				return err
-			}
-			snapshots.LogStat()
-			if notifier != nil {
-				notifier.OnNewSnapshot()
-			}
+		if err := snapshots.ReopenFolder(); err != nil {
+			return err
+		}
+		snapshots.LogStat()
+		if notifier != nil {
+			notifier.OnNewSnapshot()
 		}
 	}
-	if cc.Bor != nil {
-		borSnapshots := br.borSnapshots()
+	return nil
+}
+
+func (br *BlockRetire) buildBorMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	if cc.Bor == nil {
+		return nil
+	}
+
+	borSnapshots := br.borSnapshots()
+	if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
 		borSnapshots.LogStat()
+		if !borSnapshots.Cfg().Produce && borSnapshots.IndicesMax() == 0 {
+			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+		}
+		if !borSnapshots.Cfg().Produce {
+			return nil
+		}
+		if !borSnapshots.SegmentsReady() {
+			return fmt.Errorf("not all bor snapshot segments are available")
+		}
 
-		// Create .idx files
-		if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
+		// wait for Downloader service to download all expected snapshots
+		indexWorkers := estimate.IndexSnapshot.Workers()
+		if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+			return fmt.Errorf("BuildBorMissedIndices: %w", err)
+		}
 
-			if !borSnapshots.Cfg().Produce && borSnapshots.IndicesMax() == 0 {
-				return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
-			}
-			if borSnapshots.Cfg().Produce {
-				if !borSnapshots.SegmentsReady() {
-					return fmt.Errorf("not all bor snapshot segments are available")
-				}
-
-				// wait for Downloader service to download all expected snapshots
-				if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
-					indexWorkers := estimate.IndexSnapshot.Workers()
-					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
-						return fmt.Errorf("BuildBorMissedIndices: %w", err)
-					}
-				}
-
-				if err := borSnapshots.ReopenFolder(); err != nil {
-					return err
-				}
-				borSnapshots.LogStat()
-				if notifier != nil {
-					notifier.OnNewSnapshot()
-				}
-			}
+		if err := borSnapshots.ReopenFolder(); err != nil {
+			return err
+		}
+		borSnapshots.LogStat()
+		if notifier != nil {
+			notifier.OnNewSnapshot()
 		}
 	}
 	return nil
