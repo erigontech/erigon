@@ -37,7 +37,7 @@ type Worker struct {
 	blockReader services.FullBlockReader
 	in          *state.QueueWithRetry
 	rs          *state.StateV3
-	stateWriter *state.StateWriterBufferedV3
+	stateWriter *state.StateWriterV3
 	stateReader state.ResettableStateReader
 	historyMode atomic.Bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
@@ -68,7 +68,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		rs:          rs,
 		background:  background,
 		blockReader: blockReader,
-		stateWriter: state.NewStateWriterBufferedV3(rs),
+		stateWriter: state.NewStateWriterV3(rs),
 		stateReader: state.NewStateReaderV3(rs),
 		chainConfig: chainConfig,
 
@@ -103,7 +103,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 func (rw *Worker) ResetState(rs *state.StateV3) {
 	rw.rs = rs
 	rw.SetReader(state.NewStateReaderV3(rs))
-	rw.stateWriter = state.NewStateWriterBufferedV3(rs)
+	rw.stateWriter = state.NewStateWriterV3(rs)
 }
 
 func (rw *Worker) Tx() kv.Tx        { return rw.chainTx }
@@ -204,6 +204,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			rules = &chain.Rules{}
 			break
 		}
+
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {

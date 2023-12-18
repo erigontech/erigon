@@ -123,10 +123,12 @@ func (txNums) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 		if err != nil {
 			return err
 		}
-		if err = c.DeleteCurrent(); err != nil {
+		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
 		}
-
+		//if err = c.DeleteCurrent(); err != nil {
+		//	return err
+		//}
 	}
 	return nil
 }

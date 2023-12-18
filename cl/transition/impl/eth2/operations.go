@@ -514,7 +514,7 @@ func processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Att
 	h := metrics.NewHistTimer("beacon_process_attestation_post_altair")
 
 	c := h.Tag("step", "get_participation_flag")
-	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(data, stateSlot-data.Slot())
+	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(data, stateSlot-data.Slot(), false)
 	if err != nil {
 		return nil, err
 	}

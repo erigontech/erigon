@@ -87,9 +87,48 @@ func (a *ApiHandler) getBlock(r *http.Request) (*beaconResponse, error) {
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
 	if err != nil {
-		return nil, beaconhttp.WrapEndpointError(err)
+		return nil, err
 	}
 	return newBeaconResponse(blk).
+		withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
+		withVersion(blk.Version()), nil
+}
+
+func (a *ApiHandler) getBlindedBlock(r *http.Request) (*beaconResponse, error) {
+	ctx := r.Context()
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockId, err := blockIdFromRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	root, err := a.rootFromBlockId(ctx, tx, blockId)
+	if err != nil {
+		return nil, err
+	}
+
+	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
+	if err != nil {
+		return nil, err
+	}
+	if blk == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("block not found %x", root))
+	}
+	// Check if the block is canonical
+	var canonicalRoot libcommon.Hash
+	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
+	if err != nil {
+		return nil, err
+	}
+	blinded, err := blk.Blinded()
+	if err != nil {
+		return nil, err
+	}
+	return newBeaconResponse(blinded).
 		withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
 		withVersion(blk.Version()), nil
 }

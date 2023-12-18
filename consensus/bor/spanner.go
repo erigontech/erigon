@@ -7,7 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 )
 
-//go:generate mockgen -destination=./span_mock.go -package=bor . Spanner
+//go:generate mockgen -destination=./mock/spanner_mock.go -package=mock . Spanner
 type Spanner interface {
 	GetCurrentSpan(syscall consensus.SystemCall) (*span.Span, error)
 	GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)

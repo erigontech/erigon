@@ -27,6 +27,7 @@ type ForkChoiceStorageReader interface {
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
 	GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
+	GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint)
 	Slot() uint64
 	Time() uint64
 

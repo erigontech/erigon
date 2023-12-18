@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -20,13 +21,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/erigon/core/systemcontracts"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -384,26 +381,52 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if rebuild {
 		panic("not implemented")
 	}
-	cfg := ethconfig.NewSnapCfg(true, true, false)
 
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
-	if err := allSnapshots.ReopenFolder(); err != nil {
-		return err
-	}
-	allSnapshots.LogStat()
-	indexWorkers := estimate.IndexSnapshot.Workers()
-	chainConfig := fromdb.ChainConfig(chainDB)
-	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
-		return err
-	}
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	cfg := ethconfig.NewSnapCfg(true, false, true)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
-	if err = agg.OpenFolder(false); err != nil {
+	defer blockSnaps.Close()
+	defer borSnaps.Close()
+	defer agg.Close()
+	chainConfig := fromdb.ChainConfig(chainDB)
+	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
 		return err
 	}
-	chainDB.View(ctx, func(tx kv.Tx) error {
+	err = agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers())
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
+) {
+	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err = blockSnaps.ReopenFolder(); err != nil {
+		return
+	}
+	blockSnaps.LogStat()
+
+	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
+	if err = borSnaps.ReopenFolder(); err != nil {
+		return
+	}
+	borSnaps.LogStat()
+
+	agg, err = libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		return
+	}
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	err = agg.OpenFolder(false)
+	if err != nil {
+		return
+	}
+	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
 		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
@@ -412,14 +435,14 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		})
 		return nil
 	})
-	if err = agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
-		return err
-	}
-	if err = agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
-		return err
+	if err != nil {
+		return
 	}
 
-	return nil
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
+	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, nil, logger)
+	return
 }
 
 func doUncompress(cliCtx *cli.Context) error {
@@ -542,16 +565,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
-	borSnapshots := freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
-	if err := blockSnapshots.ReopenFolder(); err != nil {
-		return err
-	}
-	blockReader := freezeblocks.NewBlockReader(blockSnapshots, borSnapshots)
-	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
-
-	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
@@ -565,35 +579,20 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	agg.SetMergeWorkers(estimate.AlmostAllCPUs())
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 
-	var cc *chain.Config
-	if err := db.View(ctx, func(tx kv.Tx) error {
-		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		cc, err = rawdb.ReadChainConfig(tx, genesisHash)
-		return err
-	}); err != nil {
-		return err
-	}
+	defer blockSnaps.Close()
+	defer borSnaps.Close()
+	defer agg.Close()
 
-	db, err = temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[cc.ChainName])
-	if err != nil {
+	chainConfig := fromdb.ChainConfig(db)
+	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
 		return err
 	}
+	//db, err = temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[cc.ChainName])
+	//if err != nil {
+	//	return err
+	//}
 
 	//agg.KeepStepsInDB(0)
-
-	db.View(ctx, func(tx kv.Tx) error {
-		blockSnapshots.LogStat()
-		ac := agg.MakeContext()
-		defer ac.Close()
-		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-			return histBlockNumProgress
-		})
-		return nil
-	})
 
 	if to == 0 {
 		var forwardProgress uint64
@@ -601,6 +600,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err
 		})
+		blockReader, _ := br.IO()
 		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks())
 		if ok {
 			from, to, every = from2, to2, to2-from2
@@ -608,44 +608,15 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	{
-		logEvery := time.NewTicker(10 * time.Second)
-		defer logEvery.Stop()
-
-		for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-			if err := db.Update(ctx, func(tx kv.RwTx) error {
-				if err := br.PruneAncientBlocks(tx, 100, false /* includeBor */); err != nil {
-					return err
-				}
-
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
-					if err != nil {
-						return err
-					}
-					if len(firstNonGenesisHeader) > 0 {
-						logger.Info("Prunning old blocks", "progress", binary.BigEndian.Uint64(firstNonGenesisHeader))
-					}
-				default:
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-		}
-	}
-
 	for i := from; i < to; i += every {
 		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
-			panic(err)
+			return err
 		}
 		if err := br.RetireBorBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
-			panic(err)
+			return err
 		}
 		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			blockReader, _ := br.IO()
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
@@ -758,9 +729,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		blockReader, _ := br.IO()
 		ac := agg.MakeContext()
 		defer ac.Close()
-		return rawdb.WriteSnapshots(tx, blockSnapshots.Files(), ac.Files())
+		return rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files())
 	}); err != nil {
 		return err
 	}
@@ -768,7 +740,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
-		return rawdb.WriteSnapshots(tx, blockSnapshots.Files(), ac.Files())
+		return rawdb.WriteSnapshots(tx, blockSnaps.Files(), ac.Files())
 	}); err != nil {
 		return err
 	}

@@ -94,13 +94,12 @@ var (
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
-	decompressor *compress.Decompressor
-	index        *recsplit.Index
-	bindex       *BtIndex
-	bm           *bitmapdb.FixedSizeBitmaps
-	existence    *ExistenceFilter
-	startTxNum   uint64
-	endTxNum     uint64
+	decompressor         *compress.Decompressor
+	index                *recsplit.Index
+	bindex               *BtIndex
+	bm                   *bitmapdb.FixedSizeBitmaps
+	existence            *ExistenceFilter
+	startTxNum, endTxNum uint64 //[startTxNum, endTxNum)
 
 	// Frozen: file of size StepsInColdFile. Completely immutable.
 	// Cold: file of size < StepsInColdFile. Immutable, but can be closed/removed after merge to bigger file.
@@ -562,7 +561,14 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 			continue
 		}
 
+		// Semantic: [startTxNum, endTxNum)
+		// Example:
+		//   stepSize = 4
+		//   0-1.kv: [0, 8)
+		//   0-2.kv: [0, 16)
+		//   1-2.kv: [8, 16)
 		startTxNum, endTxNum := startStep*d.aggregationStep, endStep*d.aggregationStep
+
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
 		newFile.frozen = false
 
@@ -1893,21 +1899,19 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {
+	// Implementation:
+	//     File endTxNum  = last txNum of file step
+	//     DB endTxNum    = first txNum of step in db
+	//     RAM endTxNum   = current txnum
+	//  Example: stepSize=8, file=0-2.kv, db has key of step 2, current tx num is 17
+	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
+	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
+	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
+
 	var cp CursorHeap
 	heap.Init(&cp)
 	var k, v []byte
 	var err error
-
-	//iter := sd.storage.Iter()
-	//if iter.Seek(string(prefix)) {
-	//	kx := iter.Key()
-	//	v = iter.Value()
-	//	k = []byte(kx)
-	//
-	//	if len(kx) > 0 && bytes.HasPrefix(k, prefix) {
-	//		heap.Push(&cp, &CursorItem{t: RAM_CURSOR, key: common.Copy(k), val: common.Copy(v), iter: iter, endTxNum: sd.txNum.Load(), reverse: true})
-	//	}
-	//}
 
 	keysCursor, err := roTx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
@@ -1918,15 +1922,16 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 		return err
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
+		step := ^binary.BigEndian.Uint64(v)
+		endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * dc.d.aggregationStep
 		if v, err = roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: txNum + dc.d.aggregationStep, reverse: true})
+		heap.Push(&cp, &CursorItem{t: DB_CURSOR, key: k, val: v, c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	for i, item := range dc.files {
@@ -1942,7 +1947,8 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 			key := cursor.Key()
 			if key != nil && bytes.HasPrefix(key, prefix) {
 				val := cursor.Value()
-				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: item.endTxNum, reverse: true})
+				txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
 			}
 		} else {
 			ir := dc.statelessIdxReader(i)
@@ -1956,7 +1962,8 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 			dc.d.stats.FilesQueries.Add(1)
 			if key != nil && bytes.HasPrefix(key, prefix) {
 				val, lofft := g.Next(nil)
-				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: g, latestOffset: lofft, key: key, val: val, endTxNum: item.endTxNum, reverse: true})
+				txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: g, latestOffset: lofft, key: key, val: val, endTxNum: txNum, reverse: true})
 			}
 		}
 	}
@@ -1967,9 +1974,6 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
-			//if string(ci1.key) == string(hexutility.MustDecodeString("301f9a245a0adeb61835403f6fd256dd96d103942d747c6d41e95a5d655bc20ab0fac941c854894cc0ed84cdaf557374b49ed723")) {
-			//	fmt.Printf("found %x\n", ci1.key)
-			//}
 			switch ci1.t {
 			//case RAM_CURSOR:
 			//	if ci1.iter.Next() {
@@ -2008,6 +2012,10 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 				}
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = k
+					step := ^binary.BigEndian.Uint64(v)
+					endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					ci1.endTxNum = endTxNum
+
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
@@ -2182,6 +2190,15 @@ type DomainLatestIterFile struct {
 func (hi *DomainLatestIterFile) Close() {
 }
 func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
+	// Implementation:
+	//     File endTxNum  = last txNum of file step
+	//     DB endTxNum    = first txNum of step in db
+	//     RAM endTxNum   = current txnum
+	//  Example: stepSize=8, file=0-2.kv, db has key of step 2, current tx num is 17
+	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
+	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
+	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
+
 	heap.Init(hi.h)
 	var k, v []byte
 	var err error
@@ -2194,15 +2211,16 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 		return err
 	}
 	if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
+		step := ^binary.BigEndian.Uint64(v)
+		endTxNum := step * dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		step := ^binary.BigEndian.Uint64(v)
-		txNum := step * dc.d.aggregationStep
 		if v, err = hi.roTx.GetOne(dc.d.valsTable, keySuffix); err != nil {
 			return err
 		}
-		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: txNum, reverse: true})
+		heap.Push(hi.h, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: endTxNum, reverse: true})
 	}
 
 	for i, item := range dc.files {
@@ -2217,7 +2235,8 @@ func (hi *DomainLatestIterFile) init(dc *DomainContext) error {
 		key := btCursor.Key()
 		if key != nil && (hi.to == nil || bytes.Compare(key, hi.to) < 0) {
 			val := btCursor.Value()
-			heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: item.endTxNum, reverse: true})
+			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
+			heap.Push(hi.h, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: btCursor, endTxNum: txNum, reverse: true})
 		}
 	}
 	return hi.advanceInFiles()
@@ -2247,6 +2266,10 @@ func (hi *DomainLatestIterFile) advanceInFiles() error {
 				}
 				if k != nil && (hi.to == nil || bytes.Compare(k, hi.to) < 0) {
 					ci1.key = common.Copy(k)
+					step := ^binary.BigEndian.Uint64(v)
+					endTxNum := step * hi.dc.d.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					ci1.endTxNum = endTxNum
+
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)

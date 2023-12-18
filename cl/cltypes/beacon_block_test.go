@@ -60,6 +60,20 @@ func TestBeaconBody(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, libcommon.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), libcommon.Hash(root))
 
+	// Test the blinded
+	blinded, err := body.Blinded()
+	assert.NoError(t, err)
+
+	root2, err := blinded.HashSSZ()
+	assert.NoError(t, err)
+	assert.Equal(t, libcommon.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), libcommon.Hash(root2))
+
+	block2 := blinded.Full(body.ExecutionPayload.Transactions, body.ExecutionPayload.Withdrawals)
+	assert.Equal(t, block2.ExecutionPayload.version, body.ExecutionPayload.version)
+	root3, err := block2.HashSSZ()
+	assert.NoError(t, err)
+	assert.Equal(t, libcommon.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), libcommon.Hash(root3))
+
 	_, err = body.ExecutionPayload.RlpHeader()
 	assert.NoError(t, err)
 

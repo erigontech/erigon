@@ -1056,7 +1056,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.extLen = 0
 		upCell.downHashedLen = 0
 		if hph.branchBefore[row] {
-			_, err := hph.branchEncoder.CollectUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.CollectUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1084,7 +1084,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		upCell.fillFromLowerCell(cell, depth, hph.currentKey[upDepth:hph.currentKeyLen], nibble)
 		// Delete if it existed
 		if hph.branchBefore[row] {
-			_, err := hph.branchEncoder.CollectUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
+			_, err := hph.CollectUpdate(updateKey, 0, hph.touchMap[row], 0, RetrieveCellNoop)
 			if err != nil {
 				return fmt.Errorf("failed to encode leaf node update: %w", err)
 			}
@@ -1157,7 +1157,7 @@ func (hph *HexPatriciaHashed) fold() (err error) {
 		var lastNibble int
 		var err error
 
-		lastNibble, err = hph.branchEncoder.CollectUpdate(updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
+		lastNibble, err = hph.CollectUpdate(updateKey, bitmap, hph.touchMap[row], hph.afterMap[row], cellGetter)
 		if err != nil {
 			return fmt.Errorf("failed to encode branch update: %w", err)
 		}
@@ -1304,7 +1304,7 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 			return nil, ctx.Err()
 		case <-logEvery.C:
 			dbg.ReadMemStats(&m)
-			log.Info(logPrefix+"[agg] trie", "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+			log.Info(fmt.Sprintf("[%s][agg] computing trie", logPrefix), "progress", fmt.Sprintf("%dk/%dk", i/1000, len(hashedKeys)/1000), "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		default:
 		}
 		plainKey := plainKeys[pks[string(hashedKey)]]
@@ -1375,13 +1375,58 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 
 	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
 
-	// TODO we're using domain wals which order writes, and here we preorder them. Need to measure which approach
-	// is better in speed and memory consumption
-	err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
-	if err != nil {
-		return nil, err
+	if !commitmentWriteNoETL {
+		// TODO we're using domain wals which order writes, and here we preorder them. Need to measure which approach
+		// is better in speed and memory consumption
+		err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
+		if err != nil {
+			return nil, err
+		}
 	}
 	return rootHash, nil
+}
+
+// if commitmentWriteNoETL is true, puts updates directly into domain, instead of buffering in ETL
+const commitmentWriteNoETL = true
+
+func (hph *HexPatriciaHashed) CollectUpdate(
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	readCell func(nibble int, skip bool) (*Cell, error),
+) (lastNibble int, err error) {
+
+	update, ln, err := hph.branchEncoder.EncodeBranch(bitmap, touchMap, afterMap, readCell)
+	if err != nil {
+		return 0, err
+	}
+	prev, err := hph.ctx.GetBranch(prefix) // prefix already compacted by fold
+	if err != nil {
+		return 0, err
+	}
+	if len(prev) > 0 {
+		previous := BranchData(prev)
+		merged, err := hph.branchMerger.Merge(previous, update)
+		if err != nil {
+			return 0, err
+		}
+		update = merged
+	}
+	// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
+	//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
+
+	if commitmentWriteNoETL {
+		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
+		if err = hph.ctx.PutBranch(cp, cu, prev); err != nil {
+			return 0, err
+		}
+	} else {
+		//fmt.Printf("CollectUpdate [%x] -> [%x]\n", prefix, []byte(update))
+		if err := hph.branchEncoder.updates.Collect(prefix, update); err != nil {
+			return 0, err
+		}
+	}
+	mxCommitmentBranchUpdates.Inc()
+	return ln, nil
 }
 
 func (hph *HexPatriciaHashed) ProcessUpdates(ctx context.Context, plainKeys [][]byte, updates []Update) (rootHash []byte, err error) {

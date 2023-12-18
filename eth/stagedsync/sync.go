@@ -125,9 +125,9 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 	}
 
 	if reason.Block != nil {
-		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {
-		s.logger.Debug("UnwindTo", "block", unwindPoint)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "stack", dbg.Stack())
 	}
 
 	s.unwindPoint = &unwindPoint
