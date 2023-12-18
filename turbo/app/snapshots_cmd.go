@@ -456,8 +456,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
+	withBor := chainConfig.Bor != nil
+
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, forwardProgress, true, log.LvlInfo, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, forwardProgress, withBor, log.LvlInfo, nil, nil); err != nil {
 		return err
 	}
 
@@ -473,7 +475,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if err := br.PruneAncientBlocks(tx, 100, true /* includeBor */); err != nil {
+			if err := br.PruneAncientBlocks(tx, 100, withBor); err != nil {
 				return err
 			}
 			return nil
