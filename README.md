@@ -11,6 +11,8 @@ Please install:
 - Linux: `libgtest-dev` `libomp-dev` `libgmp-dev`
 - MacOS: `brew install libomp` `brew install gmp`
 
+Using the Makefile command: `make build-libs` will install these for the relevant architecture.
+
 ## zkevm-specific API Support
 
 In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag (see the example config below).

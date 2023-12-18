@@ -98,6 +98,13 @@ dbg:
 	@cd ./cmd/$* && $(GOBUILD) -o $(GOBIN)/$*
 	@echo "Run \"$(GOBIN)/$*\" to launch $*."
 
+build-libs:
+ifeq ($(UNAME), Darwin )
+	@brew install libomp gmp
+else ifeq ($(UNAME), Linux )
+	@sudo apt install libgtest-dev libomp-dev libgmp-dev
+endif
+
 ## erigon:                            build erigon
 cdk-erigon: go-version cdk-erigon.cmd
 	@rm -f $(GOBIN)/tg # Remove old binary to prevent confusion where users still use it because of the scripts
