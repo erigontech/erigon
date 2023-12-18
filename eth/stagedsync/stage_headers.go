@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 
@@ -50,6 +51,7 @@ type HeadersCfg struct {
 	forkValidator *engine_helpers.ForkValidator
 	notifications *shards.Notifications
 
+	syncConfig     ethconfig.Sync
 	loopBreakCheck func(int) bool
 }
 
@@ -58,6 +60,7 @@ func StageHeadersCfg(
 	headerDownload *headerdownload.HeaderDownload,
 	bodyDownload *bodydownload.BodyDownload,
 	chainConfig chain.Config,
+	syncConfig ethconfig.Sync,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
@@ -74,6 +77,7 @@ func StageHeadersCfg(
 		hd:                headerDownload,
 		bodyDownload:      bodyDownload,
 		chainConfig:       chainConfig,
+		syncConfig:        syncConfig,
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
@@ -246,7 +250,7 @@ Loop:
 			}
 		}
 		// Load headers into the database
-		inSync, err := cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix()))
+		inSync, err := cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.syncConfig.LoopBlockLimit, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix()))
 
 		if err != nil {
 			return err
@@ -261,9 +265,9 @@ Loop:
 			}
 		}
 
-		if dbg.StageSyncLimit() > 0 {
+		if cfg.syncConfig.LoopBlockLimit > 0 {
 			if bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies); err == nil {
-				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(dbg.StageSyncLimit()*2) {
+				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(cfg.syncConfig.LoopBlockLimit*2) {
 					break
 				}
 			}

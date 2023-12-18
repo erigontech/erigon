@@ -39,6 +39,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -63,10 +64,12 @@ type SnapshotsCfg struct {
 	agg              *state.AggregatorV3
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
+	syncConfig       ethconfig.Sync
 }
 
 func StageSnapshotsCfg(db kv.RwDB,
 	chainConfig chain.Config,
+	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
 	snapshotDownloader proto_downloader.DownloaderClient,
@@ -89,6 +92,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		caplin:             caplin,
 		agg:                agg,
 		silkworm:           silkworm,
+		syncConfig:         syncConfig,
 	}
 
 	if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
@@ -159,7 +163,7 @@ func SpawnStageSnapshots(
 			minProgress = progress
 		}
 
-		if stage == stages.SyncStage(dbg.BreakAfterStage()) {
+		if stage == stages.SyncStage(cfg.syncConfig.BreakAfterStage) {
 			break
 		}
 	}
@@ -412,7 +416,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.Enabled {
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, 100, cfg.chainConfig.Bor != nil); err != nil {
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit, cfg.chainConfig.Bor != nil); err != nil {
 			return err
 		}
 	}

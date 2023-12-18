@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -624,7 +623,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, headerLimit uint, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
 	var more = true
 	var err error
 	var force bool
@@ -641,7 +640,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 			return true, nil
 		}
 
-		if dbg.StageSyncLimit() > 0 && hd.highestInDb-startHeight > uint64(dbg.StageSyncLimit()) {
+		if headerLimit > 0 && hd.highestInDb-startHeight > uint64(headerLimit) {
 			break
 		}
 	}

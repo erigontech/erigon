@@ -283,39 +283,6 @@ func StopAfterReconst() bool {
 }
 
 var (
-	stageSyncLimit     int
-	stageSyncLimitOnce sync.Once
-)
-
-func StageSyncLimit() int {
-	stageSyncLimitOnce.Do(func() {
-		v, _ := os.LookupEnv("STAGE_SYNC_LIMIT")
-		if i, _ := strconv.ParseInt(v, 10, 64); i > 0 {
-			stageSyncLimit = int(i)
-			log.Info("[Experiment]", "STAGE_SYNC_LIMIT", stageSyncLimit)
-		}
-	})
-	return stageSyncLimit
-}
-
-var (
-	breakAfterStage     string
-	breakAfterStageFlag sync.Once
-)
-
-func BreakAfterStage() string {
-	f := func() {
-		v, _ := os.LookupEnv("BREAK_AFTER_STAGE") // see names in eth/stagedsync/stages/stages.go
-		if v != "" {
-			breakAfterStage = v
-			log.Info("[Experiment]", "BREAK_AFTER_STAGE", breakAfterStage)
-		}
-	}
-	breakAfterStageFlag.Do(f)
-	return breakAfterStage
-}
-
-var (
 	uploadSnapshotsFlag string
 	uploadSnapshots     sync.Once
 )

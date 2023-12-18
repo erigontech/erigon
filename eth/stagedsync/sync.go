@@ -10,10 +10,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 type Sync struct {
+	cfg             ethconfig.Sync
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
@@ -139,7 +141,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger) *Sync {
+func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
@@ -164,6 +166,7 @@ func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, lo
 	}
 
 	return &Sync{
+		cfg:          cfg,
 		stages:       stagesList,
 		currentStage: 0,
 		unwindOrder:  unwindStages,
@@ -270,8 +273,8 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			return libcommon.ErrStopped
 		}
 
-		if string(stage.ID) == dbg.BreakAfterStage() { // break process loop
-			s.logger.Warn("BREAK_AFTER_STAGE env flag caused stage break")
+		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
+			s.logger.Warn("--sync.loop.break caused stage break")
 			break
 		}
 
@@ -345,8 +348,8 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 			return false, libcommon.ErrStopped
 		}
 
-		if string(stage.ID) == dbg.BreakAfterStage() { // break process loop
-			s.logger.Warn("BREAK_AFTER_STAGE env flag caused stage break")
+		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
+			s.logger.Warn("--sync.loop.break caused stage break")
 			if s.posTransition != nil {
 				ptx := tx
 

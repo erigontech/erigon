@@ -77,6 +77,7 @@ var Defaults = Config{
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
+		PruneLimit:                 100,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -269,6 +270,9 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
+	PruneLimit                 int //the maxumum records to delete from the DB during pruning
+	BreakAfterStage            string
+	LoopBlockLimit             uint
 }
 
 // Chains where snapshots are enabled by default

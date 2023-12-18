@@ -1335,7 +1335,7 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 
 func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	cfg := &fullCfg.DeprecatedTxPool
-	if ctx.IsSet(TxPoolDisableFlag.Name) {
+	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {

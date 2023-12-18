@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +16,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -33,11 +35,15 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -79,6 +85,15 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
+			}),
+		},
+		{
+			Name:   "uploader",
+			Action: doUploaderCommand,
+			Usage:  "run erigon in snapshot upload mode (no execution)",
+			Flags: uploaderCommandFlags([]cli.Flag{
+				&SnapshotFromFlag,
+				&SnapshotToFlag,
 			}),
 		},
 		{
@@ -568,4 +583,64 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	return nil
+}
+
+func uploaderCommandFlags(flags []cli.Flag) []cli.Flag {
+	erigoncli.SyncLoopBreakAfter.Value = "Senders"
+	erigoncli.SyncLoopBlockLimit.Value = 100000
+	erigoncli.SyncLoopPruneLimit.Value = 100000
+	utils.NoDownloaderFlag.Value = true
+	utils.HTTPEnabledFlag.Value = false
+	utils.TxPoolDisableFlag.Value = true
+	return joinFlags(erigoncli.DefaultFlags, flags, []cli.Flag{
+		&erigoncli.SyncLoopBreakAfter,
+		&erigoncli.SyncLoopBlockLimit,
+		&erigoncli.SyncLoopPruneLimit,
+	})
+}
+
+func doUploaderCommand(cliCtx *cli.Context) error {
+	var logger log.Logger
+	var err error
+	var metricsMux *http.ServeMux
+
+	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+		return err
+	}
+
+	// initializing the node and providing the current git commit there
+
+	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
+	erigonInfoGauge.Set(1)
+
+	/* Flags to set
+	"SNAPSHOT_UPLOAD_ALL":"true",
+	"SNAPSHOT_UPLOAD_FS":"r2:erigon-v2-snapshots-bor-mainnet",
+	"FROZEN_BLOCK_LIMIT": "1500000",
+	"SNAPSHOT_VERSION": "2",
+	*/
+
+	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
+	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
+		return err
+	}
+
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	if err != nil {
+		log.Error("Erigon startup", "err", err)
+		return err
+	}
+
+	if metricsMux != nil {
+		diagnostics.Setup(cliCtx, metricsMux, ethNode)
+	}
+
+	err = ethNode.Serve()
+	if err != nil {
+		log.Error("error while serving an Erigon node", "err", err)
+	}
+	return err
 }

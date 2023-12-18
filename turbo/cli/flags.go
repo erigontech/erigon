@@ -148,6 +148,24 @@ var (
 		Value: "",
 	}
 
+	SyncLoopPruneLimit = cli.UintFlag{
+		Name:  "sync.loop.prune.limit",
+		Usage: "Sets the maximum number of block to prune per loop iteration",
+		Value: 100,
+	}
+
+	SyncLoopBreakAfter = cli.StringFlag{
+		Name:  "sync.loop.break",
+		Usage: "Sets the last stage of the sync loop to run",
+		Value: "",
+	}
+
+	SyncLoopBlockLimit = cli.UintFlag{
+		Name:  "sync.loop.block.limit",
+		Usage: "Sets the maximum number of blocks to process per loop iteration",
+		Value: 0, // unlimited
+	}
+
 	BadBlockFlag = cli.StringFlag{
 		Name:  "bad.block",
 		Usage: "Marks block with given hex string as bad and forces initial reorg before normal staged sync",
@@ -255,6 +273,18 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
+	if limit := ctx.Uint(SyncLoopBlockLimit.Name); limit > 0 {
+		cfg.Sync.PruneLimit = int(limit)
+	}
+
+	if stage := ctx.String(SyncLoopBreakAfter.Name); len(stage) > 0 {
+		cfg.Sync.BreakAfterStage = stage
+	}
+
+	if limit := ctx.Uint(SyncLoopBlockLimit.Name); limit > 0 {
+		cfg.Sync.LoopBlockLimit = limit
+	}
+
 	if ctx.String(BadBlockFlag.Name) != "" {
 		bytes, err := hexutil.Decode(ctx.String(BadBlockFlag.Name))
 		if err != nil {
@@ -354,7 +384,6 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	}
 
 	apis := ctx.String(utils.HTTPApiFlag.Name)
-	logger.Info("starting HTTP APIs", "APIs", apis)
 
 	c := &httpcfg.HttpCfg{
 		Enabled:           ctx.Bool(utils.HTTPEnabledFlag.Name),
@@ -408,6 +437,11 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 		StateCache:          kvcache.DefaultCoherentConfig,
 		RPCSlowLogThreshold: ctx.Duration(utils.RPCSlowFlag.Name),
 	}
+
+	if c.Enabled {
+		logger.Info("starting HTTP APIs", "APIs", apis)
+	}
+
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {
 		c.HttpCompression = ctx.Bool(utils.HttpCompressionFlag.Name)
 	} else {
