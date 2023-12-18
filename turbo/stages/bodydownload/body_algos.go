@@ -8,6 +8,7 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -31,7 +32,14 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	if err != nil {
 		return 0, 0, libcommon.Hash{}, nil, err
 	}
-	bd.maxProgress = headerProgress + 1
+
+	tooBigJump := headerProgress-bodyProgress > 1_000
+	if tooBigJump {
+		bd.maxProgress = cmp.Max(bodyProgress, bd.br.FrozenBlocks()) + 1_000
+	} else {
+		bd.maxProgress = headerProgress + 1
+	}
+
 	// Resetting for requesting a new range of blocks
 	bd.requestedLow = bodyProgress + 1
 	bd.requestedMap = make(map[TripleHash]uint64)
