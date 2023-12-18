@@ -370,7 +370,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				zeroProgress = append(zeroProgress, t.Name())
 			}
 
-			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
 			webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile, t.Name())
 			rates, peersRates := getPeersRatesForlogs(peersOfThisFile, t.Name())
 			// more detailed statistic: download rate of each peer (for each file)
@@ -380,6 +379,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
 			}
 
+			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
 			if isDiagEnabled {
 				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
 					Name:            t.Name(),
