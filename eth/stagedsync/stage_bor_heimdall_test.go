@@ -75,3 +75,42 @@ func TestBorHeimdallForwardPersistsStateSyncEvents(t *testing.T) {
 	require.Equal(t, uint64(5), firstEventNumPerBlock[80])
 	require.Equal(t, uint64(6), firstEventNumPerBlock[96])
 }
+
+//
+// TODO - PR 1 after this is to add mining sync and RunMiningStageForward to test harness and 2 tests for spans & bor events persistence in mining=true
+//      - PR 2 after this is to tidy up the code in bor heimdall stage (refactor out funcs, style, warnings, etc.)
+//      - PR 3 is a change in logic + test to fetch next span at beginning of last sprint in current span
+//
+
+func TestBorHeimdallForwardErrInvalidSpanValidatorsDueToLenMismatch(t *testing.T) {
+	//
+	// TODO - for this we can simply mock the heimdall client to return a different validator set and proposer at end of sprint
+	//
+
+	t.Parallel()
+
+	ctx := context.Background()
+	logger := testlog.Logger(t, log.LvlInfo)
+	numBlocks := 271
+	testHarness := test.InitHarness(ctx, t, logger, test.HarnessCfg{
+		ChainConfig:            test.BorDevnetChainConfigWithNoBlockSealDelays(),
+		GenerateChainNumBlocks: numBlocks,
+	})
+	// pretend-update previous stage progress
+	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
+
+	// run stage under test
+	testHarness.RunStageForward(t, stages.BorHeimdall)
+}
+
+func TestBorHeimdallForwardErrInvalidSpanValidatorsDueToDiffValidatorSet(t *testing.T) {
+	//
+	// TODO - for this we can simply mock the heimdall client to return a different validator set and proposer at end of sprint
+	//
+}
+
+func TestBorHeimdallForwardUnauthorizedSignerErrorDueToSnapshotValidatorSetDiff(t *testing.T) {
+	//
+	// TODO - for this persist a new sealed header but with different signer
+	//
+}

@@ -279,6 +279,13 @@ func BorHeimdallForward(
 					return fmt.Errorf("["+s.LogPrefix()+"] verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
+
+			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
+			if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
+					return err
+				}
+			}
 		}
 
 		if blockNum > 0 && blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
@@ -308,15 +315,6 @@ func BorHeimdallForward(
 
 			if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
 				return fmt.Errorf("can't persist validator sets: %w", err)
-			}
-
-			if !mine {
-				sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
-				if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
-					if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
-						return err
-					}
-				}
 			}
 		}
 	}
