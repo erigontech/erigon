@@ -14,21 +14,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
@@ -441,7 +442,8 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
-	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, nil, logger)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, logger)
 	return
 }
 
@@ -587,15 +589,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err := br.BuildMissedIndicesIfNeed(ctx, "retire", nil, chainConfig); err != nil {
 		return err
 	}
-	//db, err = temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[cc.ChainName])
-	//if err != nil {
-	//	return err
-	//}
 
 	//agg.KeepStepsInDB(0)
 
+	var forwardProgress uint64
 	if to == 0 {
-		var forwardProgress uint64
 		db.View(ctx, func(tx kv.Tx) error {
 			forwardProgress, err = stages.GetStageProgress(tx, stages.Senders)
 			return err
@@ -608,24 +606,26 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	for i := from; i < to; i += every {
-		if err := br.RetireBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, forwardProgress, log.LvlInfo, nil, nil); err != nil {
+		return err
+	}
+
+	if err := db.Update(ctx, func(tx kv.RwTx) error {
+		blockReader, _ := br.IO()
+		ac := agg.MakeContext()
+		defer ac.Close()
+		if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 			return err
 		}
-		if err := br.RetireBorBlocks(ctx, i, i+every, log.LvlInfo, nil, nil); err != nil {
-			return err
-		}
-		if err := db.Update(ctx, func(tx kv.RwTx) error {
-			blockReader, _ := br.IO()
-			ac := agg.MakeContext()
-			defer ac.Close()
-			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+			if err := br.PruneAncientBlocks(tx, 100); err != nil {
 				return err
-			}
-			for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
-				if err := br.PruneAncientBlocks(tx, 100, true /* includeBor */); err != nil {
-					return err
-				}
 			}
 			return nil
 		}); err != nil {
@@ -637,6 +637,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return nil
 	}
 
+	db, err = temporal.New(db, agg, systemcontracts.SystemContractCodeLookup[chainConfig.ChainName])
+	if err != nil {
+		return err
+	}
 	logger.Info("Compute commitment")
 	if err = db.Update(ctx, func(tx kv.RwTx) error {
 		if casted, ok := tx.(kv.CanWarmupDB); ok {
