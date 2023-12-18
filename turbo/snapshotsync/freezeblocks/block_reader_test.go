@@ -86,8 +86,10 @@ func TestBlockReaderLastFrozenSpanIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	// delete idx file for all bor span segments to simulate segments with missing idx files
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(0, 500_000, snaptype.BorSpans.String()))
 	err := os.Remove(idxFileToDelete)
+	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(500_000, 1_000_000, snaptype.BorSpans.String()))
 	err = os.Remove(idxFileToDelete)
+	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1_000_000, 1_500_000, snaptype.BorSpans.String()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
@@ -168,8 +170,10 @@ func TestBlockReaderLastFrozenEventIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	// delete idx files for all bor events segment to simulate segment files with missing idx files
 	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(0, 500_000, snaptype.BorEvents.String()))
 	err := os.Remove(idxFileToDelete)
+	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(500_000, 1_000_000, snaptype.BorEvents.String()))
 	err = os.Remove(idxFileToDelete)
+	require.NoError(t, err)
 	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1_000_000, 1_500_000, snaptype.BorEvents.String()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
