@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -256,13 +257,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if rebuild {
 		panic("not implemented")
 	}
-	cfg := ethconfig.NewSnapCfg(true, true, false)
 
-	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
-	if err := allSnapshots.ReopenFolder(); err != nil {
-		return err
-	}
-	allSnapshots.LogStat()
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err := freezeblocks.BuildMissedIndices("Indexing", ctx, dirs, chainConfig, indexWorkers, logger); err != nil {
 		return err
@@ -274,6 +269,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
+	defer agg.Close()
 	err = agg.OpenFolder()
 	if err != nil {
 		return err
@@ -283,7 +279,42 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
+	cfg := ethconfig.NewSnapCfg(true, true, false)
+	blockSnaps, borBlockSnaps, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer blockSnaps.Close()
+	defer borBlockSnaps.Close()
+	defer agg.Close()
+
 	return nil
+}
+
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (blockSnaps *freezeblocks.RoSnapshots, borBlockSnaps *freezeblocks.BorRoSnapshots, agg *libstate.AggregatorV3, err error) {
+	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	if err = blockSnaps.ReopenFolder(); err != nil {
+		return
+	}
+	blockSnaps.LogStat()
+
+	borBlockSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
+	if err = borBlockSnaps.ReopenFolder(); err != nil {
+		return
+	}
+	borBlockSnaps.LogStat()
+
+	agg, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	defer agg.Close()
+	err = agg.OpenFolder()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return nil, nil, nil, nil
 }
 
 func doUncompress(cliCtx *cli.Context) error {
