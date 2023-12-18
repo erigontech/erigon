@@ -311,7 +311,6 @@ TooBigJumpStep:
 	tooBigJump = finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > 1_000
 	if tooBigJump { //jump forward by 1K blocks
 		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+1_000, "bigJumpTo", fcuHeader.Number.Uint64())
-		isSynced = false
 		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+1_000)
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
