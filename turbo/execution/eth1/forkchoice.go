@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type forkchoiceOutcome struct {
@@ -125,7 +126,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	blockHash := originalBlockHash
-TooBigJumpStep:
+
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
@@ -150,22 +151,8 @@ TooBigJumpStep:
 	}
 
 	tooBigJump := finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > 1_000
-	if tooBigJump { //jump forward by 1K blocks
+	if tooBigJump {
 		isSynced = false
-		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+1_000)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		fcuHeader, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
-		if err != nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
-			return
-		}
-		if fcuHeader == nil {
-			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
-			return
-		}
 	}
 
 	canonicalHash, err := e.blockReader.CanonicalHash(ctx, tx, fcuHeader.Number.Uint64())
@@ -317,6 +304,27 @@ TooBigJumpStep:
 			//	return
 			//}
 			//}
+		}
+	}
+
+TooBigJumpStep:
+	tooBigJump = finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > 1_000
+	if tooBigJump { //jump forward by 1K blocks
+		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+1_000, "bigJumpTo", fcuHeader.Number.Uint64())
+		isSynced = false
+		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+1_000)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		fcuHeader, err = e.blockReader.HeaderByHash(ctx, tx, blockHash)
+		if err != nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
+			return
+		}
+		if fcuHeader == nil {
+			sendForkchoiceErrorWithoutWaiting(outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash))
+			return
 		}
 	}
 
