@@ -206,7 +206,7 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.Tx) (txsFromB
 				return 0, err
 			}
 			if lastBn < bn {
-				return 0, fmt.Errorf("TxNums index is at block %d and behind commitment %d", lastBn, bn)
+				return 0, fmt.Errorf("TxNums index is at block %d and behind commitment %d. Likely it means that `domain snaps` are ahead of `block snaps`", lastBn, bn)
 			}
 		}
 		sd.SetBlockNum(bn)
