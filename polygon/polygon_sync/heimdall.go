@@ -13,10 +13,10 @@ import (
 
 // Heimdall is a wrapper of Heimdall HTTP API
 type Heimdall interface {
-	fetchCheckpoints(start uint64, ctx context.Context) ([]*checkpoint.Checkpoint, error)
-	fetchMilestones(start uint64, ctx context.Context) ([]*milestone.Milestone, error)
-	fetchSpan(ctx context.Context) (*span.HeimdallSpan, error)
-	onMilestoneEvent(ctx context.Context, callback func(*milestone.Milestone)) error
+	FetchCheckpoints(ctx context.Context, start uint64) ([]*checkpoint.Checkpoint, error)
+	FetchMilestones(ctx context.Context, start uint64) ([]*milestone.Milestone, error)
+	FetchSpan(ctx context.Context) (*span.HeimdallSpan, error)
+	OnMilestoneEvent(ctx context.Context, callback func(*milestone.Milestone)) error
 }
 
 type HeimdallImpl struct {
@@ -35,23 +35,25 @@ func NewHeimdall(client heimdall.IHeimdallClient, logger log.Logger) Heimdall {
 }
 
 func checkpointNumContainingBlockNum(n uint64) int64 {
-	panic("implement me")
+	// TODO: implement
+	return 1
 }
 
 func milestoneNumContainingBlockNum(n uint64) int64 {
-	panic("implement me")
+	// TODO: implement
+	return 1
 }
 
-func (impl *HeimdallImpl) fetchCheckpoints(start uint64, ctx context.Context) ([]*checkpoint.Checkpoint, error) {
+func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([]*checkpoint.Checkpoint, error) {
 	startCheckpoint := checkpointNumContainingBlockNum(start)
 	count, err := impl.client.FetchCheckpointCount(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	checkpoints := make([]*checkpoint.Checkpoint, count-startCheckpoint)
+	checkpoints := make([]*checkpoint.Checkpoint, 0, count-startCheckpoint)
 
-	for i := startCheckpoint; i < count; i++ {
+	for i := startCheckpoint; i <= count; i++ {
 		c, err := impl.client.FetchCheckpoint(ctx, i)
 		if err != nil {
 			return nil, err
@@ -61,16 +63,16 @@ func (impl *HeimdallImpl) fetchCheckpoints(start uint64, ctx context.Context) ([
 	return checkpoints, nil
 }
 
-func (impl *HeimdallImpl) fetchMilestones(start uint64, ctx context.Context) ([]*milestone.Milestone, error) {
+func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]*milestone.Milestone, error) {
 	startMilestone := milestoneNumContainingBlockNum(start)
 	count, err := impl.client.FetchMilestoneCount(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	milestones := make([]*milestone.Milestone, count-startMilestone)
+	milestones := make([]*milestone.Milestone, 0, count-startMilestone)
 
-	for i := startMilestone; i < count; i++ {
+	for i := startMilestone; i <= count; i++ {
 		// TODO: how to pass i ?
 		m, err := impl.client.FetchMilestone(ctx)
 		if err != nil {
@@ -81,12 +83,12 @@ func (impl *HeimdallImpl) fetchMilestones(start uint64, ctx context.Context) ([]
 	return milestones, nil
 }
 
-func (impl *HeimdallImpl) fetchSpan(ctx context.Context) (*span.HeimdallSpan, error) {
+func (impl *HeimdallImpl) FetchSpan(ctx context.Context) (*span.HeimdallSpan, error) {
 	// TODO: calc last spanID
 	return impl.client.Span(ctx, 0)
 }
 
-func (impl *HeimdallImpl) onMilestoneEvent(ctx context.Context, callback func(*milestone.Milestone)) error {
+func (impl *HeimdallImpl) OnMilestoneEvent(ctx context.Context, callback func(*milestone.Milestone)) error {
 	currentCount, err := impl.client.FetchMilestoneCount(ctx)
 	if err != nil {
 		return err
@@ -97,7 +99,7 @@ func (impl *HeimdallImpl) onMilestoneEvent(ctx context.Context, callback func(*m
 			count, err := impl.client.FetchMilestoneCount(ctx)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					impl.logger.Error("HeimdallImpl.onMilestoneEvent FetchMilestoneCount error", "err", err)
+					impl.logger.Error("HeimdallImpl.OnMilestoneEvent FetchMilestoneCount error", "err", err)
 				}
 				break
 			}
@@ -114,7 +116,7 @@ func (impl *HeimdallImpl) onMilestoneEvent(ctx context.Context, callback func(*m
 				m, err := impl.client.FetchMilestone(ctx)
 				if err != nil {
 					if !errors.Is(err, context.Canceled) {
-						impl.logger.Error("HeimdallImpl.onMilestoneEvent FetchMilestone error", "err", err)
+						impl.logger.Error("HeimdallImpl.OnMilestoneEvent FetchMilestone error", "err", err)
 					}
 					break
 				}
