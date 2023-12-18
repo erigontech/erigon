@@ -57,7 +57,7 @@ func (r *beaconResponse) withFinalized(finalized bool) (out *beaconResponse) {
 	out.Finalized = new(bool)
 	out.ExecutionOptimistic = new(bool)
 	out.Finalized = &finalized
-	return r
+	return out
 }
 
 func (r *beaconResponse) withVersion(version clparams.StateVersion) (out *beaconResponse) {
@@ -65,7 +65,7 @@ func (r *beaconResponse) withVersion(version clparams.StateVersion) (out *beacon
 	*out = *r
 	out.Version = new(clparams.StateVersion)
 	out.Version = &version
-	return r
+	return out
 }
 
 //// In case of it being a json we need to also expose finalization, version, etc...
