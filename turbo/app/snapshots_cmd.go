@@ -442,7 +442,8 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
-	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, nil, logger)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, logger)
 	return
 }
 
@@ -604,10 +605,8 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 	}
 
-	withBor := chainConfig.Bor != nil
-
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, forwardProgress, withBor, log.LvlInfo, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, forwardProgress, log.LvlInfo, nil, nil); err != nil {
 		return err
 	}
 
@@ -625,7 +624,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 	for j := 0; j < 10_000; j++ { // prune happens by small steps, so need many runs
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			if err := br.PruneAncientBlocks(tx, 100, withBor /* includeBor */); err != nil {
+			if err := br.PruneAncientBlocks(tx, 100); err != nil {
 				return err
 			}
 			return nil
