@@ -33,7 +33,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 		return 0, 0, libcommon.Hash{}, nil, err
 	}
 
-	tooBigJump := headerProgress-bodyProgress > 1_000
+	tooBigJump := headerProgress > bodyProgress && headerProgress-bodyProgress > 1_000
 	if tooBigJump {
 		bd.maxProgress = cmp.Max(bodyProgress, bd.br.FrozenBlocks()) + 1_000
 	} else {
