@@ -384,7 +384,6 @@ TooBigJumpStep:
 		}
 	} else {
 		if !tooBigJump {
-
 			valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 			if err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
