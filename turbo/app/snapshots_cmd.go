@@ -280,29 +280,29 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 
 	cfg := ethconfig.NewSnapCfg(true, true, false)
-	blockSnaps, borBlockSnaps, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	blockSnaps, borSnaps, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()
-	defer borBlockSnaps.Close()
+	defer borSnaps.Close()
 	defer agg.Close()
 
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (blockSnaps *freezeblocks.RoSnapshots, borBlockSnaps *freezeblocks.BorRoSnapshots, agg *libstate.AggregatorV3, err error) {
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, agg *libstate.AggregatorV3, err error) {
 	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
 	blockSnaps.LogStat()
 
-	borBlockSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
-	if err = borBlockSnaps.ReopenFolder(); err != nil {
+	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
+	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
-	borBlockSnaps.LogStat()
+	borSnaps.LogStat()
 
 	agg, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
@@ -438,15 +438,15 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnaps, borBlockSnaps, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
+	blockSnaps, borSnaps, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()
-	defer borBlockSnaps.Close()
+	defer borSnaps.Close()
 	defer agg.Close()
 
-	blockReader := freezeblocks.NewBlockReader(blockSnaps, borBlockSnaps)
+	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(db))
 
 	br := freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, logger)
