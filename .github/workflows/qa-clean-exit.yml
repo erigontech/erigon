@@ -27,7 +27,7 @@ jobs:
     #runs-on: ${{ matrix.os }}
     runs-on: self-hosted
     env:
-      ERIGON_DATA_DIR: ${{ GITHUB_WORKSPACE }}/erigon_data
+      ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
 
     steps:
     - name: Check out repository
