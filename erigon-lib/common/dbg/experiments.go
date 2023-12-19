@@ -78,8 +78,8 @@ func DirtySpace() uint64 {
 			if err != nil {
 				panic(err)
 			}
+			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
 			dirtySace = uint64(i * 1024 * 1024)
-			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", dirtySace)
 		}
 	})
 	return dirtySace
