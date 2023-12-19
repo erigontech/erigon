@@ -320,7 +320,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
 	//}
 
-	unwindToLimit, err := tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
+	unwindToLimit, err := tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindDomainsToBlockNum(tx)
 	if err != nil {
 		return err
 	}

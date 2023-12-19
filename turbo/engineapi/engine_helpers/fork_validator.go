@@ -246,10 +246,6 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	//histV3, err := kvcfg.HistoryV3.Enabled(tx)
-	//if err != nil {
-	//	return "", [32]byte{}, nil, err
-	//}
 	var batch kv.RwTx
 	//if histV3 {
 	//	sd := state.NewSharedDomains(tx)
