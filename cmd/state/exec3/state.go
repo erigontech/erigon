@@ -4,7 +4,6 @@ import (
 	"context"
 	"math/big"
 	"sync"
-	"sync/atomic"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -39,7 +38,7 @@ type Worker struct {
 	rs          *state.StateV3
 	stateWriter *state.StateWriterV3
 	stateReader state.ResettableStateReader
-	historyMode atomic.Bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
+	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
 	getHeader   func(hash libcommon.Hash, number uint64) *types.Header
 
@@ -72,11 +71,10 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		stateReader: state.NewStateReaderV3(rs.Domains()),
 		chainConfig: chainConfig,
 
-		ctx:         ctx,
-		genesis:     genesis,
-		resultCh:    results,
-		engine:      engine,
-		historyMode: atomic.Bool{},
+		ctx:      ctx,
+		genesis:  genesis,
+		resultCh: results,
+		engine:   engine,
 
 		evm:         vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 		callTracer:  NewCallTracer(),
@@ -147,22 +145,22 @@ func (rw *Worker) SetReader(reader state.ResettableStateReader) {
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
-		rw.historyMode.Store(true)
+		rw.historyMode = true
 	case *state.StateReaderV3:
-		rw.historyMode.Store(false)
+		rw.historyMode = false
 	default:
-		rw.historyMode.Store(false)
+		rw.historyMode = false
 		//fmt.Printf("[worker] unknown reader %T: historyMode is set to disabled\n", reader)
 	}
 }
 
 func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
-	if txTask.HistoryExecution && !rw.historyMode.Load() {
+	if txTask.HistoryExecution && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
 		// from the beginning until committed txNum and only then disable history mode.
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
-	} else if !txTask.HistoryExecution && rw.historyMode.Load() {
+	} else if !txTask.HistoryExecution && rw.historyMode {
 		rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
 	}
 
