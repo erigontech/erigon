@@ -278,19 +278,6 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 		return false, fmt.Errorf("hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
 	}
 
-	bor, err := api.bor()
-
-	if err != nil {
-		return false, errors.New("bor engine not available")
-	}
-
-	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
-
-	if err != nil {
-		service.UnlockMutex(false, "", endBlockNr, common.Hash{})
-		return false, errors.New("milestone ID doesn't exist in Heimdall")
-	}
-
 	service.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
 
 	return true, nil
