@@ -123,13 +123,15 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 }
 
 func (sd *SharedDomains) AggCtx() *AggregatorV3Context { return sd.aggCtx }
-func (sd *SharedDomains) WithMemBatch() {
+func (sd *SharedDomains) WithMemBatch() *SharedDomains {
 	sd.RwTx = membatchwithdb.NewMemoryBatch(sd.roTx, sd.aggCtx.a.dirs.Tmp)
 	sd.withMemBatch = true
+	return sd
 }
-func (sd *SharedDomains) WithHashBatch(ctx context.Context) {
+func (sd *SharedDomains) WithHashBatch(ctx context.Context) *SharedDomains {
 	sd.RwTx = membatch.NewHashBatch(sd.roTx, ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
 	sd.withHashBatch = true
+	return sd
 }
 
 // aggregator context should call aggCtx.Unwind before this one.
