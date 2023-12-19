@@ -511,7 +511,12 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		}
 	}
 	value := accounts.SerialiseV3(account)
-	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil); err != nil {
+
+	var prev []byte
+	if original.Initialised {
+		prev = accounts.SerialiseV3(original)
+	}
+	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, prev); err != nil {
 		return err
 	}
 	return nil
