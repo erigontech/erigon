@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -23,7 +24,6 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/zap/buffer"
 )
 
 func TestBlocksByRangeHandler(t *testing.T) {
@@ -74,7 +74,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	for _, block := range blockRoots {
 		req.Append(block)
 	}
-	var reqBuf buffer.Buffer
+	var reqBuf bytes.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&reqBuf, req); err != nil {
 		return
 	}

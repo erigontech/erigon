@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/libp2p/go-libp2p/core/network"
-	"go.uber.org/zap/buffer"
 )
 
 const MAX_REQUEST_BLOCKS = 96
@@ -106,6 +105,10 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	for i := 0; i < req.Length(); i++ {
 		blockRoot := req.Get(i)
 		blockRoots = append(blockRoots, blockRoot)
+		// Limit the number of blocks to the count specified in the request.
+		if len(blockRoots) >= MAX_REQUEST_BLOCKS {
+			break
+		}
 	}
 
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
@@ -113,11 +116,6 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		return err
 	}
 	defer tx.Rollback()
-
-	// Limit the number of blocks to the count specified in the request.
-	if len(blockRoots) > MAX_REQUEST_BLOCKS {
-		blockRoots = blockRoots[:MAX_REQUEST_BLOCKS]
-	}
 
 	// Read the fork digest
 	forkDigest, err := fork.ComputeForkDigestForVersion(
@@ -140,19 +138,18 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		}
 		defer r.Close()
 
-		// Read block
-		var resBuf buffer.Buffer
+		if _, err := s.Write(forkDigest[:]); err != nil {
+			return err
+		}
+
+		// Read block from DB
 		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 		if err := ssz_snappy.DecodeAndReadNoForkDigest(r, block, clparams.Phase0Version); err != nil {
 			return err
 		}
-		ssz_snappy.EncodeAndWrite(&resBuf, block)
-		resData := libcommon.CopyBytes(resBuf.Bytes())
-
-		if _, err := s.Write(forkDigest[:]); err != nil {
+		if err := ssz_snappy.EncodeAndWrite(s, block); err != nil {
 			return err
 		}
-		s.Write(resData)
 	}
 	return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
 }
