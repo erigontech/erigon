@@ -158,12 +158,10 @@ func HeadersPOW(
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
-		if !useExternalTx {
-			if err = tx.Commit(); err != nil {
-				return err
-			}
+		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
+		if err != nil {
+			return err
 		}
-		return nil
 	}
 
 	// Allow other stages to run 1 cycle if no network available
