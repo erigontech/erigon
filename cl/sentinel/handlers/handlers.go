@@ -55,8 +55,8 @@ var rateLimits = RateLimits{
 	metadataV1Limit:          defaultRateLimit,
 	metadataV2Limit:          defaultRateLimit,
 	statusLimit:              defaultRateLimit,
-  beaconBlocksByRangeLimit: defaultBlockHandlerRateLimit
-  beaconBlocksByRootLimit:  defaultBlockHandlerRateLimit
+	beaconBlocksByRangeLimit: defaultBlockHandlerRateLimit,
+	beaconBlocksByRootLimit:  defaultBlockHandlerRateLimit,
 }
 
 type ConsensusHandlers struct {

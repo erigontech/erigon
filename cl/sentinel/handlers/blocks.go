@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 	"go.uber.org/zap/buffer"
 )
@@ -34,9 +33,8 @@ const MAX_REQUEST_BLOCKS = 96
 
 func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "beaconBlocksByRange", defaultRateLimits.beaconBlocksByRangeLimit); err != nil {
+	if err := c.checkRateLimit(peerId, "beaconBlocksByRange", rateLimits.beaconBlocksByRangeLimit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		defer s.Close()
 		return err
 	}
 
@@ -93,11 +91,9 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
-	log.Trace("Got beacon block by root handler call")
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "beaconBlocksByRoot", defaultRateLimits.beaconBlocksByRootLimit); err != nil {
+	if err := c.checkRateLimit(peerId, "beaconBlocksByRoot", rateLimits.beaconBlocksByRootLimit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		defer s.Close()
 		return err
 	}
 
