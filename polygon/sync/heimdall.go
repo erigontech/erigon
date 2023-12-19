@@ -1,4 +1,4 @@
-package polygon_sync
+package sync
 
 import (
 	"context"
