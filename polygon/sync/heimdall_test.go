@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"github.com/golang/mock/gomock"
+	heimdall_client "github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	heimdall_mock "github.com/ledgerwatch/erigon/consensus/bor/heimdall/mock"
@@ -73,6 +74,22 @@ func (test heimdallTest) setupCheckpoints(count int) []*checkpoint.Checkpoint {
 	return expectedCheckpoints
 }
 
+func (test heimdallTest) setupMilestones(count int) []*milestone.Milestone {
+	var expectedMilestones []*milestone.Milestone
+	for i := 0; i < count; i++ {
+		m := makeMilestone(uint64(i*16), 16)
+		expectedMilestones = append(expectedMilestones, m)
+	}
+
+	client := test.client
+	client.EXPECT().FetchMilestoneCount(gomock.Any()).Return(int64(len(expectedMilestones)), nil)
+	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*milestone.Milestone, error) {
+		return expectedMilestones[number-1], nil
+	}).AnyTimes()
+
+	return expectedMilestones
+}
+
 func TestFetchCheckpoints1(t *testing.T) {
 	test := newHeimdallTest(t)
 	expectedCheckpoint := test.setupCheckpoints(1)[0]
@@ -118,6 +135,83 @@ func TestFetchCheckpointsMiddleStart(t *testing.T) {
 	require.Equal(t, len(expectedCheckpoints)-offset, len(checkpoints))
 	for i := 0; i < len(checkpoints); i++ {
 		assert.Equal(t, expectedCheckpoints[offset+i].StartBlock.Uint64(), checkpoints[i].StartBlock.Uint64())
+	}
+}
+
+func TestFetchMilestones1(t *testing.T) {
+	test := newHeimdallTest(t)
+	expectedMilestone := test.setupMilestones(1)[0]
+
+	milestones, err := test.heimdall.FetchMilestones(test.ctx, 0)
+	require.Nil(t, err)
+
+	require.Equal(t, 1, len(milestones))
+	assert.Equal(t, expectedMilestone.Timestamp, milestones[0].Timestamp)
+}
+
+func TestFetchMilestonesPastLast(t *testing.T) {
+	test := newHeimdallTest(t)
+	_ = test.setupMilestones(1)[0]
+
+	milestones, err := test.heimdall.FetchMilestones(test.ctx, 500)
+	require.Nil(t, err)
+
+	require.Equal(t, 0, len(milestones))
+}
+
+func TestFetchMilestones10(t *testing.T) {
+	test := newHeimdallTest(t)
+	expectedMilestones := test.setupMilestones(10)
+
+	milestones, err := test.heimdall.FetchMilestones(test.ctx, 0)
+	require.Nil(t, err)
+
+	require.Equal(t, len(expectedMilestones), len(milestones))
+	for i := 0; i < len(milestones); i++ {
+		assert.Equal(t, expectedMilestones[i].StartBlock.Uint64(), milestones[i].StartBlock.Uint64())
+	}
+}
+
+func TestFetchMilestonesMiddleStart(t *testing.T) {
+	test := newHeimdallTest(t)
+	expectedMilestones := test.setupMilestones(10)
+	const offset = 6
+
+	milestones, err := test.heimdall.FetchMilestones(test.ctx, expectedMilestones[offset].StartBlock.Uint64())
+	require.Nil(t, err)
+
+	require.Equal(t, len(expectedMilestones)-offset, len(milestones))
+	for i := 0; i < len(milestones); i++ {
+		assert.Equal(t, expectedMilestones[offset+i].StartBlock.Uint64(), milestones[i].StartBlock.Uint64())
+	}
+}
+
+func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
+	test := newHeimdallTest(t)
+
+	var expectedMilestones []*milestone.Milestone
+	for i := 0; i < 20; i++ {
+		m := makeMilestone(uint64(i*16), 16)
+		expectedMilestones = append(expectedMilestones, m)
+	}
+	const keptMilestones = 5
+
+	client := test.client
+	client.EXPECT().FetchMilestoneCount(gomock.Any()).Return(int64(len(expectedMilestones)), nil)
+	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*milestone.Milestone, error) {
+		if int(number) <= len(expectedMilestones)-keptMilestones {
+			return nil, heimdall_client.ErrNotInMilestoneList
+		}
+		return expectedMilestones[number-1], nil
+	}).AnyTimes()
+
+	milestones, err := test.heimdall.FetchMilestones(test.ctx, 0)
+	require.NotNil(t, err)
+	require.ErrorIs(t, err, ErrIncompleteMilestoneRange)
+
+	require.Equal(t, keptMilestones, len(milestones))
+	for i := 0; i < len(milestones); i++ {
+		assert.Equal(t, expectedMilestones[len(expectedMilestones)-len(milestones)+i].StartBlock.Uint64(), milestones[i].StartBlock.Uint64())
 	}
 }
 
