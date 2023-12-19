@@ -306,12 +306,6 @@ func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
 // Get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//sd.muMaps.RLock()
-	v, ok = sd.get(table, key)
-	//sd.muMaps.RUnlock()
-	return v, ok
-}
-
-func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	keyS := *(*string)(unsafe.Pointer(&key))
 	//keyS := string(key)
 	switch table {
@@ -326,6 +320,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	default:
 		panic(table)
 	}
+	//sd.muMaps.RUnlock()
 	return v, ok
 }
 
@@ -559,8 +554,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	//     File endTxNum  = 15, because `0-2.kv` has steps 0 and 1, last txNum of step 1 is 15
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
-
-	sd.Storage.stats.FilesQueries.Add(1)
 
 	haveRamUpdates := sd.storage.Len() > 0
 
