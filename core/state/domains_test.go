@@ -107,8 +107,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 
 		}
 	}
-	sv3 := NewStateV3(domains, log.New())
-	sr := NewStateReaderV3(sv3)
+	sr := NewStateReaderV3(domains)
 
 	acc, err := sr.ReadAccountData(common.HexToAddress("0xB5CAEc2ef7B24D644d1517c9286A17E73b5988F8"))
 	require.NoError(t, err)
