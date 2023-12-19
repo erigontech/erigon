@@ -48,6 +48,10 @@ jobs:
     #    sudo apt-get update
     #    sudo apt-get install -y build-essential make gcc
 
+    - name: Clean Erigon Build Directory
+      run: |
+        make clean
+
     - name: Build Erigon
       run: |
         make erigon
@@ -80,6 +84,9 @@ jobs:
           echo "Erigon has already terminated"
         fi
         
+        # Clean up Erigon build and data directories
+        rm -rf $ERIGON_DATA_DIR
+        
         # Check monitoring script exit status
         if [ $monitoring_exit_status -eq 0 ]; then
           echo "Monitoring completed successfully"
@@ -87,16 +94,3 @@ jobs:
           echo "Error detected in Erigon logs or monitoring script exited unexpectedly"
           exit 1
         fi
-
-    - name: Clean Erigon Build Directory
-      run: |
-        make clean
-
-    - name: Clean Erigon Data Directory
-      run: |
-        rm -rf $ERIGON_DATA_DIR
-
-    - name: Do something with Erigon logs
-      run: |
-        # Example command using the logs directory
-        ls -l ${{env.ERIGON_DATA_DIR}}/logs/
