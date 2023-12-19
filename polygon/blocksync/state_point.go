@@ -8,19 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 )
 
-type statePoint struct {
-	proposer   libcommon.Address
-	startBlock *big.Int
-	endBlock   *big.Int
-	rootHash   libcommon.Hash
-	chainId    string
-	timestamp  uint64
-}
-
-func (sp *statePoint) length() int {
-	return int(sp.endBlock.Uint64() - sp.startBlock.Uint64() + 1)
-}
-
 func statePointFromCheckpoint(cp *checkpoint.Checkpoint) statePoint {
 	return statePoint{
 		proposer:   cp.Proposer,
@@ -41,4 +28,17 @@ func statePointFromMilestone(ms *milestone.Milestone) statePoint {
 		chainId:    ms.BorChainID,
 		timestamp:  ms.Timestamp,
 	}
+}
+
+type statePoint struct {
+	proposer   libcommon.Address
+	startBlock *big.Int
+	endBlock   *big.Int
+	rootHash   libcommon.Hash
+	chainId    string
+	timestamp  uint64
+}
+
+func (sp *statePoint) length() int {
+	return int(sp.endBlock.Uint64() - sp.startBlock.Uint64() + 1)
 }

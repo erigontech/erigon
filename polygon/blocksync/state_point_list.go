@@ -5,21 +5,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 )
 
-type statePointList []statePoint
-
-func (spl statePointList) extractBatch(batchSize int, reverse bool) (batch statePointList, remaining statePointList) {
-	if reverse {
-		idx := len(spl) - batchSize
-		batch = spl[idx:]
-		remaining = spl[:idx]
-	} else {
-		batch = spl[:batchSize]
-		remaining = spl[batchSize:]
-	}
-
-	return
-}
-
 func statePointListFromCheckpoints(checkpoints []*checkpoint.Checkpoint) statePointList {
 	spl := make(statePointList, len(checkpoints))
 	for i, cp := range checkpoints {
@@ -36,4 +21,19 @@ func statePointListFromMilestones(milestones []*milestone.Milestone) statePointL
 	}
 
 	return spl
+}
+
+type statePointList []statePoint
+
+func (spl statePointList) extractBatch(batchSize int, reverse bool) (batch statePointList, remaining statePointList) {
+	if reverse {
+		idx := len(spl) - batchSize
+		batch = spl[idx:]
+		remaining = spl[:idx]
+	} else {
+		batch = spl[:batchSize]
+		remaining = spl[batchSize:]
+	}
+
+	return
 }
