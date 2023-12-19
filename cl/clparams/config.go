@@ -504,6 +504,10 @@ func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
 	return slot - (slot % slotsPerSyncCommitteePeriod)
 }
 
+func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
+	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)

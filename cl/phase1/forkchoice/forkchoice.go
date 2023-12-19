@@ -61,7 +61,7 @@ type ForkChoiceStore struct {
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
-	// preverifid sizes
+	// preverifid sizes and other data collection
 	preverifiedSizes    *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
 	finalityCheckpoints *lru.Cache[libcommon.Hash, finalityCheckpoints]
 
@@ -295,4 +295,10 @@ func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool
 		return true, ret.finalizedCheckpoint, ret.currentJustifiedCheckpoint, ret.previousJustifiedCheckpoint
 	}
 	return false, solid.Checkpoint{}, solid.Checkpoint{}, solid.Checkpoint{}
+}
+
+func (f *ForkChoiceStore) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetSyncCommittees(blockRoot)
 }
