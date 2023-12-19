@@ -808,7 +808,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		false,
 		config.Miner.EnabledPOS)
 	backend.engineBackendRPC = engineBackendRPC
+
 	var engine execution_client.ExecutionEngine
+
+	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
 	if config.NetworkID == uint64(clparams.GnosisNetwork) {
 		// Read the jwt secret
 		jwtSecret, err := cli.ObtainJWTSecret(&stack.Config().Http, logger)
