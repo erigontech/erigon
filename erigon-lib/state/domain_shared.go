@@ -87,6 +87,11 @@ type HasAggCtx interface {
 }
 
 func NewSharedDomains(tx kv.Tx) *SharedDomains {
+	if casted, ok := tx.(*SharedDomains); ok {
+		_ = casted
+		panic(1)
+	}
+
 	var ac *AggregatorV3Context
 	if casted, ok := tx.(HasAggCtx); ok {
 		ac = casted.AggCtx().(*AggregatorV3Context)
@@ -122,7 +127,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	return sd
 }
 
-func (sd *SharedDomains) AggCtx() *AggregatorV3Context { return sd.aggCtx }
+func (sd *SharedDomains) AggCtx() interface{} { return sd.aggCtx }
 func (sd *SharedDomains) WithMemBatch() *SharedDomains {
 	sd.RwTx = membatchwithdb.NewMemoryBatch(sd.roTx, sd.aggCtx.a.dirs.Tmp)
 	sd.withMemBatch = true
