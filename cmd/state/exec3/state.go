@@ -69,7 +69,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		background:  background,
 		blockReader: blockReader,
 		stateWriter: state.NewStateWriterV3(rs),
-		stateReader: state.NewStateReaderV3(rs),
+		stateReader: state.NewStateReaderV3(rs.Domains()),
 		chainConfig: chainConfig,
 
 		ctx:         ctx,
@@ -102,7 +102,7 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 
 func (rw *Worker) ResetState(rs *state.StateV3) {
 	rw.rs = rs
-	rw.SetReader(state.NewStateReaderV3(rs))
+	rw.SetReader(state.NewStateReaderV3(rs.Domains()))
 	rw.stateWriter = state.NewStateWriterV3(rs)
 }
 
@@ -163,7 +163,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		// Needed to correctly evaluate spent gas and other things.
 		rw.SetReader(state.NewHistoryReaderV3())
 	} else if !txTask.HistoryExecution && rw.historyMode.Load() {
-		rw.SetReader(state.NewStateReaderV3(rw.rs))
+		rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
 	}
 
 	if rw.background && rw.chainTx == nil {
