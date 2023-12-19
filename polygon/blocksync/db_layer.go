@@ -1,4 +1,4 @@
-package sync
+package blocksync
 
 import (
 	"github.com/ledgerwatch/erigon/core/types"
