@@ -306,12 +306,6 @@ func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
 // Get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//sd.muMaps.RLock()
-	v, ok = sd.get(table, key)
-	//sd.muMaps.RUnlock()
-	return v, ok
-}
-
-func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	keyS := *(*string)(unsafe.Pointer(&key))
 	//keyS := string(key)
 	switch table {
@@ -326,6 +320,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	default:
 		panic(table)
 	}
+	//sd.muMaps.RUnlock()
 	return v, ok
 }
 
