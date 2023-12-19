@@ -56,6 +56,7 @@ func (l *KvList) Swap(i, j int) {
 type SharedDomains struct {
 	kv.RwTx
 	withHashBatch, withMemBatch bool
+	noFlush                     int
 
 	aggCtx *AggregatorV3Context
 	sdCtx  *SharedDomainsCommitmentContext
@@ -88,8 +89,8 @@ type HasAggCtx interface {
 
 func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	if casted, ok := tx.(*SharedDomains); ok {
-		_ = casted
-		panic(1)
+		casted.noFlush++
+		return casted
 	}
 
 	var ac *AggregatorV3Context
@@ -837,9 +838,13 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	defer mxFlushTook.ObserveDuration(time.Now())
-	for _, f := range sd.rotate() {
-		if err := f.Flush(ctx, tx); err != nil {
-			return err
+
+	sd.noFlush--
+	if sd.noFlush == 0 {
+		for _, f := range sd.rotate() {
+			if err := f.Flush(ctx, tx); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
