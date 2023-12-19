@@ -555,8 +555,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
 
-	sd.Storage.stats.FilesQueries.Add(1)
-
 	haveRamUpdates := sd.storage.Len() > 0
 
 	var cp CursorHeap
