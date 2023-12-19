@@ -26,6 +26,8 @@ jobs:
     #    os: [ ubuntu-22.04, macos-13-xlarge ]
     #runs-on: ${{ matrix.os }}
     runs-on: self-hosted
+    env:
+      ERIGON_DATA_DIR: /home/runner/.local/share/erigon
 
     steps:
     - name: Check out repository
@@ -60,11 +62,11 @@ jobs:
         # Run Erigon in background, send ctrl-c and check logs
         
         # Run Erigon in background
-        ./build/bin/erigon & 
+        ./build/bin/erigon --datadir $ERIGON_DATA_DIR & 
         ERIGON_PID=$!
         
         # Start the log monitoring script in the background
-        python3 ./tests/qa/check_clean_exit.py $ERIGON_PID /home/runner/.local/share/erigon/logs/erigon.log
+        python3 ./tests/qa/check_clean_exit.py $ERIGON_PID ${{env.ERIGON_DATA_DIR}}/logs/erigon.log
        
         # Capture monitoring script exit status
         monitoring_exit_status=$?
@@ -85,3 +87,16 @@ jobs:
           echo "Error detected in Erigon logs or monitoring script exited unexpectedly"
           exit 1
         fi
+
+    - name: Clean Erigon Build Directory
+      run: |
+        make clean
+
+    - name: Clean Erigon Data Directory
+      run: |
+        rm -rf $ERIGON_DATA_DIR
+
+    - name: Do something with Erigon logs
+      run: |
+        # Example command using the logs directory
+        ls -l ${{env.ERIGON_DATA_DIR}}/logs/
