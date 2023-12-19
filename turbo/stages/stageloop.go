@@ -87,6 +87,7 @@ func StageLoop(ctx context.Context,
 		}
 
 		initialCycle = false
+		mc.Hd.AfterInitialCycle()
 
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
