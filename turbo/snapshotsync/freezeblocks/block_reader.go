@@ -1079,7 +1079,17 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	lastSegment := segments[len(segments)-1]
+	// find the last segment which has a built index
+	var lastSegment *BorEventSegment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].IdxBorTxnHash != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
 	var lastEventID uint64
 	gg := lastSegment.seg.MakeGetter()
 	var buf []byte
@@ -1097,7 +1107,17 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	lastSegment := segments[len(segments)-1]
+	// find the last segment which has a built index
+	var lastSegment *BorSpanSegment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].idx != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
 	var lastSpanID uint64
 	if lastSegment.ranges.to > zerothSpanEnd {
 		lastSpanID = (lastSegment.ranges.to - zerothSpanEnd - 1) / spanLength
