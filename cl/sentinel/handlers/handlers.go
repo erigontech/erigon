@@ -36,21 +36,25 @@ import (
 )
 
 type RateLimits struct {
-	pingLimit       int
-	goodbyeLimit    int
-	metadataV1Limit int
-	metadataV2Limit int
-	statusLimit     int
+	pingLimit                int
+	goodbyeLimit             int
+	metadataV1Limit          int
+	metadataV2Limit          int
+	statusLimit              int
+	beaconBlocksByRangeLimit int
+	beaconBlocksByRootLimit  int
 }
 
 const punishmentPeriod = time.Minute
 
 var defaultRateLimits = RateLimits{
-	pingLimit:       5000,
-	goodbyeLimit:    5000,
-	metadataV1Limit: 5000,
-	metadataV2Limit: 5000,
-	statusLimit:     5000,
+	pingLimit:                5000,
+	goodbyeLimit:             5000,
+	metadataV1Limit:          5000,
+	metadataV2Limit:          5000,
+	statusLimit:              5000,
+	beaconBlocksByRangeLimit: 200,
+	beaconBlocksByRootLimit:  200,
 }
 
 type ConsensusHandlers struct {
@@ -92,7 +96,7 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		communication.StatusProtocolV1:              c.statusHandler,
 		communication.MetadataProtocolV1:            c.metadataV1Handler,
 		communication.MetadataProtocolV2:            c.metadataV2Handler,
-		communication.BeaconBlocksByRangeProtocolV1: c.blocksByRangeHandler,
+		communication.BeaconBlocksByRangeProtocolV1: c.beaconBlocksByRangeHandler,
 		communication.BeaconBlocksByRootProtocolV1:  c.beaconBlocksByRootHandler,
 	}
 
