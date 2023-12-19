@@ -195,7 +195,7 @@ func ExecV3(ctx context.Context,
 	}
 	if initialCycle {
 		if casted, ok := applyTx.(*temporal.Tx); ok {
-			casted.AggCtx().LogStats(casted, func(endTxNumMinimax uint64) uint64 {
+			casted.AggCtx().(*state2.AggregatorV3Context).LogStats(casted, func(endTxNumMinimax uint64) uint64 {
 				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
 				return histBlockNumProgress
 			})
