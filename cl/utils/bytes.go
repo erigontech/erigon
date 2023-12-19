@@ -15,6 +15,7 @@ package utils
 
 import (
 	"encoding/binary"
+	"io"
 	"math/bits"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -102,4 +103,18 @@ func GetBitlistLength(b []byte) int {
 	// bits in the preceding bytes plus the position of the most significant
 	// bit. Subtract this value by 1 to determine the length of the bitlist.
 	return 8*(len(b)-1) + msb - 1
+}
+
+func ReadZSTD(r io.Reader, out []byte) (int, error) {
+	n := 0
+	var err error
+	for n != len(out) {
+		var m int
+		m, err = r.Read(out[n:])
+		n += m
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }

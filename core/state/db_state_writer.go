@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 
 	"github.com/ledgerwatch/erigon/common/math"
@@ -74,6 +75,15 @@ func (dsw *DbStateWriter) UpdateAccountData(address libcommon.Address, original,
 	if err := dsw.db.Put(kv.HashedAccounts, addrHash[:], value); err != nil {
 		return err
 	}
+
+	if account.Incarnation == 0 && original.Incarnation > 0 {
+		var b [8]byte
+		binary.BigEndian.PutUint64(b[:], original.Incarnation)
+		if err := dsw.db.Put(kv.IncarnationMap, address[:], b[:]); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

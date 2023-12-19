@@ -28,6 +28,7 @@ import (
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -356,23 +357,6 @@ func (s *RoSnapshots) LogStat() {
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func (s *RoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := Segments(s.dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	existingFilesMap := map[string]struct{}{}
-	for _, existingFile := range existingFiles {
-		_, fname := filepath.Split(existingFile.Path)
-		existingFilesMap[fname] = struct{}{}
-	}
-
-	res := make([]*services.Range, 0, len(missingSnapshots))
-	for _, sn := range missingSnapshots {
-		res = append(res, &services.Range{From: sn.from, To: sn.to})
-	}
-	return existingFilesMap, res, nil
-}
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
@@ -496,12 +480,12 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	max := s.BlocksAvailable()
+	maxBlockNumInFiles := s.BlocksAvailable()
 	for _, seg := range s.Bodies.segments {
 		if seg.seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.seg.FilePath())
@@ -511,7 +495,7 @@ func (s *RoSnapshots) Files() (list []string) {
 		if seg.seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.seg.FilePath())
@@ -521,7 +505,7 @@ func (s *RoSnapshots) Files() (list []string) {
 		if seg.Seg == nil {
 			continue
 		}
-		if seg.ranges.from > max {
+		if seg.ranges.from > maxBlockNumInFiles {
 			continue
 		}
 		_, fName := filepath.Split(seg.Seg.FilePath())
@@ -944,6 +928,12 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
+
+				diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+					Segments:    ps.DiagnossticsData(),
+					TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
+				})
+
 				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			case <-finish:
 				return
@@ -1032,6 +1022,11 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
+			dd := ps.DiagnossticsData()
+			diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+				Segments:    dd,
+				TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
+			})
 			logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
@@ -1202,11 +1197,18 @@ type BlockRetire struct {
 	blockReader services.FullBlockReader
 	blockWriter *blockio.BlockWriter
 	dirs        datadir.Dirs
+	chainConfig *chain.Config
 }
 
-func NewBlockRetire(workers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: workers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, notifier: notifier, logger: logger}
+func NewBlockRetire(compressWorkers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
+	return &BlockRetire{workers: compressWorkers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, chainConfig: chainConfig, notifier: notifier, logger: logger}
 }
+
+func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
+	return br.blockReader, br.blockWriter
+}
+
+func (br *BlockRetire) Writer() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 
 func (br *BlockRetire) snapshots() *RoSnapshots { return br.blockReader.Snapshots().(*RoSnapshots) }
 
@@ -1266,8 +1268,7 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 	return cmp.Min(hardLimit, blocksInSnapshots+1)
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) error {
-	chainConfig := fromdb.ChainConfig(br.db)
+func (br *BlockRetire) retireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) error {
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	snapshots := br.snapshots()
@@ -1284,7 +1285,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 		notifier.OnNewSnapshot()
 	}
-	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
+	merger := NewMerger(tmpDir, workers, lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
 		return nil
@@ -1296,7 +1297,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 
 		if seedNewSnapshots != nil {
 			downloadRequest := []services.DownloadRequest{
-				services.NewDownloadRequest(&services.Range{From: r.from, To: r.to}, "", "", false /* Bor */),
+				services.NewDownloadRequest("", ""),
 			}
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
@@ -1312,7 +1313,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, blockFrom, blockTo uint
 	return nil
 }
 
-func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool) error {
+func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	if br.blockReader.FreezingCfg().KeepBlocks {
 		return nil
 	}
@@ -1322,18 +1323,19 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks())
 	if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
-		return nil
+		return err
 	}
+	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
 		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
-			return nil
+			return err
 		}
 	}
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
 	ok := br.working.CompareAndSwap(false, true)
 	if !ok {
 		// go-routine is still working
@@ -1342,88 +1344,111 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	go func() {
 		defer br.working.Store(false)
 
-		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
-		if ok {
-			if err := br.RetireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
-				br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
-			}
-		}
-
-		if includeBor {
-			blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
-			if ok {
-				if err := br.RetireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots); err != nil {
-					br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
-				}
-			}
+		if err := br.RetireBlocks(ctx, forwardProgress, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
+			br.logger.Warn("[snapshots] retire blocks", "err", err)
 		}
 	}()
 }
 
-func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
-	snapshots := br.snapshots()
-	snapshots.LogStat()
-
-	// Create .idx files
-	if snapshots.IndicesMax() < snapshots.SegmentsMax() {
-
-		if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
-			return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
+	blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
+	if ok {
+		if err := br.retireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
+			//br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+			return err
 		}
-		if snapshots.Cfg().Produce {
-			if !snapshots.SegmentsReady() {
-				return fmt.Errorf("not all snapshot segments are available")
-			}
+	}
 
-			// wait for Downloader service to download all expected snapshots
-			if snapshots.IndicesMax() < snapshots.SegmentsMax() {
-				indexWorkers := estimate.IndexSnapshot.Workers()
-				if err := BuildMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
-					return fmt.Errorf("BuildMissedIndices: %w", err)
-				}
-			}
-
-			if err := snapshots.ReopenFolder(); err != nil {
+	includeBor := br.chainConfig.Bor != nil
+	if includeBor {
+		blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+		if ok {
+			if err := br.retireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
 				return err
-			}
-			snapshots.LogStat()
-			if notifier != nil {
-				notifier.OnNewSnapshot()
+				//br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
 			}
 		}
 	}
-	if cc.Bor != nil {
-		borSnapshots := br.borSnapshots()
-		borSnapshots.LogStat()
+	return nil
+}
 
-		// Create .idx files
-		if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
+func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	if err := br.buildMissedIndicesIfNeed(ctx, logPrefix, notifier, cc); err != nil {
+		return err
+	}
 
-			if !borSnapshots.Cfg().Produce && borSnapshots.IndicesMax() == 0 {
-				return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
-			}
-			if borSnapshots.Cfg().Produce {
-				if !borSnapshots.SegmentsReady() {
-					return fmt.Errorf("not all bor snapshot segments are available")
-				}
+	if err := br.buildBorMissedIndicesIfNeed(ctx, logPrefix, notifier, cc); err != nil {
+		return err
+	}
 
-				// wait for Downloader service to download all expected snapshots
-				if borSnapshots.IndicesMax() < borSnapshots.SegmentsMax() {
-					indexWorkers := estimate.IndexSnapshot.Workers()
-					if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
-						return fmt.Errorf("BuildBorMissedIndices: %w", err)
-					}
-				}
+	return nil
+}
 
-				if err := borSnapshots.ReopenFolder(); err != nil {
-					return err
-				}
-				borSnapshots.LogStat()
-				if notifier != nil {
-					notifier.OnNewSnapshot()
-				}
-			}
-		}
+func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	snapshots := br.snapshots()
+	if snapshots.IndicesMax() >= snapshots.SegmentsMax() {
+		return nil
+	}
+	snapshots.LogStat()
+	if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
+		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+	}
+	if !snapshots.Cfg().Produce {
+		return nil
+	}
+	if !snapshots.SegmentsReady() {
+		return fmt.Errorf("not all snapshot segments are available")
+	}
+
+	// wait for Downloader service to download all expected snapshots
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err := BuildMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+		return fmt.Errorf("BuildMissedIndices: %w", err)
+	}
+
+	if err := snapshots.ReopenFolder(); err != nil {
+		return err
+	}
+	snapshots.LogStat()
+	if notifier != nil {
+		notifier.OnNewSnapshot()
+	}
+	return nil
+}
+
+func (br *BlockRetire) buildBorMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
+	if cc.Bor == nil {
+		return nil
+	}
+
+	borSnapshots := br.borSnapshots()
+	if borSnapshots.IndicesMax() >= borSnapshots.SegmentsMax() {
+		return nil
+	}
+
+	borSnapshots.LogStat()
+	if !borSnapshots.Cfg().Produce && borSnapshots.IndicesMax() == 0 {
+		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
+	}
+	if !borSnapshots.Cfg().Produce {
+		return nil
+	}
+	if !borSnapshots.SegmentsReady() {
+		return fmt.Errorf("not all bor snapshot segments are available")
+	}
+
+	// wait for Downloader service to download all expected snapshots
+	indexWorkers := estimate.IndexSnapshot.Workers()
+	if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, cc, indexWorkers, br.logger); err != nil {
+		return fmt.Errorf("BuildBorMissedIndices: %w", err)
+	}
+
+	if err := borSnapshots.ReopenFolder(); err != nil {
+		return err
+	}
+	borSnapshots.LogStat()
+	if notifier != nil {
+		notifier.OnNewSnapshot()
 	}
 	return nil
 }

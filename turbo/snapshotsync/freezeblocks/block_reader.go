@@ -439,8 +439,8 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 }
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txAmount uint32, err error) {
-	blocksAvailable := r.sn.BlocksAvailable()
-	if blocksAvailable == 0 || blockHeight > blocksAvailable {
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		body, _, txAmount = rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txAmount, nil
 	}
@@ -459,8 +459,8 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 }
 
 func (r *BlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bool, error) {
-	blocksAvailable := r.sn.BlocksAvailable()
-	if blocksAvailable == 0 || blockHeight > blocksAvailable {
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		return rawdb.HasSenders(tx, hash, blockHeight)
 	}
 	return true, nil
@@ -470,8 +470,8 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	return r.blockWithSenders(ctx, tx, hash, blockHeight, false)
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
-	blocksAvailable := r.sn.BlocksAvailable()
-	if blocksAvailable == 0 || blockHeight > blocksAvailable {
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		if forceCanonical {
 			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 			if err != nil {
@@ -756,8 +756,8 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
 // return nil if 0 < i < body.TxAmount
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (txn types.Transaction, err error) {
-	blocksAvailable := r.sn.BlocksAvailable()
-	if blocksAvailable == 0 || blockNum > blocksAvailable {
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return nil, err
@@ -991,7 +991,8 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
-	if blockHeight >= r.FrozenBorBlocks() {
+	maxBlockNumInFiles := r.FrozenBorBlocks()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
@@ -1075,7 +1076,17 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	lastSegment := segments[len(segments)-1]
+	// find the last segment which has a built index
+	var lastSegment *BorEventSegment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].IdxBorTxnHash != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
 	var lastEventID uint64
 	gg := lastSegment.seg.MakeGetter()
 	var buf []byte
@@ -1093,7 +1104,17 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 	if len(segments) == 0 {
 		return 0
 	}
-	lastSegment := segments[len(segments)-1]
+	// find the last segment which has a built index
+	var lastSegment *BorSpanSegment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].idx != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
 	var lastSpanID uint64
 	if lastSegment.ranges.to > zerothSpanEnd {
 		lastSpanID = (lastSegment.ranges.to - zerothSpanEnd - 1) / spanLength
@@ -1109,13 +1130,14 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
-	if endBlock >= r.FrozenBorBlocks() {
+	maxBlockNumInFiles := r.FrozenBorBlocks()
+	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {
 			return nil, err
 		}
 		if v == nil {
-			return nil, fmt.Errorf("span %d not found (db)", spanId)
+			return nil, fmt.Errorf("span %d not found (db), frosenBlocks=%d", spanId, maxBlockNumInFiles)
 		}
 		return common.Copy(v), nil
 	}

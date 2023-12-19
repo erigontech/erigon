@@ -25,7 +25,7 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	// Fill in previous epoch participation from the pre state's pending attestations
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
 		attestationData := pa.AttestantionData()
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay())
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay(), false)
 		if err != nil {
 			return err
 		}

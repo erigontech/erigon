@@ -330,15 +330,6 @@ func TestBeaconState_SetSlashingSegmentAt(t *testing.T) {
 	assert.Equal(t, segment, state.slashings.Get(index))
 }
 
-func TestBeaconState_IncrementSlashingSegmentAt(t *testing.T) {
-	state := GetTestState()
-	index := 0
-	delta := uint64(10)
-	state.SetSlashingSegmentAt(index, 100)
-	state.IncrementSlashingSegmentAt(index, delta)
-	assert.Equal(t, uint64(110), state.slashings.Get(index))
-}
-
 func TestBeaconState_SetEpochParticipationForValidatorIndex(t *testing.T) {
 	state := GetTestState()
 	isCurrentEpoch := true
