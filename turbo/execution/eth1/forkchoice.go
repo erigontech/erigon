@@ -368,7 +368,8 @@ TooBigJumpStep:
 		}
 	}
 	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, tx, false); err != nil {
+	initialCycle := tooBigJump
+	if err := e.executionPipeline.Run(e.db, tx, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
@@ -424,7 +425,6 @@ TooBigJumpStep:
 		}
 
 		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-			initialCycle := tooBigJump // prune more aggressively after big jump
 			return e.executionPipeline.RunPrune(e.db, tx, initialCycle)
 		}); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
