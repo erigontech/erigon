@@ -839,11 +839,13 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 
 	defer mxFlushTook.ObserveDuration(time.Now())
 
-	sd.noFlush--
-	if sd.noFlush == 0 {
-		for _, f := range sd.rotate() {
-			if err := f.Flush(ctx, tx); err != nil {
-				return err
+	if sd.noFlush > 0 {
+		sd.noFlush--
+		if sd.noFlush == 0 {
+			for _, f := range sd.rotate() {
+				if err := f.Flush(ctx, tx); err != nil {
+					return err
+				}
 			}
 		}
 	}
