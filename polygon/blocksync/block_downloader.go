@@ -8,29 +8,37 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-type blockDownloader struct {
+func NewBlockDownloader(p2pLayer p2pLayer, dbLayer dbLayer, heimdallLayer heimdallLayer) *BlockDownloader {
+	return &BlockDownloader{
+		p2pLayer:      p2pLayer,
+		dbLayer:       dbLayer,
+		heimdallLayer: heimdallLayer,
+	}
+}
+
+type BlockDownloader struct {
 	p2pLayer      p2pLayer
 	dbLayer       dbLayer
 	heimdallLayer heimdallLayer
 }
 
-func (bd blockDownloader) ForwardDownloadUsingCheckpoints(ctx context.Context, fromBlockNum uint64) error {
+func (bd BlockDownloader) ForwardDownloadUsingCheckpoints(ctx context.Context, fromBlockNum uint64) error {
 	return bd.downloadUsingCheckpoints(ctx, fromBlockNum, false)
 }
 
-func (bd blockDownloader) ForwardDownloadUsingMilestones(ctx context.Context, fromBlockNum uint64) error {
+func (bd BlockDownloader) ForwardDownloadUsingMilestones(ctx context.Context, fromBlockNum uint64) error {
 	return bd.downloadUsingMilestones(ctx, fromBlockNum, false)
 }
 
-func (bd blockDownloader) BackwardDownloadUsingCheckpoints(ctx context.Context, fromBlockNum uint64) error {
+func (bd BlockDownloader) BackwardDownloadUsingCheckpoints(ctx context.Context, fromBlockNum uint64) error {
 	return bd.downloadUsingCheckpoints(ctx, fromBlockNum, true)
 }
 
-func (bd blockDownloader) BackwardDownloadUsingMilestones(ctx context.Context, fromBlockNum uint64) error {
+func (bd BlockDownloader) BackwardDownloadUsingMilestones(ctx context.Context, fromBlockNum uint64) error {
 	return bd.downloadUsingMilestones(ctx, fromBlockNum, true)
 }
 
-func (bd blockDownloader) downloadUsingMilestones(ctx context.Context, fromBlockNum uint64, reverse bool) error {
+func (bd BlockDownloader) downloadUsingMilestones(ctx context.Context, fromBlockNum uint64, reverse bool) error {
 	milestones, err := bd.heimdallLayer.FetchMilestones(fromBlockNum)
 	if err != nil {
 		return err
@@ -44,7 +52,7 @@ func (bd blockDownloader) downloadUsingMilestones(ctx context.Context, fromBlock
 	return nil
 }
 
-func (bd blockDownloader) downloadUsingCheckpoints(ctx context.Context, fromBlockNum uint64, reverse bool) error {
+func (bd BlockDownloader) downloadUsingCheckpoints(ctx context.Context, fromBlockNum uint64, reverse bool) error {
 	checkpoints, err := bd.heimdallLayer.FetchCheckpoints(fromBlockNum)
 	if err != nil {
 		return err
@@ -58,7 +66,7 @@ func (bd blockDownloader) downloadUsingCheckpoints(ctx context.Context, fromBloc
 	return nil
 }
 
-func (bd blockDownloader) downloadUsingStatePoints(ctx context.Context, spl statePointList, reverse bool) error {
+func (bd BlockDownloader) downloadUsingStatePoints(ctx context.Context, spl statePointList, reverse bool) error {
 	var statePointsBatch statePointList
 	for len(spl) > 0 {
 		peerCount := bd.p2pLayer.PeerCount()
@@ -106,7 +114,7 @@ func (bd blockDownloader) downloadUsingStatePoints(ctx context.Context, spl stat
 	return nil
 }
 
-func (bd blockDownloader) downloadBlockRange(from, to *big.Int, peerIndex int) (chan []*types.Block, chan error) {
+func (bd BlockDownloader) downloadBlockRange(from, to *big.Int, peerIndex int) (chan []*types.Block, chan error) {
 	blocksChannel := make(chan []*types.Block, 1)
 	errChannel := make(chan error, 1)
 
