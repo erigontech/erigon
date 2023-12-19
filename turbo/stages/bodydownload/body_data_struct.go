@@ -43,16 +43,19 @@ type BodyDownload struct {
 	prefetchedBlocks *PrefetchedBlocks
 	deliveriesH      map[uint64]*types.Header
 	requests         map[uint64]*BodyRequest
-	maxProgress      uint64
-	requestedLow     uint64 // Lower bound of block number for outstanding requests
-	deliveredCount   float64
-	wastedCount      float64
-	bodyCache        *btree.BTreeG[BodyTreeItem]
-	bodyCacheSize    int
-	bodyCacheLimit   int // Limit of body Cache size
-	blockBufferSize  int
-	br               services.FullBlockReader
-	logger           log.Logger
+
+	maxProgress    uint64
+	bigLimitedJump bool
+
+	requestedLow    uint64 // Lower bound of block number for outstanding requests
+	deliveredCount  float64
+	wastedCount     float64
+	bodyCache       *btree.BTreeG[BodyTreeItem]
+	bodyCacheSize   int
+	bodyCacheLimit  int // Limit of body Cache size
+	blockBufferSize int
+	br              services.FullBlockReader
+	logger          log.Logger
 }
 
 // BodyRequest is a sketch of the request for block bodies, meaning that access to the database is required to convert it to the actual BlockBodies request (look up hashes of canonical blocks)

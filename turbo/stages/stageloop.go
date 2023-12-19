@@ -39,14 +39,13 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
-	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
 
 // StageLoop runs the continuous loop of staged sync
 func StageLoop(ctx context.Context,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
-	hd *headerdownload.HeaderDownload,
+	mc *sentry_multi_client.MultiClient,
 	waitForDone chan struct{},
 	loopMinTime time.Duration,
 	logger log.Logger,
@@ -61,30 +60,33 @@ func StageLoop(ctx context.Context,
 		start := time.Now()
 
 		select {
-		case <-hd.ShutdownCh:
+		case <-mc.Hd.ShutdownCh:
 			return
 		default:
 			// continue
 		}
 
 		// Estimate the current top height seen from the peer
+	BigJump:
 		err := StageLoopIteration(ctx, db, nil, sync, initialCycle, logger, blockReader, hook, forcePartialCommit)
-
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
 				return
 			}
 
 			logger.Error("Staged Sync", "err", err)
-			if recoveryErr := hd.RecoverFromDb(db); recoveryErr != nil {
+			if recoveryErr := mc.Hd.RecoverFromDb(db); recoveryErr != nil {
 				logger.Error("Failed to recover header sentriesClient", "err", recoveryErr)
 			}
 			time.Sleep(500 * time.Millisecond) // just to avoid too much similar errors in logs
 			continue
 		}
+		if mc.Bd.BigLimitedJump() {
+			mc.Hd.AfterInitialCycle()
+			goto BigJump
+		}
 
 		initialCycle = false
-		hd.AfterInitialCycle()
 
 		if loopMinTime != 0 {
 			waitTime := loopMinTime - time.Since(start)
@@ -111,6 +113,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	if err != nil {
 		return err
 	}
+
 	// Sync from scratch must be able Commit partial progress
 	// In all other cases - process blocks batch in 1 RwTx
 	// 2 corner-cases: when sync with --snapshots=false and when executed only blocks from snapshots (in this case all stages progress is equal and > 0, but node is not synced)
@@ -171,6 +174,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 			return err
 		}
 	}
+
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
 	}

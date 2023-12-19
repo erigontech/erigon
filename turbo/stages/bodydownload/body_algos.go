@@ -35,8 +35,10 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 
 	tooBigJump := headerProgress > bodyProgress && headerProgress-bodyProgress > 1_000
 	if tooBigJump {
+		bd.bigLimitedJump = true
 		bd.maxProgress = cmp.Max(bodyProgress, bd.br.FrozenBlocks()) + 1_000
 	} else {
+		bd.bigLimitedJump = false
 		bd.maxProgress = headerProgress + 1
 	}
 
@@ -457,3 +459,4 @@ func (bd *BodyDownload) ClearBodyCache() {
 func (bd *BodyDownload) BodyCacheSize() int {
 	return bd.bodyCacheSize
 }
+func (bd *BodyDownload) BigLimitedJump() bool { return bd.bigLimitedJump }

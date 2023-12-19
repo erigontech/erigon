@@ -230,7 +230,10 @@ func BodiesForward(
 		if bodyProgress == headerProgress {
 			return true, nil
 		}
-		if test {
+		if cfg.bd.BigLimitedJump() {
+			return true, nil
+		}
+		if test && !cfg.bd.BigLimitedJump() {
 			stopped = true
 			return true, nil
 		}
