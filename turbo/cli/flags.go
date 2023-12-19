@@ -273,7 +273,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
-	if limit := ctx.Uint(SyncLoopBlockLimit.Name); limit > 0 {
+	if limit := ctx.Uint(SyncLoopPruneLimit.Name); limit > 0 {
 		cfg.Sync.PruneLimit = int(limit)
 	}
 
