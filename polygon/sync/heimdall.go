@@ -122,7 +122,7 @@ func (impl *HeimdallImpl) OnMilestoneEvent(ctx context.Context, callback func(*m
 				}
 			} else {
 				currentCount = count
-				m, err := impl.client.FetchMilestone(ctx)
+				m, err := impl.client.FetchMilestone(ctx, count)
 				if err != nil {
 					if !errors.Is(err, context.Canceled) {
 						impl.logger.Error("HeimdallImpl.OnMilestoneEvent FetchMilestone error", "err", err)

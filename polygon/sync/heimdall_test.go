@@ -141,7 +141,7 @@ func TestOnMilestoneEvent(t *testing.T) {
 	}).AnyTimes()
 
 	expectedMilestone := makeMilestone(0, 12)
-	client.EXPECT().FetchMilestone(gomock.Any()).Return(expectedMilestone, nil)
+	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).Return(expectedMilestone, nil)
 
 	eventChan := make(chan *milestone.Milestone)
 	err := test.heimdall.OnMilestoneEvent(test.ctx, func(m *milestone.Milestone) {
