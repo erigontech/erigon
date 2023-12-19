@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"math"
 	"os"
 	"path"
@@ -968,7 +969,7 @@ func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 }
 
 // [txFrom; txTo)
-func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, omitProgress bool) error {
 	if !ic.CanPrune(rwTx) {
 		return nil
 	}
@@ -983,6 +984,21 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
+
+	pruneTxNum, _, err := stages.GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
+	if err != nil {
+		return nil
+	}
+	if !omitProgress && pruneTxNum != 0 {
+		// pruning previously stopped at purunedTxNum; txFrom < pruneTxNum < txTo of previous range.
+		// to preserve pruning range consistency need to store or reconstruct pruned range for given key
+		// for InvertedIndices storing pruned key does not make sense because keys are just txnums,
+		// any key will seek to first available txnum in db
+		prevPruneTxFrom := (pruneTxNum / ii.aggregationStep) * ii.aggregationStep
+		prevPruneTxTo := prevPruneTxFrom + ii.aggregationStep
+		txFrom, txTo = prevPruneTxFrom, prevPruneTxTo
+	}
+
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	k, v, err := keysCursor.Seek(txKey[:])
@@ -1069,10 +1085,20 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 			select {
 			case <-logEvery.C:
+				if !omitProgress {
+					if err := stages.SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
+						ii.logger.Error("failed to save prune progress", "err", err)
+					}
+				}
 				ii.logger.Info("[snapshots] prune history", "name", ii.filenameBase,
 					"to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]),
 					"pruned count", pruneCount)
 			case <-ctx.Done():
+				if !omitProgress {
+					if err := stages.SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
+						ii.logger.Error("failed to save prune progress", "err", err)
+					}
+				}
 				return ctx.Err()
 			default:
 			}
@@ -1081,7 +1107,11 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	}, etl.TransformArgs{}); err != nil {
 		return err
 	}
-
+	if !omitProgress {
+		if err := stages.SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, 0, nil); err != nil {
+			ii.logger.Error("failed to save prune progress", "err", err)
+		}
+	}
 	return nil
 }
 

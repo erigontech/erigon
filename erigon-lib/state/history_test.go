@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"math"
 	"sort"
 	"strings"
@@ -244,7 +245,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		hc.Close()
 
 		hc = h.MakeContext()
-		err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, logEvery)
+		err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, false, logEvery)
 		hc.Close()
 
 		require.NoError(err)
@@ -354,6 +355,61 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	}
 }
 
+func TestHistory_PruneProgress(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
+		t.Helper()
+		require := require.New(t)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		// Leave the last 2 aggregation steps un-collated
+		//for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
+		func() {
+			//c, err := h.collate(ctx, step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
+			//require.NoError(err)
+			//sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
+			//require.NoError(err)
+			//h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
+			ctx, cancel := context.WithTimeout(ctx, 15*time.Millisecond)
+
+			step := uint64(0)
+			hc := h.MakeContext()
+			err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+			cancel()
+
+			prunedTxNum, prunedKey, err := stages.GetExecV3PruneProgress(tx, h.historyValsTable)
+			require.NoError(err)
+			hc.Close()
+
+			iter, err := hc.HistoryRange(int(prunedTxNum), 0, order.Desc, -1, tx)
+			require.NoError(err)
+			for iter.HasNext() {
+				k, _, err := iter.Next()
+				require.NoError(err)
+				require.GreaterOrEqual(prunedKey, k)
+				break
+			}
+			require.NoError(err)
+		}()
+		//}
+		checkHistoryHistory(t, h, txs)
+	}
+	t.Run("large_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, true, logger)
+		test(t, h, db, txs)
+	})
+	t.Run("small_values", func(t *testing.T) {
+		db, h, txs := filledHistory(t, false, logger)
+		test(t, h, db, txs)
+	})
+
+}
+
 func TestHistoryHistory(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -376,7 +432,7 @@ func TestHistoryHistory(t *testing.T) {
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 				hc := h.MakeContext()
-				err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+				err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 				hc.Close()
 				require.NoError(err)
 			}()
@@ -414,7 +470,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 		hc := h.MakeContext()
-		err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+		err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 		hc.Close()
 		require.NoError(err)
 	}

@@ -405,6 +405,12 @@ const (
 	TblTracesToKeys   = "TracesToKeys"
 	TblTracesToIdx    = "TracesToIdx"
 
+	// Prune progress of execution: tableName -> [8bytes of invStep]latest pruned key
+	// Could use table constants `Tbl{Account,Storage,Code,Commitment}Keys` for domains
+	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
+	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
+	TblPruningProgress = "PruningProgress"
+
 	Snapshots = "Snapshots" // name -> hash
 
 	//State Reconstitution
@@ -622,6 +628,8 @@ var ChaindataTables = []string{
 	TblTracesFromIdx,
 	TblTracesToKeys,
 	TblTracesToIdx,
+
+	TblPruningProgress,
 
 	Snapshots,
 	MaxTxNum,

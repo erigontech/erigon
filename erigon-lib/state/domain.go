@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -1620,7 +1621,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnindTo, step, err)
 	}
 	return restored.flush(ctx, rwTx)
@@ -2108,7 +2109,22 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		seek          = make([]byte, 0, 256)
 	)
 
-	for k, v, err := keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
+	pstep, latestKey, err := stages.GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	if err != nil {
+		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
+	}
+
+	if pstep != 0 {
+		step = pstep
+	}
+	var k, v []byte
+	if latestKey != nil {
+		k, v, err = keysCursor.Seek(latestKey)
+	} else {
+		k, v, err = keysCursor.Last()
+	}
+
+	for ; k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
@@ -2150,8 +2166,14 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
+			if err := stages.SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
+				return fmt.Errorf("save %s domain pruning progress: %v, context error %w", dc.d.filenameBase, err, ctx.Err())
+			}
 			return ctx.Err()
 		case <-logEvery.C:
+			if err := stages.SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
+				return fmt.Errorf("save %s domain pruning progress: %v", dc.d.filenameBase, err)
+			}
 			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step", step,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dc.d.aggregationStep), float64(txTo)/float64(dc.d.aggregationStep)))
 		default:
@@ -2161,10 +2183,14 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		prunedMinStep = 0
 	} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
 
+	if err := stages.SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
+		return fmt.Errorf("save %s domain pruning progress: %v", dc.d.filenameBase, err)
+	}
+
 	dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested %d", prunedMinStep, prunedMaxStep, step), "pruned keys", prunedKeys)
 	mxPruneTookDomain.ObserveDuration(st)
 
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, false, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil

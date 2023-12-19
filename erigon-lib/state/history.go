@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -1090,7 +1091,11 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 }
 
 // Prune [txFrom; txTo)
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) error {
+// `force` flag to prune even if CanPrune returns false
+// `useProgress` flag to restore and update prune progress.
+//   - E.g. Unwind can't use progress, because it's not linear
+//     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced, omitProgress bool, logEvery *time.Ticker) error {
 	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
 	if !forced && !hc.CanPrune(rwTx) {
 		return nil
@@ -1109,12 +1114,11 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	defer historyKeysCursor.Close()
 
 	var (
-		txKey    [8]byte
+		seek     = make([]byte, 8, 256)
 		valsC    kv.RwCursor
 		valsCDup kv.RwCursorDupSort
 	)
 
-	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	if hc.h.historyLargeValues {
 		valsC, err = rwTx.RwCursor(hc.h.historyValsTable)
 		if err != nil {
@@ -1128,10 +1132,22 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		}
 		defer valsCDup.Close()
 	}
+	prunedTxNum, prunedKey, err := stages.GetExecV3PruneProgress(rwTx, hc.h.historyValsTable)
+	if err != nil {
+		hc.h.logger.Error("failed to restore history prune progress", "err", err)
+	}
+	if !omitProgress && prunedTxNum != 0 {
+		txFrom = prunedTxNum / hc.h.aggregationStep * hc.h.aggregationStep
+		txTo = txFrom + hc.h.aggregationStep
+		if prunedKey != nil {
+			seek = append(append(seek[:0], prunedKey...), hc.encodeTs(txFrom)...)
+		} else {
+			seek = append(seek[:0], hc.encodeTs(txFrom)...)
+		}
+	}
 
-	seek := make([]byte, 0, 256)
 	var pruneSize uint64
-	for k, v, err := historyKeysCursor.Seek(txKey[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+	for k, v, err := historyKeysCursor.Seek(seek[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		if err != nil {
 			return err
 		}
@@ -1173,12 +1189,27 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		mxPruneSizeHistory.Inc()
 		select {
 		case <-ctx.Done():
+			if !omitProgress {
+				if err := stages.SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
+					hc.h.logger.Error("failed to save history prune progress", "err", err)
+				}
+			}
 			return ctx.Err()
 		case <-logEvery.C:
+			if !omitProgress {
+				if err := stages.SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
+					hc.h.logger.Error("failed to save history prune progress", "err", err)
+				}
+			}
 			hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "from", txFrom, "to", txTo,
 				"pruned records", pruneSize)
 			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
 		default:
+		}
+	}
+	if !omitProgress {
+		if err := stages.SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, 0, nil); err != nil {
+			hc.h.logger.Error("failed to save history prune progress", "err", err)
 		}
 	}
 	return nil
