@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/log/v3"
+	"math/big"
 	"time"
 )
 
@@ -34,53 +35,61 @@ func NewHeimdall(client heimdall.IHeimdallClient, logger log.Logger) Heimdall {
 	return &impl
 }
 
-func checkpointNumContainingBlockNum(n uint64) int64 {
-	// TODO: implement
-	return 1
+func cmpNumToRange(n uint64, min *big.Int, max *big.Int) int {
+	num := new(big.Int).SetUint64(n)
+	if num.Cmp(min) < 0 {
+		return -1
+	}
+	if num.Cmp(max) > 0 {
+		return 1
+	}
+	return 0
 }
 
-func milestoneNumContainingBlockNum(n uint64) int64 {
-	// TODO: implement
-	return 1
+func cmpBlockNumToCheckpointRange(n uint64, c *checkpoint.Checkpoint) int {
+	return cmpNumToRange(n, c.StartBlock, c.EndBlock)
+}
+
+func reverse[T any](s []T) {
+	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
+		s[i], s[j] = s[j], s[i]
+	}
 }
 
 func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([]*checkpoint.Checkpoint, error) {
-	startCheckpoint := checkpointNumContainingBlockNum(start)
 	count, err := impl.client.FetchCheckpointCount(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	checkpoints := make([]*checkpoint.Checkpoint, 0, count-startCheckpoint)
+	var checkpoints []*checkpoint.Checkpoint
 
-	for i := startCheckpoint; i <= count; i++ {
+	for i := count; i >= 1; i-- {
 		c, err := impl.client.FetchCheckpoint(ctx, i)
 		if err != nil {
 			return nil, err
 		}
+
+		cmpResult := cmpBlockNumToCheckpointRange(start, c)
+		// the start block is past than the last checkpoint
+		if cmpResult > 0 {
+			return nil, nil
+		}
+
 		checkpoints = append(checkpoints, c)
+
+		// the checkpoint contains the start block
+		if cmpResult == 0 {
+			break
+		}
 	}
+
+	reverse(checkpoints)
 	return checkpoints, nil
 }
 
 func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]*milestone.Milestone, error) {
-	startMilestone := milestoneNumContainingBlockNum(start)
-	count, err := impl.client.FetchMilestoneCount(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	milestones := make([]*milestone.Milestone, 0, count-startMilestone)
-
-	for i := startMilestone; i <= count; i++ {
-		// TODO: how to pass i ?
-		m, err := impl.client.FetchMilestone(ctx)
-		if err != nil {
-			return nil, err
-		}
-		milestones = append(milestones, m)
-	}
-	return milestones, nil
+	panic("not implemented")
 }
 
 func (impl *HeimdallImpl) FetchSpan(ctx context.Context) (*span.HeimdallSpan, error) {
