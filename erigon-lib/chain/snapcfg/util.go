@@ -50,38 +50,41 @@ func doSort(in preverified) Preverified {
 }
 
 var (
-	MainnetChainSnapshotCfg = newCfg(Mainnet)
+	MainnetChainSnapshotCfg = newCfg(Mainnet, SnapshotVersion)
 	// HoleskyChainSnapshotCfg    = newCfg(Holesky, HoleskyHistory)
-	SepoliaChainSnapshotCfg    = newCfg(Sepolia)
-	GoerliChainSnapshotCfg     = newCfg(Goerli)
-	MumbaiChainSnapshotCfg     = newCfg(Mumbai)
-	AmoyChainSnapshotCfg       = newCfg(Amoy)
-	BorMainnetChainSnapshotCfg = newCfg(BorMainnet)
-	GnosisChainSnapshotCfg     = newCfg(Gnosis)
-	ChiadoChainSnapshotCfg     = newCfg(Chiado)
+	SepoliaChainSnapshotCfg    = newCfg(Sepolia, SnapshotVersion)
+	GoerliChainSnapshotCfg     = newCfg(Goerli, SnapshotVersion)
+	MumbaiChainSnapshotCfg     = newCfg(Mumbai, SnapshotVersion)
+	AmoyChainSnapshotCfg       = newCfg(Amoy, SnapshotVersion)
+	BorMainnetChainSnapshotCfg = newCfg(BorMainnet, SnapshotVersion)
+	GnosisChainSnapshotCfg     = newCfg(Gnosis, SnapshotVersion)
+	ChiadoChainSnapshotCfg     = newCfg(Chiado, SnapshotVersion)
 )
 
 const (
 	SnapshotVersion uint8 = 1
 )
 
-func newCfg(preverified Preverified) *Cfg {
-	version := SnapshotVersion
+func newCfg(preverified Preverified, version uint8) *Cfg {
 
-	if override := dbg.SnapshotVersion(); override != 0 {
-		version = override
+	if version == 0 {
+		version = SnapshotVersion
 
-		var pv Preverified
+		if override := dbg.SnapshotVersion(); override != 0 {
+			version = override
 
-		for _, p := range preverified {
-			if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
-				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
-					pv = append(pv, p)
+			var pv Preverified
+
+			for _, p := range preverified {
+				if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
+					if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
+						pv = append(pv, p)
+					}
 				}
 			}
-		}
 
-		preverified = pv
+			preverified = pv
+		}
 	}
 
 	maxBlockNum, version := cfgInfo(preverified, version)
@@ -145,7 +148,7 @@ var KnownCfgs = map[string]*Cfg{
 func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
 	c, ok := KnownCfgs[networkName]
 	if !ok {
-		return newCfg(Preverified{})
+		return newCfg(Preverified{}, 0)
 	}
 
 	var result Preverified
@@ -166,7 +169,16 @@ func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
 		}
 	}
 
-	return newCfg(result)
+	return newCfg(result, 0)
+}
+
+func VersionedCfg(networkName string, version uint8) *Cfg {
+	c, ok := KnownCfgs[networkName]
+	if !ok {
+		return newCfg(Preverified{}, version)
+	}
+
+	return newCfg(c.Preverified, version)
 }
 
 var KnownWebseeds = map[string][]string{

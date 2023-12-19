@@ -597,7 +597,7 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 		return false
 	}
 
-	for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, nil, nil).Preverified {
+	for _, it := range snapcfg.VersionedCfg(u.cfg.chainConfig.ChainName, snapcfg.SnapshotVersion).Preverified {
 		info, _ := snaptype.ParseFileName("", it.Name)
 
 		if fi.From == info.From {

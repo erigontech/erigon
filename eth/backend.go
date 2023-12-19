@@ -1233,12 +1233,19 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 
 func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snashotVersion uint8, snConfig ethconfig.BlocksFreezing, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig, dirs.Snap, snashotVersion, logger)
+
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	if isBor {
 		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig, dirs.Snap, snashotVersion, logger)
 	}
+
 	var err error
-	if !snConfig.NoDownloader {
+	if snConfig.NoDownloader {
+		allSnapshots.ReopenFolder()
+		if isBor {
+			allBorSnapshots.ReopenFolder()
+		}
+	} else {
 		allSnapshots.OptimisticalyReopenWithDB(db)
 		if isBor {
 			allBorSnapshots.OptimisticalyReopenWithDB(db)
