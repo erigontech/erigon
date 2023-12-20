@@ -2214,17 +2214,14 @@ func (r Ranges) String() string {
 	return fmt.Sprintf("%d", r)
 }
 
-var MergeSteps = []uint64{100_000, 10_000}
-
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit, mergeSteps := uint64(snaptype.Erigon2MergeLimit), MergeSteps
-
+		mergeLimit := uint64(snaptype.Erigon2MergeLimit)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}
-		for _, span := range mergeSteps {
+		for _, span := range snaptype.MergeSteps {
 			if r.to%span != 0 {
 				continue
 			}
