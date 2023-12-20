@@ -283,54 +283,6 @@ func StopAfterReconst() bool {
 }
 
 var (
-	uploadSnapshotsFlag string
-	uploadSnapshots     sync.Once
-)
-
-func SnapshotUploadFs() string {
-	uploadSnapshots.Do(func() {
-		v, _ := os.LookupEnv("SNAPSHOT_UPLOAD_FS")
-		if v != "" {
-			uploadSnapshotsFlag = v
-			log.Info("[Experiment]", "SNAPSHOT_UPLOAD_FS", uploadSnapshotsFlag)
-		}
-	})
-	return uploadSnapshotsFlag
-}
-
-var (
-	uploadAllSnapshotsFlag bool
-	uploadAllSnapshots     sync.Once
-)
-
-func UploadAllSnapshots() bool {
-	uploadAllSnapshots.Do(func() {
-		v, _ := os.LookupEnv("SNAPSHOT_UPLOAD_ALL")
-		if v == "true" {
-			uploadAllSnapshotsFlag = true
-			log.Info("[Experiment]", "SNAPSHOT_UPLOAD_ALL", uploadAllSnapshotsFlag)
-		}
-	})
-	return uploadAllSnapshotsFlag
-}
-
-var (
-	frozenBlockLimit     uint64
-	frozenBlockLimitOnce sync.Once
-)
-
-func FrozenBlockLimit() uint64 {
-	frozenBlockLimitOnce.Do(func() {
-		v, _ := os.LookupEnv("FROZEN_BLOCK_LIMIT")
-		if i, _ := strconv.ParseUint(v, 10, 64); i > 0 {
-			frozenBlockLimit = i
-			log.Info("[Experiment]", "FROZEN_BLOCK_LIMIT", frozenBlockLimit)
-		}
-	})
-	return frozenBlockLimit
-}
-
-var (
 	snapshotVersion     uint8
 	snapshotVersionOnce sync.Once
 )

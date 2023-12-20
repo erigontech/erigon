@@ -92,8 +92,10 @@ var snapshotCommand = cli.Command{
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
 			Flags: uploaderCommandFlags([]cli.Flag{
-				&SnapshotFromFlag,
-				&SnapshotToFlag,
+				&SnapshotVersionFlag,
+				&erigoncli.UploadLocationFlag,
+				&erigoncli.UploadFromFlag,
+				&erigoncli.FrozenBlockLimitFlag,
 			}),
 		},
 		{
@@ -151,7 +153,7 @@ var (
 		Value: 1_000,
 	}
 	SnapshotVersionFlag = cli.IntFlag{
-		Name:  "version",
+		Name:  "snapshot.version",
 		Usage: "Snapshot files version.",
 		Value: 1,
 	}
@@ -279,7 +281,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 	cfg := ethconfig.NewSnapCfg(true, true, false)
 
-	snapshotVersion := snapcfg.KnownCfg(chainConfig.ChainName, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(chainConfig.ChainName, nil, nil, 0).Version
 
 	allSnapshots := freezeblocks.NewRoSnapshots(cfg, dirs.Snap, snapshotVersion, logger)
 	if err := allSnapshots.ReopenFolder(); err != nil {
@@ -586,16 +588,17 @@ func doRetireCommand(cliCtx *cli.Context) error {
 }
 
 func uploaderCommandFlags(flags []cli.Flag) []cli.Flag {
-	erigoncli.SyncLoopBreakAfter.Value = "Senders"
-	erigoncli.SyncLoopBlockLimit.Value = 100000
-	erigoncli.SyncLoopPruneLimit.Value = 100000
+	erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
+	erigoncli.SyncLoopBlockLimitFlag.Value = 100000
+	erigoncli.SyncLoopPruneLimitFlag.Value = 100000
+	erigoncli.FrozenBlockLimitFlag.Value = 1500000
 	utils.NoDownloaderFlag.Value = true
 	utils.HTTPEnabledFlag.Value = false
 	utils.TxPoolDisableFlag.Value = true
 	return joinFlags(erigoncli.DefaultFlags, flags, []cli.Flag{
-		&erigoncli.SyncLoopBreakAfter,
-		&erigoncli.SyncLoopBlockLimit,
-		&erigoncli.SyncLoopPruneLimit,
+		&erigoncli.SyncLoopBreakAfterFlag,
+		&erigoncli.SyncLoopBlockLimitFlag,
+		&erigoncli.SyncLoopPruneLimitFlag,
 	})
 }
 
@@ -614,12 +617,9 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
 
-	/* Flags to set
-	"SNAPSHOT_UPLOAD_ALL":"true",
-	"SNAPSHOT_UPLOAD_FS":"r2:erigon-v2-snapshots-bor-mainnet",
-	"FROZEN_BLOCK_LIMIT": "1500000",
-	"SNAPSHOT_VERSION": "2",
-	*/
+	if version := uint8(cliCtx.Int(SnapshotVersionFlag.Name)); version != 0 {
+		snapcfg.SnapshotVersion(version)
+	}
 
 	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
 	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {

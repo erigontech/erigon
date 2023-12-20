@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
 	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
@@ -50,30 +49,33 @@ func doSort(in preverified) Preverified {
 }
 
 var (
-	MainnetChainSnapshotCfg = newCfg(Mainnet, SnapshotVersion)
-	// HoleskyChainSnapshotCfg    = newCfg(Holesky, HoleskyHistory)
-	SepoliaChainSnapshotCfg    = newCfg(Sepolia, SnapshotVersion)
-	GoerliChainSnapshotCfg     = newCfg(Goerli, SnapshotVersion)
-	MumbaiChainSnapshotCfg     = newCfg(Mumbai, SnapshotVersion)
-	AmoyChainSnapshotCfg       = newCfg(Amoy, SnapshotVersion)
-	BorMainnetChainSnapshotCfg = newCfg(BorMainnet, SnapshotVersion)
-	GnosisChainSnapshotCfg     = newCfg(Gnosis, SnapshotVersion)
-	ChiadoChainSnapshotCfg     = newCfg(Chiado, SnapshotVersion)
+	isDefaultVersion bool  = true
+	snapshotVersion  uint8 = 1
 )
 
-const (
-	SnapshotVersion uint8 = 1
-)
+func SnapshotVersion(version uint8) {
+	snapshotVersion = version
+	isDefaultVersion = false
+}
 
 func newCfg(preverified Preverified, version uint8) *Cfg {
 
 	if version == 0 {
-		version = SnapshotVersion
+		version = snapshotVersion
 
-		if override := dbg.SnapshotVersion(); override != 0 {
-			version = override
+		var pv Preverified
 
-			var pv Preverified
+		for _, p := range preverified {
+			if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
+				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
+					pv = append(pv, p)
+				}
+			}
+		}
+
+		// don't do this check if the SnapshotVersion has been explicitly set
+		if len(pv) == 0 && isDefaultVersion {
+			version = maxVersion(preverified)
 
 			for _, p := range preverified {
 				if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
@@ -82,9 +84,9 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 					}
 				}
 			}
-
-			preverified = pv
 		}
+
+		preverified = pv
 	}
 
 	maxBlockNum, version := cfgInfo(preverified, version)
@@ -132,36 +134,36 @@ type Cfg struct {
 	Preverified  Preverified
 }
 
-var KnownCfgs = map[string]*Cfg{
-	networkname.MainnetChainName: MainnetChainSnapshotCfg,
+var knownPreverified = map[string]Preverified{
+	networkname.MainnetChainName: Mainnet,
 	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
-	networkname.SepoliaChainName:    SepoliaChainSnapshotCfg,
-	networkname.GoerliChainName:     GoerliChainSnapshotCfg,
-	networkname.MumbaiChainName:     MumbaiChainSnapshotCfg,
-	networkname.AmoyChainName:       AmoyChainSnapshotCfg,
-	networkname.BorMainnetChainName: BorMainnetChainSnapshotCfg,
-	networkname.GnosisChainName:     GnosisChainSnapshotCfg,
-	networkname.ChiadoChainName:     ChiadoChainSnapshotCfg,
+	networkname.SepoliaChainName:    Sepolia,
+	networkname.GoerliChainName:     Goerli,
+	networkname.MumbaiChainName:     Mumbai,
+	networkname.AmoyChainName:       Amoy,
+	networkname.BorMainnetChainName: BorMainnet,
+	networkname.GnosisChainName:     Gnosis,
+	networkname.ChiadoChainName:     Chiado,
 }
 
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
-func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
-	c, ok := KnownCfgs[networkName]
+func KnownCfg(networkName string, whiteList, whiteListHistory []string, version uint8) *Cfg {
+	c, ok := knownPreverified[networkName]
 	if !ok {
-		return newCfg(Preverified{}, 0)
+		return newCfg(Preverified{}, version)
 	}
 
 	var result Preverified
 	if len(whiteList) == 0 {
-		result = c.Preverified
+		result = c
 	} else {
 		wlMap := make(map[string]struct{}, len(whiteList))
 		for _, fName := range whiteList {
 			wlMap[fName] = struct{}{}
 		}
 
-		result = make(Preverified, 0, len(c.Preverified))
-		for _, p := range c.Preverified {
+		result = make(Preverified, 0, len(c))
+		for _, p := range c {
 			if _, ok := wlMap[p.Name]; !ok {
 				continue
 			}
@@ -169,16 +171,24 @@ func KnownCfg(networkName string, whiteList, whiteListHistory []string) *Cfg {
 		}
 	}
 
-	return newCfg(result, 0)
+	return newCfg(result, version)
 }
 
-func VersionedCfg(networkName string, version uint8) *Cfg {
-	c, ok := KnownCfgs[networkName]
-	if !ok {
-		return newCfg(Preverified{}, version)
+func maxVersion(pv Preverified) uint8 {
+	var max uint8
+
+	for _, p := range pv {
+		if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
+			if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil {
+				version := uint8(v)
+				if max < version {
+					max = version
+				}
+			}
+		}
 	}
 
-	return newCfg(c.Preverified, version)
+	return max
 }
 
 var KnownWebseeds = map[string][]string{

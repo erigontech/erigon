@@ -373,7 +373,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			logger.Info("Use --snapshots=false")
 		}
 
-		snapshotVersion := snapcfg.KnownCfg(cc.ChainName, nil, nil).Version
+		snapshotVersion := snapcfg.KnownCfg(cc.ChainName, nil, nil, 0).Version
 
 		// Configure sapshots
 		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, snapshotVersion, logger)

@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // AggregationStep number of transactions in smallest static file
@@ -273,6 +274,10 @@ type Sync struct {
 	PruneLimit                 int //the maxumum records to delete from the DB during pruning
 	BreakAfterStage            string
 	LoopBlockLimit             uint
+
+	UploadLocation   string
+	UploadFrom       rpc.BlockNumber
+	FrozenBlockLimit uint64
 }
 
 // Chains where snapshots are enabled by default

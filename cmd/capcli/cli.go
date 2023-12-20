@@ -396,7 +396,7 @@ func (c *Chain) Run(ctx *Context) error {
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil, 0).Version
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
 
@@ -466,7 +466,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil, 0).Version
 
 	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, snapshotVersion, 0, to, snaptype.Erigon2RecentMergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
@@ -506,7 +506,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	}
 
 	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
-	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil, 0).Version
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
@@ -589,7 +589,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 
-	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil, 0).Version
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
@@ -663,7 +663,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	snapshotVersion := snapcfg.KnownCfg(d.Chain, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(d.Chain, nil, nil, 0).Version
 
 	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, snapshotsync.OnlyCaplin, s, tx, freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root()), freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root())), nil, params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
 }
@@ -694,7 +694,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	snapshotVersion := snapcfg.KnownCfg(r.Chain, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(r.Chain, nil, nil, 0).Version
 
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
 	if err := allSnapshots.ReopenFolder(); err != nil {

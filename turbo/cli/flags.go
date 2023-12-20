@@ -10,6 +10,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/c2h5oh/datasize"
@@ -148,22 +149,40 @@ var (
 		Value: "",
 	}
 
-	SyncLoopPruneLimit = cli.UintFlag{
+	SyncLoopPruneLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.prune.limit",
 		Usage: "Sets the maximum number of block to prune per loop iteration",
 		Value: 100,
 	}
 
-	SyncLoopBreakAfter = cli.StringFlag{
+	SyncLoopBreakAfterFlag = cli.StringFlag{
 		Name:  "sync.loop.break",
 		Usage: "Sets the last stage of the sync loop to run",
 		Value: "",
 	}
 
-	SyncLoopBlockLimit = cli.UintFlag{
+	SyncLoopBlockLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
 		Value: 0, // unlimited
+	}
+
+	UploadLocationFlag = cli.StringFlag{
+		Name:  "upload.location",
+		Usage: "Location to upload snapshot segments to",
+		Value: "",
+	}
+
+	UploadFromFlag = cli.StringFlag{
+		Name:  "upload.from",
+		Usage: "Blocks to upload from: number, or 'earliest' (start of the chain), 'latest' (last segment previously uploaded)",
+		Value: "latest",
+	}
+
+	FrozenBlockLimitFlag = cli.UintFlag{
+		Name:  "upload.snapshot.limit",
+		Usage: "Sets the maximum number of nampshot blocks to hold on the local disk when uploading",
+		Value: 1500000,
 	}
 
 	BadBlockFlag = cli.StringFlag{
@@ -273,16 +292,30 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
 
-	if limit := ctx.Uint(SyncLoopPruneLimit.Name); limit > 0 {
+	if limit := ctx.Uint(SyncLoopPruneLimitFlag.Name); limit > 0 {
 		cfg.Sync.PruneLimit = int(limit)
 	}
 
-	if stage := ctx.String(SyncLoopBreakAfter.Name); len(stage) > 0 {
+	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
 		cfg.Sync.BreakAfterStage = stage
 	}
 
-	if limit := ctx.Uint(SyncLoopBlockLimit.Name); limit > 0 {
+	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
+	}
+
+	if location := ctx.String(UploadLocationFlag.Name); len(location) > 0 {
+		cfg.Sync.UploadLocation = location
+	}
+
+	if blockno := ctx.String(UploadFromFlag.Name); len(blockno) > 0 {
+		cfg.Sync.UploadFrom = rpc.AsBlockNumber(blockno)
+	} else {
+		cfg.Sync.UploadFrom = rpc.LatestBlockNumber
+	}
+
+	if limit := ctx.Uint(FrozenBlockLimitFlag.Name); limit > 0 {
+		cfg.Sync.FrozenBlockLimit = uint64(limit)
 	}
 
 	if ctx.String(BadBlockFlag.Name) != "" {

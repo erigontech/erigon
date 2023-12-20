@@ -122,7 +122,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), nil, nil, 0).Version
 
 	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, snapshotVersion, beacon_router_configuration.RouterConfiguration{
 		Protocol:        cfg.BeaconProtocol,

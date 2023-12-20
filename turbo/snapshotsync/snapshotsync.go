@@ -133,7 +133,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 	}
 
 	// send all hashes to the Downloader service
-	snapCfg := snapcfg.KnownCfg(cc.ChainName, []string{} /* whitelist */, snHistInDB)
+	snapCfg := snapcfg.KnownCfg(cc.ChainName, []string{} /* whitelist */, snHistInDB, 0)
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	snapshotsVersion := snapCfg.Version
 

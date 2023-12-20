@@ -72,7 +72,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
@@ -320,7 +319,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
-	snapshotVersion := snapcfg.KnownCfg(chainConfig.ChainName, nil, nil).Version
+	snapshotVersion := snapcfg.KnownCfg(chainConfig.ChainName, nil, nil, 0).Version
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
@@ -1197,7 +1196,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
 	} else {
 		// start embedded Downloader
-		if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
+		if uploadFs := s.config.Sync.UploadLocation; len(uploadFs) > 0 {
 			downloaderCfg.AddTorrentsFromDisk = false
 		}
 

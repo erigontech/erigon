@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
@@ -95,12 +96,12 @@ func StageSnapshotsCfg(db kv.RwDB,
 		syncConfig:         syncConfig,
 	}
 
-	if uploadFs := dbg.SnapshotUploadFs(); len(uploadFs) > 0 {
+	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
 
 		cfg.snapshotUploader = &snapshotUploader{
 			cfg:      &cfg,
 			uploadFs: uploadFs,
-			version:  snapcfg.KnownCfg(chainConfig.ChainName, []string{}, []string{}).Version}
+			version:  snapcfg.KnownCfg(chainConfig.ChainName, nil, nil, 0).Version}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 
@@ -109,15 +110,11 @@ func StageSnapshotsCfg(db kv.RwDB,
 		if freezingCfg.Enabled && freezingCfg.Produce {
 			u := cfg.snapshotUploader
 
-			if dbg.FrozenBlockLimit() != 0 {
-				u.frozenBlockLimit = dbg.FrozenBlockLimit()
-			}
-
-			if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
+			if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
 				blockLimit := maxSeedable - u.minBlockNumber()
 
-				if u.frozenBlockLimit < blockLimit {
-					blockLimit = u.frozenBlockLimit
+				if u.cfg.syncConfig.FrozenBlockLimit < blockLimit {
+					blockLimit = u.cfg.syncConfig.FrozenBlockLimit
 				}
 
 				if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
@@ -199,15 +196,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 		u.init(ctx, logger)
 
-		if !dbg.UploadAllSnapshots() {
-			u.downloadLatestSnapshots(ctx, u.version)
+		if cfg.syncConfig.UploadFrom != rpc.EarliestBlockNumber {
+			u.downloadLatestSnapshots(ctx, cfg.syncConfig.UploadFrom, u.version)
 		}
 
-		if maxSeedable := u.maxSeedableHeader(); u.frozenBlockLimit > 0 && maxSeedable > u.frozenBlockLimit {
+		if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
 			blockLimit := maxSeedable - u.minBlockNumber()
 
-			if u.frozenBlockLimit < blockLimit {
-				blockLimit = u.frozenBlockLimit
+			if u.cfg.syncConfig.FrozenBlockLimit < blockLimit {
+				blockLimit = u.cfg.syncConfig.FrozenBlockLimit
 			}
 
 			if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
@@ -504,16 +501,15 @@ type uploadState struct {
 }
 
 type snapshotUploader struct {
-	cfg              *SnapshotsCfg
-	files            map[string]*uploadState
-	uploadFs         string
-	rclone           *downloader.RCloneClient
-	uploadSession    *downloader.RCloneSession
-	frozenBlockLimit uint64
-	uploadScheduled  atomic.Bool
-	uploading        atomic.Bool
-	manifestMutex    sync.Mutex
-	version          uint8
+	cfg             *SnapshotsCfg
+	files           map[string]*uploadState
+	uploadFs        string
+	rclone          *downloader.RCloneClient
+	uploadSession   *downloader.RCloneSession
+	uploadScheduled atomic.Bool
+	uploading       atomic.Bool
+	manifestMutex   sync.Mutex
+	version         uint8
 }
 
 func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
@@ -597,7 +593,7 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 		return false
 	}
 
-	for _, it := range snapcfg.VersionedCfg(u.cfg.chainConfig.ChainName, snapcfg.SnapshotVersion).Preverified {
+	for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, nil, nil, 1).Preverified {
 		info, _ := snaptype.ParseFileName("", it.Name)
 
 		if fi.From == info.From {
@@ -734,7 +730,7 @@ func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
 	}
 }
 
-func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, version uint8) error {
+func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber rpc.BlockNumber, version uint8) error {
 
 	entries, err := u.downloadManifest(ctx)
 
@@ -1206,8 +1202,8 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 	}
 
 	if err == nil {
-		if maxUploaded := u.maxUploadedHeader(); u.frozenBlockLimit > 0 && maxUploaded > u.frozenBlockLimit {
-			u.removeBefore(maxUploaded - u.frozenBlockLimit)
+		if maxUploaded := u.maxUploadedHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxUploaded > u.cfg.syncConfig.FrozenBlockLimit {
+			u.removeBefore(maxUploaded - u.cfg.syncConfig.FrozenBlockLimit)
 		}
 	}
 }

@@ -360,6 +360,8 @@ func (c *RCloneSession) Upload(ctx context.Context, files ...string) error {
 		}
 	}
 
+	c.Unlock()
+
 	cerr := make(chan error, 1)
 
 	c.syncQueue <- syncRequest{ctx, reqInfo, cerr,
@@ -370,8 +372,6 @@ func (c *RCloneSession) Upload(ctx context.Context, files ...string) error {
 			Filter: rcloneFilter{
 				IncludeRule: files,
 			}}, 0}
-
-	c.Unlock()
 
 	return <-cerr
 }
@@ -401,6 +401,8 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 		reqInfo[file] = info
 	}
 
+	c.Unlock()
+
 	cerr := make(chan error, 1)
 
 	c.syncQueue <- syncRequest{ctx, reqInfo, cerr,
@@ -410,8 +412,6 @@ func (c *RCloneSession) Download(ctx context.Context, files ...string) error {
 			Filter: rcloneFilter{
 				IncludeRule: files,
 			}}, 0}
-
-	c.Unlock()
 
 	return <-cerr
 }
