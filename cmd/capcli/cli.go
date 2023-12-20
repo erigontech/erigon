@@ -396,7 +396,7 @@ func (c *Chain) Run(ctx *Context) error {
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 
 	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
@@ -503,7 +503,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -584,7 +584,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -695,8 +695,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
-	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconConfig, blockReader, db)
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}

@@ -132,7 +132,7 @@ func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 
 	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}

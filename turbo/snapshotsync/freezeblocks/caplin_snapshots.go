@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
@@ -145,6 +146,8 @@ type CaplinSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
+	// chain cfg
+	beaconCfg *clparams.BeaconChainConfig
 }
 
 // NewCaplinSnapshots - opens all snapshots. But to simplify everything:
@@ -152,8 +155,8 @@ type CaplinSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *CaplinSnapshots {
-	return &CaplinSnapshots{dir: snapDir, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger}
+func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, snapDir string, logger log.Logger) *CaplinSnapshots {
+	return &CaplinSnapshots{dir: snapDir, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger, beaconCfg: beaconCfg}
 }
 
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
@@ -480,5 +483,5 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 	reader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader)
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
 }
