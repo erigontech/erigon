@@ -3,10 +3,10 @@ package sync
 import (
 	"context"
 	"github.com/golang/mock/gomock"
-	heimdall_client "github.com/ledgerwatch/erigon/consensus/bor/heimdall"
+	heimdallclient "github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
-	heimdall_mock "github.com/ledgerwatch/erigon/consensus/bor/heimdall/mock"
+	heimdallmock "github.com/ledgerwatch/erigon/consensus/bor/heimdall/mock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"math/big"
@@ -35,7 +35,7 @@ func makeMilestone(start uint64, len uint) *milestone.Milestone {
 
 type heimdallTest struct {
 	ctx      context.Context
-	client   *heimdall_mock.MockIHeimdallClient
+	client   *heimdallmock.MockIHeimdallClient
 	heimdall Heimdall
 	logger   log.Logger
 }
@@ -47,7 +47,7 @@ func newHeimdallTest(t *testing.T) heimdallTest {
 	ctrl := gomock.NewController(t)
 	t.Cleanup(ctrl.Finish)
 
-	client := heimdall_mock.NewMockIHeimdallClient(ctrl)
+	client := heimdallmock.NewMockIHeimdallClient(ctrl)
 	heimdall := NewHeimdall(client, logger)
 
 	return heimdallTest{
@@ -200,7 +200,7 @@ func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
 	client.EXPECT().FetchMilestoneCount(gomock.Any()).Return(int64(len(expectedMilestones)), nil)
 	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*milestone.Milestone, error) {
 		if int(number) <= len(expectedMilestones)-keptMilestones {
-			return nil, heimdall_client.ErrNotInMilestoneList
+			return nil, heimdallclient.ErrNotInMilestoneList
 		}
 		return expectedMilestones[number-1], nil
 	}).AnyTimes()
