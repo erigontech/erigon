@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -25,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pierrec/lz4"
 )
 
 type BeaconBlockSegment struct {
@@ -351,8 +351,11 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	}
 	defer tx.Rollback()
 	var w bytes.Buffer
-	lzWriter := lz4.NewWriter(&w)
-	defer lzWriter.Close()
+	compressor, err := zstd.NewWriter(&w, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	if err != nil {
+		return err
+	}
+	defer compressor.Close()
 	// Just make a reusable buffer
 	buf := make([]byte, 2048)
 	// Generate .seg file, which is just the list of beacon blocks.
@@ -371,12 +374,11 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			}
 			continue
 		}
-		lzWriter.Reset(&w)
-		lzWriter.CompressionLevel = 1
-		if buf, err = snapshot_format.WriteBlockForSnapshot(lzWriter, obj.Data, buf); err != nil {
+
+		if buf, err = snapshot_format.WriteBlockForSnapshot(compressor, obj.Data, buf); err != nil {
 			return err
 		}
-		if err := lzWriter.Flush(); err != nil {
+		if err := compressor.Close(); err != nil {
 			return err
 		}
 		word := w.Bytes()
@@ -473,10 +475,10 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	buffer.Reset()
 	buffer.Write(buf)
-	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
-	defer lz4ReaderPool.Put(lzReader)
-	lzReader.Reset(buffer)
+	reader := decompressorPool.Get().(*zstd.Decoder)
+	defer decompressorPool.Put(reader)
+	reader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(lzReader)
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader)
 }
