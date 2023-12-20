@@ -906,7 +906,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 		if initialCycle {
 			pruneTimeout = 10 * time.Minute
 		}
-		if err = tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+		if err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorV3Context).PruneWithTimeout(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	} else {
