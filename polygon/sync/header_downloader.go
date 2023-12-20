@@ -88,18 +88,13 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 
 		headerBatches := make([][]*types.Header, len(statePointsBatch))
 		maxStatePointLength := float64(0)
-		g, ctx := errgroup.WithContext(ctx)
+		// we ignore the err group ctx since we want to let all goroutines finish and cache headers for next time in case of gaps
+		g, _ := errgroup.WithContext(ctx)
 		for i, statePoint := range statePointsBatch {
 			maxStatePointLength = math.Max(float64(statePoint.length()), maxStatePointLength)
-			// local copy for inputs since used in async closure
+			// local copy for inputs since used in async function
 			i, statePoint, peerID := i, statePoint, peers[i].Id
 			g.Go(func() error {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-				}
-
 				if headers, ok := hd.statePointHeadersMemo[statePoint.rootHash]; ok {
 					headerBatches[i] = headers
 					return nil
@@ -135,8 +130,11 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 			})
 		}
 
-		if err := g.Wait(); err != nil {
-			return err
+		if err = g.Wait(); err != nil {
+			hd.logger.Debug(
+				fmt.Sprintf("[%s] issue fetching headers in parallel, trying again", headerDownloaderLogPrefix),
+				"err", err,
+			)
 		}
 
 		headers := make([]*types.Header, 0, int(maxStatePointLength)*peerCount)
@@ -144,7 +142,7 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 		for i, headerBatch := range headerBatches {
 			if len(headerBatch) == 0 {
 				hd.logger.Debug(
-					fmt.Sprintf("[%s] gap detected, auto recovery will try a different peer", headerDownloaderLogPrefix),
+					fmt.Sprintf("[%s] gap detected, trying again", headerDownloaderLogPrefix),
 					"start", statePointsBatch[i].startBlock,
 					"end", statePointsBatch[i].endBlock,
 					"rootHash", statePointsBatch[i].rootHash,
@@ -181,6 +179,8 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 }
 
 func (hd *HeaderDownloader) findEnoughPeersWithMinBlock(num uint64) ([]*erigonlibtypes.PeerInfo, error) {
+	hd.logger.Debug("finding enough peers", "minBlock", num)
+
 	peers := hd.sentry.PeersWithMinBlock(num)
 	if len(peers) >= minPeers {
 		return peers, nil

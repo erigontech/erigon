@@ -23,4 +23,4 @@ func statePointsFromMilestones(milestones []*milestone.Milestone) statePoints {
 	return statePoints
 }
 
-type statePoints []statePoint
+type statePoints []*statePoint

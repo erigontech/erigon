@@ -6,8 +6,8 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 )
 
-func statePointFromCheckpoint(cp *checkpoint.Checkpoint) statePoint {
-	return statePoint{
+func statePointFromCheckpoint(cp *checkpoint.Checkpoint) *statePoint {
+	return &statePoint{
 		proposer:   cp.Proposer,
 		startBlock: cp.StartBlock.Uint64(),
 		endBlock:   cp.EndBlock.Uint64(),
@@ -18,8 +18,8 @@ func statePointFromCheckpoint(cp *checkpoint.Checkpoint) statePoint {
 	}
 }
 
-func statePointFromMilestone(ms *milestone.Milestone) statePoint {
-	return statePoint{
+func statePointFromMilestone(ms *milestone.Milestone) *statePoint {
+	return &statePoint{
 		proposer:   ms.Proposer,
 		startBlock: ms.StartBlock.Uint64(),
 		endBlock:   ms.EndBlock.Uint64(),
