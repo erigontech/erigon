@@ -986,7 +986,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 	pruneTxNum, _, err := GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
 	if err != nil {
-		return nil
+		return err
 	}
 	if !omitProgress && pruneTxNum != 0 {
 		// pruning previously stopped at purunedTxNum; txFrom < pruneTxNum < txTo of previous range.
