@@ -539,7 +539,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
-		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
+		var progress uint64
+		if config.HistoryV3 {
+			progress, err = stages.GetStageProgress(batch, stages.Execution)
+		} else {
+			progress, err = stages.GetStageProgress(batch, stages.IntermediateHashes)
+		}
 		if err != nil {
 			return err
 		}
