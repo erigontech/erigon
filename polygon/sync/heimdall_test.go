@@ -2,18 +2,20 @@ package sync
 
 import (
 	"context"
+	"math/big"
+	"testing"
+	"time"
+
 	"github.com/golang/mock/gomock"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	heimdallclient "github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	heimdallmock "github.com/ledgerwatch/erigon/consensus/bor/heimdall/mock"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/stretchr/testify/assert"
-	"math/big"
-	"testing"
-	"time"
 )
-import "github.com/stretchr/testify/require"
 
 func makeCheckpoint(start uint64, len uint) *checkpoint.Checkpoint {
 	c := checkpoint.Checkpoint{
