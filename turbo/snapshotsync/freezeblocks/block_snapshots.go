@@ -2193,11 +2193,13 @@ type Merger struct {
 	chainConfig     *chain.Config
 	chainDB         kv.RoDB
 	logger          log.Logger
+	noFsync         bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
 	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
 }
+func (m *Merger) DisableFsync() { m.noFsync = true }
 
 type Range struct {
 	from, to uint64
@@ -2343,6 +2345,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			if !ok {
 				continue
 			}
+
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
@@ -2358,15 +2361,19 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 		snapshots.LogStat()
 
-		if err := onMerge(r); err != nil {
-			return err
+		if onMerge != nil {
+			if err := onMerge(r); err != nil {
+				return err
+			}
 		}
 		for _, t := range snaptype.BlockSnapshotTypes {
 			if len(toMerge[t]) == 0 {
 				continue
 			}
-			if err := onDelete(toMerge[t]); err != nil {
-				return err
+			if onDelete != nil {
+				if err := onDelete(toMerge[t]); err != nil {
+					return err
+				}
 			}
 		}
 		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
@@ -2397,6 +2404,9 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		return err
 	}
 	defer f.Close()
+	if m.noFsync {
+		f.DisableFsync()
+	}
 
 	_, fName := filepath.Split(targetFile)
 	m.logger.Debug("[snapshots] merge", "file", fName)
