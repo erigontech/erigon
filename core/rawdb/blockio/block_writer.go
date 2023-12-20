@@ -3,8 +3,10 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -103,11 +105,17 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	return nil
 }
 
+var (
+	mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
+	mxPruneTookBor    = metrics.GetOrCreateSummary(`prune_seconds{type="bor"}`)
+)
+
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	defer mxPruneTookBlocks.ObserveDuration(time.Now())
 	return rawdb.PruneBlocks(tx, blockTo, blocksDeleteLimit)
 }
 
@@ -116,5 +124,6 @@ func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint6
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
 func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+	defer mxPruneTookBor.ObserveDuration(time.Now())
 	return rawdb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit)
 }

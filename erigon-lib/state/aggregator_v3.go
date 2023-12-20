@@ -47,6 +47,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
+)
+
+var (
+	mxPruneTookAgg = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
 )
 
 type AggregatorV3 struct {
@@ -786,6 +791,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 	if dbg.NoPrune() {
 		return nil
 	}
+	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	step, limit := ac.a.aggregatedStep.Load(), uint64(math2.MaxUint64)
 	txTo := (step + 1) * ac.a.aggregationStep
