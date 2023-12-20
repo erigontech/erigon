@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -21,15 +22,21 @@ var ProhibitNewDownloadsLock = Migration{
 		}
 		defer tx.Rollback()
 
-		fPath := filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName)
-		if !dir.FileExist(fPath) {
-			f, err := os.Create(fPath)
-			if err != nil {
-				return err
-			}
-			defer f.Close()
-			if err := f.Sync(); err != nil {
-				return err
+		snapshotsStageProgress, err := stages.GetStageProgress(tx, stages.Snapshots)
+		if err != nil {
+			return err
+		}
+		if snapshotsStageProgress > 0 {
+			fPath := filepath.Join(dirs.Snap, downloader.ProhibitNewDownloadsFileName)
+			if !dir.FileExist(fPath) {
+				f, err := os.Create(fPath)
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				if err := f.Sync(); err != nil {
+					return err
+				}
 			}
 		}
 
