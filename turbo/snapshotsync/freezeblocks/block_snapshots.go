@@ -2213,7 +2213,7 @@ func (r Ranges) String() string {
 	return fmt.Sprintf("%d", r)
 }
 
-var MergeSteps = []uint64{500_000, 100_000, 10_000}
+var MergeSteps = []uint64{100_000, 10_000}
 var RecentMergeSteps = []uint64{100_000, 10_000}
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
