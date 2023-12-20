@@ -1146,7 +1146,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	}
 
 	var pruneSize uint64
-	for k, v, err := historyKeysCursor.Seek(seek[:]); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
+	for k, v, err := historyKeysCursor.Seek(seek); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		if err != nil {
 			return err
 		}
