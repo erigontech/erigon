@@ -88,12 +88,11 @@ func TestFindMergeRange(t *testing.T) {
 	})
 
 	t.Run("IsRecent", func(t *testing.T) {
-		require.True(t, Range{500_000, 599_000}.IsRecent(1_000_000))
-		require.True(t, Range{500_000, 501_000}.IsRecent(1_000_000))
-		require.False(t, Range{499_000, 500_000}.IsRecent(1_000_000))
+		require.True(t, Range{900_000, 901_000}.IsRecent(1_000_000))
+		require.True(t, Range{910_000, 911_000}.IsRecent(1_000_000))
+		require.False(t, Range{899_000, 900_000}.IsRecent(1_000_000))
 		require.False(t, Range{400_000, 500_000}.IsRecent(1_000_000))
 		require.False(t, Range{400_000, 401_000}.IsRecent(1_000_000))
-
 		require.False(t, Range{500_000, 501_000}.IsRecent(1_100_000))
 	})
 
