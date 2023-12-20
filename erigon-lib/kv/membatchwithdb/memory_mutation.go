@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -522,8 +521,13 @@ func (m *MemoryMutation) ViewID() uint64 {
 func (m *MemoryMutation) CHandle() unsafe.Pointer {
 	panic("CHandle not implemented")
 }
-func (m *MemoryMutation) AggCtx() *state.AggregatorV3Context {
-	return m.db.(state.HasAggCtx).AggCtx()
+
+type hasAggCtx interface {
+	AggCtx() interface{}
+}
+
+func (m *MemoryMutation) AggCtx() interface{} {
+	return m.db.(hasAggCtx).AggCtx()
 }
 
 func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err error) {

@@ -313,7 +313,7 @@ Loop:
 			doms := state.NewSharedDomains(tx) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 			defer doms.Close()
 
-			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, tx)
+			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
 				return err
 			}

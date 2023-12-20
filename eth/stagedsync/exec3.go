@@ -195,7 +195,7 @@ func ExecV3(ctx context.Context,
 	}
 	if initialCycle {
 		if casted, ok := applyTx.(*temporal.Tx); ok {
-			casted.AggCtx().LogStats(casted, func(endTxNumMinimax uint64) uint64 {
+			casted.AggCtx().(*state2.AggregatorV3Context).LogStats(casted, func(endTxNumMinimax uint64) uint64 {
 				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
 				return histBlockNumProgress
 			})
@@ -886,7 +886,7 @@ Loop:
 									return err
 								}
 							}
-							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
+							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
 								return err
 							}
 							return nil
@@ -1000,7 +1000,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -1015,7 +1015,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1028,7 +1028,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1106,7 +1106,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
-	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).CanUnwindDomainsToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1117,7 +1117,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
