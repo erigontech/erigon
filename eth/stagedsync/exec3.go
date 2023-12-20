@@ -845,7 +845,7 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
-				if rs.SizeEstimate() < commitThreshold {
+				if rs.SizeEstimate() < commitThreshold || inMemExec {
 					break
 				}
 				var (
@@ -870,9 +870,6 @@ Loop:
 				}
 				t1 = time.Since(tt)
 
-				if inMemExec {
-					continue
-				}
 				if err := func() error {
 					doms.Close()
 					if err = execStage.Update(applyTx, outputBlockNum.GetValueUint64()); err != nil {
