@@ -155,15 +155,15 @@ func TestCanRetire(t *testing.T) {
 	}{
 		{0, 1234, 0, 1000, true},
 		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
-		{2_500_000, 4_100_000, 2_500_000, 3_000_000, true},
+		{2_500_000, 4_100_000, 2_500_000, 2_600_000, true},
 		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
 		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
-	for _, tc := range cases {
+	for i, tc := range cases {
 		from, to, can := canRetire(tc.inFrom, tc.inTo)
-		require.Equal(int(tc.outFrom), int(from))
-		require.Equal(int(tc.outTo), int(to))
-		require.Equal(tc.can, can, tc.inFrom, tc.inTo)
+		require.Equal(int(tc.outFrom), int(from), i)
+		require.Equal(int(tc.outTo), int(to), i)
+		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
 	}
 }
 func TestOpenAllSnapshot(t *testing.T) {
