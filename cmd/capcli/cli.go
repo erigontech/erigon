@@ -440,6 +440,8 @@ func (c *Chain) Run(ctx *Context) error {
 type DumpSnapshots struct {
 	chainCfg
 	outputFolder
+
+	To uint64 `name:"to" help:"slot to dump"`
 }
 
 func (c *DumpSnapshots) Run(ctx *Context) error {
@@ -460,7 +462,11 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	}
 	var to uint64
 	db.View(ctx, func(tx kv.Tx) (err error) {
-		to, err = beacon_indicies.ReadHighestFinalized(tx)
+		if c.To == 0 {
+			to, err = beacon_indicies.ReadHighestFinalized(tx)
+			return
+		}
+		to = c.To
 		return
 	})
 
