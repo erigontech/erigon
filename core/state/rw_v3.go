@@ -570,7 +570,6 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 }
 
 type StateReaderV3 struct {
-	tx        kv.Tx
 	txNum     uint64
 	trace     bool
 	sd        *libstate.SharedDomains
@@ -591,7 +590,7 @@ func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
 
 func (r *StateReaderV3) DiscardReadList()                     { r.discardReadList = true }
 func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                       { r.tx = tx }
+func (r *StateReaderV3) SetTx(tx kv.Tx)                       {}
 func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
 func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
