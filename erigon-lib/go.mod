@@ -31,7 +31,7 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.4
 	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.3
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231220014156-da425d81b1fb
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20231220024406-f0326bc8cb8a
 	github.com/matryer/moq v0.3.3
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
 	github.com/pelletier/go-toml/v2 v2.1.1
