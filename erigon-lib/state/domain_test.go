@@ -50,12 +50,8 @@ func testDbAndDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	return testDbAndDomainOfStep(t, 16, logger)
 }
-func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
-	t.Helper()
-	return testDbAndDomainOfStepValsDup(t, aggStep, logger)
-}
 
-func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
+func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain) {
 	t.Helper()
 	dirs := datadir2.New(t.TempDir())
 	keysTable := "Keys"
@@ -66,12 +62,13 @@ func testDbAndDomainOfStepValsDup(t *testing.T, aggStep uint64, logger log.Logge
 	indexTable := "Index"
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		tcfg := kv.TableCfg{
-			keysTable:        kv.TableCfgItem{Flags: kv.DupSort},
-			valsTable:        kv.TableCfgItem{},
-			historyKeysTable: kv.TableCfgItem{Flags: kv.DupSort},
-			historyValsTable: kv.TableCfgItem{Flags: kv.DupSort},
-			settingsTable:    kv.TableCfgItem{},
-			indexTable:       kv.TableCfgItem{Flags: kv.DupSort},
+			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
+			valsTable:             kv.TableCfgItem{},
+			historyKeysTable:      kv.TableCfgItem{Flags: kv.DupSort},
+			historyValsTable:      kv.TableCfgItem{Flags: kv.DupSort},
+			settingsTable:         kv.TableCfgItem{},
+			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
+			kv.TblPruningProgress: kv.TableCfgItem{},
 		}
 		return tcfg
 	}).MustOpen()
@@ -106,7 +103,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	db, d := testDbAndDomainOfStepValsDup(t, 16, logger)
+	db, d := testDbAndDomainOfStep(t, 16, logger)
 	ctx := context.Background()
 
 	if compressDomainVals {
@@ -1594,6 +1591,171 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
 	}
+}
+
+func TestPruneProgress(t *testing.T) {
+	db, d := testDbAndDomainOfStep(t, 25, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	latestKey := []byte("682c02b93b63aeb260eccc33705d584ffb5f0d4c")
+	latestStep := uint64(1337)
+
+	t.Run("reset", func(t *testing.T) {
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, latestStep, latestKey)
+		require.NoError(t, err)
+
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, 0, nil)
+		require.NoError(t, err)
+
+		step, key, err := GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		require.NoError(t, err)
+		require.Zero(t, step)
+		require.Nil(t, key)
+	})
+
+	t.Run("someKey and reset", func(t *testing.T) {
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, latestStep, latestKey)
+		require.NoError(t, err)
+
+		step, key, err := GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		require.NoError(t, err)
+		require.EqualValues(t, latestStep, step)
+		require.EqualValues(t, latestKey, key)
+
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, 0, nil)
+		require.NoError(t, err)
+
+		step, key, err = GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		require.NoError(t, err)
+		require.Zero(t, step)
+		require.Nil(t, key)
+	})
+}
+
+func TestDomain_PruneProgress(t *testing.T) {
+	aggStep := uint64(1000)
+	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	d.historyLargeValues = false
+	d.History.compression = CompressKeys | CompressVals
+	d.compression = CompressKeys | CompressVals
+	d.withLocalityIndex = true
+
+	dc := d.MakeContext()
+	defer dc.Close()
+	dc.StartWrites()
+	defer dc.FinishWrites()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(2000)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			dc.SetTxNum(updates[i].txNum)
+			err = dc.PutWithPrev([]byte(key), nil, updates[i].value, p)
+			require.NoError(t, err)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	dc.SetTxNum(totalTx)
+
+	err = dc.Rotate().Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	// aggregate
+	for step := uint64(0); step < totalTx/aggStep; step++ {
+		ctx := context.Background()
+		txFrom, txTo := (step)*d.aggregationStep, (step+1)*d.aggregationStep
+
+		c, err := d.collate(ctx, step, txFrom, txTo, rwTx)
+		require.NoError(t, err)
+
+		sf, err := d.buildFiles(ctx, step, c, background.NewProgressSet())
+		require.NoError(t, err)
+		d.integrateFiles(sf, txFrom, txTo)
+	}
+	require.NoError(t, rwTx.Commit())
+
+	rwTx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	dc.Close()
+
+	dc = d.MakeContext()
+	defer dc.Close()
+
+	ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*10)
+	err = dc.Prune(ct, rwTx, 0, 0, aggStep, math.MaxUint64, time.NewTicker(time.Second))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	cancel()
+
+	step, key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	require.NoError(t, err)
+	require.EqualValues(t, ^0, step)
+
+	keysCursor, err := rwTx.RwCursorDupSort(dc.d.keysTable)
+	require.NoError(t, err)
+
+	k, istep, err := keysCursor.Seek(key)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, k, key)
+	require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(istep))
+	keysCursor.Close()
+
+	var i int
+	for step := uint64(0); ; step++ {
+		// step changing should not affect pruning. Prune should finish step 0 first.
+		i++
+		ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*2)
+		err = dc.Prune(ct, rwTx, step, step*aggStep, (aggStep*step)+1, math.MaxUint64, time.NewTicker(time.Second))
+		if err != nil {
+			require.ErrorIs(t, err, context.DeadlineExceeded)
+		} else {
+			require.NoError(t, err)
+		}
+		cancel()
+
+		step, key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+		require.NoError(t, err)
+		if step == 0 && key == nil {
+
+			fmt.Printf("pruned in %d iterations\n", i)
+
+			keysCursor, err := rwTx.RwCursorDupSort(dc.d.keysTable)
+			require.NoError(t, err)
+
+			// check there are no keys with 0 step left
+			for k, v, err := keysCursor.First(); k != nil && err == nil; k, v, err = keysCursor.Next() {
+				require.NotEqualValues(t, 0, ^binary.BigEndian.Uint64(v))
+			}
+
+			keysCursor.Close()
+			break
+		}
+
+	}
+	fmt.Printf("exitiig after %d iterations\n", i)
 }
 
 func TestDomain_Unwind(t *testing.T) {

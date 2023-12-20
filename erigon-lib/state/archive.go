@@ -122,8 +122,8 @@ func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, step uint64, pr
 }
 
 // GetExecV3PruneProgress retrieves saved progress of given table pruning from the database
-// Step==0 && prunedKey==nil means that pruning is finished, next prune could start
-func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (step uint64, prunedKey []byte, err error) {
+// ts==0 && prunedKey==nil means that pruning is finished, next prune could start
+func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (ts uint64, prunedKey []byte, err error) {
 	v, err := db.GetOne(kv.TblPruningProgress, []byte(prunedTblName))
 	if err != nil {
 		return 0, nil, err
@@ -135,7 +135,12 @@ func unmarshalData(data []byte) (uint64, []byte, error) {
 	switch {
 	case len(data) < 8 && len(data) > 0:
 		return 0, nil, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
-	case len(data) >= 8:
+	case len(data) == 8:
+		// we want to preserve guarantee that if step==0 && prunedKey==nil then pruning is finished
+		// If return data[8:] - result will be empty array which is a valid key to prune and does not
+		// mean that pruning is finished.
+		return binary.BigEndian.Uint64(data[:8]), nil, nil
+	case len(data) > 8:
 		return binary.BigEndian.Uint64(data[:8]), data[8:], nil
 	default:
 		return 0, nil, nil
