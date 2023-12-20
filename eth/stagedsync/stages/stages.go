@@ -117,7 +117,10 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (step uint64, pr
 	if step, err = unmarshalData(v); err != nil {
 		return 0, nil, err
 	}
-	return step, v[8:], nil
+	if len(v) > 8 {
+		prunedKey = v[8:]
+	}
+	return step, prunedKey, nil
 }
 
 func marshalData(blockNumber uint64) []byte {
