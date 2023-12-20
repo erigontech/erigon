@@ -1048,11 +1048,7 @@ func NewBorMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.Ro
 func (m *BorMerger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		isRecent := r.IsRecent(maxBlockNum)
-		mergeLimit, mergeSteps := uint64(snaptype.Erigon2RecentMergeLimit), MergeSteps
-		if isRecent {
-			mergeLimit, mergeSteps = snaptype.Erigon2MergeLimit, RecentMergeSteps
-		}
+		mergeLimit, mergeSteps := uint64(snaptype.Erigon2MergeLimit), MergeSteps
 
 		if r.to-r.from >= mergeLimit {
 			continue

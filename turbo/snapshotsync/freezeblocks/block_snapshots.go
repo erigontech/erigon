@@ -2205,9 +2205,8 @@ type Range struct {
 	from, to uint64
 }
 
-func (r Range) From() uint64             { return r.from }
-func (r Range) To() uint64               { return r.to }
-func (r Range) IsRecent(max uint64) bool { return max-r.to < snaptype.Erigon2MergeLimit }
+func (r Range) From() uint64 { return r.from }
+func (r Range) To() uint64   { return r.to }
 
 type Ranges []Range
 
@@ -2221,11 +2220,7 @@ var RecentMergeSteps = []uint64{100_000, 10_000}
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		isRecent := r.IsRecent(maxBlockNum)
 		mergeLimit, mergeSteps := uint64(snaptype.Erigon2MergeLimit), MergeSteps
-		if isRecent {
-			mergeLimit, mergeSteps = snaptype.Erigon2RecentMergeLimit, RecentMergeSteps
-		}
 
 		if r.to-r.from >= mergeLimit {
 			continue
