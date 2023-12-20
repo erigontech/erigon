@@ -51,6 +51,7 @@ func (b beaconChainDatabaseFilesystem) GetBlock(ctx context.Context, tx kv.Tx, s
 		return nil, err
 	}
 	defer r.Close()
+	fmt.Println(r)
 
 	block := cltypes.NewSignedBeaconBlock(b.cfg)
 	version := b.cfg.GetCurrentStateVersion(slot / b.cfg.SlotsPerEpoch)

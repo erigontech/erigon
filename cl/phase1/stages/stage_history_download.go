@@ -26,40 +26,42 @@ import (
 )
 
 type StageHistoryReconstructionCfg struct {
-	genesisCfg         *clparams.GenesisConfig
-	beaconCfg          *clparams.BeaconChainConfig
-	downloader         *network.BackwardBeaconDownloader
-	sn                 *freezeblocks.CaplinSnapshots
-	startingRoot       libcommon.Hash
-	backfilling        bool
-	waitForAllRoutines bool
-	startingSlot       uint64
-	tmpdir             string
-	db                 persistence.BeaconChainDatabase
-	indiciesDB         kv.RwDB
-	engine             execution_client.ExecutionEngine
-	antiquary          *antiquary.Antiquary
-	logger             log.Logger
+	genesisCfg            *clparams.GenesisConfig
+	beaconCfg             *clparams.BeaconChainConfig
+	downloader            *network.BackwardBeaconDownloader
+	sn                    *freezeblocks.CaplinSnapshots
+	startingRoot          libcommon.Hash
+	backfilling           bool
+	waitForAllRoutines    bool
+	startingSlot          uint64
+	tmpdir                string
+	db                    persistence.BeaconChainDatabase
+	indiciesDB            kv.RwDB
+	engine                execution_client.ExecutionEngine
+	antiquary             *antiquary.Antiquary
+	logger                log.Logger
+	backfillingThrottling time.Duration
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:         genesisCfg,
-		beaconCfg:          beaconCfg,
-		downloader:         downloader,
-		startingRoot:       startingRoot,
-		tmpdir:             tmpdir,
-		startingSlot:       startinSlot,
-		waitForAllRoutines: waitForAllRoutines,
-		logger:             logger,
-		backfilling:        backfilling,
-		indiciesDB:         indiciesDB,
-		antiquary:          antiquary,
-		db:                 db,
-		engine:             engine,
-		sn:                 sn,
+		genesisCfg:            genesisCfg,
+		beaconCfg:             beaconCfg,
+		downloader:            downloader,
+		startingRoot:          startingRoot,
+		tmpdir:                tmpdir,
+		startingSlot:          startinSlot,
+		waitForAllRoutines:    waitForAllRoutines,
+		logger:                logger,
+		backfilling:           backfilling,
+		indiciesDB:            indiciesDB,
+		antiquary:             antiquary,
+		db:                    db,
+		engine:                engine,
+		sn:                    sn,
+		backfillingThrottling: backfillingThrottling,
 	}
 }
 
@@ -211,7 +213,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-time.After(5 * time.Second):
 		}
 	}
-	cfg.downloader.SetThrottle(600 * time.Millisecond) // throttle to 0.6 second for backfilling
+	cfg.downloader.SetThrottle(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	cfg.downloader.SetNeverSkip(false)
 	// If i do not give it a database, erigon lib starts to cry uncontrollably
 	db2 := memdb.New(cfg.tmpdir)
