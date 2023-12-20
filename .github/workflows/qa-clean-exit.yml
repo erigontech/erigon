@@ -6,17 +6,16 @@ on:
       - devel
       - alpha
       - 'release/**'
-      - workflow_clean_exit
-  #pull_request:
-  #  branches:
-  #    - devel
-  #    - alpha
-  #    - 'release/**'
-  #  types:
-  #    - opened
-  #    - reopened
-  #    - synchronize
-  #    - ready_for_review
+  pull_request:
+    branches:
+      - devel
+      - alpha
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
 
 jobs:
   long-running-test:
@@ -70,7 +69,7 @@ jobs:
         ERIGON_PID=$!
         
         # Start the log monitoring script in the background
-        python3 ../erigon-qa/test_system/qa-tests/clean-exit/check_clean_exit.py $ERIGON_PID ${{env.ERIGON_DATA_DIR}}/logs/erigon.log
+        python3 ${{ github.workspace }}/../../erigon-qa/test_system/qa-tests/clean-exit/check_clean_exit.py $ERIGON_PID ${{env.ERIGON_DATA_DIR}}/logs/erigon.log
        
         # Capture monitoring script exit status
         monitoring_exit_status=$?
