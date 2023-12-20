@@ -156,7 +156,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
 }
 
-const Erigon3SeedableSteps = 32
+const Erigon3SeedableSteps = 64
 
 // Use-cases:
 //   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
