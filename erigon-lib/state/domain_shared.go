@@ -87,6 +87,11 @@ type HasAggCtx interface {
 	AggCtx() interface{}
 }
 
+func IsSharedDomains(tx kv.Tx) bool {
+	_, ok := tx.(*SharedDomains)
+	return ok
+}
+
 func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	if casted, ok := tx.(*SharedDomains); ok {
 		casted.noFlush++
