@@ -87,6 +87,11 @@ type HasAggCtx interface {
 	AggCtx() interface{}
 }
 
+func IsSharedDomains(tx kv.Tx) bool {
+	_, ok := tx.(*SharedDomains)
+	return ok
+}
+
 func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	if casted, ok := tx.(*SharedDomains); ok {
 		casted.noFlush++
@@ -104,8 +109,7 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	}
 
 	sd := &SharedDomains{
-		aggCtx: ac,
-		//Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
+		aggCtx:     ac,
 		Account:    ac.a.accounts,
 		Code:       ac.a.code,
 		Storage:    ac.a.storage,
@@ -728,6 +732,13 @@ func (sd *SharedDomains) Close() {
 	sd.LogTopics = nil
 	sd.TracesFrom = nil
 	sd.TracesTo = nil
+
+	if sd.RwTx != nil {
+		if casted, ok := sd.RwTx.(kv.Closer); ok {
+			casted.Close()
+		}
+		sd.RwTx = nil
+	}
 }
 
 // StartWrites - pattern: `defer domains.StartWrites().FinishWrites()`
@@ -835,10 +846,14 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	if sd.noFlush > 0 {
 		sd.noFlush--
 	}
+
 	if sd.noFlush == 0 {
 		for _, f := range sd.rotate() {
 			if err := f.Flush(ctx, tx); err != nil {
 				return err
+			}
+			if casted, ok := f.(kv.Closer); ok {
+				casted.Close()
 			}
 		}
 	}

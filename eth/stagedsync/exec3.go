@@ -202,9 +202,14 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	// MA setio
-	doms := state2.NewSharedDomains(applyTx)
-	defer doms.Close()
+	inMemExec := state2.IsSharedDomains(applyTx)
+	var doms *state2.SharedDomains
+	if inMemExec {
+		doms = applyTx.(*state2.SharedDomains)
+	} else {
+		doms = state2.NewSharedDomains(applyTx)
+		defer doms.Close()
+	}
 
 	var (
 		inputTxNum    = doms.TxNum()
@@ -448,9 +453,14 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac.Close()
-						if err = doms.Flush(ctx, tx); err != nil {
-							return err
+						if !inMemExec {
+							if err = doms.Flush(ctx, tx); err != nil {
+								return err
+							}
 						}
+						break
+					}
+					if inMemExec {
 						break
 					}
 
@@ -835,7 +845,7 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
-				if rs.SizeEstimate() < commitThreshold {
+				if rs.SizeEstimate() < commitThreshold || inMemExec {
 					break
 				}
 				var (
@@ -853,7 +863,7 @@ Loop:
 				}
 
 				tt = time.Now()
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -939,7 +949,7 @@ Loop:
 
 	if !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -1046,13 +1056,10 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
-		//if err := doms.Flush(ctx, applyTx); err != nil {
-		//	return false, err
-		//}
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
 			return false, err
 		}
@@ -1071,8 +1078,10 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
+		if !inMemExec {
+			if err := doms.Flush(ctx, applyTx); err != nil {
+				return false, err
+			}
 		}
 		return true, nil
 	}
