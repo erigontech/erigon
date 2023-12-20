@@ -36,19 +36,17 @@ import (
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
 
@@ -2109,7 +2107,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		seek          = make([]byte, 0, 256)
 	)
 
-	pstep, latestKey, err := stages.GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	pstep, latestKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
@@ -2166,12 +2164,12 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
-			if err := stages.SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				return fmt.Errorf("save %s domain pruning progress: %v, context error %w", dc.d.filenameBase, err, ctx.Err())
 			}
 			return ctx.Err()
 		case <-logEvery.C:
-			if err := stages.SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				return fmt.Errorf("save %s domain pruning progress: %v", dc.d.filenameBase, err)
 			}
 			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step", step,
@@ -2183,7 +2181,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		prunedMinStep = 0
 	} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
 
-	if err := stages.SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
+	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
 		return fmt.Errorf("save %s domain pruning progress: %v", dc.d.filenameBase, err)
 	}
 

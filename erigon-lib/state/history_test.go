@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"math"
 	"sort"
 	"strings"
@@ -382,7 +381,7 @@ func TestHistory_PruneProgress(t *testing.T) {
 			err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			cancel()
 
-			prunedTxNum, prunedKey, err := stages.GetExecV3PruneProgress(tx, h.historyValsTable)
+			prunedTxNum, prunedKey, err := GetExecV3PruneProgress(tx, h.historyValsTable)
 			require.NoError(err)
 			hc.Close()
 

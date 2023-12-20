@@ -87,7 +87,7 @@ func GetStageProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStageProgress(db kv.Putter, stage SyncStage, progress uint64) error {
-	return db.Put(kv.SyncStageProgress, []byte(stage), marshalData(progress))
+	return db.Put(kv.SyncStageProgress, []byte(stage), encodeBigEndian(progress))
 }
 
 // GetStagePruneProgress retrieves saved progress of given sync stage from the database
@@ -100,31 +100,7 @@ func GetStagePruneProgress(db kv.Getter, stage SyncStage) (uint64, error) {
 }
 
 func SaveStagePruneProgress(db kv.Putter, stage SyncStage, progress uint64) error {
-	return db.Put(kv.SyncStageProgress, []byte("prune_"+stage), marshalData(progress))
-}
-
-func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, step uint64, prunedKey []byte) error {
-	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(marshalData(step), prunedKey...))
-}
-
-// GetExecV3PruneProgress retrieves saved progress of given table pruning from the database
-// Step==0 && prunedKey==nil means that pruning is finished, next prune could start
-func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (step uint64, prunedKey []byte, err error) {
-	v, err := db.GetOne(kv.TblPruningProgress, []byte(prunedTblName))
-	if err != nil {
-		return 0, nil, err
-	}
-	if step, err = unmarshalData(v); err != nil {
-		return 0, nil, err
-	}
-	if len(v) > 8 {
-		prunedKey = v[8:]
-	}
-	return step, prunedKey, nil
-}
-
-func marshalData(blockNumber uint64) []byte {
-	return encodeBigEndian(blockNumber)
+	return db.Put(kv.SyncStageProgress, []byte("prune_"+stage), encodeBigEndian(progress))
 }
 
 func unmarshalData(data []byte) (uint64, error) {

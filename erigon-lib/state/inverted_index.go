@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"math"
 	"os"
 	"path"
@@ -985,7 +984,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	}
 	defer keysCursor.Close()
 
-	pruneTxNum, _, err := stages.GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
+	pruneTxNum, _, err := GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
 	if err != nil {
 		return nil
 	}
@@ -1086,7 +1085,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			select {
 			case <-logEvery.C:
 				if !omitProgress {
-					if err := stages.SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
+					if err := SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
 						ii.logger.Error("failed to save prune progress", "err", err)
 					}
 				}
@@ -1095,7 +1094,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 					"pruned count", pruneCount)
 			case <-ctx.Done():
 				if !omitProgress {
-					if err := stages.SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
+					if err := SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
 						ii.logger.Error("failed to save prune progress", "err", err)
 					}
 				}
@@ -1108,7 +1107,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return err
 	}
 	if !omitProgress {
-		if err := stages.SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, 0, nil); err != nil {
+		if err := SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, 0, nil); err != nil {
 			ii.logger.Error("failed to save prune progress", "err", err)
 		}
 	}

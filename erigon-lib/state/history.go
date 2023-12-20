@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"math"
 	"path/filepath"
 	"regexp"
@@ -1132,7 +1131,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		}
 		defer valsCDup.Close()
 	}
-	prunedTxNum, prunedKey, err := stages.GetExecV3PruneProgress(rwTx, hc.h.historyValsTable)
+	prunedTxNum, prunedKey, err := GetExecV3PruneProgress(rwTx, hc.h.historyValsTable)
 	if err != nil {
 		hc.h.logger.Error("failed to restore history prune progress", "err", err)
 	}
@@ -1190,14 +1189,14 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		select {
 		case <-ctx.Done():
 			if !omitProgress {
-				if err := stages.SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
+				if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
 					hc.h.logger.Error("failed to save history prune progress", "err", err)
 				}
 			}
 			return ctx.Err()
 		case <-logEvery.C:
 			if !omitProgress {
-				if err := stages.SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
+				if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
 					hc.h.logger.Error("failed to save history prune progress", "err", err)
 				}
 			}
@@ -1208,7 +1207,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		}
 	}
 	if !omitProgress {
-		if err := stages.SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, 0, nil); err != nil {
+		if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, 0, nil); err != nil {
 			hc.h.logger.Error("failed to save history prune progress", "err", err)
 		}
 	}
