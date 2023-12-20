@@ -175,7 +175,7 @@ type borSpanSegments struct {
 	segments []*BorSpanSegment
 }
 
-func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) error {
+func (br *BlockRetire) retireBorBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
@@ -204,7 +204,7 @@ func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo u
 
 		if seedNewSnapshots != nil {
 			downloadRequest := []services.DownloadRequest{
-				services.NewDownloadRequest(br.snapshots().Version(), &services.Range{From: r.from, To: r.to}, "", "", true /* Bor */),
+				services.NewDownloadRequest("", ""),
 			}
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
@@ -702,24 +702,6 @@ func removeBorOverlaps(dir string, version uint8, active []snaptype.FileInfo, ma
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
 	}
-}
-
-func (s *BorRoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := BorSegments(s.dir, s.version, s.segmentsMin.Load())
-	if err != nil {
-		return nil, nil, err
-	}
-	existingFilesMap := map[string]struct{}{}
-	for _, existingFile := range existingFiles {
-		_, fname := filepath.Split(existingFile.Path)
-		existingFilesMap[fname] = struct{}{}
-	}
-
-	res := make([]*services.Range, 0, len(missingSnapshots))
-	for _, sn := range missingSnapshots {
-		res = append(res, &services.Range{From: sn.from, To: sn.to})
-	}
-	return existingFilesMap, res, nil
 }
 
 func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {

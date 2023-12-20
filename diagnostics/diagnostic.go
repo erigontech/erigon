@@ -2,7 +2,6 @@ package diagnostics
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -26,7 +25,8 @@ func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node
 
 func (d *DiagnosticClient) Setup() {
 	d.runSnapshotListener()
-	d.runTorrentListener()
+	d.runSegmentDownloadingListener()
+	d.runSegmentIndexingListener()
 }
 
 func (d *DiagnosticClient) runSnapshotListener() {
@@ -54,8 +54,7 @@ func (d *DiagnosticClient) runSnapshotListener() {
 				d.snapshotDownload.Alloc = info.Alloc
 				d.snapshotDownload.Sys = info.Sys
 				d.snapshotDownload.DownloadFinished = info.DownloadFinished
-
-				fmt.Println("snapshotDownload", d.snapshotDownload)
+				d.snapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
 
 				if info.DownloadFinished {
 					return
@@ -70,7 +69,7 @@ func (d *DiagnosticClient) SnapshotDownload() diaglib.SnapshotDownloadStatistics
 	return d.snapshotDownload
 }
 
-func (d *DiagnosticClient) runTorrentListener() {
+func (d *DiagnosticClient) runSegmentDownloadingListener() {
 	go func() {
 		ctx, ch, cancel := diaglib.Context[diaglib.SegmentDownloadStatistics](context.Background(), 1)
 		defer cancel()
@@ -84,11 +83,31 @@ func (d *DiagnosticClient) runTorrentListener() {
 				cancel()
 				return
 			case info := <-ch:
-				if d.snapshotDownload.Segments == nil {
-					d.snapshotDownload.Segments = map[string]diaglib.SegmentDownloadStatistics{}
+				if d.snapshotDownload.SegmentsDownloading == nil {
+					d.snapshotDownload.SegmentsDownloading = map[string]diaglib.SegmentDownloadStatistics{}
 				}
 
-				d.snapshotDownload.Segments[info.Name] = info
+				d.snapshotDownload.SegmentsDownloading[info.Name] = info
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runSegmentIndexingListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.SnapshotIndexingStatistics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SnapshotIndexingStatistics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.snapshotDownload.SegmentIndexing = info
 			}
 		}
 	}()

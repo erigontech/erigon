@@ -12,6 +12,9 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -32,8 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -204,13 +205,17 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
-	var nextSpanId uint64
+	var lastSpanId uint64
 	if k != nil {
-		nextSpanId = binary.BigEndian.Uint64(k) + 1
+		lastSpanId = binary.BigEndian.Uint64(k)
 	}
 	snapshotLastSpanId := cfg.blockReader.(LastFrozen).LastFrozenSpanID()
-	if snapshotLastSpanId+1 > nextSpanId {
-		nextSpanId = snapshotLastSpanId + 1
+	if snapshotLastSpanId > lastSpanId {
+		lastSpanId = snapshotLastSpanId
+	}
+	var nextSpanId uint64
+	if lastSpanId > 0 {
+		nextSpanId = lastSpanId + 1
 	}
 	var endSpanID uint64
 	if headNumber > zerothSpanEnd {
@@ -234,7 +239,6 @@ func BorHeimdallForward(
 	var blockNum uint64
 	var fetchTime time.Duration
 	var eventRecords int
-	var lastSpanId uint64
 
 	logTimer := time.NewTicker(logInterval)
 	defer logTimer.Stop()
@@ -280,7 +284,7 @@ func BorHeimdallForward(
 			}
 		}
 
-		if blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
+		if blockNum > 0 && blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
 			var callTime time.Duration
 			var records int
 			if lastEventId, records, callTime, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {

@@ -40,6 +40,7 @@ type Antiquary struct {
 	genesisState    *state.CachingBeaconState
 	// set to nil
 	currentState *state.CachingBeaconState
+	balances32   []byte
 }
 
 func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
@@ -239,14 +240,14 @@ func (a *Antiquary) antiquate(version uint8, from, to uint64) error {
 	}
 
 	paths := a.sn.SegFilePaths(from, to)
-	downloadItems := make([]*proto_downloader.DownloadItem, len(paths))
+	downloadItems := make([]*proto_downloader.AddItem, len(paths))
 	for i, path := range paths {
-		downloadItems[i] = &proto_downloader.DownloadItem{
+		downloadItems[i] = &proto_downloader.AddItem{
 			Path: path,
 		}
 	}
 	// Notify bittorent to seed the new snapshots
-	if _, err := a.downloader.Download(a.ctx, &proto_downloader.DownloadRequest{Items: downloadItems}); err != nil {
+	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
 		return err
 	}
 

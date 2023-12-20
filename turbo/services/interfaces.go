@@ -94,13 +94,12 @@ type BlockSnapshots interface {
 	ReopenFolder() error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
-	ScanDir() (map[string]struct{}, []*Range, error)
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
-	PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool) error
-	RetireBlocksInBackground(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
+	PruneAncientBlocks(tx kv.RwTx, limit int) error
+	RetireBlocksInBackground(ctx context.Context, maxBlockNumInDB uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)
@@ -128,14 +127,12 @@ type DBEventNotifier interface {
 
 type DownloadRequest struct {
 	Version     uint8
-	Ranges      *Range
 	Path        string
 	TorrentHash string
-	Bor         bool
 }
 
-func NewDownloadRequest(version uint8, ranges *Range, path string, torrentHash string, bor bool) DownloadRequest {
-	return DownloadRequest{Version: version, Ranges: ranges, Path: path, TorrentHash: torrentHash, Bor: bor}
+func NewDownloadRequest(version uint8, path string, torrentHash string) DownloadRequest {
+	return DownloadRequest{Version: version, Path: path, TorrentHash: torrentHash}
 }
 
 type Range struct {

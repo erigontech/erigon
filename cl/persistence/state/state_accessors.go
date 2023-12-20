@@ -31,6 +31,9 @@ func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
 		if err = tx.Append(kv.ValidatorPublicKeys, key, v.PublicKeyBytes()); err != nil {
 			return false
 		}
+		if err = tx.Put(kv.InvertedValidatorPublicKeys, v.PublicKeyBytes(), key); err != nil {
+			return false
+		}
 		return true
 	})
 	if err != nil {
@@ -70,6 +73,9 @@ func IncrementPublicKeyTable(tx kv.RwTx, state *state.CachingBeaconState, prever
 		}
 		// We put as there could be reorgs and thus some of overwriting
 		if err := tx.Put(kv.ValidatorPublicKeys, key, pubKey[:]); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.InvertedValidatorPublicKeys, pubKey[:], key); err != nil {
 			return err
 		}
 	}
@@ -115,6 +121,15 @@ func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	var ret libcommon.Bytes48
 	copy(ret[:], pks)
 	return ret, err
+}
+
+func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, error) {
+	var index []byte
+	var err error
+	if index, err = tx.GetOne(kv.InvertedValidatorPublicKeys, key[:]); err != nil {
+		return 0, err
+	}
+	return base_encoding.Decode64FromBytes4(index), nil
 }
 
 func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {

@@ -72,6 +72,17 @@ func NewSignedBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *SignedBeaconBl
 	return &SignedBeaconBlock{Block: NewBeaconBlock(beaconCfg)}
 }
 
+func (b *SignedBeaconBlock) Blinded() (*SignedBlindedBeaconBlock, error) {
+	blindedBlock, err := b.Block.Blinded()
+	if err != nil {
+		return nil, err
+	}
+	return &SignedBlindedBeaconBlock{
+		Signature: b.Signature,
+		Block:     blindedBlock,
+	}, nil
+}
+
 func (s *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
 	bodyRoot, err := s.Block.Body.HashSSZ()
 	if err != nil {
@@ -91,6 +102,20 @@ func (s *SignedBeaconBlock) SignedBeaconBlockHeader() *SignedBeaconBlockHeader {
 
 func NewBeaconBlock(beaconCfg *clparams.BeaconChainConfig) *BeaconBlock {
 	return &BeaconBlock{Body: NewBeaconBody(beaconCfg)}
+}
+
+func (b *BeaconBlock) Blinded() (*BlindedBeaconBlock, error) {
+	body, err := b.Body.Blinded()
+	if err != nil {
+		return nil, err
+	}
+	return &BlindedBeaconBlock{
+		Slot:          b.Slot,
+		ProposerIndex: b.ProposerIndex,
+		ParentRoot:    b.ParentRoot,
+		StateRoot:     b.StateRoot,
+		Body:          body,
+	}, nil
 }
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BeaconBody {
@@ -178,6 +203,28 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 
 	err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
 	return err
+}
+
+func (b *BeaconBody) Blinded() (*BlindedBeaconBody, error) {
+	header, err := b.ExecutionPayload.PayloadHeader()
+	if err != nil {
+		return nil, err
+	}
+	return &BlindedBeaconBody{
+		RandaoReveal:       b.RandaoReveal,
+		Eth1Data:           b.Eth1Data,
+		Graffiti:           b.Graffiti,
+		ProposerSlashings:  b.ProposerSlashings,
+		AttesterSlashings:  b.AttesterSlashings,
+		Attestations:       b.Attestations,
+		Deposits:           b.Deposits,
+		VoluntaryExits:     b.VoluntaryExits,
+		SyncAggregate:      b.SyncAggregate,
+		ExecutionPayload:   header,
+		ExecutionChanges:   b.ExecutionChanges,
+		BlobKzgCommitments: b.BlobKzgCommitments,
+		Version:            b.Version,
+	}, nil
 }
 
 func (b *BeaconBody) HashSSZ() ([32]byte, error) {

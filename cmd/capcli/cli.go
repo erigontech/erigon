@@ -663,9 +663,13 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	snapshotVersion := snapcfg.KnownCfg(d.Chain, nil, nil, 0).Version
+	snapshotVersion := snapcfg.KnownCfg(d.Chain, 0).Version
 
-	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, snapshotsync.OnlyCaplin, s, tx, freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root()), freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root())), nil, params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
+	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, snapshotsync.OnlyCaplin, s, tx,
+		freezeblocks.NewBlockReader(
+			freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root()),
+			freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root())),
+		params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
 }
 
 type RetrieveHistoricalState struct {

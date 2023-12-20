@@ -783,7 +783,7 @@ func isWebsocket(r *http.Request) bool {
 // obtainJWTSecret loads the jwt-secret, either from the provided config,
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
-func obtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
+func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	// try reading from file
 	logger.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
 	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
@@ -843,7 +843,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
-	jwtSecret, err := obtainJWTSecret(cfg, logger)
+	jwtSecret, err := ObtainJWTSecret(cfg, logger)
 	if err != nil {
 		return nil, nil, "", err
 	}

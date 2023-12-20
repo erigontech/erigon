@@ -233,6 +233,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			return err
 		}
 	}
+	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
+	if cfg.dbEventNotifier != nil {
+		cfg.dbEventNotifier.OnNewSnapshot()
+	}
 
 	cfg.blockReader.Snapshots().LogStat("download")
 	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
@@ -245,7 +249,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.silkworm != nil {
-		if err := cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
+		if err := cfg.blockReader.Snapshots().(silkworm.CanAddSnapshotsToSilkwarm).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
 			return err
 		}
 	}
@@ -413,7 +417,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.Enabled {
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit, cfg.chainConfig.Bor != nil); err != nil {
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit); err != nil {
 			return err
 		}
 	}
@@ -431,7 +435,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, cfg.chainConfig.Bor != nil, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
+		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
 			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
 					return err

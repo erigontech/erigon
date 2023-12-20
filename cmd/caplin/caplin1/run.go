@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
+	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -148,21 +149,6 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}()
 	}
 
-	syncedDataManager := synced_data.NewSyncedDataManager(cfg.Active, beaconConfig)
-	if cfg.Active {
-		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool, rcsn, syncedDataManager)
-		headApiHandler := &validatorapi.ValidatorApiHandler{
-			FC:             forkChoice,
-			BeaconChainCfg: beaconConfig,
-			GenesisCfg:     genesisConfig,
-		}
-		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
-			ValidatorApi: headApiHandler,
-			ArchiveApi:   apiHandler,
-		}, cfg)
-		log.Info("Beacon API started", "addr", cfg.Address)
-	}
-
 	{ // start the gossip manager
 		go gossipManager.Start(ctx)
 		logger.Info("Started Ethereum 2.0 Gossip Service")
@@ -224,6 +210,22 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+
+	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, af, genesisState)
+	syncedDataManager := synced_data.NewSyncedDataManager(cfg.Active, beaconConfig)
+	if cfg.Active {
+		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, rawDB, db, forkChoice, pool, rcsn, syncedDataManager, statesReader)
+		headApiHandler := &validatorapi.ValidatorApiHandler{
+			FC:             forkChoice,
+			BeaconChainCfg: beaconConfig,
+			GenesisCfg:     genesisConfig,
+		}
+		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
+			ValidatorApi: headApiHandler,
+			ArchiveApi:   apiHandler,
+		}, cfg)
+		log.Info("Beacon API started", "addr", cfg.Address)
 	}
 
 	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, beaconDB, db, csn, dirs.Tmp, dbConfig, backfilling, syncedDataManager)

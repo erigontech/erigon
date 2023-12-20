@@ -55,7 +55,7 @@ const (
 
 const (
 	SubDivisionFolderSize = 10_000
-	SlotsPerDump          = 2048
+	SlotsPerDump          = 1024
 )
 
 var (
@@ -502,6 +502,10 @@ func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
 func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
 	slotsPerSyncCommitteePeriod := b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod
 	return slot - (slot % slotsPerSyncCommitteePeriod)
+}
+
+func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
+	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
 }
 
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
