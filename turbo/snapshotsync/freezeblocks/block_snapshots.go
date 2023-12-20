@@ -2215,7 +2215,6 @@ func (r Ranges) String() string {
 }
 
 var MergeSteps = []uint64{100_000, 10_000}
-var RecentMergeSteps = []uint64{100_000, 10_000}
 
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
