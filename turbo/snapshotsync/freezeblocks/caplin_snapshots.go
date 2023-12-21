@@ -389,6 +389,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			return err
 		}
 		w.Reset()
+		compressor.Reset(&w)
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
@@ -477,12 +478,9 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	buffer.Reset()
 	buffer.Write(buf)
-	// reader cannot be pooled
-	reader, err := zstd.NewReader(buffer)
-	if err != nil {
-		return nil, 0, libcommon.Hash{}, err
-	}
-	fmt.Println("A")
+	reader := decompressorPool.Get().(*zstd.Decoder)
+	defer decompressorPool.Put(reader)
+	reader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
 	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
