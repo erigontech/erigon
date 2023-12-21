@@ -310,8 +310,9 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.DisallowDataDownload = true
 	ts.DisableInitialPieceCheck = true
+	//re-try on panic, with 0 ChunkSize (lib doesn't allow change this field for existing torrents)
 	defer func() {
-		rec := recover() //re-try on panic
+		rec := recover()
 		if rec != nil {
 			ts.ChunkSize = 0
 			t, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
