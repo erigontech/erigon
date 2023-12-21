@@ -23,7 +23,6 @@ func ReadHighestFinalized(tx kv.Tx) (uint64, error) {
 	if len(val) == 0 {
 		return 0, nil
 	}
-	fmt.Println(val)
 	return base_encoding.Decode64FromBytes4(val), nil
 }
 
