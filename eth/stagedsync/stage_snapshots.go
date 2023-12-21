@@ -99,9 +99,11 @@ func StageSnapshotsCfg(db kv.RwDB,
 	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
 
 		cfg.snapshotUploader = &snapshotUploader{
-			cfg:      &cfg,
-			uploadFs: uploadFs,
-			version:  snapcfg.KnownCfg(chainConfig.ChainName, 0).Version}
+			cfg:          &cfg,
+			uploadFs:     uploadFs,
+			version:      snapcfg.KnownCfg(chainConfig.ChainName, 0).Version,
+			torrentFiles: downloader.NewAtomicTorrentFiles(cfg.dirs.Snap),
+		}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 
@@ -514,6 +516,7 @@ type snapshotUploader struct {
 	uploading       atomic.Bool
 	manifestMutex   sync.Mutex
 	version         uint8
+	torrentFiles    *downloader.TorrentFiles
 }
 
 func (u *snapshotUploader) init(ctx context.Context, logger log.Logger) {
@@ -1003,7 +1006,8 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 						}
 
 						if fi.TorrentFileExists() {
-							state.torrent, _ = downloader.LoadTorrent(fi.Path + ".torrent")
+
+							state.torrent, _ = u.torrentFiles.LoadByName(f)
 						}
 
 						u.files[f] = state
@@ -1018,7 +1022,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 					state.local = true
 
 					if state.torrent == nil && state.info.TorrentFileExists() {
-						state.torrent, _ = downloader.LoadTorrent(state.info.Path + ".torrent")
+						state.torrent, _ = u.torrentFiles.LoadByName(f)
 						if state.torrent != nil {
 							state.localHash = state.torrent.InfoHash.String()
 						}
@@ -1072,7 +1076,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 				g.Go(func() error {
 					defer i.Add(1)
 
-					torrentPath, err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap)
+					err := downloader.BuildTorrentIfNeed(gctx, state.file, u.cfg.dirs.Snap, u.torrentFiles)
 
 					state.Lock()
 					state.buildingTorrent = false
@@ -1082,7 +1086,7 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 						return err
 					}
 
-					torrent, err := downloader.LoadTorrent(torrentPath)
+					torrent, err := u.torrentFiles.LoadByName(state.file)
 
 					if err != nil {
 						return err

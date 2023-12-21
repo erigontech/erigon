@@ -156,6 +156,11 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *T
 		return nil
 	}
 
+	fPath := filepath.Join(root, fName)
+	if !dir2.FileExist(fPath) {
+		return nil
+	}
+
 	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fName}
 	if err := info.BuildFromFilePath(fPath); err != nil {
 		return fmt.Errorf("createTorrentFileFromSegment: %w", err)
