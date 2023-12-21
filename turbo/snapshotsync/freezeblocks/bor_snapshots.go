@@ -192,7 +192,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, blockFrom, blockTo u
 		notifier.OnNewSnapshot()
 	}
 	merger := NewBorMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
@@ -1045,19 +1045,14 @@ func NewBorMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.Ro
 	return &BorMerger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
 }
 
-func (m *BorMerger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
+func (m *BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		isRecent := r.IsRecent(maxBlockNum)
-		mergeLimit, mergeSteps := uint64(snaptype.Erigon2RecentMergeLimit), MergeSteps
-		if isRecent {
-			mergeLimit, mergeSteps = snaptype.Erigon2MergeLimit, RecentMergeSteps
-		}
-
+		mergeLimit := uint64(snaptype.Erigon2MergeLimit)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}
-		for _, span := range mergeSteps {
+		for _, span := range snaptype.MergeSteps {
 			if r.to%span != 0 {
 				continue
 			}
