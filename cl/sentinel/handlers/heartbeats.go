@@ -24,18 +24,33 @@ import (
 // Since packets are just structs, they can be resent with no issue
 
 func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
+	peerId := s.Conn().RemotePeer().String()
+	if err := c.checkRateLimit(peerId, "ping", rateLimits.pingLimit); err != nil {
+		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
+		return err
+	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: c.metadata.SeqNumber,
 	}, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
+	peerId := s.Conn().RemotePeer().String()
+	if err := c.checkRateLimit(peerId, "goodbye", rateLimits.goodbyeLimit); err != nil {
+		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
+		return err
+	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: 1,
 	}, SuccessfulResponsePrefix)
 }
 
 func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
+	peerId := s.Conn().RemotePeer().String()
+	if err := c.checkRateLimit(peerId, "metadataV1", rateLimits.metadataV1Limit); err != nil {
+		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
+		return err
+	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
 		SeqNumber: c.metadata.SeqNumber,
 		Attnets:   c.metadata.Attnets,
@@ -43,12 +58,21 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 }
 
 func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
+	peerId := s.Conn().RemotePeer().String()
+	if err := c.checkRateLimit(peerId, "metadataV2", rateLimits.metadataV2Limit); err != nil {
+		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
+		return err
+	}
 	return ssz_snappy.EncodeAndWrite(s, c.metadata, SuccessfulResponsePrefix)
 }
 
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
-	defer s.Close()
+	peerId := s.Conn().RemotePeer().String()
+	if err := c.checkRateLimit(peerId, "status", rateLimits.statusLimit); err != nil {
+		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
+		return err
+	}
 	status := &cltypes.Status{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, status, clparams.Phase0Version); err != nil {
 		return err

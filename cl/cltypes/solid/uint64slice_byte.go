@@ -81,7 +81,7 @@ func (arr *byteBasedUint64Slice) CopyTo(target *byteBasedUint64Slice) {
 func (arr *byteBasedUint64Slice) MarshalJSON() ([]byte, error) {
 	list := make([]uint64, arr.l)
 	for i := 0; i < arr.l; i++ {
-		list[0] = arr.Get(i)
+		list[i] = arr.Get(i)
 	}
 	return json.Marshal(list)
 }
@@ -182,7 +182,7 @@ func (arr *byteBasedUint64Slice) HashListSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(arr.l))
-	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
+	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
 // HashVectorSSZ computes the SSZ hash of the slice as a vector. It returns the hash and any error encountered.

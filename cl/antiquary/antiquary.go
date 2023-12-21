@@ -12,39 +12,55 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/afero"
 )
 
 const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
-	mainDB     kv.RwDB // this is the main DB
-	dirs       datadir.Dirs
-	downloader proto_downloader.DownloaderClient
-	logger     log.Logger
-	sn         *freezeblocks.CaplinSnapshots
-	ctx        context.Context
-	beaconDB   persistence.BlockSource
-	backfilled *atomic.Bool
-	cfg        *clparams.BeaconChainConfig
+	mainDB          kv.RwDB // this is the main DB
+	dirs            datadir.Dirs
+	downloader      proto_downloader.DownloaderClient
+	logger          log.Logger
+	sn              *freezeblocks.CaplinSnapshots
+	snReader        freezeblocks.BeaconSnapshotReader
+	ctx             context.Context
+	beaconDB        persistence.BlockSource
+	backfilled      *atomic.Bool
+	cfg             *clparams.BeaconChainConfig
+	states          bool
+	fs              afero.Fs
+	validatorsTable *state_accessors.StaticValidatorTable
+	genesisState    *state.CachingBeaconState
+	// set to nil
+	currentState *state.CachingBeaconState
+	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
-		mainDB:     mainDB,
-		dirs:       dirs,
-		downloader: downloader,
-		logger:     logger,
-		sn:         sn,
-		beaconDB:   beaconDB,
-		ctx:        ctx,
-		backfilled: backfilled,
-		cfg:        cfg,
+		mainDB:          mainDB,
+		dirs:            dirs,
+		downloader:      downloader,
+		logger:          logger,
+		sn:              sn,
+		beaconDB:        beaconDB,
+		ctx:             ctx,
+		backfilled:      backfilled,
+		cfg:             cfg,
+		states:          states,
+		snReader:        reader,
+		fs:              fs,
+		validatorsTable: validatorsTable,
+		genesisState:    genesisState,
 	}
 }
 
@@ -94,6 +110,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	defer logInterval.Stop()
+
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
 		// read the snapshot
@@ -108,7 +125,16 @@ func (a *Antiquary) Loop() error {
 		if err != nil {
 			return err
 		}
-		if err := beacon_indicies.WriteBeaconBlockHeaderAndIndicies(a.ctx, tx, header, false); err != nil {
+		if err := beacon_indicies.MarkRootCanonical(a.ctx, tx, header.Header.Slot, blockRoot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteHeaderSlot(tx, blockRoot, header.Header.Slot); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteStateRoot(tx, blockRoot, header.Header.Root); err != nil {
+			return err
+		}
+		if err := beacon_indicies.WriteParentBlockRoot(a.ctx, tx, blockRoot, header.Header.ParentRoot); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteExecutionBlockNumber(tx, blockRoot, elBlockNumber); err != nil {
@@ -130,6 +156,10 @@ func (a *Antiquary) Loop() error {
 		if err := a.beaconDB.PurgeRange(a.ctx, tx, 0, frozenSlots); err != nil {
 			return err
 		}
+	}
+
+	if a.states {
+		go a.loopStates(a.ctx)
 	}
 
 	// write the indicies
@@ -174,8 +204,8 @@ func (a *Antiquary) Loop() error {
 				continue
 			}
 			to = utils.Min64(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-			to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
-			if to-from < snaptype.Erigon2RecentMergeLimit {
+			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+			if to-from < snaptype.Erigon2MergeLimit {
 				continue
 			}
 			if err := a.antiquate(from, to); err != nil {
@@ -192,7 +222,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return nil // Just skip if we don't have a downloader
 	}
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
-	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2RecentMergeLimit, a.dirs.Tmp, a.dirs.Snap, 8, log.LvlDebug, a.logger); err != nil {
+	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2MergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 
@@ -210,14 +240,14 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 
 	paths := a.sn.SegFilePaths(from, to)
-	downloadItems := make([]*proto_downloader.DownloadItem, len(paths))
+	downloadItems := make([]*proto_downloader.AddItem, len(paths))
 	for i, path := range paths {
-		downloadItems[i] = &proto_downloader.DownloadItem{
+		downloadItems[i] = &proto_downloader.AddItem{
 			Path: path,
 		}
 	}
 	// Notify bittorent to seed the new snapshots
-	if _, err := a.downloader.Download(a.ctx, &proto_downloader.DownloadRequest{Items: downloadItems}); err != nil {
+	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
 		return err
 	}
 
@@ -226,6 +256,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return err
 	}
 	defer tx.Rollback()
+	a.validatorsTable.SetSlot(to)
 	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
 		return err
 	}

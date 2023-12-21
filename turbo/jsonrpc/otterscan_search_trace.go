@@ -2,7 +2,7 @@ package jsonrpc
 
 import (
 	"context"
-	"sync"
+	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -18,9 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
-func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, wg *sync.WaitGroup, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
-	defer wg.Done()
-
+func (api *OtterscanAPIImpl) searchTraceBlock(ctx context.Context, addr common.Address, chainConfig *chain.Config, idx int, bNum uint64, results []*TransactionsWithReceipts) {
 	// Trace block for Txs
 	newdbtx, err := api.db.BeginRo(ctx)
 	if err != nil {
@@ -80,6 +78,11 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 	rules := chainConfig.Rules(block.NumberU64(), header.Time)
 	found := false
 	for idx, tx := range block.Transactions() {
+		select {
+		case <-ctx.Done():
+			return false, nil, ctx.Err()
+		default:
+		}
 		ibs.SetTxContext(tx.Hash(), block.Hash(), idx)
 
 		msg, _ := tx.AsMessage(*signer, header.BaseFee, rules)
@@ -95,7 +98,15 @@ func (api *OtterscanAPIImpl) traceBlock(dbtx kv.Tx, ctx context.Context, blockNu
 		_ = ibs.FinalizeTx(rules, cachedWriter)
 
 		if tracer.Found {
-			rpcTx := newRPCTransaction(tx, block.Hash(), blockNum, uint64(idx), block.BaseFee())
+			if idx > len(blockReceipts) {
+				select { // it may happen because request canceled, then return canelation error
+				case <-ctx.Done():
+					return false, nil, ctx.Err()
+				default:
+				}
+				return false, nil, fmt.Errorf("requested receipt idx %d, but have only %d", idx, len(blockReceipts)) // otherwise return some error for debugging
+			}
+			rpcTx := NewRPCTransaction(tx, block.Hash(), blockNum, uint64(idx), block.BaseFee())
 			mReceipt := marshalReceipt(blockReceipts[idx], tx, chainConfig, block.HeaderNoCopy(), tx.Hash(), true)
 			mReceipt["timestamp"] = block.Time()
 			rpcTxs = append(rpcTxs, rpcTx)

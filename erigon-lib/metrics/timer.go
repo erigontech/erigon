@@ -4,45 +4,44 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/VictoriaMetrics/metrics"
 )
 
 type HistTimer struct {
-	*metrics.Histogram
-
+	Histogram
 	start time.Time
-
-	name string
+	name  string
 }
 
 func NewHistTimer(name string) *HistTimer {
 	rawName := strings.Split(name, "{")
 	return &HistTimer{
-		Histogram: metrics.GetOrCreateCompatibleHistogram(name),
+		Histogram: GetOrCreateHistogram(name),
 		start:     time.Now(),
 		name:      rawName[0],
 	}
 }
 
 func (h *HistTimer) PutSince() {
-	h.Histogram.UpdateDuration(h.start)
+	h.Histogram.ObserveDuration(h.start)
 }
 
 func (h *HistTimer) Tag(pairs ...string) *HistTimer {
 	if len(pairs)%2 != 0 {
 		pairs = append(pairs, "UNEQUAL_KEY_VALUE_TAGS")
 	}
-	toJoin := []string{}
+
+	var toJoin []string
 	for i := 0; i < len(pairs); i = i + 2 {
 		toJoin = append(toJoin, fmt.Sprintf(`%s="%s"`, pairs[i], pairs[i+1]))
 	}
+
 	tags := ""
 	if len(toJoin) > 0 {
 		tags = "{" + strings.Join(toJoin, ",") + "}"
 	}
+
 	return &HistTimer{
-		Histogram: metrics.GetOrCreateCompatibleHistogram(h.name + tags),
+		Histogram: GetOrCreateHistogram(h.name + tags),
 		start:     time.Now(),
 		name:      h.name,
 	}

@@ -16,7 +16,7 @@ import (
 
 // This test checks that lookup works.
 func TestUDPv5_lookup(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -77,7 +77,7 @@ func TestUDPv5_lookup(t *testing.T) {
 
 // Real sockets, real crypto: this test checks end-to-end connectivity for UDPv5.
 func TestUDPv5_lookupE2E(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()

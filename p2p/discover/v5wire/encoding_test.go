@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -31,6 +30,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/common/mclock"
@@ -168,7 +169,7 @@ func TestHandshake_norecord(t *testing.T) {
 func TestHandshake_rekey(t *testing.T) {
 	// runtime: setevent failed; errno=6
 	// fatal error: runtime.semawakeup
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 

@@ -64,7 +64,7 @@ func (g *RequestGenerator) debugTraceBlockByNumber(blockNum uint64) string {
 	return fmt.Sprintf(template, blockNum, g.reqID)
 }
 
-func (g *RequestGenerator) traceTransaction(hash string) string {
+func (g *RequestGenerator) debugTraceTransaction(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 	return fmt.Sprintf(template, hash, g.reqID)
 }
@@ -256,6 +256,11 @@ func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.A
 	}
 	fmt.Fprintf(&sb, `},"latest"], "id":%d}`, g.reqID)
 	return sb.String()
+}
+
+func (g *RequestGenerator) otsGetBlockTransactions(block_number uint64, page_number uint64, page_size uint64) string {
+	const template = `{"id":1,"jsonrpc":"2.0","method":"ots_getBlockTransactions","params":[%d, %d, %d]}`
+	return fmt.Sprintf(template, block_number, page_number, page_size)
 }
 
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {

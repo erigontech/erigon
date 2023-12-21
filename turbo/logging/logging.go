@@ -39,22 +39,25 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.L
 		dirLevel = log.LvlInfo
 	}
 
-	dirPath := ctx.String(LogDirPathFlag.Name)
-	if dirPath == "" {
-		datadir := ctx.String("datadir")
-		if datadir != "" {
-			dirPath = filepath.Join(datadir, "logs")
+	dirPath := ""
+	if !ctx.Bool(LogDirDisableFlag.Name) && dirPath != "/dev/null" {
+		dirPath = ctx.String(LogDirPathFlag.Name)
+		if dirPath == "" {
+			datadir := ctx.String("datadir")
+			if datadir != "" {
+				dirPath = filepath.Join(datadir, "logs")
+			}
+		}
+		if logDirPrefix := ctx.String(LogDirPrefixFlag.Name); len(logDirPrefix) > 0 {
+			filePrefix = logDirPrefix
 		}
 	}
+
 	var logger log.Logger
 	if rootHandler {
 		logger = log.Root()
 	} else {
 		logger = log.New()
-	}
-
-	if logDirPrefix := ctx.String(LogDirPrefixFlag.Name); len(logDirPrefix) > 0 {
-		filePrefix = logDirPrefix
 	}
 
 	initSeparatedLogging(logger, filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
@@ -98,16 +101,25 @@ func SetupLoggerCmd(filePrefix string, cmd *cobra.Command) log.Logger {
 		dirLevel = log.LvlInfo
 	}
 
-	dirPath := cmd.Flags().Lookup(LogDirPathFlag.Name).Value.String()
-	if dirPath == "" {
-		datadir := cmd.Flags().Lookup("datadir").Value.String()
-		if datadir != "" {
-			dirPath = filepath.Join(datadir, "logs")
-		}
+	dirPath := ""
+	disableFileLogging, err := cmd.Flags().GetBool(LogDirDisableFlag.Name)
+	if err != nil {
+		disableFileLogging = false
 	}
-
-	if logDirPrefix := cmd.Flags().Lookup(LogDirPrefixFlag.Name).Value.String(); len(logDirPrefix) > 0 {
-		filePrefix = logDirPrefix
+	if !disableFileLogging && dirPath != "/dev/null" {
+		dirPath = cmd.Flags().Lookup(LogDirPathFlag.Name).Value.String()
+		if dirPath == "" {
+			datadirFlag := cmd.Flags().Lookup("datadir")
+			if datadirFlag != nil {
+				datadir := datadirFlag.Value.String()
+				if datadir != "" {
+					dirPath = filepath.Join(datadir, "logs")
+				}
+			}
+		}
+		if logDirPrefix := cmd.Flags().Lookup(LogDirPrefixFlag.Name).Value.String(); len(logDirPrefix) > 0 {
+			filePrefix = logDirPrefix
+		}
 	}
 
 	initSeparatedLogging(log.Root(), filePrefix, dirPath, consoleLevel, dirLevel, consoleJson, dirJson)
@@ -174,7 +186,7 @@ func initSeparatedLogging(
 	logger.SetHandler(consoleHandler)
 
 	if len(dirPath) == 0 {
-		logger.Warn("no log dir set, console logging only")
+		logger.Info("console logging only")
 		return
 	}
 

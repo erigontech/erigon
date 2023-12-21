@@ -174,7 +174,7 @@ type borSpanSegments struct {
 	segments []*BorSpanSegment
 }
 
-func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error) error {
+func (br *BlockRetire) retireBorBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) error {
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
@@ -192,7 +192,7 @@ func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo u
 		notifier.OnNewSnapshot()
 	}
 	merger := NewBorMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
 	if len(rangesToMerge) == 0 {
 		return nil
 	}
@@ -203,16 +203,12 @@ func (br *BlockRetire) RetireBorBlocks(ctx context.Context, blockFrom, blockTo u
 
 		if seedNewSnapshots != nil {
 			downloadRequest := []services.DownloadRequest{
-				services.NewDownloadRequest(&services.Range{From: r.from, To: r.to}, "", "", true /* Bor */),
+				services.NewDownloadRequest("", ""),
 			}
 			if err := seedNewSnapshots(downloadRequest); err != nil {
 				return err
 			}
 		}
-		return nil
-	}
-	onDelete := func(files []string) error {
-		//TODO: add Downloader API to delete files
 		return nil
 	}
 	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
@@ -639,23 +635,6 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 	return res, missingSnapshots, nil
 }
 
-func (s *BorRoSnapshots) ScanDir() (map[string]struct{}, []*services.Range, error) {
-	existingFiles, missingSnapshots, err := BorSegments(s.dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	existingFilesMap := map[string]struct{}{}
-	for _, existingFile := range existingFiles {
-		_, fname := filepath.Split(existingFile.Path)
-		existingFilesMap[fname] = struct{}{}
-	}
-
-	res := make([]*services.Range, 0, len(missingSnapshots))
-	for _, sn := range missingSnapshots {
-		res = append(res, &services.Range{From: sn.from, To: sn.to})
-	}
-	return existingFilesMap, res, nil
-}
 func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	if s.BlocksAvailable() < cfg.ExpectBlocks {
 		return fmt.Errorf("app must wait until all expected bor snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
@@ -1066,19 +1045,14 @@ func NewBorMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.Ro
 	return &BorMerger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
 }
 
-func (m *BorMerger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
+func (m *BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		isRecent := r.IsRecent(maxBlockNum)
-		mergeLimit, mergeSteps := uint64(snaptype.Erigon2RecentMergeLimit), MergeSteps
-		if isRecent {
-			mergeLimit, mergeSteps = snaptype.Erigon2MergeLimit, RecentMergeSteps
-		}
-
+		mergeLimit := uint64(snaptype.Erigon2MergeLimit)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}
-		for _, span := range mergeSteps {
+		for _, span := range snaptype.MergeSteps {
 			if r.to%span != 0 {
 				continue
 			}

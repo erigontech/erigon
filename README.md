@@ -49,8 +49,8 @@ in `erigon --help`). We don't allow change this flag after first start.
 System Requirements
 ===================
 
-* For an Archive node of Ethereum Mainnet we recommend >=3TB storage space: 1.8TB state (as of March 2022),
-  200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
+* For an Archive node of Ethereum Mainnet we recommend >=3.5TB storage space: 2.2TB state (as of December 2023),
+  470GB snapshots (can symlink or mount folder `<datadir>/snapshots` to another disk), 200GB temp files (can symlink or mount folder `<datadir>/temp` to another disk). Ethereum Mainnet Full node (
   see `--prune*` flags): 400Gb (April 2022).
 
 * Goerli Full node (see `--prune*` flags): 189GB on Beta, 114GB on Alpha (April 2022).
@@ -102,8 +102,8 @@ download speed by flag `--torrent.download.rate=20mb`. <code>🔬 See [Downloade
 
 Use `--datadir` to choose where to store data.
 
-Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet,
-and `--chain=mumbai` for Polygon Mumbai.
+Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet, 
+`--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
 Erigon (https://docs.gnosischain.com/node/guide/beacon).
 
@@ -194,13 +194,7 @@ Support only remote-miners.
   , `--miner.gastarget`
 * JSON-RPC supports methods: eth_coinbase , eth_hashrate, eth_mining, eth_getWork, eth_submitWork, eth_submitHashrate
 * JSON-RPC supports websocket methods: newPendingTransaction
-* TODO:
-    + we don't broadcast mined blocks to p2p-network
-      yet, [but it's easy to accomplish](https://github.com/ledgerwatch/erigon/blob/9b8cdc0f2289a7cef78218a15043de5bdff4465e/eth/downloader/downloader.go#L673)
-    + eth_newPendingTransactionFilter
-    + eth_newBlockFilter
-    + eth_newFilter
-    + websocket Logs
+
 
 <code> 🔬 Detailed explanation is [here](/docs/mining.md).</code>
 
@@ -215,7 +209,7 @@ Windows users may run erigon in 3 possible ways:
     * [Git](https://git-scm.com/downloads) for Windows must be installed. If you're cloning this repository is very
       likely you already have it
     * [GO Programming Language](https://golang.org/dl/) must be installed. Minimum required version is 1.20
-    * GNU CC Compiler at least version 10 (is highly suggested that you install `chocolatey` package manager - see
+    * GNU CC Compiler at least version 13 (is highly suggested that you install `chocolatey` package manager - see
       following point)
     * If you need to build MDBX tools (i.e. `.\wmake.ps1 db-tools`)
       then [Chocolatey package manager](https://chocolatey.org/) for Windows must be installed. By Chocolatey you need
@@ -264,7 +258,7 @@ of the yaml configuration file and sets the chain to goerli
 Example of setting up TOML config file
 
 ```
-`datadir = 'your datadir'
+datadir = 'your datadir'
 port = 1111
 chain = "mainnet"
 http = true

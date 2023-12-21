@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 type SnapshotsCfg struct {
@@ -127,10 +126,15 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cstate = snapshotsync.AlsoCaplin
 	}
 
-	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.dbEventNotifier, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+	if err := snapshotsync.WaitForDownloader(s.LogPrefix(), ctx, cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 		return err
 	}
+	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
+	if cfg.dbEventNotifier != nil {
+		cfg.dbEventNotifier.OnNewSnapshot()
+	}
 
+	cfg.blockReader.Snapshots().LogStat()
 	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress
@@ -141,7 +145,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.silkworm != nil {
-		if err := cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
+		if err := cfg.blockReader.Snapshots().(silkworm.CanAddSnapshotsToSilkwarm).AddSnapshotsToSilkworm(cfg.silkworm); err != nil {
 			return err
 		}
 	}
@@ -308,7 +312,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.Enabled {
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, 100, cfg.chainConfig.Bor != nil); err != nil {
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, 100); err != nil {
 			return err
 		}
 	}
@@ -320,7 +324,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			}
 		}
 
-		cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, cfg.chainConfig.Bor != nil, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
+		cfg.blockRetire.RetireBlocksInBackground(ctx, s.ForwardProgress, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
 			if cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 				return nil
 			}

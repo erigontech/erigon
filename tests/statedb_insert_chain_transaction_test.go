@@ -30,7 +30,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -59,7 +59,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(data.addresses[1], to, uint256.NewInt(5000)),
 			data.keys[1],
@@ -98,7 +98,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -126,7 +126,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(5000)),
 			fromKey,
@@ -163,7 +163,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -188,7 +188,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -225,7 +225,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -250,7 +250,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -287,7 +287,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	fromKey := data.keys[0]
 	to := libcommon.Address{1}
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(3000)),
 			fromKey,
@@ -312,7 +312,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	}
 
 	// insert a correct block
-	m, chain, err = genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err = GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(1000)),
 			fromKey,
@@ -352,7 +352,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -434,7 +434,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -514,7 +514,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -603,7 +603,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	var contractAddress libcommon.Address
 	eipContract := new(contracts.Testcontract)
 
-	m, chain, err := genBlocks(t, data.genesisSpec, map[int]txn{
+	m, chain, err := GenerateBlocks(t, data.genesisSpec, map[int]txn{
 		0: {
 			getBlockTx(from, to, uint256.NewInt(10)),
 			fromKey,
@@ -737,7 +737,7 @@ type txn struct {
 	key  *ecdsa.PrivateKey
 }
 
-func genBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.MockSentry, *core.ChainPack, error) {
+func GenerateBlocks(t *testing.T, gspec *types.Genesis, txs map[int]txn) (*mock.MockSentry, *core.ChainPack, error) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := mock.MockWithGenesis(t, gspec, key, false)
 

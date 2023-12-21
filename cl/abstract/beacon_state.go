@@ -32,7 +32,7 @@ type BeaconStateExtension interface {
 	BaseReward(index uint64) (uint64, error)
 	SyncRewards() (proposerReward, participantReward uint64, err error)
 	CommitteeCount(epoch uint64) uint64
-	GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64) ([]uint8, error)
+	GetAttestationParticipationFlagIndicies(data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error)
 	GetBeaconCommitee(slot, committeeIndex uint64) ([]uint64, error)
 	ComputeNextSyncCommittee() (*solid.SyncCommittee, error)
 	GetAttestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool) ([]uint64, error)
@@ -115,8 +115,6 @@ type BeaconStateMutator interface {
 	AddPreviousEpochParticipationAt(index int, delta byte)
 	AddCurrentEpochAtteastation(attestation *solid.PendingAttestation)
 	AddPreviousEpochAttestation(attestation *solid.PendingAttestation)
-
-	IncrementSlashingSegmentAt(index int, delta uint64)
 
 	AppendValidator(in solid.Validator)
 
