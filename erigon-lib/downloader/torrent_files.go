@@ -31,6 +31,16 @@ func (tf *TorrentFiles) exists(name string) bool {
 	fPath := filepath.Join(tf.dir, name)
 	return dir2.FileExist(fPath + ".torrent")
 }
+func (tf *TorrentFiles) Delete(name string) error {
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+	return tf.delete(name)
+}
+
+func (tf *TorrentFiles) delete(name string) error {
+	fPath := filepath.Join(tf.dir, name)
+	return os.Remove(fPath + ".torrent")
+}
 
 func (tf *TorrentFiles) Create(torrentFilePath string, res []byte) error {
 	tf.lock.Lock()

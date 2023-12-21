@@ -19,7 +19,6 @@ package downloader
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -239,19 +238,6 @@ func CreateMetaInfo(info *metainfo.Info, mi *metainfo.MetaInfo) (*metainfo.MetaI
 		mi.AnnounceList = Trackers
 	}
 	return mi, nil
-}
-func CreateTorrentFromMetaInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo) error {
-	torrentFileName := filepath.Join(root, info.Name+".torrent")
-	file, err := os.Create(torrentFileName)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if err := mi.Write(file); err != nil {
-		return err
-	}
-	file.Sync()
-	return nil
 }
 func CreateTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.MetaInfo, torrentFiles *TorrentFiles) (err error) {
 	mi, err = CreateMetaInfo(info, mi)
