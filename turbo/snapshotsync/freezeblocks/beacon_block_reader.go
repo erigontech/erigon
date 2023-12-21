@@ -125,6 +125,9 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	var buf []byte
 	if *slot > r.sn.BlocksAvailable() {
 		data, err := r.beaconDB.GetBlock(ctx, tx, *slot)
+		if data == nil {
+			return nil, err
+		}
 		return data.Data, err
 	}
 	if r.eth1Getter == nil {
