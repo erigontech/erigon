@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"os"
 	"path"
 	"path/filepath"
@@ -1328,7 +1329,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
-		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, bor.SpanIDAt); err != nil {
 			return err
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"math"
 	"sort"
 
@@ -1115,18 +1116,18 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 	if lastSegment == nil {
 		return 0
 	}
-	var lastSpanID uint64
-	if lastSegment.ranges.to > zerothSpanEnd {
-		lastSpanID = (lastSegment.ranges.to - zerothSpanEnd - 1) / spanLength
+
+	lastSpanID := bor.SpanIDAt(lastSegment.ranges.to)
+	if lastSpanID > 0 {
+		lastSpanID--
 	}
 	return lastSpanID
 }
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
-	// Compute starting block of the span
 	var endBlock uint64
 	if spanId > 0 {
-		endBlock = (spanId)*spanLength + zerothSpanEnd
+		endBlock = bor.SpanEndBlockNum(spanId)
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1149,17 +1150,11 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx == nil {
 			continue
 		}
-		var spanFrom uint64
-		if sn.ranges.from > zerothSpanEnd {
-			spanFrom = 1 + (sn.ranges.from-zerothSpanEnd-1)/spanLength
-		}
+		spanFrom := bor.SpanIDAt(sn.ranges.from)
 		if spanId < spanFrom {
 			continue
 		}
-		var spanTo uint64
-		if sn.ranges.to > zerothSpanEnd {
-			spanTo = 1 + (sn.ranges.to-zerothSpanEnd-1)/spanLength
-		}
+		spanTo := bor.SpanIDAt(sn.ranges.to)
 		if spanId >= spanTo {
 			continue
 		}
