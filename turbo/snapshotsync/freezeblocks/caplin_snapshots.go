@@ -477,9 +477,11 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	buffer.Reset()
 	buffer.Write(buf)
-	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer decompressorPool.Put(reader)
-	reader.Reset(buffer)
+	// reader cannot be pooled
+	reader, err := zstd.NewReader(buffer)
+	if err != nil {
+		return nil, 0, libcommon.Hash{}, err
+	}
 	fmt.Println("A")
 
 	// Use pooled buffers and readers to avoid allocations.
