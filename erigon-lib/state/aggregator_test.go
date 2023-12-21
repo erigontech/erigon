@@ -611,7 +611,6 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	for i := 0; i < keyCount; i++ {
 		if !getter.HasNext() {
 			tb.Fatalf("not enough values at %d", i)
-			break
 		}
 
 		keys, _ := getter.Next(key[:0])

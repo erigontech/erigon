@@ -123,7 +123,8 @@ func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, step uint64, pr
 
 // GetExecV3PruneProgress retrieves saved progress of given table pruning from the database
 // ts==0 && prunedKey==nil means that pruning is finished, next prune could start
-func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (ts uint64, prunedKey []byte, err error) {
+// For domains make more sense to store inverted step to have 0 as empty value meaning no progress saved
+func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (ts uint64, pruned []byte, err error) {
 	v, err := db.GetOne(kv.TblPruningProgress, []byte(prunedTblName))
 	if err != nil {
 		return 0, nil, err
