@@ -2,13 +2,16 @@ package sync
 
 import (
 	"context"
+	"math/big"
 
-	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/sync/peerinfo"
 )
 
+//go:generate mockgen -destination=./mock/sentry_mock.go -package=mock . Sentry
 type Sentry interface {
-	PeersWithMinBlock(num uint64) []*erigonlibtypes.PeerInfo
-	DownloadHeaders(ctx context.Context, start uint64, end uint64, peerID string) ([]*types.Header, error)
+	MaxPeers() int
+	PeersWithBlockNumInfo() peerinfo.PeersWithBlockNumInfo
+	DownloadHeaders(ctx context.Context, start *big.Int, end *big.Int, peerID string) ([]*types.Header, error)
 	Penalize(peerID string)
 }

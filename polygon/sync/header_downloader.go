@@ -4,30 +4,33 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
+	"sync"
 	"time"
 
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/sync/peerinfo"
 )
 
-const (
-	minPeers                  = 10
-	minBlockDecreaseQuotient  = 4
-	headerDownloaderLogPrefix = "[HeaderDownloader]"
-)
+const headerDownloaderLogPrefix = "HeaderDownloader"
 
-func NewHeaderDownloader(logger log.Logger, sentry Sentry, db DB, heimdall Heimdall, verifier HeaderVerifier) *HeaderDownloader {
+func NewHeaderDownloader(logger log.Logger, sentry Sentry, db DB, heimdall Heimdall, verify HeaderVerifier) *HeaderDownloader {
+	statePointHeadersMemo, err := lru.New[common.Hash, []*types.Header](sentry.MaxPeers())
+	if err != nil {
+		panic(err)
+	}
+
 	return &HeaderDownloader{
 		logger:                logger,
 		sentry:                sentry,
 		db:                    db,
 		heimdall:              heimdall,
-		verifier:              verifier,
-		statePointHeadersMemo: map[common.Hash][]*types.Header{},
+		verify:                verify,
+		statePointHeadersMemo: statePointHeadersMemo,
 	}
 }
 
@@ -36,8 +39,8 @@ type HeaderDownloader struct {
 	sentry                Sentry
 	db                    DB
 	heimdall              Heimdall
-	verifier              HeaderVerifier
-	statePointHeadersMemo map[common.Hash][]*types.Header // statePoint.rootHash->[headers part of state point]
+	verify                HeaderVerifier
+	statePointHeadersMemo *lru.Cache[common.Hash, []*types.Header] // statePoint.rootHash->[headers part of state point]
 }
 
 func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
@@ -70,10 +73,23 @@ func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start u
 
 func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, statePoints statePoints) error {
 	for len(statePoints) > 0 {
-		lastStatePoint := statePoints[len(statePoints)-1]
-		peers, err := hd.findEnoughPeersWithMinBlock(lastStatePoint.endBlock)
-		if err != nil {
-			return err
+		allPeers := hd.sentry.PeersWithBlockNumInfo()
+		if len(allPeers) == 0 {
+			hd.logger.Warn(fmt.Sprintf("[%s] zero peers, will try again", headerDownloaderLogPrefix))
+			continue
+		}
+
+		sort.Sort(allPeers) // sort by block num in asc order
+		peers := hd.choosePeers(allPeers, statePoints)
+		if len(peers) == 0 {
+			hd.logger.Warn(
+				fmt.Sprintf("[%s] can't use any peers to sync, will try again", headerDownloaderLogPrefix),
+				"start", statePoints[0].startBlock,
+				"end", statePoints[len(statePoints)-1].endBlock,
+				"minPeerBlockNum", allPeers[0].BlockNum,
+				"minPeerID", allPeers[0].ID,
+			)
+			continue
 		}
 
 		peerCount := len(peers)
@@ -88,27 +104,36 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 
 		headerBatches := make([][]*types.Header, len(statePointsBatch))
 		maxStatePointLength := float64(0)
-		// we ignore the err group ctx since we want to let all goroutines finish and cache headers for next time in case of gaps
-		g, _ := errgroup.WithContext(ctx)
-		for i, statePoint := range statePointsBatch {
-			maxStatePointLength = math.Max(float64(statePoint.length()), maxStatePointLength)
-			// local copy for inputs since used in async function
-			i, statePoint, peerID := i, statePoint, peers[i].Id
-			g.Go(func() error {
-				if headers, ok := hd.statePointHeadersMemo[statePoint.rootHash]; ok {
+		wg := sync.WaitGroup{}
+		for i, point := range statePointsBatch {
+			maxStatePointLength = math.Max(float64(point.length()), maxStatePointLength)
+			wg.Add(1)
+			go func(i int, statePoint *statePoint, peerID string) {
+				defer wg.Done()
+
+				if headers, ok := hd.statePointHeadersMemo.Get(statePoint.rootHash); ok {
 					headerBatches[i] = headers
-					return nil
+					return
 				}
 
 				headers, err := hd.sentry.DownloadHeaders(ctx, statePoint.startBlock, statePoint.endBlock, peerID)
 				if err != nil {
-					return err
+					hd.logger.Debug(
+						fmt.Sprintf("[%s] issue downloading headers, will try again", headerDownloaderLogPrefix),
+						"err", err,
+						"start", statePoint.startBlock,
+						"end", statePoint.endBlock,
+						"rootHash", statePoint.rootHash,
+						"kind", statePoint.kind,
+						"peerID", peerID,
+					)
+					return
 				}
 
-				if err := hd.verifier.Verify(statePoint, headers); err != nil {
+				if err := hd.verify(statePoint, headers); err != nil {
 					hd.logger.Debug(
 						fmt.Sprintf(
-							"[%s] bad headers received from peer for state point - penalizing",
+							"[%s] bad headers received from peer for state point - penalizing and will try again",
 							headerDownloaderLogPrefix,
 						),
 						"start", statePoint.startBlock,
@@ -119,30 +144,21 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 					)
 
 					hd.sentry.Penalize(peerID)
-					// no error since we handle gaps outside of this goroutine at a later point
-					// and cache downloaded but unsaved headers
-					return nil
+					return
 				}
 
-				hd.statePointHeadersMemo[statePoint.rootHash] = headers
+				hd.statePointHeadersMemo.Add(statePoint.rootHash, headers)
 				headerBatches[i] = headers
-				return nil
-			})
+			}(i, point, peers[i].ID)
 		}
 
-		if err = g.Wait(); err != nil {
-			hd.logger.Debug(
-				fmt.Sprintf("[%s] issue fetching headers in parallel, trying again", headerDownloaderLogPrefix),
-				"err", err,
-			)
-		}
-
+		wg.Wait()
 		headers := make([]*types.Header, 0, int(maxStatePointLength)*peerCount)
 		gapIndex := -1
 		for i, headerBatch := range headerBatches {
 			if len(headerBatch) == 0 {
 				hd.logger.Debug(
-					fmt.Sprintf("[%s] gap detected, trying again", headerDownloaderLogPrefix),
+					fmt.Sprintf("[%s] no headers, will try again", headerDownloaderLogPrefix),
 					"start", statePointsBatch[i].startBlock,
 					"end", statePointsBatch[i].endBlock,
 					"rootHash", statePointsBatch[i].rootHash,
@@ -154,13 +170,12 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 			}
 
 			headers = append(headers, headerBatch...)
-			delete(hd.statePointHeadersMemo, statePointsBatch[i].rootHash)
 		}
 
 		if gapIndex >= 0 {
-			statePoints = statePoints[:gapIndex]
+			statePoints = statePoints[gapIndex:]
 		} else {
-			statePoints = statePoints[:len(statePointsBatch)]
+			statePoints = statePoints[len(statePointsBatch):]
 		}
 
 		dbWriteStartTime := time.Now()
@@ -178,23 +193,22 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 	return nil
 }
 
-func (hd *HeaderDownloader) findEnoughPeersWithMinBlock(num uint64) ([]*erigonlibtypes.PeerInfo, error) {
-	hd.logger.Debug("finding enough peers", "minBlock", num)
+// choosePeers assumes peers are sorted in ascending order based on block num
+func (hd *HeaderDownloader) choosePeers(peers peerinfo.PeersWithBlockNumInfo, statePoints statePoints) peerinfo.PeersWithBlockNumInfo {
+	var peersIdx int
+	chosenPeers := make(peerinfo.PeersWithBlockNumInfo, 0, len(peers))
+	for _, statePoint := range statePoints {
+		if peersIdx >= len(peers) {
+			break
+		}
 
-	peers := hd.sentry.PeersWithMinBlock(num)
-	if len(peers) >= minPeers {
-		return peers, nil
+		peer := peers[peersIdx]
+		if peer.BlockNum.Cmp(statePoint.endBlock) > -1 {
+			chosenPeers = append(chosenPeers, peer)
+		}
+
+		peersIdx++
 	}
 
-	if num < minBlockDecreaseQuotient {
-		return nil, fmt.Errorf(
-			"could not find enough peers with min block: minPeers=%d, blockNum=%d, decreaseQuotient=%d",
-			minPeers,
-			num,
-			minBlockDecreaseQuotient,
-		)
-	}
-
-	num = num - num/minBlockDecreaseQuotient
-	return hd.findEnoughPeersWithMinBlock(num)
+	return chosenPeers
 }
