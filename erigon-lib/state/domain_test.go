@@ -1662,7 +1662,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	keySize1 := uint64(length.Addr)
 	keySize2 := uint64(length.Addr + length.Hash)
 	totalTx := uint64(5000)
-	keyTxsLimit := uint64(50)
+	keyTxsLimit := uint64(150)
 	keyLimit := uint64(2000)
 
 	// put some kvs
@@ -1705,7 +1705,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	dc = d.MakeContext()
 	defer dc.Close()
 
-	ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*10)
+	ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
 	err = dc.Prune(ct, rwTx, 0, 0, aggStep, math.MaxUint64, time.NewTicker(time.Second))
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
