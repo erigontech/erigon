@@ -316,6 +316,9 @@ func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
 func (ac *AggregatorV3Context) Files() (res []string) {
+	if ac == nil {
+		return res
+	}
 	res = append(res, ac.account.Files()...)
 	res = append(res, ac.storage.Files()...)
 	res = append(res, ac.code.Files()...)
@@ -693,6 +696,9 @@ func (a *AggregatorV3) integrateFiles(sf AggV3StaticFiles, txNumFrom, txNumTo ui
 }
 
 func (a *AggregatorV3) HasNewFrozenFiles() bool {
+	if a == nil {
+		return false
+	}
 	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
