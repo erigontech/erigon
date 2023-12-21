@@ -582,7 +582,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
+	_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -619,10 +619,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-	spec.DisallowDataDownload = true
-	t, _, err := d.torrentClient.AddTorrentSpec(spec)
+	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.webseeds)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return nil
 	}
 	d.wg.Add(1)
 	go func(t *torrent.Torrent) {
@@ -672,7 +674,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		err := addTorrentFile(d.ctx, ts, d.torrentClient, d.webseeds)
+		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.webseeds)
 		if err != nil {
 			return err
 		}
