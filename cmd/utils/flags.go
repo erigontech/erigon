@@ -27,9 +27,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cl/clparams"
-
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -40,11 +43,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	common2 "github.com/ledgerwatch/erigon/common"
@@ -60,6 +60,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 // These are all the command line flags we support.
@@ -96,7 +97,7 @@ var (
 	}
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
-		Usage: "Name of the testnet to join",
+		Usage: "name of the network to join",
 		Value: networkname.MainnetChainName,
 	}
 	IdentityFlag = cli.StringFlag{
@@ -147,6 +148,11 @@ var (
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
 		Usage: "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+	}
+	TxPoolGossipDisableFlag = cli.BoolFlag{
+		Name:  "txpool.gossip.disable",
+		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
+		Value: txpoolcfg.DefaultConfig.NoGossip,
 	}
 	TxPoolLocalsFlag = cli.StringFlag{
 		Name:  "txpool.locals",
@@ -740,7 +746,7 @@ var (
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
 		Usage: "Runtime limit of chaindata db size. You can change value of this flag at any time.",
-		Value: (3 * datasize.TB).String(),
+		Value: (12 * datasize.TB).String(),
 	}
 	ForcePartialCommitFlag = cli.BoolFlag{
 		Name:  "force.partial.commit",
@@ -846,11 +852,6 @@ var (
 		Usage: "Comma separated list of support session ids to connect to",
 	}
 
-	SilkwormPathFlag = cli.StringFlag{
-		Name:  "silkworm.path",
-		Usage: "Path to the Silkworm library",
-		Value: "",
-	}
 	SilkwormExecutionFlag = cli.BoolFlag{
 		Name:  "silkworm.exec",
 		Usage: "Enable Silkworm block execution",
@@ -863,6 +864,7 @@ var (
 		Name:  "silkworm.sentry",
 		Usage: "Enable embedded Silkworm Sentry service",
 	}
+
 	BeaconAPIFlag = cli.BoolFlag{
 		Name:  "beacon.api",
 		Usage: "Enable beacon API",
@@ -897,6 +899,21 @@ var (
 		Name:  "beacon.api.port",
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
+	}
+	RPCSlowFlag = cli.DurationFlag{
+		Name:  "rpc.slow",
+		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
+		Value: 0,
+	}
+	CaplinBackfillingFlag = cli.BoolFlag{
+		Name:  "caplin.backfilling",
+		Usage: "sets whether backfilling is enabled for caplin",
+		Value: false,
+	}
+	CaplinArchiveFlag = cli.BoolFlag{
+		Name:  "caplin.archive",
+		Usage: "enables archival node in caplin (Experimental, does not work)",
+		Value: false,
 	}
 )
 
@@ -1527,11 +1544,13 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
 }
 
+func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name)
+	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+}
+
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
-	if ctx.IsSet(SilkwormExecutionFlag.Name) {
-		cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
-	}
+	cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
 	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
 }
@@ -1645,6 +1664,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setBorConfig(ctx, cfg)
 	setSilkworm(ctx, cfg)
 	setBeaconAPI(ctx, cfg)
+	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
@@ -1724,6 +1744,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
+	}
+
+	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
+		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
 }
 

@@ -42,7 +42,6 @@ func UnmarshalSSZ(buf []byte, version int, schema ...interface{}) (err error) {
 	// 		err = fmt.Errorf("panic while decoding: %v", err2)
 	// 	}
 	// }()
-
 	position := 0
 	offsets := []int{}
 	dynamicObjs := []SizedObjectSSZ{}

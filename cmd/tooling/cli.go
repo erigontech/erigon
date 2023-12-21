@@ -112,7 +112,7 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 }
 
 func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, dirs datadir.Dirs) error {
-	rawDB := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
@@ -130,7 +130,7 @@ func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 		return err
 	}
 
-	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {

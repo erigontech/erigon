@@ -79,8 +79,7 @@ func (s *Set) Collect(ch chan<- prometheus.Metric) {
 //
 // The returned histogram is safe to use from concurrent goroutines.
 func (s *Set) NewHistogram(name string, help ...string) (prometheus.Histogram, error) {
-	h, err := NewHistogram(name, help...)
-
+	h, err := newHistogram(name, help...)
 	if err != nil {
 		return nil, err
 	}
@@ -89,9 +88,8 @@ func (s *Set) NewHistogram(name string, help ...string) (prometheus.Histogram, e
 	return h, nil
 }
 
-func NewHistogram(name string, help ...string) (prometheus.Histogram, error) {
+func newHistogram(name string, help ...string) (prometheus.Histogram, error) {
 	name, labels, err := parseMetric(name)
-
 	if err != nil {
 		return nil, err
 	}
@@ -116,15 +114,14 @@ func NewHistogram(name string, help ...string) (prometheus.Histogram, error) {
 // The returned histogram is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewHistogram instead of GetOrCreateHistogram.
-func (s *Set) GetOrCreateHistogram(name string, help ...string) prometheus.Histogram {
+func (s *Set) GetOrCreateHistogram(name string, help ...string) (prometheus.Histogram, error) {
 	s.mu.Lock()
 	nm := s.m[name]
 	s.mu.Unlock()
 	if nm == nil {
-		metric, err := NewHistogram(name, help...)
-
+		metric, err := newHistogram(name, help...)
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
+			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
 		}
 
 		nmNew := &namedMetric{
@@ -141,11 +138,13 @@ func (s *Set) GetOrCreateHistogram(name string, help ...string) prometheus.Histo
 		}
 		s.mu.Unlock()
 	}
+
 	h, ok := nm.metric.(prometheus.Histogram)
 	if !ok {
-		panic(fmt.Errorf("BUG: metric %q isn't a Histogram. It is %T", name, nm.metric))
+		return nil, fmt.Errorf("metric %q isn't a Histogram. It is %T", name, nm.metric)
 	}
-	return h
+
+	return h, nil
 }
 
 // NewCounter registers and returns new counter with the given name in the s.
@@ -159,8 +158,7 @@ func (s *Set) GetOrCreateHistogram(name string, help ...string) prometheus.Histo
 //
 // The returned counter is safe to use from concurrent goroutines.
 func (s *Set) NewCounter(name string, help ...string) (prometheus.Counter, error) {
-	c, err := NewCounter(name, help...)
-
+	c, err := newCounter(name, help...)
 	if err != nil {
 		return nil, err
 	}
@@ -169,9 +167,8 @@ func (s *Set) NewCounter(name string, help ...string) (prometheus.Counter, error
 	return c, nil
 }
 
-func NewCounter(name string, help ...string) (prometheus.Counter, error) {
+func newCounter(name string, help ...string) (prometheus.Counter, error) {
 	name, labels, err := parseMetric(name)
-
 	if err != nil {
 		return nil, err
 	}
@@ -196,16 +193,15 @@ func NewCounter(name string, help ...string) (prometheus.Counter, error) {
 // The returned counter is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewCounter instead of GetOrCreateCounter.
-func (s *Set) GetOrCreateCounter(name string, help ...string) prometheus.Counter {
+func (s *Set) GetOrCreateCounter(name string, help ...string) (prometheus.Counter, error) {
 	s.mu.Lock()
 	nm := s.m[name]
 	s.mu.Unlock()
 	if nm == nil {
 		// Slow path - create and register missing counter.
-		metric, err := NewCounter(name, help...)
-
+		metric, err := newCounter(name, help...)
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
+			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
 		}
 
 		nmNew := &namedMetric{
@@ -221,15 +217,16 @@ func (s *Set) GetOrCreateCounter(name string, help ...string) prometheus.Counter
 		}
 		s.mu.Unlock()
 	}
+
 	c, ok := nm.metric.(prometheus.Counter)
 	if !ok {
-		panic(fmt.Errorf("BUG: metric %q isn't a Counter. It is %T", name, nm.metric))
+		return nil, fmt.Errorf("metric %q isn't a Counter. It is %T", name, nm.metric)
 	}
-	return c
+
+	return c, nil
 }
 
-// NewGauge registers and returns gauge with the given name in s, which calls f
-// to obtain gauge value.
+// NewGauge registers and returns gauge with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
 // For instance,
@@ -242,8 +239,7 @@ func (s *Set) GetOrCreateCounter(name string, help ...string) prometheus.Counter
 //
 // The returned gauge is safe to use from concurrent goroutines.
 func (s *Set) NewGauge(name string, help ...string) (prometheus.Gauge, error) {
-	g, err := NewGauge(name, help...)
-
+	g, err := newGauge(name, help...)
 	if err != nil {
 		return nil, err
 	}
@@ -252,10 +248,8 @@ func (s *Set) NewGauge(name string, help ...string) (prometheus.Gauge, error) {
 	return g, nil
 }
 
-func NewGauge(name string, help ...string) (prometheus.Gauge, error) {
-
+func newGauge(name string, help ...string) (prometheus.Gauge, error) {
 	name, labels, err := parseMetric(name)
-
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +261,7 @@ func NewGauge(name string, help ...string) (prometheus.Gauge, error) {
 	}), nil
 }
 
-// GetOrCreateGaugeFunc returns registered gauge with the given name in s
+// GetOrCreateGauge returns registered gauge with the given name in s
 // or creates new gauge if s doesn't contain gauge with the given name.
 //
 // name must be valid Prometheus-compatible metric with possible labels.
@@ -280,16 +274,15 @@ func NewGauge(name string, help ...string) (prometheus.Gauge, error) {
 // The returned gauge is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewGauge instead of GetOrCreateGauge.
-func (s *Set) GetOrCreateGauge(name string, help ...string) prometheus.Gauge {
+func (s *Set) GetOrCreateGauge(name string, help ...string) (prometheus.Gauge, error) {
 	s.mu.Lock()
 	nm := s.m[name]
 	s.mu.Unlock()
 	if nm == nil {
 		// Slow path - create and register missing gauge.
-		metric, err := NewGauge(name, help...)
-
+		metric, err := newGauge(name, help...)
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
+			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
 		}
 
 		nmNew := &namedMetric{
@@ -305,102 +298,13 @@ func (s *Set) GetOrCreateGauge(name string, help ...string) prometheus.Gauge {
 		}
 		s.mu.Unlock()
 	}
+
 	g, ok := nm.metric.(prometheus.Gauge)
 	if !ok {
-		panic(fmt.Errorf("BUG: metric %q isn't a Gauge. It is %T", name, nm.metric))
-	}
-	return g
-}
-
-// NewGaugeFunc registers and returns gauge with the given name in s, which calls f
-// to obtain gauge value.
-//
-// name must be valid Prometheus-compatible metric with possible labels.
-// For instance,
-//
-//   - foo
-//   - foo{bar="baz"}
-//   - foo{bar="baz",aaa="b"}
-//
-// f must be safe for concurrent calls.
-//
-// The returned gauge is safe to use from concurrent goroutines.
-func (s *Set) NewGaugeFunc(name string, f func() float64, help ...string) (prometheus.GaugeFunc, error) {
-	g, err := NewGaugeFunc(name, f, help...)
-
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("metric %q isn't a Gauge. It is %T", name, nm.metric)
 	}
 
-	s.registerMetric(name, g)
 	return g, nil
-}
-
-func NewGaugeFunc(name string, f func() float64, help ...string) (prometheus.GaugeFunc, error) {
-	if f == nil {
-		return nil, fmt.Errorf("BUG: f cannot be nil")
-	}
-
-	name, labels, err := parseMetric(name)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name:        name,
-		Help:        strings.Join(help, " "),
-		ConstLabels: labels,
-	}, f), nil
-}
-
-// GetOrCreateGaugeFunc returns registered gauge with the given name in s
-// or creates new gauge if s doesn't contain gauge with the given name.
-//
-// name must be valid Prometheus-compatible metric with possible labels.
-// For instance,
-//
-//   - foo
-//   - foo{bar="baz"}
-//   - foo{bar="baz",aaa="b"}
-//
-// The returned gauge is safe to use from concurrent goroutines.
-//
-// Performance tip: prefer NewGauge instead of GetOrCreateGauge.
-func (s *Set) GetOrCreateGaugeFunc(name string, f func() float64, help ...string) prometheus.GaugeFunc {
-	s.mu.Lock()
-	nm := s.m[name]
-	s.mu.Unlock()
-	if nm == nil {
-		// Slow path - create and register missing gauge.
-		if f == nil {
-			panic(fmt.Errorf("BUG: f cannot be nil"))
-		}
-
-		metric, err := NewGaugeFunc(name, f, help...)
-
-		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
-		}
-
-		nmNew := &namedMetric{
-			name:   name,
-			metric: metric,
-		}
-		s.mu.Lock()
-		nm = s.m[name]
-		if nm == nil {
-			nm = nmNew
-			s.m[name] = nm
-			s.a = append(s.a, nm)
-		}
-		s.mu.Unlock()
-	}
-	g, ok := nm.metric.(prometheus.GaugeFunc)
-	if !ok {
-		panic(fmt.Errorf("BUG: metric %q isn't a Gauge. It is %T", name, nm.metric))
-	}
-	return g
 }
 
 const defaultSummaryWindow = 5 * time.Minute
@@ -418,34 +322,11 @@ var defaultSummaryQuantiles = map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.97: 0.
 //
 // The returned summary is safe to use from concurrent goroutines.
 func (s *Set) NewSummary(name string, help ...string) (prometheus.Summary, error) {
-	sm, err := NewSummary(name, defaultSummaryWindow, defaultSummaryQuantiles, help...)
-
-	if err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	// defer will unlock in case of panic
-	// checks in tests
-	defer s.mu.Unlock()
-
-	s.registerMetric(name, sm)
-	return sm, nil
+	return s.NewSummaryExt(name, defaultSummaryWindow, defaultSummaryQuantiles, help...)
 }
 
-// NewSummary creates and returns new summary in s with the given name,
-// window and quantiles.
-//
-// name must be valid Prometheus-compatible metric with possible labels.
-// For instance,
-//
-//   - foo
-//   - foo{bar="baz"}
-//   - foo{bar="baz",aaa="b"}
-//
-// The returned summary is safe to use from concurrent goroutines.
-func NewSummary(name string, window time.Duration, quantiles map[float64]float64, help ...string) (prometheus.Summary, error) {
+func newSummary(name string, window time.Duration, quantiles map[float64]float64, help ...string) (prometheus.Summary, error) {
 	name, labels, err := parseMetric(name)
-
 	if err != nil {
 		return nil, err
 	}
@@ -455,6 +336,7 @@ func NewSummary(name string, window time.Duration, quantiles map[float64]float64
 		ConstLabels: labels,
 		Objectives:  quantiles,
 		MaxAge:      window,
+		Help:        strings.Join(help, " "),
 	}), nil
 }
 
@@ -471,8 +353,29 @@ func NewSummary(name string, window time.Duration, quantiles map[float64]float64
 // The returned summary is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewSummary instead of GetOrCreateSummary.
-func (s *Set) GetOrCreateSummary(name string, help ...string) prometheus.Summary {
+func (s *Set) GetOrCreateSummary(name string, help ...string) (prometheus.Summary, error) {
 	return s.GetOrCreateSummaryExt(name, defaultSummaryWindow, defaultSummaryQuantiles, help...)
+}
+
+// NewSummaryExt creates and returns new summary in s with the given name,
+// window and quantiles.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned summary is safe to use from concurrent goroutines.
+func (s *Set) NewSummaryExt(name string, window time.Duration, quantiles map[float64]float64, help ...string) (prometheus.Summary, error) {
+	metric, err := newSummary(name, window, quantiles, help...)
+	if err != nil {
+		return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
+	}
+
+	s.registerMetric(name, metric)
+	return metric, nil
 }
 
 // GetOrCreateSummaryExt returns registered summary with the given name,
@@ -489,16 +392,15 @@ func (s *Set) GetOrCreateSummary(name string, help ...string) prometheus.Summary
 // The returned summary is safe to use from concurrent goroutines.
 //
 // Performance tip: prefer NewSummaryExt instead of GetOrCreateSummaryExt.
-func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles map[float64]float64, help ...string) prometheus.Summary {
+func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles map[float64]float64, help ...string) (prometheus.Summary, error) {
 	s.mu.Lock()
 	nm := s.m[name]
 	s.mu.Unlock()
 	if nm == nil {
 		// Slow path - create and register missing summary.
-		metric, err := NewSummary(name, window, quantiles, help...)
-
+		metric, err := newSummary(name, window, quantiles, help...)
 		if err != nil {
-			panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
+			return nil, fmt.Errorf("invalid metric name %q: %w", name, err)
 		}
 
 		nmNew := &namedMetric{
@@ -514,21 +416,17 @@ func (s *Set) GetOrCreateSummaryExt(name string, window time.Duration, quantiles
 		}
 		s.mu.Unlock()
 	}
+
 	sm, ok := nm.metric.(prometheus.Summary)
 	if !ok {
-		panic(fmt.Errorf("BUG: metric %q isn't a Summary. It is %T", name, nm.metric))
+		return nil, fmt.Errorf("metric %q isn't a Summary. It is %T", name, nm.metric)
 	}
 
-	return sm
+	return sm, nil
 }
 
 func (s *Set) registerMetric(name string, m prometheus.Metric) {
-	if _, _, err := parseMetric(name); err != nil {
-		panic(fmt.Errorf("BUG: invalid metric name %q: %w", name, err))
-	}
 	s.mu.Lock()
-	// defer will unlock in case of panic
-	// checks in test
 	defer s.mu.Unlock()
 	s.mustRegisterLocked(name, m)
 }
@@ -547,7 +445,7 @@ func (s *Set) mustRegisterLocked(name string, m prometheus.Metric) {
 		s.a = append(s.a, nm)
 	}
 	if ok {
-		panic(fmt.Errorf("BUG: metric %q is already registered", name))
+		panic(fmt.Errorf("metric %q is already registered", name))
 	}
 }
 
@@ -577,7 +475,7 @@ func (s *Set) unregisterMetricLocked(nm *namedMetric) bool {
 				return
 			}
 		}
-		panic(fmt.Errorf("BUG: cannot find metric %q in the list of registered metrics", name))
+		panic(fmt.Errorf("cannot find metric %q in the list of registered metrics", name))
 	}
 
 	// remove metric from s.a

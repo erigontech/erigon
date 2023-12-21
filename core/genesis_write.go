@@ -380,6 +380,7 @@ func GoerliGenesisBlock() *types.Genesis {
 	}
 }
 
+// MumbaiGenesisBlock returns the Amoy network genesis block.
 func MumbaiGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.MumbaiChainConfig,
@@ -390,6 +391,20 @@ func MumbaiGenesisBlock() *types.Genesis {
 		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
 		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
 		Alloc:      readPrealloc("allocs/mumbai.json"),
+	}
+}
+
+// AmoyGenesisBlock returns the Amoy network genesis block.
+func AmoyGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.AmoyChainConfig,
+		Nonce:      0,
+		Timestamp:  1700225065,
+		GasLimit:   10000000,
+		Difficulty: big.NewInt(1),
+		Mixhash:    libcommon.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000000"),
+		Coinbase:   libcommon.HexToAddress("0x0000000000000000000000000000000000000000"),
+		Alloc:      readPrealloc("allocs/amoy.json"),
 	}
 }
 
@@ -540,6 +555,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
+
 		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 		var tx kv.RwTx
@@ -649,6 +665,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return GoerliGenesisBlock()
 	case networkname.MumbaiChainName:
 		return MumbaiGenesisBlock()
+	case networkname.AmoyChainName:
+		return AmoyGenesisBlock()
 	case networkname.BorMainnetChainName:
 		return BorMainnetGenesisBlock()
 	case networkname.BorDevnetChainName:

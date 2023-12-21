@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"errors"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -230,11 +231,15 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	defer e.semaphore.Release(1)
 	// Run the forkchoice
 	if err := e.executionPipeline.Run(e.db, nil, true); err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
+		}
 		return
 	}
 	if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
+		if !errors.Is(err, context.Canceled) {
+			e.logger.Error("Could not start execution service", "err", err)
+		}
 		return
 	}
 }

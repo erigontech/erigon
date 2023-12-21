@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"path"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -28,6 +29,11 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
+
+type CaplinConfig struct {
+	Backfilling bool
+	Archive     bool
+}
 
 type NetworkType int
 
@@ -45,6 +51,11 @@ const (
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 10 * time.Second
 	RespTimeout    time.Duration = 15 * time.Second
+)
+
+const (
+	SubDivisionFolderSize = 10_000
+	SlotsPerDump          = 1024
 )
 
 var (
@@ -482,6 +493,24 @@ type BeaconChainConfig struct {
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
+}
+
+func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
+	return slot - (slot % b.SlotsPerEpoch)
+}
+
+func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
+	slotsPerSyncCommitteePeriod := b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod
+	return slot - (slot % slotsPerSyncCommitteePeriod)
+}
+
+func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
+	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
+}
+
+func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
+	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
+	return slot - (slot % p)
 }
 
 func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
@@ -941,6 +970,22 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 	panic("invalid version")
 }
 
+func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
+	switch v {
+	case Phase0Version:
+		return 0
+	case AltairVersion:
+		return b.AltairForkEpoch
+	case BellatrixVersion:
+		return b.BellatrixForkEpoch
+	case CapellaVersion:
+		return b.CapellaForkEpoch
+	case DenebVersion:
+		return b.DenebForkEpoch
+	}
+	panic("invalid version")
+}
+
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
 	genesisConfig := GenesisConfigs[net]
@@ -1007,4 +1052,9 @@ func EmbeddedEnabledByDefault(id uint64) bool {
 
 func SupportBackfilling(networkId uint64) bool {
 	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork) || networkId == uint64(GnosisNetwork)
+}
+
+func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
+	folderPath := path.Clean(fmt.Sprintf("%d", slot/SubDivisionFolderSize))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }

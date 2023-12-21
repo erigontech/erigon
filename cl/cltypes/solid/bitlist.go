@@ -1,9 +1,10 @@
 package solid
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
+	"encoding/json"
 	"math/bits"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -39,6 +40,10 @@ func BitlistFromBytes(xs []byte, c int) *BitList {
 		l: len(xs),
 		c: c,
 	}
+}
+
+func (u *BitList) Bytes() []byte {
+	return u.u[:u.l]
 }
 
 // Clear wipes the BitList clean, just like the memory wipe spell from a particularly forgetful wizard.
@@ -115,7 +120,7 @@ func (u *BitList) HashSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
-	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
+	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
 func (arr *BitList) getBaseHash(xs []byte, depth uint8) error {
@@ -151,7 +156,8 @@ func (u *BitList) EncodeSSZ(dst []byte) ([]byte, error) {
 // DecodeSSZ replaces the underlying byte slice of the BitList with a copy of the input byte slice.
 // It then updates the length of the BitList to match the length of the new byte slice.
 func (u *BitList) DecodeSSZ(dst []byte, _ int) error {
-	u.u = common.CopyBytes(dst)
+	u.u = make([]byte, len(dst))
+	copy(u.u, dst)
 	u.l = len(dst)
 	return nil
 }
@@ -186,4 +192,20 @@ func (u *BitList) Bits() int {
 	// bits in the preceding bytes plus the position of the most significant
 	// bit. Subtract this value by 1 to determine the length of the bitlist.
 	return 8*(u.l-1) + msb - 1
+}
+
+func (u *BitList) MarshalJSON() ([]byte, error) {
+	enc, err := u.EncodeSSZ(nil)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(hexutility.Bytes(enc))
+}
+
+func (u *BitList) UnmarshalJSON(input []byte) error {
+	var hex hexutility.Bytes
+	if err := json.Unmarshal(input, &hex); err != nil {
+		return err
+	}
+	return u.DecodeSSZ(hex, 0)
 }

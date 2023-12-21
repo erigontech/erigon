@@ -76,7 +76,7 @@ func NewEngineServer(ctx context.Context, logger log.Logger, config *chain.Confi
 	}
 }
 
-func (e *EngineServer) Start(httpConfig httpcfg.HttpCfg, db kv.RoDB, blockReader services.FullBlockReader,
+func (e *EngineServer) Start(httpConfig *httpcfg.HttpCfg, db kv.RoDB, blockReader services.FullBlockReader,
 	filters *rpchelper.Filters, stateCache kvcache.Cache, agg *libstate.AggregatorV3, engineReader consensus.EngineReader,
 	eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient) {
 	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, agg, httpConfig.WithDatadir, httpConfig.EvmCallTimeout, engineReader, httpConfig.Dirs)
@@ -452,24 +452,19 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	if payloadAttributes != nil {
+		if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+			return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
+		}
+		if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+			return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+		}
+
 		timestamp := uint64(payloadAttributes.Timestamp)
 		if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-			if payloadAttributes.ParentBeaconBlockRoot == nil {
-				return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
-			}
 			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 		}
 		if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
-			if payloadAttributes.ParentBeaconBlockRoot != nil {
-				return nil, &rpc.InvalidParamsError{Message: "Unexpected Beacon Root"}
-			}
 			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
-
-		if s.config.IsCancun(timestamp) && version >= clparams.DenebVersion {
-			if payloadAttributes.ParentBeaconBlockRoot == nil {
-				return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
-			}
 		}
 	}
 
@@ -483,19 +478,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	headHeader := s.chainRW.GetHeaderByHash(forkchoiceState.HeadHash)
-
-	if headHeader.Hash() != forkchoiceState.HeadHash {
-		// Per Item 2 of https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.9/src/engine/specification.md#specification-1:
-		// Client software MAY skip an update of the forkchoice state and
-		// MUST NOT begin a payload build process if forkchoiceState.headBlockHash doesn't reference a leaf of the block tree.
-		// That is, the block referenced by forkchoiceState.headBlockHash is neither the head of the canonical chain nor a block at the tip of any other chain.
-		// In the case of such an event, client software MUST return
-		// {payloadStatus: {status: VALID, latestValidHash: forkchoiceState.headBlockHash, validationError: null}, payloadId: null}.
-
-		s.logger.Warn("Skipping payload building because forkchoiceState.headBlockHash is not the head of the canonical chain",
-			"forkChoice.HeadBlockHash", forkchoiceState.HeadHash, "headHeader.Hash", headHeader.Hash())
-		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
-	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
 	if headHeader.Time >= timestamp {
@@ -534,13 +516,15 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 }
 
 func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []libcommon.Hash, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	bodies := s.chainRW.GetBodiesByHases(request)
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV1, 0, len(request))
-	for idx := range request {
-		resp = append(resp, extractPayloadBodyFromBody(bodies[idx]))
+	bodies, err := s.chainRW.GetBodiesByHashes(request)
+	if err != nil {
+		return nil, err
 	}
 
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx, body := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(body)
+	}
 	return resp, nil
 }
 
@@ -558,13 +542,15 @@ func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayl
 }
 
 func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64, _ clparams.StateVersion) ([]*engine_types.ExecutionPayloadBodyV1, error) {
-	bodies := s.chainRW.GetBodiesByRange(start, count)
-
-	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
-	for idx := range bodies {
-		resp[idx] = extractPayloadBodyFromBody(bodies[idx])
+	bodies, err := s.chainRW.GetBodiesByRange(start, count)
+	if err != nil {
+		return nil, err
 	}
 
+	resp := make([]*engine_types.ExecutionPayloadBodyV1, len(bodies))
+	for idx, body := range bodies {
+		resp[idx] = extractPayloadBodyFromBody(body)
+	}
 	return resp, nil
 }
 

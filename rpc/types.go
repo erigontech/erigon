@@ -199,6 +199,8 @@ func AsBlockNumber(no interface{}) BlockNumber {
 		return no
 	case *BlockNumber:
 		return *no
+	case int:
+		return BlockNumber(no)
 	case int64:
 		return BlockNumber(no)
 	case uint64:

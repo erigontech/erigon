@@ -16,13 +16,10 @@ type checkpointService interface {
 
 var (
 	//Metrics for collecting the whitelisted milestone number
-	whitelistedCheckpointNumberMeter = metrics.GetOrCreateCounter("chain_checkpoint_latest", true)
+	whitelistedCheckpointNumberMeter = metrics.GetOrCreateGauge("chain_checkpoint_latest")
 
 	//Metrics for collecting the number of invalid chains received
-	CheckpointChainMeter = metrics.GetOrCreateCounter("chain_checkpoint_isvalidchain")
-
-	//Metrics for collecting the number of valid peers received
-	CheckpointPeerMeter = metrics.GetOrCreateCounter("chain_checkpoint_isvalidpeer")
+	checkpointChainMeter = metrics.GetOrCreateGauge("chain_checkpoint_isvalidchain")
 )
 
 // IsValidChain checks the validity of chain by comparing it
@@ -34,9 +31,9 @@ func (w *checkpoint) IsValidChain(currentHeader uint64, chain []*types.Header) b
 	res := w.finality.IsValidChain(currentHeader, chain)
 
 	if res {
-		CheckpointChainMeter.Add(1)
+		checkpointChainMeter.Inc()
 	} else {
-		CheckpointPeerMeter.Add(-1)
+		checkpointChainMeter.Dec()
 	}
 
 	return res
@@ -48,5 +45,5 @@ func (w *checkpoint) Process(block uint64, hash common.Hash) {
 
 	w.finality.Process(block, hash)
 
-	whitelistedCheckpointNumberMeter.Set(block)
+	whitelistedCheckpointNumberMeter.SetUint64(block)
 }

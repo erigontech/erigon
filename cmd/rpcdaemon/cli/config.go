@@ -142,6 +142,7 @@ func RootCommand() (*cobra.Command, *httpcfg.HttpCfg) {
 	rootCmd.PersistentFlags().BoolVar(&cfg.AllowUnprotectedTxs, utils.AllowUnprotectedTxs.Name, utils.AllowUnprotectedTxs.Value, utils.AllowUnprotectedTxs.Usage)
 	rootCmd.PersistentFlags().IntVar(&cfg.MaxGetProofRewindBlockCount, utils.RpcMaxGetProofRewindBlockCount.Name, utils.RpcMaxGetProofRewindBlockCount.Value, utils.RpcMaxGetProofRewindBlockCount.Usage)
 	rootCmd.PersistentFlags().Uint64Var(&cfg.OtsMaxPageSize, utils.OtsSearchMaxCapFlag.Name, utils.OtsSearchMaxCapFlag.Value, utils.OtsSearchMaxCapFlag.Usage)
+	rootCmd.PersistentFlags().DurationVar(&cfg.RPCSlowLogThreshold, utils.RPCSlowFlag.Name, utils.RPCSlowFlag.Value, utils.RPCSlowFlag.Usage)
 
 	if err := rootCmd.MarkPersistentFlagFilename("rpc.accessList", "json"); err != nil {
 		panic(err)
@@ -293,7 +294,7 @@ func EmbeddedServices(ctx context.Context,
 
 // RemoteServices - use when RPCDaemon run as independent process. Still it can use --datadir flag to enable
 // `cfg.WithDatadir` (mode when it on 1 machine with Erigon)
-func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
+func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger, rootCancel context.CancelFunc) (
 	db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient,
 	stateCache kvcache.Cache, blockReader services.FullBlockReader, engine consensus.EngineReader,
 	ff *rpchelper.Filters, agg *libstate.AggregatorV3, err error) {
@@ -538,7 +539,7 @@ func RemoteServices(ctx context.Context, cfg httpcfg.HttpCfg, logger log.Logger,
 	return db, eth, txPool, mining, stateCache, blockReader, engine, ff, agg, err
 }
 
-func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func StartRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if cfg.Enabled {
 		return startRegularRpcServer(ctx, cfg, rpcAPI, logger)
 	}
@@ -546,7 +547,7 @@ func StartRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, 
 	return nil
 }
 
-func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	if len(rpcAPI) == 0 {
 		return nil
 	}
@@ -558,10 +559,9 @@ func StartRpcServerWithJwtAuthentication(ctx context.Context, cfg httpcfg.HttpCf
 	return nil
 }
 
-func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
+func startRegularRpcServer(ctx context.Context, cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) error {
 	// register apis and create handler stack
-
-	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable, logger)
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 
 	allowListForRPC, err := parseAllowListForRPC(cfg.RpcAllowListFilePath)
 	if err != nil {
@@ -628,6 +628,27 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 	apiHandler, err := createHandler(cfg, defaultAPIList, httpHandler, wsHandler, graphQLHandler, nil)
 	if err != nil {
 		return err
+	}
+
+	// Separate Websocket handler if websocket port flag specified
+	if cfg.WebsocketEnabled && cfg.WebsocketPort != cfg.HttpPort {
+		wsEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.HttpListenAddress, cfg.WebsocketPort)
+		wsApiHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isWebsocket(r) {
+				wsHandler.ServeHTTP(w, r)
+			}
+		})
+		wsListener, wsAddr, err := node.StartHTTPEndpoint(wsEndpoint, &node.HttpEndpointConfig{Timeouts: cfg.HTTPTimeouts}, wsApiHandler)
+		if err != nil {
+			return fmt.Errorf("could not start separate Websocket RPC api at port %d: %w", cfg.WebsocketPort, err)
+		}
+		info = append(info, "websocket.url", wsAddr)
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = wsListener.Shutdown(shutdownCtx)
+			logger.Info("HTTP endpoint closed", "url", wsAddr)
+		}()
 	}
 
 	if cfg.HttpServerEnabled {
@@ -722,8 +743,8 @@ type engineInfo struct {
 	EngineHttpEndpoint string
 }
 
-func startAuthenticatedRpcServer(cfg httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*engineInfo, error) {
-	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable, logger)
+func startAuthenticatedRpcServer(cfg *httpcfg.HttpCfg, rpcAPI []rpc.API, logger log.Logger) (*engineInfo, error) {
+	srv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 
 	engineListener, engineSrv, engineHttpEndpoint, err := createEngineListener(cfg, rpcAPI, logger)
 	if err != nil {
@@ -759,7 +780,7 @@ func isWebsocket(r *http.Request) bool {
 // obtainJWTSecret loads the jwt-secret, either from the provided config,
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
-func obtainJWTSecret(cfg httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
+func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	// try reading from file
 	logger.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
 	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
@@ -785,7 +806,7 @@ func obtainJWTSecret(cfg httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	return jwtSecret, nil
 }
 
-func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
+func createHandler(cfg *httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Handler, wsHandler http.Handler, graphQLHandler http.Handler, jwtSecret []byte) (http.Handler, error) {
 	var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if cfg.GraphQLEnabled && graphql.ProcessGraphQLcheckIfNeeded(graphQLHandler, w, r) {
 			return
@@ -810,16 +831,16 @@ func createHandler(cfg httpcfg.HttpCfg, apiList []rpc.API, httpHandler http.Hand
 	return handler, nil
 }
 
-func createEngineListener(cfg httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
+func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.Logger) (*http.Server, *rpc.Server, string, error) {
 	engineHttpEndpoint := fmt.Sprintf("tcp://%s:%d", cfg.AuthRpcHTTPListenAddress, cfg.AuthRpcPort)
 
-	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, true, logger)
+	engineSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, true, logger, cfg.RPCSlowLogThreshold)
 
 	if err := node.RegisterApisFromWhitelist(engineApi, nil, engineSrv, true, logger); err != nil {
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
-	jwtSecret, err := obtainJWTSecret(cfg, logger)
+	jwtSecret, err := ObtainJWTSecret(cfg, logger)
 	if err != nil {
 		return nil, nil, "", err
 	}
