@@ -54,17 +54,19 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	db := mdbx.NewMDBX(logger).InMem(dirs.SnapDomain).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		if largeValues {
 			return kv.TableCfg{
-				keysTable:     kv.TableCfgItem{Flags: kv.DupSort},
-				indexTable:    kv.TableCfgItem{Flags: kv.DupSort},
-				valsTable:     kv.TableCfgItem{Flags: kv.DupSort},
-				settingsTable: kv.TableCfgItem{},
+				keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
+				indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
+				valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
+				settingsTable:         kv.TableCfgItem{},
+				kv.TblPruningProgress: kv.TableCfgItem{},
 			}
 		}
 		return kv.TableCfg{
-			keysTable:     kv.TableCfgItem{Flags: kv.DupSort},
-			indexTable:    kv.TableCfgItem{Flags: kv.DupSort},
-			valsTable:     kv.TableCfgItem{Flags: kv.DupSort},
-			settingsTable: kv.TableCfgItem{},
+			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
+			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
+			valsTable:             kv.TableCfgItem{Flags: kv.DupSort},
+			settingsTable:         kv.TableCfgItem{},
+			kv.TblPruningProgress: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
@@ -385,7 +387,7 @@ func TestHistory_PruneProgress(t *testing.T) {
 			require.NoError(err)
 			hc.Close()
 
-			iter, err := hc.HistoryRange(int(prunedTxNum), 0, order.Desc, -1, tx)
+			iter, err := hc.HistoryRange(int(prunedTxNum), 0, order.Asc, -1, tx)
 			require.NoError(err)
 			for iter.HasNext() {
 				k, _, err := iter.Next()

@@ -1131,19 +1131,17 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		}
 		defer valsCDup.Close()
 	}
-	prunedTxNum, prunedKey, err := GetExecV3PruneProgress(rwTx, hc.h.historyValsTable)
-	if err != nil {
-		hc.h.logger.Error("failed to restore history prune progress", "err", err)
-	}
-	if !omitProgress && prunedTxNum != 0 {
-		txFrom = prunedTxNum / hc.h.aggregationStep * hc.h.aggregationStep
-		txTo = txFrom + hc.h.aggregationStep
-		if prunedKey != nil {
-			seek = append(append(seek[:0], prunedKey...), hc.encodeTs(txFrom)...)
-		} else {
-			seek = append(seek[:0], hc.encodeTs(txFrom)...)
+	if !omitProgress {
+		prunedTxNum, _, err := GetExecV3PruneProgress(rwTx, hc.h.historyValsTable)
+		if err != nil {
+			hc.h.logger.Error("failed to restore history prune progress", "err", err)
+		}
+		if prunedTxNum != 0 {
+			txFrom = prunedTxNum / hc.h.aggregationStep * hc.h.aggregationStep
+			txTo = txFrom + hc.h.aggregationStep
 		}
 	}
+	seek = append(seek[:0], hc.encodeTs(txFrom)...)
 
 	var pruneSize uint64
 	for k, v, err := historyKeysCursor.Seek(seek); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {

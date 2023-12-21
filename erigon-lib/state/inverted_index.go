@@ -984,18 +984,20 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	}
 	defer keysCursor.Close()
 
-	pruneTxNum, _, err := GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
-	if err != nil {
-		return nil
-	}
-	if !omitProgress && pruneTxNum != 0 {
+	if !omitProgress {
+		pruneTxNum, _, err := GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
+		if err != nil {
+			ic.ii.logger.Error("failed to get index prune progress", "err", err)
+		}
 		// pruning previously stopped at purunedTxNum; txFrom < pruneTxNum < txTo of previous range.
 		// to preserve pruning range consistency need to store or reconstruct pruned range for given key
 		// for InvertedIndices storing pruned key does not make sense because keys are just txnums,
 		// any key will seek to first available txnum in db
-		prevPruneTxFrom := (pruneTxNum / ii.aggregationStep) * ii.aggregationStep
-		prevPruneTxTo := prevPruneTxFrom + ii.aggregationStep
-		txFrom, txTo = prevPruneTxFrom, prevPruneTxTo
+		if pruneTxNum != 0 {
+			prevPruneTxFrom := (pruneTxNum / ii.aggregationStep) * ii.aggregationStep
+			prevPruneTxTo := prevPruneTxFrom + ii.aggregationStep
+			txFrom, txTo = prevPruneTxFrom, prevPruneTxTo
+		}
 	}
 
 	var txKey [8]byte

@@ -44,8 +44,9 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	indexTable := "Index"
 	db := mdbx.NewMDBX(logger).InMem(dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
-			keysTable:  kv.TableCfgItem{Flags: kv.DupSort},
-			indexTable: kv.TableCfgItem{Flags: kv.DupSort},
+			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
+			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
+			kv.TblPruningProgress: kv.TableCfgItem{},
 		}
 	}).MustOpen()
 	tb.Cleanup(db.Close)
