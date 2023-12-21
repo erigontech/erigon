@@ -38,8 +38,6 @@ import (
 )
 
 const (
-	spanLength              = 6400 // Number of blocks in a span
-	zerothSpanEnd           = 255  // End block of 0th span
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
 	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
@@ -215,8 +213,8 @@ func BorHeimdallForward(
 		nextSpanId = lastSpanId + 1
 	}
 	var endSpanID uint64
-	if headNumber > zerothSpanEnd {
-		endSpanID = 2 + (headNumber-zerothSpanEnd)/spanLength
+	if bor.SpanIDAt(headNumber) > 0 {
+		endSpanID = bor.SpanIDAt(headNumber+1) + 1
 	}
 
 	lastBlockNum := s.BlockNumber
@@ -312,7 +310,8 @@ func BorHeimdallForward(
 
 			if !mine {
 				sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
-				if blockNum > zerothSpanEnd && ((blockNum+1)%sprintLength == 0) {
+				spanID := bor.SpanIDAt(blockNum)
+				if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
 					if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
 						return err
 					}
@@ -344,10 +343,7 @@ func checkHeaderExtraData(
 	header *types.Header,
 	config *chain.BorConfig,
 ) error {
-	var spanID uint64
-	if blockNum+1 > zerothSpanEnd {
-		spanID = 1 + (blockNum+1-zerothSpanEnd-1)/spanLength
-	}
+	spanID := bor.SpanIDAt(blockNum + 1)
 	spanBytes := chain.BorSpan(spanID)
 	var sp span.HeimdallSpan
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
@@ -795,10 +791,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 		return err
 	}
 	defer spanCursor.Close()
-	var lastSpanToKeep uint64
-	if u.UnwindPoint > zerothSpanEnd {
-		lastSpanToKeep = 1 + (u.UnwindPoint-zerothSpanEnd-1)/spanLength
-	}
+	lastSpanToKeep := bor.SpanIDAt(u.UnwindPoint)
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
 	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {

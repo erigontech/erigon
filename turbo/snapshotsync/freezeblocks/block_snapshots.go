@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"os"
 	"path"
 	"path/filepath"
@@ -1344,7 +1345,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
-		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, bor.SpanIDAt); err != nil {
 			return err
 		}
 	}
@@ -2209,19 +2210,20 @@ type Merger struct {
 	chainConfig     *chain.Config
 	chainDB         kv.RoDB
 	logger          log.Logger
+	noFsync         bool // fsync is enabled by default, but tests can manually disable
 }
 
 func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, logger log.Logger) *Merger {
 	return &Merger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, logger: logger}
 }
+func (m *Merger) DisableFsync() { m.noFsync = true }
 
 type Range struct {
 	from, to uint64
 }
 
-func (r Range) From() uint64             { return r.from }
-func (r Range) To() uint64               { return r.to }
-func (r Range) IsRecent(max uint64) bool { return max-r.to < snaptype.Erigon2MergeLimit }
+func (r Range) From() uint64 { return r.from }
+func (r Range) To() uint64   { return r.to }
 
 type Ranges []Range
 
@@ -2229,22 +2231,14 @@ func (r Ranges) String() string {
 	return fmt.Sprintf("%d", r)
 }
 
-var MergeSteps = []uint64{500_000, 100_000, 10_000}
-var RecentMergeSteps = []uint64{100_000, 10_000}
-
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		isRecent := r.IsRecent(maxBlockNum)
-		mergeLimit, mergeSteps := uint64(snaptype.Erigon2MergeLimit), MergeSteps
-		if isRecent {
-			mergeLimit, mergeSteps = snaptype.Erigon2RecentMergeLimit, RecentMergeSteps
-		}
-
+		mergeLimit := uint64(snaptype.Erigon2MergeLimit)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}
-		for _, span := range mergeSteps {
+		for _, span := range snaptype.MergeSteps {
 			if r.to%span != 0 {
 				continue
 			}
@@ -2359,6 +2353,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 			if !ok {
 				continue
 			}
+
 			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
@@ -2374,15 +2369,19 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 		snapshots.LogStat()
 
-		if err := onMerge(r); err != nil {
-			return err
+		if onMerge != nil {
+			if err := onMerge(r); err != nil {
+				return err
+			}
 		}
 		for _, t := range snaptype.BlockSnapshotTypes {
 			if len(toMerge[t]) == 0 {
 				continue
 			}
-			if err := onDelete(toMerge[t]); err != nil {
-				return err
+			if onDelete != nil {
+				if err := onDelete(toMerge[t]); err != nil {
+					return err
+				}
 			}
 		}
 		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
@@ -2413,6 +2412,9 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		return err
 	}
 	defer f.Close()
+	if m.noFsync {
+		f.DisableFsync()
+	}
 
 	_, fName := filepath.Split(targetFile)
 	m.logger.Debug("[snapshots] merge", "file", fName)
