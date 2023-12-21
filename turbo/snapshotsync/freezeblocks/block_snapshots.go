@@ -1024,10 +1024,10 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 	}
 }
 
-func notifySegmentIndexingFinished(path string) {
+func notifySegmentIndexingFinished(name string) {
 	diagnostics.Send(
 		diagnostics.SnapshotSegmentIndexingFinishedUpdate{
-			SegmentName: filepath.Base(path),
+			SegmentName: name,
 		},
 	)
 }

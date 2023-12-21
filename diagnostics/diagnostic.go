@@ -128,10 +128,21 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener() {
 				cancel()
 				return
 			case info := <-ch:
+				found := false
 				for i := range d.snapshotDownload.SegmentIndexing.Segments {
 					if d.snapshotDownload.SegmentIndexing.Segments[i].SegmentName == info.SegmentName {
+						found = true
 						d.snapshotDownload.SegmentIndexing.Segments[i].Percent = 100
 					}
+				}
+
+				if !found {
+					d.snapshotDownload.SegmentIndexing.Segments = append(d.snapshotDownload.SegmentIndexing.Segments, diaglib.SnapshotSegmentIndexingStatistics{
+						SegmentName: info.SegmentName,
+						Percent:     100,
+						Alloc:       0,
+						Sys:         0,
+					})
 				}
 			}
 		}
