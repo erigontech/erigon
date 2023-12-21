@@ -110,7 +110,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 
 		fPath := filepath.Join(s.d.SnapDir(), name)
 		_ = os.Remove(fPath)
-		_ = os.Remove(fPath + ".torrent")
+		s.d.torrentFiles.Delete(name)
 	}
 	return &emptypb.Empty{}, nil
 }
