@@ -181,7 +181,7 @@ var (
 
 	FrozenBlockLimitFlag = cli.UintFlag{
 		Name:  "upload.snapshot.limit",
-		Usage: "Sets the maximum number of nampshot blocks to hold on the local disk when uploading",
+		Usage: "Sets the maximum number of snapshot blocks to hold on the local disk when uploading",
 		Value: 1500000,
 	}
 
