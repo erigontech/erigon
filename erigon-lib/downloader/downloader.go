@@ -334,13 +334,13 @@ func (d *Downloader) mainLoop(silent bool) error {
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
+	d.statsLock.Lock()
+	defer d.statsLock.Unlock()
 	//Call this methods outside of `statsLock` critical section, because they have own locks with contention
 	torrents := d.torrentClient.Torrents()
 	connStats := d.torrentClient.ConnStats()
 	peers := make(map[torrent.PeerID]struct{}, 16)
 
-	d.statsLock.Lock()
-	defer d.statsLock.Unlock()
 	prevStats, stats := d.stats, d.stats
 
 	stats.Completed = true
