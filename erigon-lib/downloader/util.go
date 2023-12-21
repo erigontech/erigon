@@ -244,7 +244,8 @@ func CreateTorrentFileFromInfo(root string, info *metainfo.Info, mi *metainfo.Me
 	if err != nil {
 		return err
 	}
-	return torrentFiles.CreateTorrentFromMetaInfo(root, mi)
+	fPath := filepath.Join(root, info.Name+".torrent")
+	return torrentFiles.CreateTorrentFromMetaInfo(fPath, mi)
 }
 
 func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
