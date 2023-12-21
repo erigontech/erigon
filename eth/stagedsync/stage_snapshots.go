@@ -418,47 +418,49 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
+
 	if freezingCfg.Enabled {
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit); err != nil {
-			return err
-		}
-	}
-	if freezingCfg.Enabled && freezingCfg.Produce {
-		//TODO: initialSync maybe save files progress here
-		if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-			if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), cfg.agg.Files()); err != nil {
-				return err
-			}
-		}
-
-		var minBlockNumber uint64
-
-		if cfg.snapshotUploader != nil {
-			minBlockNumber = cfg.snapshotUploader.minBlockNumber()
-		}
-
-		cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
-			if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
-				if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+		if freezingCfg.Produce {
+			//TODO: initialSync maybe save files progress here
+			if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
+				if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), cfg.agg.Files()); err != nil {
 					return err
 				}
 			}
 
-			return nil
-		}, func(l []string) error {
+			var minBlockNumber uint64
+
 			if cfg.snapshotUploader != nil {
-				// TODO - we need to also remove files from the uploader (100k->500K transition)
+				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 			}
 
-			if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-				_, err := cfg.snapshotDownloader.Delete(ctx, &proto_downloader.DeleteRequest{Paths: l})
-				return err
-			}
+			cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlInfo, func(downloadRequest []services.DownloadRequest) error {
+				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
+					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
+						return err
+					}
+				}
 
-			return nil
-		})
+				return nil
+			}, func(l []string) error {
+				if cfg.snapshotUploader != nil {
+					// TODO - we need to also remove files from the uploader (100k->500K transition)
+				}
 
-		//cfg.agg.BuildFilesInBackground()
+				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
+					_, err := cfg.snapshotDownloader.Delete(ctx, &proto_downloader.DeleteRequest{Paths: l})
+					return err
+				}
+
+				return nil
+			})
+
+			//cfg.agg.BuildFilesInBackground()
+		}
+
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit); err != nil {
+			return err
+		}
 	}
 
 	if cfg.snapshotUploader != nil {

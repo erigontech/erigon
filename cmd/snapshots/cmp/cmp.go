@@ -33,7 +33,7 @@ var Command = cli.Command{
 	Action:    cmp,
 	Name:      "cmp",
 	Usage:     "Compare snapshot segments",
-	ArgsUsage: "<start block (000's)> <end block (000's)>",
+	ArgsUsage: "<start block> <end block>",
 	Flags: []cli.Flag{
 		&flags.SegTypes,
 		&utils.DataDirFlag,
