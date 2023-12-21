@@ -68,6 +68,8 @@ type Downloader struct {
 	webseeds  *WebSeeds
 	logger    log.Logger
 	verbosity log.Lvl
+
+	torrentFiles *TorrentFiles
 }
 
 type AggStats struct {
@@ -112,7 +114,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: cfg.ExpectedTorrentFilesHashes},
 		logger:            logger,
 		verbosity:         verbosity,
+		torrentFiles:      &TorrentFiles{dir: cfg.Dirs.Snap},
 	}
+	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
@@ -334,13 +338,13 @@ func (d *Downloader) mainLoop(silent bool) error {
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
 
 func (d *Downloader) ReCalcStats(interval time.Duration) {
+	d.statsLock.Lock()
+	defer d.statsLock.Unlock()
 	//Call this methods outside of `statsLock` critical section, because they have own locks with contention
 	torrents := d.torrentClient.Torrents()
 	connStats := d.torrentClient.ConnStats()
 	peers := make(map[torrent.PeerID]struct{}, 16)
 
-	d.statsLock.Lock()
-	defer d.statsLock.Unlock()
 	prevStats, stats := d.stats, d.stats
 
 	stats.Completed = true
@@ -356,25 +360,31 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		select {
 		case <-t.GotInfo():
 			stats.MetadataReady++
+
+			// call methods once - to reduce internal mutex contention
 			peersOfThisFile := t.PeerConns()
 			weebseedPeersOfThisFile := t.WebseedPeerConns()
+			bytesCompleted := t.BytesCompleted()
+			tLen := t.Length()
+			torrentName := t.Name()
+
 			for _, peer := range peersOfThisFile {
 				stats.ConnectionsTotal++
 				peers[peer.PeerID] = struct{}{}
 			}
-			stats.BytesCompleted += uint64(t.BytesCompleted())
-			stats.BytesTotal += uint64(t.Length())
+			stats.BytesCompleted += uint64(bytesCompleted)
+			stats.BytesTotal += uint64(tLen)
 
-			progress := float32(float64(100) * (float64(t.BytesCompleted()) / float64(t.Length())))
+			progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 			if progress == 0 {
-				zeroProgress = append(zeroProgress, t.Name())
+				zeroProgress = append(zeroProgress, torrentName)
 			}
 
-			webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile, t.Name())
-			rates, peersRates := getPeersRatesForlogs(peersOfThisFile, t.Name())
+			webseedRates, websRates := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName)
+			rates, peersRates := getPeersRatesForlogs(peersOfThisFile, torrentName)
 			// more detailed statistic: download rate of each peer (for each file)
 			if !t.Complete.Bool() && progress != 0 {
-				d.logger.Log(d.verbosity, "[snapshots] progress", "file", t.Name(), "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+				d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 				d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
 				d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
 			}
@@ -382,9 +392,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			isDiagEnabled := diagnostics.TypeOf(diagnostics.SegmentDownloadStatistics{}).Enabled()
 			if isDiagEnabled {
 				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-					Name:            t.Name(),
-					TotalBytes:      uint64(t.Length()),
-					DownloadedBytes: uint64(t.BytesCompleted()),
+					Name:            torrentName,
+					TotalBytes:      uint64(tLen),
+					DownloadedBytes: uint64(bytesCompleted),
 					WebseedsCount:   len(weebseedPeersOfThisFile),
 					PeersCount:      len(peersOfThisFile),
 					WebseedsRate:    websRates,
@@ -574,15 +584,15 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 
 	// if we don't have the torrent file we build it if we have the .seg file
-	torrentFilePath, err := BuildTorrentIfNeed(ctx, name, d.SnapDir())
+	err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFiles)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	ts, err := loadTorrent(torrentFilePath)
+	ts, err := d.torrentFiles.LoadByName(name)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
+	_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -619,10 +629,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-	spec.DisallowDataDownload = true
-	t, _, err := d.torrentClient.AddTorrentSpec(spec)
+	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.webseeds)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return nil
 	}
 	d.wg.Add(1)
 	go func(t *torrent.Torrent) {
@@ -634,7 +646,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		}
 
 		mi := t.Metainfo()
-		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi); err != nil {
+		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
 			d.logger.Warn("[snapshots] create torrent file", "err", err)
 			return
 		}
@@ -667,12 +679,12 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := AllTorrentSpecs(d.cfg.Dirs)
+	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFiles)
 	if err != nil {
 		return err
 	}
 	for i, ts := range files {
-		err := addTorrentFile(d.ctx, ts, d.torrentClient, d.webseeds)
+		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.webseeds)
 		if err != nil {
 			return err
 		}
@@ -687,7 +699,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	return nil
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context) error {
-	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs)
+	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles)
 }
 func (d *Downloader) Stats() AggStats {
 	d.statsLock.RLock()
