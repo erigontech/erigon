@@ -68,6 +68,8 @@ type Downloader struct {
 	webseeds  *WebSeeds
 	logger    log.Logger
 	verbosity log.Lvl
+
+	torrentFiles *TorrentFiles
 }
 
 type AggStats struct {
@@ -112,7 +114,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: cfg.ExpectedTorrentFilesHashes},
 		logger:            logger,
 		verbosity:         verbosity,
+		torrentFiles:      &TorrentFiles{dir: cfg.Dirs.Snap},
 	}
+	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
@@ -574,11 +578,11 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	}
 
 	// if we don't have the torrent file we build it if we have the .seg file
-	torrentFilePath, err := BuildTorrentIfNeed(ctx, name, d.SnapDir())
+	err := BuildTorrentIfNeed(ctx, name, d.SnapDir(), d.torrentFiles)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	ts, err := loadTorrent(torrentFilePath)
+	ts, err := d.torrentFiles.LoadByName(name)
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
@@ -634,7 +638,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		}
 
 		mi := t.Metainfo()
-		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi); err != nil {
+		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
 			d.logger.Warn("[snapshots] create torrent file", "err", err)
 			return
 		}
@@ -667,7 +671,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := AllTorrentSpecs(d.cfg.Dirs)
+	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFiles)
 	if err != nil {
 		return err
 	}
@@ -687,7 +691,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	return nil
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context) error {
-	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs)
+	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles)
 }
 func (d *Downloader) Stats() AggStats {
 	d.statsLock.RLock()

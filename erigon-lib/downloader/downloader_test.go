@@ -49,18 +49,18 @@ func TestNoEscape(t *testing.T) {
 	ctx := context.Background()
 
 	// allow adding files only if they are inside snapshots dir
-	_, err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap)
+	err := BuildTorrentIfNeed(ctx, "a.seg", dirs.Snap)
 	require.NoError(err)
-	_, err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap)
+	err = BuildTorrentIfNeed(ctx, "b/a.seg", dirs.Snap)
 	require.NoError(err)
-	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap)
+	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "a.seg"), dirs.Snap)
 	require.NoError(err)
-	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap)
+	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Snap, "b", "a.seg"), dirs.Snap)
 	require.NoError(err)
 
 	// reject escaping snapshots dir
-	_, err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap)
+	err = BuildTorrentIfNeed(ctx, filepath.Join(dirs.Chaindata, "b", "a.seg"), dirs.Snap)
 	require.Error(err)
-	_, err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap)
+	err = BuildTorrentIfNeed(ctx, "./../a.seg", dirs.Snap)
 	require.Error(err)
 }
