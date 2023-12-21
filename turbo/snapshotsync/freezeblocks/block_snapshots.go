@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"os"
 	"path"
 	"path/filepath"
@@ -17,6 +16,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/erigon/consensus/bor"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -952,7 +953,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
-				defer notifySegmentIndexingFinished(sn.FileName())
+				defer notifySegmentIndexingFinished(sn.Name())
 				defer ps.Delete(p)
 				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
@@ -996,7 +997,7 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
-				defer notifySegmentIndexingFinished(sn.FileName())
+				defer notifySegmentIndexingFinished(sn.Name())
 				defer ps.Delete(p)
 				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
