@@ -480,6 +480,8 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+
 	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
 	if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
@@ -493,23 +495,25 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	logInterval := time.NewTicker(30 * time.Second)
 	defer logInterval.Stop()
 
-	for {
+	loopStep := func() (bool, error) {
 		tx, err := db.BeginRw(ctx)
 		if err != nil {
-			return err
+			return false, err
 		}
+		defer tx.Rollback()
+
 		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
 		// Let's fetch the head first
 		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
 		if err != nil {
-			return err
+			return false, err
 		}
 		currentRoot, err = currentBlock.Block.HashSSZ()
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
-			return err
+			return false, err
 		}
 		currentRoot = currentBlock.Block.ParentRoot
 		currentSlot := currentBlock.Block.Slot
@@ -518,21 +522,21 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 			// check if the expected root is in db
 			slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot)
 			if err != nil {
-				return err
+				return false, err
 			}
 			if slot == nil || *slot == 0 {
 				break
 			}
 			if err := beacon_indicies.MarkRootCanonical(ctx, tx, *slot, currentRoot); err != nil {
-				return err
+				return false, err
 			}
 			currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot)
 			if err != nil {
-				return err
+				return false, err
 			}
 		}
 		if err := tx.Commit(); err != nil {
-			return err
+			return false, err
 		}
 		select {
 		case <-logInterval.C:
@@ -543,12 +547,16 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		case <-ctx.Done():
 		default:
 		}
-		if currentSlot == 0 {
+		return currentSlot != 0, nil
+	}
+	var keepGoing bool
+	for keepGoing, err = loopStep(); keepGoing && err == nil; keepGoing, err = loopStep() {
+		if !keepGoing {
 			break
 		}
 	}
 
-	return nil
+	return err
 }
 
 type DumpSnapshots struct {
