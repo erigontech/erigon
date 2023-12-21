@@ -243,7 +243,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs)
+		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap))
 		if err != nil {
 			return err
 		}
@@ -320,6 +320,8 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
+	tf := downloader.NewAtomicTorrentFiles(dirs.Snap)
+
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)
 		files, err := downloader.AllTorrentPaths(dirs)
@@ -331,17 +333,17 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs); err != nil {
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf); err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
 	}
 
-	torrents, err := downloader.AllTorrentSpecs(dirs)
+	res := map[string]string{}
+	torrents, err := downloader.AllTorrentSpecs(dirs, tf)
 	if err != nil {
 		return err
 	}
 
-	res := map[string]string{}
 	for _, t := range torrents {
 		// we don't release commitment history in this time. let's skip it here.
 		if strings.HasPrefix(t.DisplayName, "history/commitment") {

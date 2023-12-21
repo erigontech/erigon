@@ -12,11 +12,12 @@ import (
 
 	"github.com/golang/mock/gomock"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -36,22 +37,16 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 func InitHarness(ctx context.Context, t *testing.T, logger log.Logger, cfg HarnessCfg) Harness {
-	chainDataDb := memdb.NewTestDB(t)
+	genesisInit := createGenesisInitData(t, cfg.ChainConfig)
+	m := mock.MockWithGenesis(t, genesisInit.genesis, genesisInit.genesisAllocPrivateKey, false)
+	chainDataDb := m.DB
+	blockReader := m.BlockReader
 	borConsensusDb := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdallmock.NewMockIHeimdallClient(ctrl)
-	snapshotsDir := t.TempDir()
-	blocksFreezingCfg := ethconfig.NewSnapCfg(true, true, true)
-	snapVersion := snapcfg.KnownCfg("bor-mainnet", 0).Version
-	allRoSnapshots := freezeblocks.NewRoSnapshots(blocksFreezingCfg, snapshotsDir, snapVersion, logger)
-	allRoSnapshots.OptimisticalyReopenWithDB(chainDataDb)
-	allBorRoSnapshots := freezeblocks.NewBorRoSnapshots(blocksFreezingCfg, snapshotsDir, snapVersion, logger)
-	allBorRoSnapshots.OptimisticalyReopenWithDB(chainDataDb)
-	blockReader := freezeblocks.NewBlockReader(allRoSnapshots, allBorRoSnapshots)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDb,
 		borConsensusDb,
@@ -101,6 +96,7 @@ func InitHarness(ctx context.Context, t *testing.T, logger log.Logger, cfg Harne
 		borSpanner:       bormock.NewMockSpanner(ctrl),
 		validatorAddress: validatorAddress,
 		validatorKey:     validatorKey,
+		genesisInitData:  genesisInit,
 	}
 
 	if cfg.ChainConfig.Bor != nil {
@@ -116,6 +112,7 @@ func InitHarness(ctx context.Context, t *testing.T, logger log.Logger, cfg Harne
 
 type genesisInitData struct {
 	genesis                 *types.Genesis
+	genesisAllocPrivateKey  *ecdsa.PrivateKey
 	genesisAllocPrivateKeys map[libcommon.Address]*ecdsa.PrivateKey
 	fundedAddresses         []libcommon.Address
 }
@@ -130,7 +127,7 @@ type Harness struct {
 	chainDataDb                kv.RwDB
 	borConsensusDb             kv.RwDB
 	chainConfig                *chain.Config
-	blockReader                *freezeblocks.BlockReader
+	blockReader                services.BlockReader
 	stateSyncStages            []*stagedsync.Stage
 	stateSync                  *stagedsync.Sync
 	bhCfg                      stagedsync.BorHeimdallCfg
@@ -258,14 +255,16 @@ func (h *Harness) ReadFirstStateSyncEventNumPerBlockFromDb(ctx context.Context) 
 	return nums, nil
 }
 
-func (h *Harness) createGenesisInitData(t *testing.T) *genesisInitData {
+func createGenesisInitData(t *testing.T, chainConfig *chain.Config) *genesisInitData {
+	t.Helper()
 	accountPrivateKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	accountAddress := crypto.PubkeyToAddress(accountPrivateKey.PublicKey)
 
-	h.genesisInitData = &genesisInitData{
+	return &genesisInitData{
+		genesisAllocPrivateKey: accountPrivateKey,
 		genesis: &types.Genesis{
-			Config: h.chainConfig,
+			Config: chainConfig,
 			Alloc: types.GenesisAlloc{
 				accountAddress: {
 					Balance: new(big.Int).Exp(big.NewInt(1_000), big.NewInt(18), nil),
@@ -279,15 +278,15 @@ func (h *Harness) createGenesisInitData(t *testing.T) *genesisInitData {
 			accountAddress,
 		},
 	}
-
-	return h.genesisInitData
 }
 
 func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.Controller, cfg HarnessCfg) {
-	genInitData := h.createGenesisInitData(t)
 	consensusEngine := h.consensusEngine(t, cfg)
-	genesisTmpDbDir := t.TempDir()
-	_, parentBlock, err := core.CommitGenesisBlock(h.chainDataDb, genInitData.genesis, genesisTmpDbDir, h.logger)
+	var parentBlock *types.Block
+	err := h.chainDataDb.View(ctx, func(tx kv.Tx) (err error) {
+		parentBlock, err = h.blockReader.BlockByNumber(ctx, tx, 0)
+		return err
+	})
 	require.NoError(t, err)
 	h.sealedHeaders[parentBlock.Number().Uint64()] = parentBlock.Header()
 	mockChainHR := h.mockChainHeaderReader(ctrl)

@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
-	lg "github.com/anacrolix/log"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	lg "github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -30,6 +32,7 @@ import (
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -76,6 +79,7 @@ var CLI struct {
 	DownloadSnapshots       DownloadSnapshots       `cmd:"" help:"download snapshots from webseed"`
 	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
 	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
+	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
 }
 
 type chainCfg struct {
@@ -439,6 +443,124 @@ func (c *Chain) Run(ctx *Context) error {
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
+type ChainEndpoint struct {
+	Endpoint string `help:"endpoint" default:""`
+	chainCfg
+	outputFolder
+}
+
+func (c *ChainEndpoint) Run(ctx *Context) error {
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	dirs := datadir.New(c.Datadir)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	baseUri, err := url.JoinPath(c.Endpoint, "eth/v2/beacon/blocks")
+	if err != nil {
+		return err
+	}
+	log.Info("Hooked", "uri", baseUri)
+	// Let's fetch the head first
+	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/head", baseUri), nil)
+	if err != nil {
+		return err
+	}
+	currentRoot, err := currentBlock.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
+	currentRoot = currentBlock.Block.ParentRoot
+	if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	previousLogBlock := currentBlock.Block.Slot
+
+	logInterval := time.NewTicker(30 * time.Second)
+	defer logInterval.Stop()
+
+	loopStep := func() (bool, error) {
+		tx, err := db.BeginRw(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
+
+		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
+		// Let's fetch the head first
+		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		if err != nil {
+			return false, err
+		}
+		currentRoot, err = currentBlock.Block.HashSSZ()
+		if err != nil {
+			return false, err
+		}
+		if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+			return false, err
+		}
+		currentRoot = currentBlock.Block.ParentRoot
+		currentSlot := currentBlock.Block.Slot
+		// it will stop if we end finding a gap or if we reach the maxIterations
+		for {
+			// check if the expected root is in db
+			slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot)
+			if err != nil {
+				return false, err
+			}
+			if slot == nil || *slot == 0 {
+				break
+			}
+			if err := beacon_indicies.MarkRootCanonical(ctx, tx, *slot, currentRoot); err != nil {
+				return false, err
+			}
+			currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot)
+			if err != nil {
+				return false, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		select {
+		case <-logInterval.C:
+			// up to 2 decimal places
+			rate := float64(previousLogBlock-currentSlot) / 30
+			log.Info("Successfully processed", "slot", currentSlot, "blk/sec", fmt.Sprintf("%.2f", rate))
+			previousLogBlock = currentBlock.Block.Slot
+		case <-ctx.Done():
+		default:
+		}
+		return currentSlot != 0, nil
+	}
+	var keepGoing bool
+	for keepGoing, err = loopStep(); keepGoing && err == nil; keepGoing, err = loopStep() {
+		if !keepGoing {
+			break
+		}
+	}
+
+	return err
+}
+
 type DumpSnapshots struct {
 	chainCfg
 	outputFolder
@@ -468,7 +590,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 
 	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, snapshotVersion, 0, to, snaptype.Erigon2RecentMergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, snapshotVersion, 0, to, snaptype.Erigon2MergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {
@@ -505,7 +627,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
@@ -587,7 +709,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
 	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
 
