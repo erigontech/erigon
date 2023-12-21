@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -144,7 +143,6 @@ Loop:
 		}
 	}
 	responses := atomicResp.Load().([]*cltypes.SignedBeaconBlock)
-	fmt.Println(responses)
 	// Import new blocks, order is forward so reverse the whole packet
 	for i := len(responses) - 1; i >= 0; i-- {
 		if b.finished {
