@@ -324,6 +324,19 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	return st.buyGas(gasBailout)
 }
 
+// tryConsumeGas tries to subtract gas from gasPool, setting the result in gasPool
+// if subtracting more gas than remains in gasPool, set gasPool = 0 and return false
+// otherwise, do the subtraction setting the result in gasPool and return true
+func tryConsumeGas(gasPool *uint64, gas uint64) bool {
+	if *gasPool < gas {
+		*gasPool = 0
+		return false
+	}
+
+	*gasPool -= gas
+	return true
+}
+
 // TransitionDb will transition the state by applying the current message and
 // returning the evm execution result with following fields.
 //
@@ -384,6 +397,34 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
 	}
 	st.gas -= gas
+
+	if rules.IsPrague {
+		statelessGasOrigin := st.evm.TxContext().Accesses.TouchTxOriginAndComputeGas(msg.From().Bytes())
+		if !tryConsumeGas(&st.gas, statelessGasOrigin) {
+			return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
+		}
+		originNonce := st.state.GetNonce(msg.From())
+
+		txCtxAcc := st.evm.TxContext().Accesses
+		if txCtxAcc == nil {
+			return nil, fmt.Errorf("%s", "Dude initialize txctx with accesses list")
+		}
+		if msg.To() != nil {
+			sendsValue := msg.Value().Gt(uint256.NewInt(0))
+			toAddr := msg.To().Bytes()
+			statelessGasDest := txCtxAcc.TouchTxExistingAndComputeGas(toAddr, sendsValue)
+			if !tryConsumeGas(&st.gas, statelessGasDest) {
+				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
+			}
+			// ensure the code size ends up in the access witness
+			st.state.GetCodeSize(*msg.To())
+		} else {
+			contractAddr := crypto.CreateAddress(msg.From(), originNonce)
+			if !tryConsumeGas(&st.gas, st.evm.TxContext().Accesses.TouchAndChargeContractCreateInit(contractAddr.Bytes(), msg.Value().Gt(uint256.NewInt(0)))) {
+				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
+			}
+		}
+	}
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer

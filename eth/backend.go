@@ -291,32 +291,58 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger: logger,
 	}
 
-	var chainConfig *chain.Config
-	var genesis *types.Block
-	if err := backend.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			panic(err)
-		}
-		genesisSpec := config.Genesis
-		if h != (libcommon.Hash{}) { // fallback to db content
-			genesisSpec = nil
-		}
-		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideCancunTime, tmpdir, logger)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
-			return genesisErr
-		}
 
-		return nil
-	}); err != nil {
+	var chainConfig *chain.Config
+	var genesisBlock *types.Block
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	go func() {
+		rwtx, err := chainKv.BeginRw(context.Background())
+		if err != nil {
+			return
+		}
+		defer rwtx.Rollback()
+
+		genesisSpec := config.Genesis
+
+		chainConfig, genesisBlock, err = core.WriteGenesisBlock(rwtx, genesisSpec, config.OverrideCancunTime, tmpdir, logger)
+		if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
+			return
+		}
+		rwtx.Commit()
+		wg.Done()
+	}()
+	wg.Wait() 
+	if err != nil {
 		panic(err)
 	}
-	backend.chainConfig = chainConfig
-	backend.genesisBlock = genesis
-	backend.genesisHash = genesis.Hash()
 
-	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+	// if err = backend.chainDB.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+	// 	h, err := rawdb.ReadCanonicalHash(tx, 0)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	genesisSpec := config.Genesis
+	// 	if h != (libcommon.Hash{}) { // fallback to db content
+	// 		genesisSpec = nil
+	// 	}
+	// 	var genesisErr error
+	// 	chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideCancunTime, tmpdir, logger)
+	// 	if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+	// 		return genesisErr
+	// 	}
+
+	// 	return nil
+	// }); err != nil {
+	// 	panic(err)
+	// }
+	backend.chainConfig = chainConfig
+	backend.genesisBlock = genesisBlock
+	backend.genesisHash = genesisBlock.Hash()
+
+	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesisBlock.Hash())
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
@@ -572,8 +598,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		chainKv,
 		stack.Config().NodeName(),
 		chainConfig,
-		genesis.Hash(),
-		genesis.Time(),
+		genesisBlock.Hash(),
+		genesisBlock.Time(),
 		backend.engine,
 		backend.config.NetworkID,
 		sentries,
@@ -699,7 +725,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	if currentBlock == nil {
-		currentBlock = genesis
+		currentBlock = genesisBlock
 	}
 	// We start the transaction pool on startup, for a couple of reasons:
 	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data

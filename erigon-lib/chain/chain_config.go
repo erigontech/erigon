@@ -147,6 +147,11 @@ func (c *Config) IsSpuriousDragon(num uint64) bool {
 	return isForked(c.SpuriousDragonBlock, num)
 }
 
+// IsSpuriousDragon returns whether num is either equal to the Spurious Dragon fork block or greater.
+func (c *Config) IsEIP158(num uint64) bool {
+	return isForked(c.Eip158Block, num)
+}
+
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.
 func (c *Config) IsByzantium(num uint64) bool {
 	return isForked(c.ByzantiumBlock, num)
@@ -639,11 +644,11 @@ func asSprints(configSprints map[string]uint64) sprints {
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                 *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
-	IsAura                                                  bool
+	ChainID                                                     *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon, IsEIP158 bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul     bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague          bool
+	IsAura                                                      bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -658,6 +663,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsHomestead:        c.IsHomestead(num),
 		IsTangerineWhistle: c.IsTangerineWhistle(num),
 		IsSpuriousDragon:   c.IsSpuriousDragon(num),
+		IsEIP158:           c.IsEIP158(num),
 		IsByzantium:        c.IsByzantium(num),
 		IsConstantinople:   c.IsConstantinople(num),
 		IsPetersburg:       c.IsPetersburg(num),

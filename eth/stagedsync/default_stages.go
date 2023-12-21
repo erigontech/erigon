@@ -145,7 +145,7 @@ func DefaultStages(ctx context.Context,
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    bodies.historyV3 && ethconfig.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsPrague(1700825701) {
 					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx, logger)
 					return err
 				}
@@ -153,7 +153,7 @@ func DefaultStages(ctx context.Context,
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsPrague(1700825701) {
 					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx, logger)
 				}
 				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx, logger)
@@ -324,7 +324,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    exec.historyV3 && ethconfig.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsPrague(1700825701) {
 					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx, logger)
 					return err
 				}
@@ -332,7 +332,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsPrague(1700825700) {
 					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx, logger)
 				}
 				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx, logger)
@@ -494,10 +494,17 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				if exec.chainConfig.IsPrague(1700825701) {
+					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx, logger)
+					return err
+				}
 				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, logger)
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+				if exec.chainConfig.IsPrague(1700825701) {
+					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx, logger)
+				}
 				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx, logger)
 			},
 		},

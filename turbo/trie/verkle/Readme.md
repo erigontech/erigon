@@ -1,1 +1,0 @@
-Contains code related to Verkle tree - the new replacement for MPT

@@ -167,7 +167,14 @@ const (
 	RefundQuotientEIP3529 uint64 = 5
 
 	// EIP-4844: Shard Blob Transactions
-	PointEvaluationGas uint64 = 50000
+	PointEvaluationGas     uint64 = 50000
+	
+	// EIP-4762: costs associated to witness accesses in Verkle Tree
+	WitnessBranchReadCost  uint64 = 1900
+	WitnessChunkReadCost   uint64 = 200
+	WitnessBranchWriteCost uint64 = 3000
+	WitnessChunkWriteCost  uint64 = 500
+	WitnessChunkFillCost   uint64 = 6200
 )
 
 // EIP-4788: Beacon block root in the EVM

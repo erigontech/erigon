@@ -12,20 +12,21 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 var (
-	errInvalidRootType = errors.New("invalid node type for root")
-	errDeletedAccount  = errors.New("account deleted in VKT")
-	zero               [32]byte
+	errInvalidRootType    = errors.New("invalid node type for root")
+	errDeletedAccount     = errors.New("account deleted in VKT")
+	zero                  [32]byte
+	VerkleDBPathKeyPrefix = []byte("Path-")
 )
 
 type VerkleTrie struct {
 	root       verkle.VerkleNode
 	db         kv.RwDB
 	tx         kv.RwTx
-	pointCache *vtree.PointCache
+	pointCache *vkutils.PointCache
 	ended      bool
 }
 
@@ -33,7 +34,7 @@ func (vt *VerkleTrie) ToDot() string {
 	return verkle.ToDot(vt.root)
 }
 
-func NewVerkleTrie(root verkle.VerkleNode, db kv.RwDB, tx kv.RwTx, pointCache *vtree.PointCache, ended bool) *VerkleTrie {
+func NewVerkleTrie(root verkle.VerkleNode, db kv.RwDB, tx kv.RwTx, pointCache *vkutils.PointCache, ended bool) *VerkleTrie {
 	return &VerkleTrie{
 		root:       root,
 		db:         db,
@@ -43,13 +44,33 @@ func NewVerkleTrie(root verkle.VerkleNode, db kv.RwDB, tx kv.RwTx, pointCache *v
 	}
 }
 
-func (vt *VerkleTrie) DbNodeResolver(root []byte) ([]byte, error) {
+func OpenVKTrie(root common.Hash, tx kv.RwTx) (*VerkleTrie, error) {
+	payload, err := tx.GetOne(kv.VerkleTrie, VerkleDBPathKeyPrefix)
+	if err != nil || len(payload) == 0 {
+		return NewVerkleTrie(verkle.New(), nil, tx, vkutils.NewPointCache(), false), nil
+	}
+
+	r, err := verkle.ParseNode(payload, 0)
+	if err != nil {
+		panic(err)
+	}
+	return NewVerkleTrie(r, nil, tx, vkutils.NewPointCache(), false), err
+}
+
+func (vt *VerkleTrie) DbNodeResolver(path []byte) ([]byte, error) {
+	fullPath := make([]byte, 0, len(VerkleDBPathKeyPrefix)+32)
+	fullPath = append(fullPath, VerkleDBPathKeyPrefix...)
+	fullPath = append(fullPath[:len(VerkleDBPathKeyPrefix)], path...)
+	
+	if vt.tx != nil {
+		return vt.tx.GetOne(kv.VerkleTrie, fullPath)
+	}
 	tx, err := vt.db.BeginRo(context.Background())
 	defer tx.Rollback()
 	if err != nil {
 		return nil, err
 	}
-	return tx.GetOne(kv.VerkleTrie, root)
+	return tx.GetOne(kv.VerkleTrie, fullPath)
 }
 
 // Get returns the value for key stored in the vt. The value bytes must
@@ -57,7 +78,7 @@ func (vt *VerkleTrie) DbNodeResolver(root []byte) ([]byte, error) {
 // vt.MissingNodeError is returned.
 func (vt *VerkleTrie) GetStorage(addr common.Address, key []byte) ([]byte, error) {
 	pointEval := vt.pointCache.GetTreeKeyHeader(addr[:])
-	k := vtree.GetTreeKeyStorageSlotWithEvaluatedAddress(pointEval, key)
+	k := vkutils.GetTreeKeyStorageSlotWithEvaluatedAddress(pointEval, key)
 	return vt.root.Get(k, vt.DbNodeResolver)
 }
 
@@ -87,14 +108,14 @@ func (t *VerkleTrie) GetAccount(addr common.Address) (*accounts.Account, error) 
 	if values == nil {
 		return nil, nil
 	}
-	if len(values[vtree.NonceLeafKey]) > 0 {
-		acc.Nonce = binary.LittleEndian.Uint64(values[vtree.NonceLeafKey])
+	if len(values[vkutils.NonceLeafKey]) > 0 {
+		acc.Nonce = binary.LittleEndian.Uint64(values[vkutils.NonceLeafKey])
 	}
 	// if the account has been deleted, then values[10] will be 0 and not nil. If it has
 	// been recreated after that, then its code keccak will NOT be 0. So return `nil` if
 	// the nonce, and values[10], and code keccak is 0.
 
-	if acc.Nonce == 0 && len(values) > 10 && len(values[10]) > 0 && bytes.Equal(values[vtree.CodeKeccakLeafKey], zero[:]) {
+	if acc.Nonce == 0 && len(values) > 10 && len(values[10]) > 0 && bytes.Equal(values[vkutils.CodeKeccakLeafKey], zero[:]) {
 		if !t.ended {
 			return nil, errDeletedAccount
 		} else {
@@ -102,7 +123,7 @@ func (t *VerkleTrie) GetAccount(addr common.Address) (*accounts.Account, error) 
 		}
 	}
 	var balance [32]byte
-	copy(balance[:], values[vtree.BalanceLeafKey])
+	copy(balance[:], values[vkutils.BalanceLeafKey])
 	for i := 0; i < len(balance)/2; i++ {
 		balance[len(balance)-i-1], balance[i] = balance[i], balance[len(balance)-i-1]
 	}
@@ -113,7 +134,7 @@ func (t *VerkleTrie) GetAccount(addr common.Address) (*accounts.Account, error) 
 	// 	}
 	// }
 	acc.Balance = *uint256.NewInt(0).SetBytes(balance[:])
-	acc.CodeHash = common.BytesToHash(values[vtree.CodeKeccakLeafKey])
+	acc.CodeHash = common.BytesToHash(values[vkutils.CodeKeccakLeafKey])
 	// TODO fix the code size as well
 
 	return acc, nil
@@ -128,10 +149,10 @@ func (t *VerkleTrie) UpdateAccount(addr common.Address, acc *accounts.Account) e
 	)
 
 	// Only evaluate the polynomial once
-	values[vtree.VersionLeafKey] = zero[:]
-	values[vtree.NonceLeafKey] = nonce[:]
-	values[vtree.BalanceLeafKey] = balance[:]
-	values[vtree.CodeKeccakLeafKey] = acc.CodeHash[:]
+	values[vkutils.VersionLeafKey] = zero[:]
+	values[vkutils.NonceLeafKey] = nonce[:]
+	values[vkutils.BalanceLeafKey] = balance[:]
+	values[vkutils.CodeKeccakLeafKey] = acc.CodeHash[:]
 
 	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
 	bbytes := acc.Balance.Bytes()
@@ -146,7 +167,7 @@ func (t *VerkleTrie) UpdateAccount(addr common.Address, acc *accounts.Account) e
 		err = root.InsertValuesAtStem(stem, values, t.DbNodeResolver)
 	default:
 		return errInvalidRootType
-	}
+	}  
 	if err != nil {
 		return fmt.Errorf("UpdateAccount (%x) error: %v", addr, err)
 	}
@@ -169,7 +190,7 @@ func (vt *VerkleTrie) UpdateStem(key []byte, values [][]byte) error {
 // by the caller while they are stored in the vt. If a node was not found in the
 // database, a vt.MissingNodeError is returned.
 func (vt *VerkleTrie) UpdateStorage(address common.Address, key, value []byte) error {
-	k := vtree.GetTreeKeyStorageSlotWithEvaluatedAddress(vt.pointCache.GetTreeKeyHeader(address[:]), key)
+	k := vkutils.GetTreeKeyStorageSlotWithEvaluatedAddress(vt.pointCache.GetTreeKeyHeader(address[:]), key)
 	var v [32]byte
 	if len(value) >= 32 {
 		copy(v[:], value[:32])
@@ -208,7 +229,7 @@ func (t *VerkleTrie) DeleteAccount(addr common.Address) error {
 // found in the database, a vt.MissingNodeError is returned.
 func (vt *VerkleTrie) DeleteStorage(addr common.Address, key []byte) error {
 	pointEval := vt.pointCache.GetTreeKeyHeader(addr[:])
-	k := vtree.GetTreeKeyStorageSlotWithEvaluatedAddress(pointEval, key)
+	k := vkutils.GetTreeKeyStorageSlotWithEvaluatedAddress(pointEval, key)
 	var zero [32]byte
 	return vt.root.Insert(k, zero[:], vt.DbNodeResolver)
 }
@@ -233,30 +254,49 @@ func (vt *VerkleTrie) Commit(_ bool) (common.Hash, error) {
 	}
 
 	if vt.tx == nil {
-		return vt.Hash(), nil
+		if vt.db == nil {
+			return vt.Hash(), nil
+		}
+		var err error
+		vt.tx, err = vt.db.BeginRw(context.Background())
+		if err != nil {
+			return common.Hash{}, err
+		}
+		defer vt.tx.Rollback()
 	}
 
 	nodes, err := root.BatchSerialize()
+	path := make([]byte, 0, len(VerkleDBPathKeyPrefix)+32)
+	path = append(path, VerkleDBPathKeyPrefix...)
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("serializing tree nodes: %s", err)
 	}
 	for _, node := range nodes {
-		if err := vt.tx.Put(kv.VerkleTrie, node.Path, node.SerializedBytes); err != nil {
+		path := append(path[:len(VerkleDBPathKeyPrefix)], node.Path...)
+		if err := vt.tx.Put(kv.VerkleTrie, path, node.SerializedBytes); err != nil {
 			return common.Hash{}, fmt.Errorf("put node to disk: %s", err)
 		}
 	}
-	root.Flush(func(path []byte, node verkle.VerkleNode) {
-		s, err := node.Serialize()
-		if err != nil {
-			panic(err)
-		}
-		if err := vt.tx.Put(kv.VerkleTrie, path, s); err != nil {
-			panic(err)
-		}
-	})
 
-	err = vt.tx.Commit()
-	return vt.Hash(), err
+	if vt.db != nil {
+		err = vt.tx.Commit()
+		if err != nil {
+			return common.Hash{}, err
+		}
+	}
+	// var err error
+	// root.Flush(func(path []byte, node verkle.VerkleNode) {
+	// 	var s []byte
+	// 	s, err = node.Serialize()
+	// 	if err != nil {
+	// 		return
+	// 	}
+	// 	if err = vt.tx.Put(kv.VerkleTrie, path, s); err != nil {
+	// 		return
+	// 	}
+	// })
+
+	return vt.Hash(), nil
 }
 
 // // NodeIterator returns an iterator that returns nodes of the vt. Iteration
@@ -370,7 +410,7 @@ func DeserializeAndVerifyVerkleProof(vp *verkle.VerkleProof, preStateRoot []byte
 
 func (t *VerkleTrie) UpdateContractCode(addr common.Address, codeHash common.Hash, code []byte) error {
 	var (
-		chunks = vtree.ChunkifyCode(code)
+		chunks = vkutils.ChunkifyCode(code)
 		values [][]byte
 		key    []byte
 		err    error
@@ -379,7 +419,7 @@ func (t *VerkleTrie) UpdateContractCode(addr common.Address, codeHash common.Has
 		groupOffset := (chunknr + 128) % 256
 		if groupOffset == 0 /* start of new group */ || chunknr == 0 /* first chunk in header group */ {
 			values = make([][]byte, verkle.NodeWidth)
-			key = vtree.GetTreeKeyCodeChunkWithEvaluatedAddress(t.pointCache.GetTreeKeyHeader(addr[:]), uint256.NewInt(chunknr))
+			key = vkutils.GetTreeKeyCodeChunkWithEvaluatedAddress(t.pointCache.GetTreeKeyHeader(addr[:]), uint256.NewInt(chunknr))
 		}
 		values[groupOffset] = chunks[i : i+32]
 
@@ -387,7 +427,7 @@ func (t *VerkleTrie) UpdateContractCode(addr common.Address, codeHash common.Has
 		if i == 0 {
 			cs := make([]byte, 32)
 			binary.LittleEndian.PutUint64(cs, uint64(len(code)))
-			values[vtree.CodeSizeLeafKey] = cs
+			values[vkutils.CodeSizeLeafKey] = cs
 		}
 
 		if groupOffset == 255 || len(chunks)-i <= 32 {

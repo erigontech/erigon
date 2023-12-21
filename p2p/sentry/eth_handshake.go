@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/log/v3"
+	// "github.com/ledgerwatch/log/v3"
 )
 
 func readAndValidatePeerStatusMessage(

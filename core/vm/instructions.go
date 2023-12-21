@@ -21,13 +21,17 @@ import (
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/math"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 func opAdd(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -374,6 +378,10 @@ func opReturnDataCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeConte
 func opExtCodeSize(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	slot := scope.Stack.Peek()
 	slot.SetUint64(uint64(interpreter.evm.IntraBlockState().GetCodeSize(slot.Bytes20())))
+	if interpreter.evm.chainRules.IsPrague {
+		statelessGas := interpreter.evm.txContext.Accesses.TouchAddressOnReadAndComputeGas(slot.Bytes(), uint256.Int{}, vkutils.CodeSizeLeafKey)
+		scope.Contract.UseGas(statelessGas)
+	}
 	return nil, nil
 }
 
@@ -394,8 +402,12 @@ func opCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([
 	if overflow {
 		uint64CodeOffset = 0xffffffffffffffff
 	}
-	codeCopy := getData(scope.Contract.Code, uint64CodeOffset, length.Uint64())
-	scope.Memory.Set(memOffset.Uint64(), length.Uint64(), codeCopy)
+	// codeCopy := getData(scope.Contract.Code, uint64CodeOffset, length.Uint64())
+	paddedCodeCopy, copyOffset, nonPaddedCopyLength := getDataAndAdjustedBounds(scope.Contract.Code, uint64CodeOffset, length.Uint64())
+	if interpreter.evm.chainRules.IsPrague {
+		scope.Contract.UseGas(touchCodeChunksRangeOnReadAndChargeGas(scope.Contract.Address().Bytes(), copyOffset, nonPaddedCopyLength, uint64(len(scope.Contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness)))
+	}
+	scope.Memory.Set(memOffset.Uint64(), uint64(len(paddedCodeCopy)), paddedCodeCopy)
 	return nil, nil
 }
 
@@ -408,9 +420,24 @@ func opExtCodeCopy(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext)
 		length     = stack.Pop()
 	)
 	addr := libcommon.Address(a.Bytes20())
-	len64 := length.Uint64()
-	codeCopy := getDataBig(interpreter.evm.IntraBlockState().GetCode(addr), &codeOffset, len64)
-	scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
+
+	if interpreter.evm.chainRules.IsPrague {
+		code := interpreter.evm.intraBlockState.GetCode(addr)
+		contract := &Contract{
+			Code: code,
+			self: addr,
+		}
+		paddedCodeCopy, copyOffset, nonPaddedCopyLength := getDataAndAdjustedBounds(code, codeOffset.Uint64(), length.Uint64())
+		gas := touchCodeChunksRangeOnReadAndChargeGas(addr[:], copyOffset, nonPaddedCopyLength, uint64(len(contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness))
+		scope.Contract.UseGas(gas)
+		scope.Memory.Set(memOffset.Uint64(), length.Uint64(), paddedCodeCopy)
+	} else {
+		codeCopy := getDataBig(interpreter.evm.intraBlockState.GetCode(addr), &codeOffset, length.Uint64())
+		scope.Memory.Set(memOffset.Uint64(), length.Uint64(), codeCopy)
+	}
+	// len64 := length.Uint64()
+	// codeCopy := getDataBig(interpreter.evm.IntraBlockState().GetCode(addr), &codeOffset, len64)
+	// scope.Memory.Set(memOffset.Uint64(), len64, codeCopy)
 	return nil, nil
 }
 
@@ -645,6 +672,13 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 		input  = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
 		gas    = scope.Contract.Gas
 	)
+	if interpreter.evm.chainRules.IsPrague {
+		contractAddress := crypto.CreateAddress(scope.Contract.Address(), interpreter.evm.intraBlockState.GetNonce(scope.Contract.Address()))
+		statelessGas := interpreter.evm.txContext.Accesses.TouchAndChargeContractCreateInit(contractAddress.Bytes()[:], value.Sign() != 0)
+		if !tryConsumeGas(&gas, statelessGas) {
+			return nil, ErrExecutionReverted
+		}
+	}
 	if interpreter.evm.ChainRules().IsTangerineWhistle {
 		gas -= gas / 64
 	}
@@ -687,6 +721,14 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]
 		input        = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
 		gas          = scope.Contract.Gas
 	)
+	if interpreter.evm.chainRules.IsPrague {
+		codeAndHash := &codeAndHash{code: input}
+		contractAddress := crypto.CreateAddress2(scope.Contract.Address(), salt.Bytes32(), codeAndHash.Hash().Bytes())
+		statelessGas := interpreter.evm.txContext.Accesses.TouchAndChargeContractCreateInit(contractAddress.Bytes()[:], endowment.Sign() != 0)
+		if !tryConsumeGas(&gas, statelessGas) {
+			return nil, ErrExecutionReverted
+		}
+	}
 
 	// Apply EIP150
 	gas -= gas / 64
@@ -944,6 +986,14 @@ func opPush1(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]by
 	*pc++
 	if *pc < codeLen {
 		scope.Stack.Push(integer.SetUint64(uint64(scope.Contract.Code[*pc])))
+
+		if interpreter.evm.chainRules.IsPrague && *pc%31 == 0 {
+			// touch next chunk if PUSH1 is at the boundary. if so, *pc has
+			// advanced past this boundary.
+			contractAddr := scope.Contract.Address()
+			statelessGas := touchCodeChunksRangeOnReadAndChargeGas(contractAddr[:], *pc+1, uint64(1), uint64(len(scope.Contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness))
+			scope.Contract.UseGas(statelessGas)
+		}
 	} else {
 		scope.Stack.Push(integer.Clear())
 	}
@@ -962,6 +1012,12 @@ func makePush(size uint64, pushByteSize int) executionFunc {
 		endMin := startMin + pushByteSize
 		if startMin+pushByteSize >= codeLen {
 			endMin = codeLen
+		}
+
+		if interpreter.evm.chainRules.IsPrague {
+			contractAddr := scope.Contract.Address()
+			statelessGas := touchCodeChunksRangeOnReadAndChargeGas(contractAddr[:], uint64(startMin), uint64(pushByteSize), uint64(len(scope.Contract.Code)), interpreter.evm.txContext.Accesses.(*state.AccessWitness))
+			scope.Contract.UseGas(statelessGas)
 		}
 
 		integer := new(uint256.Int)
@@ -990,4 +1046,37 @@ func makeSwap(size int64) executionFunc {
 		scope.Stack.Swap(int(size))
 		return nil, nil
 	}
+}
+
+// touchCodeChunksRangeOnReadAndChargeGas is a helper function to touch every chunk in a code range and charge witness gas costs
+func touchCodeChunksRangeOnReadAndChargeGas(contractAddr []byte, startPC, size uint64, codeLen uint64, accesses *state.AccessWitness) uint64 {
+	// note that in the case where the copied code is outside the range of the
+	// contract code but touches the last leaf with contract code in it,
+	// we don't include the last leaf of code in the AccessWitness.  The
+	// reason that we do not need the last leaf is the account's code size
+	// is already in the AccessWitness so a stateless verifier can see that
+	// the code from the last leaf is not needed.
+	if (codeLen == 0 && size == 0) || startPC > codeLen {
+		return 0
+	}
+
+	// endPC is the last PC that must be touched.
+	endPC := startPC + size - 1
+	if startPC+size > codeLen {
+		endPC = codeLen
+	}
+
+	var statelessGasCharged uint64
+	for chunkNumber := startPC / 31; chunkNumber <= endPC/31; chunkNumber++ {
+		treeIndex := *uint256.NewInt((chunkNumber + 128) / 256)
+		subIndex := byte((chunkNumber + 128) % 256)
+		gas := accesses.TouchAddressOnReadAndComputeGas(contractAddr, treeIndex, subIndex)
+		var overflow bool
+		statelessGasCharged, overflow = math.SafeAdd(statelessGasCharged, gas)
+		if overflow {
+			panic("overflow when adding gas")
+		}
+	}
+
+	return statelessGasCharged
 }

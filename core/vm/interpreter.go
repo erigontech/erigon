@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 )
 
@@ -140,6 +141,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &constantinopleInstructionSet
 	case evm.ChainRules().IsByzantium:
 		jt = &byzantiumInstructionSet
+	case evm.chainRules.IsEIP158:
+		jt = &spuriousDragonInstructionSet
 	case evm.ChainRules().IsSpuriousDragon:
 		jt = &spuriousDragonInstructionSet
 	case evm.ChainRules().IsTangerineWhistle:
@@ -252,6 +255,13 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		if in.cfg.Debug {
 			// Capture pre-execution values for tracing.
 			logged, pcCopy, gasCopy = false, _pc, contract.Gas
+		}
+
+		if in.evm.chainRules.IsPrague && !contract.IsDeployment {
+			// if the PC ends up in a new "chunk" of verkleized code, charge the
+			// associated costs.
+			contractAddr := contract.Address()
+			contract.Gas -= touchCodeChunksRangeOnReadAndChargeGas(contractAddr[:], *pc, 1, uint64(len(contract.Code)), in.evm.txContext.Accesses.(*state.AccessWitness))
 		}
 		// Get the operation from the jump table and validate the stack to ensure there are
 		// enough stack items available to perform the operation.

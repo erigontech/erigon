@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
@@ -123,10 +123,10 @@ func (v *VerkleTreeWriter) UpdateAccount(versionKey []byte, codeSize uint64, isC
 	copy(nonceKey[:], versionKey[:31])
 	copy(balanceKey[:], versionKey[:31])
 	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vtree.CodeKeccakLeafKey
-	nonceKey[31] = vtree.NonceLeafKey
-	balanceKey[31] = vtree.BalanceLeafKey
-	codeSizeKey[31] = vtree.CodeSizeLeafKey
+	codeHashKey[31] = vkutils.CodeKeccakLeafKey
+	nonceKey[31] = vkutils.NonceLeafKey
+	balanceKey[31] = vkutils.BalanceLeafKey
+	codeSizeKey[31] = vkutils.CodeSizeLeafKey
 	// Process values
 	int256ToVerkleFormat(&acc.Balance, balance[:])
 	binary.LittleEndian.PutUint64(nonce[:], acc.Nonce)
@@ -162,10 +162,10 @@ func (v *VerkleTreeWriter) DeleteAccount(versionKey []byte, isContract bool) err
 	copy(nonceKey[:], versionKey[:31])
 	copy(balanceKey[:], versionKey[:31])
 	copy(codeSizeKey[:], versionKey[:31])
-	codeHashKey[31] = vtree.CodeKeccakLeafKey
-	nonceKey[31] = vtree.NonceLeafKey
-	balanceKey[31] = vtree.BalanceLeafKey
-	codeSizeKey[31] = vtree.CodeSizeLeafKey
+	codeHashKey[31] = vkutils.CodeKeccakLeafKey
+	nonceKey[31] = vkutils.NonceLeafKey
+	balanceKey[31] = vkutils.BalanceLeafKey
+	codeSizeKey[31] = vkutils.CodeSizeLeafKey
 	// Insert in the tree
 	if err := v.collector.Collect(versionKey, []byte{0}); err != nil {
 		return err

@@ -7,7 +7,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 type regeneratePedersenAccountsJob struct {
@@ -83,7 +83,7 @@ func pedersenAccountWorker(ctx context.Context, logPrefix string, in chan *regen
 
 		// prevent sending to close channel
 		out <- &regeneratePedersenAccountsOut{
-			versionHash: libcommon.BytesToHash(vtree.GetTreeKeyVersion(job.address[:])),
+			versionHash: libcommon.BytesToHash(vkutils.GetTreeKeyVersion(job.address[:])),
 			account:     job.account,
 			address:     job.address,
 			codeSize:    job.codeSize,
@@ -107,7 +107,7 @@ func pedersenStorageWorker(ctx context.Context, logPrefix string, in, out chan *
 			return
 		}
 		out <- &regeneratePedersenStorageJob{
-			storageVerkleKey: libcommon.BytesToHash(vtree.GetTreeKeyStorageSlot(job.address[:], job.storageKey)),
+			storageVerkleKey: libcommon.BytesToHash(vkutils.GetTreeKeyStorageSlot(job.address[:], job.storageKey)),
 			storageKey:       job.storageKey,
 			address:          job.address,
 			storageValue:     job.storageValue,
@@ -142,15 +142,15 @@ func pedersenCodeWorker(ctx context.Context, logPrefix string, in chan *regenera
 			}
 		}
 		// Chunkify contract code and build keys for each chunks and insert them in the tree
-		chunkedCode := vtree.ChunkifyCode(job.code)
+		chunkedCode := vkutils.ChunkifyCode(job.code)
 		offset := byte(0)
 		offsetOverflow := false
-		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
+		currentKey := vkutils.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
 			chunks = append(chunks, libcommon.CopyBytes(chunkedCode[i:i+32]))
 			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
-				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
+				currentKey = vkutils.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
 				chunkKeys = append(chunkKeys, libcommon.CopyBytes(currentKey))
 				offset = 1
 				offsetOverflow = false
@@ -187,7 +187,7 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 		case <-ctx.Done():
 			return
 		}
-		versionKey := libcommon.BytesToHash(vtree.GetTreeKeyVersion(job.address[:]))
+		versionKey := libcommon.BytesToHash(vkutils.GetTreeKeyVersion(job.address[:]))
 		if job.absentInState {
 			out <- &regenerateIncrementalPedersenAccountsOut{
 				versionHash:   versionKey[:],
@@ -200,16 +200,16 @@ func incrementalAccountWorker(ctx context.Context, logPrefix string, in chan *re
 		var chunks [][]byte
 		var chunkKeys [][]byte
 		// Chunkify contract code and build keys for each chunks and insert them in the tree
-		chunkedCode := vtree.ChunkifyCode(job.code)
+		chunkedCode := vkutils.ChunkifyCode(job.code)
 		offset := byte(0)
 		offsetOverflow := false
-		currentKey := vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
+		currentKey := vkutils.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(0))
 		// Write code chunks
 		for i := 0; i < len(chunkedCode); i += 32 {
 			chunks = append(chunks, libcommon.CopyBytes(chunkedCode[i:i+32]))
 			codeKey := libcommon.CopyBytes(currentKey)
 			if currentKey[31]+offset < currentKey[31] || offsetOverflow {
-				currentKey = vtree.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
+				currentKey = vkutils.GetTreeKeyCodeChunk(job.address[:], uint256.NewInt(uint64(i)/32))
 				chunkKeys = append(chunkKeys, codeKey)
 				offset = 1
 				offsetOverflow = false

@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	"github.com/gballet/go-verkle"
+	// "github.com/gballet/go-verkle"
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/trie"
-	"github.com/ledgerwatch/erigon/turbo/trie/vtree"
+	// "github.com/ledgerwatch/erigon/turbo/trie/vtree"
 )
 
 func int256ToVerkleFormat(x *uint256.Int, buffer []byte) {
@@ -36,34 +36,60 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
 		if err != nil {
+			// TODO @somnathb1 - check empty root instead of libcommon.Hash{}
 			return libcommon.Hash{}, err
 		}
 		defer tx.Rollback()
-	}
-	from := uint64(0)
-	if s.BlockNumber > 0 {
-		from = s.BlockNumber + 1
 	}
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
 
-	var (
-		rootVerkleNode verkle.VerkleNode
-	)
-	if s.BlockNumber == 0 {
-		rootVerkleNode = verkle.New()
-	} else {
-		rootHash, err := rawdb.ReadVerkleRoot(tx, s.BlockNumber)
-		if err != nil {
-			return libcommon.Hash{}, err
-		}
-		rootVerkleNode, err = rawdb.ReadVerkleNode(tx, rootHash)
+	if s.BlockNumber > to { // Erigon will self-heal (download missed blocks) eventually
+		return trie.EmptyRoot, nil
 	}
 
-	vTrie := trie.NewVerkleTrie(rootVerkleNode, nil, tx, vtree.NewPointCache(), true)
+	if s.BlockNumber == to {
+		// we already did hash check for this block
+		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
+		return trie.EmptyRoot, nil
+	}
 
+	from := uint64(0)
+	if s.BlockNumber >= 0 {
+		from = s.BlockNumber + 1
+	}
+
+	var (
+		// rootVerkleNode verkle.VerkleNode
+	)
+
+	rootHash, err := rawdb.ReadVerkleRoot(tx, s.BlockNumber)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	// if (rootHash == libcommon.Hash{}) {
+	// 	rootVerkleNode = verkle.New()
+	// } else {
+	// 	rootVerkleNode, err = rawdb.ReadVerkleNode(tx, rootHash)
+	// }
+
+	// if s.BlockNumber == 0 {
+	// 	rootVerkleNode = verkle.New()
+	// } else {
+	// 	rootHash, err := rawdb.ReadVerkleRoot(tx, s.BlockNumber)
+	// 	if err != nil {
+	// 		return libcommon.Hash{}, err
+	// 	}
+	// 	rootVerkleNode, err = rawdb.ReadVerkleNode(tx, rootHash)
+	// }
+	var newRoot libcommon.Hash
+
+	vTrie, err := trie.OpenVKTrie(rootHash, tx)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
 	accChangesCursor, err := tx.CursorDupSort(kv.AccountChangeSet)
 	if err != nil {
 		return libcommon.Hash{}, err
@@ -94,12 +120,14 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 		isContract := len(incarnationBytes) > 0 && binary.BigEndian.Uint64(incarnationBytes) != 0
 
 		accountAddr := libcommon.BytesToAddress(addressBytes)
-
 		if len(encodedAccount) == 0 {
 			vTrie.DeleteAccount(accountAddr)
 		} else {
-			var acc accounts.Account
+			acc := &accounts.Account{}
 			if err := acc.DecodeForStorage(encodedAccount); err != nil {
+				return libcommon.Hash{}, err
+			}
+			if err := vTrie.UpdateAccount(accountAddr, acc); err != nil {
 				return libcommon.Hash{}, err
 			}
 			code, err := tx.GetOne(kv.Code, acc.CodeHash[:])
@@ -143,7 +171,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 		vTrie.UpdateStorage(address, changesetKey[28:], storageValueFormatted)
 	}
 
-	newRoot, err := vTrie.Commit(true)
+	newRoot, err = vTrie.Commit(true)
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
@@ -164,8 +192,10 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	if !useExternalTx {
 		return newRoot, tx.Commit()
 	}
+	rawdb.WriteVerkleRoot(tx, to, newRoot)
 	return newRoot, nil
 }
+
 // TODO @somnathb1
 
 // DONT USE

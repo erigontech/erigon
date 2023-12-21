@@ -43,6 +43,7 @@ type TxContext struct {
 	Origin     common.Address // Provides information for ORIGIN
 	GasPrice   *uint256.Int   // Provides information for GASPRICE
 	BlobHashes []common.Hash  // Provides versioned blob hashes for BLOBHASH
+	Accesses   AccessWitness // Capture all state accesses for this tx
 }
 
 type (
@@ -108,4 +109,19 @@ type IntraBlockState interface {
 	Snapshot() int
 
 	AddLog(*types.Log)
+}
+
+type AccessWitness interface {
+	// Merge(other *AccessWitness)
+	Keys() [][]byte
+	// Copy() *AccessWitness
+	TouchAndChargeProofOfAbsence(addr []byte) uint64
+	TouchAndChargeMessageCall(addr []byte) uint64
+	TouchAndChargeValueTransfer(callerAddr, targetAddr []byte) uint64
+	TouchAndChargeContractCreateInit(addr []byte, createSendsValue bool) uint64
+	TouchAndChargeContractCreateCompleted(addr []byte) uint64
+	TouchTxOriginAndComputeGas(originAddr []byte) uint64
+	TouchTxExistingAndComputeGas(targetAddr []byte, sendsValue bool) uint64
+	TouchAddressOnWriteAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64
+	TouchAddressOnReadAndComputeGas(addr []byte, treeIndex uint256.Int, subIndex byte) uint64
 }

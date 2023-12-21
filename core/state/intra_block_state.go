@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/erigon/turbo/trie/vkutils"
 )
 
 type revision struct {
@@ -89,6 +90,9 @@ type IntraBlockState struct {
 	nextRevisionID int
 	trace          bool
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
+
+	// Verkle witness
+	witness *AccessWitness
 }
 
 // Create a new state from a given trie
@@ -826,4 +830,19 @@ func (sdb *IntraBlockState) AddressInAccessList(addr libcommon.Address) bool {
 
 func (sdb *IntraBlockState) SlotInAccessList(addr libcommon.Address, slot libcommon.Hash) (addressPresent bool, slotPresent bool) {
 	return sdb.accessList.Contains(addr, slot)
+}
+
+func (s *IntraBlockState) NewAccessWitness() *AccessWitness {
+	return NewAccessWitness(vkutils.NewPointCache())
+}
+
+func (s *IntraBlockState) Witness() *AccessWitness {
+	if s.witness == nil {
+		s.witness = s.NewAccessWitness()
+	}
+	return s.witness
+}
+
+func (s *IntraBlockState) SetWitness(aw *AccessWitness) {
+	s.witness = aw
 }
