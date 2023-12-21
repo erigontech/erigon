@@ -480,6 +480,7 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 	reader := decompressorPool.Get().(*zstd.Decoder)
 	defer decompressorPool.Put(reader)
 	reader.Reset(buffer)
+	fmt.Println("A")
 
 	// Use pooled buffers and readers to avoid allocations.
 	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
