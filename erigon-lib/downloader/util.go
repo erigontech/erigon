@@ -306,7 +306,7 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, err error) {
+func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.DisallowDataDownload = true
 	ts.DisableInitialPieceCheck = true
@@ -315,35 +315,35 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 		rec := recover()
 		if rec != nil {
 			ts.ChunkSize = 0
-			t, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
+			t, ok, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
 		}
 	}()
 
-	t, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
+	t, ok, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
 	if err != nil {
 		ts.ChunkSize = 0
 		return _addTorrentFile(ctx, ts, torrentClient, webseeds)
 	}
-	return t, err
+	return t, ok, err
 }
 
-func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, err error) {
+func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	default:
 	}
 
 	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
-	var ok bool
-	t, ok = torrentClient.Torrent(ts.InfoHash)
-	if !ok {
+	var have bool
+	t, have = torrentClient.Torrent(ts.InfoHash)
+	if !have {
 		defer func(t time.Time) { fmt.Printf("util.go:336: %s\n", time.Since(t)) }(time.Now())
 		t, _, err := torrentClient.AddTorrentSpec(ts)
 		if err != nil {
-			return t, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
-		return t, nil
+		return t, true, nil
 	}
 
 	select {
@@ -354,11 +354,11 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 		defer func(t time.Time) { fmt.Printf("util.go:353: %s\n", time.Since(t)) }(time.Now())
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
-			return t, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 	}
 
-	return t, nil
+	return t, true, nil
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
