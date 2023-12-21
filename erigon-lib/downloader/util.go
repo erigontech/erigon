@@ -306,29 +306,58 @@ func loadTorrent(torrentFilePath string) (*torrent.TorrentSpec, error) {
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) error {
+func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, err error) {
+	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
+	ts.DisallowDataDownload = true
+	ts.DisableInitialPieceCheck = true
+	defer func() {
+		rec := recover() //re-try on panic
+		if rec != nil {
+			ts.ChunkSize = 0
+			t, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
+		}
+	}()
+
+	t, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
+	if err != nil {
+		ts.ChunkSize = 0
+		return _addTorrentFile(ctx, ts, torrentClient, webseeds)
+	}
+	return t, err
+}
+
+func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, err error) {
 	select {
 	case <-ctx.Done():
-		return ctx.Err()
+		return nil, ctx.Err()
 	default:
 	}
-	wsUrls, ok := webseeds.ByFileName(ts.DisplayName)
-	if ok {
-		ts.Webseeds = append(ts.Webseeds, wsUrls...)
+
+	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
+	var ok bool
+	t, ok = torrentClient.Torrent(ts.InfoHash)
+	if !ok {
+		defer func(t time.Time) { fmt.Printf("util.go:336: %s\n", time.Since(t)) }(time.Now())
+		t, _, err := torrentClient.AddTorrentSpec(ts)
+		if err != nil {
+			return t, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+		}
+		return t, nil
 	}
 
-	_, ok = torrentClient.Torrent(ts.InfoHash)
-	if !ok { // can set ChunkSize only for new torrents
-		ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
-	} else {
-		ts.ChunkSize = 0
+	select {
+	case <-t.GotInfo():
+		defer func(t time.Time) { fmt.Printf("util.go:350: %s\n", time.Since(t)) }(time.Now())
+		t.AddWebSeeds(ts.Webseeds)
+	default:
+		defer func(t time.Time) { fmt.Printf("util.go:353: %s\n", time.Since(t)) }(time.Now())
+		t, _, err = torrentClient.AddTorrentSpec(ts)
+		if err != nil {
+			return t, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+		}
 	}
-	ts.DisallowDataDownload = true
-	_, _, err := torrentClient.AddTorrentSpec(ts)
-	if err != nil {
-		return fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
-	}
-	return nil
+
+	return t, nil
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
