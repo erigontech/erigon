@@ -256,7 +256,7 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 }
 
 func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, accumulator *shards.Accumulator) error {
-	unwindToLimit := tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsToTxNum()
+	unwindToLimit := tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindDomainsToTxNum()
 	if txUnwindTo < unwindToLimit {
 		return fmt.Errorf("can't unwind to txNum=%d, limit is %d", txUnwindTo, unwindToLimit)
 	}
@@ -511,7 +511,12 @@ func (w *StateWriterV3) UpdateAccountData(address common.Address, original, acco
 		}
 	}
 	value := accounts.SerialiseV3(account)
-	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, nil); err != nil {
+
+	var prev []byte
+	if original.Initialised {
+		prev = accounts.SerialiseV3(original)
+	}
+	if err := w.rs.domains.DomainPut(kv.AccountsDomain, address[:], nil, value, prev); err != nil {
 		return err
 	}
 	return nil
@@ -541,15 +546,15 @@ func (w *StateWriterV3) WriteAccountStorage(address common.Address, incarnation 
 	if *original == *value {
 		return nil
 	}
-	if w.trace {
-		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
-	}
 	composite := append(address.Bytes(), key.Bytes()...)
 	v := value.Bytes()
+	if w.trace {
+		fmt.Printf("storage: %x,%x,%x\n", address, *key, v)
+	}
 	if len(v) == 0 {
 		return w.rs.domains.DomainDel(kv.StorageDomain, composite, nil, original.Bytes())
 	}
-	return w.rs.domains.DomainPut(kv.StorageDomain, composite, nil, value.Bytes(), original.Bytes())
+	return w.rs.domains.DomainPut(kv.StorageDomain, composite, nil, v, original.Bytes())
 }
 
 func (w *StateWriterV3) CreateContract(address common.Address) error {
@@ -565,20 +570,19 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 }
 
 type StateReaderV3 struct {
-	tx        kv.Tx
 	txNum     uint64
 	trace     bool
-	rs        *StateV3
+	sd        *libstate.SharedDomains
 	composite []byte
 
 	discardReadList bool
 	readLists       map[string]*libstate.KvList
 }
 
-func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
+func NewStateReaderV3(sd *libstate.SharedDomains) *StateReaderV3 {
 	return &StateReaderV3{
 		//trace:     true,
-		rs:        rs,
+		sd:        sd,
 		readLists: newReadList(),
 		composite: make([]byte, 20+32),
 	}
@@ -586,13 +590,13 @@ func NewStateReaderV3(rs *StateV3) *StateReaderV3 {
 
 func (r *StateReaderV3) DiscardReadList()                     { r.discardReadList = true }
 func (r *StateReaderV3) SetTxNum(txNum uint64)                { r.txNum = txNum }
-func (r *StateReaderV3) SetTx(tx kv.Tx)                       { r.tx = tx }
+func (r *StateReaderV3) SetTx(tx kv.Tx)                       {}
 func (r *StateReaderV3) ReadSet() map[string]*libstate.KvList { return r.readLists }
 func (r *StateReaderV3) SetTrace(trace bool)                  { r.trace = trace }
 func (r *StateReaderV3) ResetReadSet()                        { r.readLists = newReadList() }
 
 func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	enc, err := r.rs.domains.LatestAccount(address[:])
+	enc, err := r.sd.LatestAccount(address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -619,10 +623,7 @@ func (r *StateReaderV3) ReadAccountData(address common.Address) (*accounts.Accou
 
 func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	r.composite = append(append(r.composite[:0], address[:]...), key.Bytes()...)
-	//var composite [20 + 32]byte
-	//copy(composite[:], address[:])
-	//copy(composite[20:], key.Bytes())
-	enc, err := r.rs.domains.LatestStorage(r.composite)
+	enc, err := r.sd.LatestStorage(r.composite)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +641,7 @@ func (r *StateReaderV3) ReadAccountStorage(address common.Address, incarnation u
 }
 
 func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint64, codeHash common.Hash) ([]byte, error) {
-	enc, err := r.rs.domains.LatestCode(address[:])
+	enc, err := r.sd.LatestCode(address[:])
 	if err != nil {
 		return nil, err
 	}
@@ -655,7 +656,7 @@ func (r *StateReaderV3) ReadAccountCode(address common.Address, incarnation uint
 }
 
 func (r *StateReaderV3) ReadAccountCodeSize(address common.Address, incarnation uint64, codeHash common.Hash) (int, error) {
-	enc, err := r.rs.domains.LatestCode(address[:])
+	enc, err := r.sd.LatestCode(address[:])
 	if err != nil {
 		return 0, err
 	}

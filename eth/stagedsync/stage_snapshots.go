@@ -192,7 +192,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if casted, ok := tx.(*temporal.Tx); ok {
 		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 	}
-	tx.(state.HasAggCtx).AggCtx().LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+	tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).LogStats(tx, func(endTxNumMinimax uint64) uint64 {
 		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
 		return histBlockNumProgress
 	})
@@ -341,7 +341,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
 	if freezingCfg.Enabled {
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, 100); err != nil {
+		pruneLimit := 100
+		if initialCycle {
+			pruneLimit = 1_000
+		}
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
 			return err
 		}
 	}

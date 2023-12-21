@@ -47,6 +47,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
+)
+
+var (
+	mxPruneTookAgg = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
 )
 
 type AggregatorV3 struct {
@@ -311,6 +316,9 @@ func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
 func (ac *AggregatorV3Context) Files() (res []string) {
+	if ac == nil {
+		return res
+	}
 	res = append(res, ac.account.Files()...)
 	res = append(res, ac.storage.Files()...)
 	res = append(res, ac.code.Files()...)
@@ -688,6 +696,9 @@ func (a *AggregatorV3) integrateFiles(sf AggV3StaticFiles, txNumFrom, txNumTo ui
 }
 
 func (a *AggregatorV3) HasNewFrozenFiles() bool {
+	if a == nil {
+		return false
+	}
 	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
@@ -786,6 +797,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 	if dbg.NoPrune() {
 		return nil
 	}
+	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	step, limit := ac.a.aggregatedStep.Load(), uint64(math2.MaxUint64)
 	txTo := (step + 1) * ac.a.aggregationStep

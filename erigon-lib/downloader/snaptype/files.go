@@ -156,7 +156,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
 }
 
-const Erigon3SeedableSteps = 32
+const Erigon3SeedableSteps = 64
 
 // Use-cases:
 //   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
@@ -164,9 +164,10 @@ const Erigon3SeedableSteps = 32
 //   - avoiding having too much files:
 //     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
 //     less files - means small files will be removed after merge (no peers for this files).
-const Erigon2RecentMergeLimit = 100_000 //nolint
-const Erigon2MergeLimit = 500_000
+const Erigon2MergeLimit = 100_000
 const Erigon2MinSegmentSize = 1_000
+
+var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -177,10 +178,8 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool {
-	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2RecentMergeLimit
-}
-func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2MergeLimit }
+func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }
