@@ -2,11 +2,8 @@ package span
 
 import (
 	"github.com/google/btree"
-
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 )
-
-const NumBlocksInSpan = 6400
 
 // Span represents a current bor span
 type Span struct {
