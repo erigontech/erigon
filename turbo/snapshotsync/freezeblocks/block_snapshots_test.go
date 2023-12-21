@@ -19,8 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, dir string, logger log.Logger) {
-	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(1, from, to, name)), dir, 100, 1, log.LvlDebug, logger)
+func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, dir string, version uint8, logger log.Logger) {
+	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(version, from, to, name)), dir, 100, 1, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	err = c.AddWord([]byte{1})
@@ -116,7 +116,7 @@ func TestMergeSnapshots(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range snaptype.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT, dir, logger)
+			createTestSegmentFile(t, from, to, snT, dir, 1, logger)
 		}
 	}
 
@@ -192,7 +192,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, 0)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.BlocksFreezing{Enabled: true}
-	createFile := func(from, to uint64, name snaptype.Type) { createTestSegmentFile(t, from, to, name, dir, logger) }
+	createFile := func(from, to uint64, name snaptype.Type) { createTestSegmentFile(t, from, to, name, dir, 1, logger) }
 	s := NewRoSnapshots(cfg, dir, 1, logger)
 	defer s.Close()
 	err := s.ReopenFolder()

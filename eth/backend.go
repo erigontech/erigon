@@ -319,7 +319,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
-	snapshotVersion := snapcfg.KnownCfg(chainConfig.ChainName, nil, nil, 0).Version
+	snapshotVersion := snapcfg.KnownCfg(chainConfig.ChainName, 0).Version
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.

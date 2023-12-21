@@ -99,7 +99,7 @@ type BlockSnapshots interface {
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
 	PruneAncientBlocks(tx kv.RwTx, limit int) error
-	RetireBlocksInBackground(ctx context.Context, maxBlockNumInDB uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
+	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)
@@ -131,8 +131,8 @@ type DownloadRequest struct {
 	TorrentHash string
 }
 
-func NewDownloadRequest(version uint8, path string, torrentHash string) DownloadRequest {
-	return DownloadRequest{Version: version, Path: path, TorrentHash: torrentHash}
+func NewDownloadRequest(path string, torrentHash string) DownloadRequest {
+	return DownloadRequest{Path: path, TorrentHash: torrentHash}
 }
 
 type Range struct {

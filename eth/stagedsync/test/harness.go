@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -45,9 +46,10 @@ func InitHarness(ctx context.Context, t *testing.T, logger log.Logger, cfg Harne
 	heimdallClient := heimdallmock.NewMockIHeimdallClient(ctrl)
 	snapshotsDir := t.TempDir()
 	blocksFreezingCfg := ethconfig.NewSnapCfg(true, true, true)
-	allRoSnapshots := freezeblocks.NewRoSnapshots(blocksFreezingCfg, snapshotsDir, logger)
+	snapVersion := snapcfg.KnownCfg("bor-mainnet", 0).Version
+	allRoSnapshots := freezeblocks.NewRoSnapshots(blocksFreezingCfg, snapshotsDir, snapVersion, logger)
 	allRoSnapshots.OptimisticalyReopenWithDB(chainDataDb)
-	allBorRoSnapshots := freezeblocks.NewBorRoSnapshots(blocksFreezingCfg, snapshotsDir, logger)
+	allBorRoSnapshots := freezeblocks.NewBorRoSnapshots(blocksFreezingCfg, snapshotsDir, snapVersion, logger)
 	allBorRoSnapshots.OptimisticalyReopenWithDB(chainDataDb)
 	blockReader := freezeblocks.NewBlockReader(allRoSnapshots, allBorRoSnapshots)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
@@ -61,6 +63,7 @@ func InitHarness(ctx context.Context, t *testing.T, logger log.Logger, cfg Harne
 		nil, // penalize
 		nil, // not used
 		nil, // not used
+		nil,
 	)
 	stateSyncStages := stagedsync.DefaultStages(
 		ctx,
@@ -80,7 +83,7 @@ func InitHarness(ctx context.Context, t *testing.T, logger log.Logger, cfg Harne
 		stagedsync.FinishCfg{},
 		true,
 	)
-	stateSync := stagedsync.New(stateSyncStages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
+	stateSync := stagedsync.New(ethconfig.Defaults.Sync, stateSyncStages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
@@ -379,7 +382,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 		return borConsensusEng
 	}
 
-	t.Fatal(fmt.Sprintf("unimplmented consensus engine init for cfg %v", cfg.ChainConfig))
+	t.Fatalf("unimplmented consensus engine init for cfg %v", cfg.ChainConfig)
 	return nil
 }
 

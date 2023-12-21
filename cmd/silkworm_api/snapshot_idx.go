@@ -76,7 +76,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	segments, _, err := freezeblocks.Segments(dirs.Snap, snapcfg.KnownCfg(chainConfig.ChainName, nil, nil, 0).Version, minBlock)
+	segments, _, err := freezeblocks.Segments(dirs.Snap, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, minBlock)
 	if err != nil {
 		return err
 	}

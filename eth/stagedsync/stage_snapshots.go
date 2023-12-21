@@ -101,7 +101,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		cfg.snapshotUploader = &snapshotUploader{
 			cfg:      &cfg,
 			uploadFs: uploadFs,
-			version:  snapcfg.KnownCfg(chainConfig.ChainName, nil, nil, 0).Version}
+			version:  snapcfg.KnownCfg(chainConfig.ChainName, 0).Version}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
 
@@ -229,13 +229,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			cfg.notifier.Events.OnNewSnapshot()
 		}
 	} else {
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, cfg.notifier.Events, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
 			return err
 		}
 	}
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
-	if cfg.dbEventNotifier != nil {
-		cfg.dbEventNotifier.OnNewSnapshot()
+	if cfg.notifier.Events != nil {
+		cfg.notifier.Events.OnNewSnapshot()
 	}
 
 	cfg.blockReader.Snapshots().LogStat("download")
@@ -597,7 +597,7 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 		return false
 	}
 
-	for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, nil, nil, 1).Preverified {
+	for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, 1).Preverified {
 		info, _ := snaptype.ParseFileName("", it.Name)
 
 		if fi.From == info.From {

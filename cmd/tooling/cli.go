@@ -80,7 +80,7 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 	defer tickerTriggerer.Stop()
 	// do the checking at first run
 
-	snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil, 0).Version
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
 
 	if err := checkSnapshots(ctx, beaconConfig, dirs, snapshotVersion); err != nil {
 		return err
@@ -97,7 +97,7 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 		select {
 		case <-tickerTriggerer.C:
 			log.Info("Checking snapshots")
-			snapshotVersion := snapcfg.KnownCfg(c.Chain, nil, nil, 0).Version
+			snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
 
 			if err := checkSnapshots(ctx, beaconConfig, dirs, snapshotVersion); err != nil {
 				return err

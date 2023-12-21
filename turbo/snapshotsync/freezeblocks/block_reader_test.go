@@ -24,8 +24,8 @@ func TestBlockReaderLastFrozenSpanIDWhenSegmentFilesArePresent(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, logger)
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, 1, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -39,7 +39,7 @@ func TestBlockReaderLastFrozenSpanIDWhenSegmentFilesAreNotPresent(t *testing.T) 
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -56,14 +56,14 @@ func TestBlockReaderLastFrozenSpanIDReturnsLastSegWithIdx(t *testing.T) {
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, logger)
+	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, 1, logger)
 	// delete idx file for last bor span segment to simulate segment with missing idx file
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1_000_000, 1_500_000, snaptype.BorSpans.String()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, snaptype.BorSpans.String()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -80,20 +80,20 @@ func TestBlockReaderLastFrozenSpanIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, logger)
+	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, 1, logger)
 	// delete idx file for all bor span segments to simulate segments with missing idx files
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(0, 500_000, snaptype.BorSpans.String()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 1, 500_000, snaptype.BorSpans.String()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(500_000, 1_000_000, snaptype.BorSpans.String()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 500_000, 1_000_000, snaptype.BorSpans.String()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1_000_000, 1_500_000, snaptype.BorSpans.String()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, snaptype.BorSpans.String()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -108,8 +108,8 @@ func TestBlockReaderLastFrozenEventIDWhenSegmentFilesArePresent(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, logger)
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, 1, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -123,7 +123,7 @@ func TestBlockReaderLastFrozenEventIDWhenSegmentFilesAreNotPresent(t *testing.T)
 
 	logger := testlog.Logger(t, log.LvlInfo)
 	dir := t.TempDir()
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err := borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -140,14 +140,14 @@ func TestBlockReaderLastFrozenEventIDReturnsLastSegWithIdx(t *testing.T) {
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, logger)
+	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, 1, logger)
 	// delete idx file for last bor events segment to simulate segment with missing idx file
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1_000_000, 1_500_000, snaptype.BorEvents.String()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, snaptype.BorEvents.String()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -164,20 +164,20 @@ func TestBlockReaderLastFrozenEventIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	createTestBorEventSegmentFile(t, 0, 500_000, 132, dir, logger)
 	createTestBorEventSegmentFile(t, 500_000, 1_000_000, 264, dir, logger)
 	createTestBorEventSegmentFile(t, 1_000_000, 1_500_000, 528, dir, logger)
-	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, logger)
-	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, logger)
+	createTestSegmentFile(t, 0, 500_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 500_000, 1_000_000, snaptype.BorSpans, dir, 1, logger)
+	createTestSegmentFile(t, 1_000_000, 1_500_000, snaptype.BorSpans, dir, 1, logger)
 	// delete idx files for all bor events segment to simulate segment files with missing idx files
-	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(0, 500_000, snaptype.BorEvents.String()))
+	idxFileToDelete := filepath.Join(dir, snaptype.IdxFileName(1, 0, 500_000, snaptype.BorEvents.String()))
 	err := os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(500_000, 1_000_000, snaptype.BorEvents.String()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 500_000, 1_000_000, snaptype.BorEvents.String()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1_000_000, 1_500_000, snaptype.BorEvents.String()))
+	idxFileToDelete = filepath.Join(dir, snaptype.IdxFileName(1, 1_000_000, 1_500_000, snaptype.BorEvents.String()))
 	err = os.Remove(idxFileToDelete)
 	require.NoError(t, err)
-	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	borRoSnapshots := NewBorRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer borRoSnapshots.Close()
 	err = borRoSnapshots.ReopenFolder()
 	require.NoError(t, err)
@@ -190,7 +190,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 	compressor, err := compress.NewCompressor(
 		context.Background(),
 		"test",
-		filepath.Join(dir, snaptype.SegmentFileName(from, to, snaptype.BorEvents)),
+		filepath.Join(dir, snaptype.SegmentFileName(1, from, to, snaptype.BorEvents)),
 		dir,
 		100,
 		1,
@@ -210,7 +210,7 @@ func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir s
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(from, to, snaptype.BorEvents.String())),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, snaptype.BorEvents.String())),
 			LeafSize:   8,
 		},
 		logger,
