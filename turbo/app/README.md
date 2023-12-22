@@ -24,7 +24,7 @@ this process avoids execution in run signifigantly faster than a standard erigon
 The uploader uses rclone to send seedable (100K or 500K blocks) to a remote storage location specified
 in the rclone config file.
 
-The **uploader** is configured to avoid excessaive disk usages by doing the following:
+The **uploader** is configured to minimize disk usage by doing the following:
 
 * It removes snapshots once they are loaded
 * It agressively prunes the database once entites are transferred to snapshots
@@ -32,7 +32,7 @@ The **uploader** is configured to avoid excessaive disk usages by doing the foll
 in addition to this it has the following performance related features:
 
 * maximises the workers allocated to snaphot processing to improve thoughtput
-* Can be started from scratch by downloading the latest snaphots from the remote location to seed processing
+* Can be started from scratch by downloading the latest snapshots from the remote location to seed processing
 
 The following configuration can be used to upload blocks from genesis where:
 
