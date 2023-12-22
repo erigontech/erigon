@@ -633,9 +633,9 @@ type rcloneFilter struct {
 }
 
 type rcloneRequest struct {
-	Group  string                 `json:"_group"`
 	Async  bool                   `json:"_async,omitempty"`
 	Config map[string]interface{} `json:"_config,omitempty"`
+	Group  string                 `json:"group"`
 	SrcFs  string                 `json:"srcFs"`
 	DstFs  string                 `json:"dstFs"`
 	Filter rcloneFilter           `json:"_filter"`
