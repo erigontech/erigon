@@ -1,6 +1,6 @@
 # Snapshots - tool for managing remote stanshots
 
-In the root of `Erigon` project, use this command to build the the commans:
+In the root of `Erigon` project, use this command to build the the commands:
 
 ```shell
 make snapshots
@@ -46,7 +46,7 @@ Optionally a `<start block>` and optionally an `<end block>` may be specified to
 
 ## manifest - manage the manifest file in the root of remote snapshot locations
 
-The `torrent` command supports the following actions
+The `manifest` command supports the following actions
 
 | Action | Description |
 |--------|-------------|
