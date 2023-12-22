@@ -597,24 +597,28 @@ func (e dirEntry) Info() (fs.FileInfo, error) {
 	return e, nil
 }
 
+var checkKnownSizes = false
+
 func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 	if !fi.Seedable() {
 		return false
 	}
 
-	for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, 1).Preverified {
-		info, _ := snaptype.ParseFileName("", it.Name)
+	if checkKnownSizes {
+		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, 1).Preverified {
+			info, _ := snaptype.ParseFileName("", it.Name)
 
-		if fi.From == info.From {
-			return fi.To == info.To
-		}
+			if fi.From == info.From {
+				return fi.To == info.To
+			}
 
-		if fi.From < info.From {
-			return info.To-info.From == fi.To-fi.From
-		}
+			if fi.From < info.From {
+				return info.To-info.From == fi.To-fi.From
+			}
 
-		if fi.From < info.To {
-			return false
+			if fi.From < info.To {
+				return false
+			}
 		}
 	}
 
@@ -852,6 +856,37 @@ func (u *snapshotUploader) minBlockNumber() uint64 {
 	return min
 }
 
+func expandHomeDir(dirpath string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return dirpath
+	}
+	prefix := fmt.Sprintf("~%c", os.PathSeparator)
+	if strings.HasPrefix(dirpath, prefix) {
+		return filepath.Join(home, dirpath[len(prefix):])
+	} else if dirpath == "~" {
+		return home
+	}
+	return dirpath
+}
+
+func isLocalFs(ctx context.Context, rclient *downloader.RCloneClient, fs string) bool {
+
+	remotes, _ := rclient.ListRemotes(ctx)
+
+	if remote, _, ok := strings.Cut(fs, ":"); ok {
+		for _, r := range remotes {
+			if remote == r {
+				return false
+			}
+		}
+
+		return filepath.VolumeName(fs) == remote
+	}
+
+	return true
+}
+
 func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 	var err error
 
@@ -862,7 +897,25 @@ func (u *snapshotUploader) start(ctx context.Context, logger log.Logger) {
 		return
 	}
 
-	u.uploadSession, err = u.rclone.NewSession(ctx, u.cfg.dirs.Snap, u.uploadFs)
+	uploadFs := u.uploadFs
+
+	if isLocalFs(ctx, u.rclone, uploadFs) {
+		uploadFs = expandHomeDir(filepath.Clean(uploadFs))
+
+		uploadFs, err = filepath.Abs(uploadFs)
+
+		if err != nil {
+			logger.Warn("[uploader] Uploading disabled: invalid upload fs", "err", err, "fs", u.uploadFs)
+			return
+		}
+
+		if err := os.MkdirAll(uploadFs, 0755); err != nil {
+			logger.Warn("[uploader] Uploading disabled: can't create upload fs", "err", err, "fs", u.uploadFs)
+			return
+		}
+	}
+
+	u.uploadSession, err = u.rclone.NewSession(ctx, u.cfg.dirs.Snap, uploadFs)
 
 	if err != nil {
 		logger.Warn("[uploader] Uploading disabled: rclone session failed", "err", err)
@@ -1008,7 +1061,6 @@ func (u *snapshotUploader) upload(ctx context.Context, logger log.Logger) {
 						}
 
 						if fi.TorrentFileExists() {
-
 							state.torrent, _ = u.torrentFiles.LoadByName(f)
 						}
 
