@@ -356,7 +356,7 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	default:
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
-			return t, true, nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+			return t, true, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 	}
 
