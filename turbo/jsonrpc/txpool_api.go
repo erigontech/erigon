@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -14,9 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-// NetAPI the interface for the net_ RPC commands
+// TxPoolAPI the interface for the txpool_ RPC commands
 type TxPoolAPI interface {
 	Content(ctx context.Context) (map[string]map[string]map[string]*RPCTransaction, error)
+	ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]map[string]*RPCTransaction, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
@@ -36,6 +38,14 @@ func NewTxPoolAPI(base *BaseAPI, db kv.RoDB, pool proto_txpool.TxpoolClient) *Tx
 }
 
 func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]map[string]*RPCTransaction, error) {
+	return api.content(ctx, nil)
+}
+
+func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr libcommon.Address) (map[string]map[string]map[string]*RPCTransaction, error) {
+	return api.content(ctx, func(sender libcommon.Address) bool { return sender == addr })
+}
+
+func (api *TxPoolAPIImpl) content(ctx context.Context, addrFilter func(libcommon.Address) bool) (map[string]map[string]map[string]*RPCTransaction, error) {
 	reply, err := api.pool.All(ctx, &proto_txpool.AllRequest{})
 	if err != nil {
 		return nil, err
@@ -56,6 +66,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 			return nil, fmt.Errorf("decoding transaction from: %x: %w", reply.Txs[i].RlpTx, err)
 		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
+		if addrFilter != nil && !addrFilter(addr) {
+			continue
+		}
 		switch reply.Txs[i].TxnType {
 		case proto_txpool.AllReply_PENDING:
 			if _, ok := pending[addr]; !ok {
