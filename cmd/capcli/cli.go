@@ -769,7 +769,6 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	downloaderCfg.DownloadTorrentFilesFromWebseed = true
 	downlo, err := downloader.New(ctx, downloaderCfg, dirs, log.Root(), log.LvlInfo, true)
 	if err != nil {
 		return err
