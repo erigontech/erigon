@@ -83,7 +83,7 @@ func ReadBlockFromSnapshot(r io.Reader, executionReader ExecutionBlockReaderByNu
 	}
 	// Read the length
 	length := make([]byte, 8)
-	if _, err := r.Read(length); err != nil {
+	if _, err := io.ReadFull(r, length); err != nil {
 		return nil, err
 	}
 	// Read the block
@@ -127,7 +127,7 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	}
 	// Read the length
 	length := make([]byte, 8)
-	if _, err := r.Read(length); err != nil {
+	if _, err := io.ReadFull(r, length); err != nil {
 		return nil, 0, libcommon.Hash{}, err
 	}
 	// Read the block
