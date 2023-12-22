@@ -239,6 +239,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
+	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
 	//TODO:
 	// - what to do if node already synced?
