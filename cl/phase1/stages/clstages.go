@@ -321,7 +321,8 @@ func ConsensusClStages(ctx context.Context,
 									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 									continue MainLoop
 								}
-								header, err := executionPayload.RlpHeader()
+								parentRoot := &block.Block.ParentRoot
+								header, err := executionPayload.RlpHeader(parentRoot)
 								if err != nil {
 									log.Warn("bad blocks segment received", "err", err)
 									cfg.rpc.BanPeer(blocks.Peer)

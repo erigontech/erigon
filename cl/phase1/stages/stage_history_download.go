@@ -118,7 +118,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, fmt.Errorf("error encoding execution payload during download: %s", err)
 			}
 			// Use snappy compression that the temporary files do not take too much disk.
-			encodedPayload = utils.CompressSnappy(append(encodedPayload, byte(blk.Version())))
+			encodedPayload = utils.CompressSnappy(append(encodedPayload, append(blk.Block.ParentRoot[:], byte(blk.Version()))...))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
@@ -240,12 +240,15 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		version := clparams.StateVersion(v[len(v)-1])
+		parentRoot := libcommon.BytesToHash(v[len(v)-1-32 : len(v)-1])
+
 		executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
-		if err := executionPayload.DecodeSSZ(v[:len(v)-1], int(version)); err != nil {
+		if err := executionPayload.DecodeSSZ(v[:len(v)-1-32], int(version)); err != nil {
 			return fmt.Errorf("error decoding execution payload during collection: %s", err)
 		}
 		body := executionPayload.Body()
-		header, err := executionPayload.RlpHeader()
+
+		header, err := executionPayload.RlpHeader(&parentRoot)
 		if err != nil {
 			return fmt.Errorf("error parsing rlp header during collection: %s", err)
 		}
