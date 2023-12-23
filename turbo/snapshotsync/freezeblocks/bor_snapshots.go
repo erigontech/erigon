@@ -641,7 +641,7 @@ func removeBorOverlaps(dir string, version uint8, active []snaptype.FileInfo, ma
 	}
 
 	var toDel []string
-	var l []snaptype.FileInfo
+	l := make([]snaptype.FileInfo, 0, len(list))
 
 	for _, f := range list {
 		if !(f.T == snaptype.BorSpans || f.T == snaptype.BorEvents) {
