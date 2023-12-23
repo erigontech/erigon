@@ -1482,14 +1482,16 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
-	if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-		minBlockNum = frozen
-	}
 
 	includeBor := br.chainConfig.Bor != nil
 
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
+
+		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
+			minBlockNum = frozen
+		}
+
 		for br.blockReader.FrozenBorBlocks() < minBlockNum {
 			blockFrom, blockTo, ok := CanRetire(maxBlockNum, br.blockReader.FrozenBorBlocks())
 			if !ok {
@@ -1502,6 +1504,10 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 	}
 
 	for {
+		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
+			minBlockNum = frozen
+		}
+
 		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
 		if !ok {
 			return nil
