@@ -857,12 +857,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			case <-logEvery.C:
 				var m runtime.MemStats
 				dbg.ReadMemStats(&m)
-
-				diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
-					Segments:    ps.DiagnossticsData(),
-					TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
-				})
-
+				sendDiagnostics(startIndexingTime, ps.DiagnossticsData(), m.Alloc, m.Sys)
 				logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 			case <-finish:
 				return
@@ -885,6 +880,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
+				defer notifySegmentIndexingFinished(sn.Name())
 				defer ps.Delete(p)
 				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
@@ -902,7 +898,6 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-
 }
 
 func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, chainConfig *chain.Config, workers int, logger log.Logger) error {
@@ -929,6 +924,7 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
+				defer notifySegmentIndexingFinished(sn.Name())
 				defer ps.Delete(p)
 				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
@@ -951,14 +947,34 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 		case <-logEvery.C:
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
-			dd := ps.DiagnossticsData()
-			diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
-				Segments:    dd,
-				TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
-			})
+			sendDiagnostics(startIndexingTime, ps.DiagnossticsData(), m.Alloc, m.Sys)
 			logger.Info(fmt.Sprintf("[%s] Indexing", logPrefix), "progress", ps.String(), "total-indexing-time", time.Since(startIndexingTime).Round(time.Second).String(), "alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 		}
 	}
+}
+
+func notifySegmentIndexingFinished(name string) {
+	diagnostics.Send(
+		diagnostics.SnapshotSegmentIndexingFinishedUpdate{
+			SegmentName: name,
+		},
+	)
+}
+
+func sendDiagnostics(startIndexingTime time.Time, indexPercent map[string]int, alloc uint64, sys uint64) {
+	segmentsStats := make([]diagnostics.SnapshotSegmentIndexingStatistics, 0, len(indexPercent))
+	for k, v := range indexPercent {
+		segmentsStats = append(segmentsStats, diagnostics.SnapshotSegmentIndexingStatistics{
+			SegmentName: k,
+			Percent:     v,
+			Alloc:       alloc,
+			Sys:         sys,
+		})
+	}
+	diagnostics.Send(diagnostics.SnapshotIndexingStatistics{
+		Segments:    segmentsStats,
+		TimeElapsed: time.Since(startIndexingTime).Round(time.Second).Seconds(),
+	})
 }
 
 func noGaps(in []snaptype.FileInfo) (out []snaptype.FileInfo, missingSnapshots []Range) {
