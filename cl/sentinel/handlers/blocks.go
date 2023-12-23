@@ -57,7 +57,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		req.Count = MAX_REQUEST_BLOCKS
 	}
 
-	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(c.ctx, tx, req.StartSlot, req.Count)
+	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(c.ctx, tx, req.StartSlot, req.Count-1)
 	if err != nil {
 		return err
 	}
@@ -86,7 +86,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 	}
-	return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+	return nil
 }
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
@@ -143,7 +143,8 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		}
 
 		// Read block from DB
-		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
+		block := cltypes.NewSignedBeaconBlock(c.beaconConfig)
+
 		if err := ssz_snappy.DecodeAndReadNoForkDigest(r, block, clparams.Phase0Version); err != nil {
 			return err
 		}
@@ -151,7 +152,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 			return err
 		}
 	}
-	return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+	return nil
 }
 
 type emptyString struct{}

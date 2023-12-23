@@ -85,9 +85,14 @@ func TestBlocksByRootHandler(t *testing.T) {
 
 	for i := 0; i < int(count); i++ {
 		forkDigest := make([]byte, 4)
+
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
-			require.NoError(t, err)
+		if err != nil {
+			if err == io.EOF {
+				t.Fatal("Stream is empty")
+			} else {
+				require.NoError(t, err)
+			}
 		}
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
@@ -118,12 +123,16 @@ func TestBlocksByRootHandler(t *testing.T) {
 			require.NoError(t, err)
 			return
 		}
-
 		require.Equal(t, expBlocks[i].Block.Slot, block.Block.Slot)
 		require.Equal(t, expBlocks[i].Block.StateRoot, block.Block.StateRoot)
 		require.Equal(t, expBlocks[i].Block.ParentRoot, block.Block.ParentRoot)
 		require.Equal(t, expBlocks[i].Block.ProposerIndex, block.Block.ProposerIndex)
 		require.Equal(t, expBlocks[i].Block.Body.ExecutionPayload.BlockNumber, block.Block.Body.ExecutionPayload.BlockNumber)
+	}
+
+	_, err = stream.Read(make([]byte, 1))
+	if err != io.EOF {
+		t.Fatal("Stream is not empty")
 	}
 
 	defer indiciesDB.Close()

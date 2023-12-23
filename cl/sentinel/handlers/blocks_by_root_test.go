@@ -86,7 +86,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	_, err = stream.Write(reqData)
 	require.NoError(t, err)
 
-	for i := 0; i < int(count); i++ {
+	for i := 0; i < len(blockRoots); i++ {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
 		if err != nil && err != io.EOF {
@@ -127,6 +127,11 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		require.Equal(t, expBlocks[i].Block.ParentRoot, block.Block.ParentRoot)
 		require.Equal(t, expBlocks[i].Block.ProposerIndex, block.Block.ProposerIndex)
 		require.Equal(t, expBlocks[i].Block.Body.ExecutionPayload.BlockNumber, block.Block.Body.ExecutionPayload.BlockNumber)
+	}
+
+	_, err = stream.Read(make([]byte, 1))
+	if err != io.EOF {
+		t.Fatal("Stream is not empty")
 	}
 
 	defer indiciesDB.Close()
