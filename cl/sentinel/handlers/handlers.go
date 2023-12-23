@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -35,22 +36,27 @@ import (
 )
 
 type RateLimits struct {
-	pingLimit       int
-	goodbyeLimit    int
-	metadataV1Limit int
-	metadataV2Limit int
-	statusLimit     int
+	pingLimit                int
+	goodbyeLimit             int
+	metadataV1Limit          int
+	metadataV2Limit          int
+	statusLimit              int
+	beaconBlocksByRangeLimit int
+	beaconBlocksByRootLimit  int
 }
 
 const punishmentPeriod = time.Minute
 const defaultRateLimit = 5000
+const defaultBlockHandlerRateLimit = 200
 
 var rateLimits = RateLimits{
-	pingLimit:       defaultRateLimit,
-	goodbyeLimit:    defaultRateLimit,
-	metadataV1Limit: defaultRateLimit,
-	metadataV2Limit: defaultRateLimit,
-	statusLimit:     defaultRateLimit,
+	pingLimit:                defaultRateLimit,
+	goodbyeLimit:             defaultRateLimit,
+	metadataV1Limit:          defaultRateLimit,
+	metadataV2Limit:          defaultRateLimit,
+	statusLimit:              defaultRateLimit,
+	beaconBlocksByRangeLimit: defaultBlockHandlerRateLimit,
+	beaconBlocksByRootLimit:  defaultBlockHandlerRateLimit,
 }
 
 type ConsensusHandlers struct {
@@ -61,6 +67,7 @@ type ConsensusHandlers struct {
 	genesisConfig      *clparams.GenesisConfig
 	ctx                context.Context
 	beaconDB           persistence.RawBeaconBlockChain
+	indiciesDB         kv.RoDB
 	peerRateLimits     sync.Map
 	punishmentEndTimes sync.Map
 }
@@ -71,12 +78,13 @@ const (
 	ResourceUnavaiablePrefix = 0x03
 )
 
-func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
+func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, host host.Host,
 	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		metadata:           metadata,
 		beaconDB:           db,
+		indiciesDB:         indiciesDB,
 		genesisConfig:      genesisConfig,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
@@ -90,7 +98,7 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		communication.StatusProtocolV1:              c.statusHandler,
 		communication.MetadataProtocolV1:            c.metadataV1Handler,
 		communication.MetadataProtocolV2:            c.metadataV2Handler,
-		communication.BeaconBlocksByRangeProtocolV1: c.blocksByRangeHandler,
+		communication.BeaconBlocksByRangeProtocolV1: c.beaconBlocksByRangeHandler,
 		communication.BeaconBlocksByRootProtocolV1:  c.beaconBlocksByRootHandler,
 	}
 
