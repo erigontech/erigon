@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format/getters"
 	clcore "github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -846,6 +847,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		rawBeaconBlockChainDb, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconCfg, dirs.CaplinHistory)
+		_, indiciesDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, rawBeaconBlockChainDb, dirs.CaplinIndexing, engine, false)
+		if err != nil {
+			return nil, err
+		}
 
 		client, err := service.StartSentinelService(&sentinel.SentinelConfig{
 			IpAddr:        config.LightClientDiscoveryAddr,
@@ -855,7 +860,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			NetworkConfig: networkCfg,
 			BeaconConfig:  beaconCfg,
 			TmpDir:        tmpdir,
-		}, rawBeaconBlockChainDb, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
+		}, rawBeaconBlockChainDb, indiciesDB, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
 			ForkDigest:     forkDigest,
 			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
 			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
