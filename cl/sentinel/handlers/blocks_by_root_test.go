@@ -29,11 +29,11 @@ import (
 func TestBlocksByRangeHandler(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/5000"
+	listenAddrHost := "/ip4/127.0.0.1/tcp/6000"
 	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6001"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
 
