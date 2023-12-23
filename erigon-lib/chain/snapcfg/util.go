@@ -67,7 +67,7 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 
 		for _, p := range preverified {
 			if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
-				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
+				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 					pv = append(pv, p)
 				}
 			}
@@ -79,7 +79,7 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 
 			for _, p := range preverified {
 				if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
-					if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && version == uint8(v) {
+					if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 						pv = append(pv, p)
 					}
 				}

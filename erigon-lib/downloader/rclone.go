@@ -23,7 +23,6 @@ import (
 
 	"golang.org/x/exp/slices"
 
-	"github.com/anacrolix/torrent"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
@@ -33,14 +32,10 @@ import (
 
 type rcloneInfo struct {
 	sync.Mutex
-	file            string
-	torrent         *torrent.TorrentSpec
-	buildingTorrent bool
-	snapInfo        *snaptype.FileInfo
-	remoteInfo      remoteInfo
-	remoteHash      string
-	localInfo       fs.FileInfo
-	localHash       string
+	file       string
+	snapInfo   *snaptype.FileInfo
+	remoteInfo remoteInfo
+	localInfo  fs.FileInfo
 }
 
 func (i *rcloneInfo) Version() uint8 {
@@ -85,8 +80,6 @@ type RCloneClient struct {
 func (c *RCloneClient) start(logger log.Logger) error {
 	c.logger = logger
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	rclone, _ := exec.LookPath("rclone")
 
 	if len(rclone) == 0 {
@@ -95,28 +88,31 @@ func (c *RCloneClient) start(logger log.Logger) error {
 	}
 
 	if p, err := freePort(); err == nil {
+		ctx, cancel := context.WithCancel(context.Background())
+
 		addr := fmt.Sprintf("127.0.0.1:%d", p)
 		c.rclone = exec.CommandContext(ctx, rclone, "rcd", "--rc-addr", addr, "--rc-no-auth")
 		c.rcloneUrl = "http://" + addr
 		c.rcloneSession = &http.Client{} // no timeout - we're doing sync calls
 
 		if err := c.rclone.Start(); err != nil {
+			cancel()
 			logger.Warn("[rclone] Uploading disabled: rclone didn't start", "err", err)
 			return fmt.Errorf("rclone didn't start: %w", err)
 		} else {
 			logger.Info("[rclone] rclone started", "addr", addr)
 		}
+
+		go func() {
+			signalCh := make(chan os.Signal, 1)
+			signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
+
+			switch s := <-signalCh; s {
+			case syscall.SIGTERM, syscall.SIGINT:
+				cancel()
+			}
+		}()
 	}
-
-	go func() {
-		signalCh := make(chan os.Signal, 1)
-		signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
-
-		switch s := <-signalCh; s {
-		case syscall.SIGTERM, syscall.SIGINT:
-			cancel()
-		}
-	}()
 
 	return nil
 }
@@ -209,7 +205,7 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 	var response *http.Response
 
 	err = retry(ctx, func(ctx context.Context) error {
-		response, err = u.rcloneSession.Do(request)
+		response, err = u.rcloneSession.Do(request) //nolint:bodyclose
 		return err
 	}, isConnectionError, time.Millisecond*200, nil)
 
@@ -546,7 +542,7 @@ func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.D
 		var response *http.Response
 
 		for i := 0; i < 10; i++ {
-			response, err = c.rcloneSession.Do(listRequest)
+			response, err = c.rcloneSession.Do(listRequest) //nolint:bodyclose
 			if err == nil {
 				break
 			}
@@ -561,12 +557,12 @@ func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.D
 
 		if response.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(response.Body)
-			error := struct {
+			e := struct {
 				Error string `json:"error"`
 			}{}
 
-			if err := json.Unmarshal(body, &error); err == nil {
-				if strings.Contains(error.Error, "AccessDenied") {
+			if err := json.Unmarshal(body, &e); err == nil {
+				if strings.Contains(e.Error, "AccessDenied") {
 					return nil, fmt.Errorf("can't get remote list: %w", ErrAccessDenied)
 				}
 			}
@@ -749,13 +745,14 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 					}
 
 					if err := c.sync(gctx, req.request); err != nil {
+
 						if gctx.Err() != nil {
 							req.cerr <- gctx.Err()
 						} else {
 							go retry(req)
 						}
 
-						return nil
+						return nil //nolint:nilerr
 					}
 
 					for _, info := range req.info {
