@@ -1371,7 +1371,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
-		// if bor snapshots are behind, let's align them
+		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
 		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
 			blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
 			if !ok {
