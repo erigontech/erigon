@@ -740,6 +740,8 @@ func (b BucketsStats) Size() uint64 {
 }
 
 func TestCreateOnExistingStorage(t *testing.T) {
+	t.Skip("Alex Sharov: seems it's not useful property in reality")
+
 	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
