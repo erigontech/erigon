@@ -741,7 +741,7 @@ func (c *RCloneSession) syncFiles(ctx context.Context) {
 
 					if req.ctx.Err() != nil {
 						req.cerr <- req.ctx.Err()
-						return nil
+						return nil //nolint:nilerr
 					}
 
 					if err := c.sync(gctx, req.request); err != nil {
