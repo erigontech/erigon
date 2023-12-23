@@ -65,7 +65,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	require.NoError(t, sentinel.Start())
 	h := sentinel.host
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/3201"
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/3202"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
 
@@ -90,7 +90,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(1))
+	require.Equal(t, code[0], uint8(0))
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
@@ -170,7 +170,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	require.NoError(t, sentinel.Start())
 	h := sentinel.host
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5021"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
 
@@ -199,7 +199,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	code := make([]byte, 1)
 	_, err = stream.Read(code)
 	require.NoError(t, err)
-	require.Equal(t, code[0], uint8(1))
+	require.Equal(t, code[0], uint8(0))
 
 	var w bytes.Buffer
 	_, err = io.Copy(&w, stream)
@@ -256,4 +256,60 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 
 		require.Equal(t, root1, root2)
 	}
+}
+
+func TestSentinelStatusRequest(t *testing.T) {
+	listenAddrHost := "127.0.0.1"
+
+	ctx := context.Background()
+	db, blocks, f, _, _ := loadChain(t)
+	raw := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
+	genesisConfig, networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
+	sentinel, err := New(ctx, &SentinelConfig{
+		NetworkConfig: networkConfig,
+		BeaconConfig:  beaconConfig,
+		GenesisConfig: genesisConfig,
+		IpAddr:        listenAddrHost,
+		Port:          7070,
+		EnableBlocks:  true,
+	}, raw, db, log.New())
+	require.NoError(t, err)
+	defer sentinel.Stop()
+
+	require.NoError(t, sentinel.Start())
+	h := sentinel.host
+
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/5001"
+	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
+	require.NoError(t, err)
+
+	err = h.Connect(ctx, peer.AddrInfo{
+		ID:    host1.ID(),
+		Addrs: host1.Addrs(),
+	})
+	require.NoError(t, err)
+	req := &cltypes.Status{
+		HeadRoot: blocks[0].Block.ParentRoot,
+		HeadSlot: 1234,
+	}
+	sentinel.SetStatus(req)
+	stream, err := host1.NewStream(ctx, h.ID(), protocol.ID(communication.StatusProtocolV1))
+	require.NoError(t, err)
+
+	if err := ssz_snappy.EncodeAndWrite(stream, req); err != nil {
+		return
+	}
+
+	code := make([]byte, 1)
+	_, err = stream.Read(code)
+	require.NoError(t, err)
+	require.Equal(t, code[0], uint8(0))
+
+	resp := &cltypes.Status{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(stream, resp, 0); err != nil {
+		return
+	}
+	require.NoError(t, err)
+
+	require.Equal(t, resp, req)
 }

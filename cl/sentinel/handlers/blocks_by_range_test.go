@@ -86,7 +86,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 	firstByte := make([]byte, 1)
 	_, err = stream.Read(firstByte)
 	require.NoError(t, err)
-	require.Equal(t, firstByte[0], byte(1))
+	require.Equal(t, firstByte[0], byte(0))
 
 	for i := 0; i < int(count); i++ {
 		forkDigest := make([]byte, 4)

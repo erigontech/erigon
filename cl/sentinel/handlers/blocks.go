@@ -77,7 +77,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 
-		if _, err := s.Write([]byte{1}); err != nil {
+		if _, err := s.Write([]byte{0}); err != nil {
 			return err
 		}
 
@@ -138,7 +138,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		}
 		defer r.Close()
 
-		if _, err := s.Write([]byte{1}); err != nil {
+		if _, err := s.Write([]byte{0}); err != nil {
 			return err
 		}
 
