@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	gosync "sync"
 	"time"
+
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/log/v3"
 
