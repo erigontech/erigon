@@ -99,7 +99,7 @@ var Defaults = Config{
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
-		Enabled:    false,
+		Enabled:    true,
 		KeepBlocks: false,
 		Produce:    true,
 	},

@@ -43,11 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const (
-	spanLength    = 6400 // Number of blocks in a span
-	zerothSpanEnd = 255  // End block of 0th span
-)
-
 // ReadCanonicalHash retrieves the hash assigned to a canonical block number.
 func ReadCanonicalHash(db kv.Getter, number uint64) (common.Hash, error) {
 	data, err := db.GetOne(kv.HeaderCanonical, hexutility.EncodeTs(number))
@@ -1074,7 +1069,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
+func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, spanIDAt func(number uint64) uint64) error {
 	c, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return err
@@ -1109,10 +1104,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	if err != nil {
 		return err
 	}
-	var firstSpanToKeep uint64
-	if blockTo > zerothSpanEnd {
-		firstSpanToKeep = 1 + (blockTo-zerothSpanEnd-1)/spanLength
-	}
+	firstSpanToKeep := spanIDAt(blockTo)
 	c2, err := tx.RwCursor(kv.BorSpans)
 	if err != nil {
 		return err

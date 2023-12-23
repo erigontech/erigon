@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -77,8 +79,9 @@ const (
 	fetchCheckpoint      = "/checkpoints/%s"
 	fetchCheckpointCount = "/checkpoints/count"
 
-	fetchMilestone      = "/milestone/latest"
-	fetchMilestoneCount = "/milestone/count"
+	fetchMilestoneAt     = "/milestone/%d"
+	fetchMilestoneLatest = "/milestone/latest"
+	fetchMilestoneCount  = "/milestone/count"
 
 	fetchLastNoAckMilestone = "/milestone/lastNoAck"
 	fetchNoAckMilestone     = "/milestone/noAck/%s"
@@ -159,17 +162,29 @@ func (h *HeimdallClient) FetchCheckpoint(ctx context.Context, number int64) (*ch
 	return &response.Result, nil
 }
 
-// FetchMilestone fetches the checkpoint from heimdall
-func (h *HeimdallClient) FetchMilestone(ctx context.Context) (*milestone.Milestone, error) {
-	url, err := milestoneURL(h.urlString)
+func isInvalidMilestoneIndexError(err error) bool {
+	return errors.Is(err, ErrNotSuccessfulResponse) &&
+		strings.Contains(err.Error(), "Invalid milestone index")
+}
+
+// FetchMilestone fetches a milestone from heimdall
+func (h *HeimdallClient) FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error) {
+	url, err := milestoneURL(h.urlString, number)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx = withRequestType(ctx, milestoneRequest)
 
-	response, err := FetchWithRetry[milestone.MilestoneResponse](ctx, h.client, url, h.closeCh, h.logger)
+	isRecoverableError := func(err error) bool {
+		return !isInvalidMilestoneIndexError(err)
+	}
+
+	response, err := FetchWithRetryEx[milestone.MilestoneResponse](ctx, h.client, url, isRecoverableError, h.closeCh, h.logger)
 	if err != nil {
+		if isInvalidMilestoneIndexError(err) {
+			return nil, fmt.Errorf("%w: number %d", ErrNotInMilestoneList, number)
+		}
 		return nil, err
 	}
 
@@ -273,35 +288,42 @@ func (h *HeimdallClient) FetchMilestoneID(ctx context.Context, milestoneID strin
 
 // FetchWithRetry returns data from heimdall with retry
 func FetchWithRetry[T any](ctx context.Context, client http.Client, url *url.URL, closeCh chan struct{}, logger log.Logger) (*T, error) {
-	// request data once
-	request := &Request{client: client, url: url, start: time.Now()}
-	result, err := Fetch[T](ctx, request)
-	if err == nil {
-		return result, nil
-	}
+	return FetchWithRetryEx[T](ctx, client, url, nil, closeCh, logger)
+}
 
-	// 503 (Service Unavailable) is thrown when an endpoint isn't activated
-	// yet in heimdall. E.g. when the hardfork hasn't hit yet but heimdall
-	// is upgraded.
-	if errors.Is(err, ErrServiceUnavailable) {
-		logger.Debug("[bor.heimdall] service unavailable at the moment", "path", url.Path, "error", err)
-		return nil, err
-	}
-
-	// attempt counter
-	attempt := 1
-
-	logger.Warn("[bor.heimdall] an error while fetching", "path", url.Path, "attempt", attempt, "error", err)
+// FetchWithRetryEx returns data from heimdall with retry
+func FetchWithRetryEx[T any](ctx context.Context, client http.Client, url *url.URL, isRecoverableError func(error) bool, closeCh chan struct{}, logger log.Logger) (*T, error) {
+	attempt := 0
+	const logEach = 5
 
 	// create a new ticker for retrying the request
 	ticker := time.NewTicker(retryCall)
 	defer ticker.Stop()
 
-	const logEach = 5
-
-retryLoop:
 	for {
 		attempt++
+
+		request := &Request{client: client, url: url, start: time.Now()}
+		result, err := Fetch[T](ctx, request)
+		if err == nil {
+			return result, nil
+		}
+
+		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
+		// yet in heimdall. E.g. when the hardfork hasn't hit yet but heimdall
+		// is upgraded.
+		if errors.Is(err, ErrServiceUnavailable) {
+			logger.Debug("[bor.heimdall] service unavailable at the moment", "path", url.Path, "attempt", attempt, "err", err)
+			return nil, err
+		}
+
+		if (isRecoverableError != nil) && !isRecoverableError(err) {
+			return nil, err
+		}
+
+		if attempt%logEach == 1 {
+			logger.Warn("[bor.heimdall] an error while fetching", "path", url.Path, "attempt", attempt, "err", err)
+		}
 
 		select {
 		case <-ctx.Done():
@@ -309,26 +331,9 @@ retryLoop:
 			return nil, ctx.Err()
 		case <-closeCh:
 			logger.Debug("[bor.heimdall] shutdown detected, terminating request", "path", url.Path)
-
 			return nil, ErrShutdownDetected
 		case <-ticker.C:
-			request = &Request{client: client, url: url, start: time.Now()}
-			result, err = Fetch[T](ctx, request)
-
-			if errors.Is(err, ErrServiceUnavailable) {
-				logger.Debug("[bor.heimdall] service unavailable at the moment", "path", url.Path, "attempt", attempt, "error", err)
-				return nil, err
-			}
-
-			if err != nil {
-				if attempt%logEach == 0 {
-					logger.Warn("[bor.heimdall] an error while trying fetching", "path", url.Path, "attempt", attempt, "error", err)
-				}
-
-				continue retryLoop
-			}
-
-			return result, nil
+			// retry
 		}
 	}
 }
@@ -385,18 +390,21 @@ func checkpointURL(urlString string, number int64) (*url.URL, error) {
 	return makeURL(urlString, url, "")
 }
 
-func milestoneURL(urlString string) (*url.URL, error) {
-	url := fetchMilestone
-	return makeURL(urlString, url, "")
-}
-
 func checkpointCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchCheckpointCount, "")
+}
+
+func milestoneURL(urlString string, number int64) (*url.URL, error) {
+	if number == -1 {
+		return makeURL(urlString, fetchMilestoneLatest, "")
+	}
+	return makeURL(urlString, fmt.Sprintf(fetchMilestoneAt, number), "")
 }
 
 func milestoneCountURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchMilestoneCount, "")
 }
+
 func lastNoAckMilestoneURL(urlString string) (*url.URL, error) {
 	return makeURL(urlString, fetchLastNoAckMilestone, "")
 }
@@ -415,7 +423,7 @@ func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
 		return nil, err
 	}
 
-	u.Path = rawPath
+	u.Path = path.Join(u.Path, rawPath)
 	u.RawQuery = rawQuery
 
 	return u, err
@@ -436,12 +444,7 @@ func internalFetch(ctx context.Context, client http.Client, u *url.URL) ([]byte,
 	defer res.Body.Close()
 
 	if res.StatusCode == http.StatusServiceUnavailable {
-		return nil, fmt.Errorf("%w: response code %d", ErrServiceUnavailable, res.StatusCode)
-	}
-
-	// check status code
-	if res.StatusCode != 200 && res.StatusCode != 204 {
-		return nil, fmt.Errorf("%w: %s:response code %d", ErrNotSuccessfulResponse, u.String(), res.StatusCode)
+		return nil, fmt.Errorf("%w: url='%s'; status=%d;", ErrServiceUnavailable, u.String(), res.StatusCode)
 	}
 
 	// unmarshall data from buffer
@@ -453,6 +456,11 @@ func internalFetch(ctx context.Context, client http.Client, u *url.URL) ([]byte,
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
+	}
+
+	// check status code
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("%w: url='%s'; status=%d; body='%s';", ErrNotSuccessfulResponse, u.String(), res.StatusCode, string(body))
 	}
 
 	return body, nil

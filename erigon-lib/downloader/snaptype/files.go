@@ -164,9 +164,10 @@ const Erigon3SeedableSteps = 32
 //   - avoiding having too much files:
 //     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
 //     less files - means small files will be removed after merge (no peers for this files).
-const Erigon2RecentMergeLimit = 100_000 //nolint
-const Erigon2MergeLimit = 500_000
+const Erigon2MergeLimit = 100_000
 const Erigon2MinSegmentSize = 1_000
+
+var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -177,10 +178,9 @@ type FileInfo struct {
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool {
-	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2RecentMergeLimit
-}
-func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2MergeLimit }
+func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Name() string            { return filepath.Base(f.Path) }
 
 func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
 func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }

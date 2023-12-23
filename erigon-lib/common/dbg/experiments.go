@@ -26,6 +26,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+
 var doMemstat = true
 
 func init() {

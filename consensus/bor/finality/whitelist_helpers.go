@@ -71,7 +71,7 @@ func fetchWhitelistMilestone(ctx context.Context, heimdallClient heimdall.IHeimd
 	)
 
 	// fetch latest milestone
-	milestone, err := heimdallClient.FetchMilestone(ctx)
+	milestone, err := heimdallClient.FetchMilestone(ctx, -1)
 	if errors.Is(err, heimdall.ErrServiceUnavailable) {
 		config.logger.Debug("[bor.heimdall] Failed to fetch latest milestone for whitelisting", "err", err)
 		return num, hash, err

@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -35,6 +36,7 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion5,
 		TxsBeginEnd,
 		TxsV3,
+		ProhibitNewDownloadsLock,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},
