@@ -61,7 +61,9 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	if err != nil {
 		return err
 	}
-
+	if len(beaconBlockRooots) == 0 || len(slots) == 0 {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+	}
 	// Read the fork digest
 	forkDigest, err := fork.ComputeForkDigestForVersion(
 		utils.Uint32ToBytes4(c.beaconConfig.GenesisForkVersion),
@@ -71,6 +73,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return err
 	}
 
+	resourceAvaiable := false
 	for i, slot := range slots {
 		r, err := c.beaconDB.BlockReader(c.ctx, slot, beaconBlockRooots[i])
 		if err != nil {
@@ -85,6 +88,10 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		if err != nil {
 			return err
 		}
+		resourceAvaiable = true
+	}
+	if !resourceAvaiable {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
 	}
 	return nil
 }
@@ -110,7 +117,9 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 			break
 		}
 	}
-
+	if len(blockRoots) == 0 {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+	}
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {
 		return err
@@ -126,8 +135,12 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		return err
 	}
 
+	resourceAvaiable := false
 	for i, blockRoot := range blockRoots {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		if slot == nil {
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -151,6 +164,10 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		if err := ssz_snappy.EncodeAndWrite(s, block); err != nil {
 			return err
 		}
+		resourceAvaiable = true
+	}
+	if !resourceAvaiable {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
 	}
 	return nil
 }
