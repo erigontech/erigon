@@ -81,6 +81,13 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		}
 		defer r.Close()
 
+		if !resourceAvaiable {
+			if _, err := s.Write([]byte{1}); err != nil {
+				return err
+			}
+			resourceAvaiable = true
+		}
+
 		if _, err := s.Write(forkDigest[:]); err != nil {
 			return err
 		}
@@ -88,7 +95,6 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		if err != nil {
 			return err
 		}
-		resourceAvaiable = true
 	}
 	if !resourceAvaiable {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
@@ -151,6 +157,13 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		}
 		defer r.Close()
 
+		if !resourceAvaiable {
+			if _, err := s.Write([]byte{1}); err != nil {
+				return err
+			}
+			resourceAvaiable = true
+		}
+
 		if _, err := s.Write(forkDigest[:]); err != nil {
 			return err
 		}
@@ -164,7 +177,6 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		if err := ssz_snappy.EncodeAndWrite(s, block); err != nil {
 			return err
 		}
-		resourceAvaiable = true
 	}
 	if !resourceAvaiable {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
