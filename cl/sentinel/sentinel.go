@@ -290,6 +290,7 @@ func (s *Sentinel) Start() error {
 	s.subManager = NewGossipManager(s.ctx)
 
 	go s.listenForPeers()
+	go s.forkWatcher()
 
 	return nil
 }

@@ -137,8 +137,53 @@ func (s *GossipManager) unsubscribe(topic string) {
 	if _, ok := s.subscriptions[topic]; !ok {
 		return
 	}
-	s.subscriptions[topic].Close()
+	sub := s.subscriptions[topic]
+	go func() {
+		timer := time.NewTimer(time.Hour)
+		ctx := sub.ctx
+		select {
+		case <-ctx.Done():
+			sub.Close()
+		case <-timer.C:
+			sub.Close()
+		}
+	}()
 	delete(s.subscriptions, topic)
+}
+
+func (s *Sentinel) forkWatcher() {
+	prevDigest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+		return
+	}
+	fmt.Println("A")
+	iterationInterval := time.NewTicker(30 * time.Millisecond)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-iterationInterval.C:
+			digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+			if err != nil {
+				log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+				return
+			}
+			if prevDigest != digest {
+				subs := s.subManager.subscriptions
+				for path, sub := range subs {
+					s.subManager.unsubscribe(path)
+					newSub, err := s.SubscribeGossip(sub.gossip_topic)
+					if err != nil {
+						log.Error("[Gossip] Failed to resubscribe to topic", "err", err)
+						return
+					}
+					newSub.Listen()
+				}
+				prevDigest = digest
+			}
+		}
+	}
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
