@@ -1572,12 +1572,14 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		}
 		snapDir, fileName := filepath.Split(f.Path)
 		ext := filepath.Ext(fileName)
-		logger.Log(lvl, "[snapshots] Compression", "ratio", sn.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
-
+		logger.Log(lvl, "[snapshots] Compression start", "file", fileName[:len(fileName)-len(ext)])
+		t := time.Now()
 		_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(snapDir, blockFrom, blockTo)
 		if err != nil {
 			return err
 		}
+		logger.Log(lvl, "[snapshots] Compression", "took", time.Since(t), "ratio", sn.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
+
 		if expectedCount != sn.Count() {
 			return fmt.Errorf("incorrect tx count: %d, expected from snapshots: %d", sn.Count(), expectedCount)
 		}
