@@ -10,6 +10,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/log/v3"
 
@@ -65,6 +66,11 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 		// rootVerkleNode verkle.VerkleNode
 	)
 
+	logPrefix := s.LogPrefix()
+	// if to > s.BlockNumber+16 {
+	logger.Info(fmt.Sprintf("[%s] Computing Verkle Root", logPrefix), "from", s.BlockNumber, "to", to)
+	// }
+
 	rootHash, err := rawdb.ReadVerkleRoot(tx, s.BlockNumber)
 	if err != nil {
 		return libcommon.Hash{}, err
@@ -97,6 +103,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	defer accChangesCursor.Close()
 
 	for k, v, err := accChangesCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accChangesCursor.Next() {
+	// for k, v, err := accChangesCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = accChangesCursor.Next() {
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
@@ -127,6 +134,8 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 			if err := acc.DecodeForStorage(encodedAccount); err != nil {
 				return libcommon.Hash{}, err
 			}
+			tryCodeHash, err := tx.GetOne(kv.PlainContractCode, dbutils.PlainGenerateStoragePrefix(addressBytes[:], acc.Incarnation))
+			log.Debug("Lo behold", "anotherway", tryCodeHash)
 			if err := vTrie.UpdateAccount(accountAddr, acc); err != nil {
 				return libcommon.Hash{}, err
 			}
@@ -142,6 +151,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 
 	storageCursor, err := tx.CursorDupSort(kv.StorageChangeSet)
 
+	// for k, v, err := storageCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = storageCursor.Next() {
 	for k, v, err := storageCursor.Seek(hexutility.EncodeTs(from)); k != nil; k, v, err = storageCursor.Next() {
 		if err != nil {
 			return libcommon.Hash{}, err
@@ -161,14 +171,15 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
-		var storageValueFormatted []byte
+		// var storageValueFormatted []byte
 
-		if len(storageValue) > 0 {
-			storageValueFormatted = make([]byte, 32)
-			int256ToVerkleFormat(new(uint256.Int).SetBytes(storageValue), storageValueFormatted)
-		}
+		// if len(storageValue) > 0 {
+		// 	storageValueFormatted = make([]byte, 32)
+		// 	int256ToVerkleFormat(new(uint256.Int).SetBytes(storageValue), storageValueFormatted)
+		// }
 
-		vTrie.UpdateStorage(address, changesetKey[28:], storageValueFormatted)
+		// vTrie.UpdateStorage(address, changesetKey[28:], storageValueFormatted)
+		vTrie.UpdateStorage(address, changesetKey[28:], storageValue)
 	}
 
 	newRoot, err = vTrie.Commit(true)
@@ -179,20 +190,28 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	if cfg.checkRoot {
 		header := rawdb.ReadHeaderByNumber(tx, to)
 		if header.Root != newRoot {
-			return libcommon.Hash{}, fmt.Errorf("invalid verkle root, header has %x, computed: %x", header.Root, newRoot)
+			return libcommon.Hash{}, fmt.Errorf("invalid verkle root for block %d header has %x, computed: %x", header.Number.Uint64(), header.Root, newRoot)
 		}
 	}
 
 	if err := s.Update(tx, to); err != nil {
 		return libcommon.Hash{}, err
 	}
+
+	// TODO @somnathb1
 	if err := stages.SaveStageProgress(tx, stages.VerkleTrie, to); err != nil {
+		return libcommon.Hash{}, err
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.IntermediateHashes, to); err != nil {
 		return libcommon.Hash{}, err
 	}
 	if !useExternalTx {
 		return newRoot, tx.Commit()
 	}
 	rawdb.WriteVerkleRoot(tx, to, newRoot)
+	
+	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", to, "Verkle Root", newRoot)
 	return newRoot, nil
 }
 
@@ -267,6 +286,12 @@ func UnwindVerkleTrie(u *UnwindState, s *StageState, tx kv.RwTx, cfg TrieCfg, ct
 	if err := s.Update(tx, from); err != nil {
 		return err
 	}
+
+	//TODO @somnathb1
+	if err := stages.SaveStageProgress(tx, stages.VerkleTrie, from); err != nil {
+		return err
+	}
+
 	if err := stages.SaveStageProgress(tx, stages.VerkleTrie, from); err != nil {
 		return err
 	}

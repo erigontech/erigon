@@ -1,7 +1,6 @@
 {
     "ChainName": "verkle-gen-devnet2",
     "chainId": 69420,
-    "consensus": "ethash",
     
     "homesteadBlock": 0,
     "eip150Block": 0,
@@ -22,7 +21,6 @@
 
     "terminalTotalDifficulty": 0,
     "terminalTotalDifficultyPassed": true,
-    "proofInBlocks": true,
-    "ethash": {}
+    "proofInBlocks": true
   }
   

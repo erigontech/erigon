@@ -490,6 +490,26 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 				return UnwindHashStateStage(u, s, tx, hashState, ctx, logger)
 			},
 		},
+
+		{
+			ID:          stages.IntermediateHashes,
+			Description: "Generate intermediate hashes and computing state root",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				if exec.chainConfig.IsPrague(1700825701) {
+					_, err := SpawnVerkleTrie(s, u, tx, trieCfg, ctx, logger)
+					return err
+				}
+				_, err := SpawnIntermediateHashesStage(s, u, tx, trieCfg, ctx, logger)
+				return err
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+				if exec.chainConfig.IsPrague(1700825701) {
+					return UnwindVerkleTrie(u, s, tx, trieCfg, ctx, logger)
+				}
+				return UnwindIntermediateHashesStage(u, s, tx, trieCfg, ctx, logger)
+			},
+		},
+
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",

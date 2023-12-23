@@ -409,8 +409,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		if txCtxAcc == nil {
 			return nil, fmt.Errorf("%s", "Dude initialize txctx with accesses list")
 		}
+		sendsValue := msg.Value().Gt(uint256.NewInt(0))
 		if msg.To() != nil {
-			sendsValue := msg.Value().Gt(uint256.NewInt(0))
 			toAddr := msg.To().Bytes()
 			statelessGasDest := txCtxAcc.TouchTxExistingAndComputeGas(toAddr, sendsValue)
 			if !tryConsumeGas(&st.gas, statelessGasDest) {
@@ -420,7 +420,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 			st.state.GetCodeSize(*msg.To())
 		} else {
 			contractAddr := crypto.CreateAddress(msg.From(), originNonce)
-			if !tryConsumeGas(&st.gas, st.evm.TxContext().Accesses.TouchAndChargeContractCreateInit(contractAddr.Bytes(), msg.Value().Gt(uint256.NewInt(0)))) {
+			statelessGasDest := txCtxAcc.TouchAndChargeContractCreateInit(contractAddr.Bytes(), sendsValue)
+			if !tryConsumeGas(&st.gas, statelessGasDest) {
 				return nil, fmt.Errorf("%w: Insufficient funds to cover witness access costs for transaction: have %d, want %d", ErrInsufficientFunds, st.gas, gas)
 			}
 		}

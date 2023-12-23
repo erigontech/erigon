@@ -417,6 +417,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// The contract is a scoped environment for this execution context only.
 	contract := NewContract(caller, address, value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
+	contract.IsDeployment = true
 
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gas, nil
