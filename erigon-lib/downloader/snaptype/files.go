@@ -196,6 +196,7 @@ type FileInfo struct {
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
 func (f FileInfo) Seedable() bool          { return f.To-f.From == Erigon2MergeLimit }
 func (f FileInfo) NeedTorrentFile() bool   { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Name() string            { return filepath.Base(f.Path) }
 
 func IdxFiles(dir string, version uint8) (res []FileInfo, err error) {
 	return FilesWithExt(dir, version, ".idx")
