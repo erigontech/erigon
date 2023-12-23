@@ -16,6 +16,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -104,8 +105,8 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 	}
 
 	if c.enableBlocks {
-		hm[communication.BeaconBlocksByRangeProtocolV1] = c.beaconBlocksByRangeHandler
-		hm[communication.BeaconBlocksByRootProtocolV1] = c.beaconBlocksByRootHandler
+		hm[communication.BeaconBlocksByRangeProtocolV2] = c.beaconBlocksByRangeHandler
+		hm[communication.BeaconBlocksByRootProtocolV2] = c.beaconBlocksByRootHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
@@ -162,6 +163,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		err = fn(s)
 		if err != nil {
 			l["err"] = err
+			fmt.Println("err", err)
 			log.Trace("[pubsubhandler] stream handler", l)
 			// TODO: maybe we should log this
 			_ = s.Reset()

@@ -14,7 +14,6 @@
 package handlers
 
 import (
-	"errors"
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -42,38 +41,25 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		return err
 	}
 
-	if req.Step != 1 {
-		return errors.New("step must be 1")
-	}
-
 	tx, err := c.indiciesDB.BeginRo(c.ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-
 	// Limit the number of blocks to the count specified in the request.
 	if int(req.Count) > MAX_REQUEST_BLOCKS {
 		req.Count = MAX_REQUEST_BLOCKS
 	}
 
-	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(c.ctx, tx, req.StartSlot, req.Count-1)
-	if err != nil {
-		return err
-	}
-	if len(beaconBlockRooots) == 0 || len(slots) == 0 {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
-	}
-	// Read the fork digest
-	forkDigest, err := fork.ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(c.beaconConfig.GenesisForkVersion),
-		c.genesisConfig.GenesisValidatorRoot,
-	)
+	beaconBlockRooots, slots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(c.ctx, tx, req.StartSlot, req.Count)
 	if err != nil {
 		return err
 	}
 
-	resourceAvaiable := false
+	if len(beaconBlockRooots) == 0 || len(slots) == 0 {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
+	}
+
 	for i, slot := range slots {
 		r, err := c.beaconDB.BlockReader(c.ctx, slot, beaconBlockRooots[i])
 		if err != nil {
@@ -81,11 +67,18 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 		}
 		defer r.Close()
 
-		if !resourceAvaiable {
-			if _, err := s.Write([]byte{1}); err != nil {
-				return err
-			}
-			resourceAvaiable = true
+		version := c.beaconConfig.GetCurrentStateVersion(slot / c.beaconConfig.SlotsPerEpoch)
+		// Read the fork digest
+		forkDigest, err := fork.ComputeForkDigestForVersion(
+			utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)),
+			c.genesisConfig.GenesisValidatorRoot,
+		)
+		if err != nil {
+			return err
+		}
+
+		if _, err := s.Write([]byte{1}); err != nil {
+			return err
 		}
 
 		if _, err := s.Write(forkDigest[:]); err != nil {
@@ -96,9 +89,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 	}
-	if !resourceAvaiable {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
-	}
+
 	return nil
 }
 
@@ -132,16 +123,6 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	}
 	defer tx.Rollback()
 
-	// Read the fork digest
-	forkDigest, err := fork.ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(c.beaconConfig.GenesisForkVersion),
-		c.genesisConfig.GenesisValidatorRoot,
-	)
-	if err != nil {
-		return err
-	}
-
-	resourceAvaiable := false
 	for i, blockRoot := range blockRoots {
 		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 		if slot == nil {
@@ -157,11 +138,18 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		}
 		defer r.Close()
 
-		if !resourceAvaiable {
-			if _, err := s.Write([]byte{1}); err != nil {
-				return err
-			}
-			resourceAvaiable = true
+		if _, err := s.Write([]byte{1}); err != nil {
+			return err
+		}
+
+		version := c.beaconConfig.GetCurrentStateVersion(*slot / c.beaconConfig.SlotsPerEpoch)
+		// Read the fork digest
+		forkDigest, err := fork.ComputeForkDigestForVersion(
+			utils.Uint32ToBytes4(c.beaconConfig.GetForkVersionByVersion(version)),
+			c.genesisConfig.GenesisValidatorRoot,
+		)
+		if err != nil {
+			return err
 		}
 
 		if _, err := s.Write(forkDigest[:]); err != nil {
@@ -178,9 +166,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 			return err
 		}
 	}
-	if !resourceAvaiable {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavaiablePrefix)
-	}
+
 	return nil
 }
 

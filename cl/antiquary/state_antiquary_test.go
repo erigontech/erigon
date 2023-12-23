@@ -3,7 +3,6 @@ package antiquary
 import (
 	"context"
 	_ "embed"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -20,7 +19,7 @@ import (
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
 	db := memdb.NewTestDB(t)
-	reader := tests.LoadChain(blocks, db)
+	reader, _ := tests.LoadChain(blocks, db)
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
@@ -31,21 +30,16 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {
-	t.Skip()
-	t.Skip()
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryBellatrix(t *testing.T) {
-	t.Skip()
 	blocks, preState, postState := tests.GetBellatrixRandom()
-	fmt.Println(len(blocks))
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
-	t.Skip()
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
 }

@@ -80,7 +80,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	}
 
 	reqData := libcommon.CopyBytes(reqBuf.Bytes())
-	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV1))
+	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 	require.NoError(t, err)
 
 	_, err = stream.Write(reqData)
@@ -132,6 +132,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		require.Equal(t, expBlocks[i].Block.ParentRoot, block.Block.ParentRoot)
 		require.Equal(t, expBlocks[i].Block.ProposerIndex, block.Block.ProposerIndex)
 		require.Equal(t, expBlocks[i].Block.Body.ExecutionPayload.BlockNumber, block.Block.Body.ExecutionPayload.BlockNumber)
+		stream.Read(make([]byte, 1))
 	}
 
 	_, err = stream.Read(make([]byte, 1))
