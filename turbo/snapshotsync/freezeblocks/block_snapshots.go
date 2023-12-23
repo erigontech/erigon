@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon/consensus/bor"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -1255,7 +1257,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
-		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
+		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, bor.SpanIDAt); err != nil {
 			return err
 		}
 	}
