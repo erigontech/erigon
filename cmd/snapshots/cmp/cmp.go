@@ -146,9 +146,10 @@ func cmp(cliCtx *cli.Context) error {
 		}
 	}
 
-	var snapTypes []snaptype.Type
+	typeValues := cliCtx.StringSlice(flags.SegTypes.Name)
+	snapTypes := make([]snaptype.Type, 0, len(typeValues))
 
-	for _, val := range cliCtx.StringSlice(flags.SegTypes.Name) {
+	for _, val := range typeValues {
 		segType, ok := snaptype.ParseFileType(val)
 
 		if !ok {
@@ -739,7 +740,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					blockReader2 := freezeblocks.NewBlockReader(f2snaps, nil)
 
 					return func() error {
-						for i := uint64(ent1.From); i < ent1.To; i++ {
+						for i := ent1.From; i < ent1.To; i++ {
 							body1, err := blockReader1.BodyWithTransactions(ctx, nil, common.Hash{}, i)
 
 							if err != nil {

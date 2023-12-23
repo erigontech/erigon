@@ -443,9 +443,9 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 
 				return nil
 			}, func(l []string) error {
-				if cfg.snapshotUploader != nil {
-					// TODO - we need to also remove files from the uploader (100k->500K transition)
-				}
+				//if cfg.snapshotUploader != nil {
+				// TODO - we need to also remove files from the uploader (100k->500K transition)
+				//}
 
 				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
 					_, err := cfg.snapshotDownloader.Delete(ctx, &proto_downloader.DeleteRequest{Paths: l})
@@ -503,9 +503,9 @@ type uploadState struct {
 	uploads          []string
 	remote           bool
 	hasRemoteTorrent bool
-	remoteHash       string
-	local            bool
-	localHash        string
+	//remoteHash       string
+	local     bool
+	localHash string
 }
 
 type snapshotUploader struct {
@@ -672,7 +672,7 @@ func (u *snapshotUploader) uploadManifest(ctx context.Context, remoteRefresh boo
 		}
 	}
 
-	var files []string
+	files := make([]string, 0, len(fileMap))
 
 	for torrent, file := range fileMap {
 		files = append(files, file)
@@ -784,8 +784,6 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 		}
 	}
 
-	var downloads []string
-
 	var min uint64
 
 	for _, info := range lastSegments {
@@ -813,6 +811,8 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 			}
 		}
 	}
+
+	downloads := make([]string, 0, len(lastSegments))
 
 	for _, info := range lastSegments {
 		downloads = append(downloads, info.Name())
@@ -993,7 +993,7 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 	var toReopen []string
 	var borToReopen []string
 
-	var toRemove []string
+	var toRemove []string //nolint:prealloc
 
 	for _, f := range list {
 		if f.To > before {

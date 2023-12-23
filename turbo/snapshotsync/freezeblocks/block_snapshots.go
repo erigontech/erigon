@@ -1867,7 +1867,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 
 		for i := 0; i < workers; i++ {
 			valueBuf := bufPool.Get().([]byte)
-			defer bufPool.Put(valueBuf)
+			defer bufPool.Put(valueBuf) //nolint
 			valueBufs[i] = valueBuf
 			parseCtxs[i] = types2.NewTxParseContext(*chainID)
 		}

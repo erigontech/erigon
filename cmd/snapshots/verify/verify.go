@@ -149,9 +149,10 @@ func verify(cliCtx *cli.Context) error {
 		}
 	}
 
-	var snapTypes []snaptype.Type
+	typeValues := cliCtx.StringSlice(flags.SegTypes.Name)
+	snapTypes := make([]snaptype.Type, 0, len(typeValues))
 
-	for _, val := range cliCtx.StringSlice(flags.SegTypes.Name) {
+	for _, val := range typeValues {
 		segType, ok := snaptype.ParseFileType(val)
 
 		if !ok {
@@ -168,11 +169,15 @@ func verify(cliCtx *cli.Context) error {
 	var firstBlock, lastBlock uint64
 
 	if cliCtx.Args().Len() > 0 {
-		firstBlock, err = strconv.ParseUint(cliCtx.Args().Get(0), 10, 64)
+		if firstBlock, err = strconv.ParseUint(cliCtx.Args().Get(0), 10, 64); err != nil {
+			return err
+		}
 	}
 
 	if cliCtx.Args().Len() > 1 {
-		lastBlock, err = strconv.ParseUint(cliCtx.Args().Get(1), 10, 64)
+		if lastBlock, err = strconv.ParseUint(cliCtx.Args().Get(1), 10, 64); err != nil {
+			return err
+		}
 	}
 
 	var srcSession sync.DownloadSession

@@ -145,9 +145,10 @@ func copy(cliCtx *cli.Context) error {
 		}
 	}
 
-	var snapTypes []snaptype.Type
+	typeValues := cliCtx.StringSlice(flags.SegTypes.Name)
+	snapTypes := make([]snaptype.Type, 0, len(typeValues))
 
-	for _, val := range cliCtx.StringSlice(flags.SegTypes.Name) {
+	for _, val := range typeValues {
 		segType, ok := snaptype.ParseFileType(val)
 
 		if !ok {

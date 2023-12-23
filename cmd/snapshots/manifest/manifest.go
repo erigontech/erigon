@@ -91,8 +91,6 @@ func manifest(cliCtx *cli.Context, command string) error {
 		return err
 	}
 
-	pos++
-
 	switch src.LType {
 	case sync.RemoteFs:
 		if rcCli == nil {
