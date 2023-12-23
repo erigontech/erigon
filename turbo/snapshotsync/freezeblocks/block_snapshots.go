@@ -1369,21 +1369,35 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
-	blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
-	if ok {
-		if err := br.retireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
-			//br.logger.Warn("[snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
-			return err
+	includeBor := br.chainConfig.Bor != nil
+	if includeBor {
+		// if bor snapshots are behind, let's align them
+		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
+			blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+			if !ok {
+				break
+			}
+			if err := br.retireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
+				return err
+			}
 		}
 	}
 
-	includeBor := br.chainConfig.Bor != nil
-	if includeBor {
-		blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
-		if ok {
-			if err := br.retireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
-				return err
-				//br.logger.Warn("[bor snapshots] retire blocks", "err", err, "fromBlock", blockFrom, "toBlock", blockTo)
+	for {
+		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
+		if !ok {
+			break
+		}
+		if err := br.retireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
+			return err
+		}
+
+		if includeBor {
+			blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+			if ok {
+				if err := br.retireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -2384,9 +2398,6 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 					return err
 				}
 			}
-		}
-		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
-		for _, t := range snaptype.BlockSnapshotTypes {
 			m.removeOldFiles(toMerge[t], snapDir)
 		}
 	}
@@ -2446,6 +2457,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
+		_ = os.Remove(f + ".torrent")
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
