@@ -63,7 +63,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		peersPool,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{},
+		&cltypes.Metadata{}, true,
 	)
 	c.Start()
 	req := &cltypes.BeaconBlocksByRangeRequest{

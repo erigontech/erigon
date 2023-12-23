@@ -70,6 +70,8 @@ type ConsensusHandlers struct {
 	indiciesDB         kv.RoDB
 	peerRateLimits     sync.Map
 	punishmentEndTimes sync.Map
+
+	enableBlocks bool
 }
 
 const (
@@ -79,7 +81,7 @@ const (
 )
 
 func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, host host.Host,
-	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
+	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata, enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		metadata:           metadata,
@@ -90,16 +92,20 @@ func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChai
 		ctx:                ctx,
 		peerRateLimits:     sync.Map{},
 		punishmentEndTimes: sync.Map{},
+		enableBlocks:       enabledBlocks,
 	}
 
 	hm := map[string]func(s network.Stream) error{
-		communication.PingProtocolV1:                c.pingHandler,
-		communication.GoodbyeProtocolV1:             c.goodbyeHandler,
-		communication.StatusProtocolV1:              c.statusHandler,
-		communication.MetadataProtocolV1:            c.metadataV1Handler,
-		communication.MetadataProtocolV2:            c.metadataV2Handler,
-		communication.BeaconBlocksByRangeProtocolV1: c.beaconBlocksByRangeHandler,
-		communication.BeaconBlocksByRootProtocolV1:  c.beaconBlocksByRootHandler,
+		communication.PingProtocolV1:     c.pingHandler,
+		communication.GoodbyeProtocolV1:  c.goodbyeHandler,
+		communication.StatusProtocolV1:   c.statusHandler,
+		communication.MetadataProtocolV1: c.metadataV1Handler,
+		communication.MetadataProtocolV2: c.metadataV2Handler,
+	}
+
+	if c.enableBlocks {
+		hm[communication.BeaconBlocksByRangeProtocolV1] = c.beaconBlocksByRangeHandler
+		hm[communication.BeaconBlocksByRootProtocolV1] = c.beaconBlocksByRootHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}

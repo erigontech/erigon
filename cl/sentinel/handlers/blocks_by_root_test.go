@@ -66,7 +66,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		peersPool,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{},
+		&cltypes.Metadata{}, true,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))
