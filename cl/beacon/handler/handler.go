@@ -108,7 +108,7 @@ func (a *ApiHandler) init() {
 				})
 			})
 			r.Route("/beacon", func(r chi.Router) {
-				r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock)) //otterscan
+				r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock))
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Post("/blocks/{slot}", http.NotFound)

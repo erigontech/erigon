@@ -61,7 +61,18 @@ func (m *MockBlockReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot ui
 }
 
 func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
-	panic("implement me")
+	// do a linear search
+	for _, v := range m.u {
+		r, err := v.Block.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+
+		if r == blockRoot {
+			return v, nil
+		}
+	}
+	return nil, nil
 }
 func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
 	panic("implement me")
