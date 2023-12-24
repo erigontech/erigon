@@ -838,6 +838,11 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
+
+	if err := haveState.InitBeaconState(); err != nil {
+		return err
+	}
 
 	v := haveState.Version()
 	// encode and decode the state
@@ -854,7 +859,6 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
 	if r.CompareFile == "" {
 		return nil
 	}

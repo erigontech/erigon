@@ -231,7 +231,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
-
+			if err := s.currentState.InitBeaconState(); err != nil {
+				return err
+			}
 		}
 		s.balances32 = s.balances32[:0]
 		s.balances32 = append(s.balances32, s.currentState.RawBalances()...)

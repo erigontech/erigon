@@ -16,48 +16,47 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func (a *ApiHandler) rootFromStateId(ctx context.Context, tx kv.Tx, stateId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
-	var blockRoot libcommon.Hash
+func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
 	switch {
 	case stateId.head():
-		blockRoot, _, err = a.forkchoiceStore.GetHead()
+		root, _, err = a.forkchoiceStore.GetHead()
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
+		return
 	case stateId.finalized():
-		blockRoot = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
+		return
 	case stateId.justified():
-		blockRoot = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
+		return
 	case stateId.genesis():
-		blockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if root == (libcommon.Hash{}) {
 			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("genesis block not found")
 		}
+		return
 	case stateId.getSlot() != nil:
-		blockRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *stateId.getSlot())
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *stateId.getSlot())
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
-		if blockRoot == (libcommon.Hash{}) {
+		if root == (libcommon.Hash{}) {
 			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("block not found %d", *stateId.getSlot())
 		}
+		return
 	case stateId.getRoot() != nil:
-		root = *stateId.getRoot()
+		root, err = beacon_indicies.ReadBlockRootByStateRoot(tx, *stateId.getRoot())
+		if err != nil {
+			return libcommon.Hash{}, http.StatusInternalServerError, err
+		}
 		return
 	default:
 		return libcommon.Hash{}, http.StatusInternalServerError, fmt.Errorf("cannot parse state id")
 	}
-	root, err = beacon_indicies.ReadStateRootByBlockRoot(ctx, tx, blockRoot)
-	if err != nil {
-		return libcommon.Hash{}, http.StatusInternalServerError, err
-	}
-	if root == (libcommon.Hash{}) {
-		return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("block not found")
-	}
-	return
 }
 
 type rootResponse struct {
@@ -84,7 +83,7 @@ func (a *ApiHandler) getStateFork(r *http.Request) (*beaconResponse, error) {
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
@@ -94,7 +93,7 @@ func (a *ApiHandler) getStateFork(r *http.Request) (*beaconResponse, error) {
 		return nil, err
 	}
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read block slot: %x", root))
 	}
 	epoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 
@@ -123,7 +122,7 @@ func (a *ApiHandler) getStateRoot(r *http.Request) (*beaconResponse, error) {
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
@@ -166,19 +165,39 @@ func (a *ApiHandler) getFullState(r *http.Request) (*beaconResponse, error) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
-	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
-	}
-
-	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
-	if err != nil {
-		return nil, err
 	}
 
 	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+	if state == nil {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		if err != nil {
+			return nil, err
+		}
+		// Sanity checks slot and canonical data.
+		if slot == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read block slot: %x", blockRoot))
+		}
+		canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if canonicalRoot == blockRoot {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read state: %x", blockRoot))
+		}
+		state, err := a.stateReader.ReadHistoricalState(ctx, tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		if state == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read state: %x", blockRoot))
+		}
+		return newBeaconResponse(state).withFinalized(true).withVersion(state.Version()), nil
 	}
 
 	return newBeaconResponse(state).withFinalized(false).withVersion(state.Version()), nil
@@ -203,7 +222,7 @@ func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, e
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
-	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
+	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
@@ -265,14 +284,9 @@ func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error)
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
-	root, httpStatus, err := a.rootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
-	}
-
-	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
-	if err != nil {
-		return nil, err
 	}
 
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -341,5 +355,5 @@ func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error)
 		return nil, err
 	}
 
-	return newBeaconResponse(response).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	return newBeaconResponse(response).withFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }

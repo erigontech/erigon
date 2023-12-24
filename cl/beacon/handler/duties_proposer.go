@@ -22,7 +22,6 @@ type proposerDuties struct {
 }
 
 func (a *ApiHandler) getDutiesProposer(r *http.Request) (*beaconResponse, error) {
-
 	epoch, err := epochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
