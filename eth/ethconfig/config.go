@@ -46,7 +46,7 @@ import (
 )
 
 // AggregationStep number of transactions in smalest static file
-const HistoryV3AggregationStep = 3_125_000 // = 100M / 32. Dividers: 2, 5, 10, 20, 40, 50, 100, 1000
+const HistoryV3AggregationStep = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
 //const HistoryV3AggregationStep = 3_125_000 / 50 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.

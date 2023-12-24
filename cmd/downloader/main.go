@@ -106,6 +106,9 @@ func init() {
 	rootCmd.AddCommand(torrentCat)
 	rootCmd.AddCommand(torrentMagnet)
 
+	withDataDir(manifestCmd)
+	rootCmd.AddCommand(manifestCmd)
+
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
@@ -198,7 +201,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
 
-	cfg.DownloadTorrentFilesFromWebseed = true // enable it only for standalone mode now. feature is not fully ready yet
 	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo, seedbox)
 	if err != nil {
 		return err
@@ -241,7 +243,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs)
+		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap))
 		if err != nil {
 			return err
 		}
@@ -255,6 +257,18 @@ var printTorrentHashes = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := doPrintTorrentHashes(cmd.Context(), logger); err != nil {
+			log.Error(err.Error())
+		}
+		return nil
+	},
+}
+
+var manifestCmd = &cobra.Command{
+	Use:     "manifest",
+	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := debug.SetupCobra(cmd, "downloader")
+		if err := manifest(cmd.Context(), logger); err != nil {
 			log.Error(err.Error())
 		}
 		return nil
@@ -312,11 +326,60 @@ var torrentMagnet = &cobra.Command{
 	},
 }
 
+func manifest(ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	extList := []string{
+		".torrent",
+		".seg", ".idx", // e2
+		".kv", ".kvi", ".bt", ".kvei", // e3 domain
+		".v", ".vi", //e3 hist
+		".ef", ".efi", //e3 idx
+		".txt", //salt.txt
+	}
+	l, _ := dir.ListFiles(dirs.Snap, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		fmt.Printf("%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapDomain, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		fmt.Printf("domain/%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		if strings.Contains(fName, "commitment") {
+			continue
+		}
+		fmt.Printf("history/%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		if strings.Contains(fName, "commitment") {
+			continue
+		}
+		fmt.Printf("idx/%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapAccessors, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		if strings.Contains(fName, "commitment") {
+			continue
+		}
+		fmt.Printf("accessors/%s\n", fName)
+	}
+	return nil
+}
+
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
+
+	tf := downloader.NewAtomicTorrentFiles(dirs.Snap)
 
 	if forceRebuild { // remove and create .torrent files (will re-read all snapshots)
 		//removePieceCompletionStorage(snapDir)
@@ -329,13 +392,13 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs); err != nil {
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf); err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
 	}
 
 	res := map[string]string{}
-	torrents, err := downloader.AllTorrentSpecs(dirs)
+	torrents, err := downloader.AllTorrentSpecs(dirs, tf)
 	if err != nil {
 		return err
 	}

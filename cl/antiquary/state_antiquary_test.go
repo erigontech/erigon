@@ -32,6 +32,7 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 
 func TestStateAntiquaryCapella(t *testing.T) {
 	t.Skip()
+	t.Skip()
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }

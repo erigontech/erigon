@@ -65,13 +65,6 @@ func (s *StageState) ExecutionAt(db kv.Getter) (uint64, error) {
 	return execution, err
 }
 
-// IntermediateHashesAt gets the current state of the "IntermediateHashes" stage.
-// A block is fully validated after the IntermediateHashes stage is passed successfully.
-func (s *StageState) IntermediateHashesAt(db kv.Getter) (uint64, error) {
-	progress, err := stages.GetStageProgress(db, stages.IntermediateHashes)
-	return progress, err
-}
-
 type UnwindReason struct {
 	// If we;re unwinding due to a fork - we want to unlink blocks but not mark
 	// them as bad - as they may get replayed then deselected

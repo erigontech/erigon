@@ -15,6 +15,8 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/kv/membatch"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -22,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -53,7 +54,10 @@ func (l *KvList) Swap(i, j int) {
 }
 
 type SharedDomains struct {
-	*membatch.Mapmutation
+	kv.RwTx
+	withHashBatch, withMemBatch bool
+	noFlush                     int
+
 	aggCtx *AggregatorV3Context
 	sdCtx  *SharedDomainsCommitmentContext
 	roTx   kv.Tx
@@ -80,13 +84,23 @@ type SharedDomains struct {
 }
 
 type HasAggCtx interface {
-	AggCtx() *AggregatorV3Context
+	AggCtx() interface{}
+}
+
+func IsSharedDomains(tx kv.Tx) bool {
+	_, ok := tx.(*SharedDomains)
+	return ok
 }
 
 func NewSharedDomains(tx kv.Tx) *SharedDomains {
+	if casted, ok := tx.(*SharedDomains); ok {
+		casted.noFlush++
+		return casted
+	}
+
 	var ac *AggregatorV3Context
 	if casted, ok := tx.(HasAggCtx); ok {
-		ac = casted.AggCtx()
+		ac = casted.AggCtx().(*AggregatorV3Context)
 	} else {
 		panic(fmt.Sprintf("type %T need AggCtx method", tx))
 	}
@@ -95,17 +109,16 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	}
 
 	sd := &SharedDomains{
-		aggCtx:      ac,
-		Mapmutation: membatch.NewHashBatch(tx, ac.a.ctx.Done(), ac.a.dirs.Tmp, ac.a.logger),
-		Account:     ac.a.accounts,
-		Code:        ac.a.code,
-		Storage:     ac.a.storage,
-		Commitment:  ac.a.commitment,
-		TracesTo:    ac.a.tracesTo,
-		TracesFrom:  ac.a.tracesFrom,
-		LogAddrs:    ac.a.logAddrs,
-		LogTopics:   ac.a.logTopics,
-		roTx:        tx,
+		aggCtx:     ac,
+		Account:    ac.a.accounts,
+		Code:       ac.a.code,
+		Storage:    ac.a.storage,
+		Commitment: ac.a.commitment,
+		TracesTo:   ac.a.tracesTo,
+		TracesFrom: ac.a.tracesFrom,
+		LogAddrs:   ac.a.logAddrs,
+		LogTopics:  ac.a.logTopics,
+		roTx:       tx,
 		//trace:       true,
 	}
 
@@ -119,7 +132,17 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	return sd
 }
 
-func (sd *SharedDomains) AggCtx() *AggregatorV3Context { return sd.aggCtx }
+func (sd *SharedDomains) AggCtx() interface{} { return sd.aggCtx }
+func (sd *SharedDomains) WithMemBatch() *SharedDomains {
+	sd.RwTx = membatchwithdb.NewMemoryBatch(sd.roTx, sd.aggCtx.a.dirs.Tmp)
+	sd.withMemBatch = true
+	return sd
+}
+func (sd *SharedDomains) WithHashBatch(ctx context.Context) *SharedDomains {
+	sd.RwTx = membatch.NewHashBatch(sd.roTx, ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
+	sd.withHashBatch = true
+	return sd
+}
 
 // aggregator context should call aggCtx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
@@ -306,12 +329,6 @@ func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
 // Get returns cached value by key. Cache is invalidated when associated WAL is flushed
 func (sd *SharedDomains) Get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	//sd.muMaps.RLock()
-	v, ok = sd.get(table, key)
-	//sd.muMaps.RUnlock()
-	return v, ok
-}
-
-func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	keyS := *(*string)(unsafe.Pointer(&key))
 	//keyS := string(key)
 	switch table {
@@ -326,6 +343,7 @@ func (sd *SharedDomains) get(table kv.Domain, key []byte) (v []byte, ok bool) {
 	default:
 		panic(table)
 	}
+	//sd.muMaps.RUnlock()
 	return v, ok
 }
 
@@ -560,8 +578,6 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	//     DB endTxNum    = 16, because db has step 2, and first txNum of step 2 is 16.
 	//     RAM endTxNum   = 17, because current tcurrent txNum is 17
 
-	sd.Storage.stats.FilesQueries.Add(1)
-
 	haveRamUpdates := sd.storage.Len() > 0
 
 	var cp CursorHeap
@@ -716,6 +732,13 @@ func (sd *SharedDomains) Close() {
 	sd.LogTopics = nil
 	sd.TracesFrom = nil
 	sd.TracesTo = nil
+
+	if sd.RwTx != nil {
+		if casted, ok := sd.RwTx.(kv.Closer); ok {
+			casted.Close()
+		}
+		sd.RwTx = nil
+	}
 }
 
 // StartWrites - pattern: `defer domains.StartWrites().FinishWrites()`
@@ -786,9 +809,8 @@ func (sd *SharedDomains) DiscardHistory() {
 func (sd *SharedDomains) rotate() []flusher {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
-	mut := sd.Mapmutation
-	sd.Mapmutation = membatch.NewHashBatch(sd.roTx, sd.aggCtx.a.ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
-	return []flusher{
+
+	l := []flusher{
 		sd.aggCtx.account.Rotate(),
 		sd.aggCtx.storage.Rotate(),
 		sd.aggCtx.code.Rotate(),
@@ -797,8 +819,16 @@ func (sd *SharedDomains) rotate() []flusher {
 		sd.aggCtx.logTopics.Rotate(),
 		sd.aggCtx.tracesFrom.Rotate(),
 		sd.aggCtx.tracesTo.Rotate(),
-		mut,
 	}
+	if sd.withHashBatch {
+		l = append(l, sd.RwTx.(flusher))
+		sd.RwTx = membatch.NewHashBatch(sd.roTx, sd.aggCtx.a.ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
+	}
+	if sd.withMemBatch {
+		l = append(l, sd.RwTx.(flusher))
+		sd.RwTx = membatchwithdb.NewMemoryBatch(sd.roTx, sd.aggCtx.a.dirs.Tmp)
+	}
+	return l
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -812,9 +842,19 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	defer mxFlushTook.ObserveDuration(time.Now())
-	for _, f := range sd.rotate() {
-		if err := f.Flush(ctx, tx); err != nil {
-			return err
+
+	if sd.noFlush > 0 {
+		sd.noFlush--
+	}
+
+	if sd.noFlush == 0 {
+		for _, f := range sd.rotate() {
+			if err := f.Flush(ctx, tx); err != nil {
+				return err
+			}
+			if casted, ok := f.(kv.Closer); ok {
+				casted.Close()
+			}
 		}
 	}
 	return nil

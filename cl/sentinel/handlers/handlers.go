@@ -43,13 +43,14 @@ type RateLimits struct {
 }
 
 const punishmentPeriod = time.Minute
+const defaultRateLimit = 5000
 
-var defaultRateLimits = RateLimits{
-	pingLimit:       5000,
-	goodbyeLimit:    5000,
-	metadataV1Limit: 5000,
-	metadataV2Limit: 5000,
-	statusLimit:     5000,
+var rateLimits = RateLimits{
+	pingLimit:       defaultRateLimit,
+	goodbyeLimit:    defaultRateLimit,
+	metadataV1Limit: defaultRateLimit,
+	metadataV2Limit: defaultRateLimit,
+	statusLimit:     defaultRateLimit,
 }
 
 type ConsensusHandlers struct {
@@ -106,12 +107,16 @@ func (c *ConsensusHandlers) checkRateLimit(peerId string, method string, limit i
 	if punishmentEndTime, ok := c.punishmentEndTimes.Load(keyHash); ok {
 		if time.Now().Before(punishmentEndTime.(time.Time)) {
 			return errors.New("rate limit exceeded, punishment period in effect")
-		} else {
-			c.punishmentEndTimes.Delete(keyHash)
 		}
+		c.punishmentEndTimes.Delete(keyHash)
 	}
 
-	value, _ := c.peerRateLimits.LoadOrStore(keyHash, rate.NewLimiter(rate.Every(time.Minute), limit))
+	value, ok := c.peerRateLimits.Load(keyHash)
+	if !ok {
+		value = rate.NewLimiter(rate.Every(time.Minute), limit)
+		c.peerRateLimits.Store(keyHash, value)
+	}
+
 	limiter := value.(*rate.Limiter)
 
 	if !limiter.Allow() {
@@ -146,6 +151,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 			log.Trace("[pubsubhandler] stream handler", l)
 			// TODO: maybe we should log this
 			_ = s.Reset()
+			_ = s.Close()
 			return
 		}
 		err = s.Close()

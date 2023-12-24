@@ -145,25 +145,23 @@ func HeadersPOW(
 	defer cfg.hd.SetFetchingNew(false)
 	headerProgress = cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
 
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
 	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
 	if err != nil {
 		return err
 	}
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-	if hash == (libcommon.Hash{}) {
+	if hash == (libcommon.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
 		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
-		if !useExternalTx {
-			if err = tx.Commit(); err != nil {
-				return err
-			}
+		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
+		if err != nil {
+			return err
 		}
-		return nil
 	}
 
 	// Allow other stages to run 1 cycle if no network available
@@ -313,7 +311,7 @@ Loop:
 			doms := state.NewSharedDomains(tx) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 			defer doms.Close()
 
-			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, tx)
+			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindTo, tx)
 			if err != nil {
 				return err
 			}

@@ -320,7 +320,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
 	//}
 
-	unwindToLimit, err := tx.(libstate.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(tx)
+	unwindToLimit, err := tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindDomainsToBlockNum(tx)
 	if err != nil {
 		return err
 	}
@@ -902,7 +902,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.historyV3 {
-		if err = tx.(*temporal.Tx).AggCtx().PruneWithTimeout(ctx, 1*time.Second, tx); err != nil { // prune part of retired data, before commit
+		pruneTimeout := 1 * time.Second
+		if initialCycle {
+			pruneTimeout = 10 * time.Minute
+		}
+		if err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorV3Context).PruneWithTimeout(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	} else {
