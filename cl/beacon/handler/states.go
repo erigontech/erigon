@@ -187,7 +187,7 @@ func (a *ApiHandler) getFullState(r *http.Request) (*beaconResponse, error) {
 		if err != nil {
 			return nil, err
 		}
-		if canonicalRoot == blockRoot {
+		if canonicalRoot != blockRoot {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read state: %x", blockRoot))
 		}
 		state, err := a.stateReader.ReadHistoricalState(ctx, tx, *slot)
