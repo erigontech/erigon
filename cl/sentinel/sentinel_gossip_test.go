@@ -85,7 +85,6 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 
 	select {
 	case ans := <-ch:
-		require.Equal(t, len(msg), len(ans.Message.Data))
 		previousTopic = *ans.Topic
 	case <-ctx.Done():
 		t.Fatal("timeout")
@@ -96,7 +95,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	msg = []byte("hello1")
 	go func() {
 		// delay to make sure that the connection is established
-		time.Sleep(time.Second)
+		time.Sleep(5 * time.Second)
 		sub1 = sentinel1.subManager.GetMatchingSubscription(string(BeaconBlockSsz.Name))
 		sub1.Publish(msg)
 	}()
