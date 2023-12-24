@@ -28,7 +28,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 		return
 	}
 
-	header, err := payload.RlpHeader()
+	header, err := payload.RlpHeader(beaconParentRoot)
 	if err != nil {
 		return true, err
 	}

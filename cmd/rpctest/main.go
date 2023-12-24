@@ -73,6 +73,19 @@ func main() {
 	}
 	with(benchEthCallCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
 
+	var benchEthCreateAccessListCmd = &cobra.Command{
+		Use:   "benchEthCreateAccessList",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchEthCreateAccessList(erigonURL, gethURL, needCompare, latest, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchEthCreateAccessListCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile, withLatest)
+
 	var benchEthGetBlockByHash = &cobra.Command{
 		Use:   "benchEthGetBlockByHash",
 		Short: "",
@@ -434,6 +447,7 @@ func main() {
 		benchEthGetBlockByNumber2Cmd,
 		benchEthGetBlockByHash,
 		benchEthCallCmd,
+		benchEthCreateAccessListCmd,
 		benchEthGetTransactionByHashCmd,
 		bench1Cmd,
 		bench2Cmd,

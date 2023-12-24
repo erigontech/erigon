@@ -16,10 +16,12 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -35,22 +37,27 @@ import (
 )
 
 type RateLimits struct {
-	pingLimit       int
-	goodbyeLimit    int
-	metadataV1Limit int
-	metadataV2Limit int
-	statusLimit     int
+	pingLimit                int
+	goodbyeLimit             int
+	metadataV1Limit          int
+	metadataV2Limit          int
+	statusLimit              int
+	beaconBlocksByRangeLimit int
+	beaconBlocksByRootLimit  int
 }
 
 const punishmentPeriod = time.Minute
 const defaultRateLimit = 5000
+const defaultBlockHandlerRateLimit = 200
 
 var rateLimits = RateLimits{
-	pingLimit:       defaultRateLimit,
-	goodbyeLimit:    defaultRateLimit,
-	metadataV1Limit: defaultRateLimit,
-	metadataV2Limit: defaultRateLimit,
-	statusLimit:     defaultRateLimit,
+	pingLimit:                defaultRateLimit,
+	goodbyeLimit:             defaultRateLimit,
+	metadataV1Limit:          defaultRateLimit,
+	metadataV2Limit:          defaultRateLimit,
+	statusLimit:              defaultRateLimit,
+	beaconBlocksByRangeLimit: defaultBlockHandlerRateLimit,
+	beaconBlocksByRootLimit:  defaultBlockHandlerRateLimit,
 }
 
 type ConsensusHandlers struct {
@@ -61,37 +68,45 @@ type ConsensusHandlers struct {
 	genesisConfig      *clparams.GenesisConfig
 	ctx                context.Context
 	beaconDB           persistence.RawBeaconBlockChain
+	indiciesDB         kv.RoDB
 	peerRateLimits     sync.Map
 	punishmentEndTimes sync.Map
+
+	enableBlocks bool
 }
 
 const (
 	SuccessfulResponsePrefix = 0x00
-	RateLimitedPrefix        = 0x02
-	ResourceUnavaiablePrefix = 0x03
+	RateLimitedPrefix        = 0x01
+	ResourceUnavaiablePrefix = 0x02
 )
 
-func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, host host.Host,
-	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata) *ConsensusHandlers {
+func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, host host.Host,
+	peers *peers.Pool, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, metadata *cltypes.Metadata, enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,
 		metadata:           metadata,
 		beaconDB:           db,
+		indiciesDB:         indiciesDB,
 		genesisConfig:      genesisConfig,
 		beaconConfig:       beaconConfig,
 		ctx:                ctx,
 		peerRateLimits:     sync.Map{},
 		punishmentEndTimes: sync.Map{},
+		enableBlocks:       enabledBlocks,
 	}
 
 	hm := map[string]func(s network.Stream) error{
-		communication.PingProtocolV1:                c.pingHandler,
-		communication.GoodbyeProtocolV1:             c.goodbyeHandler,
-		communication.StatusProtocolV1:              c.statusHandler,
-		communication.MetadataProtocolV1:            c.metadataV1Handler,
-		communication.MetadataProtocolV2:            c.metadataV2Handler,
-		communication.BeaconBlocksByRangeProtocolV1: c.blocksByRangeHandler,
-		communication.BeaconBlocksByRootProtocolV1:  c.beaconBlocksByRootHandler,
+		communication.PingProtocolV1:     c.pingHandler,
+		communication.GoodbyeProtocolV1:  c.goodbyeHandler,
+		communication.StatusProtocolV1:   c.statusHandler,
+		communication.MetadataProtocolV1: c.metadataV1Handler,
+		communication.MetadataProtocolV2: c.metadataV2Handler,
+	}
+
+	if c.enableBlocks {
+		hm[communication.BeaconBlocksByRangeProtocolV2] = c.beaconBlocksByRangeHandler
+		hm[communication.BeaconBlocksByRootProtocolV2] = c.beaconBlocksByRootHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
@@ -148,6 +163,7 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		err = fn(s)
 		if err != nil {
 			l["err"] = err
+			fmt.Println("err", err)
 			log.Trace("[pubsubhandler] stream handler", l)
 			// TODO: maybe we should log this
 			_ = s.Reset()

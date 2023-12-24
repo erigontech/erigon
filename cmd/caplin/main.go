@@ -21,6 +21,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
@@ -88,7 +90,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		NetworkConfig: cfg.NetworkCfg,
 		BeaconConfig:  cfg.BeaconCfg,
 		NoDiscovery:   cfg.NoDiscovery,
-	}, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
+	}, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
 		ForkDigest:     forkDigest,
 		FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
 		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
@@ -121,6 +123,11 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			Root: cfg.RecordDir,
 		}
 	}
+	rawBeaconBlockChainDb, _ := persistence.AferoRawBeaconBlockChainFromOsPath(cfg.BeaconCfg, cfg.Dirs.CaplinHistory)
+	historyDB, indiciesDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, rawBeaconBlockChainDb, cfg.Dirs.CaplinIndexing, executionEngine, false)
+	if err != nil {
+		return err
+	}
 
 	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), 0).Version
 
@@ -131,5 +138,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		WriteTimeout:    cfg.BeaconApiWriteTimeout,
 		IdleTimeout:     cfg.BeaconApiWriteTimeout,
 		Active:          !cfg.NoBeaconApi,
-	}, nil, nil, false, false)
+	}, nil, nil, false, false, historyDB, indiciesDB)
 }

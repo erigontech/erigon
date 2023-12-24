@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -19,12 +20,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pierrec/lz4"
 )
 
 type BeaconBlockSegment struct {
@@ -145,10 +146,11 @@ type CaplinSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
-
 	// allows for pruning segments - this is the min availible segment
 	segmentsMin atomic.Uint64
 	version     uint8
+	// chain cfg
+	beaconCfg *clparams.BeaconChainConfig
 }
 
 // NewCaplinSnapshots - opens all snapshots. But to simplify everything:
@@ -156,8 +158,8 @@ type CaplinSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, version uint8, logger log.Logger) *CaplinSnapshots {
-	return &CaplinSnapshots{dir: snapDir, version: version, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger}
+func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, snapDir string, version uint8, logger log.Logger) *CaplinSnapshots {
+	return &CaplinSnapshots{dir: snapDir, version: version, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger, beaconCfg: beaconCfg}
 }
 
 func (s *CaplinSnapshots) Version() uint8      { return s.version }
@@ -356,8 +358,11 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	}
 	defer tx.Rollback()
 	var w bytes.Buffer
-	lzWriter := lz4.NewWriter(&w)
-	defer lzWriter.Close()
+	compressor, err := zstd.NewWriter(&w, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	if err != nil {
+		return err
+	}
+	defer compressor.Close()
 	// Just make a reusable buffer
 	buf := make([]byte, 2048)
 	// Generate .seg file, which is just the list of beacon blocks.
@@ -370,18 +375,16 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
 		}
 		if obj == nil {
-
 			if err := sn.AddWord(nil); err != nil {
 				return err
 			}
 			continue
 		}
-		lzWriter.Reset(&w)
-		lzWriter.CompressionLevel = 1
-		if buf, err = snapshot_format.WriteBlockForSnapshot(lzWriter, obj.Data, buf); err != nil {
+
+		if buf, err = snapshot_format.WriteBlockForSnapshot(compressor, obj.Data, buf); err != nil {
 			return err
 		}
-		if err := lzWriter.Flush(); err != nil {
+		if err := compressor.Close(); err != nil {
 			return err
 		}
 		word := w.Bytes()
@@ -390,6 +393,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 			return err
 		}
 		w.Reset()
+		compressor.Reset(&w)
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
@@ -478,10 +482,10 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	buffer.Reset()
 	buffer.Write(buf)
-	lzReader := lz4ReaderPool.Get().(*lz4.Reader)
-	defer lz4ReaderPool.Put(lzReader)
-	lzReader.Reset(buffer)
+	reader := decompressorPool.Get().(*zstd.Decoder)
+	defer decompressorPool.Put(reader)
+	reader.Reset(buffer)
 
 	// Use pooled buffers and readers to avoid allocations.
-	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(lzReader)
+	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
 }
