@@ -16,6 +16,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -46,7 +47,7 @@ type RateLimits struct {
 }
 
 const punishmentPeriod = time.Minute
-const defaultRateLimit = 5000
+const defaultRateLimit = math.MaxInt
 const defaultBlockHandlerRateLimit = 200
 
 var rateLimits = RateLimits{
