@@ -96,9 +96,6 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash libcommon.Hash
 	}
 	ret := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(r.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range body.Withdrawals {
-		if w.Index == 0 {
-			return nil, fmt.Errorf("withdrawal index is zero")
-		}
 		ret.Append(&cltypes.Withdrawal{
 			Index:     w.Index,
 			Validator: w.Validator,
