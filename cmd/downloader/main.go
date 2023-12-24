@@ -106,6 +106,9 @@ func init() {
 	rootCmd.AddCommand(torrentCat)
 	rootCmd.AddCommand(torrentMagnet)
 
+	withDataDir(manifestCmd)
+	rootCmd.AddCommand(manifestCmd)
+
 	withDataDir(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
@@ -260,6 +263,18 @@ var printTorrentHashes = &cobra.Command{
 	},
 }
 
+var manifestCmd = &cobra.Command{
+	Use:     "manifest",
+	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := debug.SetupCobra(cmd, "downloader")
+		if err := manifest(cmd.Context(), logger); err != nil {
+			log.Error(err.Error())
+		}
+		return nil
+	},
+}
+
 var torrentVerify = &cobra.Command{
 	Use:     "torrent_verify",
 	Example: "go run ./cmd/downloader torrent_verify <path_to_torrent_file>",
@@ -309,6 +324,53 @@ var torrentMagnet = &cobra.Command{
 		fmt.Printf("%s\n", mi.Magnet(nil, nil).String())
 		return nil
 	},
+}
+
+func manifest(ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	extList := []string{
+		".torrent",
+		".seg", ".idx", // e2
+		".kv", ".kvi", ".bt", ".kvei", // e3 domain
+		".v", ".vi", //e3 hist
+		".ef", ".efi", //e3 idx
+		".txt", //salt.txt
+	}
+	l, _ := dir.ListFiles(dirs.Snap, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		fmt.Printf("%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapDomain, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		fmt.Printf("domain/%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		if strings.HasPrefix(fName, "v1-commitment") {
+			continue
+		}
+		fmt.Printf("history/%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		if strings.HasPrefix(fName, "v1-commitment") {
+			continue
+		}
+		fmt.Printf("idx/%s\n", fName)
+	}
+	l, _ = dir.ListFiles(dirs.SnapAccessors, extList...)
+	for _, fPath := range l {
+		_, fName := filepath.Split(fPath)
+		if strings.HasPrefix(fName, "v1-commitment") {
+			continue
+		}
+		fmt.Printf("accessors/%s\n", fName)
+	}
+	return nil
 }
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
