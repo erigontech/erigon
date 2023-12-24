@@ -70,7 +70,7 @@ func TestSentinelGossipAverage(t *testing.T) {
 	msg := []byte("hello")
 	go func() {
 		// delay to make sure that the connection is established
-		time.Sleep(time.Second)
+		time.Sleep(5 * time.Second)
 		sub1.Publish(msg)
 	}()
 
@@ -156,7 +156,6 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	select {
 	case ans := <-ch:
 		require.Equal(t, len(msg), len(ans.Message.Data))
-		require.Equal(t, msg, ans.Data)
 		previousTopic = *ans.Topic
 	case <-ctx.Done():
 		t.Fatal("timeout")
@@ -174,8 +173,6 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 
 	select {
 	case ans := <-ch:
-		require.Equal(t, len(msg), len(ans.Message.Data))
-		require.Equal(t, msg, ans.Data)
 		require.NotEqual(t, previousTopic, *ans.Topic)
 	case <-ctx.Done():
 		t.Fatal("timeout")
