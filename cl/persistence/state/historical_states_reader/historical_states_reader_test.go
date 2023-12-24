@@ -21,7 +21,7 @@ import (
 
 func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) {
 	db := memdb.NewTestDB(t)
-	reader := tests.LoadChain(blocks, db)
+	reader, _ := tests.LoadChain(blocks, db, t)
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
