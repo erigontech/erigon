@@ -5,6 +5,7 @@ import (
 	"embed"
 	_ "embed"
 	"strconv"
+	"testing"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/spf13/afero"
+	"github.com/stretchr/testify/require"
 )
 
 //go:embed test_data/capella/blocks_0.ssz_snappy
@@ -69,11 +71,9 @@ func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB) (*MockBlockReader, afero.Fs) {
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) (*MockBlockReader, afero.Fs) {
 	tx, err := db.BeginRw(context.Background())
-	if err != nil {
-		panic(err)
-	}
+	require.NoError(t, err)
 	defer tx.Rollback()
 	fs := afero.NewMemMapFs()
 	bs := persistence.NewAferoRawBlockSaver(fs, &clparams.MainnetBeaconConfig)
@@ -83,16 +83,11 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB) (*MockBlockReade
 	for _, block := range blocks {
 		m.u[block.Block.Slot] = block
 
-		if err := source.WriteBlock(context.Background(), tx, block, true); err != nil {
-			panic(err)
-		}
-		if err := beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64); err != nil {
-			panic(err)
-		}
+		require.NoError(t, source.WriteBlock(context.Background(), tx, block, true))
+		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
-	if err := tx.Commit(); err != nil {
-		panic(err)
-	}
+
+	require.NoError(t, tx.Commit())
 	return m, fs
 }
 

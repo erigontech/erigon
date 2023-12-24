@@ -157,7 +157,6 @@ func (s *Sentinel) forkWatcher() {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 		return
 	}
-	fmt.Println("A")
 	iterationInterval := time.NewTicker(30 * time.Millisecond)
 	for {
 		select {

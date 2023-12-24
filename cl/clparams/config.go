@@ -539,7 +539,6 @@ func toBytes4(in []byte) (ret [4]byte) {
 func configForkSchedule(b *BeaconChainConfig) map[libcommon.Bytes4]uint64 {
 	fvs := map[libcommon.Bytes4]uint64{}
 	fvs[utils.Uint32ToBytes4(b.GenesisForkVersion)] = 0
-	fmt.Println(b.AltairForkEpoch)
 	fvs[utils.Uint32ToBytes4(b.AltairForkVersion)] = b.AltairForkEpoch
 	fvs[utils.Uint32ToBytes4(b.BellatrixForkVersion)] = b.BellatrixForkEpoch
 	fvs[utils.Uint32ToBytes4(b.CapellaForkVersion)] = b.CapellaForkEpoch
