@@ -1286,28 +1286,33 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 	return cmp.Min(hardLimit, blocksInSnapshots+1)
 }
 
-func (br *BlockRetire) retireBlocks(ctx context.Context, blockFrom, blockTo uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) error {
+func (br *BlockRetire) retireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
-	logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 	snapshots := br.snapshots()
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 
-	// in future we will do it in background
-	if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
-		return fmt.Errorf("DumpBlocks: %w", err)
+	blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
+	if ok {
+		logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+		// in future we will do it in background
+		if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+			return ok, fmt.Errorf("DumpBlocks: %w", err)
+		}
+		if err := snapshots.ReopenFolder(); err != nil {
+			return ok, fmt.Errorf("reopen: %w", err)
+		}
+		snapshots.LogStat()
+		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
+			notifier.OnNewSnapshot()
+		}
 	}
-	if err := snapshots.ReopenFolder(); err != nil {
-		return fmt.Errorf("reopen: %w", err)
-	}
-	snapshots.LogStat()
-	if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-		notifier.OnNewSnapshot()
-	}
+
 	merger := NewMerger(tmpDir, workers, lvl, db, br.chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) == 0 {
-		return nil
+		return ok, nil
 	}
+	ok = true // have something to merge
 	onMerge := func(r Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -1325,10 +1330,10 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, blockFrom, blockTo uint
 	}
 	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 	if err != nil {
-		return err
+		return ok, err
 	}
 
-	return nil
+	return ok, nil
 }
 
 func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
@@ -1368,37 +1373,37 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	}()
 }
 
-func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) error {
+func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
 		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
-			blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+			ok, err := br.retireBorBlocks(ctx, forwardProgress, lvl, seedNewSnapshots, onDeleteSnapshots)
+			if err != nil {
+				return err
+			}
 			if !ok {
 				break
-			}
-			if err := br.retireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
-				return err
 			}
 		}
 	}
 
+	var ok, okBor bool
 	for {
-		blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBlocks())
-		if !ok {
-			break
-		}
-		if err := br.retireBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
+		ok, err = br.retireBlocks(ctx, forwardProgress, lvl, seedNewSnapshots, onDeleteSnapshots)
+		if err != nil {
 			return err
 		}
 
 		if includeBor {
-			blockFrom, blockTo, ok = CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
-			if ok {
-				if err := br.retireBorBlocks(ctx, blockFrom, blockTo, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
-					return err
-				}
+			okBor, err = br.retireBorBlocks(ctx, forwardProgress, lvl, seedNewSnapshots, onDeleteSnapshots)
+			if err != nil {
+				return err
 			}
+		}
+		haveMore := ok || okBor
+		if !haveMore {
+			break
 		}
 	}
 	return nil
