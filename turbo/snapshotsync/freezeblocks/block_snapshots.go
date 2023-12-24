@@ -1521,6 +1521,8 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 			break
 		}
 	}
+
+	return nil
 }
 
 func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
