@@ -239,7 +239,6 @@ func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, e
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	fmt.Println(ok)
 	if !ok {
 		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, err = state_accessors.ReadCheckpoints(tx, a.beaconChainCfg.RoundSlotToEpoch(*slot))
 		if err != nil {
