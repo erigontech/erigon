@@ -70,7 +70,7 @@ func TestBlockSnapshotEncoding(t *testing.T) {
 		b.Reset()
 		_, err = snapshot_format.WriteBlockForSnapshot(&b, blk, nil)
 		require.NoError(t, err)
-		header, bn, bHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(&b)
+		header, bn, bHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(&b, &clparams.MainnetBeaconConfig)
 		require.NoError(t, err)
 		hash3, err := header.HashSSZ()
 		require.NoError(t, err)

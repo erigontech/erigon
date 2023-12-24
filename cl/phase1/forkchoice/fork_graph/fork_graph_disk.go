@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -12,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pierrec/lz4"
 	"github.com/spf13/afero"
 	"golang.org/x/exp/slices"
 )
@@ -22,15 +22,23 @@ type syncCommittees struct {
 	nextSyncCommittee    *solid.SyncCommittee
 }
 
-var lz4PoolWriterPool = sync.Pool{
+var compressorPool = sync.Pool{
 	New: func() interface{} {
-		return lz4.NewWriter(nil)
+		w, err := zstd.NewWriter(nil)
+		if err != nil {
+			panic(err)
+		}
+		return w
 	},
 }
 
-var lz4PoolReaderPool = sync.Pool{
+var decompressPool = sync.Pool{
 	New: func() interface{} {
-		return lz4.NewReader(nil)
+		r, err := zstd.NewReader(nil)
+		if err != nil {
+			panic(err)
+		}
+		return r
 	},
 }
 
