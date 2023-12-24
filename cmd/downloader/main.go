@@ -349,7 +349,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.HasPrefix(fName, "v1-commitment") {
+		if strings.Contains(fName, "commitment") {
 			continue
 		}
 		fmt.Printf("history/%s\n", fName)
@@ -357,7 +357,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.HasPrefix(fName, "v1-commitment") {
+		if strings.Contains(fName, "commitment") {
 			continue
 		}
 		fmt.Printf("idx/%s\n", fName)
@@ -365,7 +365,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ = dir.ListFiles(dirs.SnapAccessors, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		if strings.HasPrefix(fName, "v1-commitment") {
+		if strings.Contains(fName, "commitment") {
 			continue
 		}
 		fmt.Printf("accessors/%s\n", fName)
