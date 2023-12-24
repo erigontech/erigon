@@ -76,7 +76,14 @@ func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRo
 	return nil, nil
 }
 func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
-	panic("implement me")
+	block, err := m.ReadBlockByRoot(ctx, tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	return block.SignedBeaconBlockHeader(), nil
 }
 
 func (m *MockBlockReader) FrozenSlots() uint64 {
