@@ -736,16 +736,16 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 		if err := s.antiquateFullUint64List(inactivities, slot, state.RawInactivityScores(), &commonBuffer, compressor); err != nil {
 			return err
 		}
-	}
+		committeeSlot := s.cfg.RoundSlotToSyncCommitteePeriod(slot)
+		committee := *state.CurrentSyncCommittee()
+		if err := currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(committeeSlot), libcommon.Copy(committee[:])); err != nil {
+			return err
+		}
 
-	committee := *state.CurrentSyncCommittee()
-	if err := currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(committee[:])); err != nil {
-		return err
-	}
-
-	committee = *state.NextSyncCommittee()
-	if err := nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(slot), libcommon.Copy(committee[:])); err != nil {
-		return err
+		committee = *state.NextSyncCommittee()
+		if err := nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(committeeSlot), libcommon.Copy(committee[:])); err != nil {
+			return err
+		}
 	}
 
 	var b bytes.Buffer

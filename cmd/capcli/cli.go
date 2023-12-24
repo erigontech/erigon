@@ -838,6 +838,11 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	endTime := time.Since(start)
+	hRoot, err := haveState.HashSSZ()
+	if err != nil {
+		return err
+	}
 	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
 
 	if err := haveState.InitBeaconState(); err != nil {
@@ -854,8 +859,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
 		return err
 	}
-	endTime := time.Since(start)
-	hRoot, err := haveState.HashSSZ()
+	hRoot, err = haveState.HashSSZ()
 	if err != nil {
 		return err
 	}

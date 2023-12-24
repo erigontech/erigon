@@ -222,14 +222,9 @@ func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, e
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
-	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
-	}
-
-	blockRoot, err := beacon_indicies.ReadBlockRootByStateRoot(tx, root)
-	if err != nil {
-		return nil, err
 	}
 
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -244,6 +239,7 @@ func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, e
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
+	fmt.Println(ok)
 	if !ok {
 		currentJustifiedCheckpoint, previousJustifiedCheckpoint, finalizedCheckpoint, err = state_accessors.ReadCheckpoints(tx, a.beaconChainCfg.RoundSlotToEpoch(*slot))
 		if err != nil {
@@ -263,7 +259,7 @@ func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, e
 		FinalizedCheckpoint:         finalizedCheckpoint,
 		CurrentJustifiedCheckpoint:  currentJustifiedCheckpoint,
 		PreviousJustifiedCheckpoint: previousJustifiedCheckpoint,
-	}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()).withVersion(version), nil
+	}).withFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).withVersion(version), nil
 }
 
 type syncCommitteesResponse struct {

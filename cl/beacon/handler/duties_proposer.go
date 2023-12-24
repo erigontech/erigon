@@ -34,7 +34,7 @@ func (a *ApiHandler) getDutiesProposer(r *http.Request) (*beaconResponse, error)
 		}
 		defer tx.Rollback()
 		key := base_encoding.Encode64ToBytes4(epoch)
-		indiciesBytes, err := tx.GetOne(kv.Proposers, key[:])
+		indiciesBytes, err := tx.GetOne(kv.Proposers, key)
 		if err != nil {
 			return nil, err
 		}

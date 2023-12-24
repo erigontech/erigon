@@ -7,14 +7,15 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGetBlindedBlock(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t, clparams.Phase0Version)
 
 	// Start by testing
 	rootBlock1, err := blocks[0].Block.HashSSZ()
@@ -74,8 +75,8 @@ func TestGetBlindedBlock(t *testing.T) {
 
 func TestGetBlockBlinded(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t, clparams.Phase0Version)
 
 	// Start by testing
 	rootBlock1, err := blocks[0].Block.HashSSZ()
@@ -136,8 +137,8 @@ func TestGetBlockBlinded(t *testing.T) {
 
 func TestGetBlockAttestations(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t, clparams.Phase0Version)
 
 	// Start by testing
 	rootBlock1, err := blocks[0].Block.HashSSZ()
@@ -195,8 +196,8 @@ func TestGetBlockAttestations(t *testing.T) {
 
 func TestGetBlockRoot(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, _, _, handler, _, _, fcu := setupTestingHandler(t, clparams.Phase0Version)
 
 	var err error
 

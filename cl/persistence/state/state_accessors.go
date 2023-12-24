@@ -129,6 +129,9 @@ func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, err
 	if index, err = tx.GetOne(kv.InvertedValidatorPublicKeys, key[:]); err != nil {
 		return 0, err
 	}
+	if len(index) == 0 {
+		return 0, nil
+	}
 	return base_encoding.Decode64FromBytes4(index), nil
 }
 

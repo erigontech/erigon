@@ -14,8 +14,8 @@ import (
 
 func TestGetSpec(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -36,8 +36,8 @@ func TestGetSpec(t *testing.T) {
 
 func TestGetForkSchedule(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -64,8 +64,8 @@ func TestGetForkSchedule(t *testing.T) {
 
 func TestGetDepositContract(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()

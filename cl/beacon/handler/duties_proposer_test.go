@@ -8,14 +8,15 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/stretchr/testify/require"
 )
 
 func TestProposerDutiesProposerFcu(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, blocks, _, postState, _, handler, _, syncedDataManager, fcu := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, postState, _, handler, _, syncedDataManager, fcu := setupTestingHandler(t, clparams.Phase0Version)
 	epoch := blocks[len(blocks)-1].Block.Slot / 32
 
 	require.NoError(t, syncedDataManager.OnHeadState(postState))
@@ -46,8 +47,8 @@ func TestProposerDutiesProposerFcu(t *testing.T) {
 
 func TestProposerDutiesProposerBadEpoch(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, _, _, postState, _, handler, _, syncedDataManager, fcu := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, postState, _, handler, _, syncedDataManager, fcu := setupTestingHandler(t, clparams.Phase0Version)
 
 	require.NoError(t, syncedDataManager.OnHeadState(postState))
 
@@ -64,7 +65,7 @@ func TestProposerDutiesProposerBadEpoch(t *testing.T) {
 }
 
 func TestProposerDutiesNotSynced(t *testing.T) {
-	_, _, _, _, _, handler, _, _, fcu := setupTestingHandler(t)
+	_, _, _, _, _, handler, _, _, fcu := setupTestingHandler(t, clparams.Phase0Version)
 
 	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{}, 1)
 
@@ -80,8 +81,8 @@ func TestProposerDutiesNotSynced(t *testing.T) {
 
 func TestProposerDutiesProposerFcuHistorical(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, blocks, _, postState, _, handler, _, syncedDataManager, fcu := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, postState, _, handler, _, syncedDataManager, fcu := setupTestingHandler(t, clparams.Phase0Version)
 	epoch := blocks[len(blocks)-1].Block.Slot / 32
 
 	require.NoError(t, syncedDataManager.OnHeadState(postState))

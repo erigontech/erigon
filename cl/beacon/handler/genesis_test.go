@@ -6,13 +6,14 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/stretchr/testify/require"
 )
 
 func TestGetGenesis(t *testing.T) {
 
-	// setupTestingHandler(t)
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t)
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()

@@ -23,12 +23,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestingHandler(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, handler *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
-	blocks, preState, postState = tests.GetPhase0Random()
+func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, handler *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
+	if v == clparams.Phase0Version {
+		blocks, preState, postState = tests.GetPhase0Random()
+	} else if v == clparams.BellatrixVersion {
+		blocks, preState, postState = tests.GetBellatrixRandom()
+	} else {
+		require.FailNow(t, "unknown state version")
+	}
 	fcu = forkchoice.NewForkChoiceStorageMock()
 	db = memdb.NewTestDB(t)
 	var reader *tests.MockBlockReader
-	reader, f = tests.LoadChain(blocks, db, t)
+	reader, f = tests.LoadChain(blocks, postState, db, t)
 
 	rawDB := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
 

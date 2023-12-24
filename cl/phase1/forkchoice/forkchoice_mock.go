@@ -133,11 +133,12 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(blockRoot common.Hash, alway
 }
 
 func (f *ForkChoiceStorageMock) GetFinalityCheckpoints(blockRoot common.Hash) (bool, solid.Checkpoint, solid.Checkpoint, solid.Checkpoint) {
-	return true, f.GetFinalityCheckpointsVal[blockRoot][0], f.GetFinalityCheckpointsVal[blockRoot][1], f.GetFinalityCheckpointsVal[blockRoot][2]
+	oneNil := f.GetFinalityCheckpointsVal[blockRoot][0] != nil && f.GetFinalityCheckpointsVal[blockRoot][1] != nil && f.GetFinalityCheckpointsVal[blockRoot][2] != nil
+	return oneNil, f.GetFinalityCheckpointsVal[blockRoot][0], f.GetFinalityCheckpointsVal[blockRoot][1], f.GetFinalityCheckpointsVal[blockRoot][2]
 }
 
 func (f *ForkChoiceStorageMock) GetSyncCommittees(blockRoot common.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
-	return f.GetSyncCommitteesVal[blockRoot][0], f.GetSyncCommitteesVal[blockRoot][1], true
+	return f.GetSyncCommitteesVal[blockRoot][0], f.GetSyncCommitteesVal[blockRoot][1], f.GetSyncCommitteesVal[blockRoot][0] != nil && f.GetSyncCommitteesVal[blockRoot][1] != nil
 }
 
 func (f *ForkChoiceStorageMock) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error) {
