@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
@@ -169,7 +170,7 @@ func checkValidValidatorId(s string) (bool, *beaconhttp.EndpointError) {
 	// If it starts with 0x, then it must a 48bytes 0x prefixed string
 	if len(s) == 98 && s[:2] == "0x" {
 		// check if it is a valid hex string
-		if _, err := hex.DecodeString(s[2:]); err != nil {
+		if _, err := hex.DecodeString(s); err != nil {
 			return false, beaconhttp.NewEndpointError(http.StatusBadRequest, "invalid validator id")
 		}
 		return true, nil
@@ -224,6 +225,13 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 			var b48 libcommon.Bytes48
 			if err := b48.UnmarshalText([]byte(id[2:])); err != nil {
 				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+			}
+			has, err := tx.Has(kv.InvertedValidatorPublicKeys, b48[:])
+			if err != nil {
+				return nil, err
+			}
+			if !has {
+				continue
 			}
 			idx, err := state_accessors.ReadValidatorIndexByPublicKey(tx, b48)
 			if err != nil {
