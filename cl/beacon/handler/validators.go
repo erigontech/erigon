@@ -118,6 +118,7 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 		}
 	}
+	_ = filterIndicies
 	_ = blockRoot
 	panic("implement me")
 	// time to begin motherfucker
