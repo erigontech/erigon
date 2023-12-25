@@ -202,7 +202,7 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchMilestone(ctx context.Context) (*milestone.Milestone, error) {
+func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error) {
 	return nil, fmt.Errorf("TODO")
 }
 

@@ -48,11 +48,10 @@ func (a *ApiHandler) init() {
 				r.Get("/fork_schedule", beaconhttp.HandleEndpointFunc(a.getForkSchedule))
 			})
 			r.Route("/beacon", func(r chi.Router) {
-				// r.Route("/headers", func(r chi.Router) {
-				// 	r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
-				// 	r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
-				// })
-				r.Get("/headers", beaconhttp.HandleEndpointFunc(a.getHeaders))
+				r.Route("/headers", func(r chi.Router) {
+					r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
+					r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
+				})
 				r.Route("/blocks", func(r chi.Router) {
 					r.Post("/", http.NotFound)
 					r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock))
@@ -75,10 +74,12 @@ func (a *ApiHandler) init() {
 					r.Get("/head/validators/{index}", http.NotFound) // otterscan
 					r.Get("/head/committees", http.NotFound)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
+						r.Get("/sync_committees", beaconhttp.HandleEndpointFunc(a.getSyncCommittees)) // otterscan
 						r.Get("/finality_checkpoints", beaconhttp.HandleEndpointFunc(a.getFinalityCheckpoints))
 						r.Get("/validators", http.NotFound)
 						r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
+						r.Get("/validators", beaconhttp.HandleEndpointFunc(a.getAllValidators))
 						r.Get("/validators/{id}", http.NotFound)
 					})
 				})
@@ -107,7 +108,7 @@ func (a *ApiHandler) init() {
 				})
 			})
 			r.Route("/beacon", func(r chi.Router) {
-				r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock)) //otterscan
+				r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlock))
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Post("/blocks/{slot}", http.NotFound)

@@ -34,7 +34,7 @@ type Antiquary struct {
 	beaconDB        persistence.BlockSource
 	backfilled      *atomic.Bool
 	cfg             *clparams.BeaconChainConfig
-	states          bool
+	states, blocks  bool
 	fs              afero.Fs
 	validatorsTable *state_accessors.StaticValidatorTable
 	genesisState    *state.CachingBeaconState
@@ -43,7 +43,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states bool, fs afero.Fs) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states, blocks bool, fs afero.Fs) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
@@ -61,12 +61,13 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 		fs:              fs,
 		validatorsTable: validatorsTable,
 		genesisState:    genesisState,
+		blocks:          blocks,
 	}
 }
 
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
-	if a.downloader == nil {
+	if a.downloader == nil || !a.blocks {
 		return nil // Just skip if we don't have a downloader
 	}
 	// Skip if we dont support backfilling for the current network
@@ -204,8 +205,8 @@ func (a *Antiquary) Loop() error {
 				continue
 			}
 			to = utils.Min64(to, to-safetyMargin) // We don't want to retire snapshots that are too close to the finalized head
-			to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
-			if to-from < snaptype.Erigon2RecentMergeLimit {
+			to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+			if to-from < snaptype.Erigon2MergeLimit {
 				continue
 			}
 			if err := a.antiquate(from, to); err != nil {
@@ -222,7 +223,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return nil // Just skip if we don't have a downloader
 	}
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
-	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2RecentMergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
+	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2MergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 

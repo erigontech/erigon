@@ -461,7 +461,8 @@ const (
 	LightClientUpdates = "LightClientUpdates"
 	// Beacon historical data
 	// ValidatorIndex => [Field]
-	ValidatorPublicKeys = "ValidatorPublickeys"
+	ValidatorPublicKeys         = "ValidatorPublickeys"
+	InvertedValidatorPublicKeys = "InvertedValidatorPublickeys"
 	// ValidatorIndex + Slot => [Field]
 	ValidatorEffectiveBalance = "ValidatorEffectiveBalance"
 	ValidatorSlashings        = "ValidatorSlashings"
@@ -653,6 +654,7 @@ var ChaindataTables = []string{
 	LastBeaconSnapshot,
 	// State Reconstitution
 	ValidatorPublicKeys,
+	InvertedValidatorPublicKeys,
 	ValidatorEffectiveBalance,
 	ValidatorBalance,
 	ValidatorSlashings,

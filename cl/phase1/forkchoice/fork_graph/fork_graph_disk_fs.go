@@ -6,9 +6,9 @@ import (
 	"os"
 
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/pierrec/lz4"
 	"github.com/spf13/afero"
 )
 
@@ -70,12 +70,12 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	}
 	defer cacheFile.Close()
 
-	lz4Reader := lz4PoolReaderPool.Get().(*lz4.Reader)
-	defer lz4PoolReaderPool.Put(lz4Reader)
+	reader := decompressPool.Get().(*zstd.Decoder)
+	defer decompressPool.Put(reader)
 
-	lz4Reader.Reset(cacheFile)
+	reader.Reset(cacheFile)
 
-	if err := bs.DecodeCaches(lz4Reader); err != nil {
+	if err := bs.DecodeCaches(reader); err != nil {
 		return nil, err
 	}
 
@@ -135,16 +135,16 @@ func (f *forkGraphDisk) dumpBeaconStateOnDisk(bs *state.CachingBeaconState, bloc
 	}
 	defer cacheFile.Close()
 
-	lz4Writer := lz4PoolWriterPool.Get().(*lz4.Writer)
-	defer lz4PoolWriterPool.Put(lz4Writer)
+	writer := compressorPool.Get().(*zstd.Encoder)
+	defer compressorPool.Put(writer)
 
-	lz4Writer.CompressionLevel = 5
-	lz4Writer.Reset(cacheFile)
+	writer.Reset(cacheFile)
+	defer writer.Close()
 
-	if err := bs.EncodeCaches(lz4Writer); err != nil {
+	if err := bs.EncodeCaches(writer); err != nil {
 		return err
 	}
-	if err = lz4Writer.Flush(); err != nil {
+	if err = writer.Close(); err != nil {
 		return
 	}
 	err = cacheFile.Sync()

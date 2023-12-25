@@ -1780,7 +1780,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes, localTxsBroadcastMaxPeers*2)
 				for i := 0; i < localTxHashes.Len(); i++ {
 					hash := localTxHashes.At(i)
-					p.logger.Info("local tx announced", "tx_hash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
+					p.logger.Info("Local tx announced", "txHash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
 				}
 
 				// broadcast remote transactions
