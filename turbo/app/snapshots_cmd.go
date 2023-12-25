@@ -273,6 +273,9 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.DebugKey(domain, key); err != nil {
 		return err
 	}
+	if err := view.DebugEFKey(domain, key); err != nil {
+		return err
+	}
 	tx, err := chainDB.BeginRo(ctx)
 	if err != nil {
 		return err
