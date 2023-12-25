@@ -195,7 +195,7 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		PublicKey                  common.Bytes48 `json:"public_key"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
-		EffectiveBalance           uint64         `json:"effective_balance"`
+		EffectiveBalance           uint64         `json:"effective_balance,string"`
 		Slashed                    bool           `json:"slashed"`
 		ActivationEligibilityEpoch uint64         `json:"activation_eligibility_epoch,string"`
 		ActivationEpoch            uint64         `json:"activation_epoch,string"`
