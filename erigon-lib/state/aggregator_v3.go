@@ -249,7 +249,6 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 		mx--
 	}
 	a.aggregatedStep.Store(mx / a.aggregationStep)
-
 	return nil
 }
 

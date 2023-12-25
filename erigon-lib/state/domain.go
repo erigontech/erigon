@@ -536,6 +536,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
+
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 4 {
@@ -601,7 +602,6 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 			}
 			return true
 		})
-
 		if addNewFile {
 			d.files.Set(newFile)
 		}
@@ -1103,7 +1103,7 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 			if ef.Count() > 2 {
 				last2 = ef.Get(ef.Count() - 2)
 			}
-			fmt.Printf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.decompressor.FileName(), ef.Min(), ef.Max(), last2, iter.ToArrU64Must(ef.Iterator()))
+			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.decompressor.FileName(), ef.Min(), ef.Max(), last2, iter.ToArrU64Must(ef.Iterator())))
 		}
 		return true
 	})
