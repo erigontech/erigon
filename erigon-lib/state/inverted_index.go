@@ -923,7 +923,6 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 			if ic.files[i].src.index.KeyCount() == 0 {
 				continue
 			}
-			fmt.Printf("[dbg] iter see in file: %s\n", ic.files[i].src.decompressor.FileName())
 			it.stack = append(it.stack, ic.files[i])
 			it.stack[len(it.stack)-1].getter = it.stack[len(it.stack)-1].src.decompressor.MakeGetter()
 			it.stack[len(it.stack)-1].reader = it.stack[len(it.stack)-1].src.index.GetReaderFromPool()

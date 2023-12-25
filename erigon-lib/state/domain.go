@@ -32,6 +32,7 @@ import (
 	"time"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -1068,9 +1069,28 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 func (dc *DomainContext) DebugEFKey(k []byte) error {
 	dc.d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.decompressor != nil {
-				fmt.Printf("[dbg] see1:     %s\n", item.decompressor.FileName())
+			if item.decompressor == nil {
+				continue
 			}
+			if item.index == nil {
+				continue
+			}
+			fmt.Printf("[dbg] see1: %s\n", item.decompressor.FileName())
+			offset := item.index.GetReaderFromPool().Lookup(k)
+			g := item.decompressor.MakeGetter()
+			g.Reset(offset)
+			key, _ := g.NextUncompressed()
+			if !bytes.Equal(k, key) {
+				continue
+			}
+			eliasVal, _ := g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+
+			last2 := uint64(0)
+			if ef.Count() > 2 {
+				last2 = ef.Get(ef.Count() - 2)
+			}
+			fmt.Printf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.decompressor.FileName(), ef.Min(), ef.Max(), last2, iter.ToArrU64Must(ef.Iterator()))
 		}
 		return true
 	})
