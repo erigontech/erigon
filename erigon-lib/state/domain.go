@@ -1065,6 +1065,17 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 	}
 	return res, nil
 }
+func (dc *DomainContext) DebugEFKey(k []byte) error {
+	dc.d.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.decompressor != nil {
+				fmt.Printf("[dbg] see1:     %s\n", item.decompressor.FileName())
+			}
+		}
+		return true
+	})
+	return nil
+}
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
 	d.History.files.Walk(func(items []*filesItem) bool {

@@ -1552,6 +1552,45 @@ func (ac *AggregatorV3Context) DebugKey(domain kv.Domain, k []byte) error {
 	}
 	return nil
 }
+func (ac *AggregatorV3Context) DebugEFKey(domain kv.Domain, k []byte) error {
+	switch domain {
+	case kv.AccountsDomain:
+		l, err := ac.account.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.StorageDomain:
+		l, err := ac.code.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.CodeDomain:
+		l, err := ac.storage.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	case kv.CommitmentDomain:
+		l, err := ac.commitment.DebugKVFilesWithKey(k)
+		if err != nil {
+			return err
+		}
+		if len(l) > 0 {
+			log.Info("[dbg] found in", "files", l)
+		}
+	default:
+		panic(fmt.Sprintf("unexpected: %s", domain))
+	}
+	return nil
+}
 
 // --- Domain part END ---
 
