@@ -1282,7 +1282,7 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 
 	v, _ := g.Next(nil)
 	if traceGetAsOf == hc.h.filenameBase {
-		fmt.Printf("GetAsOf(%s, %x, %d) -> %s, isNil(v)=%t\n", hc.h.filenameBase, key, txNum, g.FileName(), v == nil)
+		fmt.Printf("GetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", hc.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 	return v, true, nil
 }
