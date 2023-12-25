@@ -1373,21 +1373,10 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		fmt.Printf("root hash %x updates %d\n", rootHash, len(plainKeys))
 	}
 
-	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
+	//defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
 
-	if !commitmentWriteNoETL {
-		// TODO we're using domain wals which order writes, and here we preorder them. Need to measure which approach
-		// is better in speed and memory consumption
-		err = hph.branchEncoder.Load(loadToPatriciaContextFunc(hph.ctx), etl.TransformArgs{Quit: ctx.Done()})
-		if err != nil {
-			return nil, err
-		}
-	}
 	return rootHash, nil
 }
-
-// if commitmentWriteNoETL is true, puts updates directly into domain, instead of buffering in ETL
-const commitmentWriteNoETL = true
 
 func (hph *HexPatriciaHashed) CollectUpdate(
 	prefix []byte,
@@ -1414,16 +1403,9 @@ func (hph *HexPatriciaHashed) CollectUpdate(
 	// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
 	//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
 
-	if commitmentWriteNoETL {
-		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-		if err = hph.ctx.PutBranch(cp, cu, prev); err != nil {
-			return 0, err
-		}
-	} else {
-		//fmt.Printf("CollectUpdate [%x] -> [%x]\n", prefix, []byte(update))
-		if err := hph.branchEncoder.updates.Collect(prefix, update); err != nil {
-			return 0, err
-		}
+	cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
+	if err = hph.ctx.PutBranch(cp, cu, prev); err != nil {
+		return 0, err
 	}
 	mxCommitmentBranchUpdates.Inc()
 	return ln, nil

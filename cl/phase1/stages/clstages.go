@@ -269,7 +269,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -321,7 +321,8 @@ func ConsensusClStages(ctx context.Context,
 									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
 									continue MainLoop
 								}
-								header, err := executionPayload.RlpHeader()
+								parentRoot := &block.Block.ParentRoot
+								header, err := executionPayload.RlpHeader(parentRoot)
 								if err != nil {
 									log.Warn("bad blocks segment received", "err", err)
 									cfg.rpc.BanPeer(blocks.Peer)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -295,3 +296,20 @@ func (*BlindedBeaconBody) Static() bool {
 func (*BlindedBeaconBlock) Static() bool {
 	return false
 }
+
+func (b *BlindedBeaconBody) Clone() clonable.Clonable {
+	return NewBlindedBeaconBody(b.beaconCfg)
+}
+
+func (b *BlindedBeaconBlock) Clone() clonable.Clonable {
+	return NewBlindedBeaconBlock(b.Body.beaconCfg)
+}
+
+func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
+	return NewSignedBlindedBeaconBlock(b.Block.Body.beaconCfg)
+}
+
+// make sure that the type implements the interface ssz2.ObjectSSZ
+var _ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
+var _ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
+var _ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)

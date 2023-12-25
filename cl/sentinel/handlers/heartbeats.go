@@ -59,6 +59,7 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 
 func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
+
 	if err := c.checkRateLimit(peerId, "metadataV2", rateLimits.metadataV2Limit); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err

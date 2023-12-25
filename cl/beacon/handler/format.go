@@ -260,3 +260,12 @@ func uint64FromQueryParams(r *http.Request, name string) (*uint64, error) {
 	}
 	return &num, nil
 }
+
+// decode a list of strings from the query params
+func stringListFromQueryParams(r *http.Request, name string) ([]string, error) {
+	str := r.URL.Query().Get(name)
+	if str == "" {
+		return nil, nil
+	}
+	return regexp.MustCompile(`\s*,\s*`).Split(str, -1), nil
+}

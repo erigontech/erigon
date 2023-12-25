@@ -27,6 +27,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runSnapshotListener()
 	d.runSegmentDownloadingListener()
 	d.runSegmentIndexingListener()
+	d.runSegmentIndexingFinishedListener()
 }
 
 func (d *DiagnosticClient) runSnapshotListener() {
@@ -107,8 +108,68 @@ func (d *DiagnosticClient) runSegmentIndexingListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.snapshotDownload.SegmentIndexing = info
+				d.addOrUpdateSegmentIndexingState(info)
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) runSegmentIndexingFinishedListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.SnapshotSegmentIndexingFinishedUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SnapshotSegmentIndexingFinishedUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				found := false
+				for i := range d.snapshotDownload.SegmentIndexing.Segments {
+					if d.snapshotDownload.SegmentIndexing.Segments[i].SegmentName == info.SegmentName {
+						found = true
+						d.snapshotDownload.SegmentIndexing.Segments[i].Percent = 100
+					}
+				}
+
+				if !found {
+					d.snapshotDownload.SegmentIndexing.Segments = append(d.snapshotDownload.SegmentIndexing.Segments, diaglib.SnapshotSegmentIndexingStatistics{
+						SegmentName: info.SegmentName,
+						Percent:     100,
+						Alloc:       0,
+						Sys:         0,
+					})
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd diaglib.SnapshotIndexingStatistics) {
+	if d.snapshotDownload.SegmentIndexing.Segments == nil {
+		d.snapshotDownload.SegmentIndexing.Segments = []diaglib.SnapshotSegmentIndexingStatistics{}
+	}
+
+	for i := range upd.Segments {
+		found := false
+		for j := range d.snapshotDownload.SegmentIndexing.Segments {
+			if d.snapshotDownload.SegmentIndexing.Segments[j].SegmentName == upd.Segments[i].SegmentName {
+				d.snapshotDownload.SegmentIndexing.Segments[j].Percent = upd.Segments[i].Percent
+				d.snapshotDownload.SegmentIndexing.Segments[j].Alloc = upd.Segments[i].Alloc
+				d.snapshotDownload.SegmentIndexing.Segments[j].Sys = upd.Segments[i].Sys
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			d.snapshotDownload.SegmentIndexing.Segments = append(d.snapshotDownload.SegmentIndexing.Segments, upd.Segments[i])
+		}
+	}
+
+	d.snapshotDownload.SegmentIndexing.TimeElapsed = upd.TimeElapsed
 }
