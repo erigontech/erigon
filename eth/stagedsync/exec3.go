@@ -914,6 +914,7 @@ Loop:
 						}
 					}
 					doms = state2.NewSharedDomains(applyTx)
+					doms.SetTxNum(inputTxNum)
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
