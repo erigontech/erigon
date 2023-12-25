@@ -1081,7 +1081,7 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 					if err != nil {
 						_, fName := filepath.Split(fPath)
 						dc.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
+						continue
 					}
 					defer idx.Close()
 				} else {
