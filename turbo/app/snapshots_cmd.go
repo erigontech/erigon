@@ -230,7 +230,7 @@ func doBtSearch(cliCtx *cli.Context) error {
 
 	var a = accounts.Account{}
 	accounts.DeserialiseV3(&a, cur.Value())
-	fmt.Printf("a: %s\n", a)
+	fmt.Printf("a: nonce=%d\n", a.Nonce)
 	return nil
 }
 
