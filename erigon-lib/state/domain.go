@@ -1067,6 +1067,7 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 	return res, nil
 }
 func (dc *DomainContext) DebugEFKey(k []byte) error {
+	fmt.Printf("[dbg] see1: %s, %d\n", dc.d.filenameBase, dc.d.files.Len())
 	dc.d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
@@ -1075,7 +1076,6 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 			if item.index == nil {
 				continue
 			}
-			fmt.Printf("[dbg] see1: %s\n", item.decompressor.FileName())
 			offset := item.index.GetReaderFromPool().Lookup(k)
 			g := item.decompressor.MakeGetter()
 			g.Reset(offset)
