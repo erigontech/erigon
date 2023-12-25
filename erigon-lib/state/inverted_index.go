@@ -1191,6 +1191,7 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			if bytes.Equal(k, it.key) {
 				eliasVal, _ := g.NextUncompressed()
 				it.ef.Reset(eliasVal)
+				fmt.Printf("[dbg] see1: %s, %d\n", g.FileName(), iter.ToArrU64Must(it.ef.Iterator()))
 				if it.orderAscend {
 					efiter := it.ef.Iterator()
 					if it.startTxNum > 0 {
