@@ -17,6 +17,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -227,6 +228,9 @@ func doBtSearch(cliCtx *cli.Context) error {
 		fmt.Printf("seek: %x, -> nil\n", seek)
 	}
 
+	var a = accounts.Account{}
+	accounts.DeserialiseV3(&a, cur.Value())
+	fmt.Printf("a: %s\n", a)
 	return nil
 }
 
