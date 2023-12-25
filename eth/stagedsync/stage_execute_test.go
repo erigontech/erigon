@@ -154,6 +154,7 @@ func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, 
 				WriteLists: stateWriter.WriteSet(),
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
+			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
 			if err := rs.ApplyState4(context.Background(), txTask); err != nil {
 				panic(err)
 			}
