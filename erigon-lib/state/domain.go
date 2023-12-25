@@ -1067,7 +1067,7 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 	return res, nil
 }
 func (dc *DomainContext) DebugEFKey(k []byte) error {
-	dc.d.files.Walk(func(items []*filesItem) bool {
+	dc.hc.ic.ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.decompressor == nil {
 				continue
