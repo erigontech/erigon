@@ -1069,13 +1069,26 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 func (dc *DomainContext) DebugEFKey(k []byte) error {
 	dc.d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			fmt.Printf("[dbg] see1: %s, %d, %d-%d, %t, %t\n", dc.d.filenameBase, dc.d.files.Len(), item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep, item.decompressor == nil, item.index == nil)
 			if item.decompressor == nil {
 				continue
 			}
-			if item.index == nil {
-				continue
+			idx := item.index
+			if idx == nil {
+				fPath := dc.d.efAccessorFilePath(item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
+				if dir.FileExist(fPath) {
+					var err error
+					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						dc.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						// don't interrupt on error. other files may be good
+					}
+				} else {
+					continue
+				}
 			}
+
+			fmt.Printf("[dbg] see1: %s, %d, %d-%d, %t, %t\n", dc.d.filenameBase, dc.d.files.Len(), item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep, item.decompressor == nil, item.index == nil)
+
 			offset := item.index.GetReaderFromPool().Lookup(k)
 			g := item.decompressor.MakeGetter()
 			g.Reset(offset)
