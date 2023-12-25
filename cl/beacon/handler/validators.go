@@ -229,6 +229,9 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 	if blockId.head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		s, cn := a.syncedData.HeadState()
 		defer cn()
+		if s == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "node is not synced")
+		}
 		return responseValidators(filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false)
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -330,6 +333,10 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 		if s.ValidatorLength() <= int(validatorIndex) {
 			return newBeaconResponse([]int{}).withFinalized(false), nil
 		}
+		if s == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "node is not synced")
+		}
+		return responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false)
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
@@ -389,6 +396,9 @@ func (a *ApiHandler) getAllValidatorsBalances(r *http.Request) (*beaconResponse,
 	if blockId.head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		s, cn := a.syncedData.HeadState()
 		defer cn()
+		if s == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "node is not synced")
+		}
 		return responseValidatorsBalances(filterIndicies, state.Epoch(s), s.Balances(), false)
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
