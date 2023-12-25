@@ -1089,7 +1089,7 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 				}
 			}
 
-			fmt.Printf("[dbg] see1: %s, %d, %d-%d\n", dc.d.filenameBase, dc.d.files.Len(), item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
+			fmt.Printf("[dbg] see1: %s\n", item.decompressor.FileName())
 
 			offset := idx.GetReaderFromPool().Lookup(k)
 			g := item.decompressor.MakeGetter()
