@@ -1077,11 +1077,13 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 				fPath := dc.d.efAccessorFilePath(item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
 				if dir.FileExist(fPath) {
 					var err error
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					idx, err = recsplit.OpenIndex(fPath)
+					if err != nil {
 						_, fName := filepath.Split(fPath)
 						dc.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
 						// don't interrupt on error. other files may be good
 					}
+					defer idx.Close()
 				} else {
 					continue
 				}
