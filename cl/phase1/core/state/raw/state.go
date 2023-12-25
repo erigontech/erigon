@@ -2,7 +2,6 @@ package raw
 
 import (
 	"encoding/json"
-	"go/format"
 	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -117,7 +116,7 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		"historical_roots":              b.historicalRoots,
 		"eth1_data":                     b.eth1Data,
 		"eth1_data_votes":               b.eth1DataVotes,
-		"eth1_deposit_index":            strconv.FormatInt(int64(b.eth1DepositIndex), 10)
+		"eth1_deposit_index":            strconv.FormatInt(int64(b.eth1DepositIndex), 10),
 		"validators":                    b.validators,
 		"balances":                      b.balances,
 		"randao_mixes":                  b.randaoMixes,
