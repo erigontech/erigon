@@ -68,7 +68,7 @@ func TestGetBlindedBlock(t *testing.T) {
 			message := data["message"].(map[string]interface{})
 
 			// compare the block
-			require.Equal(t, message["slot"], float64(c.slot))
+			require.Equal(t, message["slot"], strconv.FormatInt(int64(c.slot), 10))
 		})
 	}
 }
@@ -130,7 +130,7 @@ func TestGetBlockBlinded(t *testing.T) {
 			message := data["message"].(map[string]interface{})
 
 			// compare the block
-			require.Equal(t, message["slot"], float64(c.slot))
+			require.Equal(t, message["slot"], strconv.FormatInt(int64(c.slot), 10))
 		})
 	}
 }

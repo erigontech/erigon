@@ -14,9 +14,8 @@ func (a *ApiHandler) getSpec(r *http.Request) (*beaconResponse, error) {
 }
 
 func (a *ApiHandler) getDepositContract(r *http.Request) (*beaconResponse, error) {
-
 	return newBeaconResponse(struct {
-		ChainId         uint64 `json:"chain_id"`
+		ChainId         uint64 `json:"chain_id,string"`
 		DepositContract string `json:"address"`
 	}{ChainId: a.beaconChainCfg.DepositChainID, DepositContract: a.beaconChainCfg.DepositContractAddress}), nil
 

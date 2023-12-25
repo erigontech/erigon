@@ -17,8 +17,8 @@ import (
 
 type proposerDuties struct {
 	Pubkey         libcommon.Bytes48 `json:"pubkey"`
-	ValidatorIndex uint64            `json:"validator_index"`
-	Slot           uint64            `json:"slot"`
+	ValidatorIndex uint64            `json:"validator_index,string"`
+	Slot           uint64            `json:"slot,string"`
 }
 
 func (a *ApiHandler) getDutiesProposer(r *http.Request) (*beaconResponse, error) {

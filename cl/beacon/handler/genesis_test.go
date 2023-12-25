@@ -28,8 +28,8 @@ func TestGetGenesis(t *testing.T) {
 	require.NoError(t, err)
 
 	data := out["data"].(map[string]interface{})
-	genesisTime := uint64(data["genesis_time"].(float64))
-	require.Equal(t, genesisTime, uint64(1606824023))
+	genesisTime := data["genesis_time"].(string)
+	require.Equal(t, genesisTime, "1606824023")
 	require.Equal(t, data["genesis_fork_version"], "0xbba4da96")
 	require.Equal(t, data["genesis_validators_root"], "0x4b363db94e286120d76eb905340fdd4e54bfe9f06bf33ff6cf5ad27f511bfe95")
 }
