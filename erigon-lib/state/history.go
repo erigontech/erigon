@@ -1281,6 +1281,9 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	g.Reset(offset)
 
 	v, _ := g.Next(nil)
+	if traceGetAsOf == hc.h.filenameBase {
+		fmt.Printf("GetAsOf(%s, %x, %d) -> %s, isNil(v)=%t\n", hc.h.filenameBase, key, txNum, historyItem.getter.FileName(), v == nil)
+	}
 	return v, true, nil
 }
 func (hc *HistoryContext) getNoStateByLocalityIndex(key []byte, txNum uint64) ([]byte, bool, error) {
