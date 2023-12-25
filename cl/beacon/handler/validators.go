@@ -20,7 +20,7 @@ import (
 
 type validatorStatus int
 
-var validatorJsonTemplate = "{\"index\":%d,\"status\":\"%s\",\"balance\":%d,\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":%d,\"slashed\":%t,\"activation_eligibility_epoch\":%d,\"activation_epoch\":%d,\"exit_epoch\":%d,\"withdrawable_epoch\":%d}}"
+var validatorJsonTemplate = "{\"index\":\"%d\",\"status\":\"%s\",\"balance\":\"%d\",\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":\"%d\",\"slashed\":%t,\"activation_eligibility_epoch\":\"%d\",\"activation_epoch\":\"%d\",\"exit_epoch\":\"%d\",\"withdrawable_epoch\":\"%d\"}}"
 
 const (
 	validatorPendingInitialized validatorStatus = 1  //"pending_initialized"
@@ -485,7 +485,7 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 func responseValidatorsBalances(filterIndicies []uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, finalized bool) (*beaconResponse, error) {
 	var b strings.Builder
 	b.WriteString("[")
-	jsonTemplate := "{\"index\":%d,\"balance\":%d}"
+	jsonTemplate := "{\"index\":\"%d\",\"balance\":\"%d\"}"
 	first := true
 	var err error
 	balances.Range(func(i int, v uint64, l int) bool {

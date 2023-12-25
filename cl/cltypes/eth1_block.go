@@ -22,18 +22,18 @@ type Eth1Block struct {
 	ReceiptsRoot  libcommon.Hash    `json:"receipts_root"`
 	LogsBloom     types.Bloom       `json:"logs_bloom"`
 	PrevRandao    libcommon.Hash    `json:"prev_randao"`
-	BlockNumber   uint64            `json:"block_number"`
-	GasLimit      uint64            `json:"gas_limit"`
-	GasUsed       uint64            `json:"gas_used"`
-	Time          uint64            `json:"timestamp"`
+	BlockNumber   uint64            `json:"block_number,string"`
+	GasLimit      uint64            `json:"gas_limit,string"`
+	GasUsed       uint64            `json:"gas_used,string"`
+	Time          uint64            `json:"timestamp,string"`
 	Extra         *solid.ExtraData  `json:"extra_data"`
 	BaseFeePerGas libcommon.Hash    `json:"base_fee_per_gas"`
 	// Extra fields
 	BlockHash     libcommon.Hash              `json:"block_hash"`
 	Transactions  *solid.TransactionsSSZ      `json:"transactions"`
 	Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
-	BlobGasUsed   uint64                      `json:"blob_gas_used,omitempty"`
-	ExcessBlobGas uint64                      `json:"excess_blob_gas,omitempty"`
+	BlobGasUsed   uint64                      `json:"blob_gas_used,omitempty,string"`
+	ExcessBlobGas uint64                      `json:"excess_blob_gas,omitempty,string"`
 	// internals
 	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig
