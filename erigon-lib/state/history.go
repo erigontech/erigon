@@ -212,9 +212,6 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 			h.files.Set(newFile)
 		}
 	}
-	idxMax, _ := h.InvertedIndex.files.Max()
-	hMax, _ := h.files.Max()
-	log.Warn("[dbg] scan2", "idx", idxMax.endTxNum/h.aggregationStep, "hist", hMax.endTxNum/h.aggregationStep, "name", h.filenameBase)
 	return garbageFiles
 }
 

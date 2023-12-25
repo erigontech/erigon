@@ -601,24 +601,10 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 			return true
 		})
 
-		hMax, _ := d.History.files.Max()
-		if hMax.endTxNum/d.aggregationStep < newFile.endTxNum/d.aggregationStep {
-			log.Warn("[dbg] ahead1", "hist", hMax.endTxNum/d.aggregationStep, "domain", newFile.endTxNum/d.aggregationStep, "name", d.filenameBase)
-		}
-		idxMax, _ := d.History.InvertedIndex.files.Max()
-		if idxMax.endTxNum/d.aggregationStep < newFile.endTxNum/d.aggregationStep {
-			log.Warn("[dbg] ahead2", "idx", idxMax.endTxNum/d.aggregationStep, "domain", newFile.endTxNum/d.aggregationStep, "name", d.filenameBase)
-		}
-
 		if addNewFile {
 			d.files.Set(newFile)
 		}
 	}
-
-	idxMax, _ := d.History.InvertedIndex.files.Max()
-	hMax, _ := d.History.files.Max()
-	dMax, _ := d.History.files.Max()
-	log.Warn("[dbg] scan1", "idx", idxMax.endTxNum/d.aggregationStep, "hist", hMax.endTxNum/d.aggregationStep, "domain", dMax.endTxNum/d.aggregationStep, "name", d.filenameBase)
 	return garbageFiles
 }
 
