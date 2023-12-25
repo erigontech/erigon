@@ -1196,7 +1196,7 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 				if it.ef.Count() > 2 {
 					m2 = it.ef.Get(it.ef.Count() - 2)
 				}
-				fmt.Printf("[dbg] see1: %s, max=%d, %d\n", g.FileName(), it.ef.Max(), m2, iter.ToArrU64Must(it.ef.Iterator()))
+				fmt.Printf("[dbg] see1: %s, max=%d, m2=%d, %d\n", g.FileName(), it.ef.Max(), m2, iter.ToArrU64Must(it.ef.Iterator()))
 				if it.orderAscend {
 					efiter := it.ef.Iterator()
 					if it.startTxNum > 0 {
