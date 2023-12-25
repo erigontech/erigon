@@ -73,36 +73,42 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Addrs: h2.Addrs(),
 	})
 	require.NoError(t, err)
+	time.Sleep(time.Second)
 
 	ch := sentinel2.RecvGossip()
 	msg := []byte("hello")
 	go func() {
 		// delay to make sure that the connection is established
-		time.Sleep(5 * time.Second)
 		sub1.Publish(msg)
 	}()
 	previousTopic := ""
+	ctx1, _ := context.WithTimeout(ctx, 2*time.Second)
 
 	select {
 	case ans := <-ch:
-		previousTopic = *ans.Topic
-	case <-ctx.Done():
-		t.Fatal("timeout")
+		require.Equal(t, ans.Data, msg)
+		previousTopic = string(ans.Topic)
+	case <-ctx1.Done():
+		t.Fatal(len(ch))
 	}
 
 	bcfg.AltairForkEpoch = clparams.MainnetBeaconConfig.AltairForkEpoch
 	bcfg.InitializeForkSchedule()
+	time.Sleep(1 * time.Second)
+
 	msg = []byte("hello1")
 	go func() {
 		// delay to make sure that the connection is established
-		time.Sleep(5 * time.Second)
 		sub1 = sentinel1.subManager.GetMatchingSubscription(string(BeaconBlockSsz.Name))
 		sub1.Publish(msg)
 	}()
 
+	ctx, _ = context.WithTimeout(ctx, 2*time.Second)
+
 	select {
 	case ans := <-ch:
-		require.NotEqual(t, previousTopic, *ans.Topic)
+		require.Equal(t, ans.Data, msg)
+		require.NotEqual(t, previousTopic, ans.Topic)
 	case <-ctx.Done():
 		t.Fatal("timeout")
 	}
