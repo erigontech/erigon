@@ -437,7 +437,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, false, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -838,6 +838,16 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	endTime := time.Since(start)
+	hRoot, err := haveState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
+
+	if err := haveState.InitBeaconState(); err != nil {
+		return err
+	}
 
 	v := haveState.Version()
 	// encode and decode the state
@@ -849,12 +859,10 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
 		return err
 	}
-	endTime := time.Since(start)
-	hRoot, err := haveState.HashSSZ()
+	hRoot, err = haveState.HashSSZ()
 	if err != nil {
 		return err
 	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
 	if r.CompareFile == "" {
 		return nil
 	}
