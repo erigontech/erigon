@@ -16,7 +16,7 @@ package handlers
 import (
 	"context"
 	"errors"
-	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -47,7 +47,7 @@ type RateLimits struct {
 }
 
 const punishmentPeriod = time.Minute
-const defaultRateLimit = 5000
+const defaultRateLimit = math.MaxInt
 const defaultBlockHandlerRateLimit = 200
 
 var rateLimits = RateLimits{
@@ -163,7 +163,6 @@ func (c *ConsensusHandlers) wrapStreamHandler(name string, fn func(s network.Str
 		err = fn(s)
 		if err != nil {
 			l["err"] = err
-			fmt.Println("err", err)
 			log.Trace("[pubsubhandler] stream handler", l)
 			// TODO: maybe we should log this
 			_ = s.Reset()

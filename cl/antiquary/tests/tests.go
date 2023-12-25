@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/spf13/afero"
@@ -61,17 +62,35 @@ func (m *MockBlockReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, slot ui
 }
 
 func (m *MockBlockReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, error) {
-	panic("implement me")
+	// do a linear search
+	for _, v := range m.u {
+		r, err := v.Block.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+
+		if r == blockRoot {
+			return v, nil
+		}
+	}
+	return nil, nil
 }
 func (m *MockBlockReader) ReadHeaderByRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, error) {
-	panic("implement me")
+	block, err := m.ReadBlockByRoot(ctx, tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if block == nil {
+		return nil, nil
+	}
+	return block.SignedBeaconBlockHeader(), nil
 }
 
 func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) (*MockBlockReader, afero.Fs) {
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) (*MockBlockReader, afero.Fs) {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -86,6 +105,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, db kv.RwDB, t *testing.T) (*
 		require.NoError(t, source.WriteBlock(context.Background(), tx, block, true))
 		require.NoError(t, beacon_indicies.WriteHighestFinalized(tx, block.Block.Slot+64))
 	}
+	require.NoError(t, state_accessors.InitializeStaticTables(tx, s))
 
 	require.NoError(t, tx.Commit())
 	return m, fs

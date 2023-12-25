@@ -28,18 +28,15 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	// Schedule update.
-	go func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.headState == nil {
-			s.headState, err = newState.Copy()
-		}
-		err = newState.CopyInto(s.headState)
-		if err != nil {
-			log.Error("failed to copy head state", "err", err)
-		}
-	}()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.headState == nil {
+		s.headState, err = newState.Copy()
+	}
+	err = newState.CopyInto(s.headState)
+	if err != nil {
+		log.Error("failed to copy head state", "err", err)
+	}
 
 	return
 }
