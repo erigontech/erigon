@@ -79,6 +79,7 @@ func (a *ApiHandler) init() {
 						r.Get("/validators", http.NotFound)
 						r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
+						r.Get("/validators", beaconhttp.HandleEndpointFunc(a.getAllValidators))
 						r.Get("/validators/{id}", http.NotFound)
 					})
 				})
