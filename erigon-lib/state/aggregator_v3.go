@@ -249,6 +249,39 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 		mx--
 	}
 	a.aggregatedStep.Store(mx / a.aggregationStep)
+
+	{
+		m, _ := a.accounts.files.Max()
+		log.Warn("[dbg] after open", a.accounts.filenameBase, m.endTxNum/a.aggregationStep)
+	}
+	{
+		m, _ := a.storage.files.Max()
+		log.Warn("[dbg] after open", a.storage.filenameBase, m.endTxNum/a.aggregationStep)
+	}
+	{
+		m, _ := a.code.files.Max()
+		log.Warn("[dbg] after open", a.code.filenameBase, m.endTxNum/a.aggregationStep)
+	}
+	{
+		m, _ := a.commitment.files.Max()
+		log.Warn("[dbg] after open", a.commitment.filenameBase, m.endTxNum/a.aggregationStep)
+	}
+	{
+		m, _ := a.logAddrs.files.Max()
+		log.Warn("[dbg] after open", a.logAddrs.filenameBase, m.endTxNum/a.aggregationStep)
+	}
+	{
+		m, _ := a.logTopics.files.Max()
+		log.Warn("[dbg] after open", a.logTopics.filenameBase, m.endTxNum/a.aggregationStep)
+	}
+	{
+		m, _ := a.tracesFrom.files.Max()
+		log.Warn("[dbg] after open", a.tracesFrom.filenameBase, m.endTxNum/a.aggregationStep)
+	}
+	{
+		m, _ := a.tracesTo.files.Max()
+		log.Warn("[dbg] after open", a.tracesTo.filenameBase, m.endTxNum/a.aggregationStep)
+	}
 	return nil
 }
 
