@@ -1067,9 +1067,9 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 	return res, nil
 }
 func (dc *DomainContext) DebugEFKey(k []byte) error {
-	fmt.Printf("[dbg] see1: %s, %d\n", dc.d.filenameBase, dc.d.files.Len())
 	dc.d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
+			fmt.Printf("[dbg] see1: %s, %d, %d-%d, %t, %t\n", dc.d.filenameBase, dc.d.files.Len(), item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep, item.decompressor == nil, item.index == nil)
 			if item.decompressor == nil {
 				continue
 			}
