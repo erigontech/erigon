@@ -146,7 +146,6 @@ func TestGetStateFullHistorical(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fmt.Println(fcu.HeadSlotVal)
 
 	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
 

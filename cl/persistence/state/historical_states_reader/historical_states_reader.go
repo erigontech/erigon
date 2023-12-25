@@ -696,7 +696,7 @@ func (r *HistoricalStatesReader) ReadValidatorsData(tx kv.Tx, slot uint64) (*sol
 	if err != nil {
 		return nil, nil, err
 	}
-	balances, err := r.reconstructBalances(nil, slot, kv.ValidatorBalance)
+	balances, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
 	if err != nil {
 		return nil, nil, err
 	}

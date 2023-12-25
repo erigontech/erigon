@@ -290,7 +290,7 @@ func (d directString) MarshalJSON() ([]byte, error) {
 func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconResponse, error) {
 	var b strings.Builder
 	b.WriteString("[")
-	jsonTemplate := "{\"index\":%d,\"status\":\"%s\",\"balance\":%d,\"validator\":{\"pubkey\":\"%x\",\"withdrawal_credentials\":\"%x\",\"effective_balance\":%d,\"slashed\":%t,\"activation_eligibility_epoch\":%d,\"activation_epoch\":%d,\"exit_epoch\":%d,\"withdrawable_epoch\":%d}}"
+	jsonTemplate := "{\"index\":%d,\"status\":\"%s\",\"balance\":%d,\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":%d,\"slashed\":%t,\"activation_eligibility_epoch\":%d,\"activation_epoch\":%d,\"exit_epoch\":%d,\"withdrawable_epoch\":%d}}"
 	first := true
 	var err error
 	validators.Range(func(i int, v solid.Validator, l int) bool {
