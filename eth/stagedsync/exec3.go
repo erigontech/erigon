@@ -797,7 +797,7 @@ Loop:
 					if errors.Is(err, context.Canceled) {
 						return err
 					}
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
 					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 					}

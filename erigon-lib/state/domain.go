@@ -32,6 +32,7 @@ import (
 	"time"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
@@ -1064,6 +1065,49 @@ func (dc *DomainContext) DebugKVFilesWithKey(k []byte) (res []string, err error)
 		}
 	}
 	return res, nil
+}
+func (dc *DomainContext) DebugEFKey(k []byte) error {
+	dc.hc.ic.ii.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.decompressor == nil {
+				continue
+			}
+			idx := item.index
+			if idx == nil {
+				fPath := dc.d.efAccessorFilePath(item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
+				if dir.FileExist(fPath) {
+					var err error
+					idx, err = recsplit.OpenIndex(fPath)
+					if err != nil {
+						_, fName := filepath.Split(fPath)
+						dc.d.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+						continue
+					}
+					defer idx.Close()
+				} else {
+					continue
+				}
+			}
+
+			offset := idx.GetReaderFromPool().Lookup(k)
+			g := item.decompressor.MakeGetter()
+			g.Reset(offset)
+			key, _ := g.NextUncompressed()
+			if !bytes.Equal(k, key) {
+				continue
+			}
+			eliasVal, _ := g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+
+			last2 := uint64(0)
+			if ef.Count() > 2 {
+				last2 = ef.Get(ef.Count() - 2)
+			}
+			log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.decompressor.FileName(), ef.Min(), ef.Max(), last2, iter.ToArrU64Must(ef.Iterator())))
+		}
+		return true
+	})
+	return nil
 }
 
 func (d *Domain) collectFilesStats() (datsz, idxsz, files uint64) {
