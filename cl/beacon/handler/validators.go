@@ -170,8 +170,8 @@ func checkValidValidatorId(s string) (bool, *beaconhttp.EndpointError) {
 	// If it starts with 0x, then it must a 48bytes 0x prefixed string
 	if len(s) == 98 && s[:2] == "0x" {
 		// check if it is a valid hex string
-		if _, err := hex.DecodeString(s); err != nil {
-			return false, beaconhttp.NewEndpointError(http.StatusBadRequest, "invalid validator id")
+		if _, err := hex.DecodeString(s[2:]); err != nil {
+			return false, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 		}
 		return true, nil
 	}
@@ -223,7 +223,7 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 		}
 		if isPublicKey {
 			var b48 libcommon.Bytes48
-			if err := b48.UnmarshalText([]byte(id[2:])); err != nil {
+			if err := b48.UnmarshalText([]byte(id)); err != nil {
 				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 			}
 			has, err := tx.Has(kv.InvertedValidatorPublicKeys, b48[:])
@@ -231,6 +231,7 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 				return nil, err
 			}
 			if !has {
+				filterIndicies = append(filterIndicies, math.MaxUint64)
 				continue
 			}
 			idx, err := state_accessors.ReadValidatorIndexByPublicKey(tx, b48)
