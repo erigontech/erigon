@@ -20,6 +20,8 @@ import (
 
 type validatorStatus int
 
+var validatorJsonTemplate = "{\"index\":%d,\"status\":\"%s\",\"balance\":%d,\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":%d,\"slashed\":%t,\"activation_eligibility_epoch\":%d,\"activation_epoch\":%d,\"exit_epoch\":%d,\"withdrawable_epoch\":%d}}"
+
 const (
 	validatorPendingInitialized validatorStatus = 1  //"pending_initialized"
 	validatorPendingQueued      validatorStatus = 2  //"pending_queued"
@@ -214,38 +216,9 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 	if len(validatorIds) > maxValidatorsLookupFilter {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "too many validators requested")
 	}
-	filterIndicies := make([]uint64, 0, len(validatorIds))
-
-	for _, id := range validatorIds {
-		isPublicKey, err := checkValidValidatorId(id)
-		if err != nil {
-			return nil, err
-		}
-		if isPublicKey {
-			var b48 libcommon.Bytes48
-			if err := b48.UnmarshalText([]byte(id)); err != nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
-			}
-			has, err := tx.Has(kv.InvertedValidatorPublicKeys, b48[:])
-			if err != nil {
-				return nil, err
-			}
-			if !has {
-				filterIndicies = append(filterIndicies, math.MaxUint64)
-				continue
-			}
-			idx, err := state_accessors.ReadValidatorIndexByPublicKey(tx, b48)
-			if err != nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err.Error())
-			}
-			filterIndicies = append(filterIndicies, idx)
-		} else {
-			idx, err := strconv.ParseUint(id, 10, 64)
-			if err != nil {
-				return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
-			}
-			filterIndicies = append(filterIndicies, idx)
-		}
+	filterIndicies, err := parseQueryValidatorIndicies(tx, validatorIds)
+	if err != nil {
+		return nil, err
 	}
 	// Check the filters' validity
 	statusFilters, err := parseStatuses(queryFilters)
@@ -281,6 +254,166 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 	return responseValidators(filterIndicies, statusFilters, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
+func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
+	isPublicKey, err := checkValidValidatorId(id)
+	if err != nil {
+		return 0, err
+	}
+	if isPublicKey {
+		var b48 libcommon.Bytes48
+		if err := b48.UnmarshalText([]byte(id)); err != nil {
+			return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		}
+		has, err := tx.Has(kv.InvertedValidatorPublicKeys, b48[:])
+		if err != nil {
+			return 0, err
+		}
+		if !has {
+			return math.MaxUint64, nil
+		}
+		return state_accessors.ReadValidatorIndexByPublicKey(tx, b48)
+	} else {
+		idx, err := strconv.ParseUint(id, 10, 64)
+		if err != nil {
+			return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		}
+		return idx, nil
+	}
+}
+
+func parseQueryValidatorIndicies(tx kv.Tx, ids []string) ([]uint64, error) {
+	filterIndicies := make([]uint64, 0, len(ids))
+
+	for _, id := range ids {
+		idx, err := parseQueryValidatorIndex(tx, id)
+		if err != nil {
+			return nil, err
+		}
+		filterIndicies = append(filterIndicies, idx)
+	}
+	return filterIndicies, nil
+}
+
+func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error) {
+	ctx := r.Context()
+
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockId, err := stateIdFromRequest(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+	}
+
+	validatorId, err := stringFromRequest(r, "validator_id")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+	fmt.Println(validatorId)
+
+	validatorIndex, err := parseQueryValidatorIndex(tx, validatorId)
+	if err != nil {
+		return nil, err
+	}
+
+	if blockId.head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
+		s, cn := a.syncedData.HeadState()
+		defer cn()
+		if s.ValidatorLength() <= int(validatorIndex) {
+			return newBeaconResponse([]int{}).withFinalized(false), nil
+		}
+	}
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	if slot == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+	}
+	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
+	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil {
+		validatorSet, balances, err := a.stateReader.ReadValidatorsData(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		return responseValidator(validatorIndex, stateEpoch, balances, validatorSet, true)
+	}
+	return responseValidator(validatorIndex, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
+}
+
+func (a *ApiHandler) getAllValidatorsBalances(r *http.Request) (*beaconResponse, error) {
+	ctx := r.Context()
+
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	blockId, err := stateIdFromRequest(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+	}
+
+	validatorIds, err := stringListFromQueryParams(r, "id")
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+
+	if len(validatorIds) > maxValidatorsLookupFilter {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "too many validators requested")
+	}
+	filterIndicies, err := parseQueryValidatorIndicies(tx, validatorIds)
+	if err != nil {
+		return nil, err
+	}
+
+	if blockId.head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
+		s, cn := a.syncedData.HeadState()
+		defer cn()
+		return responseValidatorsBalances(filterIndicies, state.Epoch(s), s.Balances(), false)
+	}
+	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	if slot == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+	}
+	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
+	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+	if err != nil {
+		return nil, err
+	}
+	if state == nil {
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		return responseValidatorsBalances(filterIndicies, stateEpoch, balances, true)
+	}
+	return responseValidatorsBalances(filterIndicies, stateEpoch, state.Balances(), *slot <= a.forkchoiceStore.FinalizedSlot())
+}
+
 type directString string
 
 func (d directString) MarshalJSON() ([]byte, error) {
@@ -290,7 +423,6 @@ func (d directString) MarshalJSON() ([]byte, error) {
 func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconResponse, error) {
 	var b strings.Builder
 	b.WriteString("[")
-	jsonTemplate := "{\"index\":%d,\"status\":\"%s\",\"balance\":%d,\"validator\":{\"pubkey\":\"0x%x\",\"withdrawal_credentials\":\"0x%x\",\"effective_balance\":%d,\"slashed\":%t,\"activation_eligibility_epoch\":%d,\"activation_epoch\":%d,\"exit_epoch\":%d,\"withdrawable_epoch\":%d}}"
 	first := true
 	var err error
 	validators.Range(func(i int, v solid.Validator, l int) bool {
@@ -307,7 +439,57 @@ func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatu
 			}
 		}
 		first = false
-		if _, err = b.WriteString(fmt.Sprintf(jsonTemplate, i, status.String(), balances.Get(i), v.PublicKey(), v.WithdrawalCredentials().String(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
+		if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, i, status.String(), balances.Get(i), v.PublicKey(), v.WithdrawalCredentials().String(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
+			return false
+		}
+		return true
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	_, err = b.WriteString("]\n")
+
+	return newBeaconResponse(directString(b.String())).withFinalized(finalized), err
+}
+
+func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconResponse, error) {
+	var b strings.Builder
+	var err error
+	if validators.Length() <= int(idx) {
+		return newBeaconResponse([]int{}).withFinalized(finalized), nil
+	}
+
+	v := validators.Get(int(idx))
+	status := validatorStatusFromValidator(v, stateEpoch, balances.Get(int(idx)))
+
+	if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, idx, status.String(), balances.Get(int(idx)), v.PublicKey(), v.WithdrawalCredentials().String(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
+		return nil, err
+	}
+
+	_, err = b.WriteString("\n")
+
+	return newBeaconResponse(directString(b.String())).withFinalized(finalized), err
+}
+
+func responseValidatorsBalances(filterIndicies []uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, finalized bool) (*beaconResponse, error) {
+	var b strings.Builder
+	b.WriteString("[")
+	jsonTemplate := "{\"index\":%d,\"balance\":%d}"
+	first := true
+	var err error
+	balances.Range(func(i int, v uint64, l int) bool {
+		if len(filterIndicies) > 0 && !slices.Contains(filterIndicies, uint64(i)) {
+			return true
+		}
+
+		if !first {
+			if _, err = b.WriteString(","); err != nil {
+				return false
+			}
+		}
+		first = false
+		if _, err = b.WriteString(fmt.Sprintf(jsonTemplate, i, v)); err != nil {
 			return false
 		}
 		return true
@@ -326,19 +508,10 @@ func shouldStatusBeFiltered(status validatorStatus, statuses []validatorStatus) 
 		return false
 	}
 	for _, s := range statuses {
-		if s == validatorActive && (status == validatorActiveOngoing || status == validatorActiveExiting || status == validatorActiveSlashed) {
-			return false
-		}
-		if s == validatorPending && (status == validatorPendingInitialized || status == validatorPendingQueued) {
-			return false
-		}
-		if s == validatorExited && (status == validatorExitedUnslashed || status == validatorExitedSlashed) {
-			return false
-		}
-		if s == validatorWithdrawal && (status == validatorWithdrawalPossible || status == validatorWithdrawalDone) {
-			return false
-		}
-		if s == status {
+		if (s == status) || (s == validatorActive && (status == validatorActiveOngoing || status == validatorActiveExiting || status == validatorActiveSlashed)) ||
+			(s == validatorPending && (status == validatorPendingInitialized || status == validatorPendingQueued)) ||
+			(s == validatorExited && (status == validatorExitedUnslashed || status == validatorExitedSlashed)) ||
+			(s == validatorWithdrawal && (status == validatorWithdrawalPossible || status == validatorWithdrawalDone)) {
 			return false
 		}
 	}

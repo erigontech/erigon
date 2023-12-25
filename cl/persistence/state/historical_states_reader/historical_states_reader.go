@@ -704,3 +704,22 @@ func (r *HistoricalStatesReader) ReadValidatorsData(tx kv.Tx, slot uint64) (*sol
 
 	return validatorSet, balancesList, balancesList.DecodeSSZ(balances, 0)
 }
+
+func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (solid.Uint64ListSSZ, error) {
+	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	// State not found
+	if minimalBeaconState == nil {
+		return nil, nil
+	}
+
+	balances, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
+	if err != nil {
+		return nil, err
+	}
+	balancesList := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
+
+	return balancesList, balancesList.DecodeSSZ(balances, 0)
+}
