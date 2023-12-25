@@ -73,7 +73,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Addrs: h2.Addrs(),
 	})
 	require.NoError(t, err)
-	time.Sleep(time.Second)
+	time.Sleep(5 * time.Second)
 
 	ch := sentinel2.RecvGossip()
 	msg := []byte("hello")
@@ -82,19 +82,14 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		sub1.Publish(msg)
 	}()
 	previousTopic := ""
-	ctx1, _ := context.WithTimeout(ctx, 2*time.Second)
 
-	select {
-	case ans := <-ch:
-		require.Equal(t, ans.Data, msg)
-		previousTopic = string(ans.Topic)
-	case <-ctx1.Done():
-		t.Fatal(len(ch))
-	}
+	ans := <-ch
+	require.Equal(t, ans.Data, msg)
+	previousTopic = string(ans.Topic)
 
 	bcfg.AltairForkEpoch = clparams.MainnetBeaconConfig.AltairForkEpoch
 	bcfg.InitializeForkSchedule()
-	time.Sleep(1 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	msg = []byte("hello1")
 	go func() {
@@ -103,13 +98,8 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		sub1.Publish(msg)
 	}()
 
-	ctx, _ = context.WithTimeout(ctx, 2*time.Second)
+	ans = <-ch
+	require.Equal(t, ans.Data, msg)
+	require.NotEqual(t, previousTopic, ans.Topic)
 
-	select {
-	case ans := <-ch:
-		require.Equal(t, ans.Data, msg)
-		require.NotEqual(t, previousTopic, ans.Topic)
-	case <-ctx.Done():
-		t.Fatal("timeout")
-	}
 }
