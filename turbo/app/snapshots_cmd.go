@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
@@ -226,7 +225,9 @@ func doBtSearch(cliCtx *cli.Context) error {
 	} else {
 		fmt.Printf("seek: %x, -> nil\n", seek)
 	}
-
+	//var a = accounts.Account{}
+	//accounts.DeserialiseV3(&a, cur.Value())
+	//fmt.Printf("a: nonce=%d\n", a.Nonce)
 	return nil
 }
 
@@ -251,6 +252,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	default:
 		panic(ds)
 	}
+	_ = idx
 
 	ctx := cliCtx.Context
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
@@ -269,29 +271,9 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.DebugKey(domain, key); err != nil {
 		return err
 	}
-	tx, err := chainDB.BeginRo(ctx)
-	if err != nil {
+	if err := view.DebugEFKey(domain, key); err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if _, _, err := view.GetLatest(domain, key, nil, tx); err != nil {
-		return err
-	}
-	{
-		it, err := view.IndexRange(idx, key, -1, -1, order.Asc, -1, tx)
-		if err != nil {
-			return err
-		}
-		blockNumsIt := rawdbv3.TxNums2BlockNums(tx, it, order.Asc)
-		var blockNums, txNums []uint64
-		for blockNumsIt.HasNext() {
-			txNum, blockNum, _, _, _, _ := blockNumsIt.Next()
-			blockNums = append(blockNums, blockNum)
-			txNums = append(txNums, txNum)
-		}
-		log.Info("HistoryIdx", "blockNums", blockNums, "txNums", txNums)
-	}
-
 	return nil
 }
 

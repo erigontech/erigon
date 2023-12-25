@@ -1551,6 +1551,33 @@ func (ac *AggregatorV3Context) DebugKey(domain kv.Domain, k []byte) error {
 	}
 	return nil
 }
+func (ac *AggregatorV3Context) DebugEFKey(domain kv.Domain, k []byte) error {
+	switch domain {
+	case kv.AccountsDomain:
+		err := ac.account.DebugEFKey(k)
+		if err != nil {
+			return err
+		}
+	case kv.StorageDomain:
+		err := ac.code.DebugEFKey(k)
+		if err != nil {
+			return err
+		}
+	case kv.CodeDomain:
+		err := ac.storage.DebugEFKey(k)
+		if err != nil {
+			return err
+		}
+	case kv.CommitmentDomain:
+		err := ac.commitment.DebugEFKey(k)
+		if err != nil {
+			return err
+		}
+	default:
+		panic(fmt.Sprintf("unexpected: %s", domain))
+	}
+	return nil
+}
 
 // --- Domain part END ---
 
