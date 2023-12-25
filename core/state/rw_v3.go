@@ -194,16 +194,14 @@ func (rs *StateV3) Domains() *libstate.SharedDomains {
 	return rs.domains
 }
 
-func (rs *StateV3) SetTxNum(txNum, blockNum uint64) {
-	rs.domains.SetTxNum(txNum)
-	rs.domains.SetBlockNum(blockNum)
-}
-
 func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	if txTask.HistoryExecution {
 		return nil
 	}
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
+
+	rs.domains.SetTxNum(txTask.TxNum)
+	rs.domains.SetBlockNum(txTask.BlockNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
