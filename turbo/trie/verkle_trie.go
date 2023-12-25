@@ -45,6 +45,7 @@ func NewVerkleTrie(root verkle.VerkleNode, db kv.RwDB, tx kv.RwTx, pointCache *v
 }
 
 func OpenVKTrie(root common.Hash, tx kv.RwTx) (*VerkleTrie, error) {
+	// Root is stored at VerkleDBPathKeyPrefix
 	payload, err := tx.GetOne(kv.VerkleTrie, VerkleDBPathKeyPrefix)
 	if err != nil || len(payload) == 0 {
 		return NewVerkleTrie(verkle.New(), nil, tx, vkutils.NewPointCache(), false), nil
@@ -240,6 +241,8 @@ func (vt *VerkleTrie) Hash() common.Hash {
 	return vt.root.Commit().Bytes()
 }
 
+
+//NOT USED
 func nodeToDBKey(n verkle.VerkleNode) []byte {
 	ret := n.Commitment().Bytes()
 	return ret[:]

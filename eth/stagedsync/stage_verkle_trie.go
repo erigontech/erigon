@@ -75,21 +75,7 @@ func SpawnVerkleTrie(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx con
 	if err != nil {
 		return libcommon.Hash{}, err
 	}
-	// if (rootHash == libcommon.Hash{}) {
-	// 	rootVerkleNode = verkle.New()
-	// } else {
-	// 	rootVerkleNode, err = rawdb.ReadVerkleNode(tx, rootHash)
-	// }
 
-	// if s.BlockNumber == 0 {
-	// 	rootVerkleNode = verkle.New()
-	// } else {
-	// 	rootHash, err := rawdb.ReadVerkleRoot(tx, s.BlockNumber)
-	// 	if err != nil {
-	// 		return libcommon.Hash{}, err
-	// 	}
-	// 	rootVerkleNode, err = rawdb.ReadVerkleNode(tx, rootHash)
-	// }
 	var newRoot libcommon.Hash
 
 	vTrie, err := trie.OpenVKTrie(rootHash, tx)
