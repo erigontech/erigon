@@ -680,5 +680,27 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(randaoMixes solid.H
 		}(epoch, activeIdxs[i])
 	}
 	wg.Wait()
+}
 
+func (r *HistoricalStatesReader) ReadValidatorsData(tx kv.Tx, slot uint64) (*solid.ValidatorSet, solid.Uint64ListSSZ, error) {
+	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	if err != nil {
+		return nil, nil, err
+	}
+	// State not found
+	if minimalBeaconState == nil {
+		return nil, nil, nil
+	}
+
+	validatorSet, _, _, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
+	if err != nil {
+		return nil, nil, err
+	}
+	balances, err := r.reconstructBalances(nil, slot, kv.ValidatorBalance)
+	if err != nil {
+		return nil, nil, err
+	}
+	balancesList := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
+
+	return validatorSet, balancesList, balancesList.DecodeSSZ(balances, 0)
 }

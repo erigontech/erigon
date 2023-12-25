@@ -365,13 +365,11 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			if msg.GetFrom() == s.host {
 				continue
 			}
-			fmt.Println("Gossip message sent", string(msg.Data), len(s.ch))
 			s.ch <- &GossipMessage{
 				From:  msg.GetFrom(),
 				Topic: TopicName(topic),
 				Data:  common.Copy(msg.Data),
 			}
-			fmt.Println("Gossip message received", string(msg.Data), len(s.ch))
 		}
 	}
 }

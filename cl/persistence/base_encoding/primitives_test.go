@@ -3,7 +3,6 @@ package base_encoding
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -70,7 +69,6 @@ func TestDiff64Effective(t *testing.T) {
 	out := b.Bytes()
 	new2, err := ApplyCompressedSerializedUint64ListDiff(previous, nil, out)
 	require.NoError(t, err)
-	fmt.Println(previous)
 
 	require.Equal(t, new2, expected)
 }
