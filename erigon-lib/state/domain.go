@@ -535,7 +535,7 @@ func (d *Domain) removeFilesAfterStep(lowerBound uint64, readonly bool) {
 func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) {
 	re := regexp.MustCompile("^v([0-9]+)-" + d.filenameBase + ".([0-9]+)-([0-9]+).kv$")
 	var err error
-
+	fmt.Printf("a: %s\n", fileNames)
 	for _, name := range fileNames {
 		subs := re.FindStringSubmatch(name)
 		if len(subs) != 4 {
