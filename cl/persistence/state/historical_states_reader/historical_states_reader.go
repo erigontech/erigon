@@ -23,6 +23,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
 	"golang.org/x/exp/slices"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 type HistoricalStatesReader struct {
@@ -592,7 +594,6 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64, curren
 func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, validatorLength uint64,
 	currentActiveIndicies, previousActiveIndicies []uint64, ret *state.CachingBeaconState,
 	currentJustifiedCheckpoint, previousJustifiedCheckpoint solid.Checkpoint) (*solid.BitList, *solid.BitList, error) {
-	randaoMixes := ret.RandaoMixes()
 	var beginSlot uint64
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
@@ -600,7 +601,9 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	// trigger the cache for shuffled sets in parallel
-	r.tryCachingEpochsInParallell(randaoMixes, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch})
+	if err := r.tryCachingEpochsInParallell(tx, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
+		return nil, nil, err
+	}
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
@@ -633,8 +636,16 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 				activeIndicies = previousActiveIndicies
 			}
 
+			attestationEpoch := data.Slot() / r.cfg.SlotsPerEpoch
+
+			mixPosition := (attestationEpoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
+			mix, err := r.ReadRandaoMixBySlotAndIndex(tx, data.Slot(), mixPosition)
+			if err != nil {
+				return false
+			}
+
 			var attestingIndicies []uint64
-			attestingIndicies, err = r.attestingIndicies(attestation.AttestantionData(), attestation.AggregationBits(), true, randaoMixes, activeIndicies)
+			attestingIndicies, err = r.attestingIndicies(data, attestation.AggregationBits(), true, mix, activeIndicies)
 			if err != nil {
 				return false
 			}
@@ -679,16 +690,24 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 	return epoch, epoch - 1
 }
 
-func (r *HistoricalStatesReader) tryCachingEpochsInParallell(randaoMixes solid.HashVectorSSZ, activeIdxs [][]uint64, epochs []uint64) {
+func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdxs [][]uint64, epochs []uint64) error {
 	var wg sync.WaitGroup
 	wg.Add(len(epochs))
 	for i, epoch := range epochs {
-		go func(epoch uint64, idxs []uint64) {
+		mixPosition := (epoch + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
+		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, epochs[0]*r.cfg.SlotsPerEpoch, mixPosition)
+		if err != nil {
+			return err
+		}
+
+		go func(mix libcommon.Hash, epoch uint64, idxs []uint64) {
 			defer wg.Done()
-			_, _ = r.computeCommittee(randaoMixes, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
-		}(epoch, activeIdxs[i])
+
+			_, _ = r.computeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
+		}(mix, epoch, activeIdxs[i])
 	}
 	wg.Wait()
+	return nil
 }
 
 func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (solid.Uint64ListSSZ, error) {
@@ -708,4 +727,41 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (
 	balancesList := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 
 	return balancesList, balancesList.DecodeSSZ(balances, 0)
+}
+
+func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, index uint64) (libcommon.Hash, error) {
+	epoch := slot / r.cfg.SlotsPerEpoch
+	epochSubIndex := epoch % r.cfg.EpochsPerHistoricalVector
+	if index == epochSubIndex {
+		intraRandaoMix, err := tx.GetOne(kv.IntraRandaoMixes, base_encoding.Encode64ToBytes4(slot))
+		if err != nil {
+			return libcommon.Hash{}, err
+		}
+		if len(intraRandaoMix) != 32 {
+			return libcommon.Hash{}, fmt.Errorf("invalid intra randao mix length %d", len(intraRandaoMix))
+		}
+		return libcommon.BytesToHash(intraRandaoMix), nil
+	}
+	var epochLookup uint64
+	if index <= epochSubIndex {
+		if epoch > (epochSubIndex - index) {
+			epochLookup = epoch - (epochSubIndex - index)
+		}
+	} else {
+		if epoch > (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index)) {
+			epochLookup = epoch - (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index))
+		}
+	}
+
+	if epochLookup < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
+		return r.genesisState.GetRandaoMixes(epoch), nil
+	}
+	mixBytes, err := tx.GetOne(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	if len(mixBytes) != 32 {
+		return libcommon.Hash{}, fmt.Errorf("invalid mix length %d", len(mixBytes))
+	}
+	return libcommon.BytesToHash(mixBytes), nil
 }

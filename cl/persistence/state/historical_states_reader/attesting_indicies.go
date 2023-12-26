@@ -3,20 +3,21 @@ package historical_states_reader
 import (
 	"fmt"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func (r *HistoricalStatesReader) attestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool, randaoMixes solid.HashVectorSSZ, idxs []uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) attestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
 	slot := attestation.Slot()
 	committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
 	committeeIndex := attestation.ValidatorIndex()
 	index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 	count := committeesPerSlot * r.cfg.SlotsPerEpoch
 
-	committee, err := r.computeCommittee(randaoMixes, idxs, attestation.Slot(), count, index)
+	committee, err := r.computeCommittee(mix, idxs, attestation.Slot(), count, index)
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +41,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation solid.Attestation
 }
 
 // computeCommittee uses cache to compute compittee
-func (r *HistoricalStatesReader) computeCommittee(randaoMixes solid.HashVectorSSZ, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) computeCommittee(mix libcommon.Hash, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
 	cfg := r.cfg
 	lenIndicies := uint64(len(indicies))
 
@@ -48,12 +49,9 @@ func (r *HistoricalStatesReader) computeCommittee(randaoMixes solid.HashVectorSS
 	end := (lenIndicies * (index + 1)) / count
 	var shuffledIndicies []uint64
 	epoch := slot / cfg.SlotsPerEpoch
-
-	mixPosition := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) %
-		cfg.EpochsPerHistoricalVector
-	// Input for the seed hash.
-	mix := randaoMixes.Get(int(mixPosition))
-
+	/*
+	   mixPosition := (epoch + cfg.EpochsPerHistoricalVector - cfg.MinSeedLookahead - 1) % cfg.EpochsPerHistoricalVector
+	*/
 	if shuffledIndicesInterface, ok := r.shuffledSetsCache.Get(epoch); ok {
 		shuffledIndicies = shuffledIndicesInterface
 	} else {
