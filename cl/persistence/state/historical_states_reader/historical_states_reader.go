@@ -138,20 +138,6 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetBalances(balances)
 
-	epoch := slot / r.cfg.SlotsPerEpoch
-	activeIds, err := state_accessors.ReadActiveIndicies(tx, epoch)
-	if err != nil {
-		return nil, err
-	}
-	var prevActiveIds []uint64
-	if epoch == 0 {
-		prevActiveIds = activeIds
-	} else {
-		prevActiveIds, err = state_accessors.ReadActiveIndicies(tx, epoch-1)
-		if err != nil {
-			return nil, err
-		}
-	}
 	validatorSet, err := r.ReadValidatorsForHistoricalState(tx, slot)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validators: %w", err)
@@ -198,7 +184,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		ret.SetCurrentEpochAttestations(currentAtts)
 		ret.SetPreviousEpochAttestations(previousAtts)
 	} else {
-		currentIdxs, previousIdxs, err := r.readPartecipations(tx, slot, minimalBeaconState.ValidatorLength, activeIds, prevActiveIds, ret, currentCheckpoint, previousCheckpoint)
+		currentIdxs, previousIdxs, err := r.ReadPartecipations(tx, slot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read participations: %w", err)
 		}
@@ -591,12 +577,35 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64, curren
 }
 
 // readParticipations shuffles active indicies and returns the participation flags for the given epoch.
-func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, validatorLength uint64,
-	currentActiveIndicies, previousActiveIndicies []uint64, ret *state.CachingBeaconState,
-	currentJustifiedCheckpoint, previousJustifiedCheckpoint solid.Checkpoint) (*solid.BitList, *solid.BitList, error) {
+func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*solid.BitList, *solid.BitList, error) {
 	var beginSlot uint64
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
+
+	currentActiveIndicies, err := state_accessors.ReadActiveIndicies(tx, epoch)
+	if err != nil {
+		return nil, nil, err
+	}
+	var previousActiveIndicies []uint64
+	if epoch == 0 {
+		previousActiveIndicies = currentActiveIndicies
+	} else {
+		previousActiveIndicies, err = state_accessors.ReadActiveIndicies(tx, epoch-1)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// Read the minimal beacon state which have the small fields.
+	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	if err != nil {
+		return nil, nil, err
+	}
+	// State not found
+	if minimalBeaconState == nil {
+		return nil, nil, nil
+	}
+	validatorLength := minimalBeaconState.ValidatorLength
 
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
@@ -614,7 +623,6 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 		if block == nil {
 			continue
 		}
-		ret.SetSlot(i)
 		currentEpoch := i / r.cfg.SlotsPerEpoch
 
 		// Read the participation flags
@@ -650,7 +658,7 @@ func (r *HistoricalStatesReader) readPartecipations(tx kv.Tx, slot uint64, valid
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = ret.GetAttestationParticipationFlagIndicies(data, ret.Slot()-data.Slot(), true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, i, data, i-data.Slot(), true)
 			if err != nil {
 				return false
 			}
@@ -742,18 +750,21 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, ind
 		}
 		return libcommon.BytesToHash(intraRandaoMix), nil
 	}
+	needFromGenesis := true
 	var epochLookup uint64
 	if index <= epochSubIndex {
 		if epoch > (epochSubIndex - index) {
+			needFromGenesis = false
 			epochLookup = epoch - (epochSubIndex - index)
 		}
 	} else {
 		if epoch > (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index)) {
+			needFromGenesis = false
 			epochLookup = epoch - (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index))
 		}
 	}
 
-	if epochLookup < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
+	if needFromGenesis {
 		return r.genesisState.GetRandaoMixes(epoch), nil
 	}
 	mixBytes, err := tx.GetOne(kv.RandaoMixes, base_encoding.Encode64ToBytes4(epochLookup*r.cfg.SlotsPerEpoch))

@@ -75,8 +75,12 @@ func (a *ApiHandler) getAttestationsRewards(r *http.Request) (*beaconResponse, e
 	if err != nil {
 		return nil, err
 	}
-	_ = validatorSet
-	return nil, nil
+
+	_, previousIdx, err := a.stateReader.ReadPartecipations(tx, lastSlot)
+	if err != nil {
+		return nil, err
+	}
+	return computeAttestationsRewards(validatorSet, previousIdx, filterIndicies, epoch)
 }
 
 func computeAttestationsRewards(validatorSet *solid.ValidatorSet, previousParticipation *solid.BitList, filterIndicies []uint64, epoch uint64) (*beaconResponse, error) {
