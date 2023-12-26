@@ -78,8 +78,6 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.Aggre
 						casted.Close()
 					}
 				}
-				log.Warn(fmt.Sprintf("[dbg] step=%d", minStep))
-
 				return nil
 			})
 		}
