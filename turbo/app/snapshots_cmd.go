@@ -459,7 +459,13 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
 	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
 	chainConfig := fromdb.ChainConfig(chainDB)
-	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, logger)
+	blockSnapBuildSema := make(chan struct{}, 1)
+	for i := 0; i < cap(blockSnapBuildSema); i++ {
+		blockSnapBuildSema <- struct{}{}
+	}
+
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, blockSnapBuildSema, logger)
 	return
 }
 

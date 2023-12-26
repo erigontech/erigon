@@ -30,6 +30,7 @@ type Antiquary struct {
 	logger          log.Logger
 	sn              *freezeblocks.CaplinSnapshots
 	snReader        freezeblocks.BeaconSnapshotReader
+	snBuildSema     chan struct{} // semaphore for building only one type (blocks, caplin, v3) at a time
 	ctx             context.Context
 	beaconDB        persistence.BlockSource
 	backfilled      *atomic.Bool
@@ -43,7 +44,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states, blocks bool, fs afero.Fs) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states, blocks bool, fs afero.Fs, snBuildSema chan struct{}) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
@@ -58,6 +59,7 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 		cfg:             cfg,
 		states:          states,
 		snReader:        reader,
+		snBuildSema:     snBuildSema,
 		fs:              fs,
 		validatorsTable: validatorsTable,
 		genesisState:    genesisState,
@@ -217,11 +219,41 @@ func (a *Antiquary) Loop() error {
 	}
 }
 
+func (a *Antiquary) antiquateDone() {
+	if a.snBuildSema == nil {
+		return
+	}
+	select {
+	case a.snBuildSema <- struct{}{}:
+	default:
+	}
+}
+
+func (a *Antiquary) antiquateAllowed() bool {
+	if a.snBuildSema == nil {
+		return true
+	}
+	select {
+	case _, ok := <-a.snBuildSema:
+		if !ok {
+			return false
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
 func (a *Antiquary) antiquate(from, to uint64) error {
 	if a.downloader == nil {
 		return nil // Just skip if we don't have a downloader
 	}
+	if !a.antiquateAllowed() {
+		return nil
+	}
+	defer a.antiquateDone()
+
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2MergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err

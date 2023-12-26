@@ -1133,11 +1133,13 @@ type BlockRetire struct {
 	working               atomic.Bool
 	needSaveFilesListInDB atomic.Bool
 
+	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
+	semav3 chan struct{}
+
 	workers int
 	tmpDir  string
 	db      kv.RoDB
 
-	semav3      chan struct{}
 	notifier    services.DBEventNotifier
 	logger      log.Logger
 	blockReader services.FullBlockReader
@@ -1146,8 +1148,29 @@ type BlockRetire struct {
 	chainConfig *chain.Config
 }
 
-func NewBlockRetire(compressWorkers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: compressWorkers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, chainConfig: chainConfig, notifier: notifier, logger: logger}
+func NewBlockRetire(
+		compressWorkers int,
+		dirs datadir.Dirs,
+		blockReader services.FullBlockReader,
+		blockWriter *blockio.BlockWriter,
+		db kv.RoDB,
+		chainConfig *chain.Config,
+		notifier services.DBEventNotifier,
+		sema chan struct{},
+		logger log.Logger,
+) *BlockRetire {
+	return &BlockRetire{
+		workers:     compressWorkers,
+		tmpDir:      dirs.Tmp,
+		dirs:        dirs,
+		blockReader: blockReader,
+		blockWriter: blockWriter,
+		db:          db,
+		semav3:      sema,
+		chainConfig: chainConfig,
+		notifier:    notifier,
+		logger:      logger,
+	}
 }
 
 func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
@@ -1294,6 +1317,10 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	}
 	go func() {
 		defer br.working.Store(false)
+		if !br.retireAllowed() {
+			return
+		}
+		defer br.retireDone()
 
 		if err := br.RetireBlocks(ctx, forwardProgress, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err)
@@ -1301,14 +1328,7 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	}()
 }
 
-func (br *BlockRetire) AllowChannel() chan struct{} {
-	if br.semav3 == nil {
-		br.semav3 = make(chan struct{}, 1)
-	}
-	return br.semav3
-}
-
-func (br *BlockRetire) RetireDone() {
+func (br *BlockRetire) retireDone() {
 	if br.semav3 == nil {
 		return
 	}
@@ -1318,13 +1338,16 @@ func (br *BlockRetire) RetireDone() {
 	}
 }
 
-func (br *BlockRetire) RetireAllowed() bool {
+func (br *BlockRetire) retireAllowed() bool {
 	if br.semav3 == nil {
 		return true
 	}
 
 	select {
-	case <-br.semav3:
+	case _, ok := <-br.semav3:
+		if !ok {
+			return false
+		}
 		return true
 	default:
 		return false
@@ -1332,11 +1355,6 @@ func (br *BlockRetire) RetireAllowed() bool {
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {
-	if !br.RetireAllowed() {
-		return nil
-	}
-	defer br.RetireDone()
-
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge

@@ -1646,8 +1646,15 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		panic(err)
 	}
 
+	blockSnapBuildSema := make(chan struct{}, 1)
+	for i := 0; i < cap(blockSnapBuildSema); i++ {
+		blockSnapBuildSema <- struct{}{}
+	}
+
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+
 	notifications := &shards.Notifications{}
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, chainConfig, notifications.Events, logger)
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, chainConfig, notifications.Events, blockSnapBuildSema, logger)
 
 	var (
 		snapDb     kv.RwDB

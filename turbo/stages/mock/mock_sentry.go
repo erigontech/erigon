@@ -432,8 +432,15 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		block := <-miningStatePos.MiningResultPOSCh
 		return block, nil
 	}
+	blockSnapBuildSema := make(chan struct{}, 1)
+	for i := 0; i < cap(blockSnapBuildSema); i++ {
+		blockSnapBuildSema <- struct{}{}
+	}
+	//defer close(blockSnapBuildSema)
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, mock.Notifications.Events, logger)
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, mock.Notifications.Events, blockSnapBuildSema, logger)
 	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, dirs, blockRetire, snapshotsDownloader, mock.BlockReader, mock.Notifications.Events, mock.HistoryV3, mock.agg, false, nil),

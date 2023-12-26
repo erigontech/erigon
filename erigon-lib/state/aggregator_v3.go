@@ -74,6 +74,7 @@ type AggregatorV3 struct {
 	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
+	snapshotBuildSema chan struct{}
 
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
@@ -1270,6 +1271,35 @@ func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
 	return a
 }
 
+func (a *AggregatorV3) SetSnapshotBuildSema(semaphore chan struct{}) {
+	a.snapshotBuildSema = semaphore
+}
+
+func (a *AggregatorV3) snapshotBuildAllowed() bool {
+	if a.snapshotBuildSema == nil {
+		return true
+	}
+	select {
+	case _, ok := <-a.snapshotBuildSema:
+		if !ok {
+			return false
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *AggregatorV3) snapshotBuildDone() {
+	if a.snapshotBuildSema == nil {
+		return
+	}
+	select {
+	case a.snapshotBuildSema <- struct{}{}:
+	default:
+	}
+}
+
 // Returns channel which is closed when aggregation is done
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
@@ -1290,6 +1320,12 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
+
+		if !a.snapshotBuildAllowed() {
+			return //nolint
+		}
+
+		defer a.snapshotBuildDone()
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts)
