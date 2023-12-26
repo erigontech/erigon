@@ -1635,6 +1635,7 @@ type AggregatorStep struct {
 	keyBuf     []byte
 }
 
+func (a *AggregatorV3) StepSize() uint64 { return a.aggregationStep }
 func (a *AggregatorV3) MakeSteps() ([]*AggregatorStep, error) {
 	frozenAndIndexed := a.EndTxNumDomainsFrozen()
 	accountSteps := a.accounts.MakeSteps(frozenAndIndexed)

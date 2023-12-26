@@ -17,6 +17,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
@@ -166,6 +167,13 @@ var snapshotCommand = cli.Command{
 				&cli.StringFlag{Name: "domain", Required: true},
 			}),
 		},
+		{
+			Name:   "integrity",
+			Action: doIntegrity,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
 	},
 }
 
@@ -274,6 +282,36 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err := view.DebugEFKey(domain, key); err != nil {
 		return err
 	}
+
+	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func doIntegrity(cliCtx *cli.Context) error {
+	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	if err = agg.OpenFolder(false); err != nil {
+		return err
+	}
+
+	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+		return err
+	}
+
 	return nil
 }
 
