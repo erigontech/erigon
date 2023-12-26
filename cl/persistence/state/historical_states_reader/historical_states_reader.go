@@ -523,12 +523,19 @@ func (r *HistoricalStatesReader) reconstructUint64ListDump(tx kv.Tx, slot uint64
 func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot, validatorSetLength uint64) (*solid.ValidatorSet, []uint64, []uint64, error) {
 	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
-	activeIds := make([]uint64, 0, validatorSetLength)
 	epoch := slot / r.cfg.SlotsPerEpoch
-
-	prevActiveIds := make([]uint64, 0, validatorSetLength)
+	activeIds, err := state_accessors.ReadActiveIndicies(tx, epoch)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	var prevActiveIds []uint64
 	if epoch == 0 {
 		prevActiveIds = activeIds
+	} else {
+		prevActiveIds, err = state_accessors.ReadActiveIndicies(tx, epoch-1)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if validatorIndex >= validatorSetLength {
@@ -536,15 +543,6 @@ func (r *HistoricalStatesReader) readValidatorsForHistoricalState(tx kv.Tx, slot
 		}
 		currValidator := out.Get(int(validatorIndex))
 		validator.ToValidator(currValidator, slot)
-		if currValidator.Active(epoch) {
-			activeIds = append(activeIds, validatorIndex)
-		}
-		if epoch == 0 {
-			return true
-		}
-		if currValidator.Active(epoch - 1) {
-			prevActiveIds = append(prevActiveIds, validatorIndex)
-		}
 		return true
 	})
 	// Read the balances

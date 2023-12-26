@@ -312,5 +312,17 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	}
 	out.slot = slot
 	return err
+}
 
+func ReadActiveIndicies(tx kv.Tx, epoch uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(epoch)
+	v, err := tx.GetOne(kv.ActiveValidatorIndicies, key)
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	buf := bytes.NewBuffer(v)
+	return base_encoding.ReadRabbits(nil, buf)
 }
