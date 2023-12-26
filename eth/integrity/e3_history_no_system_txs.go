@@ -56,7 +56,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.Aggre
 							return err
 						}
 						if !ok {
-							panic(txNum)
+							panic(fmt.Sprintf("blockNum not found for txNum=%d", txNum))
 						}
 						if blockNum == 0 {
 							continue
