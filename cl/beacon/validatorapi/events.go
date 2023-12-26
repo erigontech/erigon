@@ -18,5 +18,6 @@ func (v *ValidatorApiHandler) GetEthV1Events(w http.ResponseWriter, r *http.Requ
 			Event: []byte(topic),
 			Data:  nil,
 		})
+		// OK to ignore this error. maybe should log it later
 	}
 }
