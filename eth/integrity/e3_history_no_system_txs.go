@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync/atomic"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -15,6 +17,10 @@ import (
 
 // E3 History - usually don't have anything attributed to 1-st system txs (except genesis)
 func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.AggregatorV3) error {
+	count := atomic.Uint64{}
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
 	g := &errgroup.Group{}
 	for j := 0; j < 255; j++ {
 		for jj := 0; jj < 255; jj++ {
@@ -61,7 +67,13 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.Aggre
 							break
 						}
 
+						select {
+						case <-logEvery.C:
+							log.Warn(fmt.Sprintf("[dbg] checked=%d", count.Load()))
+						default:
+						}
 					}
+					count.Add(1)
 					if casted, ok := it.(kv.Closer); ok {
 						casted.Close()
 					}
