@@ -69,7 +69,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.Aggre
 
 						select {
 						case <-logEvery.C:
-							log.Warn(fmt.Sprintf("[dbg] checked=%dM", count.Load()/1_000_000))
+							log.Warn(fmt.Sprintf("[dbg] checked=%dK", count.Load()/1_000))
 						default:
 						}
 					}
