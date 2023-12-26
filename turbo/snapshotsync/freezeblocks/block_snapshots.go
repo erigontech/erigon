@@ -1137,6 +1137,7 @@ type BlockRetire struct {
 	tmpDir  string
 	db      kv.RoDB
 
+	semav3      chan struct{}
 	notifier    services.DBEventNotifier
 	logger      log.Logger
 	blockReader services.FullBlockReader
@@ -1300,7 +1301,42 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	}()
 }
 
+func (br *BlockRetire) AllowChannel() chan struct{} {
+	if br.semav3 == nil {
+		br.semav3 = make(chan struct{}, 1)
+	}
+	return br.semav3
+}
+
+func (br *BlockRetire) RetireDone() {
+	if br.semav3 == nil {
+		return
+	}
+	select {
+	case br.semav3 <- struct{}{}:
+	default:
+	}
+}
+
+func (br *BlockRetire) RetireAllowed() bool {
+	if br.semav3 == nil {
+		return true
+	}
+
+	select {
+	case <-br.semav3:
+		return true
+	default:
+		return false
+	}
+}
+
 func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {
+	if !br.RetireAllowed() {
+		return nil
+	}
+	defer br.RetireDone()
+
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
