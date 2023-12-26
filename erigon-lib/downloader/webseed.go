@@ -40,6 +40,8 @@ type WebSeeds struct {
 
 	logger    log.Logger
 	verbosity log.Lvl
+
+	torrentFiles *TorrentFiles
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.URL, files []string, rootDir string) {
@@ -237,6 +239,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
+	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
 	//TODO:
 	// - what to do if node already synced?
@@ -261,7 +264,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 					continue
 				}
 				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
-				if err := saveTorrent(tPath, res); err != nil {
+				if err := d.torrentFiles.Create(tPath, res); err != nil {
 					d.logger.Debug("[snapshots] saveTorrent", "err", err)
 					continue
 				}

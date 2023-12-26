@@ -96,18 +96,18 @@ func (mr *MockIHeimdallClientMockRecorder) FetchLastNoAckMilestone(arg0 interfac
 }
 
 // FetchMilestone mocks base method.
-func (m *MockIHeimdallClient) FetchMilestone(arg0 context.Context) (*milestone.Milestone, error) {
+func (m *MockIHeimdallClient) FetchMilestone(arg0 context.Context, arg1 int64) (*milestone.Milestone, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchMilestone", arg0)
+	ret := m.ctrl.Call(m, "FetchMilestone", arg0, arg1)
 	ret0, _ := ret[0].(*milestone.Milestone)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // FetchMilestone indicates an expected call of FetchMilestone.
-func (mr *MockIHeimdallClientMockRecorder) FetchMilestone(arg0 interface{}) *gomock.Call {
+func (mr *MockIHeimdallClientMockRecorder) FetchMilestone(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestone", reflect.TypeOf((*MockIHeimdallClient)(nil).FetchMilestone), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestone", reflect.TypeOf((*MockIHeimdallClient)(nil).FetchMilestone), arg0, arg1)
 }
 
 // FetchMilestoneCount mocks base method.

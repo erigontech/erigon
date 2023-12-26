@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -51,7 +50,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 // extractBlobSideCarIndex takes a topic and extract the blob sidecar
 func extractBlobSideCarIndex(topic string) int {
 	// compute the index prefixless
-	startIndex := strings.Index(topic, string(sentinel.BlobSidecarTopic)) + len(sentinel.BlobSidecarTopic)
+	startIndex := strings.Index(topic, gossip.TopicNamePrefixBlobSidecar) + len(gossip.TopicNamePrefixBlobSidecar)
 	endIndex := strings.Index(topic[:startIndex], "/")
 	blobIndex, err := strconv.Atoi(topic[startIndex:endIndex])
 	if err != nil {
@@ -82,17 +81,19 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 
 	var subscription *sentinel.GossipSubscription
 
+	// TODO: this is still wrong... we should build a subscription here to match exactly, meaning that downstream consumers should be
+	// in charge of keeping track of fork id.
 	switch msg.Name {
 	case gossip.TopicNameBeaconBlock:
-		subscription = manager.GetMatchingSubscription(string(sentinel.BeaconBlockTopic))
+		subscription = manager.GetMatchingSubscription(msg.Name)
 	case gossip.TopicNameBeaconAggregateAndProof:
-		subscription = manager.GetMatchingSubscription(string(sentinel.BeaconAggregateAndProofTopic))
+		subscription = manager.GetMatchingSubscription(msg.Name)
 	case gossip.TopicNameVoluntaryExit:
-		subscription = manager.GetMatchingSubscription(string(sentinel.VoluntaryExitTopic))
+		subscription = manager.GetMatchingSubscription(msg.Name)
 	case gossip.TopicNameProposerSlashing:
-		subscription = manager.GetMatchingSubscription(string(sentinel.ProposerSlashingTopic))
+		subscription = manager.GetMatchingSubscription(msg.Name)
 	case gossip.TopicNameAttesterSlashing:
-		subscription = manager.GetMatchingSubscription(string(sentinel.AttesterSlashingTopic))
+		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
 		switch {
 		case gossip.IsTopicBlobSidecar(msg.Name):
@@ -272,43 +273,43 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
-func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
+func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	var err error
-	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
+	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
 
-	data := pkt.GetData()
-
+	data := pkt.Data
+	topic := string(pkt.TopicName)
 	// If we use snappy codec then decompress it accordingly.
-	if strings.Contains(*pkt.Topic, sentinel.SSZSnappyCodec) {
+	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
 		data, err = utils.DecompressSnappy(data)
 		if err != nil {
 			return err
 		}
 	}
-	textPid, err := pkt.ReceivedFrom.MarshalText()
+	textPid, err := pkt.From.MarshalText()
 	if err != nil {
 		return err
 	}
 
-	msgType, msgCap := parseTopic(pkt.GetTopic())
+	msgType, msgCap := parseTopic(topic)
 	s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
-	if strings.Contains(*pkt.Topic, string(sentinel.BeaconBlockTopic)) {
+	if strings.Contains(topic, string(gossip.TopicNameBeaconBlock)) {
 		s.gossipNotifier.notify(gossip.TopicNameBeaconBlock, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BeaconAggregateAndProofTopic)) {
+	} else if strings.Contains(topic, string(gossip.TopicNameBeaconAggregateAndProof)) {
 		s.gossipNotifier.notify(gossip.TopicNameBeaconAggregateAndProof, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.VoluntaryExitTopic)) {
+	} else if strings.Contains(topic, string(gossip.TopicNameVoluntaryExit)) {
 		s.gossipNotifier.notify(gossip.TopicNameVoluntaryExit, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.ProposerSlashingTopic)) {
+	} else if strings.Contains(topic, string(gossip.TopicNameProposerSlashing)) {
 		s.gossipNotifier.notify(gossip.TopicNameProposerSlashing, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.AttesterSlashingTopic)) {
+	} else if strings.Contains(topic, string(gossip.TopicNameAttesterSlashing)) {
 		s.gossipNotifier.notify(gossip.TopicNameAttesterSlashing, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BlsToExecutionChangeTopic)) {
+	} else if strings.Contains(topic, string(gossip.TopicNameBlsToExecutionChange)) {
 		s.gossipNotifier.notify(gossip.TopicNameBlsToExecutionChange, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BlobSidecarTopic)) {
+	} else if gossip.IsTopicBlobSidecar(topic) {
 		// extract the index
-		s.gossipNotifier.notifyBlob(data, string(textPid), extractBlobSideCarIndex(*pkt.Topic))
+		s.gossipNotifier.notifyBlob(data, string(textPid), extractBlobSideCarIndex(topic))
 	}
 	return nil
 }

@@ -55,8 +55,6 @@ const (
 )
 
 const (
-	spanLength              = 6400 // Number of blocks in a span
-	zerothSpanEnd           = 255  // End block of 0th span
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
 	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
@@ -926,10 +924,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
-		var spanID uint64
-		if number+1 > zerothSpanEnd {
-			spanID = 1 + (number+1-zerothSpanEnd-1)/spanLength
-		}
+		spanID := SpanIDAt(number + 1)
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
