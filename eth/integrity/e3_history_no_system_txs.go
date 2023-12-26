@@ -23,8 +23,9 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.Aggre
 
 	g := &errgroup.Group{}
 	for j := 0; j < 255; j++ {
+		j := j
 		for jj := 0; jj < 255; jj++ {
-			j, jj := j, jj
+			jj := jj
 			g.Go(func() error {
 				tx, err := chainDB.BeginRo(ctx)
 				if err != nil {
@@ -35,7 +36,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.Aggre
 				var minStep uint64 = math.MaxUint64
 				view := agg.MakeContext()
 				defer view.Close()
-				keys, err := view.DomainRangeLatest(tx, kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j + 1), byte(jj + 1)}, -1)
+				keys, err := view.DomainRangeLatest(tx, kv.AccountsDomain, []byte{byte(j), byte(jj)}, []byte{byte(j), byte(jj + 1)}, -1)
 				if err != nil {
 					return err
 				}
