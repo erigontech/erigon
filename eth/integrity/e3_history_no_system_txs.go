@@ -22,7 +22,7 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RoDB, agg *state.Aggre
 	defer logEvery.Stop()
 
 	g := &errgroup.Group{}
-	for j := 0; j < 255; j++ {
+	for j := 0; j < 256; j++ {
 		j := j
 		for jj := 0; jj < 255; jj++ {
 			jj := jj
