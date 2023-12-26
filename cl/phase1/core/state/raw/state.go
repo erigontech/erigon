@@ -2,6 +2,7 @@ package raw
 
 import (
 	"encoding/json"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -105,9 +106,9 @@ func (b *BeaconState) init() error {
 
 func (b *BeaconState) MarshalJSON() ([]byte, error) {
 	obj := map[string]interface{}{
-		"genesis_time":                  b.genesisTime,
+		"genesis_time":                  strconv.FormatInt(int64(b.genesisTime), 10),
 		"genesis_validators_root":       b.genesisValidatorsRoot,
-		"slot":                          b.slot,
+		"slot":                          strconv.FormatInt(int64(b.slot), 10),
 		"fork":                          b.fork,
 		"latest_block_header":           b.latestBlockHeader,
 		"block_roots":                   b.blockRoots,
@@ -115,7 +116,7 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		"historical_roots":              b.historicalRoots,
 		"eth1_data":                     b.eth1Data,
 		"eth1_data_votes":               b.eth1DataVotes,
-		"eth1_deposit_index":            b.eth1DepositIndex,
+		"eth1_deposit_index":            strconv.FormatInt(int64(b.eth1DepositIndex), 10),
 		"validators":                    b.validators,
 		"balances":                      b.balances,
 		"randao_mixes":                  b.randaoMixes,
@@ -141,8 +142,8 @@ func (b *BeaconState) MarshalJSON() ([]byte, error) {
 		obj["latest_execution_payload_header"] = b.latestExecutionPayloadHeader
 	}
 	if b.version >= clparams.CapellaVersion {
-		obj["next_withdrawal_index"] = b.nextWithdrawalIndex
-		obj["next_withdrawal_validator_index"] = b.nextWithdrawalValidatorIndex
+		obj["next_withdrawal_index"] = strconv.FormatInt(int64(b.nextWithdrawalIndex), 10)
+		obj["next_withdrawal_validator_index"] = strconv.FormatInt(int64(b.nextWithdrawalValidatorIndex), 10)
 		obj["historical_summaries"] = b.historicalSummaries
 	}
 	return json.Marshal(obj)

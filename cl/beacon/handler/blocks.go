@@ -19,7 +19,7 @@ type headerResponse struct {
 }
 
 type getHeadersRequest struct {
-	Slot       *uint64         `json:"slot,omitempty"`
+	Slot       *uint64         `json:"slot,omitempty,string"`
 	ParentRoot *libcommon.Hash `json:"root,omitempty"`
 }
 

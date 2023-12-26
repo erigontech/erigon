@@ -79,7 +79,7 @@ func TestGetHeader(t *testing.T) {
 			message := header["message"].(map[string]interface{})
 
 			// compare the block
-			require.Equal(t, message["slot"], float64(c.slot))
+			require.Equal(t, message["slot"], strconv.FormatInt(int64(c.slot), 10))
 			require.Equal(t, message["body_root"], c.bodyRoot)
 			require.Equal(t, data["canonical"], true)
 		})
