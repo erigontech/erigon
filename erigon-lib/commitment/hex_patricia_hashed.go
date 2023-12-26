@@ -1271,9 +1271,9 @@ func (hph *HexPatriciaHashed) updateCell(plainKey, hashedKey []byte) *Cell {
 }
 
 func (hph *HexPatriciaHashed) collectBranchUpdate(
-		prefix []byte,
-		bitmap, touchMap, afterMap uint16,
-		readCell func(nibble int, skip bool) (*Cell, error),
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	readCell func(nibble int, skip bool) (*Cell, error),
 ) (lastNibble int, err error) {
 
 	update, ln, err := hph.branchEncoder.EncodeBranch(bitmap, touchMap, afterMap, readCell)
