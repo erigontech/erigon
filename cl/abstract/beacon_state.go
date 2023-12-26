@@ -162,6 +162,8 @@ type BeaconStateMinimal interface {
 	Eth1Data() *cltypes.Eth1Data
 	Eth1DataVotes() *solid.ListSSZ[*cltypes.Eth1Data]
 	Eth1DepositIndex() uint64
+	ValidatorSet() *solid.ValidatorSet
+	PreviousEpochParticipation() *solid.BitList
 
 	ForEachValidator(fn func(v solid.Validator, idx int, total int) bool)
 	ValidatorForValidatorIndex(index int) (solid.Validator, error)
