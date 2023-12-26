@@ -734,6 +734,9 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 			}
+			doms.SetTxNum(txTask.TxNum)
+			doms.SetBlockNum(txTask.BlockNum)
+
 			//if txTask.HistoryExecution { // nolint
 			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
 			//}
@@ -794,7 +797,7 @@ Loop:
 					if errors.Is(err, context.Canceled) {
 						return err
 					}
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
 					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 					}
@@ -911,6 +914,7 @@ Loop:
 						}
 					}
 					doms = state2.NewSharedDomains(applyTx)
+					doms.SetTxNum(inputTxNum)
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
@@ -1188,6 +1192,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 		}
 
 		if txTask.Final {
+			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
 			err := rs.ApplyState4(ctx, txTask)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)

@@ -167,6 +167,14 @@ func epochFromRequest(r *http.Request) (uint64, error) {
 	return epochMaybe, nil
 }
 
+func stringFromRequest(r *http.Request, name string) (string, error) {
+	str := chi.URLParam(r, name)
+	if str == "" {
+		return "", nil
+	}
+	return str, nil
+}
+
 func blockIdFromRequest(r *http.Request) (*segmentID, error) {
 	regex := regexp.MustCompile(`^(?:0x[0-9a-fA-F]{64}|head|finalized|genesis|\d+)$`)
 

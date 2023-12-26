@@ -194,14 +194,16 @@ func (rs *StateV3) Domains() *libstate.SharedDomains {
 	return rs.domains
 }
 
+func (rs *StateV3) SetTxNum(txNum, blockNum uint64) {
+	rs.domains.SetTxNum(txNum)
+	rs.domains.SetBlockNum(blockNum)
+}
+
 func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	if txTask.HistoryExecution {
 		return nil
 	}
 	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
-
-	rs.domains.SetTxNum(txTask.TxNum)
-	rs.domains.SetBlockNum(txTask.BlockNum)
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)
@@ -456,14 +458,13 @@ func (w *StateWriterBufferedV3) CreateContract(address common.Address) error {
 	}
 
 	//seems don't need delete code here - tests starting fail
-	//w.writeLists[string(kv.CodeDomain)].Push(string(address[:]), nil)
-	err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
-		w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
-		return nil
-	})
-	if err != nil {
-		return err
-	}
+	//err := w.rs.domains.IterateStoragePrefix(address[:], func(k, v []byte) error {
+	//	w.writeLists[string(kv.StorageDomain)].Push(string(k), nil)
+	//	return nil
+	//})
+	//if err != nil {
+	//	return err
+	//}
 	return nil
 }
 
@@ -563,9 +564,9 @@ func (w *StateWriterV3) CreateContract(address common.Address) error {
 	}
 
 	//seems don't need delete code here. IntraBlockState take care of it.
-	if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-		return err
-	}
+	//if err := w.rs.domains.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
+	//	return err
+	//}
 	return nil
 }
 

@@ -262,7 +262,7 @@ func (s *Sentinel) ReqRespHandler() http.Handler {
 	return s.httpApi
 }
 
-func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
+func (s *Sentinel) RecvGossip() <-chan *GossipMessage {
 	return s.subManager.Recv()
 }
 

@@ -28,8 +28,8 @@ type SignedBeaconBlock struct {
 }
 
 type BeaconBlock struct {
-	Slot          uint64         `json:"slot"`
-	ProposerIndex uint64         `json:"proposer_index"`
+	Slot          uint64         `json:"slot,string"`
+	ProposerIndex uint64         `json:"proposer_index,string"`
 	ParentRoot    libcommon.Hash `json:"parent_root"`
 	StateRoot     libcommon.Hash `json:"state_root"`
 	Body          *BeaconBody    `json:"body"`

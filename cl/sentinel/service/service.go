@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
@@ -273,43 +272,43 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
-func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
+func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	var err error
 	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
 
-	data := pkt.GetData()
-
+	data := pkt.Data
+	topic := string(pkt.Topic)
 	// If we use snappy codec then decompress it accordingly.
-	if strings.Contains(*pkt.Topic, sentinel.SSZSnappyCodec) {
+	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
 		data, err = utils.DecompressSnappy(data)
 		if err != nil {
 			return err
 		}
 	}
-	textPid, err := pkt.ReceivedFrom.MarshalText()
+	textPid, err := pkt.From.MarshalText()
 	if err != nil {
 		return err
 	}
 
-	msgType, msgCap := parseTopic(pkt.GetTopic())
+	msgType, msgCap := parseTopic(topic)
 	s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
-	if strings.Contains(*pkt.Topic, string(sentinel.BeaconBlockTopic)) {
+	if strings.Contains(topic, string(sentinel.BeaconBlockTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_BeaconBlockGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BeaconAggregateAndProofTopic)) {
+	} else if strings.Contains(topic, string(sentinel.BeaconAggregateAndProofTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_AggregateAndProofGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.VoluntaryExitTopic)) {
+	} else if strings.Contains(topic, string(sentinel.VoluntaryExitTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_VoluntaryExitGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.ProposerSlashingTopic)) {
+	} else if strings.Contains(topic, string(sentinel.ProposerSlashingTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_ProposerSlashingGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.AttesterSlashingTopic)) {
+	} else if strings.Contains(topic, string(sentinel.AttesterSlashingTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_AttesterSlashingGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BlsToExecutionChangeTopic)) {
+	} else if strings.Contains(topic, string(sentinel.BlsToExecutionChangeTopic)) {
 		s.gossipNotifier.notify(sentinelrpc.GossipType_BlsToExecutionChangeGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BlobSidecarTopic)) {
+	} else if strings.Contains(topic, string(sentinel.BlobSidecarTopic)) {
 		// extract the index
-		s.gossipNotifier.notifyBlob(sentinelrpc.GossipType_BlobSidecarType, data, string(textPid), extractBlobSideCarIndex(*pkt.Topic))
+		s.gossipNotifier.notifyBlob(sentinelrpc.GossipType_BlobSidecarType, data, string(textPid), extractBlobSideCarIndex(topic))
 	}
 	return nil
 }

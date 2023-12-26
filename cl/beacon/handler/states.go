@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -262,8 +263,8 @@ func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, e
 }
 
 type syncCommitteesResponse struct {
-	Validators          []uint64   `json:"validators"`
-	ValidatorAggregates [][]uint64 `json:"validator_aggregates"`
+	Validators          []string   `json:"validators"`
+	ValidatorAggregates [][]string `json:"validator_aggregates"`
 }
 
 func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error) {
@@ -328,8 +329,8 @@ func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error)
 	// Lastly construct the response
 	validatorsPerSubcommittee := a.beaconChainCfg.SyncCommitteeSize / a.beaconChainCfg.SyncCommitteeSubnetCount
 	response := syncCommitteesResponse{
-		Validators:          make([]uint64, a.beaconChainCfg.SyncCommitteeSize),
-		ValidatorAggregates: make([][]uint64, a.beaconChainCfg.SyncCommitteeSubnetCount),
+		Validators:          make([]string, a.beaconChainCfg.SyncCommitteeSize),
+		ValidatorAggregates: make([][]string, a.beaconChainCfg.SyncCommitteeSubnetCount),
 	}
 	for i, publicKey := range committee {
 		// get the validator index of the committee
@@ -337,13 +338,14 @@ func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error)
 		if err != nil {
 			return nil, err
 		}
-		response.Validators[i] = validatorIndex
+		idx := strconv.FormatInt(int64(validatorIndex), 10)
+		response.Validators[i] = idx
 		// add the index to the subcommittee
 		subCommitteeIndex := uint64(i) / validatorsPerSubcommittee
 		if len(response.ValidatorAggregates[subCommitteeIndex]) == 0 {
-			response.ValidatorAggregates[subCommitteeIndex] = make([]uint64, validatorsPerSubcommittee)
+			response.ValidatorAggregates[subCommitteeIndex] = make([]string, validatorsPerSubcommittee)
 		}
-		response.ValidatorAggregates[subCommitteeIndex][uint64(i)%validatorsPerSubcommittee] = validatorIndex
+		response.ValidatorAggregates[subCommitteeIndex][uint64(i)%validatorsPerSubcommittee] = idx
 	}
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, *slot)
 	if err != nil {

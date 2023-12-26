@@ -77,5 +77,5 @@ func TestGetDepositContract(t *testing.T) {
 
 	data := out["data"].(map[string]interface{})
 	require.Equal(t, data["address"], "0x00000000219ab540356cBB839Cbe05303d7705Fa")
-	require.Equal(t, data["chain_id"], float64(1))
+	require.Equal(t, data["chain_id"], "1")
 }

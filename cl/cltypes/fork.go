@@ -10,7 +10,7 @@ import (
 type Fork struct {
 	PreviousVersion libcommon.Bytes4 `json:"previous_version"`
 	CurrentVersion  libcommon.Bytes4 `json:"current_version"`
-	Epoch           uint64           `json:"epoch"`
+	Epoch           uint64           `json:"epoch,string"`
 }
 
 func (*Fork) Static() bool {
