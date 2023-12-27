@@ -180,7 +180,7 @@ func executeBlock(
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.StateSyncReceipt
 
-	if writeReceipts {
+	if writeReceipts || filterSpecialReceipts(receipts).Len() > 0 {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
@@ -201,6 +201,20 @@ func executeBlock(
 		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
 	}
 	return nil
+}
+
+func filterSpecialReceipts(receipts types.Receipts) types.Receipts {
+	cr := types.Receipts{}
+	for _, r := range receipts {
+		for _, l := range r.Logs{
+			if isSpecialContract[l.Address] {
+				cr = append(cr, r)
+				break
+			}
+		}
+	}
+	receipts = cr
+	return cr
 }
 
 func newStateReaderWriter(
@@ -893,9 +907,9 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 				return err
 			}
 			// LogIndex.Prune will read everything what not pruned here
-			if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
-				return err
-			}
+			// if err = rawdb.PruneTable(tx, kv.Log, cfg.prune.Receipts.PruneTo(s.ForwardProgress), ctx, math.MaxInt32); err != nil {
+			// 	return err
+			// }
 		}
 		if cfg.prune.CallTraces.Enabled() {
 			if err = rawdb.PruneTableDupSort(tx, kv.CallTraceSet, logPrefix, cfg.prune.CallTraces.PruneTo(s.ForwardProgress), logEvery, ctx); err != nil {

@@ -25,6 +25,11 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
+var isSpecialContract = map[libcommon.Address]bool{
+	libcommon.HexToAddress("0x0B98057eA310F4d31F2a452B414647007d1645d9"): true,
+	libcommon.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"): true,
+}
+
 const (
 	bitmapsBufLimit   = 256 * datasize.MB // limit how much memory can use bitmaps before flushing to DB
 	bitmapsFlushEvery = 10 * time.Second
@@ -80,14 +85,14 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	startBlock := s.BlockNumber
-	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)
-	if startBlock < pruneTo {
-		startBlock = pruneTo
-	}
+	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)		//endBlock - prune.r.older
+	// if startBlock < pruneTo {
+	// 	startBlock = pruneTo
+	// }
 	if startBlock > 0 {
 		startBlock++
 	}
-	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, cfg, ctx, logger); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, pruneTo, cfg, ctx, logger); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
@@ -103,7 +108,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, cfg LogIndexCfg, ctx context.Context, logger log.Logger) error {
+func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, pruneBlock uint64, cfg LogIndexCfg, ctx context.Context, logger log.Logger) error {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -175,6 +180,9 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		}
 
 		for _, l := range ll {
+			if !isSpecialContract[l.Address] && l.BlockNumber < pruneBlock {
+				continue
+			}
 			for _, topic := range l.Topics {
 				topicStr := string(topic.Bytes())
 				m, ok := topics[topicStr]
@@ -461,6 +469,9 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 			}
 
 			for _, l := range logs {
+				if isSpecialContract[l.Address] {
+					continue
+				}
 				for _, topic := range l.Topics {
 					if err := topics.Collect(topic.Bytes(), nil); err != nil {
 						return err

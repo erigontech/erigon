@@ -104,7 +104,7 @@ func TestPromoteLogIndex(t *testing.T) {
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
 
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
@@ -131,7 +131,7 @@ func TestPruneLogIndex(t *testing.T) {
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
@@ -171,7 +171,7 @@ func TestUnwindLogIndex(t *testing.T) {
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
