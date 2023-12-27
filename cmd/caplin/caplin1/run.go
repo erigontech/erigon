@@ -229,7 +229,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")
-	err = sync.StartWithStage(ctx, "WaitForPeers", logger, stageCfg)
+	err = sync.StartWithStage(ctx, "CatchUpEpochs", logger, stageCfg)
 	logger.Info("[Caplin] exiting clstages loop")
 	if err != nil {
 		return err
