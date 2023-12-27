@@ -14,7 +14,7 @@ func (v *ValidatorApiHandler) GetEthV1Events(w http.ResponseWriter, r *http.Requ
 	}
 	topics := r.URL.Query()["topics"]
 	for _, topic := range topics {
-		err = sink.Encode(&sse.Event{
+		sink.Encode(&sse.Event{
 			Event: []byte(topic),
 			Data:  nil,
 		})
