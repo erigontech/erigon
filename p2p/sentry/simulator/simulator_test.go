@@ -1,3 +1,5 @@
+//go:build integration
+
 package simulator_test
 
 import (
@@ -15,6 +17,7 @@ import (
 )
 
 func TestSimulatorStart(t *testing.T) {
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	defer cancel()
