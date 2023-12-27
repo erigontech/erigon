@@ -899,7 +899,7 @@ Loop:
 									return err
 								}
 							}
-							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
+							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).Prune(ctx, tx); err != nil {
 								return err
 							}
 							return nil
