@@ -764,11 +764,32 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	return blockNumWithCommitment, true, nil
 }
 
+// PruneSmallBatches is not cancellable, it's over when it's over or failed.
+// It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
+func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
+	localTimeout, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	for {
+		if err := ac.Prune(context.Background(), tx, 100); err != nil {
+			log.Warn("[snapshots] PruneSmallBatches", "err", err)
+			return err
+		}
+		if localTimeout.Err() != nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	cc, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if err := ac.Prune(cc, tx); err != nil { // prune part of retired data, before commit
+	if err := ac.Prune(cc, tx, 0); err != nil { // prune part of retired data, before commit
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil
 		}
@@ -793,21 +814,25 @@ func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
 	}, ", ")
 }
 
-func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
+func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64) error {
 	if dbg.NoPrune() {
 		return nil
 	}
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
-	step, limit := ac.a.aggregatedStep.Load(), uint64(math2.MaxUint64)
+	step := ac.a.aggregatedStep.Load()
+	if limit == 0 {
+		limit = uint64(math2.MaxUint64)
+	}
+
 	txTo := (step + 1) * ac.a.aggregationStep
 	var txFrom uint64
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	ac.a.logger.Info("aggregator prune", "step", step,
-		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), /*"limit", limit,
-		"stepsLimit", limit/ac.a.aggregationStep,*/"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
+		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
+		/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
 
 	if err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err

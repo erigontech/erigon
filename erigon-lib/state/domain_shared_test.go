@@ -216,7 +216,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		rwTx, err = db.BeginRw(ctx)
 		require.NoError(err)
 		defer rwTx.Rollback()
-		require.NoError(ac.Prune(ctx, rwTx))
+		require.NoError(ac.Prune(ctx, rwTx, 0))
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
@@ -335,7 +335,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	require.NoError(t, err)
 
 	err = db.Update(ctx, func(tx kv.RwTx) error {
-		return ac.PruneWithTimeout(ctx, 60*time.Minute, tx)
+		return ac.PruneSmallBatches(ctx, 60*time.Minute, tx)
 	})
 	require.NoError(t, err)
 

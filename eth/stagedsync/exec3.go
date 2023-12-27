@@ -449,7 +449,7 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac := agg.MakeContext()
-						if err = ac.PruneWithTimeout(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
+						if err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
 							return err
 						}
 						ac.Close()
@@ -899,7 +899,7 @@ Loop:
 									return err
 								}
 							}
-							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).Prune(ctx, tx); err != nil {
+							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).Prune(ctx, tx, 0); err != nil {
 								return err
 							}
 							return nil
