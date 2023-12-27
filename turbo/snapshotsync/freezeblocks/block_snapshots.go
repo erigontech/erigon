@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/semaphore"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,8 +17,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/ledgerwatch/erigon/consensus/bor"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -37,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
+	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -1134,7 +1134,7 @@ type BlockRetire struct {
 	needSaveFilesListInDB atomic.Bool
 
 	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
-	semav3 chan struct{}
+	snBuildAllowed *semaphore.Weighted
 
 	workers int
 	tmpDir  string
@@ -1156,20 +1156,20 @@ func NewBlockRetire(
 		db kv.RoDB,
 		chainConfig *chain.Config,
 		notifier services.DBEventNotifier,
-		sema chan struct{},
+		snBuildAllowed *semaphore.Weighted,
 		logger log.Logger,
 ) *BlockRetire {
 	return &BlockRetire{
-		workers:     compressWorkers,
-		tmpDir:      dirs.Tmp,
-		dirs:        dirs,
-		blockReader: blockReader,
-		blockWriter: blockWriter,
-		db:          db,
-		semav3:      sema,
-		chainConfig: chainConfig,
-		notifier:    notifier,
-		logger:      logger,
+		workers:        compressWorkers,
+		tmpDir:         dirs.Tmp,
+		dirs:           dirs,
+		blockReader:    blockReader,
+		blockWriter:    blockWriter,
+		db:             db,
+		snBuildAllowed: snBuildAllowed,
+		chainConfig:    chainConfig,
+		notifier:       notifier,
+		logger:         logger,
 	}
 }
 
@@ -1309,6 +1309,8 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	return nil
 }
 
+const blockRetireAllowedWeight int64 = 1
+
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
 	ok := br.working.CompareAndSwap(false, true)
 	if !ok {
@@ -1317,41 +1319,15 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	}
 	go func() {
 		defer br.working.Store(false)
-		if !br.retireAllowed() {
+		if !br.snBuildAllowed.TryAcquire(blockRetireAllowedWeight) {
 			return
 		}
-		defer br.retireDone()
+		defer br.snBuildAllowed.Release(blockRetireAllowedWeight)
 
 		if err := br.RetireBlocks(ctx, forwardProgress, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err)
 		}
 	}()
-}
-
-func (br *BlockRetire) retireDone() {
-	if br.semav3 == nil {
-		return
-	}
-	select {
-	case br.semav3 <- struct{}{}:
-	default:
-	}
-}
-
-func (br *BlockRetire) retireAllowed() bool {
-	if br.semav3 == nil {
-		return true
-	}
-
-	select {
-	case _, ok := <-br.semav3:
-		if !ok {
-			return false
-		}
-		return true
-	default:
-		return false
-	}
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {

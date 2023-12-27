@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"golang.org/x/sync/semaphore"
 	"strings"
 	"sync"
 	"time"
@@ -1646,11 +1648,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		panic(err)
 	}
 
-	blockSnapBuildSema := make(chan struct{}, 1)
-	for i := 0; i < cap(blockSnapBuildSema); i++ {
-		blockSnapBuildSema <- struct{}{}
-	}
-
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	notifications := &shards.Notifications{}

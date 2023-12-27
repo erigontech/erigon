@@ -2,6 +2,7 @@ package caplin1
 
 import (
 	"context"
+	"golang.org/x/sync/semaphore"
 	"os"
 	"path"
 	"time"
@@ -88,7 +89,7 @@ func OpenCaplinDatabase(ctx context.Context,
 func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon_router_configuration.RouterConfiguration, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-		snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool, historyDB persistence.BeaconChainDatabase, indexDB kv.RwDB, snBuildSema chan struct{}) error {
+		snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool, historyDB persistence.BeaconChainDatabase, indexDB kv.RwDB, snBuildSema *semaphore.Weighted) error {
 	rawDB, af := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 
 	ctx, cn := context.WithCancel(ctx)

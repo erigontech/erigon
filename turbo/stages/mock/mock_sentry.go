@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"golang.org/x/sync/semaphore"
 	"math/big"
 	"os"
 	"sync"
@@ -432,12 +434,8 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		block := <-miningStatePos.MiningResultPOSCh
 		return block, nil
 	}
-	blockSnapBuildSema := make(chan struct{}, 1)
-	for i := 0; i < cap(blockSnapBuildSema); i++ {
-		blockSnapBuildSema <- struct{}{}
-	}
-	//defer close(blockSnapBuildSema)
 
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, mock.Notifications.Events, blockSnapBuildSema, logger)

@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"golang.org/x/sync/semaphore"
 	"io/fs"
 	"math/big"
 	"net"
@@ -680,10 +681,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// intiialize engine backend
 
-	blockSnapBuildSema := make(chan struct{}, dbg.BuildSnapshotAllowance)
-	for i := 0; i < cap(blockSnapBuildSema); i++ {
-		blockSnapBuildSema <- struct{}{}
-	}
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
 	agg.SetSnapshotBuildSema(blockSnapBuildSema)
 	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.chainConfig, backend.notifications.Events, blockSnapBuildSema, logger)
