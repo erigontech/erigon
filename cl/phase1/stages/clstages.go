@@ -98,7 +98,6 @@ func ClStagesCfg(
 type StageName = string
 
 const (
-	WaitForPeers             StageName = "WaitForPeers"
 	CatchUpEpochs            StageName = "CatchUpEpochs"
 	CatchUpBlocks            StageName = "CatchUpBlocks"
 	ForkChoice               StageName = "ForkChoice"
@@ -113,9 +112,6 @@ const (
 )
 
 func MetaCatchingUp(args Args) StageName {
-	if args.peers < minPeersForDownload {
-		return WaitForPeers
-	}
 	if !args.hasDownloaded {
 		return DownloadHistoricalBlocks
 	}
@@ -218,39 +214,6 @@ func ConsensusClStages(ctx context.Context,
 			return
 		},
 		Stages: map[string]clstages.Stage[*Cfg, Args]{
-			WaitForPeers: {
-				Description: `wait for enough peers. This is also a safe stage to go to when unsure of what stage to use`,
-				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					if x := MetaCatchingUp(args); x != "" {
-						return x
-					}
-					return CatchUpBlocks
-				},
-				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					peersCount, err := cfg.rpc.Peers()
-					if err != nil {
-						return nil
-					}
-					waitWhenNotEnoughPeers := 3 * time.Second
-					for {
-						if peersCount >= minPeersForDownload {
-							break
-						}
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						default:
-						}
-						logger.Info("[Caplin] Waiting For Peers", "have", peersCount, "needed", minPeersForDownload, "retryIn", waitWhenNotEnoughPeers)
-						time.Sleep(waitWhenNotEnoughPeers)
-						peersCount, err = cfg.rpc.Peers()
-						if err != nil {
-							peersCount = 0
-						}
-					}
-					return nil
-				},
-			},
 			DownloadHistoricalBlocks: {
 				Description: "Download historical blocks",
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
@@ -620,7 +583,7 @@ func ConsensusClStages(ctx context.Context,
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					return WaitForPeers
+					return MetaCatchingUp(args)
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
