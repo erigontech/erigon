@@ -1299,11 +1299,12 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
 
-		if !a.snapshotBuildSema.TryAcquire(aggregatorSnapBuildWeight) {
-			return //nolint
+		if a.snapshotBuildSema != nil {
+			if !a.snapshotBuildSema.TryAcquire(aggregatorSnapBuildWeight) {
+				return //nolint
+			}
+			defer a.snapshotBuildSema.Release(aggregatorSnapBuildWeight)
 		}
-
-		defer a.snapshotBuildSema.Release(aggregatorSnapBuildWeight)
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts)

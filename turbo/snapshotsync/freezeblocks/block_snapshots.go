@@ -1319,10 +1319,12 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, forwardProg
 	}
 	go func() {
 		defer br.working.Store(false)
-		if !br.snBuildAllowed.TryAcquire(blockRetireAllowedWeight) {
-			return
+		if br.snBuildAllowed != nil {
+			if !br.snBuildAllowed.TryAcquire(blockRetireAllowedWeight) {
+				return
+			}
+			defer br.snBuildAllowed.Release(blockRetireAllowedWeight)
 		}
-		defer br.snBuildAllowed.Release(blockRetireAllowedWeight)
 
 		if err := br.RetireBlocks(ctx, forwardProgress, lvl, seedNewSnapshots, onDeleteSnapshots); err != nil {
 			br.logger.Warn("[snapshots] retire blocks", "err", err)
