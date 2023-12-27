@@ -1010,9 +1010,13 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return nil
 	}
 	txFrom = binary.BigEndian.Uint64(k)
-	if limit != math.MaxUint64 && limit != 0 {
-		txTo = cmp.Min(txTo, txFrom+limit)
+	if limit == 0 {
+		limit = math.MaxUint64
 	}
+	// Todo feels incorrect that we decide upper txnum based on pruning keys limit
+	//if limit != math.MaxUint64 && limit != 0 {
+	//	txTo = cmp.Min(txTo, txFrom+limit)
+	//}
 	if txFrom >= txTo {
 		return nil
 	}
@@ -1074,7 +1078,10 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if txNum >= txTo { // [txFrom; txTo)
 				break
 			}
-
+			if limit == 0 {
+				break
+			}
+			limit--
 			if _, _, err = idxCForDeletes.SeekBothExact(key, v); err != nil {
 				return err
 			}
