@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -42,6 +41,7 @@ type BorEventSegment struct {
 	seg           *compress.Decompressor // value: event_rlp
 	IdxBorTxnHash *recsplit.Index        // bor_transaction_hash  -> bor_event_segment_offset
 	Range
+	version uint8
 }
 
 func (sn *BorEventSegment) closeIdx() {
@@ -62,8 +62,8 @@ func (sn *BorEventSegment) close() {
 }
 func (sn *BorEventSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.from, sn.to, snaptype.BorEvents)
-	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
+	fileName := snaptype.SegmentFileName(sn.version, sn.from, sn.to, snaptype.BorEvents)
+	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
@@ -75,8 +75,8 @@ func (sn *BorEventSegment) reopenIdx(dir string) (err error) {
 		return nil
 	}
 
-	fileName := snaptype.IdxFileName(sn.from, sn.to, snaptype.BorEvents.String())
-	sn.IdxBorTxnHash, err = recsplit.OpenIndex(path.Join(dir, fileName))
+	fileName := snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.BorEvents.String())
+	sn.IdxBorTxnHash, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
@@ -109,6 +109,7 @@ type BorSpanSegment struct {
 	seg *compress.Decompressor // value: span_json
 	idx *recsplit.Index        // span_id -> offset
 	Range
+	version uint8
 }
 
 func (sn *BorSpanSegment) closeIdx() {
@@ -129,8 +130,8 @@ func (sn *BorSpanSegment) close() {
 }
 func (sn *BorSpanSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.from, sn.to, snaptype.BorSpans)
-	sn.seg, err = compress.NewDecompressor(path.Join(dir, fileName))
+	fileName := snaptype.SegmentFileName(sn.version, sn.from, sn.to, snaptype.BorSpans)
+	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
@@ -141,8 +142,8 @@ func (sn *BorSpanSegment) reopenIdx(dir string) (err error) {
 	if sn.seg == nil {
 		return nil
 	}
-	fileName := snaptype.IdxFileName(sn.from, sn.to, snaptype.BorSpans.String())
-	sn.idx, err = recsplit.OpenIndex(path.Join(dir, fileName))
+	fileName := snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.BorSpans.String())
+	sn.idx, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
 	}
@@ -171,21 +172,21 @@ type borSpanSegments struct {
 	segments []*BorSpanSegment
 }
 
-func (br *BlockRetire) retireBorBlocks(ctx context.Context, forwardProgress uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.borSnapshots()
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
-	blockFrom, blockTo, ok := CanRetire(forwardProgress, br.blockReader.FrozenBorBlocks())
+	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
 	if ok {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-		if err := DumpBorBlocks(ctx, chainConfig, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBorBlocks(ctx, chainConfig, snapshots.version, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBorBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
 			return ok, fmt.Errorf("reopen: %w", err)
 		}
-		snapshots.LogStat()
+		snapshots.LogStat("retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
@@ -219,25 +220,25 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, forwardProgress uint
 	}
 	return ok, nil
 }
-func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, version uint8, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
 
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
+		if err := dumpBorBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func dumpBorBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	{
-		segName := snaptype.SegmentFileName(blockFrom, blockTo, snaptype.BorEvents)
+		segName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.BorEvents)
 		f, _ := snaptype.ParseFileName(snapDir, segName)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot BorEvents", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
@@ -260,7 +261,7 @@ func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, 
 		}
 	}
 	{
-		segName := snaptype.SegmentFileName(blockFrom, blockTo, snaptype.BorSpans)
+		segName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.BorSpans)
 		f, _ := snaptype.ParseFileName(snapDir, segName)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot BorSpans", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
@@ -406,7 +407,7 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wo
 	return nil
 }
 
-func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorEventsIdx(ctx context.Context, segmentFilePath string, version uint8, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -440,7 +441,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, blockFrom, blockT
 		default:
 		}
 	}
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BorEvents.String()))
+	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.BorEvents.String()))
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   blockCount,
@@ -492,7 +493,7 @@ RETRY:
 	return nil
 }
 
-func BorSpansIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorSpansIdx(ctx context.Context, segmentFilePath string, version uint8, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
@@ -505,7 +506,7 @@ func BorSpansIdx(ctx context.Context, segmentFilePath string, blockFrom, blockTo
 	}
 	defer d.Close()
 	g := d.MakeGetter()
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(blockFrom, blockTo, snaptype.BorSpans.String()))
+	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.BorSpans.String()))
 
 	baseSpanId := bor.SpanIDAt(blockFrom)
 
@@ -566,6 +567,9 @@ type BorRoSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
+	version     uint8
+
+	segmentsMin atomic.Uint64
 }
 
 // NewBorRoSnapshots - opens all bor snapshots. But to simplify everything:
@@ -573,30 +577,33 @@ type BorRoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{dir: snapDir, cfg: cfg, Events: &borEventSegments{}, Spans: &borSpanSegments{}, logger: logger}
+func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, version uint8, logger log.Logger) *BorRoSnapshots {
+	return &BorRoSnapshots{dir: snapDir, version: version, cfg: cfg, Events: &borEventSegments{}, Spans: &borSpanSegments{}, logger: logger}
 }
 
+func (s *BorRoSnapshots) Version() uint8                { return s.version }
 func (s *BorRoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
 func (s *BorRoSnapshots) Dir() string                   { return s.dir }
 func (s *BorRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
 func (s *BorRoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
 func (s *BorRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *BorRoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
+func (s *BorRoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
+func (s *BorRoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
 func (s *BorRoSnapshots) BlocksAvailable() uint64 {
 	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
 }
-func (s *BorRoSnapshots) LogStat() {
+func (s *BorRoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
-	s.logger.Info("[bor snapshots] Blocks Stat",
+	s.logger.Info(fmt.Sprintf("[bor snapshots:%s] Blocks Stat", label),
 		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
+func BorSegments(dir string, version uint8, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir, version)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
@@ -609,7 +616,7 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 			}
 			l = append(l, f)
 		}
-		l, m = noGaps(noOverlaps(borSegmentsMustExist(dir, l)))
+		l, m = noGaps(noOverlaps(borSegmentsMustExist(dir, l)), min)
 		res = append(res, l...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}
@@ -621,11 +628,73 @@ func BorSegments(dir string) (res []snaptype.FileInfo, missingSnapshots []Range,
 			}
 			l = append(l, f)
 		}
-		l, _ = noGaps(noOverlaps(borSegmentsMustExist(dir, l)))
+		l, _ = noGaps(noOverlaps(borSegmentsMustExist(dir, l)), min)
 		res = append(res, l...)
 	}
 
 	return res, missingSnapshots, nil
+}
+
+// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+// removal of intermediate segments after a merge operation
+func removeBorOverlaps(dir string, version uint8, active []snaptype.FileInfo, max uint64) {
+	list, err := snaptype.Segments(dir, version)
+
+	if err != nil {
+		return
+	}
+
+	var toDel []string
+	l := make([]snaptype.FileInfo, 0, len(list))
+
+	for _, f := range list {
+		if !(f.T == snaptype.BorSpans || f.T == snaptype.BorEvents) {
+			continue
+		}
+		l = append(l, f)
+	}
+
+	// added overhead to make sure we don't delete in the
+	// current 500k block segment
+	if max > 500_001 {
+		max -= 500_001
+	}
+
+	for _, f := range l {
+		if max < f.From {
+			continue
+		}
+
+		for _, a := range active {
+			if a.T != snaptype.BorSpans {
+				continue
+			}
+
+			if f.From < a.From {
+				continue
+			}
+
+			if f.From == a.From {
+				if f.To < a.To {
+					toDel = append(toDel, f.Path)
+				}
+
+				break
+			}
+
+			if f.From < a.To {
+				toDel = append(toDel, f.Path)
+				break
+			}
+		}
+	}
+
+	for _, f := range toDel {
+		_ = os.Remove(f)
+		ext := filepath.Ext(f)
+		withoutExt := f[:len(f)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+	}
 }
 
 func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
@@ -782,7 +851,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &BorEventSegment{Range: Range{f.From, f.To}}
+				sn = &BorEventSegment{version: f.Version, Range: Range{f.From, f.To}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -822,7 +891,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &BorSpanSegment{Range: Range{f.From, f.To}}
+				sn = &BorSpanSegment{version: f.Version, Range: Range{f.From, f.To}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -884,10 +953,15 @@ func (s *BorRoSnapshots) Ranges() (ranges []Range) {
 func (s *BorRoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *BorRoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := BorSegments(s.dir)
+	files, _, err := BorSegments(s.dir, s.version, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}
+
+	// this is one off code to fix an issue in 2.49.x->2.52.x which missed
+	// removal of intermediate segments after a merge operation
+	removeBorOverlaps(s.dir, s.version, files, s.BlocksAvailable())
+
 	list := make([]string, 0, len(files))
 	for _, f := range files {
 		_, fName := filepath.Split(f.Path)
@@ -1099,8 +1173,8 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 			return err
 		}
 
-		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
-			segName := snaptype.SegmentFileName(r.from, r.to, t)
+		for _, t := range snaptype.BorSnapshotTypes {
+			segName := snaptype.SegmentFileName(snapshots.Version(), r.from, r.to, t)
 			f, ok := snaptype.ParseFileName(snapDir, segName)
 			if !ok {
 				continue
@@ -1118,20 +1192,24 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 		if err := snapshots.ReopenFolder(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
-		snapshots.LogStat()
+		snapshots.LogStat("merge")
 		if err := onMerge(r); err != nil {
 			return err
 		}
-		for _, t := range snaptype.BlockSnapshotTypes {
+
+		for _, t := range snaptype.BorSnapshotTypes {
 			if len(toMerge[t]) == 0 {
 				continue
 			}
+
 			if err := onDelete(toMerge[t]); err != nil {
 				return err
 			}
+
 		}
-		for _, t := range []snaptype.Type{snaptype.BorEvents, snaptype.BorSpans} {
-			m.removeOldFiles(toMerge[t], snapDir)
+		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
+		for _, t := range snaptype.BorSnapshotTypes {
+			m.removeOldFiles(toMerge[t], snapDir, snapshots.Version())
 		}
 	}
 	m.logger.Log(m.lvl, "[bor snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
@@ -1181,14 +1259,14 @@ func (m *BorMerger) merge(ctx context.Context, toMerge []string, targetFile stri
 	return nil
 }
 
-func (m *BorMerger) removeOldFiles(toDel []string, snapDir string) {
+func (m *BorMerger) removeOldFiles(toDel []string, snapDir string, version uint8) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
 	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir)
+	tmpFiles, err := snaptype.TmpFiles(snapDir, version)
 	if err != nil {
 		return
 	}

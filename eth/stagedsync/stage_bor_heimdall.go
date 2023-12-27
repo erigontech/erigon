@@ -55,6 +55,7 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
+	loopBreakCheck   func(int) bool
 	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
@@ -68,6 +69,7 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
+	loopBreakCheck func(int) bool,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) BorHeimdallCfg {
@@ -81,6 +83,7 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: contract.StateReceiver(),
+		loopBreakCheck:   loopBreakCheck,
 		recents:          recents,
 		signatures:       signatures,
 	}
@@ -262,7 +265,7 @@ func BorHeimdallForward(
 				return err
 			}
 			if header == nil {
-				return fmt.Errorf("["+s.LogPrefix()+"] header not found: %d", blockNum)
+				return fmt.Errorf("header not found: %d", blockNum)
 			}
 
 			// Whitelist service is called to check if the bor chain is
@@ -274,7 +277,7 @@ func BorHeimdallForward(
 						{Penalty: headerdownload.BadBlockPenalty, PeerID: cfg.hd.SourcePeerId(header.Hash())}})
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
 					s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
-					return fmt.Errorf("["+s.LogPrefix()+"] verification failed for header %d: %x", blockNum, header.Hash())
+					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
 		}
@@ -293,19 +296,21 @@ func BorHeimdallForward(
 		var snap *bor.Snapshot
 
 		if header != nil {
-			snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
+			if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
+				snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
 
-			if snap == nil {
-				snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
-					chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
+				if snap == nil {
+					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
+						cfg.heimdallClient, chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
-				if err != nil {
-					return fmt.Errorf("can't initialise validator sets: %w", err)
+					if err != nil {
+						return fmt.Errorf("can't initialise validator sets: %w", err)
+					}
 				}
-			}
 
-			if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
-				return fmt.Errorf("can't persist validator sets: %w", err)
+				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
+					return fmt.Errorf("can't persist validator sets: %w", err)
+				}
 			}
 
 			if !mine {
@@ -318,6 +323,11 @@ func BorHeimdallForward(
 				}
 			}
 		}
+
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
+			break
+		}
+
 	}
 
 	if err = s.Update(tx, headNumber); err != nil {
@@ -645,9 +655,10 @@ func persistValidatorSets(
 
 func initValidatorSets(
 	ctx context.Context,
-	tx kv.Tx,
+	tx kv.RwTx,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
+	heimdallClient heimdall.IHeimdallClient,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
@@ -673,8 +684,17 @@ func initValidatorSets(
 
 		// get validators and current span
 		zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
+
 		if err != nil {
-			return nil, err
+			if _, err := fetchAndWriteSpans(ctx, 0, tx, heimdallClient, logPrefix, logger); err != nil {
+				return nil, err
+			}
+
+			zeroSpanBytes, err = blockReader.Span(ctx, tx, 0)
+
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if zeroSpanBytes == nil {
