@@ -180,7 +180,7 @@ func executeBlock(
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.StateSyncReceipt
 
-	if writeReceipts || filterSpecialReceipts(receipts).Len() > 0 {
+	if writeReceipts || filterNoPruneReceipts(receipts, cfg.chainConfig).Len() > 0 {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
@@ -203,11 +203,12 @@ func executeBlock(
 	return nil
 }
 
-func filterSpecialReceipts(receipts types.Receipts) types.Receipts {
+// Filters out receipts of contracts that may be needed by CL, such as deposit contract
+func filterNoPruneReceipts(receipts types.Receipts, chainCfg *chain.Config) types.Receipts {
 	cr := types.Receipts{}
 	for _, r := range receipts {
 		for _, l := range r.Logs{
-			if isSpecialContract[l.Address] {
+			if chainCfg.NoPruneContracts[l.Address] {
 				cr = append(cr, r)
 				break
 			}

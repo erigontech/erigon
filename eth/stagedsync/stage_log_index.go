@@ -25,31 +25,28 @@ import (
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 )
 
-var isSpecialContract = map[libcommon.Address]bool{
-	libcommon.HexToAddress("0x0B98057eA310F4d31F2a452B414647007d1645d9"): true,
-	libcommon.HexToAddress("0x00000000219ab540356cBB839Cbe05303d7705Fa"): true,
-}
-
 const (
 	bitmapsBufLimit   = 256 * datasize.MB // limit how much memory can use bitmaps before flushing to DB
 	bitmapsFlushEvery = 10 * time.Second
 )
 
 type LogIndexCfg struct {
-	tmpdir     string
-	db         kv.RwDB
-	prune      prune.Mode
-	bufLimit   datasize.ByteSize
-	flushEvery time.Duration
+	tmpdir           string
+	db               kv.RwDB
+	prune            prune.Mode
+	bufLimit         datasize.ByteSize
+	flushEvery       time.Duration
+	noPruneContracts map[libcommon.Address]bool
 }
 
-func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string, noPruneContracts map[libcommon.Address]bool) LogIndexCfg {
 	return LogIndexCfg{
-		db:         db,
-		prune:      prune,
-		bufLimit:   bitmapsBufLimit,
-		flushEvery: bitmapsFlushEvery,
-		tmpdir:     tmpDir,
+		db:               db,
+		prune:            prune,
+		bufLimit:         bitmapsBufLimit,
+		flushEvery:       bitmapsFlushEvery,
+		tmpdir:           tmpDir,
+		noPruneContracts: noPruneContracts,
 	}
 }
 
@@ -180,7 +177,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		}
 
 		for _, l := range ll {
-			if !isSpecialContract[l.Address] && l.BlockNumber < pruneBlock {
+			if cfg.noPruneContracts != nil && !cfg.noPruneContracts[l.Address] && l.BlockNumber < pruneBlock {
 				continue
 			}
 			for _, topic := range l.Topics {
@@ -413,7 +410,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx, logger); err != nil {
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
 		return err
 	}
 	if err = s.Done(tx); err != nil {
@@ -428,7 +425,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, ctx context.Context, logger log.Logger) error {
+func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, ctx context.Context, logger log.Logger, noPruneContracts map[libcommon.Address]bool) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -469,7 +466,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 			}
 
 			for _, l := range logs {
-				if isSpecialContract[l.Address] {
+				if noPruneContracts != nil && noPruneContracts[l.Address] {
 					continue
 				}
 				for _, topic := range l.Topics {
