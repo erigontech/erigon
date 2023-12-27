@@ -98,7 +98,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.Version, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.HeadersIdx(ctx, segment.Path, segment.Version, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		case snaptype.Bodies:
 			g.Go(func() error {

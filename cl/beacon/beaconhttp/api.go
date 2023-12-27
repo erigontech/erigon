@@ -71,7 +71,12 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		ans, err := h.Handle(r)
 		if err != nil {
 			log.Error("beacon api request error", "err", err)
-			endpointError := WrapEndpointError(err)
+			var endpointError *EndpointError
+			if e, ok := err.(*EndpointError); ok {
+				endpointError = e
+			} else {
+				endpointError = WrapEndpointError(err)
+			}
 			endpointError.WriteTo(w)
 			return
 		}

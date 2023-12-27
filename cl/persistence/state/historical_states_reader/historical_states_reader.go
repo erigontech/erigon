@@ -191,7 +191,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 
 	if ret.Version() < clparams.AltairVersion {
-		return ret, ret.InitBeaconState()
+		return ret, nil
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	// Inactivity
@@ -222,7 +222,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetNextSyncCommittee(nextSyncCommittee)
 	// Execution
 	if ret.Version() < clparams.BellatrixVersion {
-		return ret, ret.InitBeaconState()
+		return ret, nil
 	}
 	payloadHeader, err := block.Block.Body.ExecutionPayload.PayloadHeader()
 	if err != nil {
@@ -230,7 +230,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	ret.SetLatestExecutionPayloadHeader(payloadHeader)
 	if ret.Version() < clparams.CapellaVersion {
-		return ret, ret.InitBeaconState()
+		return ret, nil
 	}
 
 	// Withdrawals
@@ -245,7 +245,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("failed to read historical summaries: %w", err)
 	}
 	ret.SetHistoricalSummaries(historicalSummaries)
-	return ret, ret.InitBeaconState()
+	return ret, nil
 }
 
 func (r *HistoricalStatesReader) readHistoryHashVector(tx kv.Tx, genesisVector solid.HashVectorSSZ, slot, size uint64, table string, out solid.HashVectorSSZ) (err error) {
@@ -680,5 +680,46 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(randaoMixes solid.H
 		}(epoch, activeIdxs[i])
 	}
 	wg.Wait()
+}
 
+func (r *HistoricalStatesReader) ReadValidatorsData(tx kv.Tx, slot uint64) (*solid.ValidatorSet, solid.Uint64ListSSZ, error) {
+	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	if err != nil {
+		return nil, nil, err
+	}
+	// State not found
+	if minimalBeaconState == nil {
+		return nil, nil, nil
+	}
+
+	validatorSet, _, _, err := r.readValidatorsForHistoricalState(tx, slot, minimalBeaconState.ValidatorLength)
+	if err != nil {
+		return nil, nil, err
+	}
+	balances, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
+	if err != nil {
+		return nil, nil, err
+	}
+	balancesList := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
+
+	return validatorSet, balancesList, balancesList.DecodeSSZ(balances, 0)
+}
+
+func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (solid.Uint64ListSSZ, error) {
+	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	// State not found
+	if minimalBeaconState == nil {
+		return nil, nil
+	}
+
+	balances, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
+	if err != nil {
+		return nil, err
+	}
+	balancesList := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
+
+	return balancesList, balancesList.DecodeSSZ(balances, 0)
 }

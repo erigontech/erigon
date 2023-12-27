@@ -200,11 +200,11 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 	seg, ok := view.TxsSegment(10)
 	require.True(ok)
-	require.Equal(int(seg.ranges.to), 500_000)
+	require.Equal(int(seg.to), 500_000)
 
 	seg, ok = view.TxsSegment(500_000)
 	require.True(ok)
-	require.Equal(int(seg.ranges.to), 1_000_000)
+	require.Equal(int(seg.to), 1_000_000)
 
 	_, ok = view.TxsSegment(1_000_000)
 	require.False(ok)
