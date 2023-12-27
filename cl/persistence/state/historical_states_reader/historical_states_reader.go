@@ -151,7 +151,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetRandaoMixes(randaoMixes)
 	slashingsVector := solid.NewUint64VectorSSZ(int(r.cfg.EpochsPerSlashingsVector))
 	// Slashings
-	err = r.reconstructUint64ListDump(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector), slashingsVector)
+	err = r.ReconstructUint64ListDump(tx, slot, kv.ValidatorSlashings, int(r.cfg.EpochsPerSlashingsVector), slashingsVector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read slashings: %w", err)
 	}
@@ -197,7 +197,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	// Inactivity
-	err = r.reconstructUint64ListDump(tx, slot, kv.InactivityScores, int(minimalBeaconState.ValidatorLength), inactivityScores)
+	err = r.ReconstructUint64ListDump(tx, slot, kv.InactivityScores, int(minimalBeaconState.ValidatorLength), inactivityScores)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read inactivity scores: %w", err)
 	}
@@ -482,7 +482,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 	return currentList, err
 }
 
-func (r *HistoricalStatesReader) reconstructUint64ListDump(tx kv.Tx, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
+func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
 	diffCursor, err := tx.Cursor(bkt)
 	if err != nil {
 		return err
