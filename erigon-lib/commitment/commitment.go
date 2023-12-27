@@ -21,7 +21,6 @@ import (
 
 var (
 	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentWriteTook     = metrics.GetOrCreateHistogram("domain_commitment_write_took")
 	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
 )
 
@@ -200,7 +199,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err != nil {
 		return 0, err
 	}
-	//fmt.Printf("CollectUpdate [%x] -> [%x]\n", prefix, []byte(v))
+	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, []byte(v))
 	if err := be.updates.Collect(prefix, v); err != nil {
 		return 0, err
 	}
@@ -209,11 +208,6 @@ func (be *BranchEncoder) CollectUpdate(
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*Cell, error)) (BranchData, int, error) {
-	//binary.BigEndian.PutUint16(be.bitmapBuf[0:], touchMap)
-	//binary.BigEndian.PutUint16(be.bitmapBuf[2:], afterMap)
-	//bitmapBuf [binary.MaxVarintLen64]byte
-	//branchData = make([]byte, 0, 4)
-	//branchData = append(branchData, be.bitmapBuf[:4]...)
 	be.buf.Reset()
 
 	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
