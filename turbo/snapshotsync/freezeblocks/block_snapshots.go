@@ -799,7 +799,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
-	files, _, err := segments(s.dir, s.version, func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
+	files, _, err := segments(s.dir, s.version, 0, func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 		return typeOfSegmentsMustExist(dir, in, types)
 	})
 
@@ -1258,7 +1258,7 @@ func Segments(dir string, version uint8, minBlock uint64) (res []snaptype.FileIn
 }
 
 func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func(dir string, in []snaptype.FileInfo) []snaptype.FileInfo) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
+	list, err := snaptype.Segments(dir, version)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
