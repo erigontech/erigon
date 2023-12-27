@@ -263,6 +263,9 @@ func (i *filesItem) closeFilesAndRemove() {
 			if err := os.Remove(i.decompressor.FilePath()); err != nil {
 				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName())
 			}
+			if err := os.Remove(i.decompressor.FilePath() + ".torrent"); err != nil {
+				log.Trace("remove after close", "err", err, "file", i.decompressor.FileName()+".torrent")
+			}
 		}
 		i.decompressor = nil
 	}
