@@ -271,7 +271,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = agg.OpenFolder(false); err != nil {
+	if err = agg.OpenFolder(true); err != nil {
 		return err
 	}
 
@@ -300,7 +300,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = agg.OpenFolder(false); err != nil {
+	if err = agg.OpenFolder(true); err != nil {
 		return err
 	}
 
@@ -439,7 +439,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	err = agg.OpenFolder(false)
+	err = agg.OpenFolder(true)
 	if err != nil {
 		return
 	}
@@ -587,7 +587,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	err = agg.OpenFolder(false)
+	err = agg.OpenFolder(true)
 	if err != nil {
 		return err
 	}

@@ -416,7 +416,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 		if err := g.Wait(); err != nil {
 			return err
 		}
-		if err := a.OpenFolder(false); err != nil {
+		if err := a.OpenFolder(true); err != nil {
 			return err
 		}
 	}
