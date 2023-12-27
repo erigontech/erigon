@@ -523,9 +523,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -556,6 +554,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+
 			var collation map[string]*roaring64.Bitmap
 			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
 				collation, err = d.collate(ctx, step, tx)
@@ -564,9 +563,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 			}
-			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -1176,21 +1173,16 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		}
 	}()
 
-	//var predicates sync.WaitGroup
 	if r.accounts.any() {
 		log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
-		//predicates.Add(1)
 		g.Go(func() (err error) {
-			//defer predicates.Done()
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, ac.a.ps)
 			return err
 		})
 	}
 
 	if r.storage.any() {
-		//predicates.Add(1)
 		g.Go(func() (err error) {
-			//defer predicates.Done()
 			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, ac.a.ps)
 			return err
 		})
@@ -1202,14 +1194,12 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		})
 	}
 	if r.commitment.any() {
-		//predicates.Wait()
 		//log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
 			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, files.commitment, files.commitmentIdx, files.commitmentHist, r.commitment, ac.a.ps)
 			return err
 			//var v4Files SelectedStaticFiles
 			//var v4MergedF MergedFiles
-			//
 			//// THIS merge uses strategy with replacement of hisotry keys in commitment.
 			//mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, ac.a.ps)
 			//return err

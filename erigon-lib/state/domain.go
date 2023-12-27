@@ -1291,6 +1291,8 @@ func (sf StaticFiles) CleanupOnError() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	mxRunningFilesBuilding.Inc()
+	defer mxRunningFilesBuilding.Dec()
 	if d.filenameBase == traceFileLife {
 		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
 	}

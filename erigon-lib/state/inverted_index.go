@@ -1617,6 +1617,9 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		warmLocality *LocalityIndexFiles
 		err          error
 	)
+	mxRunningFilesBuilding.Inc()
+	defer mxRunningFilesBuilding.Dec()
+
 	closeComp := true
 	defer func() {
 		if closeComp {
