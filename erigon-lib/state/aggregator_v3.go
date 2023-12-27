@@ -776,13 +776,12 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return err
 		}
 		if localTimeout.Err() != nil {
-			break
+			return nil //nolint
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 	}
-	return nil
 }
 
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
