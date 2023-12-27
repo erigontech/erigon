@@ -1149,15 +1149,15 @@ type BlockRetire struct {
 }
 
 func NewBlockRetire(
-		compressWorkers int,
-		dirs datadir.Dirs,
-		blockReader services.FullBlockReader,
-		blockWriter *blockio.BlockWriter,
-		db kv.RoDB,
-		chainConfig *chain.Config,
-		notifier services.DBEventNotifier,
-		snBuildAllowed *semaphore.Weighted,
-		logger log.Logger,
+	compressWorkers int,
+	dirs datadir.Dirs,
+	blockReader services.FullBlockReader,
+	blockWriter *blockio.BlockWriter,
+	db kv.RoDB,
+	chainConfig *chain.Config,
+	notifier services.DBEventNotifier,
+	snBuildAllowed *semaphore.Weighted,
+	logger log.Logger,
 ) *BlockRetire {
 	return &BlockRetire{
 		workers:        compressWorkers,
