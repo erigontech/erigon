@@ -115,8 +115,8 @@ func (a *PendingAttestation) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		AggregationBits hexutility.Bytes `json:"aggregation_bits"`
 		AttestationData AttestationData  `json:"attestation_data"`
-		InclusionDelay  uint64           `json:"inclusion_delay"`
-		ProposerIndex   uint64           `json:"proposer_index"`
+		InclusionDelay  uint64           `json:"inclusion_delay,string"`
+		ProposerIndex   uint64           `json:"proposer_index,string"`
 	}{
 		AggregationBits: a.AggregationBits(),
 		AttestationData: a.AttestantionData(),
@@ -130,8 +130,8 @@ func (a *PendingAttestation) UnmarshalJSON(input []byte) error {
 	var tmp struct {
 		AggregationBits hexutility.Bytes `json:"aggregation_bits"`
 		AttestationData AttestationData  `json:"attestation_data"`
-		InclusionDelay  uint64           `json:"inclusion_delay"`
-		ProposerIndex   uint64           `json:"proposer_index"`
+		InclusionDelay  uint64           `json:"inclusion_delay,string"`
+		ProposerIndex   uint64           `json:"proposer_index,string"`
 	}
 	if err = json.Unmarshal(input, &tmp); err != nil {
 		return err

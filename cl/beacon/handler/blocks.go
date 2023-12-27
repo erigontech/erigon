@@ -19,7 +19,7 @@ type headerResponse struct {
 }
 
 type getHeadersRequest struct {
-	Slot       *uint64         `json:"slot,omitempty"`
+	Slot       *uint64         `json:"slot,omitempty,string"`
 	ParentRoot *libcommon.Hash `json:"root,omitempty"`
 }
 
@@ -193,5 +193,7 @@ func (a *ApiHandler) getBlockRoot(r *http.Request) (*beaconResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newBeaconResponse(struct{ Root libcommon.Hash }{Root: root}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	return newBeaconResponse(struct {
+		Root libcommon.Hash `json:"root"`
+	}{Root: root}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }

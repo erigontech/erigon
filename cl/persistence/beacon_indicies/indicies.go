@@ -247,11 +247,16 @@ func PruneBlockRoots(ctx context.Context, tx kv.RwTx, fromSlot, toSlot uint64) e
 func ReadBeaconBlockRootsInSlotRange(ctx context.Context, tx kv.Tx, fromSlot, count uint64) ([]libcommon.Hash, []uint64, error) {
 	blockRoots := make([]libcommon.Hash, 0, count)
 	slots := make([]uint64, 0, count)
-	err := RangeBlockRoots(ctx, tx, fromSlot, fromSlot+count, func(slot uint64, beaconBlockRoot libcommon.Hash) bool {
-		blockRoots = append(blockRoots, beaconBlockRoot)
-		slots = append(slots, slot)
-		return true
-	})
+	cursor, err := tx.Cursor(kv.CanonicalBlockRoots)
+	if err != nil {
+		return nil, nil, err
+	}
+	currentCount := uint64(0)
+	for k, v, err := cursor.Seek(base_encoding.Encode64ToBytes4(fromSlot)); err == nil && k != nil && currentCount != count; k, v, err = cursor.Next() {
+		currentCount++
+		blockRoots = append(blockRoots, libcommon.BytesToHash(v))
+		slots = append(slots, base_encoding.Decode64FromBytes4(k))
+	}
 	return blockRoots, slots, err
 }
 

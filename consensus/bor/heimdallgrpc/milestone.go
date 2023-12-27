@@ -24,9 +24,10 @@ func (h *HeimdallGRPCClient) FetchMilestoneCount(ctx context.Context) (int64, er
 	return res.Result.Count, nil
 }
 
-func (h *HeimdallGRPCClient) FetchMilestone(ctx context.Context) (*milestone.Milestone, error) {
+func (h *HeimdallGRPCClient) FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error) {
 	h.logger.Info("Fetching milestone")
 
+	// TODO: use number
 	res, err := h.client.FetchMilestone(ctx, nil)
 	if err != nil {
 		return nil, err

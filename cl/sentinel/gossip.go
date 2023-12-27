@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -83,17 +84,19 @@ var BlsToExecutionChangeSsz = GossipTopic{
 }
 
 type GossipManager struct {
-	ch            chan *pubsub.Message
+	ch            chan *GossipMessage
 	subscriptions map[string]*GossipSubscription
 	mu            sync.RWMutex
 }
+
+const maxIncomingGossipMessages = 5092
 
 // construct a new gossip manager that will handle packets with the given handlerfunc
 func NewGossipManager(
 	ctx context.Context,
 ) *GossipManager {
 	g := &GossipManager{
-		ch:            make(chan *pubsub.Message, 1),
+		ch:            make(chan *GossipMessage, maxIncomingGossipMessages),
 		subscriptions: map[string]*GossipSubscription{},
 	}
 	return g
@@ -109,7 +112,7 @@ func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
 	return
 }
 
-func (s *GossipManager) Recv() <-chan *pubsub.Message {
+func (s *GossipManager) Recv() <-chan *GossipMessage {
 	return s.ch
 }
 
@@ -137,8 +140,52 @@ func (s *GossipManager) unsubscribe(topic string) {
 	if _, ok := s.subscriptions[topic]; !ok {
 		return
 	}
-	s.subscriptions[topic].Close()
+	sub := s.subscriptions[topic]
+	go func() {
+		timer := time.NewTimer(time.Hour)
+		ctx := sub.ctx
+		select {
+		case <-ctx.Done():
+			sub.Close()
+		case <-timer.C:
+			sub.Close()
+		}
+	}()
 	delete(s.subscriptions, topic)
+}
+
+func (s *Sentinel) forkWatcher() {
+	prevDigest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+	if err != nil {
+		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+		return
+	}
+	iterationInterval := time.NewTicker(30 * time.Millisecond)
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-iterationInterval.C:
+			digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
+			if err != nil {
+				log.Error("[Gossip] Failed to calculate fork choice", "err", err)
+				return
+			}
+			if prevDigest != digest {
+				subs := s.subManager.subscriptions
+				for path, sub := range subs {
+					s.subManager.unsubscribe(path)
+					newSub, err := s.SubscribeGossip(sub.gossip_topic)
+					if err != nil {
+						log.Error("[Gossip] Failed to resubscribe to topic", "err", err)
+						return
+					}
+					newSub.Listen()
+				}
+				prevDigest = digest
+			}
+		}
+	}
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
@@ -239,7 +286,7 @@ func (g *GossipManager) Close() {
 type GossipSubscription struct {
 	gossip_topic GossipTopic
 	host         peer.ID
-	ch           chan *pubsub.Message
+	ch           chan *GossipMessage
 	ctx          context.Context
 
 	topic *pubsub.Topic
@@ -286,6 +333,12 @@ func (s *GossipSubscription) Close() {
 	}
 }
 
+type GossipMessage struct {
+	From  peer.ID
+	Topic TopicName
+	Data  []byte
+}
+
 // this is a helper to begin running the gossip subscription.
 // function should not be used outside of the constructor for gossip subscription
 func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topic string) {
@@ -312,7 +365,11 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			if msg.GetFrom() == s.host {
 				continue
 			}
-			s.ch <- msg
+			s.ch <- &GossipMessage{
+				From:  msg.GetFrom(),
+				Topic: TopicName(topic),
+				Data:  common.Copy(msg.Data),
+			}
 		}
 	}
 }

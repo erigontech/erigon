@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -18,8 +19,8 @@ type SignedBlindedBeaconBlock struct {
 }
 
 type BlindedBeaconBlock struct {
-	Slot          uint64             `json:"slot"`
-	ProposerIndex uint64             `json:"proposer_index"`
+	Slot          uint64             `json:"slot,string"`
+	ProposerIndex uint64             `json:"proposer_index,string"`
 	ParentRoot    libcommon.Hash     `json:"parent_root"`
 	StateRoot     libcommon.Hash     `json:"state_root"`
 	Body          *BlindedBeaconBody `json:"body"`
@@ -295,3 +296,20 @@ func (*BlindedBeaconBody) Static() bool {
 func (*BlindedBeaconBlock) Static() bool {
 	return false
 }
+
+func (b *BlindedBeaconBody) Clone() clonable.Clonable {
+	return NewBlindedBeaconBody(b.beaconCfg)
+}
+
+func (b *BlindedBeaconBlock) Clone() clonable.Clonable {
+	return NewBlindedBeaconBlock(b.Body.beaconCfg)
+}
+
+func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
+	return NewSignedBlindedBeaconBlock(b.Block.Body.beaconCfg)
+}
+
+// make sure that the type implements the interface ssz2.ObjectSSZ
+var _ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
+var _ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)
+var _ ssz2.ObjectSSZ = (*SignedBlindedBeaconBlock)(nil)

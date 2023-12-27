@@ -10,8 +10,8 @@ import (
 )
 
 type genesisResponse struct {
-	GenesisTime          uint64           `json:"genesis_time,omitempty"`
-	GenesisValidatorRoot common.Hash      `json:"genesis_validator_root,omitempty"`
+	GenesisTime          uint64           `json:"genesis_time,omitempty,string"`
+	GenesisValidatorRoot common.Hash      `json:"genesis_validators_root,omitempty"`
 	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version,omitempty"`
 }
 

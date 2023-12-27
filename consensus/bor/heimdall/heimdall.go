@@ -20,7 +20,7 @@ type IHeimdallClient interface {
 	Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error)
 	FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
-	FetchMilestone(ctx context.Context) (*milestone.Milestone, error)
+	FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error)
 	FetchMilestoneCount(ctx context.Context) (int64, error)
 	FetchNoAckMilestone(ctx context.Context, milestoneID string) error //Fetch the bool value whether milestone corresponding to the given id failed in the Heimdall
 	FetchLastNoAckMilestone(ctx context.Context) (string, error)       //Fetch latest failed milestone id
@@ -33,7 +33,7 @@ type HeimdallServer interface {
 	Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error)
 	FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
-	FetchMilestone(ctx context.Context) (*milestone.Milestone, error)
+	FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error)
 	FetchMilestoneCount(ctx context.Context) (int64, error)
 	FetchNoAckMilestone(ctx context.Context, milestoneID string) error
 	FetchLastNoAckMilestone(ctx context.Context) (string, error)

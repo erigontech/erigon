@@ -57,8 +57,19 @@ type SegmentDownloadStatistics struct {
 }
 
 type SnapshotIndexingStatistics struct {
-	Segments    map[string]int `json:"segments"`
-	TimeElapsed float64        `json:"timeElapsed"`
+	Segments    []SnapshotSegmentIndexingStatistics `json:"segments"`
+	TimeElapsed float64                             `json:"timeElapsed"`
+}
+
+type SnapshotSegmentIndexingStatistics struct {
+	SegmentName string `json:"segmentName"`
+	Percent     int    `json:"percent"`
+	Alloc       uint64 `json:"alloc"`
+	Sys         uint64 `json:"sys"`
+}
+
+type SnapshotSegmentIndexingFinishedUpdate struct {
+	SegmentName string `json:"segmentName"`
 }
 
 func (ti SnapshotDownloadStatistics) Type() Type {
@@ -70,5 +81,9 @@ func (ti SegmentDownloadStatistics) Type() Type {
 }
 
 func (ti SnapshotIndexingStatistics) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
 	return TypeOf(ti)
 }
