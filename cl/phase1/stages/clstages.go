@@ -354,7 +354,8 @@ func ConsensusClStages(ctx context.Context,
 							if _, ok := source.(*persistence.BeaconRpcSource); ok {
 								time.Sleep(2 * time.Second)
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
-								for blocks == nil || len(blocks.Data) < 3 {
+							Loop:
+								for {
 									from := args.seenSlot - 2
 									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 									count := (currentSlot - from) + 2
@@ -366,6 +367,11 @@ func ConsensusClStages(ctx context.Context,
 									if err != nil {
 										errCh <- err
 										return
+									}
+									for _, block := range blocks.Data {
+										if block.Block.Slot >= currentSlot {
+											break Loop
+										}
 									}
 								}
 								respCh <- blocks
