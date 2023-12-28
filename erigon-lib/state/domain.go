@@ -2122,6 +2122,7 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
+	//fmt.Printf("CanPrune %s: %v %v\n", dc.d.filenameBase, dc.hc.ic.CanPruneFrom(tx), dc.maxTxNumInDomainFiles(false))
 	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)
 }
 
@@ -2152,8 +2153,16 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		prunedMaxStep uint64
 		prunedMinStep = uint64(math.MaxUint64)
 		seek          = make([]byte, 0, 256)
+		srcLimit      = limit
 	)
-
+	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dc.d.filenameBase, txFrom, txTo, step, limit)
+	defer func() {
+		dc.d.logger.Info("[snapshots] prune domain",
+			"name", dc.d.filenameBase,
+			"pruned keys", prunedKeys,
+			"keys until limit", limit,
+			"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
+	}()
 	prunedStep, _, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
@@ -2163,10 +2172,10 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		step = ^prunedStep
 	}
 
-	k, v, err := keysCursor.Last()
+	//k, v, err := keysCursor.Last()
 	//fmt.Printf("prune domain %s from %x|%x step %d\n", dc.d.filenameBase, k, v, step)
 
-	for ; k != nil; k, v, err = keysCursor.Prev() {
+	for k, v, err := keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
@@ -2175,15 +2184,19 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			continue
 		}
 		if limit == 0 {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
+			}
 			return nil
 		}
 		limit--
 
 		seek = append(append(seek[:0], k...), v...)
-		//fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
+		//if dc.d.filenameBase == "commitment" {
+		//	fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
+		//}
 
 		mxPruneSizeDomain.Inc()
-		prunedKeys++
 
 		err = rwTx.Delete(dc.d.valsTable, seek)
 		if err != nil {
@@ -2197,6 +2210,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
 			return err
 		}
+		prunedKeys++
 
 		if is < prunedMinStep {
 			prunedMinStep = is
@@ -2223,15 +2237,14 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	if prunedMinStep == math.MaxUint64 {
 		prunedMinStep = 0
 	} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
-
+	//
 	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
 		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 
-	dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested %d", prunedMinStep, prunedMaxStep, step), "pruned keys", prunedKeys)
 	mxPruneTookDomain.ObserveDuration(st)
 
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, false, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, srcLimit, false, true, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil

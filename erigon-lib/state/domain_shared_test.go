@@ -328,11 +328,16 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	fmt.Printf("calling build files step %d\n", maxTx/stepSize)
 	err = domains.Flush(ctx, rwTx)
 	require.NoError(t, err)
+	domains.Close()
+
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
 	err = agg.BuildFiles(maxTx - stepSize)
 	require.NoError(t, err)
+
+	ac.Close()
+	ac = agg.MakeContext()
 
 	err = db.Update(ctx, func(tx kv.RwTx) error {
 		return ac.PruneSmallBatches(ctx, 60*time.Minute, tx)
@@ -343,7 +348,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	ac = agg.MakeContext()
 	defer ac.Close()
-	domains.Close()
+	//domains.Close()
 
 	rwTx, err = db.BeginRw(ctx)
 	require.NoError(t, err)

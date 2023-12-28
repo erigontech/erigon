@@ -1090,7 +1090,7 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 }
 
 // Prune [txFrom; txTo)
-// `force` flag to prune even if CanPrune returns false
+// `force` flag to prune even if CanPrune returns false (when Unwind is needed, CanPrune always returns false)
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
@@ -1144,6 +1144,10 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	seek = append(seek[:0], hc.encodeTs(txFrom)...)
 
 	var pruneSize uint64
+	defer func() {
+		hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "pruned records", pruneSize, "keys until limit", limit)
+	}()
+
 	for k, v, err := historyKeysCursor.Seek(seek); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
 		if err != nil {
 			return err
@@ -1153,6 +1157,11 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 			break
 		}
 		if limit == 0 {
+			if !omitProgress {
+				if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
+					hc.h.logger.Error("failed to save history prune progress", "err", err)
+				}
+			}
 			return nil
 		}
 		limit--

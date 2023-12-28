@@ -715,7 +715,7 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	//fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInDomainFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
+	fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInDomainFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
 	return ac.CanPruneFrom(tx) < ac.maxTxNumInDomainFiles(false)
 }
 func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
@@ -761,24 +761,42 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	return blockNumWithCommitment, true, nil
 }
 
+// returns true if we can prune something
+func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx) bool {
+	return dbg.NoPrune() || (!ac.account.CanPrune(tx) && !ac.storage.CanPrune(tx) && !ac.code.CanPrune(tx) && !ac.commitment.CanPrune(tx))
+}
+
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	localTimeout, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	//i := 10
 	for {
-		if err := ac.Prune(context.Background(), tx, 100); err != nil {
+		if ac.nothingToPrune(tx) {
+			return nil
+		}
+
+		//if i == 0 {
+		//	fmt.Printf("otce4ka\n")
+		//	break
+		//}
+		//i--
+
+		if err := ac.Prune(context.Background(), tx, 1000); err != nil {
 			log.Warn("[snapshots] PruneSmallBatches", "err", err)
 			return err
 		}
 		if localTimeout.Err() != nil {
+			fmt.Printf("lt %v\n", localTimeout.Err())
 			return nil //nolint
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 	}
+	return nil
 }
 
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
@@ -816,18 +834,18 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	}
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
-	step := ac.a.aggregatedStep.Load()
 	if limit == 0 {
 		limit = uint64(math2.MaxUint64)
 	}
 
-	txTo := (step + 1) * ac.a.aggregationStep
-	var txFrom uint64
+	var txFrom, txTo uint64
+	step := ac.a.aggregatedStep.Load()
+	txTo = (step + 1) * ac.a.aggregationStep
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	//ac.a.logger.Info("aggregator prune", "step", step,
-	//	"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
+	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
 	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
 
 	if err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
@@ -842,16 +860,17 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	if err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
+	omitIndexPruneProgress := true
+	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
 		return err
 	}
-	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
+	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
 		return err
 	}
-	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
+	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
 		return err
 	}
-	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
+	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
 		return err
 	}
 	return nil
