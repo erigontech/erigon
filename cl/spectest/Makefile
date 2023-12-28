@@ -9,8 +9,6 @@ tests:
 	rm -rf tests/minimal
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
-	# will not implement until i see it on a testnet
-	rm -rf tests/mainnet/deneb
 
 clean:
 	rm -rf tests
