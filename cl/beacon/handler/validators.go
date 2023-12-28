@@ -324,7 +324,6 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	fmt.Println(validatorId)
 
 	validatorIndex, err := parseQueryValidatorIndex(tx, validatorId)
 	if err != nil {

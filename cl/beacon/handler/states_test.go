@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +27,6 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fmt.Println(fcu.HeadSlotVal)
 
 	cases := []struct {
 		blockID string
@@ -87,7 +85,6 @@ func TestGetStateRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fmt.Println(fcu.HeadSlotVal)
 
 	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
 
@@ -213,7 +210,6 @@ func TestGetStateFullForkchoice(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fmt.Println(fcu.HeadSlotVal)
 
 	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
 

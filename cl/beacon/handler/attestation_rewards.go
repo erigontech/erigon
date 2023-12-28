@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
@@ -108,7 +107,6 @@ func (a *ApiHandler) getAttestationsRewards(r *http.Request) (*beaconResponse, e
 			if s.Version() == clparams.Phase0Version {
 				return a.computeAttestationsRewardsForPhase0(s, filterIndicies, epoch)
 			}
-			fmt.Println("A")
 			return a.computeAttestationsRewardsForAltair(s.ValidatorSet(), s.InactivityScores(), s.PreviousEpochParticipation(), state.InactivityLeaking(s), filterIndicies, epoch)
 		}
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "no block found for this epoch")
