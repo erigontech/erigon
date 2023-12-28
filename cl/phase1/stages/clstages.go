@@ -356,7 +356,12 @@ func ConsensusClStages(ctx context.Context,
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 								for blocks == nil || len(blocks.Data) < 3 {
 									from := args.seenSlot - 2
-									count := (utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) - from) + 2
+									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+									count := (currentSlot - from) + 2
+									if currentSlot <= cfg.forkChoice.HighestSeen() {
+										time.Sleep(100 * time.Millisecond)
+										continue
+									}
 									blocks, err = sourceFunc(ctx, tx, from, count)
 									if err != nil {
 										errCh <- err
