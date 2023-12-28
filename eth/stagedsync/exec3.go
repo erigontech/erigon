@@ -305,11 +305,6 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	if applyTx != nil {
-		if dbg.DiscardHistory() {
-			doms.DiscardHistory()
-		}
-	}
 	var err error
 
 	if maxBlockNum-blockNum > 16 {
@@ -417,11 +412,6 @@ func ExecV3(ctx context.Context,
 			defer tx.Rollback()
 
 			doms.SetTx(tx)
-			if dbg.DiscardHistory() {
-				doms.DiscardHistory()
-			} else {
-				doms.StartWrites()
-			}
 
 			defer applyLoopWg.Wait()
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)

@@ -73,14 +73,15 @@ type SharedDomains struct {
 	code       map[string][]byte
 	storage    *btree2.Map[string, []byte]
 	commitment map[string][]byte
-	Account    *Domain
-	Storage    *Domain
-	Code       *Domain
-	Commitment *Domain
-	TracesTo   *InvertedIndex
-	LogAddrs   *InvertedIndex
-	LogTopics  *InvertedIndex
-	TracesFrom *InvertedIndex
+
+	AccountWriter    *domainWAL
+	StorageWriter    *domainWAL
+	CodeWriter       *domainWAL
+	CommitmentWriter *domainWAL
+	TracesToWriter   *invertedIndexWAL
+	LogAddrsWriter   *invertedIndexWAL
+	LogTopicsWriter  *invertedIndexWAL
+	TracesFromWriter *invertedIndexWAL
 }
 
 type HasAggCtx interface {
@@ -109,16 +110,8 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 	}
 
 	sd := &SharedDomains{
-		aggCtx:     ac,
-		Account:    ac.a.accounts,
-		Code:       ac.a.code,
-		Storage:    ac.a.storage,
-		Commitment: ac.a.commitment,
-		TracesTo:   ac.a.tracesTo,
-		TracesFrom: ac.a.tracesFrom,
-		LogAddrs:   ac.a.logAddrs,
-		LogTopics:  ac.a.logTopics,
-		roTx:       tx,
+		aggCtx: ac,
+		roTx:   tx,
 		//trace:       true,
 	}
 
@@ -453,7 +446,7 @@ func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []b
 	addrS := string(addr)
 	sd.sdCtx.TouchPlainKey(addrS, account, sd.sdCtx.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, account)
-	return sd.aggCtx.account.PutWithPrev(addr, nil, account, prevAccount)
+	return sd.AccountWriter.PutWithPrev(addr, nil, account, prevAccount)
 }
 
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte) error {
@@ -461,21 +454,21 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte) error {
 	sd.sdCtx.TouchPlainKey(addrS, code, sd.sdCtx.TouchCode)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
-		return sd.aggCtx.code.DeleteWithPrev(addr, nil, prevCode)
+		return sd.CodeWriter.DeleteWithPrev(addr, nil, prevCode)
 	}
-	return sd.aggCtx.code.PutWithPrev(addr, nil, code, prevCode)
+	return sd.CodeWriter.PutWithPrev(addr, nil, code, prevCode)
 }
 
 func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte) error {
 	sd.put(kv.CommitmentDomain, string(prefix), data)
-	return sd.aggCtx.commitment.PutWithPrev(prefix, nil, data, prev)
+	return sd.CommitmentWriter.PutWithPrev(prefix, nil, data, prev)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	addrS := string(addr)
 	sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.aggCtx.account.DeleteWithPrev(addr, nil, prev); err != nil {
+	if err := sd.AccountWriter.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
 	}
 
@@ -498,7 +491,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	compositeS := string(composite)
 	sd.sdCtx.TouchPlainKey(compositeS, value, sd.sdCtx.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, value)
-	return sd.aggCtx.storage.PutWithPrev(composite, nil, value, preVal)
+	return sd.StorageWriter.PutWithPrev(composite, nil, value, preVal)
 }
 func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte) error {
 	composite := addr
@@ -509,7 +502,7 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte) erro
 	compositeS := string(composite)
 	sd.sdCtx.TouchPlainKey(compositeS, nil, sd.sdCtx.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, nil)
-	return sd.aggCtx.storage.DeleteWithPrev(composite, nil, preVal)
+	return sd.StorageWriter.DeleteWithPrev(composite, nil, preVal)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
@@ -528,13 +521,8 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) 
 	return err
 }
 
-func (sd *SharedDomains) SetTx(tx kv.RwTx) {
-	sd.roTx = tx
-}
-
-func (sd *SharedDomains) StepSize() uint64 {
-	return sd.Account.aggregationStep
-}
+func (sd *SharedDomains) SetTx(tx kv.RwTx) { sd.roTx = tx }
+func (sd *SharedDomains) StepSize() uint64 { return sd.aggCtx.a.StepSize() }
 
 // SetTxNum sets txNum for all domains as well as common txNum for all domains
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
@@ -548,6 +536,14 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.aggCtx.tracesFrom.SetTxNum(txNum)
 	sd.aggCtx.logAddrs.SetTxNum(txNum)
 	sd.aggCtx.logTopics.SetTxNum(txNum)
+	sd.AccountWriter.SetTxNum(txNum)
+	sd.CodeWriter.SetTxNum(txNum)
+	sd.StorageWriter.SetTxNum(txNum)
+	sd.CommitmentWriter.SetTxNum(txNum)
+	sd.TracesToWriter.SetTxNum(txNum)
+	sd.TracesFromWriter.SetTxNum(txNum)
+	sd.LogAddrsWriter.SetTxNum(txNum)
+	sd.LogTopicsWriter.SetTxNum(txNum)
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
@@ -598,7 +594,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 
 	roTx := sd.roTx
-	keysCursor, err := roTx.CursorDupSort(sd.Storage.keysTable)
+	keysCursor, err := roTx.CursorDupSort(sd.aggCtx.a.storage.keysTable)
 	if err != nil {
 		return err
 	}
@@ -608,7 +604,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 	}
 	if k != nil && bytes.HasPrefix(k, prefix) {
 		step := ^binary.BigEndian.Uint64(v)
-		endTxNum := step * sd.Storage.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+		endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 		if haveRamUpdates && endTxNum >= sd.txNum {
 			return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 		}
@@ -616,7 +612,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 		keySuffix := make([]byte, len(k)+8)
 		copy(keySuffix, k)
 		copy(keySuffix[len(k):], v)
-		if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
+		if v, err = roTx.GetOne(sd.aggCtx.a.storage.valsTable, keySuffix); err != nil {
 			return err
 		}
 		heap.Push(cpPtr, &CursorItem{t: DB_CURSOR, key: common.Copy(k), val: common.Copy(v), c: keysCursor, endTxNum: endTxNum, reverse: true})
@@ -624,7 +620,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 
 	sctx := sd.aggCtx.storage
 	for _, item := range sctx.files {
-		gg := NewArchiveGetter(item.src.decompressor.MakeGetter(), sd.Storage.compression)
+		gg := NewArchiveGetter(item.src.decompressor.MakeGetter(), sd.aggCtx.a.storage.compression)
 		cursor, err := item.src.bindex.Seek(gg, prefix)
 		if err != nil {
 			return err
@@ -688,7 +684,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 				if k != nil && bytes.HasPrefix(k, prefix) {
 					ci1.key = common.Copy(k)
 					step := ^binary.BigEndian.Uint64(v)
-					endTxNum := step * sd.Storage.aggregationStep // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
+					endTxNum := step * sd.StepSize() // DB can store not-finished step, it means - then set first txn in step - it anyway will be ahead of files
 					if haveRamUpdates && endTxNum >= sd.txNum {
 						return fmt.Errorf("probably you didn't set SharedDomains.SetTxNum(). ram must be ahead of db: %d, %d", sd.txNum, endTxNum)
 					}
@@ -697,7 +693,7 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 					keySuffix := make([]byte, len(k)+8)
 					copy(keySuffix, k)
 					copy(keySuffix[len(k):], v)
-					if v, err = roTx.GetOne(sd.Storage.valsTable, keySuffix); err != nil {
+					if v, err = roTx.GetOne(sd.aggCtx.a.storage.valsTable, keySuffix); err != nil {
 						return err
 					}
 					ci1.val = common.Copy(v)
@@ -724,14 +720,6 @@ func (sd *SharedDomains) Close() {
 		sd.sdCtx.updates.keys = nil
 		sd.sdCtx.updates.tree.Clear(true)
 	}
-	sd.account = nil
-	sd.code = nil
-	sd.storage = nil
-	sd.commitment = nil
-	sd.LogAddrs = nil
-	sd.LogTopics = nil
-	sd.TracesFrom = nil
-	sd.TracesTo = nil
 
 	if sd.RwTx != nil {
 		if casted, ok := sd.RwTx.(kv.Closer); ok {
@@ -746,14 +734,14 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 
-	sd.aggCtx.account.StartWrites()
-	sd.aggCtx.storage.StartWrites()
-	sd.aggCtx.code.StartWrites()
-	sd.aggCtx.commitment.StartWrites()
-	sd.aggCtx.logAddrs.StartWrites()
-	sd.aggCtx.logTopics.StartWrites()
-	sd.aggCtx.tracesFrom.StartWrites()
-	sd.aggCtx.tracesTo.StartWrites()
+	sd.AccountWriter = sd.aggCtx.account.NewWriter()
+	sd.StorageWriter = sd.aggCtx.storage.NewWriter()
+	sd.CodeWriter = sd.aggCtx.code.NewWriter()
+	sd.CommitmentWriter = sd.aggCtx.commitment.NewWriter()
+	sd.LogAddrsWriter = sd.aggCtx.logAddrs.NewWriter()
+	sd.LogTopicsWriter = sd.aggCtx.logTopics.NewWriter()
+	sd.TracesFromWriter = sd.aggCtx.tracesFrom.NewWriter()
+	sd.TracesToWriter = sd.aggCtx.tracesTo.NewWriter()
 
 	if sd.account == nil {
 		sd.account = map[string][]byte{}
@@ -776,14 +764,21 @@ func (sd *SharedDomains) FinishWrites() {
 	if sd.aggCtx != nil {
 		sd.SetTxNum(0)
 		sd.SetBlockNum(0)
-		sd.aggCtx.account.FinishWrites()
-		sd.aggCtx.storage.FinishWrites()
-		sd.aggCtx.code.FinishWrites()
-		sd.aggCtx.commitment.FinishWrites()
-		sd.aggCtx.logAddrs.FinishWrites()
-		sd.aggCtx.logTopics.FinishWrites()
-		sd.aggCtx.tracesFrom.FinishWrites()
-		sd.aggCtx.tracesTo.FinishWrites()
+
+		sd.AccountWriter.close()
+		sd.AccountWriter = nil
+		sd.StorageWriter.close()
+		sd.StorageWriter = nil
+		sd.CodeWriter.close()
+		sd.CodeWriter = nil
+		sd.LogAddrsWriter.close()
+		sd.LogAddrsWriter = nil
+		sd.LogTopicsWriter.close()
+		sd.LogTopicsWriter = nil
+		sd.TracesFromWriter.close()
+		sd.TracesFromWriter = nil
+		sd.TracesToWriter.close()
+		sd.TracesToWriter = nil
 	}
 }
 
@@ -795,42 +790,6 @@ func (sd *SharedDomains) BatchHistoryWriteStart() *SharedDomains {
 func (sd *SharedDomains) BatchHistoryWriteEnd() {
 	sd.walLock.RUnlock()
 }
-
-func (sd *SharedDomains) DiscardHistory() {
-	sd.aggCtx.account.DiscardHistory()
-	sd.aggCtx.storage.DiscardHistory()
-	sd.aggCtx.code.DiscardHistory()
-	sd.aggCtx.commitment.DiscardHistory()
-	sd.aggCtx.logAddrs.DiscardHistory()
-	sd.aggCtx.logTopics.DiscardHistory()
-	sd.aggCtx.tracesFrom.DiscardHistory()
-	sd.aggCtx.tracesTo.DiscardHistory()
-}
-func (sd *SharedDomains) rotate() []flusher {
-	sd.walLock.Lock()
-	defer sd.walLock.Unlock()
-
-	l := []flusher{
-		sd.aggCtx.account.Rotate(),
-		sd.aggCtx.storage.Rotate(),
-		sd.aggCtx.code.Rotate(),
-		sd.aggCtx.commitment.Rotate(),
-		sd.aggCtx.logAddrs.Rotate(),
-		sd.aggCtx.logTopics.Rotate(),
-		sd.aggCtx.tracesFrom.Rotate(),
-		sd.aggCtx.tracesTo.Rotate(),
-	}
-	if sd.withHashBatch {
-		l = append(l, sd.RwTx.(flusher))
-		sd.RwTx = membatch.NewHashBatch(sd.roTx, sd.aggCtx.a.ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
-	}
-	if sd.withMemBatch {
-		l = append(l, sd.RwTx.(flusher))
-		sd.RwTx = membatchwithdb.NewMemoryBatch(sd.roTx, sd.aggCtx.a.dirs.Tmp)
-	}
-	return l
-}
-
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
 	if err != nil {
@@ -848,14 +807,39 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if sd.noFlush == 0 {
-		for _, f := range sd.rotate() {
-			if err := f.Flush(ctx, tx); err != nil {
-				return err
-			}
-			if casted, ok := f.(kv.Closer); ok {
-				casted.Close()
-			}
+		if err := sd.AccountWriter.flush(ctx, tx); err != nil {
+			return err
 		}
+		if err := sd.StorageWriter.flush(ctx, tx); err != nil {
+			return err
+		}
+		if err := sd.CodeWriter.flush(ctx, tx); err != nil {
+			return err
+		}
+		if err := sd.CommitmentWriter.flush(ctx, tx); err != nil {
+			return err
+		}
+		if err := sd.LogAddrsWriter.Flush(ctx, tx); err != nil {
+			return err
+		}
+		if err := sd.LogTopicsWriter.Flush(ctx, tx); err != nil {
+			return err
+		}
+		if err := sd.TracesFromWriter.Flush(ctx, tx); err != nil {
+			return err
+		}
+		if err := sd.TracesToWriter.Flush(ctx, tx); err != nil {
+			return err
+		}
+
+		sd.AccountWriter.close()
+		sd.StorageWriter.close()
+		sd.CodeWriter.close()
+		sd.CommitmentWriter.close()
+		sd.LogAddrsWriter.close()
+		sd.LogTopicsWriter.close()
+		sd.TracesFromWriter.close()
+		sd.TracesToWriter.close()
 	}
 	return nil
 }
@@ -1186,7 +1170,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.trace {
 		fmt.Printf("[commitment] store txn %d block %d rh %x\n", dc.hc.ic.txNum, blockNum, rh)
 	}
-	return dc.PutWithPrev(keyCommitmentState, nil, encodedState, prevState)
+	return sdc.sd.CommitmentWriter.PutWithPrev(keyCommitmentState, nil, encodedState, prevState)
 }
 
 func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {

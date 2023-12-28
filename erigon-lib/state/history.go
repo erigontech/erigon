@@ -444,19 +444,15 @@ func (hc *HistoryContext) AddPrevValue(key1, key2, original []byte) (err error) 
 	}
 	return hc.wal.addPrevValue(key1, key2, original)
 }
+func (hc *historyWAL) AddPrevValue(key1, key2, original []byte) (err error) {
+	if original == nil {
+		original = []byte{}
+	}
+	return hc.addPrevValue(key1, key2, original)
+}
 
-func (hc *HistoryContext) DiscardHistory() {
-	hc.ic.StartWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, true)
-}
-func (hc *HistoryContext) StartWrites() {
-	hc.ic.StartWrites()
-	hc.wal = hc.newWriter(hc.h.dirs.Tmp, false)
-}
-func (hc *HistoryContext) FinishWrites() {
-	hc.ic.FinishWrites()
-	hc.wal.close()
-	hc.wal = nil
+func (hc *HistoryContext) NewWriter() *historyWAL {
+	return hc.newWriter(hc.h.dirs.Tmp, false)
 }
 
 func (hc *HistoryContext) Rotate() historyFlusher {
@@ -516,7 +512,11 @@ type historyWAL struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
+
+	ii *invertedIndexWAL
 }
+
+func (h *historyWAL) SetTxNum(v uint64) { h.ii.SetTxNum(v) }
 
 func (h *historyWAL) close() {
 	if h == nil { // allow dobule-close
@@ -524,6 +524,9 @@ func (h *historyWAL) close() {
 	}
 	if h.historyVals != nil {
 		h.historyVals.Close()
+	}
+	if h.ii != nil {
+		h.ii.close()
 	}
 }
 
@@ -536,6 +539,8 @@ func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyWAL {
 		historyKey:       make([]byte, 128),
 		largeValues:      hc.h.historyLargeValues,
 		historyVals:      etl.NewCollector(hc.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), hc.h.logger),
+
+		ii: hc.ic.newWriter(tmpdir, discard),
 	}
 	w.historyVals.LogLvl(log.LvlTrace)
 	return w

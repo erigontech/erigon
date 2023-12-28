@@ -605,17 +605,8 @@ func (ic *InvertedIndexContext) Add(key []byte) error {
 	return ic.wal.add(key, key)
 }
 
-func (ic *InvertedIndexContext) DiscardHistory() {
-	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, true)
-}
-func (ic *InvertedIndexContext) StartWrites() {
-	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, false)
-}
-func (ic *InvertedIndexContext) FinishWrites() {
-	if ic.wal != nil {
-		ic.wal.close()
-		ic.wal = nil
-	}
+func (ic *InvertedIndexContext) NewWriter() *invertedIndexWAL {
+	return ic.newWriter(ic.ii.dirs.Tmp, false)
 }
 
 func (ic *InvertedIndexContext) Rotate() *invertedIndexWAL {
@@ -639,12 +630,20 @@ type invertedIndexWAL struct {
 	tmpdir       string
 	discard      bool
 	filenameBase string
+
+	txNum      uint64
+	txNumBytes [8]byte
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
 // maybe in future we will improve etl, to sort dupSort values in the way that allow use .AppendDup
 func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 	return next(k, k, v)
+}
+
+func (ic *invertedIndexWAL) SetTxNum(txNum uint64) {
+	ic.txNum = txNum
+	binary.BigEndian.PutUint64(ic.txNumBytes[:], ic.txNum)
 }
 
 func (ii *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -694,10 +693,10 @@ func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
 	if ii.discard {
 		return nil
 	}
-	if err := ii.indexKeys.Collect(ii.ic.txNumBytes[:], key); err != nil {
+	if err := ii.indexKeys.Collect(ii.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if err := ii.index.Collect(indexKey, ii.ic.txNumBytes[:]); err != nil {
+	if err := ii.index.Collect(indexKey, ii.txNumBytes[:]); err != nil {
 		return err
 	}
 	return nil

@@ -723,6 +723,7 @@ func TestDomain_Delete(t *testing.T) {
 	defer tx.Rollback()
 	dc := d.MakeContext()
 	defer dc.Close()
+
 	dc.StartWrites()
 	defer dc.FinishWrites()
 
