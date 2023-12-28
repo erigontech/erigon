@@ -222,8 +222,12 @@ func BorHeimdallForward(
 		nextSpanId = lastSpanId + 1
 	}
 	var endSpanID uint64
-	if bor.SpanIDAt(headNumber) > 0 {
-		endSpanID = bor.SpanIDAt(headNumber+1) + 1
+	if span.NumAt(headNumber) > 0 {
+		endSpanID = span.NumAt(headNumber + 1)
+	}
+
+	if span.BlockInLastSprintOfSpan(headNumber, cfg.chainConfig.Bor) {
+		endSpanID++
 	}
 
 	lastBlockNum := s.BlockNumber
@@ -288,7 +292,7 @@ func BorHeimdallForward(
 			}
 
 			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
-			spanID := bor.SpanIDAt(blockNum)
+			spanID := span.NumAt(blockNum)
 			if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
 				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
 					return err
@@ -357,7 +361,7 @@ func checkHeaderExtraData(
 	header *types.Header,
 	config *chain.BorConfig,
 ) error {
-	spanID := bor.SpanIDAt(blockNum + 1)
+	spanID := span.NumAt(blockNum + 1)
 	spanBytes := chain.BorSpan(spanID)
 	var sp span.HeimdallSpan
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
@@ -815,7 +819,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 		return err
 	}
 	defer spanCursor.Close()
-	lastSpanToKeep := bor.SpanIDAt(u.UnwindPoint)
+	lastSpanToKeep := span.NumAt(u.UnwindPoint)
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
 	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
