@@ -772,17 +772,10 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	localTimeout, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	//i := 10
 	for {
 		if ac.nothingToPrune(tx) {
 			return nil
 		}
-
-		//if i == 0 {
-		//	fmt.Printf("otce4ka\n")
-		//	break
-		//}
-		//i--
 
 		if err := ac.Prune(context.Background(), tx, 1000); err != nil {
 			log.Warn("[snapshots] PruneSmallBatches", "err", err)
@@ -796,7 +789,6 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return ctx.Err()
 		}
 	}
-	return nil
 }
 
 func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
