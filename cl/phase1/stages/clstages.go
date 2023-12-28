@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"time"
 
@@ -355,7 +356,10 @@ func ConsensusClStages(ctx context.Context,
 								time.Sleep(2 * time.Second)
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 								for blocks == nil || len(blocks.Data) < 3 {
-									blocks, err = sourceFunc(ctx, tx, args.seenSlot-3, totalRequest+5)
+									from := args.seenSlot - 2
+									count := (utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) - from) + 2
+									fmt.Println(from, count)
+									blocks, err = sourceFunc(ctx, tx, from, count)
 									if err != nil {
 										errCh <- err
 										return
@@ -374,17 +378,22 @@ func ConsensusClStages(ctx context.Context,
 					}
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
-					select {
-					case err := <-errCh:
-						return err
-					case blocks := <-respCh:
-						for _, block := range blocks.Data {
-							if err := processBlock(tx, block, true, true); err != nil {
-								return err
+					for {
+						select {
+						case err := <-errCh:
+							return err
+						case blocks := <-respCh:
+							for _, block := range blocks.Data {
+								if err := processBlock(tx, block, true, true); err != nil {
+									return err
+								}
+								if block.Block.Slot >= args.targetSlot {
+									break
+								}
 							}
+						case <-logTimer.C:
+							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenEpoch, "to", args.targetSlot)
 						}
-					case <-logTimer.C:
-						logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenEpoch, "to", args.targetSlot)
 					}
 					return tx.Commit()
 				},
