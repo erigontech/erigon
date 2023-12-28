@@ -67,7 +67,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, fmt.Errorf("slot %d is greater than latest processed state %d", slot, latestProcessedState)
 	}
 
-	if slot == 0 {
+	if slot == r.genesisState.Slot() {
 		return r.genesisState.Copy()
 	}
 	// Read the current block (we need the block header) + other stuff
@@ -76,7 +76,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 		return nil, err
 	}
 	if block == nil {
-		return nil, fmt.Errorf("block at slot %d not found", slot)
+		return nil, nil
 	}
 	blockHeader := block.SignedBeaconBlockHeader().Header
 	blockHeader.Root = common.Hash{}
@@ -762,6 +762,9 @@ func (r *HistoricalStatesReader) ReadRandaoMixBySlotAndIndex(tx kv.Tx, slot, ind
 			needFromGenesis = false
 			epochLookup = epoch - (epochSubIndex + (r.cfg.EpochsPerHistoricalVector - index))
 		}
+	}
+	if epochLookup < r.genesisState.Slot()/r.cfg.SlotsPerEpoch {
+		needFromGenesis = true
 	}
 
 	if needFromGenesis {

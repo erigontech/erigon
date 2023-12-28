@@ -78,7 +78,7 @@ func (a *ApiHandler) getAttestationsRewards(r *http.Request) (*beaconResponse, e
 	}
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch > headEpoch {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "epoch is in the future")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "epoch is in the future")
 	}
 	// Few cases to handle:
 	// 1) finalized data

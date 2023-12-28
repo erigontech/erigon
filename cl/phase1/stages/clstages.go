@@ -122,7 +122,7 @@ func MetaCatchingUp(args Args) StageName {
 		return CatchUpBlocks
 	}
 
-	return CatchUpEpochs
+	return ""
 }
 
 /*
@@ -583,7 +583,10 @@ func ConsensusClStages(ctx context.Context,
 			SleepForSlot: {
 				Description: `sleep until the next slot`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
-					return MetaCatchingUp(args)
+					if x := MetaCatchingUp(args); x != "" {
+						return x
+					}
+					return ListenForForks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					nextSlot := args.seenSlot + 1
