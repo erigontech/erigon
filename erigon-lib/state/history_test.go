@@ -491,7 +491,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 			}
 			indexOuts, historyOuts, _, err := hc.staticFilesInRange(r)
 			require.NoError(err)
-			indexIn, historyIn, err := h.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
+			indexIn, historyIn, err := hc.mergeFiles(ctx, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(err)
 			h.integrateMergedFiles(indexOuts, historyOuts, indexIn, historyIn)
 			return false
