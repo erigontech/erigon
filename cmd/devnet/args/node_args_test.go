@@ -36,7 +36,7 @@ func TestNodeArgs(t *testing.T) {
 		t.Fatal(asMap, "not found")
 	}
 
-	nodeArgs, _ = args.AsArgs(args.NonBlockProducer{
+	nodeArgs, _ = args.AsArgs(args.BlockConsumer{
 		NodeArgs: args.NodeArgs{
 			DataDir:        filepath.Join("data", fmt.Sprintf("%d", 2)),
 			StaticPeers:    "enode",

@@ -922,7 +922,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		return reset2.ResetExec(ctx, db, chain, "")
+		return reset2.ResetExec(ctx, db, chain, "", logger)
 	}
 
 	if txtrace {
