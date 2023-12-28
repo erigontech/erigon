@@ -332,7 +332,7 @@ func ConsensusClStages(ctx context.Context,
 					)
 					respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
-					sources := []persistence.BlockSource{gossipSource}
+					sources := []persistence.BlockSource{gossipSource, rpcSource}
 
 					// if we are more than one block behind, we request the rpc source as well
 					if totalRequest > 2 {
@@ -350,14 +350,27 @@ func ConsensusClStages(ctx context.Context,
 					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
 					for _, v := range sources {
 						sourceFunc := v.GetRange
-						go func() {
+						go func(source persistence.BlockSource) {
+							if _, ok := source.(*persistence.BeaconRpcSource); ok {
+								time.Sleep(2 * time.Second)
+								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
+								for blocks == nil || len(blocks.Data) < 3 {
+									blocks, err = sourceFunc(ctx, tx, args.seenSlot-3, totalRequest+5)
+									if err != nil {
+										errCh <- err
+										return
+									}
+								}
+								respCh <- blocks
+								return
+							}
 							blocks, err := sourceFunc(ctx, tx, args.seenSlot+1, totalRequest)
 							if err != nil {
 								errCh <- err
 								return
 							}
 							respCh <- blocks
-						}()
+						}(v)
 					}
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()

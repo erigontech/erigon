@@ -396,7 +396,7 @@ func (a *ApiHandler) computeAttestationsRewardsForPhase0(s *state.CachingBeaconS
 		// we can use a multiplier to account for all attesting
 		var attested, missed uint64
 		if currentValidator.Slashed() {
-			attested, missed = 0, 3
+			missed = 3
 		} else {
 			if previousMatchingSourceAttester {
 				attested++
