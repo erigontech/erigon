@@ -25,6 +25,37 @@ func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
+	numBlocks := 4000
+	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
+		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
+		GenerateChainNumBlocks: numBlocks,
+		LogLvl:                 log.LvlInfo,
+	})
+	// pretend-update previous stage progress
+	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
+
+	// run stage under test
+	testHarness.RunStageForward(t, stages.BorHeimdall)
+
+	// asserts
+	spans, err := testHarness.ReadSpansFromDB(ctx)
+	require.NoError(t, err)
+	require.Len(t, spans, 2)
+	require.Equal(t, uint64(0), spans[0].ID)
+	require.Equal(t, uint64(0), spans[0].StartBlock)
+	require.Equal(t, uint64(255), spans[0].EndBlock)
+	require.Equal(t, uint64(1), spans[1].ID)
+	require.Equal(t, uint64(256), spans[1].StartBlock)
+	require.Equal(t, uint64(6655), spans[1].EndBlock)
+}
+
+func TestBorHeimdallForwardFetchesNextSpanDuringLastSprintOfCurrentSpan(t *testing.T) {
+	// heimdall prepares the next span a number of sprints before the end of the current one
+	// we should be fetching the next span once we reach the last sprint of the current span
+	// this mimics the behaviour in bor
+	t.Parallel()
+
+	ctx := context.Background()
 	numBlocks := 6640
 	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
 		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
