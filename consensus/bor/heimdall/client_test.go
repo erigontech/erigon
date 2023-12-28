@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/ledgerwatch/log/v3"
@@ -31,9 +32,9 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	httpClient.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{StatusCode: 404, Body: emptyBodyReadCloser{}}, nil).
-		AnyTimes()
+		Times(5)
 	logger := testlog.Logger(t, log.LvlDebug)
-	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, logger)
+	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, 100*time.Millisecond, 5, logger)
 
 	spanRes, err := heimdallClient.Span(ctx, 1534)
 	require.Nil(t, spanRes)
