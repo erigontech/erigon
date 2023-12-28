@@ -629,7 +629,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 				return true
 			}
 			valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
-			valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, background.NewProgressSet())
+			valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, background.NewProgressSet())
 			require.NoError(t, err)
 			if valuesIn != nil && valuesIn.decompressor != nil {
 				fmt.Printf("merge: %s\n", valuesIn.decompressor.FileName())
@@ -675,7 +675,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
 			break
 		}
 		valuesOuts, indexOuts, historyOuts, _ := dc.staticFilesInRange(r)
-		valuesIn, indexIn, historyIn, err := d.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, background.NewProgressSet())
+		valuesIn, indexIn, historyIn, err := dc.mergeFiles(ctx, valuesOuts, indexOuts, historyOuts, r, background.NewProgressSet())
 		require.NoError(t, err)
 
 		d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
@@ -1338,7 +1338,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		ranges := dc.findMergeRange(txFrom, txTo)
 		vl, il, hl, _ := dc.staticFilesInRange(ranges)
 
-		dv, di, dh, err := d.mergeFiles(ctx, vl, il, hl, ranges, ps)
+		dv, di, dh, err := dc.mergeFiles(ctx, vl, il, hl, ranges, ps)
 		require.NoError(t, err)
 
 		d.integrateMergedFiles(vl, il, hl, dv, di, dh)
