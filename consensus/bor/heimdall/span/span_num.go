@@ -23,6 +23,7 @@ func EndBlockNum(spanNum uint64) uint64 {
 	return zerothSpanEnd
 }
 
+// BlockInLastSprintOfSpan returns true if a block num is within the last sprint of a span and false otherwise.
 func BlockInLastSprintOfSpan(blockNum uint64, config *chain.BorConfig) bool {
 	spanNum := NumAt(blockNum)
 	endBlockNum := EndBlockNum(spanNum)
