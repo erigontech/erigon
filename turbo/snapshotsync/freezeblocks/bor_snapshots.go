@@ -376,8 +376,8 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	spanFrom := span.NumAt(blockFrom)
-	spanTo := span.NumAt(blockTo)
+	spanFrom := span.IDAt(blockFrom)
+	spanTo := span.IDAt(blockTo)
 	from := hexutility.EncodeTs(spanFrom)
 	if err := kv.BigChunks(db, kv.BorSpans, from, func(tx kv.Tx, spanIdBytes, spanBytes []byte) (bool, error) {
 		spanId := binary.BigEndian.Uint64(spanIdBytes)
@@ -508,7 +508,7 @@ func BorSpansIdx(ctx context.Context, segmentFilePath string, version uint8, blo
 	g := d.MakeGetter()
 	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.BorSpans.String()))
 
-	baseSpanId := span.NumAt(blockFrom)
+	baseSpanId := span.IDAt(blockFrom)
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),

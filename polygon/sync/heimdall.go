@@ -136,7 +136,7 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]
 }
 
 func (impl *HeimdallImpl) FetchSpan(ctx context.Context, start uint64) (*span.HeimdallSpan, error) {
-	return impl.client.Span(ctx, span.NumAt(start))
+	return impl.client.Span(ctx, span.IDAt(start))
 }
 
 func (impl *HeimdallImpl) OnMilestoneEvent(ctx context.Context, callback func(*milestone.Milestone)) error {
