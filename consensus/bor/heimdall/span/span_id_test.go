@@ -8,19 +8,19 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 )
 
-func TestSpanNumAt(t *testing.T) {
-	assert.Equal(t, uint64(0), NumAt(0))
-	assert.Equal(t, uint64(0), NumAt(1))
-	assert.Equal(t, uint64(0), NumAt(2))
-	assert.Equal(t, uint64(0), NumAt(zerothSpanEnd))
-	assert.Equal(t, uint64(1), NumAt(zerothSpanEnd+1))
-	assert.Equal(t, uint64(1), NumAt(zerothSpanEnd+2))
-	assert.Equal(t, uint64(1), NumAt(6655))
-	assert.Equal(t, uint64(2), NumAt(6656))
-	assert.Equal(t, uint64(2), NumAt(6657))
-	assert.Equal(t, uint64(2), NumAt(13055))
-	assert.Equal(t, uint64(3), NumAt(13056))
-	assert.Equal(t, uint64(6839), NumAt(43763456))
+func TestSpanIDAt(t *testing.T) {
+	assert.Equal(t, uint64(0), IDAt(0))
+	assert.Equal(t, uint64(0), IDAt(1))
+	assert.Equal(t, uint64(0), IDAt(2))
+	assert.Equal(t, uint64(0), IDAt(zerothSpanEnd))
+	assert.Equal(t, uint64(1), IDAt(zerothSpanEnd+1))
+	assert.Equal(t, uint64(1), IDAt(zerothSpanEnd+2))
+	assert.Equal(t, uint64(1), IDAt(6655))
+	assert.Equal(t, uint64(2), IDAt(6656))
+	assert.Equal(t, uint64(2), IDAt(6657))
+	assert.Equal(t, uint64(2), IDAt(13055))
+	assert.Equal(t, uint64(3), IDAt(13056))
+	assert.Equal(t, uint64(6839), IDAt(43763456))
 }
 
 func TestSpanEndBlockNum(t *testing.T) {

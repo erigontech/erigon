@@ -1139,7 +1139,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 		return 0
 	}
 
-	lastSpanID := span.NumAt(lastSegment.to)
+	lastSpanID := span.IDAt(lastSegment.to)
 	if lastSpanID > 0 {
 		lastSpanID--
 	}
@@ -1172,11 +1172,11 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx == nil {
 			continue
 		}
-		spanFrom := span.NumAt(sn.from)
+		spanFrom := span.IDAt(sn.from)
 		if spanId < spanFrom {
 			continue
 		}
-		spanTo := span.NumAt(sn.to)
+		spanTo := span.IDAt(sn.to)
 		if spanId >= spanTo {
 			continue
 		}
