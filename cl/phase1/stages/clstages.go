@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"errors"
-	"fmt"
 	"runtime"
 	"time"
 
@@ -358,7 +357,6 @@ func ConsensusClStages(ctx context.Context,
 								for blocks == nil || len(blocks.Data) < 3 {
 									from := args.seenSlot - 2
 									count := (utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot) - from) + 2
-									fmt.Println(from, count)
 									blocks, err = sourceFunc(ctx, tx, from, count)
 									if err != nil {
 										errCh <- err
