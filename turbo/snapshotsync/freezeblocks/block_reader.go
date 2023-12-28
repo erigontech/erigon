@@ -248,12 +248,7 @@ type BlockReader struct {
 }
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
-	var borSn *BorRoSnapshots
-
-	if borSnapshots != nil {
-		borSn = borSnapshots.(*BorRoSnapshots)
-	}
-
+	borSn, _ := borSnapshots.(*BorRoSnapshots)
 	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSn}
 }
 
@@ -269,8 +264,13 @@ func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	return nil
 }
 
-func (r *BlockReader) FrozenBlocks() uint64    { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenBorBlocks() uint64 { return r.borSn.BlocksAvailable() }
+func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+func (r *BlockReader) FrozenBorBlocks() uint64 {
+	if r.borSn != nil {
+		return r.borSn.BlocksAvailable()
+	}
+	return 0
+}
 func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
 	if r.borSn != nil {
@@ -286,16 +286,18 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-	if err != nil {
-		return nil, err
-	}
-	if blockHash == (common.Hash{}) {
-		return nil, nil
-	}
-	h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-	if h != nil {
-		return h, nil
+	if tx != nil {
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if blockHash == (common.Hash{}) {
+			return nil, nil
+		}
+		h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+		if h != nil {
+			return h, nil
+		}
 	}
 
 	view := r.sn.View()
@@ -394,13 +396,14 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
-
-	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		return body, nil
+	if tx != nil {
+		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if body != nil {
+			return body, nil
+		}
 	}
 
 	view := r.sn.View()
@@ -962,6 +965,10 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 		return *n, true, nil
 	}
 
+	if r.borSn == nil {
+		return 0, false, nil
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 
@@ -1080,6 +1087,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 }
 
 func (r *BlockReader) LastFrozenEventID() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Events()
@@ -1108,6 +1119,10 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 }
 
 func (r *BlockReader) LastFrozenSpanID() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Spans()

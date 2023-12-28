@@ -469,6 +469,7 @@ const (
 	ValidatorBalance          = "ValidatorBalance"
 	StaticValidators          = "StaticValidators"
 	StateEvents               = "StateEvents"
+	ActiveValidatorIndicies   = "ActiveValidatorIndicies"
 
 	// External data
 	StateRoot                  = "StateRoot"
@@ -679,6 +680,7 @@ var ChaindataTables = []string{
 	PreviousEpochAttestations,
 	Eth1DataVotes,
 	IntraRandaoMixes,
+	ActiveValidatorIndicies,
 }
 
 const (

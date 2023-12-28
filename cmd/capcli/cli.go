@@ -400,7 +400,9 @@ func (c *Chain) Run(ctx *Context) error {
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 
 	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
@@ -592,7 +594,9 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2MergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
+
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, snapshotVersion, 0, to, snaptype.Erigon2MergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {
@@ -630,8 +634,9 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	}
 
 	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -712,7 +717,9 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -782,7 +789,14 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
-	return snapshotsync.WaitForDownloader("CapCliDownloader", ctx, false, snapshotsync.OnlyCaplin, s, tx, freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root()), freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root())), params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
+
+	snapshotVersion := snapcfg.KnownCfg(d.Chain, 0).Version
+
+	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, snapshotsync.OnlyCaplin, s, tx,
+		freezeblocks.NewBlockReader(
+			freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root()),
+			freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root())),
+		params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
 }
 
 type RetrieveHistoricalState struct {
@@ -811,7 +825,9 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(r.Chain, 0).Version
+
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
@@ -822,7 +838,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconConfig, blockReader, db)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}

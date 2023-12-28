@@ -61,6 +61,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		nil, // penalize
 		nil, // not used
 		nil, // not used
+		nil,
 	)
 	stateSyncStages := stagedsync.DefaultStages(
 		ctx,
@@ -80,7 +81,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.FinishCfg{},
 		true,
 	)
-	stateSync := stagedsync.New(stateSyncStages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
+	stateSync := stagedsync.New(ethconfig.Defaults.Sync, stateSyncStages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
@@ -438,7 +439,7 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 		return borConsensusEng
 	}
 
-	t.Fatal(fmt.Sprintf("unimplmented consensus engine init for cfg %v", cfg.ChainConfig))
+	t.Fatalf("unimplmented consensus engine init for cfg %v", cfg.ChainConfig)
 	return nil
 }
 

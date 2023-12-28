@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -72,9 +71,6 @@ func TestGetAllValidators(t *testing.T) {
 			// unmarshal the json
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			if string(out) != c.expectedResp {
-				fmt.Println(string(out))
-			}
 			require.Equal(t, c.expectedResp, string(out))
 
 		})
@@ -134,9 +130,6 @@ func TestGetValidatorsBalances(t *testing.T) {
 			// unmarshal the json
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			if string(out) != c.expectedResp {
-				fmt.Println(string(out))
-			}
 			require.Equal(t, c.expectedResp, string(out))
 
 		})
@@ -197,9 +190,6 @@ func TestGetSingleValidator(t *testing.T) {
 			// unmarshal the json
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			if string(out) != c.expectedResp {
-				fmt.Println(string(out))
-			}
 			require.Equal(t, c.expectedResp, string(out))
 
 		})

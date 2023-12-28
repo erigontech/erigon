@@ -111,7 +111,7 @@ func NewTorrentClient(ctx context.Context, chain string, torrentDir string, logg
 	}
 
 	items := map[string]snapcfg.PreverifiedItem{}
-	for _, it := range snapcfg.KnownCfg(chain).Preverified {
+	for _, it := range snapcfg.KnownCfg(chain, 0).Preverified {
 		items[it.Name] = it
 	}
 

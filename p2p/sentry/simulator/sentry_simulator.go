@@ -32,11 +32,10 @@ type server struct {
 	peers            map[[64]byte]*p2p.Peer
 	messageReceivers map[sentry_if.MessageId][]sentry_if.Sentry_MessagesServer
 	logger           log.Logger
-	//snapshotVersion  uint8
-	knownSnapshots  *freezeblocks.RoSnapshots
-	activeSnapshots *freezeblocks.RoSnapshots
-	blockReader     *freezeblocks.BlockReader
-	downloader      *TorrentClient
+	knownSnapshots   *freezeblocks.RoSnapshots
+	activeSnapshots  *freezeblocks.RoSnapshots
+	blockReader      *freezeblocks.BlockReader
+	downloader       *TorrentClient
 }
 
 func newPeer(name string, caps []p2p.Cap) (*p2p.Peer, error) {
@@ -61,13 +60,13 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		peers[peer.Pubkey()] = peer
 	}
 
-	cfg := snapcfg.KnownCfg(chain)
+	cfg := snapcfg.KnownCfg(chain, 0)
 
 	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,
 		Produce:      false,
 		NoDownloader: true,
-	}, "" /*s.snapshotVersion,*/, logger)
+	}, "", cfg.Version, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
 
@@ -82,7 +81,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		Enabled:      true,
 		Produce:      false,
 		NoDownloader: true,
-	}, snapshotLocation /*s.snapshotVersion,*/, logger)
+	}, snapshotLocation, cfg.Version, logger)
 
 	if err := activeSnapshots.ReopenFolder(); err != nil {
 		return nil, err
@@ -437,7 +436,7 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*core_t
 }
 
 func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.HeaderSegment) error {
-	fileName := snaptype.SegmentFileName(header.From(), header.To(), snaptype.Headers)
+	fileName := snaptype.SegmentFileName(s.knownSnapshots.Version(), header.From(), header.To(), snaptype.Headers)
 
 	s.logger.Info(fmt.Sprintf("Downloading %s", fileName))
 
@@ -450,5 +449,5 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Heade
 	s.logger.Info(fmt.Sprintf("Indexing %s", fileName))
 
 	return freezeblocks.HeadersIdx(ctx,
-		filepath.Join(s.downloader.LocalFsRoot(), fileName), header.From(), s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+		filepath.Join(s.downloader.LocalFsRoot(), fileName), s.knownSnapshots.Version(), header.From(), s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }
