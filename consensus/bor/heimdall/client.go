@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var (
@@ -35,7 +35,8 @@ var (
 const (
 	stateFetchLimit    = 50
 	apiHeimdallTimeout = 10 * time.Second
-	retryCall          = 5 * time.Second
+	retryCall          = time.Second
+	maxRetries         = 5
 )
 
 type StateSyncEventsResponse struct {
@@ -48,27 +49,38 @@ type SpanResponse struct {
 	Result span.HeimdallSpan `json:"result"`
 }
 
-type HeimdallClient struct {
+type Client struct {
 	urlString string
-	client    http.Client
+	client    HttpClient
 	closeCh   chan struct{}
 	logger    log.Logger
 }
 
 type Request struct {
-	client http.Client
+	client HttpClient
 	url    *url.URL
 	start  time.Time
 }
 
-func NewHeimdallClient(urlString string, logger log.Logger) *HeimdallClient {
-	return &HeimdallClient{
+//go:generate mockgen -destination=./mock/http_client_mock.go -package=mock . HttpClient
+type HttpClient interface {
+	Do(req *http.Request) (*http.Response, error)
+	CloseIdleConnections()
+}
+
+func NewHeimdallClient(urlString string, logger log.Logger) *Client {
+	httpClient := &http.Client{
+		Timeout: apiHeimdallTimeout,
+	}
+	return newHeimdallClient(urlString, httpClient, logger)
+}
+
+func newHeimdallClient(urlString string, client HttpClient, logger log.Logger) *Client {
+	return &Client{
 		urlString: urlString,
 		logger:    logger,
-		client: http.Client{
-			Timeout: apiHeimdallTimeout,
-		},
-		closeCh: make(chan struct{}),
+		client:    client,
+		closeCh:   make(chan struct{}),
 	}
 }
 
@@ -90,7 +102,7 @@ const (
 	fetchSpanFormat = "bor/span/%d"
 )
 
-func (h *HeimdallClient) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
+func (h *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
 	eventRecords := make([]*clerk.EventRecordWithTime, 0)
 
 	for {
@@ -129,7 +141,7 @@ func (h *HeimdallClient) StateSyncEvents(ctx context.Context, fromID uint64, to 
 	return eventRecords, nil
 }
 
-func (h *HeimdallClient) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
+func (h *Client) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
 	url, err := spanURL(h.urlString, spanID)
 	if err != nil {
 		return nil, err
@@ -146,7 +158,7 @@ func (h *HeimdallClient) Span(ctx context.Context, spanID uint64) (*span.Heimdal
 }
 
 // FetchCheckpoint fetches the checkpoint from heimdall
-func (h *HeimdallClient) FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error) {
+func (h *Client) FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error) {
 	url, err := checkpointURL(h.urlString, number)
 	if err != nil {
 		return nil, err
@@ -168,7 +180,7 @@ func isInvalidMilestoneIndexError(err error) bool {
 }
 
 // FetchMilestone fetches a milestone from heimdall
-func (h *HeimdallClient) FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error) {
+func (h *Client) FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error) {
 	url, err := milestoneURL(h.urlString, number)
 	if err != nil {
 		return nil, err
@@ -192,7 +204,7 @@ func (h *HeimdallClient) FetchMilestone(ctx context.Context, number int64) (*mil
 }
 
 // FetchCheckpointCount fetches the checkpoint count from heimdall
-func (h *HeimdallClient) FetchCheckpointCount(ctx context.Context) (int64, error) {
+func (h *Client) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	url, err := checkpointCountURL(h.urlString)
 	if err != nil {
 		return 0, err
@@ -209,7 +221,7 @@ func (h *HeimdallClient) FetchCheckpointCount(ctx context.Context) (int64, error
 }
 
 // FetchMilestoneCount fetches the milestone count from heimdall
-func (h *HeimdallClient) FetchMilestoneCount(ctx context.Context) (int64, error) {
+func (h *Client) FetchMilestoneCount(ctx context.Context) (int64, error) {
 	url, err := milestoneCountURL(h.urlString)
 	if err != nil {
 		return 0, err
@@ -226,7 +238,7 @@ func (h *HeimdallClient) FetchMilestoneCount(ctx context.Context) (int64, error)
 }
 
 // FetchLastNoAckMilestone fetches the last no-ack-milestone from heimdall
-func (h *HeimdallClient) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
+func (h *Client) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
 	url, err := lastNoAckMilestoneURL(h.urlString)
 	if err != nil {
 		return "", err
@@ -243,7 +255,7 @@ func (h *HeimdallClient) FetchLastNoAckMilestone(ctx context.Context) (string, e
 }
 
 // FetchNoAckMilestone fetches the last no-ack-milestone from heimdall
-func (h *HeimdallClient) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
+func (h *Client) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
 	url, err := noAckMilestoneURL(h.urlString, milestoneID)
 	if err != nil {
 		return err
@@ -263,9 +275,9 @@ func (h *HeimdallClient) FetchNoAckMilestone(ctx context.Context, milestoneID st
 	return nil
 }
 
-// FetchMilestoneID fetches the bool result from Heimdal whether the ID corresponding
+// FetchMilestoneID fetches the bool result from Heimdall whether the ID corresponding
 // to the given milestone is in process in Heimdall
-func (h *HeimdallClient) FetchMilestoneID(ctx context.Context, milestoneID string) error {
+func (h *Client) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	url, err := milestoneIDURL(h.urlString, milestoneID)
 	if err != nil {
 		return err
@@ -287,30 +299,35 @@ func (h *HeimdallClient) FetchMilestoneID(ctx context.Context, milestoneID strin
 }
 
 // FetchWithRetry returns data from heimdall with retry
-func FetchWithRetry[T any](ctx context.Context, client http.Client, url *url.URL, closeCh chan struct{}, logger log.Logger) (*T, error) {
+func FetchWithRetry[T any](ctx context.Context, client HttpClient, url *url.URL, closeCh chan struct{}, logger log.Logger) (*T, error) {
 	return FetchWithRetryEx[T](ctx, client, url, nil, closeCh, logger)
 }
 
 // FetchWithRetryEx returns data from heimdall with retry
-func FetchWithRetryEx[T any](ctx context.Context, client http.Client, url *url.URL, isRecoverableError func(error) bool, closeCh chan struct{}, logger log.Logger) (*T, error) {
+func FetchWithRetryEx[T any](
+	ctx context.Context,
+	client HttpClient,
+	url *url.URL,
+	isRecoverableError func(error) bool,
+	closeCh chan struct{},
+	logger log.Logger,
+) (result *T, err error) {
 	attempt := 0
-	const logEach = 5
-
 	// create a new ticker for retrying the request
 	ticker := time.NewTicker(retryCall)
 	defer ticker.Stop()
 
-	for {
+	for attempt < maxRetries {
 		attempt++
 
 		request := &Request{client: client, url: url, start: time.Now()}
-		result, err := Fetch[T](ctx, request)
+		result, err = Fetch[T](ctx, request)
 		if err == nil {
 			return result, nil
 		}
 
 		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
-		// yet in heimdall. E.g. when the hardfork hasn't hit yet but heimdall
+		// yet in heimdall. E.g. when the hard fork hasn't hit yet but heimdall
 		// is upgraded.
 		if errors.Is(err, ErrServiceUnavailable) {
 			logger.Debug("[bor.heimdall] service unavailable at the moment", "path", url.Path, "attempt", attempt, "err", err)
@@ -321,9 +338,7 @@ func FetchWithRetryEx[T any](ctx context.Context, client http.Client, url *url.U
 			return nil, err
 		}
 
-		if attempt%logEach == 1 {
-			logger.Warn("[bor.heimdall] an error while fetching", "path", url.Path, "attempt", attempt, "err", err)
-		}
+		logger.Warn("[bor.heimdall] an error while fetching", "path", url.Path, "attempt", attempt, "err", err)
 
 		select {
 		case <-ctx.Done():
@@ -336,6 +351,8 @@ func FetchWithRetryEx[T any](ctx context.Context, client http.Client, url *url.U
 			// retry
 		}
 	}
+
+	return nil, err
 }
 
 // Fetch fetches response from heimdall
@@ -430,7 +447,7 @@ func makeURL(urlString, rawPath, rawQuery string) (*url.URL, error) {
 }
 
 // internal fetch method
-func internalFetch(ctx context.Context, client http.Client, u *url.URL) ([]byte, error) {
+func internalFetch(ctx context.Context, client HttpClient, u *url.URL) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -441,10 +458,12 @@ func internalFetch(ctx context.Context, client http.Client, u *url.URL) ([]byte,
 		return nil, err
 	}
 
-	defer res.Body.Close()
+	defer func() {
+		_ = res.Body.Close()
+	}()
 
 	if res.StatusCode == http.StatusServiceUnavailable {
-		return nil, fmt.Errorf("%w: url='%s'; status=%d;", ErrServiceUnavailable, u.String(), res.StatusCode)
+		return nil, fmt.Errorf("%w: url='%s', status=%d", ErrServiceUnavailable, u.String(), res.StatusCode)
 	}
 
 	// unmarshall data from buffer
@@ -460,13 +479,13 @@ func internalFetch(ctx context.Context, client http.Client, u *url.URL) ([]byte,
 
 	// check status code
 	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("%w: url='%s'; status=%d; body='%s';", ErrNotSuccessfulResponse, u.String(), res.StatusCode, string(body))
+		return nil, fmt.Errorf("%w: url='%s', status=%d, body='%s'", ErrNotSuccessfulResponse, u.String(), res.StatusCode, string(body))
 	}
 
 	return body, nil
 }
 
-func internalFetchWithTimeout(ctx context.Context, client http.Client, url *url.URL) ([]byte, error) {
+func internalFetchWithTimeout(ctx context.Context, client HttpClient, url *url.URL) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, apiHeimdallTimeout)
 	defer cancel()
 
@@ -475,7 +494,7 @@ func internalFetchWithTimeout(ctx context.Context, client http.Client, url *url.
 }
 
 // Close sends a signal to stop the running process
-func (h *HeimdallClient) Close() {
+func (h *Client) Close() {
 	close(h.closeCh)
 	h.client.CloseIdleConnections()
 }
