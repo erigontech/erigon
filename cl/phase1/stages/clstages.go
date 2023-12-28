@@ -378,6 +378,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
+				MainLoop:
 					for {
 						select {
 						case <-ctx.Done():
@@ -389,14 +390,14 @@ func ConsensusClStages(ctx context.Context,
 								if err := processBlock(tx, block, true, true); err != nil {
 									log.Error("bad blocks segment received", "err", err)
 									cfg.rpc.BanPeer(blocks.Peer)
-									continue
+									continue MainLoop
 								}
 								if block.Block.Slot >= args.targetSlot {
-									break
+									break MainLoop
 								}
 							}
 						case <-logTimer.C:
-							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenEpoch, "to", args.targetSlot)
+							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 						}
 					}
 					return tx.Commit()
