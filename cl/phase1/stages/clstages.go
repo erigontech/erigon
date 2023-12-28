@@ -122,7 +122,7 @@ func MetaCatchingUp(args Args) StageName {
 		return CatchUpBlocks
 	}
 
-	return ""
+	return CatchUpEpochs
 }
 
 /*
