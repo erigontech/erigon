@@ -380,12 +380,16 @@ func ConsensusClStages(ctx context.Context,
 					defer logTimer.Stop()
 					for {
 						select {
+						case <-ctx.Done():
+							return errors.New("timeout waiting for blocks")
 						case err := <-errCh:
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
 								if err := processBlock(tx, block, true, true); err != nil {
-									return err
+									log.Error("bad blocks segment received", "err", err)
+									cfg.rpc.BanPeer(blocks.Peer)
+									continue
 								}
 								if block.Block.Slot >= args.targetSlot {
 									break
