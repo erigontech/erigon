@@ -2,6 +2,7 @@ package antiquary
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -67,17 +68,21 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
+	fmt.Println("A")
 	if a.downloader == nil || !a.blocks {
 		return nil // Just skip if we don't have a downloader
 	}
+	fmt.Println("B")
 	// Skip if we dont support backfilling for the current network
 	if !clparams.SupportBackfilling(a.cfg.DepositNetworkID) {
 		return nil
 	}
+	fmt.Println("C")
 	statsReply, err := a.downloader.Stats(a.ctx, &proto_downloader.StatsRequest{})
 	if err != nil {
 		return err
 	}
+	fmt.Println("D")
 	reCheckTicker := time.NewTicker(3 * time.Second)
 	defer reCheckTicker.Stop()
 	// Fist part of the antiquate is to download caplin snapshots
@@ -91,6 +96,7 @@ func (a *Antiquary) Loop() error {
 		case <-a.ctx.Done():
 		}
 	}
+	fmt.Println("E")
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger, log.LvlDebug); err != nil {
 		return err
 	}
