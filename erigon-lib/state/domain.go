@@ -2149,11 +2149,11 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	defer keysCursor.Close()
 
 	var (
-		prunedKeys    uint64
-		prunedMaxStep uint64
-		prunedMinStep = uint64(math.MaxUint64)
-		seek          = make([]byte, 0, 256)
-		srcLimit      = limit
+		prunedKeys uint64
+		//prunedMaxStep uint64
+		//prunedMinStep = uint64(math.MaxUint64)
+		seek     = make([]byte, 0, 256)
+		srcLimit = limit
 	)
 	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dc.d.filenameBase, txFrom, txTo, step, limit)
 	//defer func() {
@@ -2206,12 +2206,12 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 		prunedKeys++
 
-		if is < prunedMinStep {
-			prunedMinStep = is
-		}
-		if is > prunedMaxStep {
-			prunedMaxStep = is
-		}
+		//if is < prunedMinStep {
+		//	prunedMinStep = is
+		//}
+		//if is > prunedMaxStep {
+		//	prunedMaxStep = is
+		//}
 
 		select {
 		case <-ctx.Done():
@@ -2229,9 +2229,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		default:
 		}
 	}
-	if prunedMinStep == math.MaxUint64 {
-		prunedMinStep = 0
-	} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
+	//if prunedMinStep == math.MaxUint64 {
+	//	prunedMinStep = 0
+	//} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
 
 	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
 		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
