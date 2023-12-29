@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -43,6 +44,11 @@ const (
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 	extraVanity             = 32   // Fixed number of extra-data prefix bytes reserved for signer vanity
 	extraSeal               = 65   // Fixed number of extra-data suffix bytes reserved for signer seal
+)
+
+var (
+	ErrHeaderValidatorsLengthMismatch = errors.New("header validators length mismatch")
+	ErrHeaderValidatorsBytesMismatch  = errors.New("header validators bytes mismatch")
 )
 
 type BorHeimdallCfg struct {
@@ -216,8 +222,12 @@ func BorHeimdallForward(
 		nextSpanId = lastSpanId + 1
 	}
 	var endSpanID uint64
-	if bor.SpanIDAt(headNumber) > 0 {
-		endSpanID = bor.SpanIDAt(headNumber+1) + 1
+	if span.IDAt(headNumber) > 0 {
+		endSpanID = span.IDAt(headNumber + 1)
+	}
+
+	if span.BlockInLastSprintOfSpan(headNumber, cfg.chainConfig.Bor) {
+		endSpanID++
 	}
 
 	lastBlockNum := s.BlockNumber
@@ -280,6 +290,14 @@ func BorHeimdallForward(
 					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 				}
 			}
+
+			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
+			spanID := span.IDAt(blockNum)
+			if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
+					return err
+				}
+			}
 		}
 
 		if blockNum > 0 && blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
@@ -310,16 +328,6 @@ func BorHeimdallForward(
 
 				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
 					return fmt.Errorf("can't persist validator sets: %w", err)
-				}
-			}
-
-			if !mine {
-				sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
-				spanID := bor.SpanIDAt(blockNum)
-				if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
-					if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
-						return err
-					}
 				}
 			}
 		}
@@ -353,7 +361,7 @@ func checkHeaderExtraData(
 	header *types.Header,
 	config *chain.BorConfig,
 ) error {
-	spanID := bor.SpanIDAt(blockNum + 1)
+	spanID := span.IDAt(blockNum + 1)
 	spanBytes := chain.BorSpan(spanID)
 	var sp span.HeimdallSpan
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
@@ -372,12 +380,12 @@ func checkHeaderExtraData(
 	}
 
 	if len(producerSet) != len(headerVals) {
-		return bor.ErrInvalidSpanValidators
+		return ErrHeaderValidatorsLengthMismatch
 	}
 
 	for i, val := range producerSet {
 		if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
-			return bor.ErrInvalidSpanValidators
+			return ErrHeaderValidatorsBytesMismatch
 		}
 	}
 	return nil
@@ -811,7 +819,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 		return err
 	}
 	defer spanCursor.Close()
-	lastSpanToKeep := bor.SpanIDAt(u.UnwindPoint)
+	lastSpanToKeep := span.IDAt(u.UnwindPoint)
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
 	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
