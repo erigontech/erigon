@@ -9,7 +9,6 @@ import (
 	"math"
 	"path/filepath"
 	"runtime"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -67,7 +66,7 @@ type SharedDomains struct {
 	estSize  int
 	trace    bool //nolint
 	//muMaps   sync.RWMutex
-	walLock sync.RWMutex
+	//walLock sync.RWMutex
 
 	account    map[string][]byte
 	code       map[string][]byte
@@ -113,9 +112,29 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		aggCtx: ac,
 		roTx:   tx,
 		//trace:       true,
+		accountWriter:    ac.account.NewWriter(),
+		storageWriter:    ac.storage.NewWriter(),
+		codeWriter:       ac.code.NewWriter(),
+		commitmentWriter: ac.commitment.NewWriter(),
+		logAddrsWriter:   ac.logAddrs.NewWriter(),
+		logTopicsWriter:  ac.logTopics.NewWriter(),
+		tracesFromWriter: ac.tracesFrom.NewWriter(),
+		tracesToWriter:   ac.tracesTo.NewWriter(),
 	}
 
-	sd.StartWrites()
+	if sd.account == nil {
+		sd.account = map[string][]byte{}
+	}
+	if sd.commitment == nil {
+		sd.commitment = map[string][]byte{}
+	}
+	if sd.code == nil {
+		sd.code = map[string][]byte{}
+	}
+	if sd.storage == nil {
+		sd.storage = btree2.NewMap[string, []byte](128)
+	}
+
 	sd.SetTxNum(0)
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 
@@ -709,22 +728,15 @@ func (sd *SharedDomains) Close() {
 	if sd.aggCtx != nil {
 		sd.SetTxNum(0)
 
-		sd.walLock.Lock()
-		defer sd.walLock.Unlock()
+		//sd.walLock.Lock()
+		//defer sd.walLock.Unlock()
 		sd.accountWriter.close()
-		sd.accountWriter = nil
 		sd.storageWriter.close()
-		sd.storageWriter = nil
 		sd.codeWriter.close()
-		sd.codeWriter = nil
 		sd.logAddrsWriter.close()
-		sd.logAddrsWriter = nil
 		sd.logTopicsWriter.close()
-		sd.logTopicsWriter = nil
 		sd.tracesFromWriter.close()
-		sd.tracesFromWriter = nil
 		sd.tracesToWriter.close()
-		sd.tracesToWriter = nil
 	}
 
 	if sd.sdCtx != nil {
@@ -740,43 +752,6 @@ func (sd *SharedDomains) Close() {
 	}
 }
 
-// StartWrites - pattern: `defer domains.StartWrites().FinishWrites()`
-func (sd *SharedDomains) StartWrites() *SharedDomains {
-	sd.walLock.Lock()
-	defer sd.walLock.Unlock()
-
-	sd.accountWriter = sd.aggCtx.account.NewWriter()
-	sd.storageWriter = sd.aggCtx.storage.NewWriter()
-	sd.codeWriter = sd.aggCtx.code.NewWriter()
-	sd.commitmentWriter = sd.aggCtx.commitment.NewWriter()
-	sd.logAddrsWriter = sd.aggCtx.logAddrs.NewWriter()
-	sd.logTopicsWriter = sd.aggCtx.logTopics.NewWriter()
-	sd.tracesFromWriter = sd.aggCtx.tracesFrom.NewWriter()
-	sd.tracesToWriter = sd.aggCtx.tracesTo.NewWriter()
-
-	if sd.account == nil {
-		sd.account = map[string][]byte{}
-	}
-	if sd.commitment == nil {
-		sd.commitment = map[string][]byte{}
-	}
-	if sd.code == nil {
-		sd.code = map[string][]byte{}
-	}
-	if sd.storage == nil {
-		sd.storage = btree2.NewMap[string, []byte](128)
-	}
-	return sd
-}
-
-func (sd *SharedDomains) BatchHistoryWriteStart() *SharedDomains {
-	sd.walLock.RLock()
-	return sd
-}
-
-func (sd *SharedDomains) BatchHistoryWriteEnd() {
-	sd.walLock.RUnlock()
-}
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
 	if err != nil {
