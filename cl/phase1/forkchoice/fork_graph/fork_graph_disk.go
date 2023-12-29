@@ -410,6 +410,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		delete(f.headers, root)
 		delete(f.saveStates, root)
 		delete(f.syncCommittees, root)
+		delete(f.blockRewards, root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		f.fs.Remove(getBeaconStateCacheFilename(root))
 	}
