@@ -125,7 +125,7 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993
 				c.logger.Warn(
 					"[bor.heimdall] check heimdall logs to see if it is in sync - no response when querying state sync events",
-					"url", url,
+					"path", url.RequestURI(),
 				)
 			}
 			return nil, err
@@ -342,7 +342,8 @@ func FetchWithRetryEx[T any](ctx context.Context, client *Client, url *url.URL, 
 			return nil, err
 		}
 
-		client.logger.Warn("[bor.heimdall] an error while fetching", "url", url, "attempt", attempt, "err", err)
+		client.logger.Warn("[bor.heimdall] an error while fetching", "path", url.RequestURI(), "attempt", attempt, "err", err)
+
 		select {
 		case <-ctx.Done():
 			client.logger.Debug("[bor.heimdall] request canceled", "reason", ctx.Err(), "path", url.Path, "attempt", attempt)
