@@ -970,13 +970,13 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		maxTxnum   uint64 = 0
 		pruneCount uint64
 	)
-	defer func() {
-		ii.logger.Info("[snapshots] prune index",
-			"name", ii.filenameBase,
-			"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(ic.ii.aggregationStep), float64(maxTxnum)/float64(ic.ii.aggregationStep)),
-			"pruned values", pruneCount,
-			"tx until limit", limit)
-	}()
+	//defer func() {
+	//	ii.logger.Info("[snapshots] prune index",
+	//		"name", ii.filenameBase,
+	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(ic.ii.aggregationStep), float64(maxTxnum)/float64(ic.ii.aggregationStep)),
+	//		"pruned values", pruneCount,
+	//		"tx until limit", limit)
+	//}()
 
 	if !omitProgress {
 		pruneTxNum, _, err := GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
@@ -1097,7 +1097,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase,
 					"prefix", fmt.Sprintf("%x", key[:8]),
-					"count", pruneCount,
+					"pruned values", pruneCount,
 					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
 			case <-ctx.Done():
 				if !omitProgress {
