@@ -532,17 +532,17 @@ func TestIterationMultistep(t *testing.T) {
 	require.NoError(t, err)
 
 	writer.SetTxNum(2 + 16)
-	err = writer.Put([]byte("addr2"), []byte("loc1"), []byte("value1"), tx)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil)
 	require.NoError(t, err)
-	err = writer.Put([]byte("addr2"), []byte("loc2"), []byte("value1"), tx)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil)
 	require.NoError(t, err)
-	err = writer.Put([]byte("addr2"), []byte("loc3"), []byte("value1"), tx)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc3"), []byte("value1"), nil)
 	require.NoError(t, err)
-	err = writer.Put([]byte("addr2"), []byte("loc4"), []byte("value1"), tx)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc4"), []byte("value1"), nil)
 	require.NoError(t, err)
 
 	writer.SetTxNum(2 + 16 + 16)
-	err = writer.Delete([]byte("addr2"), []byte("loc1"), tx)
+	err = writer.DeleteWithPrev([]byte("addr2"), []byte("loc1"), nil)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
