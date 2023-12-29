@@ -318,7 +318,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := base_encoding.WriteRabbits(actives, commonBuffer); err != nil {
 				return err
 			}
-			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(prevEpoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
+			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(prevEpoch*s.cfg.SlotsPerEpoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
 				return err
 			}
 			actives = s.currentState.GetActiveValidatorsIndices(epoch)
@@ -326,7 +326,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := base_encoding.WriteRabbits(actives, commonBuffer); err != nil {
 				return err
 			}
-			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(epoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
+			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(epoch*s.cfg.SlotsPerEpoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
 				return err
 			}
 			// truncate the file

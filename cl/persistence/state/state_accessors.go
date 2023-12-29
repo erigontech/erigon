@@ -346,8 +346,8 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	return err
 }
 
-func ReadActiveIndicies(tx kv.Tx, epoch uint64) ([]uint64, error) {
-	key := base_encoding.Encode64ToBytes4(epoch)
+func ReadActiveIndicies(tx kv.Tx, slot uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(slot)
 	v, err := tx.GetOne(kv.ActiveValidatorIndicies, key)
 	if err != nil {
 		return nil, err

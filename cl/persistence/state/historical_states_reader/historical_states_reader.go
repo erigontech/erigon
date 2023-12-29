@@ -590,7 +590,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
 
-	currentActiveIndicies, err := state_accessors.ReadActiveIndicies(tx, epoch)
+	currentActiveIndicies, err := state_accessors.ReadActiveIndicies(tx, epoch*r.cfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -598,7 +598,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	if epoch == 0 {
 		previousActiveIndicies = currentActiveIndicies
 	} else {
-		previousActiveIndicies, err = state_accessors.ReadActiveIndicies(tx, epoch-1)
+		previousActiveIndicies, err = state_accessors.ReadActiveIndicies(tx, (epoch-1)*r.cfg.SlotsPerEpoch)
 		if err != nil {
 			return nil, nil, err
 		}
