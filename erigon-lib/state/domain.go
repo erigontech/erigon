@@ -879,6 +879,10 @@ func (d *domainWAL) Flush(ctx context.Context, tx kv.RwTx) error {
 	if d.discard {
 		return nil
 	}
+	if err := d.h.Flush(ctx, tx); err != nil {
+		return err
+	}
+
 	if err := d.keys.Load(tx, d.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}

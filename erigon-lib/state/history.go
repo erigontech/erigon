@@ -566,6 +566,10 @@ func (w *historyWAL) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
+	if err := w.ii.Flush(ctx, tx); err != nil {
+		return err
+	}
+
 	if err := w.historyVals.Load(tx, w.hc.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
