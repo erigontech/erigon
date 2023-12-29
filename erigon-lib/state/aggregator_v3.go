@@ -784,7 +784,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return nil
 		}
 
-		if err := ac.Prune(context.Background(), tx, 10000); err != nil {
+		if err := ac.Prune(context.Background(), tx, 10); err != nil {
 			log.Warn("[snapshots] PruneSmallBatches", "err", err)
 			return err
 		}
