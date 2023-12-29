@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	dbg "runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -343,20 +344,72 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	baseRpcPort := ctx.Int(BaseRpcPortFlag.Name)
 	producerCount := int(ctx.Uint(BlockProducersFlag.Name))
 
+	var dirLogLevel log.Lvl = log.LvlTrace
+	var consoleLogLevel log.Lvl = log.LvlCrit
+
+	if ctx.IsSet(logging.LogVerbosityFlag.Name) {
+		lvlVal := ctx.String(logging.LogVerbosityFlag.Name)
+
+		i, err := strconv.Atoi(lvlVal)
+
+		lvl := log.Lvl(i)
+
+		if err != nil {
+			lvl, err = log.LvlFromString(lvlVal)
+		}
+
+		if err == nil {
+			consoleLogLevel = lvl
+			dirLogLevel = lvl
+		}
+	} else {
+		if ctx.IsSet(logging.LogConsoleVerbosityFlag.Name) {
+			lvlVal := ctx.String(logging.LogConsoleVerbosityFlag.Name)
+
+			i, err := strconv.Atoi(lvlVal)
+
+			lvl := log.Lvl(i)
+
+			if err != nil {
+				lvl, err = log.LvlFromString(lvlVal)
+			}
+
+			if err == nil {
+				consoleLogLevel = lvl
+			}
+		}
+
+		if ctx.IsSet(logging.LogDirVerbosityFlag.Name) {
+			lvlVal := ctx.String(logging.LogDirVerbosityFlag.Name)
+
+			i, err := strconv.Atoi(lvlVal)
+
+			lvl := log.Lvl(i)
+
+			if err != nil {
+				lvl, err = log.LvlFromString(lvlVal)
+			}
+
+			if err == nil {
+				dirLogLevel = lvl
+			}
+		}
+	}
+
 	switch chainName {
 	case networkname.BorDevnetChainName:
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
-			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, logger), nil
+			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, logger, consoleLogLevel, dirLogLevel), nil
 		} else if ctx.Bool(LocalHeimdallFlag.Name) {
 			heimdallGrpcAddr := ctx.String(HeimdallGrpcAddressFlag.Name)
 			sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name))
-			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, logger), nil
+			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, logger, consoleLogLevel, dirLogLevel), nil
 		} else {
-			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, logger), nil
+			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, logger, consoleLogLevel, dirLogLevel), nil
 		}
 
 	case networkname.DevChainName:
-		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, logger), nil
+		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, logger, consoleLogLevel, dirLogLevel), nil
 
 	default:
 		return nil, fmt.Errorf("unknown network: '%s'", chainName)

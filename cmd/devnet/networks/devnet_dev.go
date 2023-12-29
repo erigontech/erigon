@@ -1,6 +1,8 @@
 package networks
 
 import (
+	"strconv"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
@@ -16,6 +18,8 @@ func NewDevDevnet(
 	baseRpcPort int,
 	producerCount int,
 	logger log.Logger,
+	consoleLogLevel log.Lvl,
+	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	faucetSource := accounts.NewAccount("faucet-source")
 
@@ -28,8 +32,8 @@ func NewDevDevnet(
 	for i := 0; i < producerCount; i++ {
 		nodes = append(nodes, &args.BlockProducer{
 			NodeArgs: args.NodeArgs{
-				ConsoleVerbosity: "0",
-				DirVerbosity:     "5",
+				ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
+				DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
 			},
 			AccountSlots: 200,
 		})

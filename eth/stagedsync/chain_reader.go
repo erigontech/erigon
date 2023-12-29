@@ -17,10 +17,10 @@ import (
 
 // Implements consensus.ChainReader
 type ChainReader struct {
-	Cfg chain.Config
-
+	Cfg         chain.Config
 	Db          kv.Getter
 	BlockReader services.FullBlockReader
+	Logger      log.Logger
 }
 
 // Config retrieves the blockchain's chain configuration.
@@ -71,7 +71,7 @@ func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
 func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.Db, hash, number)
 	if err != nil {
-		log.Error("ReadTd failed", "err", err)
+		cr.Logger.Error("ReadTd failed", "err", err)
 		return nil
 	}
 	return td
@@ -82,9 +82,13 @@ func (cr ChainReader) FrozenBlocks() uint64 {
 }
 
 func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
-	panic("")
+	panic("TODO")
 }
 
 func (cr ChainReader) BorSpan(spanId uint64) []byte {
-	panic("")
+	spanBytes, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
+	if err != nil {
+		cr.Logger.Error("[staged sync] BorSpan failed", "err", err)
+	}
+	return spanBytes
 }

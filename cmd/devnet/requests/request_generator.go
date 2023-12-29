@@ -184,32 +184,44 @@ func (req *requestGenerator) rpcCall(ctx context.Context, result interface{}, me
 	})
 }
 
-const connectionTimeout = time.Second * 5
+const connectionTimeout = time.Second * 20
 
 func isConnectionError(err error) bool {
 	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	switch {
+	case errors.As(err, &opErr):
 		return opErr.Op == "dial"
+
+	case errors.Is(err, context.DeadlineExceeded):
+		return true
 	}
+
 	return false
 }
 
 func retryConnects(ctx context.Context, op func(context.Context) error) error {
 	ctx, cancel := context.WithTimeout(ctx, connectionTimeout)
 	defer cancel()
-	return retry(ctx, op, isConnectionError, time.Millisecond*200, nil)
+	return retry(ctx, op, isConnectionError, time.Second*1, nil)
 }
 
 func retry(ctx context.Context, op func(context.Context) error, isRecoverableError func(error) bool, delay time.Duration, lastErr error) error {
 	err := op(ctx)
+
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, context.DeadlineExceeded) && lastErr != nil {
-		return lastErr
-	}
+
 	if !isRecoverableError(err) {
 		return err
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		if lastErr != nil {
+			return lastErr
+		}
+
+		err = nil
 	}
 
 	delayTimer := time.NewTimer(delay)

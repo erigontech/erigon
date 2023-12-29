@@ -1,6 +1,7 @@
 package networks
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -20,6 +21,8 @@ func NewBorDevnetWithoutHeimdall(
 	baseRpcHost string,
 	baseRpcPort int,
 	logger log.Logger,
+	consoleLogLevel log.Lvl,
+	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	faucetSource := accounts.NewAccount("faucet-source")
 
@@ -41,16 +44,16 @@ func NewBorDevnetWithoutHeimdall(
 		Nodes: []devnet.Node{
 			&args.BlockProducer{
 				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
+					ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
+					DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
 					WithoutHeimdall:  true,
 				},
 				AccountSlots: 200,
 			},
 			&args.BlockConsumer{
 				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
+					ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
+					DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
 					WithoutHeimdall:  true,
 				},
 			},
@@ -70,6 +73,8 @@ func NewBorDevnetWithHeimdall(
 	producerCount int,
 	withMilestones bool,
 	logger log.Logger,
+	consoleLogLevel log.Lvl,
+	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	faucetSource := accounts.NewAccount("faucet-source")
 
@@ -87,8 +92,8 @@ func NewBorDevnetWithHeimdall(
 	for i := 0; i < producerCount; i++ {
 		nodes = append(nodes, &args.BlockProducer{
 			NodeArgs: args.NodeArgs{
-				ConsoleVerbosity: "0",
-				DirVerbosity:     "5",
+				ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
+				DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
 				HeimdallGrpcAddr: heimdallGrpcAddr,
 			},
 			AccountSlots: 20000,
@@ -112,8 +117,8 @@ func NewBorDevnetWithHeimdall(
 		Nodes: append(nodes,
 			&args.BlockConsumer{
 				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
+					ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
+					DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
 					HeimdallGrpcAddr: heimdallGrpcAddr,
 				},
 			}),
@@ -135,8 +140,8 @@ func NewBorDevnetWithHeimdall(
 		Nodes: []devnet.Node{
 			&args.BlockProducer{
 				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
+					ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
+					DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
 					VMDebug:          true,
 					HttpCorsDomain:   "*",
 				},
@@ -145,8 +150,8 @@ func NewBorDevnetWithHeimdall(
 			},
 			&args.BlockConsumer{
 				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "3",
+					ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
+					DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
 				},
 			},
 		},
@@ -164,6 +169,8 @@ func NewBorDevnetWithRemoteHeimdall(
 	baseRpcPort int,
 	producerCount int,
 	logger log.Logger,
+	consoleLogLevel log.Lvl,
+	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	heimdallGrpcAddr := ""
 	checkpointOwner := accounts.NewAccount("checkpoint-owner")
@@ -177,7 +184,9 @@ func NewBorDevnetWithRemoteHeimdall(
 		checkpointOwner,
 		producerCount,
 		withMilestones,
-		logger)
+		logger,
+		consoleLogLevel,
+		dirLogLevel)
 }
 
 func NewBorDevnetWithLocalHeimdall(
@@ -188,6 +197,8 @@ func NewBorDevnetWithLocalHeimdall(
 	sprintSize uint64,
 	producerCount int,
 	logger log.Logger,
+	consoleLogLevel log.Lvl,
+	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	config := *params.BorDevnetChainConfig
 	if sprintSize > 0 {
@@ -215,5 +226,5 @@ func NewBorDevnetWithLocalHeimdall(
 		producerCount,
 		// milestones are not supported yet on the local heimdall
 		false,
-		logger)
+		logger, consoleLogLevel, dirLogLevel)
 }
