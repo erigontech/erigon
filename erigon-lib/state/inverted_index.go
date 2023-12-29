@@ -595,50 +595,26 @@ func (ic *InvertedIndexContext) Files() (res []string) {
 	return res
 }
 
-func (ic *InvertedIndexContext) SetTxNum(txNum uint64) {
-	ic.txNum = txNum
-	binary.BigEndian.PutUint64(ic.txNumBytes[:], ic.txNum)
-}
-
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (ic *InvertedIndexContext) Add(key []byte) error {
-	return ic.wal.add(key, key)
+func (w *invertedIndexBufferedWriter) Add(key []byte) error {
+	return w.add(key, key)
 }
 
-func (ic *InvertedIndexContext) DiscardHistory() {
-	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, true)
-}
-func (ic *InvertedIndexContext) StartWrites() {
-	ic.wal = ic.newWriter(ic.ii.dirs.Tmp, false)
-}
-func (ic *InvertedIndexContext) FinishWrites() {
-	if ic.wal != nil {
-		ic.wal.close()
-		ic.wal = nil
-	}
+func (ic *InvertedIndexContext) NewWriter() *invertedIndexBufferedWriter {
+	return ic.newWriter(ic.ii.dirs.Tmp, false)
 }
 
-func (ic *InvertedIndexContext) Rotate() *invertedIndexWAL {
-	wal := ic.wal
-	if wal != nil {
-		if err := wal.index.Flush(); err != nil {
-			panic(err)
-		}
-		if err := wal.indexKeys.Flush(); err != nil {
-			panic(err)
-		}
-		ic.wal = ic.newWriter(ic.wal.tmpdir, ic.wal.discard)
-	}
-	return wal
-}
+type invertedIndexBufferedWriter struct {
+	index, indexKeys *etl.Collector
+	tmpdir           string
+	discard          bool
+	filenameBase     string
 
-type invertedIndexWAL struct {
-	ic           *InvertedIndexContext
-	index        *etl.Collector
-	indexKeys    *etl.Collector
-	tmpdir       string
-	discard      bool
-	filenameBase string
+	indexTable, indexKeysTable string
+
+	txNum           uint64
+	aggregationStep uint64
+	txNumBytes      [8]byte
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -647,40 +623,49 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 
-func (ii *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
-	if ii.discard {
+func (w *invertedIndexBufferedWriter) SetTxNum(txNum uint64) {
+	w.txNum = txNum
+	binary.BigEndian.PutUint64(w.txNumBytes[:], w.txNum)
+}
+
+func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	if w.discard {
 		return nil
 	}
-	if err := ii.index.Load(tx, ii.ic.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := ii.indexKeys.Load(tx, ii.ic.ii.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	ii.close()
+	w.close()
 	return nil
 }
 
-func (ii *invertedIndexWAL) close() {
-	if ii == nil {
+func (w *invertedIndexBufferedWriter) close() {
+	if w == nil {
 		return
 	}
-	if ii.index != nil {
-		ii.index.Close()
+	if w.index != nil {
+		w.index.Close()
 	}
-	if ii.indexKeys != nil {
-		ii.indexKeys.Close()
+	if w.indexKeys != nil {
+		w.indexKeys.Close()
 	}
 }
 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
 
-func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *invertedIndexWAL {
-	w := &invertedIndexWAL{ic: ic,
-		discard:      discard,
-		tmpdir:       tmpdir,
-		filenameBase: ic.ii.filenameBase,
+func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *invertedIndexBufferedWriter {
+	w := &invertedIndexBufferedWriter{
+		discard:         discard,
+		tmpdir:          tmpdir,
+		filenameBase:    ic.ii.filenameBase,
+		aggregationStep: ic.ii.aggregationStep,
+
+		indexKeysTable: ic.ii.indexKeysTable,
+		indexTable:     ic.ii.indexTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		indexKeys: etl.NewCollector(ic.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ic.ii.logger),
 		index:     etl.NewCollector(ic.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ic.ii.logger),
@@ -690,14 +675,14 @@ func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *inverted
 	return w
 }
 
-func (ii *invertedIndexWAL) add(key, indexKey []byte) error {
-	if ii.discard {
+func (w *invertedIndexBufferedWriter) add(key, indexKey []byte) error {
+	if w.discard {
 		return nil
 	}
-	if err := ii.indexKeys.Collect(ii.ic.txNumBytes[:], key); err != nil {
+	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
 		return err
 	}
-	if err := ii.index.Collect(indexKey, ii.ic.txNumBytes[:]); err != nil {
+	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
 		return err
 	}
 	return nil
@@ -750,10 +735,6 @@ type InvertedIndexContext struct {
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
-
-	wal        *invertedIndexWAL
-	txNum      uint64
-	txNumBytes [8]byte
 
 	warmLocality *ctxLocalityIdx
 	coldLocality *ctxLocalityIdx

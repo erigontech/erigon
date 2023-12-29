@@ -95,7 +95,6 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	err = domains.Flush(context.Background(), rwTx)
 	require.NoError(t, err)
-	domains.FinishWrites()
 
 	require.NoError(t, err)
 	err = rwTx.Commit()
@@ -224,7 +223,6 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
-	domains.FinishWrites()
 	agg.Close()
 
 	// Start another aggregator on same datadir
@@ -330,7 +328,6 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	err = tx.Commit()
 	require.NoError(t, err)
-	domains.FinishWrites()
 
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
