@@ -605,15 +605,16 @@ func (ic *InvertedIndexContext) NewWriter() *invertedIndexBufferedWriter {
 }
 
 type invertedIndexBufferedWriter struct {
-	ic           *InvertedIndexContext
-	index        *etl.Collector
-	indexKeys    *etl.Collector
-	tmpdir       string
-	discard      bool
-	filenameBase string
+	index, indexKeys *etl.Collector
+	tmpdir           string
+	discard          bool
+	filenameBase     string
 
-	txNum      uint64
-	txNumBytes [8]byte
+	indexTable, indexKeysTable string
+
+	txNum           uint64
+	aggregationStep uint64
+	txNumBytes      [8]byte
 }
 
 // loadFunc - is analog of etl.Identity, but it signaling to etl - use .Put instead of .AppendDup - to allow duplicates
@@ -631,10 +632,10 @@ func (w *invertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if w.discard {
 		return nil
 	}
-	if err := w.index.Load(tx, w.ic.ii.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := w.indexKeys.Load(tx, w.ic.ii.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	w.close()
@@ -657,10 +658,14 @@ func (w *invertedIndexBufferedWriter) close() {
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
 
 func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *invertedIndexBufferedWriter {
-	w := &invertedIndexBufferedWriter{ic: ic,
-		discard:      discard,
-		tmpdir:       tmpdir,
-		filenameBase: ic.ii.filenameBase,
+	w := &invertedIndexBufferedWriter{
+		discard:         discard,
+		tmpdir:          tmpdir,
+		filenameBase:    ic.ii.filenameBase,
+		aggregationStep: ic.ii.aggregationStep,
+
+		indexKeysTable: ic.ii.indexKeysTable,
+		indexTable:     ic.ii.indexTable,
 		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
 		indexKeys: etl.NewCollector(ic.ii.indexKeysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ic.ii.logger),
 		index:     etl.NewCollector(ic.ii.indexTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), ic.ii.logger),

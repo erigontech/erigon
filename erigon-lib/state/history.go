@@ -465,10 +465,6 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte) (err e
 		}
 		return nil
 	}
-	if len(original) > 2048 {
-		log.Error("History value is too large while largeValues=false", "h", w.hc.h.historyValsTable, "histo", string(w.historyKey[:len(key1)+len(key2)]), "len", len(original), "max", len(w.historyKey)-8-len(key1)-len(key2))
-		panic("History value is too large while largeValues=false")
-	}
 
 	lk := len(key1) + len(key2)
 	w.historyKey = append(append(append(append(w.historyKey[:0], key1...), key2...), w.ii.txNumBytes[:]...), original...)
@@ -476,6 +472,11 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte) (err e
 	historyKey1 := historyKey[:lk]
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
+
+	if len(original) > 2048 {
+		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(key1)-len(key2))
+		panic("History value is too large while largeValues=false")
+	}
 
 	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
@@ -491,12 +492,11 @@ func (hc *HistoryContext) NewWriter() *historyBufferedWriter {
 }
 
 type historyBufferedWriter struct {
-	hc               *HistoryContext
 	historyVals      *etl.Collector
 	tmpdir           string
-	autoIncrementBuf []byte
 	historyKey       []byte
 	discard          bool
+	historyValsTable string
 
 	// not large:
 	//   keys: txNum -> key1+key2
@@ -522,13 +522,13 @@ func (w *historyBufferedWriter) close() {
 }
 
 func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
-	w := &historyBufferedWriter{hc: hc,
+	w := &historyBufferedWriter{
 		tmpdir:  tmpdir,
 		discard: discard,
 
-		autoIncrementBuf: make([]byte, 8),
 		historyKey:       make([]byte, 128),
 		largeValues:      hc.h.historyLargeValues,
+		historyValsTable: hc.h.historyValsTable,
 		historyVals:      etl.NewCollector(hc.h.historyValsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), hc.h.logger),
 
 		ii: hc.ic.newWriter(tmpdir, discard),
@@ -545,7 +545,7 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
-	if err := w.historyVals.Load(tx, w.hc.h.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	w.close()

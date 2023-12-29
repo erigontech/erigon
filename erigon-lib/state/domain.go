@@ -787,16 +787,18 @@ func (w *domainBufferedWriter) Delete(key1, key2 []byte, tx kv.RwTx) error {
 func (w *domainBufferedWriter) SetTxNum(v uint64) {
 	w.setTxNumOnce = true
 	w.h.SetTxNum(v)
-	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.dc.d.aggregationStep))
+	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.h.ii.aggregationStep))
 }
 
 func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
 	w := &domainBufferedWriter{dc: dc,
-		tmpdir:  tmpdir,
-		discard: discard,
-		aux:     make([]byte, 0, 128),
-		keys:    etl.NewCollector(dc.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
-		values:  etl.NewCollector(dc.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
+		tmpdir:    tmpdir,
+		discard:   discard,
+		aux:       make([]byte, 0, 128),
+		keysTable: dc.d.keysTable,
+		valsTable: dc.d.valsTable,
+		keys:      etl.NewCollector(dc.d.keysTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
+		values:    etl.NewCollector(dc.d.valsTable, tmpdir, etl.NewSortableBuffer(WALCollectorRAM), dc.d.logger),
 
 		h: dc.hc.newWriter(tmpdir, discard),
 	}
@@ -806,16 +808,16 @@ func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedW
 }
 
 type domainBufferedWriter struct {
-	dc     *DomainContext
-	keys   *etl.Collector
-	values *etl.Collector
-	aux    []byte
-	tmpdir string
+	dc           *DomainContext
+	keys, values *etl.Collector
+	aux          []byte
+	tmpdir       string
 
 	setTxNumOnce bool
 	discard      bool
 
-	stepBytes [8]byte // current inverted step representation
+	keysTable, valsTable string
+	stepBytes            [8]byte // current inverted step representation
 
 	h *historyBufferedWriter
 }
@@ -859,10 +861,10 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 		return err
 	}
 
-	if err := w.keys.Load(tx, w.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.keys.Load(tx, w.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := w.values.Load(tx, w.dc.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
@@ -879,8 +881,8 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 	kl := len(key1) + len(key2)
 	w.aux = append(append(append(w.aux[:0], key1...), key2...), w.stepBytes[:]...)
 	fullkey := w.aux[:kl+8]
-	if asserts && (w.h.ii.txNum/w.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
-		panic(fmt.Sprintf("assert: %w != %w", w.h.ii.txNum/w.dc.d.aggregationStep, ^binary.BigEndian.Uint64(w.stepBytes[:])))
+	if asserts && (w.h.ii.txNum/w.h.ii.aggregationStep) != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
+		panic(fmt.Sprintf("assert: %d != %d", w.h.ii.txNum/w.h.ii.aggregationStep, ^binary.BigEndian.Uint64(w.stepBytes[:])))
 	}
 
 	//defer func() {
