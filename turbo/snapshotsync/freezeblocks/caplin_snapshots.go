@@ -215,7 +215,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &BeaconBlockSegment{ranges: Range{f.From, f.To}}
+				sn = &BeaconBlockSegment{version: sn.version, ranges: Range{f.From, f.To}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
