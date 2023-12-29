@@ -889,7 +889,10 @@ Loop:
 									return err
 								}
 							}
-							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).Prune(ctx, tx, 0); err != nil {
+							if err := tx.(state2.HasAggCtx).
+								AggCtx().(*state2.AggregatorV3Context).
+								PruneSmallBatches(ctx, time.Minute*10, tx); err != nil {
+
 								return err
 							}
 							return nil

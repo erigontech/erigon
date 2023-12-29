@@ -1605,7 +1605,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, true, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnindTo, step, err)
 	}
 	return restored.Flush(ctx, rwTx)
@@ -2086,16 +2086,16 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	//		"keys until limit", limit,
 	//		"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
 	//}()
-	prunedStep, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
-	if err != nil {
-		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
-	}
+	//prunedStep, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	//if err != nil {
+	//	dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
+	//}
+	//
+	//if prunedStep != 0 {
+	//	step = ^prunedStep
+	//}
 
-	if prunedStep != 0 {
-		step = ^prunedStep
-	}
-
-	for k, v, err := keysCursor.Seek(prunedKey); k != nil; k, v, err = keysCursor.Prev() {
+	for k, v, err := keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
@@ -2152,7 +2152,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 	mxPruneTookDomain.ObserveDuration(st)
 
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, true, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil

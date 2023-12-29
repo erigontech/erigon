@@ -949,7 +949,7 @@ func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 }
 
 // [txFrom; txTo)
-func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, omitProgress bool, fn func(key []byte, txnum []byte) error) error {
+func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, txnum []byte) error) error {
 	if !ic.CanPrune(rwTx) {
 		return nil
 	}
@@ -977,22 +977,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	//		"pruned values", pruneCount,
 	//		"tx until limit", limit)
 	//}()
-
-	if !omitProgress {
-		pruneTxNum, _, err := GetExecV3PruneProgress(rwTx, ii.indexKeysTable)
-		if err != nil {
-			ic.ii.logger.Error("failed to get index prune progress", "err", err)
-		}
-		// pruning previously stopped at purunedTxNum; txFrom < pruneTxNum < txTo of previous range.
-		// to preserve pruning range consistency need to store or reconstruct pruned range for given key
-		// for InvertedIndices storing pruned key does not make sense because keys are just txnums,
-		// any key will seek to first available txnum in db
-		if pruneTxNum != 0 {
-			prevPruneTxFrom := (pruneTxNum / ii.aggregationStep) * ii.aggregationStep
-			prevPruneTxTo := prevPruneTxFrom + ii.aggregationStep
-			txFrom, txTo = prevPruneTxFrom, prevPruneTxTo
-		}
-	}
 
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
@@ -1063,7 +1047,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
 	}
 
-	if err := collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		for txnm, err := idxC.SeekBothRange(key, txKey[:]); txnm != nil; _, txnm, err = idxC.NextDup() {
 			if err != nil {
 				return err
@@ -1089,36 +1073,19 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 			select {
 			case <-logEvery.C:
-				if !omitProgress {
-					if err := SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
-						ii.logger.Error("failed to save prune progress", "err", err)
-					}
-				}
-
 				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase,
 					"prefix", fmt.Sprintf("%x", key[:8]),
 					"pruned values", pruneCount,
 					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
 			case <-ctx.Done():
-				if !omitProgress {
-					if err := SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
-						ii.logger.Error("failed to save prune progress", "err", err)
-					}
-				}
 				return ctx.Err()
 			default:
 			}
 		}
 		return nil
-	}, etl.TransformArgs{}); err != nil {
-		return err
-	}
-	if !omitProgress {
-		if err := SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, 0, nil); err != nil {
-			ii.logger.Error("failed to save prune progress", "err", err)
-		}
-	}
-	return nil
+	}, etl.TransformArgs{})
+
+	return err
 }
 
 // FrozenInvertedIdxIter allows iteration over range of tx numbers

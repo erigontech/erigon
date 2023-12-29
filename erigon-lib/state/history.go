@@ -1045,7 +1045,7 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced, omitProgress bool, logEvery *time.Ticker) error {
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) error {
 	//fmt.Printf(" prune[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
 	if !forced && !hc.CanPrune(rwTx) {
 		return nil
@@ -1100,7 +1100,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		mxPruneSizeHistory.Inc()
 		return nil
 	}
-	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, omitProgress, prunevalus); err != nil {
+	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, prunevalus); err != nil {
 		return err
 	}
 	return nil
