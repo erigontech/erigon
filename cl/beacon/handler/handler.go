@@ -50,7 +50,7 @@ func (a *ApiHandler) init() {
 			})
 			r.Route("/beacon", func(r chi.Router) {
 				r.Route("/rewards", func(r chi.Router) {
-					r.Get("/sync_committee/{block_id}", http.NotFound)
+					r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.getSyncCommitteesRewards))
 					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlockRewards))
 					r.Post("/attestations/{epoch}", beaconhttp.HandleEndpointFunc(a.getAttestationsRewards))
 				})

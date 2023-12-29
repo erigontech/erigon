@@ -123,16 +123,16 @@ func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	return ret, err
 }
 
-func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, error) {
+func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, bool, error) {
 	var index []byte
 	var err error
 	if index, err = tx.GetOne(kv.InvertedValidatorPublicKeys, key[:]); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if len(index) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
-	return base_encoding.Decode64FromBytes4(index), nil
+	return base_encoding.Decode64FromBytes4(index), true, nil
 }
 
 func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {

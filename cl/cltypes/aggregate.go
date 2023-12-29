@@ -82,6 +82,13 @@ func (agg *SyncAggregate) Sum() int {
 	return ret
 }
 
+func (agg *SyncAggregate) IsSet(idx uint64) bool {
+	if idx >= 2048 {
+		return false
+	}
+	return agg.SyncCommiteeBits[idx/8]&(1<<(idx%8)) > 0
+}
+
 func (agg *SyncAggregate) EncodeSSZ(buf []byte) ([]byte, error) {
 	return append(buf, append(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:]...)...), nil
 }

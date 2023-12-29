@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 )
 
 // type ForkChoiceStorage interface {
@@ -170,5 +171,13 @@ func (f *ForkChoiceStorageMock) OnTick(time uint64) {
 }
 
 func (f *ForkChoiceStorageMock) GetStateAtStateRoot(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) BlockRewards(root common.Hash) (*eth2.BlockRewardsCollector, bool) {
+	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) TotalActiveBalance(root common.Hash) (uint64, bool) {
 	panic("implement me")
 }
