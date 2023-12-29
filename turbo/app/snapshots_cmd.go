@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/integrity"
@@ -38,11 +41,15 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/params"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
+	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
@@ -84,6 +91,17 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
+			}),
+		},
+		{
+			Name:   "uploader",
+			Action: doUploaderCommand,
+			Usage:  "run erigon in snapshot upload mode (no execution)",
+			Flags: uploaderCommandFlags([]cli.Flag{
+				&SnapshotVersionFlag,
+				&erigoncli.UploadLocationFlag,
+				&erigoncli.UploadFromFlag,
+				&erigoncli.FrozenBlockLimitFlag,
 			}),
 		},
 		{
@@ -193,6 +211,11 @@ var (
 		Name:  "every",
 		Usage: "Do operation every N blocks",
 		Value: 1_000,
+	}
+	SnapshotVersionFlag = cli.IntFlag{
+		Name:  "snapshot.version",
+		Usage: "Snapshot files version.",
+		Value: 1,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -388,14 +411,15 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	}
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
+
 	if err != nil {
 		return err
 	}
 	defer blockSnaps.Close()
 	defer borSnaps.Close()
 	defer agg.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
 	if err := br.BuildMissedIndicesIfNeed(ctx, "Indexing", nil, chainConfig); err != nil {
 		return err
 	}
@@ -407,20 +431,20 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, version uint8, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
 ) {
-	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
+	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, version, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
-	blockSnaps.LogStat()
+	blockSnaps.LogStat("open")
 
-	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
+	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, version, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
-	borSnaps.LogStat()
+	borSnaps.LogStat("open")
 	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.MakeContext()
@@ -558,11 +582,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
+	version := uint8(cliCtx.Int(SnapshotVersionFlag.Name))
+
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, version, db, logger)
 	if err != nil {
 		return err
 	}
@@ -601,7 +627,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Params", "from", from, "to", to, "every", every)
-	if err := br.RetireBlocks(ctx, forwardProgress, log.LvlInfo, nil, nil); err != nil {
+	if err := br.RetireBlocks(ctx, 0, forwardProgress, log.LvlInfo, nil, nil); err != nil {
 		return err
 	}
 
@@ -745,6 +771,64 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	return nil
+}
+
+func uploaderCommandFlags(flags []cli.Flag) []cli.Flag {
+	erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
+	erigoncli.SyncLoopBlockLimitFlag.Value = 100000
+	erigoncli.SyncLoopPruneLimitFlag.Value = 100000
+	erigoncli.FrozenBlockLimitFlag.Value = 1500000
+	utils.NoDownloaderFlag.Value = true
+	utils.HTTPEnabledFlag.Value = false
+	utils.TxPoolDisableFlag.Value = true
+	return joinFlags(erigoncli.DefaultFlags, flags, []cli.Flag{
+		&erigoncli.SyncLoopBreakAfterFlag,
+		&erigoncli.SyncLoopBlockLimitFlag,
+		&erigoncli.SyncLoopPruneLimitFlag,
+	})
+}
+
+func doUploaderCommand(cliCtx *cli.Context) error {
+	var logger log.Logger
+	var err error
+	var metricsMux *http.ServeMux
+
+	if logger, metricsMux, err = debug.Setup(cliCtx, true /* root logger */); err != nil {
+		return err
+	}
+
+	// initializing the node and providing the current git commit there
+
+	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
+	erigonInfoGauge.Set(1)
+
+	if version := uint8(cliCtx.Int(SnapshotVersionFlag.Name)); version != 0 {
+		snapcfg.SnapshotVersion(version)
+	}
+
+	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
+	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {
+		return err
+	}
+
+	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+
+	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger)
+	if err != nil {
+		log.Error("Erigon startup", "err", err)
+		return err
+	}
+
+	if metricsMux != nil {
+		diagnostics.Setup(cliCtx, metricsMux, ethNode)
+	}
+
+	err = ethNode.Serve()
+	if err != nil {
+		log.Error("error while serving an Erigon node", "err", err)
+	}
+	return err
 }
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {

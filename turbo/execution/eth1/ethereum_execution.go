@@ -232,18 +232,25 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
-	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, nil, true); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			e.logger.Error("Could not start execution service", "err", err)
+
+	more := true
+
+	for more {
+		var err error
+
+		if more, err = e.executionPipeline.Run(e.db, nil, true); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
+			continue
 		}
-		return
-	}
-	if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			e.logger.Error("Could not start execution service", "err", err)
+
+		if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
+			continue
 		}
-		return
 	}
 }
 

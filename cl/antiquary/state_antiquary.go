@@ -183,6 +183,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer eth1DataVotes.Close()
 	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer stateEvents.Close()
+	activeValidatorIndicies := etl.NewCollector(kv.ActiveValidatorIndicies, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer activeValidatorIndicies.Close()
 
 	progress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
@@ -309,6 +311,23 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			prevEpoch := epoch - 1
 			mix := s.currentState.GetRandaoMixes(prevEpoch)
 			if err := randaoMixes.Collect(base_encoding.Encode64ToBytes4(prevEpoch*s.cfg.SlotsPerEpoch), mix[:]); err != nil {
+				return err
+			}
+			// Write active validator indicies
+			actives := s.currentState.GetActiveValidatorsIndices(prevEpoch)
+			commonBuffer.Reset()
+			if err := base_encoding.WriteRabbits(actives, commonBuffer); err != nil {
+				return err
+			}
+			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(prevEpoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
+				return err
+			}
+			actives = s.currentState.GetActiveValidatorsIndices(epoch)
+			commonBuffer.Reset()
+			if err := base_encoding.WriteRabbits(actives, commonBuffer); err != nil {
+				return err
+			}
+			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(epoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
 				return err
 			}
 			// truncate the file
@@ -502,6 +521,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 
 	if err := stateRoots.Load(rwTx, kv.StateRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := activeValidatorIndicies.Load(rwTx, kv.ActiveValidatorIndicies, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 
@@ -758,7 +780,7 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 
 func (s *Antiquary) storeMinimalState(buffer *bytes.Buffer, st *state.CachingBeaconState, collector *etl.Collector) error {
 	buffer.Reset()
-	minimalBeaconState := state_accessors.MinimalBeaconStateFromBeaconState(st.BeaconState)
+	minimalBeaconState := state_accessors.MinimalBeaconStateFromBeaconState(st)
 
 	if err := minimalBeaconState.WriteTo(buffer); err != nil {
 		return err
