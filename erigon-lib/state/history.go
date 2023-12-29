@@ -444,7 +444,7 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 //		}
 //		return hc.wal.addPrevValue(key1, key2, original)
 //	}
-func (w *historyWAL) AddPrevValue(key1, key2, original []byte) (err error) {
+func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte) (err error) {
 	if w.discard {
 		return nil
 	}
@@ -492,28 +492,11 @@ func (w *historyWAL) AddPrevValue(key1, key2, original []byte) (err error) {
 	return nil
 }
 
-func (hc *HistoryContext) NewWriter() *historyWAL {
+func (hc *HistoryContext) NewWriter() *historyBufferedWriter {
 	return hc.newWriter(hc.h.dirs.Tmp, false)
 }
 
-//func (hc *HistoryContext) Rotate() historyFlusher {
-//	hf := historyFlusher{}
-//	if hc.ic.wal != nil {
-//		hf.i = hc.ic.Rotate()
-//	}
-//
-//	if hc.wal != nil {
-//		w := hc.wal
-//		if err := w.historyVals.Flush(); err != nil {
-//			panic(err)
-//		}
-//		hf.h = w
-//		hc.wal = hc.newWriter(hc.wal.tmpdir, hc.wal.discard)
-//	}
-//	return hf
-//}
-
-type historyWAL struct {
+type historyBufferedWriter struct {
 	hc               *HistoryContext
 	historyVals      *etl.Collector
 	tmpdir           string
@@ -529,12 +512,12 @@ type historyWAL struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
 
-	ii *invertedIndexWAL
+	ii *invertedIndexBufferedWireter
 }
 
-func (w *historyWAL) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
+func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
 
-func (w *historyWAL) close() {
+func (w *historyBufferedWriter) close() {
 	if w == nil { // allow dobule-close
 		return
 	}
@@ -544,8 +527,8 @@ func (w *historyWAL) close() {
 	}
 }
 
-func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyWAL {
-	w := &historyWAL{hc: hc,
+func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
+	w := &historyBufferedWriter{hc: hc,
 		tmpdir:  tmpdir,
 		discard: discard,
 
@@ -560,7 +543,7 @@ func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyWAL {
 	return w
 }
 
-func (w *historyWAL) Flush(ctx context.Context, tx kv.RwTx) error {
+func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}

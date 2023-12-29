@@ -74,14 +74,14 @@ type SharedDomains struct {
 	storage    *btree2.Map[string, []byte]
 	commitment map[string][]byte
 
-	AccountWriter    *domainWAL
-	StorageWriter    *domainWAL
-	CodeWriter       *domainWAL
-	CommitmentWriter *domainWAL
-	TracesToWriter   *invertedIndexWAL
-	LogAddrsWriter   *invertedIndexWAL
-	LogTopicsWriter  *invertedIndexWAL
-	TracesFromWriter *invertedIndexWAL
+	AccountWriter    *domainBufferedWriter
+	StorageWriter    *domainBufferedWriter
+	CodeWriter       *domainBufferedWriter
+	CommitmentWriter *domainBufferedWriter
+	TracesToWriter   *invertedIndexBufferedWireter
+	LogAddrsWriter   *invertedIndexBufferedWireter
+	LogTopicsWriter  *invertedIndexBufferedWireter
+	TracesFromWriter *invertedIndexBufferedWireter
 }
 
 type HasAggCtx interface {

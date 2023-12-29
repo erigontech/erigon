@@ -596,29 +596,15 @@ func (ic *InvertedIndexContext) Files() (res []string) {
 }
 
 // Add - !NotThreadSafe. Must use WalRLock/BatchHistoryWriteEnd
-func (w *invertedIndexWAL) Add(key []byte) error {
+func (w *invertedIndexBufferedWireter) Add(key []byte) error {
 	return w.add(key, key)
 }
 
-func (ic *InvertedIndexContext) NewWriter() *invertedIndexWAL {
+func (ic *InvertedIndexContext) NewWriter() *invertedIndexBufferedWireter {
 	return ic.newWriter(ic.ii.dirs.Tmp, false)
 }
 
-//func (ic *InvertedIndexContext) Rotate() *invertedIndexWAL {
-//	wal := ic.wal
-//	if wal != nil {
-//		if err := wal.index.Flush(); err != nil {
-//			panic(err)
-//		}
-//		if err := wal.indexKeys.Flush(); err != nil {
-//			panic(err)
-//		}
-//		ic.wal = ic.newWriter(ic.wal.tmpdir, ic.wal.discard)
-//	}
-//	return wal
-//}
-
-type invertedIndexWAL struct {
+type invertedIndexBufferedWireter struct {
 	ic           *InvertedIndexContext
 	index        *etl.Collector
 	indexKeys    *etl.Collector
@@ -636,12 +622,12 @@ func loadFunc(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) 
 	return next(k, k, v)
 }
 
-func (w *invertedIndexWAL) SetTxNum(txNum uint64) {
+func (w *invertedIndexBufferedWireter) SetTxNum(txNum uint64) {
 	w.txNum = txNum
 	binary.BigEndian.PutUint64(w.txNumBytes[:], w.txNum)
 }
 
-func (w *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
+func (w *invertedIndexBufferedWireter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if w.discard {
 		return nil
 	}
@@ -655,7 +641,7 @@ func (w *invertedIndexWAL) Flush(ctx context.Context, tx kv.RwTx) error {
 	return nil
 }
 
-func (w *invertedIndexWAL) close() {
+func (w *invertedIndexBufferedWireter) close() {
 	if w == nil {
 		return
 	}
@@ -670,8 +656,8 @@ func (w *invertedIndexWAL) close() {
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors, 17*(256Mb/8) = 512Mb - for all collectros
 var WALCollectorRAM = dbg.EnvDataSize("AGG_WAL_RAM", etl.BufferOptimalSize/8)
 
-func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *invertedIndexWAL {
-	w := &invertedIndexWAL{ic: ic,
+func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *invertedIndexBufferedWireter {
+	w := &invertedIndexBufferedWireter{ic: ic,
 		discard:      discard,
 		tmpdir:       tmpdir,
 		filenameBase: ic.ii.filenameBase,
@@ -684,7 +670,7 @@ func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *inverted
 	return w
 }
 
-func (w *invertedIndexWAL) add(key, indexKey []byte) error {
+func (w *invertedIndexBufferedWireter) add(key, indexKey []byte) error {
 	if w.discard {
 		return nil
 	}
