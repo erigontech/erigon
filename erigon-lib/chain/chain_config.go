@@ -476,7 +476,7 @@ type BorConfig struct {
 }
 
 // String implements the stringer interface, returning the consensus engine details.
-func (b *BorConfig) String() string {
+func (c *BorConfig) String() string {
 	return "bor"
 }
 

@@ -93,7 +93,6 @@ Loop:
 	if count > 0 {
 		count--
 	}
-	domains.FinishWrites()
 	domains.Close()
 	ac.Close()
 	if count == 0 {

@@ -43,11 +43,12 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // AggregationStep number of transactions in smalest static file
 const HistoryV3AggregationStep = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
-//const HistoryV3AggregationStep = 3_125_000 / 50 // use this to reduce step size for dev/debug
+//const HistoryV3AggregationStep = 1_562_500 / 10 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -78,6 +79,7 @@ var Defaults = Config{
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
+		PruneLimit:                 100,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -270,6 +272,13 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
+	PruneLimit                 int //the maxumum records to delete from the DB during pruning
+	BreakAfterStage            string
+	LoopBlockLimit             uint
+
+	UploadLocation   string
+	UploadFrom       rpc.BlockNumber
+	FrozenBlockLimit uint64
 }
 
 // Chains where snapshots are enabled by default

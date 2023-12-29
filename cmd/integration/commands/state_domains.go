@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	state2 "github.com/ledgerwatch/erigon-lib/state"
+	state3 "github.com/ledgerwatch/erigon-lib/state"
+
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
 
@@ -80,7 +81,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, snapshotVersion, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -103,7 +104,7 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg := allSnapshots(ctx, chainDb, logger)
+	sn, bsn, agg := allSnapshots(ctx, chainDb, snapshotVersion, logger)
 	defer sn.Close()
 	defer bsn.Close()
 	defer agg.Close()
@@ -114,7 +115,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
-	domains := state2.NewSharedDomains(stateTx)
+	domains := state3.NewSharedDomains(stateTx)
 	defer agg.Close()
 
 	r := state.NewReaderV4(domains)

@@ -305,11 +305,6 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	if applyTx != nil {
-		if dbg.DiscardHistory() {
-			doms.DiscardHistory()
-		}
-	}
 	var err error
 
 	if maxBlockNum-blockNum > 16 {
@@ -417,11 +412,6 @@ func ExecV3(ctx context.Context,
 			defer tx.Rollback()
 
 			doms.SetTx(tx)
-			if dbg.DiscardHistory() {
-				doms.DiscardHistory()
-			} else {
-				doms.StartWrites()
-			}
 
 			defer applyLoopWg.Wait()
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
@@ -1165,7 +1155,7 @@ func blockWithSenders(db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, bl
 	return b, err
 }
 
-func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *state2.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
+func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *state.ResultsQueue, outputTxNumIn uint64, rs *state.StateV3, agg *libstate.AggregatorV3, applyTx kv.Tx, backPressure chan struct{}, applyWorker *exec3.Worker, canRetry, forceStopAtBlockEnd bool) (outputTxNum uint64, conflicts, triggers int, processedBlockNum uint64, stopedAtBlockEnd bool, err error) {
 	rwsIt := rws.Iter()
 	defer rwsIt.Close()
 
@@ -1457,7 +1447,7 @@ func reconstituteStep(last bool,
 				return err
 			}
 			if b == nil {
-				return fmt.Errorf("could not find block %d\n", bn)
+				return fmt.Errorf("could not find block %d", bn)
 			}
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()
@@ -1747,7 +1737,7 @@ func safeCloseTxTaskCh(ch chan *state.TxTask) {
 
 func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
-	logger log.Logger, agg *state2.AggregatorV3, engine consensus.Engine,
+	logger log.Logger, agg *libstate.AggregatorV3, engine consensus.Engine,
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {
 	startTime := time.Now()
 

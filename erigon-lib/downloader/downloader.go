@@ -120,11 +120,13 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
-	if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
-		return nil, err
-	}
-	if err := d.addTorrentFilesFromDisk(false); err != nil {
-		return nil, err
+	if cfg.AddTorrentsFromDisk {
+		if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
+			return nil, err
+		}
+		if err := d.addTorrentFilesFromDisk(false); err != nil {
+			return nil, err
+		}
 	}
 
 	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)

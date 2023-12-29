@@ -19,6 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -53,7 +55,8 @@ type HeadersCfg struct {
 	forkValidator *engine_helpers.ForkValidator
 	notifications *shards.Notifications
 
-	loopBreakCheck func() bool
+	syncConfig     ethconfig.Sync
+	loopBreakCheck func(int) bool
 }
 
 func StageHeadersCfg(
@@ -61,6 +64,7 @@ func StageHeadersCfg(
 	headerDownload *headerdownload.HeaderDownload,
 	bodyDownload *bodydownload.BodyDownload,
 	chainConfig chain.Config,
+	syncConfig ethconfig.Sync,
 	headerReqSend func(context.Context, *headerdownload.HeaderRequest) ([64]byte, bool),
 	announceNewHashes func(context.Context, []headerdownload.Announce),
 	penalize func(context.Context, []headerdownload.PenaltyItem),
@@ -72,12 +76,13 @@ func StageHeadersCfg(
 	historyV3 bool,
 	notifications *shards.Notifications,
 	forkValidator *engine_helpers.ForkValidator,
-	loopBreakCheck func() bool) HeadersCfg {
+	loopBreakCheck func(int) bool) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
 		hd:                headerDownload,
 		bodyDownload:      bodyDownload,
 		chainConfig:       chainConfig,
+		syncConfig:        syncConfig,
 		headerReqSend:     headerReqSend,
 		announceNewHashes: announceNewHashes,
 		penalize:          penalize,
@@ -134,8 +139,9 @@ func HeadersPOW(
 	useExternalTx bool,
 	logger log.Logger,
 ) error {
-	var headerProgress uint64
 	var err error
+
+	startTime := time.Now()
 
 	if err = cfg.hd.ReadProgressFromDb(tx); err != nil {
 		return err
@@ -143,22 +149,22 @@ func HeadersPOW(
 	cfg.hd.SetPOSSync(false)
 	cfg.hd.SetFetchingNew(true)
 	defer cfg.hd.SetFetchingNew(false)
-	headerProgress = cfg.hd.Progress()
+	startProgress := cfg.hd.Progress()
 	logPrefix := s.LogPrefix()
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
 	// Check if this is called straight after the unwinds, which means we need to create new canonical markings
-	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
+	hash, err := cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 	if err != nil {
 		return err
 	}
 	if hash == (libcommon.Hash{}) { // restore canonical markers after unwind
 		headHash := rawdb.ReadHeadHeaderHash(tx)
-		if err = fixCanonicalChain(logPrefix, logEvery, headerProgress, headHash, tx, cfg.blockReader, logger); err != nil {
+		if err = fixCanonicalChain(logPrefix, logEvery, startProgress, headHash, tx, cfg.blockReader, logger); err != nil {
 			return err
 		}
-		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, headerProgress)
+		hash, err = cfg.blockReader.CanonicalHash(ctx, tx, startProgress)
 		if err != nil {
 			return err
 		}
@@ -169,21 +175,23 @@ func HeadersPOW(
 		return nil
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", headerProgress)
+	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress)
 
-	localTd, err := rawdb.ReadTd(tx, hash, headerProgress)
+	localTd, err := rawdb.ReadTd(tx, hash, startProgress)
 	if err != nil {
 		return err
 	}
+	/* TEMP TESTING
 	if localTd == nil {
-		return fmt.Errorf("localTD is nil: %d, %x", headerProgress, hash)
+		return fmt.Errorf("localTD is nil: %d, %x", startProgress, hash)
 	}
-	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, headerProgress, cfg.blockReader)
+	TEMP TESTING */
+	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
 	cfg.hd.SetHeaderReader(consensuschain.NewReader(&cfg.chainConfig, tx, cfg.blockReader, logger))
 
 	stopped := false
 	var noProgressCounter uint = 0
-	prevProgress := headerProgress
+	prevProgress := startProgress
 	var wasProgress bool
 	var lastSkeletonTime time.Time
 	var peer [64]byte
@@ -191,14 +199,15 @@ func HeadersPOW(
 Loop:
 	for !stopped {
 
-		transitionedToPoS, err := rawdb.Transitioned(tx, headerProgress, cfg.chainConfig.TerminalTotalDifficulty)
+		transitionedToPoS, err := rawdb.Transitioned(tx, startProgress, cfg.chainConfig.TerminalTotalDifficulty)
 		if err != nil {
 			return err
 		}
 		if transitionedToPoS {
-			if err := s.Update(tx, headerProgress); err != nil {
+			if err := s.Update(tx, startProgress); err != nil {
 				return err
 			}
+			s.state.posTransition = &startProgress
 			break
 		}
 
@@ -245,8 +254,9 @@ Loop:
 			}
 		}
 		// Load headers into the database
-		var inSync bool
-		if inSync, err = cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix())); err != nil {
+		inSync, err := cfg.hd.InsertHeaders(headerInserter.NewFeedHeaderFunc(tx, cfg.blockReader), cfg.syncConfig.LoopBlockLimit, cfg.chainConfig.TerminalTotalDifficulty, logPrefix, logEvery.C, uint64(currentTime.Unix()))
+
+		if err != nil {
 			return err
 		}
 
@@ -259,7 +269,15 @@ Loop:
 			}
 		}
 
-		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck() {
+		if cfg.syncConfig.LoopBlockLimit > 0 {
+			if bodyProgress, err := stages.GetStageProgress(tx, stages.Bodies); err == nil {
+				if cfg.hd.Progress() > bodyProgress && cfg.hd.Progress()-bodyProgress > uint64(cfg.syncConfig.LoopBlockLimit*2) {
+					break
+				}
+			}
+		}
+
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(cfg.hd.Progress()-startProgress)) {
 			break
 		}
 
@@ -349,7 +367,16 @@ Loop:
 		return libcommon.ErrStopped
 	}
 	// We do not print the following line if the stage was interrupted
-	logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest inserted", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)))
+
+	if s.state.posTransition != nil {
+		logger.Info(fmt.Sprintf("[%s] Transitioned to POS", logPrefix), "block", *s.state.posTransition)
+	} else {
+		headers := headerInserter.GetHighest() - startProgress
+		secs := time.Since(startTime).Seconds()
+		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix),
+			"highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
+			"headers", headers, "in", secs, "blk/sec", uint64(float64(headers)/secs))
+	}
 
 	return nil
 }

@@ -26,14 +26,7 @@ import (
 func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string, toTxNum uint64) ([]byte, error) {
 	domains := state.NewSharedDomains(tx)
 	defer domains.Close()
-
-	acc := domains.Account.MakeContext()
-	ccc := domains.Code.MakeContext()
-	stc := domains.Storage.MakeContext()
-
-	defer acc.Close()
-	defer ccc.Close()
-	defer stc.Close()
+	ac := domains.AggCtx().(*state.AggregatorV3Context)
 
 	// has to set this value because it will be used during domain.Commit() call.
 	// If we do not, txNum of block beginning will be used, which will cause invalid txNum on restart following commitment rebuilding
@@ -45,18 +38,49 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 	defer collector.Close()
 
 	var totalKeys atomic.Uint64
-	for _, dc := range []*state.DomainContext{acc, ccc, stc} {
-		logger.Info("Collecting keys")
-		err := dc.IteratePrefix(tx, nil, func(k []byte, _ []byte) error {
-			if err := collector.Collect(k, nil); err != nil {
-				return err
-			}
-			totalKeys.Add(1)
-			return ctx.Err()
-		})
+	it, err := ac.DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+	if err != nil {
+		return nil, err
+	}
+	for it.HasNext() {
+		k, _, err := it.Next()
 		if err != nil {
 			return nil, err
 		}
+		if err := collector.Collect(k, nil); err != nil {
+			return nil, err
+		}
+		totalKeys.Add(1)
+	}
+
+	it, err = ac.DomainRangeLatest(tx, kv.CodeDomain, nil, nil, -1)
+	if err != nil {
+		return nil, err
+	}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if err := collector.Collect(k, nil); err != nil {
+			return nil, err
+		}
+		totalKeys.Add(1)
+	}
+
+	it, err = ac.DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	if err != nil {
+		return nil, err
+	}
+	for it.HasNext() {
+		k, _, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if err := collector.Collect(k, nil); err != nil {
+			return nil, err
+		}
+		totalKeys.Add(1)
 	}
 
 	var (
@@ -81,7 +105,7 @@ func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string,
 
 		return nil
 	}
-	err := collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
+	err = collector.Load(nil, "", loadKeys, etl.TransformArgs{Quit: ctx.Done()})
 	if err != nil {
 		return nil, err
 	}

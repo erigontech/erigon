@@ -623,12 +623,15 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 
 // InsertHeaders attempts to insert headers into the database, verifying them first
 // It returns true in the first return value if the system is "in sync"
-func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
+func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, headerLimit uint, terminalTotalDifficulty *big.Int, logPrefix string, logChannel <-chan time.Time, currentTime uint64) (bool, error) {
 	var more = true
 	var err error
 	var force bool
 	var blocksToTTD uint64
 	var blockTime uint64
+
+	startHeight := hd.highestInDb
+
 	for more {
 		if more, force, blocksToTTD, blockTime, err = hd.InsertHeader(hf, terminalTotalDifficulty, logPrefix, logChannel); err != nil {
 			return false, err
@@ -636,9 +639,13 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, terminalTotalDifficul
 		if force {
 			return true, nil
 		}
+
+		if headerLimit > 0 && hd.highestInDb-startHeight > uint64(headerLimit) {
+			break
+		}
 	}
 	if blocksToTTD > 0 {
-		hd.logger.Info("Estimated to reaching TTD", "blocks", blocksToTTD)
+		hd.logger.Trace("Estimated to reaching TTD", "blocks", blocksToTTD)
 	}
 	hd.lock.RLock()
 	defer hd.lock.RUnlock()

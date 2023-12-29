@@ -203,7 +203,7 @@ func (rs *StateV3) ApplyState4(ctx context.Context, txTask *TxTask) error {
 	if txTask.HistoryExecution {
 		return nil
 	}
-	defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
+	//defer rs.domains.BatchHistoryWriteStart().BatchHistoryWriteEnd()
 
 	if err := rs.applyState(txTask, rs.domains); err != nil {
 		return fmt.Errorf("StateV3.ApplyState: %w", err)

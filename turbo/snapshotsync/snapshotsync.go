@@ -67,7 +67,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -87,7 +87,9 @@ func WaitForDownloader(logPrefix string, ctx context.Context, histV3 bool, capli
 	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
 	// - After "download once" - Erigon will produce and seed new files
 
-	preverifiedBlockSnapshots := snapcfg.KnownCfg(cc.ChainName).Preverified
+	// send all hashes to the Downloader service
+	snapCfg := snapcfg.KnownCfg(cc.ChainName, 0)
+	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
 	// build all download requests

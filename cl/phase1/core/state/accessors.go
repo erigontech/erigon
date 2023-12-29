@@ -82,12 +82,9 @@ func InactivityLeaking(b abstract.BeaconState) bool {
 }
 
 // IsUnslashedParticipatingIndex
-func IsUnslashedParticipatingIndex(b abstract.BeaconState, epoch, index uint64, flagIdx int) bool {
-	validator, err := b.ValidatorForValidatorIndex(int(index))
-	if err != nil {
-		return false
-	}
-	return validator.Active(epoch) && cltypes.ParticipationFlags(b.EpochParticipation(false).Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
+func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.BitList, epoch, index uint64, flagIdx int) bool {
+	validator := validatorSet.Get(int(index))
+	return validator.Active(epoch) && cltypes.ParticipationFlags(previousEpochParticipation.Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
 }
 
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.
