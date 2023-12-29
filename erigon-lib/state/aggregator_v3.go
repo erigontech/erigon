@@ -763,7 +763,14 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 // returns true if we can prune something
 func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx) bool {
-	return dbg.NoPrune() || (!ac.account.CanPrune(tx) && !ac.storage.CanPrune(tx) && !ac.code.CanPrune(tx) && !ac.commitment.CanPrune(tx))
+	return dbg.NoPrune() || (!ac.account.CanPrune(tx) &&
+		!ac.storage.CanPrune(tx) &&
+		!ac.code.CanPrune(tx) &&
+		!ac.commitment.CanPrune(tx) &&
+		!ac.logAddrs.CanPrune(tx) &&
+		!ac.logTopics.CanPrune(tx) &&
+		!ac.tracesFrom.CanPrune(tx) &&
+		!ac.tracesTo.CanPrune(tx))
 }
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
@@ -777,7 +784,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return nil
 		}
 
-		if err := ac.Prune(context.Background(), tx, 1000); err != nil {
+		if err := ac.Prune(context.Background(), tx, 10000); err != nil {
 			log.Warn("[snapshots] PruneSmallBatches", "err", err)
 			return err
 		}
@@ -853,16 +860,16 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		return err
 	}
 	omitIndexPruneProgress := true
-	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
+	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress, nil); err != nil {
 		return err
 	}
-	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
+	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress, nil); err != nil {
 		return err
 	}
-	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
+	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress, nil); err != nil {
 		return err
 	}
-	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress); err != nil {
+	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, omitIndexPruneProgress, nil); err != nil {
 		return err
 	}
 	return nil

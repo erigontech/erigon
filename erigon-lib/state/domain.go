@@ -2152,8 +2152,8 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		prunedKeys uint64
 		//prunedMaxStep uint64
 		//prunedMinStep = uint64(math.MaxUint64)
-		seek     = make([]byte, 0, 256)
-		srcLimit = limit
+		seek    = make([]byte, 0, 256)
+		limiter = limit
 	)
 	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dc.d.filenameBase, txFrom, txTo, step, limit)
 	//defer func() {
@@ -2180,13 +2180,13 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		if is > step {
 			continue
 		}
-		if limit == 0 {
+		if limiter == 0 {
 			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			return nil
 		}
-		limit--
+		limiter--
 
 		seek = append(append(seek[:0], k...), v...)
 
@@ -2239,7 +2239,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 	mxPruneTookDomain.ObserveDuration(st)
 
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, srcLimit, false, true, logEvery); err != nil {
+	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, true, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	return nil

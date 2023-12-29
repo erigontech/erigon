@@ -571,7 +571,10 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 		if err := h.historyVals.Collect(historyKey, original); err != nil {
 			return err
 		}
-		if err := ic.wal.indexKeys.Collect(ic.txNumBytes[:], historyKey[:lk]); err != nil {
+		//if err := ic.wal.indexKeys.Collect(ic.txNumBytes[:], historyKey[:lk]); err != nil {
+		//	return err
+		//}
+		if err := ic.Add(historyKey[:lk]); err != nil {
 			return err
 		}
 		return nil
@@ -591,7 +594,8 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 	if err := h.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
-	if err := ic.wal.indexKeys.Collect(ic.txNumBytes[:], invIdxVal); err != nil {
+	//if err := ic.wal.indexKeys.Collect(ic.txNumBytes[:], invIdxVal); err != nil {
+	if err := ic.Add(invIdxVal); err != nil {
 		return err
 	}
 	return nil
@@ -1101,21 +1105,11 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
-	historyKeysCursorForDeletes, err := rwTx.RwCursorDupSort(hc.h.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s history cursor: %w", hc.h.filenameBase, err)
-	}
-	defer historyKeysCursorForDeletes.Close()
-	historyKeysCursor, err := rwTx.RwCursorDupSort(hc.h.indexKeysTable)
-	if err != nil {
-		return fmt.Errorf("create %s history cursor: %w", hc.h.filenameBase, err)
-	}
-	defer historyKeysCursor.Close()
-
 	var (
 		seek     = make([]byte, 8, 256)
 		valsC    kv.RwCursor
 		valsCDup kv.RwCursorDupSort
+		err      error
 	)
 
 	if hc.h.historyLargeValues {
@@ -1131,95 +1125,35 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		}
 		defer valsCDup.Close()
 	}
-	if !omitProgress {
-		prunedTxNum, _, err := GetExecV3PruneProgress(rwTx, hc.h.historyValsTable)
-		if err != nil {
-			hc.h.logger.Error("failed to restore history prune progress", "err", err)
-		}
-		if prunedTxNum != 0 {
-			txFrom = prunedTxNum / hc.h.aggregationStep * hc.h.aggregationStep
-			txTo = txFrom + hc.h.aggregationStep
-		}
-	}
-	seek = append(seek[:0], hc.encodeTs(txFrom)...)
 
-	var prunedValues uint64
-	defer func() {
-		hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "pruned records", prunedValues, "keys until limit", limit)
-	}()
-
-	for k, v, err := historyKeysCursor.Seek(seek); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
-		if err != nil {
-			return err
-		}
-		txNum := binary.BigEndian.Uint64(k)
+	prunevalus := func(k, txnm []byte) error {
+		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo { //[txFrom; txTo)
-			break
-		}
-		if limit == 0 {
-			if !omitProgress {
-				if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
-					hc.h.logger.Error("failed to save history prune progress", "err", err)
-				}
-			}
 			return nil
 		}
-		limit--
 
 		if hc.h.historyLargeValues {
-			seek = append(append(seek[:0], v...), k...)
+			seek = append(append(seek[:0], txnm...), k...)
 			if err := valsC.Delete(seek); err != nil {
 				return err
 			}
 		} else {
-			vv, err := valsCDup.SeekBothRange(v, k)
+			vv, err := valsCDup.SeekBothRange(k, txnm)
 			if err != nil {
 				return err
 			}
 			if binary.BigEndian.Uint64(vv) != txNum {
-				continue
+				return nil
 			}
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
 			}
 		}
-		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
-		if _, _, err = historyKeysCursorForDeletes.SeekBothExact(k, v); err != nil {
-			return err
-		}
-		if err = historyKeysCursorForDeletes.DeleteCurrent(); err != nil {
-			return err
-		}
 
-		prunedValues++
 		mxPruneSizeHistory.Inc()
-		select {
-		case <-ctx.Done():
-			if !omitProgress {
-				if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
-					hc.h.logger.Error("failed to save history prune progress", "err", err)
-				}
-			}
-			return ctx.Err()
-		case <-logEvery.C:
-			if !omitProgress {
-				if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, txNum, k); err != nil {
-					hc.h.logger.Error("failed to save history prune progress", "err", err)
-				}
-			}
-			hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase,
-				//"from", txFrom, "to", txTo,
-				"pruned values", prunedValues,
-				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(hc.h.aggregationStep), float64(txTo)/float64(hc.h.aggregationStep)))
-		default:
-		}
+		return nil
 	}
-	if !omitProgress {
-		if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, 0, nil); err != nil {
-			hc.h.logger.Error("failed to save history prune progress", "err", err)
-		}
-	}
-	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, omitProgress); err != nil {
+	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, omitProgress, prunevalus); err != nil {
 		return err
 	}
 	return nil
