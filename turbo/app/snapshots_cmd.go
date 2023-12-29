@@ -267,13 +267,7 @@ func doDebugKey(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	if err = agg.OpenFolder(true); err != nil {
-		return err
-	}
+	agg := openAgg(ctx, dirs, chainDB, logger)
 
 	view := agg.MakeContext()
 	defer view.Close()
@@ -296,13 +290,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
-	if err != nil {
-		return err
-	}
-	if err = agg.OpenFolder(true); err != nil {
-		return err
-	}
+	agg := openAgg(ctx, dirs, chainDB, logger)
 
 	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
 		return err
@@ -433,16 +421,7 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 	borSnaps.LogStat()
-
-	agg, err = libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
-	if err != nil {
-		return
-	}
-	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-	err = agg.OpenFolder(true)
-	if err != nil {
-		return
-	}
+	agg = openAgg(ctx, dirs, chainDB, logger)
 	err = chainDB.View(ctx, func(tx kv.Tx) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
@@ -776,4 +755,15 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	// to read all options from DB, instead of overriding them
 	opts = opts.Accede()
 	return opts
+}
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.AggregatorV3 {
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		panic(err)
+	}
+	if err = agg.OpenFolder(true); err != nil {
+		panic(err)
+	}
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
+	return agg
 }
