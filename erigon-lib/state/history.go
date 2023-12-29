@@ -1143,9 +1143,9 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 	}
 	seek = append(seek[:0], hc.encodeTs(txFrom)...)
 
-	var pruneSize uint64
+	var prunedValues uint64
 	defer func() {
-		hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "pruned records", pruneSize, "keys until limit", limit)
+		hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "pruned records", prunedValues, "keys until limit", limit)
 	}()
 
 	for k, v, err := historyKeysCursor.Seek(seek); err == nil && k != nil; k, v, err = historyKeysCursor.Next() {
@@ -1191,7 +1191,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 			return err
 		}
 
-		pruneSize++
+		prunedValues++
 		mxPruneSizeHistory.Inc()
 		select {
 		case <-ctx.Done():
@@ -1207,9 +1207,10 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 					hc.h.logger.Error("failed to save history prune progress", "err", err)
 				}
 			}
-			hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase, "from", txFrom, "to", txTo,
-				"pruned records", pruneSize)
-			//"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(d.aggregationStep), float64(txTo)/float64(d.aggregationStep)))
+			hc.h.logger.Info("[snapshots] prune history", "name", hc.h.filenameBase,
+				//"from", txFrom, "to", txTo,
+				"pruned values", prunedValues,
+				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(hc.h.aggregationStep), float64(txTo)/float64(hc.h.aggregationStep)))
 		default:
 		}
 	}
@@ -1217,6 +1218,9 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		if err := SaveExecV3PruneProgress(rwTx, hc.h.historyValsTable, 0, nil); err != nil {
 			hc.h.logger.Error("failed to save history prune progress", "err", err)
 		}
+	}
+	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, omitProgress); err != nil {
+		return err
 	}
 	return nil
 }

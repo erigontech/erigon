@@ -964,6 +964,7 @@ func (ic *InvertedIndexContext) CanPruneFrom(tx kv.Tx) uint64 {
 }
 
 func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
+	fmt.Printf("CanPrune: %s %d < %d?\n", ic.ii.filenameBase, ic.CanPruneFrom(tx), ic.maxTxNumInFiles(false))
 	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
 }
 
@@ -1013,10 +1014,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
-	// Todo feels incorrect that we decide upper txnum based on pruning keys limit
-	//if limit != math.MaxUint64 && limit != 0 {
-	//	txTo = cmp.Min(txTo, txFrom+limit)
-	//}
 	if txFrom >= txTo {
 		return nil
 	}
@@ -1069,6 +1066,14 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	}
 
 	var pruneCount uint64
+
+	defer func() {
+		ii.logger.Info("[snapshots] prune domain",
+			"name", ii.filenameBase,
+			"pruned keys", pruneCount,
+			"keys until limit", limit)
+		//"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
+	}()
 	if err := collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		for v, err := idxC.SeekBothRange(key, txKey[:]); v != nil; _, v, err = idxC.NextDup() {
 			if err != nil {
@@ -1098,9 +1103,11 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 						ii.logger.Error("failed to save prune progress", "err", err)
 					}
 				}
-				ii.logger.Info("[snapshots] prune history", "name", ii.filenameBase,
-					"to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]),
-					"pruned count", pruneCount)
+
+				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase,
+					"prefix", fmt.Sprintf("%x", key[:8]),
+					"count", pruneCount,
+					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txTo)/float64(ii.aggregationStep)))
 			case <-ctx.Done():
 				if !omitProgress {
 					if err := SaveExecV3PruneProgress(rwTx, ii.indexKeysTable, txNum, nil); err != nil {
