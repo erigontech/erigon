@@ -754,13 +754,14 @@ func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedW
 
 type domainBufferedWriter struct {
 	keys, values *etl.Collector
-	aux          []byte
 
 	setTxNumOnce bool
 	discard      bool
 
 	keysTable, valsTable string
-	stepBytes            [8]byte // current inverted step representation
+
+	stepBytes [8]byte // current inverted step representation
+	aux       []byte
 
 	h *historyBufferedWriter
 }
