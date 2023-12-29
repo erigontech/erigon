@@ -1047,12 +1047,13 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	defer tx.Rollback()
 	dc := d.MakeContext()
 	defer dc.Close()
+	maxTx := uint64(10000)
+	d.aggregationStep = maxTx
+
 	writer := dc.NewWriter()
 	defer writer.close()
 
 	var preval1, preval2, preval3 []byte
-	maxTx := uint64(10000)
-	d.aggregationStep = maxTx
 
 	l := []byte("asd9s9af0afa9sfh9afha")
 
