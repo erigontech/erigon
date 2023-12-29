@@ -786,6 +786,8 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	var k [8]byte
 	var v [8]byte
 	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInColdFile
+	prev := map[string]string{}
+
 	// key 0: only in frozen file 0
 	// key 1: only in frozen file 1 and file 2
 	// key 2: in frozen file 2 and in warm files
@@ -816,12 +818,14 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 			//v[0] = 3 // value marker
-			err = writer.Put(k[:], nil, v[:], tx)
+			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]))
 			require.NoError(t, err)
 			if _, ok := dat[keyNum]; !ok {
 				dat[keyNum] = make([]bool, txCount+1)
 			}
 			dat[keyNum][txNum] = true
+
+			prev[string(k[:])] = string(v[:])
 		}
 		if txNum%d.aggregationStep == 0 {
 			err = writer.Flush(ctx, tx)
@@ -927,6 +931,8 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	// each key changes value on every txNum which is multiple of the key
 	data := make(map[string][]uint64)
 
+	prev := map[string]string{}
+
 	for txNum := uint64(1); txNum <= txCount; txNum++ {
 		writer.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= keysCount; keyNum++ {
@@ -937,8 +943,10 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
-			err = writer.Put(k[:], nil, v[:], tx)
+			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]))
 			require.NoError(t, err)
+
+			prev[string(k[:])] = string(v[:])
 
 			list, ok := data[fmt.Sprintf("%d", keyNum)]
 			if !ok {
