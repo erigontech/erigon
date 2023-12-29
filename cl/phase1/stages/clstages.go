@@ -342,11 +342,6 @@ func ConsensusClStages(ctx context.Context,
 					ctx, cn := context.WithTimeout(ctx, 15*time.Second)
 					defer cn()
 
-					tx, err := cfg.indiciesDB.BeginRw(ctx)
-					if err != nil {
-						return err
-					}
-					defer tx.Rollback()
 					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
 					for _, v := range sources {
 						sourceFunc := v.GetRange
@@ -363,7 +358,7 @@ func ConsensusClStages(ctx context.Context,
 										time.Sleep(100 * time.Millisecond)
 										continue
 									}
-									blocks, err = sourceFunc(ctx, tx, from, count)
+									blocks, err := sourceFunc(ctx, nil, from, count)
 									if err != nil {
 										errCh <- err
 										return
@@ -377,7 +372,7 @@ func ConsensusClStages(ctx context.Context,
 								respCh <- blocks
 								return
 							}
-							blocks, err := sourceFunc(ctx, tx, args.seenSlot+1, totalRequest)
+							blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, totalRequest)
 							if err != nil {
 								errCh <- err
 								return
@@ -385,6 +380,12 @@ func ConsensusClStages(ctx context.Context,
 							respCh <- blocks
 						}(v)
 					}
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
+
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
 				MainLoop:
