@@ -221,6 +221,7 @@ Loop:
 					if optimistic {
 						continue Loop
 					} else {
+						fmt.Println(err)
 						break Loop
 					}
 				}
