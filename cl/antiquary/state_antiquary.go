@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/cl/transition"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -418,8 +419,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
 
 		fullValidation := slot%100_000 == 0 || first
+		blockRewardsCollector := &eth2.BlockRewardsCollector{}
 		// We sanity check the state every 100k slots or when we start.
-		if err := transition.TransitionState(s.currentState, block, fullValidation); err != nil {
+		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
 
@@ -432,7 +434,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 		}
 
-		if err := s.storeSlotData(commonBuffer, s.currentState, slotData); err != nil {
+		if err := s.storeSlotData(commonBuffer, s.currentState, blockRewardsCollector, slotData); err != nil {
 			return err
 		}
 		if err := stateEvents.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes()); err != nil {
@@ -764,17 +766,22 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 	}
 
 	var b bytes.Buffer
-	if err := s.storeSlotData(&b, state, slotDataCollector); err != nil {
+	if err := s.storeSlotData(&b, state, nil, slotDataCollector); err != nil {
 		return err
 	}
 
 	return stateEvents.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (s *Antiquary) storeSlotData(buffer *bytes.Buffer, st *state.CachingBeaconState, collector *etl.Collector) error {
+func (s *Antiquary) storeSlotData(buffer *bytes.Buffer, st *state.CachingBeaconState, rewardsCollector *eth2.BlockRewardsCollector, collector *etl.Collector) error {
 	buffer.Reset()
 	slotData := state_accessors.SlotDataFromBeaconState(st)
-
+	if rewardsCollector != nil {
+		slotData.AttestationsRewards = rewardsCollector.Attestations
+		slotData.SyncAggregateRewards = rewardsCollector.SyncAggregate
+		slotData.AttesterSlashings = rewardsCollector.AttesterSlashings
+		slotData.ProposerSlashings = rewardsCollector.ProposerSlashings
+	}
 	if err := slotData.WriteTo(buffer); err != nil {
 		return err
 	}

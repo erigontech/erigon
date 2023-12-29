@@ -25,6 +25,12 @@ type SlotData struct {
 	// Capella
 	NextWithdrawalIndex          uint64
 	NextWithdrawalValidatorIndex uint64
+
+	// BlockRewards for proposer
+	AttestationsRewards  uint64
+	SyncAggregateRewards uint64
+	ProposerSlashings    uint64
+	AttesterSlashings    uint64
 }
 
 func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -301,4 +302,10 @@ func (f *ForkChoiceStore) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.Sy
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.forkGraph.GetSyncCommittees(blockRoot)
+}
+
+func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetBlockRewards(root)
 }
