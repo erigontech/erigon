@@ -538,11 +538,9 @@ func (w *historyWAL) close() {
 	if w == nil { // allow dobule-close
 		return
 	}
+	w.ii.close()
 	if w.historyVals != nil {
 		w.historyVals.Close()
-	}
-	if w.ii != nil {
-		w.ii.close()
 	}
 }
 

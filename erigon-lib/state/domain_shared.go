@@ -705,11 +705,28 @@ func (sd *SharedDomains) IterateStoragePrefix(prefix []byte, it func(k []byte, v
 }
 
 func (sd *SharedDomains) Close() {
-	sd.FinishWrites()
 	sd.SetBlockNum(0)
 	if sd.aggCtx != nil {
 		sd.SetTxNum(0)
+
+		sd.walLock.Lock()
+		defer sd.walLock.Unlock()
+		sd.AccountWriter.close()
+		sd.AccountWriter = nil
+		sd.StorageWriter.close()
+		sd.StorageWriter = nil
+		sd.CodeWriter.close()
+		sd.CodeWriter = nil
+		sd.LogAddrsWriter.close()
+		sd.LogAddrsWriter = nil
+		sd.LogTopicsWriter.close()
+		sd.LogTopicsWriter = nil
+		sd.TracesFromWriter.close()
+		sd.TracesFromWriter = nil
+		sd.TracesToWriter.close()
+		sd.TracesToWriter = nil
 	}
+
 	if sd.sdCtx != nil {
 		sd.sdCtx.updates.keys = nil
 		sd.sdCtx.updates.tree.Clear(true)
@@ -750,30 +767,6 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 		sd.storage = btree2.NewMap[string, []byte](128)
 	}
 	return sd
-}
-
-func (sd *SharedDomains) FinishWrites() {
-	sd.walLock.Lock()
-	defer sd.walLock.Unlock()
-	if sd.aggCtx != nil {
-		sd.SetTxNum(0)
-		sd.SetBlockNum(0)
-
-		sd.AccountWriter.close()
-		sd.AccountWriter = nil
-		sd.StorageWriter.close()
-		sd.StorageWriter = nil
-		sd.CodeWriter.close()
-		sd.CodeWriter = nil
-		sd.LogAddrsWriter.close()
-		sd.LogAddrsWriter = nil
-		sd.LogTopicsWriter.close()
-		sd.LogTopicsWriter = nil
-		sd.TracesFromWriter.close()
-		sd.TracesFromWriter = nil
-		sd.TracesToWriter.close()
-		sd.TracesToWriter = nil
-	}
 }
 
 func (sd *SharedDomains) BatchHistoryWriteStart() *SharedDomains {

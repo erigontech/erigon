@@ -846,14 +846,12 @@ func (d *domainWAL) close() {
 	if d == nil { // allow dobule-close
 		return
 	}
+	d.h.close()
 	if d.keys != nil {
 		d.keys.Close()
 	}
 	if d.values != nil {
 		d.values.Close()
-	}
-	if d.h != nil {
-		d.h.close()
 	}
 }
 
