@@ -730,60 +730,6 @@ func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte) (err erro
 	return w.addValue(key1, key2, nil)
 }
 
-// Derecated
-func (w *domainBufferedWriter) update(key []byte, tx kv.RwTx) error {
-	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(w.h.ii.txNum / w.dc.d.aggregationStep))
-	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
-	if err := tx.Put(w.dc.d.keysTable, key, invertedStep[:]); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Derecated
-func (w *domainBufferedWriter) put(key, val []byte, tx kv.RwTx) error {
-	if err := w.update(key, tx); err != nil {
-		return err
-	}
-	invertedStep := ^(w.h.ii.txNum / w.dc.d.aggregationStep)
-	keySuffix := make([]byte, len(key)+8)
-	copy(keySuffix, key)
-	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
-	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
-	return tx.Put(w.dc.d.valsTable, keySuffix, val)
-}
-
-// Deprecated
-func (w *domainBufferedWriter) Put(key1, key2, val []byte, tx kv.RwTx) error {
-	key := common.Append(key1, key2)
-	original, _, err := w.dc.GetLatest(key, nil, tx)
-	if err != nil {
-		return err
-	}
-	if bytes.Equal(original, val) {
-		return nil
-	}
-	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
-	if err = w.h.AddPrevValue(key1, key2, original); err != nil {
-		return err
-	}
-	return w.put(key, val, tx)
-}
-
-// Deprecated
-func (w *domainBufferedWriter) Delete(key1, key2 []byte, tx kv.RwTx) error {
-	key := common.Append(key1, key2)
-	original, found, err := w.dc.GetLatest(key, nil, tx)
-	if err != nil {
-		return err
-	}
-	if !found {
-		return nil
-	}
-	return w.DeleteWithPrev(key1, key2, original)
-}
-
 func (w *domainBufferedWriter) SetTxNum(v uint64) {
 	w.setTxNumOnce = true
 	w.h.SetTxNum(v)
