@@ -185,7 +185,6 @@ func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error 
 	s.BeaconBlocks.lock.Lock()
 	defer s.BeaconBlocks.lock.Unlock()
 
-	fmt.Println(fileNames)
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
@@ -196,6 +195,7 @@ Loop:
 			continue
 		}
 		var processed bool = true
+		fmt.Println(f)
 
 		switch f.T {
 		case snaptype.BeaconBlocks:
