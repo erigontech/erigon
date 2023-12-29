@@ -1198,9 +1198,11 @@ func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
 // sets up blockReader and client downloader
 func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downloadercfg.Cfg) error {
 	var err error
+	fmt.Println("AS2")
 	if s.config.Snapshot.NoDownloader {
 		return nil
 	}
+	fmt.Println("AS")
 	if s.config.Snapshot.DownloaderAddr != "" {
 		// connect to external Downloader
 		s.downloaderClient, err = downloadergrpc.NewClient(ctx, s.config.Snapshot.DownloaderAddr)
