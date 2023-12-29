@@ -54,7 +54,6 @@ func (sn *BeaconBlockSegment) close() {
 func (sn *BeaconBlockSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
 	fileName := snaptype.SegmentFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks)
-	fmt.Println(fileName, sn.version)
 	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
@@ -189,16 +188,13 @@ func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error 
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-	fmt.Println(fileNames)
 Loop:
 	for _, fName := range fileNames {
-		fmt.Println(fName)
 		f, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
 			continue
 		}
 		var processed bool = true
-		fmt.Println(f)
 
 		switch f.T {
 		case snaptype.BeaconBlocks:
@@ -222,7 +218,6 @@ Loop:
 					if optimistic {
 						continue Loop
 					} else {
-						fmt.Println(err)
 						break Loop
 					}
 				}
