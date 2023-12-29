@@ -68,7 +68,7 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 
 // Antiquate is the function that starts transactions seeding and shit, very cool but very shit too as a name.
 func (a *Antiquary) Loop() error {
-	fmt.Println("A")
+	fmt.Println(a.downloader == nil, !a.blocks)
 	if a.downloader == nil || !a.blocks {
 		return nil // Just skip if we don't have a downloader
 	}
