@@ -472,13 +472,15 @@ const (
 	ActiveValidatorIndicies   = "ActiveValidatorIndicies"
 
 	// External data
-	StateRoot                  = "StateRoot"
-	BlockRoot                  = "BlockRoot"
-	MinimalBeaconState         = "MinimalBeaconState"
+	StateRoot = "StateRoot"
+	BlockRoot = "BlockRoot"
+	// Differentiate data stored per-slot vs per-epoch
+	SlotData  = "SlotData"
+	EpochData = "EpochData"
+	// State fields
 	InactivityScores           = "InactivityScores"
 	PreviousEpochParticipation = "PreviousEpochParticipation"
 	CurrentEpochParticipation  = "CurrentEpochParticipation"
-	Checkpoints                = "Checkpoints"
 	NextSyncCommittee          = "NextSyncCommittee"
 	CurrentSyncCommittee       = "CurrentSyncCommittee"
 	HistoricalRoots            = "HistoricalRoots"
@@ -664,14 +666,14 @@ var ChaindataTables = []string{
 	// Other stuff (related to state reconstitution)
 	BlockRoot,
 	StateRoot,
-	MinimalBeaconState,
+	SlotData,
+	EpochData,
 	RandaoMixes,
 	Proposers,
 	StatesProcessingProgress,
 	PreviousEpochParticipation,
 	CurrentEpochParticipation,
 	InactivityScores,
-	Checkpoints,
 	NextSyncCommittee,
 	CurrentSyncCommittee,
 	HistoricalRoots,
