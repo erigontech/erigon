@@ -528,14 +528,16 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.aggCtx.a.StepSize() }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	sd.AccountWriter.SetTxNum(txNum)
-	sd.CodeWriter.SetTxNum(txNum)
-	sd.StorageWriter.SetTxNum(txNum)
-	sd.CommitmentWriter.SetTxNum(txNum)
-	sd.TracesToWriter.SetTxNum(txNum)
-	sd.TracesFromWriter.SetTxNum(txNum)
-	sd.LogAddrsWriter.SetTxNum(txNum)
-	sd.LogTopicsWriter.SetTxNum(txNum)
+	if sd.AccountWriter != nil {
+		sd.AccountWriter.SetTxNum(txNum)
+		sd.CodeWriter.SetTxNum(txNum)
+		sd.StorageWriter.SetTxNum(txNum)
+		sd.CommitmentWriter.SetTxNum(txNum)
+		sd.TracesToWriter.SetTxNum(txNum)
+		sd.TracesFromWriter.SetTxNum(txNum)
+		sd.LogAddrsWriter.SetTxNum(txNum)
+		sd.LogTopicsWriter.SetTxNum(txNum)
+	}
 }
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
