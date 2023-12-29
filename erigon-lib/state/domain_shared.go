@@ -74,14 +74,14 @@ type SharedDomains struct {
 	storage    *btree2.Map[string, []byte]
 	commitment map[string][]byte
 
-	AccountWriter    *domainBufferedWriter
-	StorageWriter    *domainBufferedWriter
-	CodeWriter       *domainBufferedWriter
-	CommitmentWriter *domainBufferedWriter
-	TracesToWriter   *invertedIndexBufferedWriter
-	LogAddrsWriter   *invertedIndexBufferedWriter
-	LogTopicsWriter  *invertedIndexBufferedWriter
-	TracesFromWriter *invertedIndexBufferedWriter
+	accountWriter    *domainBufferedWriter
+	storageWriter    *domainBufferedWriter
+	codeWriter       *domainBufferedWriter
+	commitmentWriter *domainBufferedWriter
+	logAddrsWriter   *invertedIndexBufferedWriter
+	logTopicsWriter  *invertedIndexBufferedWriter
+	tracesFromWriter *invertedIndexBufferedWriter
+	tracesToWriter   *invertedIndexBufferedWriter
 }
 
 type HasAggCtx interface {
@@ -446,7 +446,7 @@ func (sd *SharedDomains) updateAccountData(addr []byte, account, prevAccount []b
 	addrS := string(addr)
 	sd.sdCtx.TouchPlainKey(addrS, account, sd.sdCtx.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, account)
-	return sd.AccountWriter.PutWithPrev(addr, nil, account, prevAccount)
+	return sd.accountWriter.PutWithPrev(addr, nil, account, prevAccount)
 }
 
 func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte) error {
@@ -454,21 +454,21 @@ func (sd *SharedDomains) updateAccountCode(addr, code, prevCode []byte) error {
 	sd.sdCtx.TouchPlainKey(addrS, code, sd.sdCtx.TouchCode)
 	sd.put(kv.CodeDomain, addrS, code)
 	if len(code) == 0 {
-		return sd.CodeWriter.DeleteWithPrev(addr, nil, prevCode)
+		return sd.codeWriter.DeleteWithPrev(addr, nil, prevCode)
 	}
-	return sd.CodeWriter.PutWithPrev(addr, nil, code, prevCode)
+	return sd.codeWriter.PutWithPrev(addr, nil, code, prevCode)
 }
 
 func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte) error {
 	sd.put(kv.CommitmentDomain, string(prefix), data)
-	return sd.CommitmentWriter.PutWithPrev(prefix, nil, data, prev)
+	return sd.commitmentWriter.PutWithPrev(prefix, nil, data, prev)
 }
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte) error {
 	addrS := string(addr)
 	sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchAccount)
 	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.AccountWriter.DeleteWithPrev(addr, nil, prev); err != nil {
+	if err := sd.accountWriter.DeleteWithPrev(addr, nil, prev); err != nil {
 		return err
 	}
 
@@ -491,7 +491,7 @@ func (sd *SharedDomains) writeAccountStorage(addr, loc []byte, value, preVal []b
 	compositeS := string(composite)
 	sd.sdCtx.TouchPlainKey(compositeS, value, sd.sdCtx.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, value)
-	return sd.StorageWriter.PutWithPrev(composite, nil, value, preVal)
+	return sd.storageWriter.PutWithPrev(composite, nil, value, preVal)
 }
 func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte) error {
 	composite := addr
@@ -502,19 +502,19 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte) erro
 	compositeS := string(composite)
 	sd.sdCtx.TouchPlainKey(compositeS, nil, sd.sdCtx.TouchStorage)
 	sd.put(kv.StorageDomain, compositeS, nil)
-	return sd.StorageWriter.DeleteWithPrev(composite, nil, preVal)
+	return sd.storageWriter.DeleteWithPrev(composite, nil, preVal)
 }
 
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
 	switch table {
 	case kv.LogAddrIdx, kv.TblLogAddressIdx:
-		err = sd.LogAddrsWriter.Add(key)
+		err = sd.logAddrsWriter.Add(key)
 	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
-		err = sd.LogTopicsWriter.Add(key)
+		err = sd.logTopicsWriter.Add(key)
 	case kv.TblTracesToIdx:
-		err = sd.TracesToWriter.Add(key)
+		err = sd.tracesToWriter.Add(key)
 	case kv.TblTracesFromIdx:
-		err = sd.TracesFromWriter.Add(key)
+		err = sd.tracesFromWriter.Add(key)
 	default:
 		panic(fmt.Errorf("unknown shared index %s", table))
 	}
@@ -528,15 +528,15 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.aggCtx.a.StepSize() }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	if sd.AccountWriter != nil {
-		sd.AccountWriter.SetTxNum(txNum)
-		sd.CodeWriter.SetTxNum(txNum)
-		sd.StorageWriter.SetTxNum(txNum)
-		sd.CommitmentWriter.SetTxNum(txNum)
-		sd.TracesToWriter.SetTxNum(txNum)
-		sd.TracesFromWriter.SetTxNum(txNum)
-		sd.LogAddrsWriter.SetTxNum(txNum)
-		sd.LogTopicsWriter.SetTxNum(txNum)
+	if sd.accountWriter != nil {
+		sd.accountWriter.SetTxNum(txNum)
+		sd.codeWriter.SetTxNum(txNum)
+		sd.storageWriter.SetTxNum(txNum)
+		sd.commitmentWriter.SetTxNum(txNum)
+		sd.tracesToWriter.SetTxNum(txNum)
+		sd.tracesFromWriter.SetTxNum(txNum)
+		sd.logAddrsWriter.SetTxNum(txNum)
+		sd.logTopicsWriter.SetTxNum(txNum)
 	}
 }
 
@@ -711,20 +711,20 @@ func (sd *SharedDomains) Close() {
 
 		sd.walLock.Lock()
 		defer sd.walLock.Unlock()
-		sd.AccountWriter.close()
-		sd.AccountWriter = nil
-		sd.StorageWriter.close()
-		sd.StorageWriter = nil
-		sd.CodeWriter.close()
-		sd.CodeWriter = nil
-		sd.LogAddrsWriter.close()
-		sd.LogAddrsWriter = nil
-		sd.LogTopicsWriter.close()
-		sd.LogTopicsWriter = nil
-		sd.TracesFromWriter.close()
-		sd.TracesFromWriter = nil
-		sd.TracesToWriter.close()
-		sd.TracesToWriter = nil
+		sd.accountWriter.close()
+		sd.accountWriter = nil
+		sd.storageWriter.close()
+		sd.storageWriter = nil
+		sd.codeWriter.close()
+		sd.codeWriter = nil
+		sd.logAddrsWriter.close()
+		sd.logAddrsWriter = nil
+		sd.logTopicsWriter.close()
+		sd.logTopicsWriter = nil
+		sd.tracesFromWriter.close()
+		sd.tracesFromWriter = nil
+		sd.tracesToWriter.close()
+		sd.tracesToWriter = nil
 	}
 
 	if sd.sdCtx != nil {
@@ -745,14 +745,14 @@ func (sd *SharedDomains) StartWrites() *SharedDomains {
 	sd.walLock.Lock()
 	defer sd.walLock.Unlock()
 
-	sd.AccountWriter = sd.aggCtx.account.NewWriter()
-	sd.StorageWriter = sd.aggCtx.storage.NewWriter()
-	sd.CodeWriter = sd.aggCtx.code.NewWriter()
-	sd.CommitmentWriter = sd.aggCtx.commitment.NewWriter()
-	sd.LogAddrsWriter = sd.aggCtx.logAddrs.NewWriter()
-	sd.LogTopicsWriter = sd.aggCtx.logTopics.NewWriter()
-	sd.TracesFromWriter = sd.aggCtx.tracesFrom.NewWriter()
-	sd.TracesToWriter = sd.aggCtx.tracesTo.NewWriter()
+	sd.accountWriter = sd.aggCtx.account.NewWriter()
+	sd.storageWriter = sd.aggCtx.storage.NewWriter()
+	sd.codeWriter = sd.aggCtx.code.NewWriter()
+	sd.commitmentWriter = sd.aggCtx.commitment.NewWriter()
+	sd.logAddrsWriter = sd.aggCtx.logAddrs.NewWriter()
+	sd.logTopicsWriter = sd.aggCtx.logTopics.NewWriter()
+	sd.tracesFromWriter = sd.aggCtx.tracesFrom.NewWriter()
+	sd.tracesToWriter = sd.aggCtx.tracesTo.NewWriter()
 
 	if sd.account == nil {
 		sd.account = map[string][]byte{}
@@ -794,39 +794,39 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if sd.noFlush == 0 {
-		if err := sd.AccountWriter.Flush(ctx, tx); err != nil {
+		if err := sd.accountWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.StorageWriter.Flush(ctx, tx); err != nil {
+		if err := sd.storageWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.CodeWriter.Flush(ctx, tx); err != nil {
+		if err := sd.codeWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.CommitmentWriter.Flush(ctx, tx); err != nil {
+		if err := sd.commitmentWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.LogAddrsWriter.Flush(ctx, tx); err != nil {
+		if err := sd.logAddrsWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.LogTopicsWriter.Flush(ctx, tx); err != nil {
+		if err := sd.logTopicsWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.TracesFromWriter.Flush(ctx, tx); err != nil {
+		if err := sd.tracesFromWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.TracesToWriter.Flush(ctx, tx); err != nil {
+		if err := sd.tracesToWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
 
-		sd.AccountWriter.close()
-		sd.StorageWriter.close()
-		sd.CodeWriter.close()
-		sd.CommitmentWriter.close()
-		sd.LogAddrsWriter.close()
-		sd.LogTopicsWriter.close()
-		sd.TracesFromWriter.close()
-		sd.TracesToWriter.close()
+		sd.accountWriter.close()
+		sd.storageWriter.close()
+		sd.codeWriter.close()
+		sd.commitmentWriter.close()
+		sd.logAddrsWriter.close()
+		sd.logTopicsWriter.close()
+		sd.tracesFromWriter.close()
+		sd.tracesToWriter.close()
 	}
 	return nil
 }
@@ -1156,7 +1156,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.trace {
 		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
 	}
-	return sdc.sd.CommitmentWriter.PutWithPrev(keyCommitmentState, nil, encodedState, prevState)
+	return sdc.sd.commitmentWriter.PutWithPrev(keyCommitmentState, nil, encodedState, prevState)
 }
 
 func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
