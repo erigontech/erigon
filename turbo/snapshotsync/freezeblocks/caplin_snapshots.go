@@ -188,6 +188,7 @@ func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error 
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
+	fmt.Println(fileNames)
 Loop:
 	for _, fName := range fileNames {
 		fmt.Println(fName)
@@ -281,6 +282,7 @@ func (s *CaplinSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
+	fmt.Println(list)
 	return s.ReopenList(list, false)
 }
 
