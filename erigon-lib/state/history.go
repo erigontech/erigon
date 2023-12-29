@@ -493,7 +493,6 @@ func (hc *HistoryContext) NewWriter() *historyBufferedWriter {
 
 type historyBufferedWriter struct {
 	historyVals      *etl.Collector
-	tmpdir           string
 	historyKey       []byte
 	discard          bool
 	historyValsTable string
@@ -523,7 +522,6 @@ func (w *historyBufferedWriter) close() {
 
 func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyBufferedWriter {
 	w := &historyBufferedWriter{
-		tmpdir:  tmpdir,
 		discard: discard,
 
 		historyKey:       make([]byte, 128),

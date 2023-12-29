@@ -721,7 +721,7 @@ func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte) error
 
 func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
-	if tracePutWithPrev != "" && tracePutWithPrev == w.dc.d.filenameBase {
+	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, prev)
 	}
 	if err := w.h.AddPrevValue(key1, key2, prev); err != nil {
@@ -737,8 +737,7 @@ func (w *domainBufferedWriter) SetTxNum(v uint64) {
 }
 
 func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
-	w := &domainBufferedWriter{dc: dc,
-		tmpdir:    tmpdir,
+	w := &domainBufferedWriter{
 		discard:   discard,
 		aux:       make([]byte, 0, 128),
 		keysTable: dc.d.keysTable,
@@ -754,10 +753,8 @@ func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedW
 }
 
 type domainBufferedWriter struct {
-	dc           *DomainContext
 	keys, values *etl.Collector
 	aux          []byte
-	tmpdir       string
 
 	setTxNumOnce bool
 	discard      bool
