@@ -351,6 +351,7 @@ func ConsensusClStages(ctx context.Context,
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 							Loop:
 								for {
+									var err error
 									from := args.seenSlot - 2
 									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 									count := (currentSlot - from) + 2
@@ -358,7 +359,7 @@ func ConsensusClStages(ctx context.Context,
 										time.Sleep(100 * time.Millisecond)
 										continue
 									}
-									blocks, err := sourceFunc(ctx, nil, from, count)
+									blocks, err = sourceFunc(ctx, nil, from, count)
 									if err != nil {
 										errCh <- err
 										return
