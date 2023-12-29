@@ -54,6 +54,7 @@ func (sn *BeaconBlockSegment) close() {
 func (sn *BeaconBlockSegment) reopenSeg(dir string) (err error) {
 	sn.closeSeg()
 	fileName := snaptype.SegmentFileName(sn.version, sn.ranges.from, sn.ranges.to, snaptype.BeaconBlocks)
+	fmt.Println(fileName, sn.version)
 	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, fileName)
@@ -159,7 +160,6 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, snapDir string, version uint8, logger log.Logger) *CaplinSnapshots {
-	fmt.Println(version)
 	return &CaplinSnapshots{dir: snapDir, version: version, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger, beaconCfg: beaconCfg}
 }
 
