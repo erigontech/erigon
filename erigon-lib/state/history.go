@@ -438,12 +438,6 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	return nil
 }
 
-//	func (hc *HistoryContext) AddPrevValue(key1, key2, original []byte) (err error) {
-//		if original == nil {
-//			original = []byte{}
-//		}
-//		return hc.wal.addPrevValue(key1, key2, original)
-//	}
 func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte) (err error) {
 	if w.discard {
 		return nil

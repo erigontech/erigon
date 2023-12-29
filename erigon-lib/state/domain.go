@@ -708,76 +708,56 @@ func (d *Domain) Close() {
 	d.reCalcRoFiles()
 }
 
-//	func (dc *DomainContext) PutWithPrev(key1, key2, val, preval []byte) error {
-//		// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
-//		if tracePutWithPrev == dc.d.filenameBase {
-//			fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, val, preval)
-//		}
-//		if err := dc.hc.AddPrevValue(key1, key2, preval); err != nil {
-//			return err
-//		}
-//		return dc.wal.addValue(key1, key2, val)
-//	}
-func (dc *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte) error {
+func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
-	if tracePutWithPrev == dc.dc.d.filenameBase {
-		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.dc.d.filenameBase, dc.h.ii.txNum, key1, key2, val, preval)
+	if tracePutWithPrev == w.dc.d.filenameBase {
+		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", w.dc.d.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
 	}
-	if err := dc.h.AddPrevValue(key1, key2, preval); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, preval); err != nil {
 		return err
 	}
-	return dc.addValue(key1, key2, val)
+	return w.addValue(key1, key2, val)
 }
 
-//	func (dc *DomainContext) DeleteWithPrev(key1, key2, prev []byte) (err error) {
-//		// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
-//		if tracePutWithPrev == dc.d.filenameBase {
-//			fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", dc.d.filenameBase, dc.hc.ic.txNum, key1, key2, prev)
-//		}
-//		if err := dc.hc.AddPrevValue(key1, key2, prev); err != nil {
-//			return err
-//		}
-//		return dc.wal.addValue(key1, key2, nil)
-//	}
-func (dc *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte) (err error) {
+func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
-	if tracePutWithPrev == dc.dc.d.filenameBase {
-		fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", dc.dc.d.filenameBase, dc.h.ii.txNum, key1, key2, prev)
+	if tracePutWithPrev == w.dc.d.filenameBase {
+		fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", w.dc.d.filenameBase, w.h.ii.txNum, key1, key2, prev)
 	}
-	if err := dc.h.AddPrevValue(key1, key2, prev); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, prev); err != nil {
 		return err
 	}
-	return dc.addValue(key1, key2, nil)
+	return w.addValue(key1, key2, nil)
 }
 
 // Derecated
-func (dc *domainBufferedWriter) update(key []byte, tx kv.RwTx) error {
+func (w *domainBufferedWriter) update(key []byte, tx kv.RwTx) error {
 	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(dc.h.ii.txNum / dc.dc.d.aggregationStep))
+	binary.BigEndian.PutUint64(invertedStep[:], ^(w.h.ii.txNum / w.dc.d.aggregationStep))
 	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
-	if err := tx.Put(dc.dc.d.keysTable, key, invertedStep[:]); err != nil {
+	if err := tx.Put(w.dc.d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
 }
 
 // Derecated
-func (dc *domainBufferedWriter) put(key, val []byte, tx kv.RwTx) error {
-	if err := dc.update(key, tx); err != nil {
+func (w *domainBufferedWriter) put(key, val []byte, tx kv.RwTx) error {
+	if err := w.update(key, tx); err != nil {
 		return err
 	}
-	invertedStep := ^(dc.h.ii.txNum / dc.dc.d.aggregationStep)
+	invertedStep := ^(w.h.ii.txNum / w.dc.d.aggregationStep)
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
 	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
-	return tx.Put(dc.dc.d.valsTable, keySuffix, val)
+	return tx.Put(w.dc.d.valsTable, keySuffix, val)
 }
 
 // Deprecated
-func (dc *domainBufferedWriter) Put(key1, key2, val []byte, tx kv.RwTx) error {
+func (w *domainBufferedWriter) Put(key1, key2, val []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
-	original, _, err := dc.dc.GetLatest(key, nil, tx)
+	original, _, err := w.dc.GetLatest(key, nil, tx)
 	if err != nil {
 		return err
 	}
@@ -785,29 +765,29 @@ func (dc *domainBufferedWriter) Put(key1, key2, val []byte, tx kv.RwTx) error {
 		return nil
 	}
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
-	if err = dc.h.AddPrevValue(key1, key2, original); err != nil {
+	if err = w.h.AddPrevValue(key1, key2, original); err != nil {
 		return err
 	}
-	return dc.put(key, val, tx)
+	return w.put(key, val, tx)
 }
 
 // Deprecated
-func (dc *domainBufferedWriter) Delete(key1, key2 []byte, tx kv.RwTx) error {
+func (w *domainBufferedWriter) Delete(key1, key2 []byte, tx kv.RwTx) error {
 	key := common.Append(key1, key2)
-	original, found, err := dc.dc.GetLatest(key, nil, tx)
+	original, found, err := w.dc.GetLatest(key, nil, tx)
 	if err != nil {
 		return err
 	}
 	if !found {
 		return nil
 	}
-	return dc.DeleteWithPrev(key1, key2, original)
+	return w.DeleteWithPrev(key1, key2, original)
 }
 
-func (dc *domainBufferedWriter) SetTxNum(v uint64) {
-	dc.setTxNumOnce = true
-	dc.h.SetTxNum(v)
-	binary.BigEndian.PutUint64(dc.stepBytes[:], ^(v / dc.dc.d.aggregationStep))
+func (w *domainBufferedWriter) SetTxNum(v uint64) {
+	w.setTxNumOnce = true
+	w.h.SetTxNum(v)
+	binary.BigEndian.PutUint64(w.stepBytes[:], ^(v / w.dc.d.aggregationStep))
 }
 
 func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedWriter {
@@ -840,16 +820,16 @@ type domainBufferedWriter struct {
 	h *historyBufferedWriter
 }
 
-func (d *domainBufferedWriter) close() {
-	if d == nil { // allow dobule-close
+func (w *domainBufferedWriter) close() {
+	if w == nil { // allow dobule-close
 		return
 	}
-	d.h.close()
-	if d.keys != nil {
-		d.keys.Close()
+	w.h.close()
+	if w.keys != nil {
+		w.keys.Close()
 	}
-	if d.values != nil {
-		d.values.Close()
+	if w.values != nil {
+		w.values.Close()
 	}
 }
 
@@ -871,46 +851,46 @@ func loadSkipFunc() etl.LoadFunc {
 		return nil
 	}
 }
-func (d *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
-	if d.discard {
+func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
+	if w.discard {
 		return nil
 	}
-	if err := d.h.Flush(ctx, tx); err != nil {
+	if err := w.h.Flush(ctx, tx); err != nil {
 		return err
 	}
 
-	if err := d.keys.Load(tx, d.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.keys.Load(tx, w.dc.d.keysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := d.values.Load(tx, d.dc.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := w.values.Load(tx, w.dc.d.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *domainBufferedWriter) addValue(key1, key2, value []byte) error {
-	if d.discard {
+func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
+	if w.discard {
 		return nil
 	}
-	if !d.setTxNumOnce {
+	if !w.setTxNumOnce {
 		panic("you forgot to call SetTxNum")
 	}
 
 	kl := len(key1) + len(key2)
-	d.aux = append(append(append(d.aux[:0], key1...), key2...), d.stepBytes[:]...)
-	fullkey := d.aux[:kl+8]
-	if asserts && (d.h.ii.txNum/d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.stepBytes[:]) {
-		panic(fmt.Sprintf("assert: %d != %d", d.h.ii.txNum/d.dc.d.aggregationStep, ^binary.BigEndian.Uint64(d.stepBytes[:])))
+	w.aux = append(append(append(w.aux[:0], key1...), key2...), w.stepBytes[:]...)
+	fullkey := w.aux[:kl+8]
+	if asserts && (w.h.ii.txNum/w.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(w.stepBytes[:]) {
+		panic(fmt.Sprintf("assert: %w != %w", w.h.ii.txNum/w.dc.d.aggregationStep, ^binary.BigEndian.Uint64(w.stepBytes[:])))
 	}
 
 	//defer func() {
-	//	fmt.Printf("addValue @%d %x->%x buffered %t largeVals %t file %s\n", d.dc.hc.ic.txNum, fullkey, value, d.buffered, d.largeValues, d.dc.d.filenameBase)
+	//	fmt.Printf("addValue @%w %x->%x buffered %t largeVals %t file %s\n", w.dc.hc.ic.txNum, fullkey, value, w.buffered, w.largeValues, w.dc.w.filenameBase)
 	//}()
 
-	if err := d.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
+	if err := w.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
 		return err
 	}
-	if err := d.values.Collect(fullkey, value); err != nil {
+	if err := w.values.Collect(fullkey, value); err != nil {
 		return err
 	}
 	return nil
