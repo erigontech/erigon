@@ -120,19 +120,11 @@ func NewSharedDomains(tx kv.Tx) *SharedDomains {
 		logTopicsWriter:  ac.logTopics.NewWriter(),
 		tracesFromWriter: ac.tracesFrom.NewWriter(),
 		tracesToWriter:   ac.tracesTo.NewWriter(),
-	}
 
-	if sd.account == nil {
-		sd.account = map[string][]byte{}
-	}
-	if sd.commitment == nil {
-		sd.commitment = map[string][]byte{}
-	}
-	if sd.code == nil {
-		sd.code = map[string][]byte{}
-	}
-	if sd.storage == nil {
-		sd.storage = btree2.NewMap[string, []byte](128)
+		account:    map[string][]byte{},
+		commitment: map[string][]byte{},
+		code:       map[string][]byte{},
+		storage:    btree2.NewMap[string, []byte](128),
 	}
 
 	sd.SetTxNum(0)
