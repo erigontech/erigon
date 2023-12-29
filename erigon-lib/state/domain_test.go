@@ -731,10 +731,12 @@ func TestDomain_Delete(t *testing.T) {
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
 		writer.SetTxNum(txNum)
+		original, _, err := dc.GetLatest([]byte("key1"), nil, tx)
+		require.NoError(err)
 		if txNum%2 == 0 {
-			err = writer.Put([]byte("key1"), nil, []byte("value1"), tx)
+			err = writer.PutWithPrev([]byte("key1"), nil, []byte("value1"), original)
 		} else {
-			err = writer.Delete([]byte("key1"), nil, tx)
+			err = writer.DeleteWithPrev([]byte("key1"), nil, original)
 		}
 		require.NoError(err)
 	}
