@@ -97,35 +97,36 @@ func TestHistoryCollationBuild(t *testing.T) {
 		defer tx.Rollback()
 		hc := h.MakeContext()
 		defer hc.Close()
-		hc.StartWrites()
-		defer hc.FinishWrites()
+		writer := hc.NewWriter()
+		defer writer.close()
 
-		hc.SetTxNum(2)
-		err = hc.AddPrevValue([]byte("key1"), nil, nil)
+		writer.SetTxNum(2)
+		err = writer.AddPrevValue([]byte("key1"), nil, nil)
 		require.NoError(err)
 
-		hc.SetTxNum(3)
-		err = hc.AddPrevValue([]byte("key2"), nil, nil)
+		writer.SetTxNum(3)
+		err = writer.AddPrevValue([]byte("key2"), nil, nil)
 		require.NoError(err)
 
-		hc.SetTxNum(6)
-		err = hc.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
+		writer.SetTxNum(6)
+		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
 		require.NoError(err)
-		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
 		require.NoError(err)
 
-		flusher := hc.Rotate()
+		flusher := writer
+		writer = hc.NewWriter()
 
-		hc.SetTxNum(7)
-		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		writer.SetTxNum(7)
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
 		require.NoError(err)
-		err = hc.AddPrevValue([]byte("key3"), nil, nil)
+		err = writer.AddPrevValue([]byte("key3"), nil, nil)
 		require.NoError(err)
 
 		err = flusher.Flush(ctx, tx)
 		require.NoError(err)
 
-		err = hc.Rotate().Flush(ctx, tx)
+		err = writer.Flush(ctx, tx)
 		require.NoError(err)
 
 		c, err := h.collate(ctx, 0, 0, 8, tx)
@@ -210,30 +211,30 @@ func TestHistoryAfterPrune(t *testing.T) {
 		defer tx.Rollback()
 		hc := h.MakeContext()
 		defer hc.Close()
-		hc.StartWrites()
-		defer hc.FinishWrites()
+		writer := hc.NewWriter()
+		defer writer.close()
 
-		hc.SetTxNum(2)
-		err = hc.AddPrevValue([]byte("key1"), nil, nil)
-		require.NoError(err)
-
-		hc.SetTxNum(3)
-		err = hc.AddPrevValue([]byte("key2"), nil, nil)
+		writer.SetTxNum(2)
+		err = writer.AddPrevValue([]byte("key1"), nil, nil)
 		require.NoError(err)
 
-		hc.SetTxNum(6)
-		err = hc.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
-		require.NoError(err)
-		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
+		writer.SetTxNum(3)
+		err = writer.AddPrevValue([]byte("key2"), nil, nil)
 		require.NoError(err)
 
-		hc.SetTxNum(7)
-		err = hc.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		writer.SetTxNum(6)
+		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
 		require.NoError(err)
-		err = hc.AddPrevValue([]byte("key3"), nil, nil)
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
 		require.NoError(err)
 
-		err = hc.Rotate().Flush(ctx, tx)
+		writer.SetTxNum(7)
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		require.NoError(err)
+		err = writer.AddPrevValue([]byte("key3"), nil, nil)
+		require.NoError(err)
+
+		err = writer.Flush(ctx, tx)
 		require.NoError(err)
 
 		c, err := h.collate(ctx, 0, 0, 16, tx)
@@ -281,8 +282,8 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	defer tx.Rollback()
 	hc := h.MakeContext()
 	defer hc.Close()
-	hc.StartWrites()
-	defer hc.FinishWrites()
+	writer := hc.NewWriter()
+	defer writer.close()
 
 	txs := uint64(1000)
 	// keys are encodings of numbers 1..31
@@ -290,7 +291,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 	var prevVal [32][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		hc.SetTxNum(txNum)
+		writer.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= uint64(31); keyNum++ {
 			if txNum%keyNum == 0 {
 				valNum := txNum / keyNum
@@ -300,7 +301,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				binary.BigEndian.PutUint64(v[:], valNum)
 				k[0] = 1   //mark key to simplify debug
 				v[0] = 255 //mark value to simplify debug
-				err = hc.AddPrevValue(k[:], nil, prevVal[keyNum])
+				err = writer.AddPrevValue(k[:], nil, prevVal[keyNum])
 				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
 			}
@@ -311,14 +312,15 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 			flusher = nil
 		}
 		if txNum%10 == 0 {
-			flusher = hc.Rotate()
+			flusher = writer
+			writer = hc.NewWriter()
 		}
 	}
 	if flusher != nil {
 		err = flusher.Flush(ctx, tx)
 		require.NoError(tb, err)
 	}
-	err = hc.Rotate().Flush(ctx, tx)
+	err = writer.Flush(ctx, tx)
 	require.NoError(tb, err)
 	err = tx.Commit()
 	require.NoError(tb, err)
@@ -539,9 +541,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		hc := h.MakeContext()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
-		txNum := hc.ic.txNum
 		require.NoError(h.OpenFolder(false))
-		hc.SetTxNum(txNum)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -951,8 +951,8 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	defer tx.Rollback()
 	hc := h.MakeContext()
 	defer hc.Close()
-	hc.StartWrites()
-	defer hc.FinishWrites()
+	writer := hc.NewWriter()
+	defer writer.close()
 
 	keys := [][]byte{
 		common.FromHex(""),
@@ -968,7 +968,7 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	var prevVal [7][]byte
 	var flusher flusher
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		hc.SetTxNum(txNum)
+		writer.SetTxNum(txNum)
 
 		for ik, k := range keys {
 			var v [8]byte
@@ -976,14 +976,14 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			if ik == 0 && txNum%33 == 0 {
 				continue
 			}
-			err = hc.AddPrevValue(k, nil, prevVal[ik])
+			err = writer.AddPrevValue(k, nil, prevVal[ik])
 			require.NoError(tb, err)
 
 			prevVal[ik] = v[:]
 		}
 
 		if txNum%33 == 0 {
-			err = hc.AddPrevValue(keys[0], nil, nil)
+			err = writer.AddPrevValue(keys[0], nil, nil)
 			require.NoError(tb, err)
 		}
 
@@ -993,14 +993,15 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			flusher = nil
 		}
 		if txNum%10 == 0 {
-			flusher = hc.Rotate()
+			flusher = writer
+			writer = hc.NewWriter()
 		}
 	}
 	if flusher != nil {
 		err = flusher.Flush(ctx, tx)
 		require.NoError(tb, err)
 	}
-	err = hc.Rotate().Flush(ctx, tx)
+	err = writer.Flush(ctx, tx)
 	require.NoError(tb, err)
 	err = tx.Commit()
 	require.NoError(tb, err)

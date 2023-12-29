@@ -508,13 +508,13 @@ func (sd *SharedDomains) delAccountStorage(addr, loc []byte, preVal []byte) erro
 func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte) (err error) {
 	switch table {
 	case kv.LogAddrIdx, kv.TblLogAddressIdx:
-		err = sd.aggCtx.logAddrs.Add(key)
+		err = sd.LogAddrsWriter.Add(key)
 	case kv.LogTopicIdx, kv.TblLogTopicsIdx, kv.LogTopicIndex:
-		err = sd.aggCtx.logTopics.Add(key)
+		err = sd.LogTopicsWriter.Add(key)
 	case kv.TblTracesToIdx:
-		err = sd.aggCtx.tracesTo.Add(key)
+		err = sd.TracesToWriter.Add(key)
 	case kv.TblTracesFromIdx:
-		err = sd.aggCtx.tracesFrom.Add(key)
+		err = sd.TracesFromWriter.Add(key)
 	default:
 		panic(fmt.Errorf("unknown shared index %s", table))
 	}
@@ -528,14 +528,6 @@ func (sd *SharedDomains) StepSize() uint64 { return sd.aggCtx.a.StepSize() }
 // Requires for sd.rwTx because of commitment evaluation in shared domains if aggregationStep is reached
 func (sd *SharedDomains) SetTxNum(txNum uint64) {
 	sd.txNum = txNum
-	sd.aggCtx.account.SetTxNum(txNum)
-	sd.aggCtx.code.SetTxNum(txNum)
-	sd.aggCtx.storage.SetTxNum(txNum)
-	sd.aggCtx.commitment.SetTxNum(txNum)
-	sd.aggCtx.tracesTo.SetTxNum(txNum)
-	sd.aggCtx.tracesFrom.SetTxNum(txNum)
-	sd.aggCtx.logAddrs.SetTxNum(txNum)
-	sd.aggCtx.logTopics.SetTxNum(txNum)
 	sd.AccountWriter.SetTxNum(txNum)
 	sd.CodeWriter.SetTxNum(txNum)
 	sd.StorageWriter.SetTxNum(txNum)
@@ -807,16 +799,16 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	}
 
 	if sd.noFlush == 0 {
-		if err := sd.AccountWriter.flush(ctx, tx); err != nil {
+		if err := sd.AccountWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.StorageWriter.flush(ctx, tx); err != nil {
+		if err := sd.StorageWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.CodeWriter.flush(ctx, tx); err != nil {
+		if err := sd.CodeWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-		if err := sd.CommitmentWriter.flush(ctx, tx); err != nil {
+		if err := sd.CommitmentWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
 		if err := sd.LogAddrsWriter.Flush(ctx, tx); err != nil {
@@ -1148,8 +1140,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 	if sdc.sd.aggCtx == nil {
 		return fmt.Errorf("store commitment state: AggregatorContext is not initialized")
 	}
-	dc := sdc.sd.aggCtx.commitment
-	encodedState, err := sdc.encodeCommitmentState(blockNum, dc.hc.ic.txNum)
+	encodedState, err := sdc.encodeCommitmentState(blockNum, sdc.sd.txNum)
 	if err != nil {
 		return err
 	}
@@ -1168,7 +1159,7 @@ func (sdc *SharedDomainsCommitmentContext) storeCommitmentState(blockNum uint64,
 		return nil
 	}
 	if sdc.sd.trace {
-		fmt.Printf("[commitment] store txn %d block %d rh %x\n", dc.hc.ic.txNum, blockNum, rh)
+		fmt.Printf("[commitment] store txn %d block %d rh %x\n", sdc.sd.txNum, blockNum, rh)
 	}
 	return sdc.sd.CommitmentWriter.PutWithPrev(keyCommitmentState, nil, encodedState, prevState)
 }

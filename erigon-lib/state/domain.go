@@ -723,7 +723,7 @@ func (d *Domain) Close() {
 func (dc *domainWAL) PutWithPrev(key1, key2, val, preval []byte) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev == dc.dc.d.filenameBase {
-		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.dc.d.filenameBase, dc.dc.hc.ic.txNum, key1, key2, val, preval)
+		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", dc.dc.d.filenameBase, dc.h.ii.txNum, key1, key2, val, preval)
 	}
 	if err := dc.h.AddPrevValue(key1, key2, preval); err != nil {
 		return err
@@ -744,7 +744,7 @@ func (dc *domainWAL) PutWithPrev(key1, key2, val, preval []byte) error {
 func (dc *domainWAL) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if tracePutWithPrev == dc.dc.d.filenameBase {
-		fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", dc.dc.d.filenameBase, dc.dc.hc.ic.txNum, key1, key2, prev)
+		fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", dc.dc.d.filenameBase, dc.h.ii.txNum, key1, key2, prev)
 	}
 	if err := dc.h.AddPrevValue(key1, key2, prev); err != nil {
 		return err
@@ -752,61 +752,58 @@ func (dc *domainWAL) DeleteWithPrev(key1, key2, prev []byte) (err error) {
 	return dc.addValue(key1, key2, nil)
 }
 
-func (dc *DomainContext) update(key []byte, tx kv.RwTx) error {
+// Derecated
+func (dc *domainWAL) update(key []byte, tx kv.RwTx) error {
 	var invertedStep [8]byte
-	binary.BigEndian.PutUint64(invertedStep[:], ^(dc.hc.ic.txNum / dc.d.aggregationStep))
+	binary.BigEndian.PutUint64(invertedStep[:], ^(dc.h.ii.txNum / dc.dc.d.aggregationStep))
 	//fmt.Printf("put: %s, %x, %x\n", d.filenameBase, key, invertedStep[:])
-	if err := tx.Put(dc.d.keysTable, key, invertedStep[:]); err != nil {
+	if err := tx.Put(dc.dc.d.keysTable, key, invertedStep[:]); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (dc *DomainContext) put(key, val []byte, tx kv.RwTx) error {
+// Derecated
+func (dc *domainWAL) put(key, val []byte, tx kv.RwTx) error {
 	if err := dc.update(key, tx); err != nil {
 		return err
 	}
-	invertedStep := ^(dc.hc.ic.txNum / dc.d.aggregationStep)
+	invertedStep := ^(dc.h.ii.txNum / dc.dc.d.aggregationStep)
 	keySuffix := make([]byte, len(key)+8)
 	copy(keySuffix, key)
 	binary.BigEndian.PutUint64(keySuffix[len(key):], invertedStep)
 	//fmt.Printf("put2: %s, %x, %x\n", d.filenameBase, keySuffix, val)
-	return tx.Put(dc.d.valsTable, keySuffix, val)
+	return tx.Put(dc.dc.d.valsTable, keySuffix, val)
 }
 
 // Deprecated
-//func (dc *DomainContext) Put(key1, key2, val []byte, tx kv.RwTx) error {
-//	key := common.Append(key1, key2)
-//	original, _, err := dc.GetLatest(key, nil, tx)
-//	if err != nil {
-//		return err
-//	}
-//	if bytes.Equal(original, val) {
-//		return nil
-//	}
-//	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
-//	if err = dc.hc.AddPrevValue(key1, key2, original); err != nil {
-//		return err
-//	}
-//	return dc.put(key, val, tx)
-//}
+func (dc *domainWAL) Put(key1, key2, val []byte, tx kv.RwTx) error {
+	key := common.Append(key1, key2)
+	original, _, err := dc.dc.GetLatest(key, nil, tx)
+	if err != nil {
+		return err
+	}
+	if bytes.Equal(original, val) {
+		return nil
+	}
+	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `original`` slice is invalidated
+	if err = dc.h.AddPrevValue(key1, key2, original); err != nil {
+		return err
+	}
+	return dc.put(key, val, tx)
+}
 
 // Deprecated
-//func (dc *DomainContext) Delete(key1, key2 []byte, tx kv.RwTx) error {
-//	key := common.Append(key1, key2)
-//	original, found, err := dc.GetLatest(key, nil, tx)
-//	if err != nil {
-//		return err
-//	}
-//	if !found {
-//		return nil
-//	}
-//	return dc.DeleteWithPrev(key1, key2, original)
-//}
-
-func (dc *DomainContext) SetTxNum(v uint64) {
-	dc.hc.SetTxNum(v)
-	binary.BigEndian.PutUint64(dc.stepBytes[:], ^(v / dc.d.aggregationStep))
+func (dc *domainWAL) Delete(key1, key2 []byte, tx kv.RwTx) error {
+	key := common.Append(key1, key2)
+	original, found, err := dc.dc.GetLatest(key, nil, tx)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return nil
+	}
+	return dc.DeleteWithPrev(key1, key2, original)
 }
 
 func (dc *domainWAL) SetTxNum(v uint64) {
@@ -878,7 +875,7 @@ func loadSkipFunc() etl.LoadFunc {
 		return nil
 	}
 }
-func (d *domainWAL) flush(ctx context.Context, tx kv.RwTx) error {
+func (d *domainWAL) Flush(ctx context.Context, tx kv.RwTx) error {
 	if d.discard {
 		return nil
 	}
@@ -902,7 +899,7 @@ func (d *domainWAL) addValue(key1, key2, value []byte) error {
 	kl := len(key1) + len(key2)
 	d.aux = append(append(append(d.aux[:0], key1...), key2...), d.stepBytes[:]...)
 	fullkey := d.aux[:kl+8]
-	if asserts && (d.dc.hc.ic.txNum/d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.stepBytes[:]) {
+	if asserts && (d.h.ii.txNum/d.dc.d.aggregationStep) != ^binary.BigEndian.Uint64(d.stepBytes[:]) {
 		panic(fmt.Sprintf("assert: %d != %d", d.h.ii.txNum/d.dc.d.aggregationStep, ^binary.BigEndian.Uint64(d.stepBytes[:])))
 	}
 
@@ -1007,9 +1004,6 @@ type DomainContext struct {
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
 
-	wal *domainWAL
-
-	stepBytes [8]byte  // current inverted step representation
 	keyBuf    [60]byte // 52b key and 8b for inverted step
 	valKeyBuf [60]byte // 52b key and 8b for inverted step
 
@@ -1618,9 +1612,9 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 			if err != nil {
 				return err
 			}
-			dc.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
+			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
 		} else {
-			dc.SetTxNum(txNumUnindTo - 1)
+			restored.SetTxNum(txNumUnindTo - 1)
 		}
 		//fmt.Printf("[%s]unwinding %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, dc.TxNum())
 		if err := restored.addValue(k, nil, v); err != nil {
@@ -1686,7 +1680,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnindTo, step, err)
 	}
-	return restored.flush(ctx, rwTx)
+	return restored.Flush(ctx, rwTx)
 }
 
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
@@ -1705,22 +1699,21 @@ func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
 	return k == nil && k2 == nil && isEmptyHist, nil
 }
 
-func (dc *DomainContext) Rotate() flusher {
-	hf := dc.hc.Rotate()
-	if dc.wal != nil {
-		w := dc.wal
-		if err := w.keys.Flush(); err != nil {
-			panic(err)
-		}
-		if err := w.values.Flush(); err != nil {
-			panic(err)
-		}
-		hf.d = w
-		dc.wal = dc.newWriter(dc.wal.tmpdir, dc.wal.discard)
-	}
-	return hf
-}
-
+//	func (dc *DomainContext) Rotate() flusher {
+//		hf := dc.hc.Rotate()
+//		if dc.wal != nil {
+//			w := dc.wal
+//			if err := w.keys.Flush(); err != nil {
+//				panic(err)
+//			}
+//			if err := w.values.Flush(); err != nil {
+//				panic(err)
+//			}
+//			hf.d = w
+//			dc.wal = dc.newWriter(dc.wal.tmpdir, dc.wal.discard)
+//		}
+//		return hf
+//	}
 var (
 	UseBtree = true // if true, will use btree for all files
 )

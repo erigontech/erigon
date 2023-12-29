@@ -70,28 +70,28 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	defer tx.Rollback()
 	ic := ii.MakeContext()
 	defer ic.Close()
-	ic.StartWrites()
-	defer ic.FinishWrites()
+	writer := ic.NewWriter()
+	defer writer.close()
 
-	ic.SetTxNum(2)
-	err = ic.Add([]byte("key1"))
+	writer.SetTxNum(2)
+	err = writer.Add([]byte("key1"))
 	require.NoError(t, err)
 
-	ic.SetTxNum(3)
-	err = ic.Add([]byte("key2"))
+	writer.SetTxNum(3)
+	err = writer.Add([]byte("key2"))
 	require.NoError(t, err)
 
-	ic.SetTxNum(6)
-	err = ic.Add([]byte("key1"))
+	writer.SetTxNum(6)
+	err = writer.Add([]byte("key1"))
 	require.NoError(t, err)
-	err = ic.Add([]byte("key3"))
-	require.NoError(t, err)
-
-	ic.SetTxNum(17)
-	err = ic.Add([]byte("key10"))
+	err = writer.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	err = ic.Rotate().Flush(ctx, tx)
+	writer.SetTxNum(17)
+	err = writer.Add([]byte("key10"))
+	require.NoError(t, err)
+
+	err = writer.Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -154,24 +154,24 @@ func TestInvIndexAfterPrune(t *testing.T) {
 	}()
 	ic := ii.MakeContext()
 	defer ic.Close()
-	ic.StartWrites()
-	defer ic.FinishWrites()
+	writer := ic.NewWriter()
+	defer writer.close()
 
-	ic.SetTxNum(2)
-	err = ic.Add([]byte("key1"))
+	writer.SetTxNum(2)
+	err = writer.Add([]byte("key1"))
 	require.NoError(t, err)
 
-	ic.SetTxNum(3)
-	err = ic.Add([]byte("key2"))
+	writer.SetTxNum(3)
+	err = writer.Add([]byte("key2"))
 	require.NoError(t, err)
 
-	ic.SetTxNum(6)
-	err = ic.Add([]byte("key1"))
+	writer.SetTxNum(6)
+	err = writer.Add([]byte("key1"))
 	require.NoError(t, err)
-	err = ic.Add([]byte("key3"))
+	err = writer.Add([]byte("key3"))
 	require.NoError(t, err)
 
-	err = ic.Rotate().Flush(ctx, tx)
+	err = writer.Flush(ctx, tx)
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
@@ -238,20 +238,20 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 	defer tx.Rollback()
 	ic := ii.MakeContext()
 	defer ic.Close()
-	ic.StartWrites()
-	defer ic.FinishWrites()
+	writer := ic.NewWriter()
+	defer writer.close()
 
 	var flusher flusher
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
 	for txNum := uint64(1); txNum <= txs; txNum++ {
-		ic.SetTxNum(txNum)
+		writer.SetTxNum(txNum)
 		for keyNum := uint64(1); keyNum <= module; keyNum++ {
 			if txNum%keyNum == 0 {
 				var k [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
-				err = ic.Add(k[:])
+				err = writer.Add(k[:])
 				require.NoError(err)
 			}
 		}
@@ -259,13 +259,14 @@ func filledInvIndexOfSize(tb testing.TB, txs, aggStep, module uint64, logger log
 			require.NoError(flusher.Flush(ctx, tx))
 		}
 		if txNum%10 == 0 {
-			flusher = ic.Rotate()
+			flusher = writer
+			writer = ic.NewWriter()
 		}
 	}
 	if flusher != nil {
 		require.NoError(flusher.Flush(ctx, tx))
 	}
-	err = ic.Rotate().Flush(ctx, tx)
+	err = writer.Flush(ctx, tx)
 	require.NoError(err)
 	err = tx.Commit()
 	require.NoError(err)
