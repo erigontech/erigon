@@ -2027,7 +2027,7 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 		require.EqualValues(t, ek, uk)
 		require.EqualValues(t, ev, uv)
 		if !et.HasNext() {
-			require.False(t, ut.HasNext(), "unwindedIterhas extra keys\n")
+			require.False(t, ut.HasNext(), "unwindedIter has extra keys\n")
 			break
 		}
 	}

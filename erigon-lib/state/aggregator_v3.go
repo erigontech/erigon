@@ -715,7 +715,6 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInDomainFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
 	return ac.CanPruneFrom(tx) < ac.maxTxNumInDomainFiles(false)
 }
 func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
