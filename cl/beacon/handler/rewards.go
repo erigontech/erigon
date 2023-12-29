@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
@@ -80,7 +81,7 @@ func (a *ApiHandler) getBlockRewards(r *http.Request) (*beaconResponse, error) {
 
 type syncCommitteeReward struct {
 	ValidatorIndex uint64 `json:"validator_index,string"`
-	Reward         uint64 `json:"reward,string"`
+	Reward         int64  `json:"reward,string"`
 }
 
 func (a *ApiHandler) getSyncCommitteesRewards(r *http.Request) (*beaconResponse, error) {
@@ -123,6 +124,10 @@ func (a *ApiHandler) getSyncCommitteesRewards(r *http.Request) (*beaconResponse,
 	}
 	if blk == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "block not found")
+	}
+	version := a.beaconChainCfg.GetCurrentStateVersion(blk.Block.Slot / a.beaconChainCfg.SlotsPerEpoch)
+	if version < clparams.AltairVersion {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "sync committee rewards not available before Altair fork")
 	}
 	// retrieve the state we need -----------------------------------------------
 	// We need:
@@ -180,11 +185,11 @@ func (a *ApiHandler) getSyncCommitteesRewards(r *http.Request) (*beaconResponse,
 		filterIndiciesSet[v] = struct{}{}
 	}
 	// validator index -> accumulated rewards
-	accumulatedRewards := map[uint64]uint64{}
+	accumulatedRewards := map[uint64]int64{}
 	for _, idx := range filterIndicies {
 		accumulatedRewards[idx] = 0
 	}
-	partecipantReward := a.syncPartecipantReward(totalActiveBalance)
+	partecipantReward := int64(a.syncPartecipantReward(totalActiveBalance))
 
 	for committeeIdx, v := range committee {
 		idx, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, v)
