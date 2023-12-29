@@ -78,10 +78,10 @@ type SharedDomains struct {
 	StorageWriter    *domainBufferedWriter
 	CodeWriter       *domainBufferedWriter
 	CommitmentWriter *domainBufferedWriter
-	TracesToWriter   *invertedIndexBufferedWireter
-	LogAddrsWriter   *invertedIndexBufferedWireter
-	LogTopicsWriter  *invertedIndexBufferedWireter
-	TracesFromWriter *invertedIndexBufferedWireter
+	TracesToWriter   *invertedIndexBufferedWriter
+	LogAddrsWriter   *invertedIndexBufferedWriter
+	LogTopicsWriter  *invertedIndexBufferedWriter
+	TracesFromWriter *invertedIndexBufferedWriter
 }
 
 type HasAggCtx interface {

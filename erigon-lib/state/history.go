@@ -506,7 +506,7 @@ type historyBufferedWriter struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	largeValues bool
 
-	ii *invertedIndexBufferedWireter
+	ii *invertedIndexBufferedWriter
 }
 
 func (w *historyBufferedWriter) SetTxNum(v uint64) { w.ii.SetTxNum(v) }
