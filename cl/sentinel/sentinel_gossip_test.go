@@ -94,7 +94,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	msg = []byte("hello1")
 	go func() {
 		// delay to make sure that the connection is established
-		sub1 = sentinel1.subManager.GetMatchingSubscription(string(BeaconBlockSsz.Name))
+		sub1 = sentinel1.subManager.GetMatchingSubscription(BeaconBlockSsz.Name)
 		sub1.Publish(msg)
 	}()
 
