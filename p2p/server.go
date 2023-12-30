@@ -32,11 +32,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
@@ -558,7 +557,7 @@ func (srv *Server) setupLocalNode() error {
 	}
 	sort.Sort(capsByNameAndVersion(srv.ourHandshake.Caps))
 	// Create the local node
-	db, err := enode.OpenDB(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir)
+	db, err := enode.OpenDB(srv.quitCtx, srv.Config.NodeDatabase, srv.Config.TmpDir, srv.logger)
 	if err != nil {
 		return err
 	}

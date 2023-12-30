@@ -25,14 +25,13 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 func main() {
@@ -120,7 +119,7 @@ func main() {
 	ctx, cancel := common.RootContext()
 	defer cancel()
 
-	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */)
+	db, err := enode.OpenDB(ctx, "" /* path */, "" /* tmpDir */, logger)
 	if err != nil {
 		panic(err)
 	}

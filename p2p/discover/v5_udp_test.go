@@ -29,19 +29,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/turbo/testlog"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/p2p/discover/v5wire"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
 func startLocalhostV5(t *testing.T, cfg Config, logger log.Logger) *UDPv5 {
 	cfg.PrivateKey = newkey()
 	tmpDir := t.TempDir()
-	db, err := enode.OpenDB(context.Background(), "", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -573,7 +573,7 @@ func newUDPV5TestContext(ctx context.Context, t *testing.T, logger log.Logger) *
 	t.Cleanup(test.close)
 	var err error
 	tmpDir := t.TempDir()
-	test.db, err = enode.OpenDB(context.Background(), "", tmpDir)
+	test.db, err = enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -627,7 +627,7 @@ func (test *udpV5Test) getNode(key *ecdsa.PrivateKey, addr *net.UDPAddr, logger 
 	ln := test.nodesByID[id]
 	if ln == nil {
 		tmpDir := test.t.TempDir()
-		db, err := enode.OpenDB(context.Background(), "", tmpDir)
+		db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 		if err != nil {
 			panic(err)
 		}

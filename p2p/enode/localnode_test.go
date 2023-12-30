@@ -22,14 +22,15 @@ import (
 	"net"
 	"testing"
 
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 )
 
 func newLocalNodeForTesting(tmpDir string, logger log.Logger) (*LocalNode, *DB) {
-	db, err := OpenDB(context.Background(), "", tmpDir)
+	db, err := OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -13,14 +14,17 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func TestGenesisBlockHashes(t *testing.T) {
@@ -50,12 +54,13 @@ func TestGenesisBlockRoots(t *testing.T) {
 	require := require.New(t)
 	var err error
 
-	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "")
+	logger := testlog.Logger(t, log.LvlInfo)
+	block, _, _ := core.GenesisToBlock(core.MainnetGenesisBlock(), "", logger)
 	if block.Hash() != params.MainnetGenesisHash {
 		t.Errorf("wrong mainnet genesis hash, got %v, want %v", block.Hash(), params.MainnetGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "")
+	block, _, err = core.GenesisToBlock(core.GnosisGenesisBlock(), "", logger)
 	require.NoError(err)
 	if block.Root() != params.GnosisGenesisStateRoot {
 		t.Errorf("wrong Gnosis Chain genesis state root, got %v, want %v", block.Root(), params.GnosisGenesisStateRoot)
@@ -64,7 +69,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		t.Errorf("wrong Gnosis Chain genesis hash, got %v, want %v", block.Hash(), params.GnosisGenesisHash)
 	}
 
-	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "")
+	block, _, err = core.GenesisToBlock(core.ChiadoGenesisBlock(), "", logger)
 	require.NoError(err)
 	if block.Root() != params.ChiadoGenesisStateRoot {
 		t.Errorf("wrong Chiado genesis state root, got %v, want %v", block.Root(), params.ChiadoGenesisStateRoot)

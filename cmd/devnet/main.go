@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
@@ -23,15 +23,14 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
 	erigon_app "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/urfave/cli/v2"
 )
 
 var (

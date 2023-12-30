@@ -5,26 +5,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
 // does not change the state root.
 func TestEmptyBlock(t *testing.T) {
+	logger := testlog.Logger(t, log.LvlInfo)
 	require := require.New(t)
 	genesis := core.GnosisGenesisBlock()
-	genesisBlock, _, err := core.GenesisToBlock(genesis, "")
+	genesisBlock, _, err := core.GenesisToBlock(genesis, "", logger)
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false

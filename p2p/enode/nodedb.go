@@ -29,12 +29,14 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/rlp"
 
 	mdbx1 "github.com/erigontech/mdbx-go/mdbx"
 )
@@ -82,8 +84,7 @@ type DB struct {
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
-func OpenDB(ctx context.Context, path string, tmpDir string) (*DB, error) {
-	logger := log.New() //TODO: move higher
+func OpenDB(ctx context.Context, path string, tmpDir string, logger log.Logger) (*DB, error) {
 	if path == "" {
 		return newMemoryDB(logger, tmpDir)
 	}

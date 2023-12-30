@@ -25,10 +25,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
 func TestTable_pingReplace(t *testing.T) {
@@ -49,7 +52,8 @@ func TestTable_pingReplace(t *testing.T) {
 func testPingReplace(t *testing.T, newNodeIsResponding, lastInBucketIsResponding bool) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	tab, db := newTestTable(transport, tmpDir, logger)
 	defer db.Close()
 	defer tab.close()
 
@@ -92,6 +96,7 @@ func testPingReplace(t *testing.T, newNodeIsResponding, lastInBucketIsResponding
 }
 
 func testTableBumpNoDuplicatesRun(t *testing.T, bucketCountGen byte, bumpCountGen byte, randGen *rand.Rand) bool {
+	logger := testlog.Logger(t, log.LvlInfo)
 	generateBucketNodes := func(bucketCountGen byte) []*node {
 		bucketCount := bucketCountGen % (bucketSize + 1) // [0...bucketSize]
 		nodes := make([]*node, bucketCount)
@@ -115,10 +120,9 @@ func testTableBumpNoDuplicatesRun(t *testing.T, bucketCountGen byte, bumpCountGe
 		return true
 	}
 	bumps := generateRandomBumpPositions(bumpCountGen, len(nodes), randGen)
-
 	if len(bumps) > 0 {
 		tmpDir := t.TempDir()
-		tab, db := newTestTable(newPingRecorder(), tmpDir)
+		tab, db := newTestTable(newPingRecorder(), tmpDir, logger)
 		defer db.Close()
 		defer tab.close()
 
@@ -170,7 +174,8 @@ func TestTable_bumpNoDuplicates_examples(t *testing.T) {
 func TestTable_IPLimit(t *testing.T) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	tab, db := newTestTable(transport, tmpDir, logger)
 	defer db.Close()
 	defer tab.close()
 
@@ -188,7 +193,8 @@ func TestTable_IPLimit(t *testing.T) {
 func TestTable_BucketIPLimit(t *testing.T) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	tab, db := newTestTable(transport, tmpDir, logger)
 	defer db.Close()
 	defer tab.close()
 
@@ -224,7 +230,8 @@ func testTableFindNodeByIDRun(t *testing.T, nodesCountGen uint16, resultsCountGe
 		// for any node table, Target and N
 		transport := newPingRecorder()
 		tmpDir := t.TempDir()
-		tab, db := newTestTable(transport, tmpDir)
+		logger := testlog.Logger(t, log.LvlInfo)
+		tab, db := newTestTable(transport, tmpDir, logger)
 		defer db.Close()
 		defer tab.close()
 
@@ -328,7 +335,8 @@ func testTableReadRandomNodesGetAllRun(t *testing.T, nodesCountGen uint16, rand 
 		buf := make([]*enode.Node, nodesCount)
 		transport := newPingRecorder()
 		tmpDir := t.TempDir()
-		tab, db := newTestTable(transport, tmpDir)
+		logger := testlog.Logger(t, log.LvlInfo)
+		tab, db := newTestTable(transport, tmpDir, logger)
 		defer db.Close()
 		defer tab.close()
 		<-tab.initDone
@@ -392,7 +400,8 @@ func generateNode(rand *rand.Rand) *node {
 
 func TestTable_addVerifiedNode(t *testing.T) {
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(newPingRecorder(), tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	tab, db := newTestTable(newPingRecorder(), tmpDir, logger)
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()
@@ -425,7 +434,8 @@ func TestTable_addVerifiedNode(t *testing.T) {
 
 func TestTable_addSeenNode(t *testing.T) {
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(newPingRecorder(), tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	tab, db := newTestTable(newPingRecorder(), tmpDir, logger)
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()
@@ -460,7 +470,8 @@ func TestTable_addSeenNode(t *testing.T) {
 func TestTable_revalidateSyncRecord(t *testing.T) {
 	transport := newPingRecorder()
 	tmpDir := t.TempDir()
-	tab, db := newTestTable(transport, tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	tab, db := newTestTable(transport, tmpDir, logger)
 	<-tab.initDone
 	defer db.Close()
 	defer tab.close()

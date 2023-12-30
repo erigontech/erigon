@@ -26,11 +26,11 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	mdbx2 "github.com/erigontech/mdbx-go/mdbx"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -58,10 +58,11 @@ type StatetestResult struct {
 
 func stateTestCmd(ctx *cli.Context) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
+	rootLogger := log.Root()
 	if machineFriendlyOutput {
-		log.Root().SetHandler(log.DiscardHandler())
+		rootLogger.SetHandler(log.DiscardHandler())
 	} else {
-		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+		rootLogger.SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	}
 
 	// Configure the EVM logger
@@ -81,7 +82,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	}
 
 	if len(ctx.Args().First()) != 0 {
-		return runStateTest(ctx.Args().First(), cfg, ctx.Bool(MachineFlag.Name))
+		return runStateTest(ctx.Args().First(), cfg, ctx.Bool(MachineFlag.Name), rootLogger)
 	}
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
@@ -89,7 +90,7 @@ func stateTestCmd(ctx *cli.Context) error {
 		if len(fname) == 0 {
 			return nil
 		}
-		if err := runStateTest(fname, cfg, ctx.Bool(MachineFlag.Name)); err != nil {
+		if err := runStateTest(fname, cfg, ctx.Bool(MachineFlag.Name), rootLogger); err != nil {
 			return err
 		}
 	}
@@ -97,7 +98,7 @@ func stateTestCmd(ctx *cli.Context) error {
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
+func runStateTest(fname string, cfg vm.Config, jsonOut bool, logger log.Logger) error {
 	// Load the test content from the input file
 	src, err := os.ReadFile(fname)
 	if err != nil {
@@ -109,7 +110,7 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 	}
 
 	// Iterate over all the stateTests, run them and aggregate the results
-	results, err := aggregateResultsFromStateTests(stateTests, cfg, jsonOut)
+	results, err := aggregateResultsFromStateTests(stateTests, cfg, jsonOut, logger)
 	if err != nil {
 		return err
 	}
@@ -120,12 +121,15 @@ func runStateTest(fname string, cfg vm.Config, jsonOut bool) error {
 }
 
 func aggregateResultsFromStateTests(
-	stateTests map[string]tests.StateTest, cfg vm.Config,
-	jsonOut bool) ([]StatetestResult, error) {
+	stateTests map[string]tests.StateTest,
+	cfg vm.Config,
+	jsonOut bool,
+	logger log.Logger,
+) ([]StatetestResult, error) {
 	//this DB is shared. means:
 	// - faster sequential tests: don't need create/delete db
 	// - less parallelism: multiple processes can open same DB but only 1 can create rw-transaction (other will wait when 1-st finish)
-	db := mdbx.NewMDBX(log.New()).
+	db := mdbx.NewMDBX(logger).
 		Path(filepath.Join(os.TempDir(), "erigon-statetest")).
 		Flags(func(u uint) uint {
 			return u | mdbx2.UtterlyNoSync | mdbx2.NoMetaSync | mdbx2.LifoReclaim | mdbx2.NoMemInit
@@ -149,7 +153,7 @@ func aggregateResultsFromStateTests(
 			var root libcommon.Hash
 			var calcRootErr error
 
-			statedb, err := test.Run(tx, st, cfg)
+			statedb, err := test.Run(tx, st, cfg, logger)
 			// print state root for evmlab tracing
 			root, calcRootErr = trie.CalcRoot("", tx)
 			if err == nil && calcRootErr != nil {

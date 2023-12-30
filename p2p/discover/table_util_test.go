@@ -29,10 +29,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/enr"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var nullNode *enode.Node
@@ -43,8 +44,8 @@ func init() {
 	nullNode = enode.SignNull(&r, enode.ID{})
 }
 
-func newTestTable(t transport, tmpDir string) (*Table, *enode.DB) {
-	db, err := enode.OpenDB(context.Background(), "", tmpDir)
+func newTestTable(t transport, tmpDir string, logger log.Logger) (*Table, *enode.DB) {
+	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}

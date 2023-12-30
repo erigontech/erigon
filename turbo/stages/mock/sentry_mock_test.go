@@ -5,8 +5,11 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
+
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
@@ -67,7 +70,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	t.Parallel()
 	t.Skip("revive me")
 	require, m := require.New(t), mock.Mock(t)
-
+	logger := testlog.Logger(t, log.LvlInfo)
 	chain, err := core.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *core.BlockGen) {
 		b.SetCoinbase(libcommon.Address{1})
 	})
@@ -119,7 +122,7 @@ func TestMineBlockWith1Tx(t *testing.T) {
 	}
 	m.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
-	err = stages.MiningStep(m.Ctx, m.DB, m.MiningSync, "")
+	err = stages.MiningStep(m.Ctx, m.DB, m.MiningSync, "", logger)
 	require.NoError(err)
 
 	got := <-m.PendingBlocks

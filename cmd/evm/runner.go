@@ -30,21 +30,21 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
-
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -125,6 +125,7 @@ func runCmd(ctx *cli.Context) error {
 	} else {
 		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 	}
+	rootLogger := log.Root()
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
@@ -154,7 +155,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "")
+		core.MustCommitGenesis(gen, db, "", rootLogger)
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {

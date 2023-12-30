@@ -32,11 +32,38 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -47,54 +74,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
-
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	downloader "github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/common/debug"
-
-	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
@@ -106,6 +88,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -118,14 +101,27 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/silkworm"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -550,7 +546,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		return nil
 	}
-	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
+	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader, logger)
 
 	// limit "new block" broadcasts to at most 10 random peers at time
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
@@ -665,7 +661,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 			logger)
 		// We start the mining step
-		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultPOSCh
@@ -1141,7 +1137,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				works = true
 				hasWork = false
 				mineEvery.Reset(cfg.Recommit)
-				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
+				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir, s.logger) }()
 			}
 		}
 	}()

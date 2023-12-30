@@ -22,18 +22,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/sentinel/handlers"
-	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
-	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
-
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/discover"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
@@ -42,6 +30,18 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	rcmgr "github.com/libp2p/go-libp2p/p2p/host/resource-manager"
 	rcmgrObs "github.com/libp2p/go-libp2p/p2p/host/resource-manager/obs"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/sentinel/handlers"
+	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
+	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
+	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p/discover"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 )
 
 const (
@@ -92,7 +92,7 @@ func (s *Sentinel) createLocalNode(
 	udpPort, tcpPort int,
 	tmpDir string,
 ) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(s.ctx, "", tmpDir)
+	db, err := enode.OpenDB(s.ctx, "", tmpDir, s.logger)
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}

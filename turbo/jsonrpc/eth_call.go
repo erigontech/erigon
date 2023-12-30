@@ -6,20 +6,18 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -355,7 +353,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		if latestBlock-blockNr > uint64(api.MaxGetProofRewindBlockCount) {
 			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", uint64(api.MaxGetProofRewindBlockCount), latestBlock)
 		}
-		batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp)
+		batch := membatchwithdb.NewMemoryBatch(tx, api.dirs.Tmp, api.logger)
 		defer batch.Rollback()
 
 		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}

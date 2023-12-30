@@ -27,17 +27,18 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 )
 
 func TestState(t *testing.T) {
-	defer log.Root().SetHandler(log.Root().GetHandler())
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlError, log.StderrHandler))
+	logger := testlog.Logger(t, log.LvlError)
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please") // it's too slow on win and stops on macos, need generally improve speed of this tests
 	}
@@ -61,7 +62,7 @@ func TestState(t *testing.T) {
 						t.Fatal(err)
 					}
 					defer tx.Rollback()
-					_, err = test.Run(tx, subtest, vmconfig)
+					_, err = test.Run(tx, subtest, vmconfig, logger)
 					tx.Rollback()
 					if err != nil && len(test.json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

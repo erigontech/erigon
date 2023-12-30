@@ -31,13 +31,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/mclock"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // To regenerate discv5 test vectors, run
@@ -537,7 +537,7 @@ func (t *handshakeTest) close() {
 }
 
 func (n *handshakeTestNode) init(key *ecdsa.PrivateKey, ip net.IP, clock mclock.Clock, tmpDir string, logger log.Logger) {
-	db, err := enode.OpenDB(context.Background(), "", tmpDir)
+	db, err := enode.OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}

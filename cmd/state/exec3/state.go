@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
 	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -143,7 +142,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		if txTask.BlockNum == 0 {
 			// Genesis block
 			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = core.GenesisToBlock(rw.genesis, "")
+			_, ibs, err = core.GenesisToBlock(rw.genesis, "", logger)
 			if err != nil {
 				panic(err)
 			}

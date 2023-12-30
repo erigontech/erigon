@@ -25,6 +25,10 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
 var keytestID = HexID("51232b8d7821617d2b29b54b81cdefb9b3e9c37d7fd5f63270bcc9e1a6f6a439")
@@ -89,7 +93,8 @@ var nodeDBInt64Tests = []struct {
 
 func TestDBInt64(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	db, err := OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -124,8 +129,9 @@ func TestDBFetchStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	inst := time.Now()
 	num := 314
+	logger := testlog.Logger(t, log.LvlInfo)
 
-	db, err := OpenDB(context.Background(), "", tmpDir)
+	db, err := OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -257,8 +263,9 @@ func TestDBSeedQuery(t *testing.T) {
 	const attempts = 15
 	var err error
 	tmpDir := t.TempDir()
+	logger := testlog.Logger(t, log.LvlInfo)
 	for i := 0; i < attempts; i++ {
-		if err = testSeedQuery(tmpDir); err == nil {
+		if err = testSeedQuery(tmpDir, logger); err == nil {
 			return
 		}
 	}
@@ -267,8 +274,8 @@ func TestDBSeedQuery(t *testing.T) {
 	}
 }
 
-func testSeedQuery(tmpDir string) error {
-	db, err := OpenDB(context.Background(), "", tmpDir)
+func testSeedQuery(tmpDir string, logger log.Logger) error {
+	db, err := OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -317,8 +324,9 @@ func TestDBPersistency(t *testing.T) {
 		testInt = int64(314)
 	)
 
+	logger := testlog.Logger(t, log.LvlInfo)
 	// Create a persistent database and store some values
-	db, err := OpenDB(context.Background(), filepath.Join(root, "database"), root)
+	db, err := OpenDB(context.Background(), filepath.Join(root, "database"), root, logger)
 	if err != nil {
 		t.Fatalf("failed to create persistent database: %v", err)
 	}
@@ -329,7 +337,7 @@ func TestDBPersistency(t *testing.T) {
 	db.Close()
 
 	// ReopenSegments the database and check the value
-	db, err = OpenDB(context.Background(), filepath.Join(root, "database"), root)
+	db, err = OpenDB(context.Background(), filepath.Join(root, "database"), root, logger)
 	if err != nil {
 		t.Fatalf("failed to open persistent database: %v", err)
 	}
@@ -432,7 +440,8 @@ var nodeDBExpirationNodes = []struct {
 
 func TestDBExpiration(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	db, err := OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -479,7 +488,8 @@ func TestDBExpiration(t *testing.T) {
 // in the database.
 func TestDBExpireV5(t *testing.T) {
 	tmpDir := t.TempDir()
-	db, err := OpenDB(context.Background(), "", tmpDir)
+	logger := testlog.Logger(t, log.LvlInfo)
+	db, err := OpenDB(context.Background(), "", tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}

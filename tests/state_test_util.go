@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -158,8 +158,8 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest and verifies the post-state and logs
-func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, error) {
-	state, root, err := t.RunNoVerify(tx, subtest, vmconfig)
+func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, logger log.Logger) (*state.IntraBlockState, error) {
+	state, root, err := t.RunNoVerify(tx, subtest, vmconfig, logger)
 	if err != nil {
 		return state, err
 	}
@@ -176,13 +176,13 @@ func (t *StateTest) Run(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*
 }
 
 // RunNoVerify runs a specific subtest and returns the statedb and post-state root
-func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, libcommon.Hash, error) {
+func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Config, logger log.Logger) (*state.IntraBlockState, libcommon.Hash, error) {
 	config, eips, err := GetChainConfig(subtest.Fork)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := core.GenesisToBlock(t.genesis(config), "")
+	block, _, err := core.GenesisToBlock(t.genesis(config), "", logger)
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}

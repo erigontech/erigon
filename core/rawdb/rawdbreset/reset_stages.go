@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -17,10 +19,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
-func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
+func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
 	if err := Reset(ctx, db, stages.HashState); err != nil {
 		return err
@@ -44,7 +45,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain, tmpDir); err != nil {
+	if err := ResetExec(ctx, db, chain, tmpDir, logger); err != nil {
 		return err
 	}
 	return nil
@@ -130,7 +131,7 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	return
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, logger log.Logger) (err error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 	if historyV3 {
 		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
@@ -156,7 +157,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 		}
 		if !historyV3 {
 			genesis := core.GenesisBlockByChainName(chain)
-			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
+			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir, logger); err != nil {
 				return err
 			}
 		}

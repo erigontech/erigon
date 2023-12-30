@@ -17,21 +17,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"sync"
+
+	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-
-	"github.com/ledgerwatch/erigon/common/math"
-	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 )
 
@@ -57,13 +57,14 @@ type ForkValidator struct {
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[libcommon.Hash, bool]
 
-	ctx context.Context
+	ctx    context.Context
+	logger log.Logger
 
 	// we want fork validator to be thread safe so let
 	lock sync.Mutex
 }
 
-func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
+func NewForkValidatorMock(currentHeight uint64, logger log.Logger) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
 	if err != nil {
 		panic(err)
@@ -71,10 +72,11 @@ func NewForkValidatorMock(currentHeight uint64) *ForkValidator {
 	return &ForkValidator{
 		currentHeight: currentHeight,
 		validHashes:   validHashes,
+		logger:        logger,
 	}
 }
 
-func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader) *ForkValidator {
+func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload validatePayloadFunc, tmpDir string, blockReader services.FullBlockReader, logger log.Logger) *ForkValidator {
 	validHashes, err := lru.New[libcommon.Hash, bool]("validHashes", maxForkDepth*8)
 	if err != nil {
 		panic(err)
@@ -86,6 +88,7 @@ func NewForkValidator(ctx context.Context, currentHeight uint64, validatePayload
 		blockReader:     blockReader,
 		ctx:             ctx,
 		validHashes:     validHashes,
+		logger:          logger,
 	}
 }
 
@@ -147,9 +150,9 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		return
 	}
 
-	log.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
+	fv.logger.Debug("Execution ForkValidator.ValidatePayload", "extendCanonical", extendCanonical)
 	if extendCanonical {
-		extendingFork := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir)
+		extendingFork := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, fv.logger)
 		defer extendingFork.Close()
 
 		fv.extendingForkNotifications = &shards.Notifications{
@@ -228,7 +231,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir)
+	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, fv.logger)
 	defer batch.Rollback()
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),
