@@ -85,9 +85,6 @@ func TestGetCommitteesAntiquated(t *testing.T) {
 			// read the all of the octect
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			if c.expected != string(out) {
-				panic(string(out))
-			}
 			require.Equal(t, c.expected, string(out))
 		})
 	}
