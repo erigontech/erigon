@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -64,6 +65,7 @@ type ForkChoiceStore struct {
 	// preverifid sizes and other data collection
 	preverifiedSizes    *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
 	finalityCheckpoints *lru.Cache[libcommon.Hash, finalityCheckpoints]
+	totalActiveBalances *lru.Cache[libcommon.Hash, uint64]
 
 	mu sync.Mutex
 	// EL
@@ -125,6 +127,12 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		historicalSummariesLength: anchorState.HistoricalSummariesLength(),
 	})
 
+	totalActiveBalances, err := lru.New[libcommon.Hash, uint64](checkpointsPerCache * 10)
+	if err != nil {
+		return nil, err
+	}
+	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
+
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -147,6 +155,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		childrens:                     make(map[libcommon.Hash]childrens),
 		preverifiedSizes:              preverifiedSizes,
 		finalityCheckpoints:           finalityCheckpoints,
+		totalActiveBalances:           totalActiveBalances,
 	}, nil
 }
 
@@ -301,4 +310,14 @@ func (f *ForkChoiceStore) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.Sy
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.forkGraph.GetSyncCommittees(blockRoot)
+}
+
+func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.GetBlockRewards(root)
+}
+
+func (f *ForkChoiceStore) TotalActiveBalance(root libcommon.Hash) (uint64, bool) {
+	return f.totalActiveBalances.Get(root)
 }

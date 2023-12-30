@@ -80,22 +80,30 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	blockHeader := block.SignedBeaconBlockHeader().Header
 	blockHeader.Root = common.Hash{}
-	// Read the minimal beacon state which have the small fields.
-	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	// Read the epoch and per-slot data.
+	slotData, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {
 		return nil, err
 	}
-	// State not found
-	if minimalBeaconState == nil {
+	if slotData == nil {
+		return nil, nil
+	}
+	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
+
+	epochData, err := state_accessors.ReadEpochData(tx, roundedSlot)
+	if err != nil {
+		return nil, err
+	}
+	if epochData == nil {
 		return nil, nil
 	}
 
 	// Versioning
-	ret.SetVersion(minimalBeaconState.Version)
+	ret.SetVersion(slotData.Version)
 	ret.SetGenesisTime(r.genesisState.GenesisTime())
 	ret.SetGenesisValidatorsRoot(r.genesisState.GenesisValidatorsRoot())
 	ret.SetSlot(slot)
-	ret.SetFork(minimalBeaconState.Fork)
+	ret.SetFork(epochData.Fork)
 	// History
 	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
 	ret.SetLatestBlockHeader(blockHeader)
@@ -111,7 +119,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetStateRoots(stateRoots)
 
 	historicalRoots := solid.NewHashList(int(r.cfg.HistoricalRootsLimit))
-	if err := state_accessors.ReadHistoricalRoots(tx, minimalBeaconState.HistoricalRootsLength, func(idx int, root common.Hash) error {
+	if err := state_accessors.ReadHistoricalRoots(tx, epochData.HistoricalRootsLength, func(idx int, root common.Hash) error {
 		historicalRoots.Append(root)
 		return nil
 	}); err != nil {
@@ -121,12 +129,12 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	// Eth1
 	eth1DataVotes := solid.NewStaticListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()), 72)
-	if err := r.readEth1DataVotes(tx, minimalBeaconState.Eth1DataLength, slot, eth1DataVotes); err != nil {
+	if err := r.readEth1DataVotes(tx, slotData.Eth1DataLength, slot, eth1DataVotes); err != nil {
 		return nil, err
 	}
 	ret.SetEth1DataVotes(eth1DataVotes)
-	ret.SetEth1Data(minimalBeaconState.Eth1Data)
-	ret.SetEth1DepositIndex(minimalBeaconState.Eth1DepositIndex)
+	ret.SetEth1Data(slotData.Eth1Data)
+	ret.SetEth1DepositIndex(slotData.Eth1DepositIndex)
 	// Registry (Validators + Balances)
 	balancesBytes, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
 	if err != nil {
@@ -158,7 +166,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetSlashings(slashingsVector)
 
 	// Finality
-	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(slot))
+	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, roundedSlot)
 	if err != nil {
 		return nil, err
 	}
@@ -171,13 +179,13 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if finalizedCheckpoint == nil {
 		finalizedCheckpoint = r.genesisState.FinalizedCheckpoint()
 	}
-	ret.SetJustificationBits(*minimalBeaconState.JustificationBits)
+	ret.SetJustificationBits(*epochData.JustificationBits)
 	ret.SetPreviousJustifiedCheckpoint(previousCheckpoint)
 	ret.SetCurrentJustifiedCheckpoint(currentCheckpoint)
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
-		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, minimalBeaconState.CurrentEpochAttestationsLength, minimalBeaconState.PreviousEpochAttestationsLength)
+		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, slotData.CurrentEpochAttestationsLength, slotData.PreviousEpochAttestationsLength)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read pending attestations: %w", err)
 		}
@@ -197,7 +205,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 	inactivityScores := solid.NewUint64ListSSZ(int(r.cfg.ValidatorRegistryLimit))
 	// Inactivity
-	err = r.ReconstructUint64ListDump(tx, slot, kv.InactivityScores, int(minimalBeaconState.ValidatorLength), inactivityScores)
+	err = r.ReconstructUint64ListDump(tx, slot, kv.InactivityScores, int(slotData.ValidatorLength), inactivityScores)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read inactivity scores: %w", err)
 	}
@@ -236,11 +244,11 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	}
 
 	// Withdrawals
-	ret.SetNextWithdrawalIndex(minimalBeaconState.NextWithdrawalIndex)
-	ret.SetNextWithdrawalValidatorIndex(minimalBeaconState.NextWithdrawalValidatorIndex)
+	ret.SetNextWithdrawalIndex(slotData.NextWithdrawalIndex)
+	ret.SetNextWithdrawalValidatorIndex(slotData.NextWithdrawalValidatorIndex)
 	// Deep history valid from Capella onwards
 	historicalSummaries := solid.NewStaticListSSZ[*cltypes.HistoricalSummary](int(r.cfg.HistoricalRootsLimit), 64)
-	if err := state_accessors.ReadHistoricalSummaries(tx, minimalBeaconState.HistoricalSummariesLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
+	if err := state_accessors.ReadHistoricalSummaries(tx, epochData.HistoricalSummariesLength, func(idx int, historicalSummary *cltypes.HistoricalSummary) error {
 		historicalSummaries.Append(historicalSummary)
 		return nil
 	}); err != nil {
@@ -524,15 +532,15 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64
 
 func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot uint64) (*solid.ValidatorSet, error) {
 	// Read the minimal beacon state which have the small fields.
-	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	sd, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {
 		return nil, err
 	}
 	// State not found
-	if minimalBeaconState == nil {
+	if sd == nil {
 		return nil, nil
 	}
-	validatorSetLength := minimalBeaconState.ValidatorLength
+	validatorSetLength := sd.ValidatorLength
 
 	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
@@ -582,7 +590,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	epoch, prevEpoch := r.computeRelevantEpochs(slot)
 	beginSlot = prevEpoch * r.cfg.SlotsPerEpoch
 
-	currentActiveIndicies, err := state_accessors.ReadActiveIndicies(tx, epoch)
+	currentActiveIndicies, err := state_accessors.ReadActiveIndicies(tx, epoch*r.cfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -590,22 +598,22 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	if epoch == 0 {
 		previousActiveIndicies = currentActiveIndicies
 	} else {
-		previousActiveIndicies, err = state_accessors.ReadActiveIndicies(tx, epoch-1)
+		previousActiveIndicies, err = state_accessors.ReadActiveIndicies(tx, (epoch-1)*r.cfg.SlotsPerEpoch)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
 
 	// Read the minimal beacon state which have the small fields.
-	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	sd, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {
 		return nil, nil, err
 	}
 	// State not found
-	if minimalBeaconState == nil {
+	if sd == nil {
 		return nil, nil, nil
 	}
-	validatorLength := minimalBeaconState.ValidatorLength
+	validatorLength := sd.ValidatorLength
 
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
@@ -711,7 +719,7 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdx
 		go func(mix libcommon.Hash, epoch uint64, idxs []uint64) {
 			defer wg.Done()
 
-			_, _ = r.computeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
+			_, _ = r.ComputeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
 		}(mix, epoch, activeIdxs[i])
 	}
 	wg.Wait()
@@ -719,12 +727,12 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdx
 }
 
 func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (solid.Uint64ListSSZ, error) {
-	minimalBeaconState, err := state_accessors.ReadMinimalBeaconState(tx, slot)
+	sd, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {
 		return nil, err
 	}
 	// State not found
-	if minimalBeaconState == nil {
+	if sd == nil {
 		return nil, nil
 	}
 

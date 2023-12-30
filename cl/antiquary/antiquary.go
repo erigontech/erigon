@@ -95,7 +95,6 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	// Here we need to start mdbx transaction and lock the thread
-	log.Info("[Antiquary]: Stopping Caplin to process historical indicies")
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
@@ -111,6 +110,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	defer logInterval.Stop()
+	log.Info("[Antiquary]: Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
 
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {

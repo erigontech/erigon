@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 )
 
 /*
@@ -27,6 +28,7 @@ type ForkGraph interface {
 	MarkHeaderAsInvalid(blockRoot libcommon.Hash)
 	AnchorSlot() uint64
 	Prune(uint64) error
+	GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
 
 	// extra methods for validator api
 	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)
