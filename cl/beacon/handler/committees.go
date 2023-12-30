@@ -109,12 +109,12 @@ func (a *ApiHandler) getCommittees(r *http.Request) (*beaconResponse, error) {
 		return nil, err
 	}
 
-	committeeCount := uint64(len(activeIdxs)) / a.beaconChainCfg.SlotsPerEpoch / a.beaconChainCfg.TargetCommitteeSize
-	if a.beaconChainCfg.MaxCommitteesPerSlot < committeeCount {
-		committeeCount = a.beaconChainCfg.MaxCommitteesPerSlot
+	committeesPerSlot := uint64(len(activeIdxs)) / a.beaconChainCfg.SlotsPerEpoch / a.beaconChainCfg.TargetCommitteeSize
+	if a.beaconChainCfg.MaxCommitteesPerSlot < committeesPerSlot {
+		committeesPerSlot = a.beaconChainCfg.MaxCommitteesPerSlot
 	}
-	if committeeCount < 1 {
-		committeeCount = 1
+	if committeesPerSlot < 1 {
+		committeesPerSlot = 1
 	}
 
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
@@ -127,12 +127,14 @@ func (a *ApiHandler) getCommittees(r *http.Request) (*beaconResponse, error) {
 		if slotFilter != nil && currSlot != *slotFilter {
 			continue
 		}
-		for committeeIndex := uint64(0); committeeIndex < committeeCount; committeeIndex++ {
+		for committeeIndex := uint64(0); committeeIndex < committeesPerSlot; committeeIndex++ {
 			if index != nil && committeeIndex != *index {
 				continue
 			}
 			data := &committeeResponse{Index: committeeIndex, Slot: currSlot}
-			idxs, err := a.stateReader.ComputeCommittee(mix, activeIdxs, currSlot, committeeCount, committeeIndex)
+			index := (currSlot%a.beaconChainCfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
+			committeeCount := committeesPerSlot * a.beaconChainCfg.SlotsPerEpoch
+			idxs, err := a.stateReader.ComputeCommittee(mix, activeIdxs, currSlot, committeeCount, index)
 			if err != nil {
 				return nil, err
 			}
