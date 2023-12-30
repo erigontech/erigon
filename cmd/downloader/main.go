@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
-	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -163,7 +163,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err := checkChainName(ctx, dirs, chain); err != nil {
 		return err
 	}
-	torrentLogLevel, _, err := downloadercfg2.Int2LogLevel(torrentVerbosity)
+	torrentLogLevel, _, err := downloadercfg.Int2LogLevel(torrentVerbosity)
 	if err != nil {
 		return err
 	}
@@ -185,7 +185,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
-	cfg, err := downloadercfg2.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain)
+	cfg, err := downloadercfg.New(dirs, version, torrentLogLevel, downloadRate, uploadRate, torrentPort, torrentConnsPerFile, torrentDownloadSlots, staticPeers, webseedsList, chain)
 	if err != nil {
 		return err
 	}
@@ -199,6 +199,8 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return fmt.Errorf("invalid nat option %s: %w", natSetting, err)
 	}
 	downloadernat.DoNat(natif, cfg.ClientConfig, logger)
+
+	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
 	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo, seedbox)
 	if err != nil {
@@ -401,6 +403,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
+
 	for _, t := range torrents {
 		// we don't release commitment history in this time. let's skip it here.
 		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
@@ -496,7 +499,7 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 
 // Add pre-configured
 func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error {
-	for _, it := range snapcfg.KnownCfg(chain).Preverified {
+	for _, it := range snapcfg.KnownCfg(chain, 0).Preverified {
 		if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
 			return err
 		}
