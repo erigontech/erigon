@@ -48,7 +48,7 @@ func (v *ValidatorApiHandler) Route(r chi.Router) {
 				r.Get("/node/syncing", beaconhttp.HandleEndpointFunc(v.GetEthV1NodeSyncing))
 			})
 			r.Get("/config/spec", beaconhttp.HandleEndpointFunc(v.GetEthV1ConfigSpec))
-			r.Get("/events", http.NotFound)
+			r.Get("/events", v.GetEthV1Events)
 			r.Route("/validator", func(r chi.Router) {
 				r.Route("/duties", func(r chi.Router) {
 					r.Post("/attester/{epoch}", http.NotFound)
