@@ -719,7 +719,7 @@ func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdx
 		go func(mix libcommon.Hash, epoch uint64, idxs []uint64) {
 			defer wg.Done()
 
-			_, _ = r.computeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
+			_, _ = r.ComputeCommittee(mix, idxs, epoch*r.cfg.SlotsPerEpoch, r.cfg.TargetCommitteeSize, 0)
 		}(mix, epoch, activeIdxs[i])
 	}
 	wg.Wait()
