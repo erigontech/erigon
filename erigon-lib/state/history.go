@@ -1100,7 +1100,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		mxPruneSizeHistory.Inc()
 		return nil
 	}
-	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, prunevalus); err != nil {
+	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, prunevalus, forced); err != nil {
 		return err
 	}
 	return nil

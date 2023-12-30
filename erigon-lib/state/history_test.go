@@ -260,7 +260,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 			var k []byte
 			k, _, err = cur.First()
 			require.NoError(err)
-			require.Nil(k, table)
+			require.Nilf(k, "table=%s", table)
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {

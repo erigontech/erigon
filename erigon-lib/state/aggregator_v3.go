@@ -859,16 +859,16 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	if err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil); err != nil {
+	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil, false); err != nil {
 		return err
 	}
-	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil); err != nil {
+	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil, false); err != nil {
 		return err
 	}
-	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil); err != nil {
+	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil, false); err != nil {
 		return err
 	}
-	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil); err != nil {
+	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, nil, false); err != nil {
 		return err
 	}
 	return nil
