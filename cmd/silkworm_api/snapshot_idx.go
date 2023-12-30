@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -37,7 +38,7 @@ func main() {
 			},
 		},
 		Action: func(cCtx *cli.Context) error {
-			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"))
+			return buildIndex(cCtx, cCtx.String("datadir"), cCtx.StringSlice("snapshot_path"), 0)
 		},
 	}
 
@@ -55,7 +56,7 @@ func FindIf(segments []snaptype.FileInfo, predicate func(snaptype.FileInfo) bool
 	return snaptype.FileInfo{}, false // Return zero value and false if not found
 }
 
-func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) error {
+func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, minBlock uint64) error {
 	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
@@ -75,7 +76,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) err
 
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	segments, _, err := freezeblocks.Segments(dirs.Snap)
+	segments, _, err := freezeblocks.Segments(dirs.Snap, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, minBlock)
 	if err != nil {
 		return err
 	}
@@ -97,7 +98,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) err
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, chainConfig, segment.Path, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.HeadersIdx(ctx, segment.Path, segment.Version, segment.From, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		case snaptype.Bodies:
 			g.Go(func() error {
@@ -112,7 +113,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string) err
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
 				dir, _ := filepath.Split(segment.Path)
-				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment.Version, segment.From, segment.To, dir, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

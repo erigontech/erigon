@@ -5,18 +5,21 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 type Sync struct {
+	cfg             ethconfig.Sync
 	unwindPoint     *uint64 // used to run stages
 	prevUnwindPoint *uint64 // used to get value from outside of staged sync after cycle (for example to notify RPCDaemon)
 	unwindReason    UnwindReason
+	posTransition   *uint64
 
 	stages       []*Stage
 	unwindOrder  []*Stage
@@ -34,8 +37,21 @@ type Timing struct {
 	took     time.Duration
 }
 
-func (s *Sync) Len() int                 { return len(s.stages) }
-func (s *Sync) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
+func (s *Sync) Len() int {
+	return len(s.stages)
+}
+
+func (s *Sync) UnwindPoint() uint64 {
+	return *s.unwindPoint
+}
+
+func (s *Sync) UnwindReason() UnwindReason {
+	return s.unwindReason
+}
+
+func (s *Sync) PrevUnwindPoint() *uint64 {
+	return s.prevUnwindPoint
+}
 
 func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
 	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s}
@@ -138,7 +154,7 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 	return fmt.Errorf("stage not found with id: %v", id)
 }
 
-func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger) *Sync {
+func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger) *Sync {
 	unwindStages := make([]*Stage, len(stagesList))
 	for i, stageIndex := range unwindOrder {
 		for _, s := range stagesList {
@@ -163,6 +179,7 @@ func New(stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, lo
 	}
 
 	return &Sync{
+		cfg:          cfg,
 		stages:       stagesList,
 		currentStage: 0,
 		unwindOrder:  unwindStages,
@@ -269,6 +286,11 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			return libcommon.ErrStopped
 		}
 
+		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
+			s.logger.Warn("--sync.loop.break caused stage break")
+			break
+		}
+
 		s.NextStage()
 	}
 
@@ -280,9 +302,11 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	return nil
 }
 
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
+
+	hasMore := false
 
 	for !s.IsDone() {
 		var badBlockUnwind bool
@@ -292,7 +316,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 					continue
 				}
 				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
-					return err
+					return false, err
 				}
 			}
 			s.prevUnwindPoint = s.unwindPoint
@@ -302,7 +326,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			}
 			s.unwindReason = UnwindReason{}
 			if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-				return err
+				return false, err
 			}
 			// If there were unwinds at the start, a heavier but invalid chain may be present, so
 			// we relax the rules for Stage1
@@ -318,7 +342,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 
 		if string(stage.ID) == dbg.StopBeforeStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_BEFORE_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return false, libcommon.ErrStopped
 		}
 
 		if stage.Disabled || stage.Forward == nil {
@@ -329,23 +353,46 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		}
 
 		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
-			return err
+			return false, err
 		}
 
 		if string(stage.ID) == dbg.StopAfterStage() { // stop process for debugging reasons
 			s.logger.Warn("STOP_AFTER_STAGE env flag forced to stop app")
-			return libcommon.ErrStopped
+			return false, libcommon.ErrStopped
+		}
+
+		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
+			s.logger.Warn("--sync.loop.break caused stage break")
+			if s.posTransition != nil {
+				ptx := tx
+
+				if ptx == nil {
+					if tx, err := db.BeginRw(context.Background()); err == nil {
+						ptx = tx
+						defer tx.Rollback()
+					}
+				}
+
+				if ptx != nil {
+					if progress, err := stages.GetStageProgress(ptx, stage.ID); err == nil {
+						hasMore = progress < *s.posTransition
+					}
+				}
+			} else {
+				hasMore = true
+			}
+			break
 		}
 
 		s.NextStage()
 	}
 
 	if err := s.SetCurrentStage(s.stages[0].ID); err != nil {
-		return err
+		return false, err
 	}
 
 	s.currentStage = 0
-	return nil
+	return hasMore, nil
 }
 
 func (s *Sync) RunPrune(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {

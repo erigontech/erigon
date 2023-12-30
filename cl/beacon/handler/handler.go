@@ -41,6 +41,7 @@ func (a *ApiHandler) init() {
 	// otterscn specific ones are commented as such
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
+
 			r.Get("/events", http.NotFound)
 			r.Route("/config", func(r chi.Router) {
 				r.Get("/spec", beaconhttp.HandleEndpointFunc(a.getSpec))
@@ -48,6 +49,11 @@ func (a *ApiHandler) init() {
 				r.Get("/fork_schedule", beaconhttp.HandleEndpointFunc(a.getForkSchedule))
 			})
 			r.Route("/beacon", func(r chi.Router) {
+				r.Route("/rewards", func(r chi.Router) {
+					r.Get("/sync_committee/{block_id}", http.NotFound)
+					r.Get("/blocks/{block_id}", http.NotFound)
+					r.Post("/attestations/{epoch}", beaconhttp.HandleEndpointFunc(a.getAttestationsRewards))
+				})
 				r.Route("/headers", func(r chi.Router) {
 					r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
 					r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
