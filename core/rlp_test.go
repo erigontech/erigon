@@ -22,20 +22,22 @@ import (
 	"math/big"
 	"testing"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
-func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string) *types.Block {
+func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir string, logger log.Logger) *types.Block {
 	_, db, _ := temporal.NewTestDB(tb, datadir.New(tmpDir), nil)
 	var (
 		aa = libcommon.HexToAddress("0x000000000000000000000000000000000000aaaa")
@@ -49,7 +51,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 			Config: params.TestChainConfig,
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}},
 		}
-		genesis = MustCommitGenesis(gspec, db, tmpDir)
+		genesis = MustCommitGenesis(gspec, db, tmpDir, logger)
 	)
 
 	// We need to generate as many blocks +1 as uncles
@@ -74,6 +76,7 @@ func getBlock(tb testing.TB, transactions int, uncles int, dataSize int, tmpDir 
 // from blocks without full unmarshalling/marshalling
 func TestRlpIterator(t *testing.T) {
 	t.Parallel()
+	logger := testlog.Logger(t, log.LvlInfo)
 	for _, tt := range []struct {
 		txs      int
 		uncles   int
@@ -85,13 +88,13 @@ func TestRlpIterator(t *testing.T) {
 		{10, 2, 0},
 		{10, 2, 50},
 	} {
-		testRlpIterator(t, tt.txs, tt.uncles, tt.datasize)
+		testRlpIterator(t, tt.txs, tt.uncles, tt.datasize, logger)
 	}
 }
 
-func testRlpIterator(t *testing.T, txs, uncles, datasize int) {
+func testRlpIterator(t *testing.T, txs, uncles, datasize int, logger log.Logger) {
 	desc := fmt.Sprintf("%d txs [%d datasize] and %d uncles", txs, datasize, uncles)
-	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "").Body())
+	bodyRlp, _ := rlp.EncodeToBytes(getBlock(t, txs, uncles, datasize, "", logger).Body())
 	it, err := rlp.NewListIterator(bodyRlp)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +153,7 @@ func BenchmarkHashing(b *testing.B) {
 		blockRlp []byte
 	)
 	{
-		block := getBlock(b, 200, 2, 50, "")
+		block := getBlock(b, 200, 2, 50, "", log.New())
 		bodyRlp, _ = rlp.EncodeToBytes(block.Body())
 		blockRlp, _ = rlp.EncodeToBytes(block)
 	}
