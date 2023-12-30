@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
@@ -41,9 +42,9 @@ func TestStagesSuccess(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -81,9 +82,9 @@ func TestDisabledStages(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -121,9 +122,9 @@ func TestErroredStage(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedFlow := []stages.SyncStage{
@@ -204,9 +205,9 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -297,9 +298,9 @@ func TestUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -326,7 +327,7 @@ func TestUnwind(t *testing.T) {
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
 	state.UnwindTo(100, UnwindReason{})
-	err = state.Run(db, tx, true /* initialCycle */)
+	_, err = state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow = []stages.SyncStage{
@@ -386,9 +387,9 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -442,13 +443,13 @@ func TestSyncDoTwice(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
-	state = New(s, nil, nil, log.New())
-	err = state.Run(db, tx, true /* initialCycle */)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
+	_, err = state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -500,15 +501,15 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		},
 	}
 
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedErr = nil
 
-	state = New(s, nil, nil, log.New())
-	err = state.Run(db, tx, true /* initialCycle */)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
+	_, err = state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -579,9 +580,9 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, tx, true /* initialCycle */)
 	assert.Error(t, errInterrupted, err)
 
 	//state = NewState(s)
@@ -589,7 +590,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	//err = state.LoadUnwindInfo(tx)
 	//assert.NoError(t, err)
 	//state.UnwindTo(500, libcommon.Hash{})
-	err = state.Run(db, tx, true /* initialCycle */)
+	_, err = state.Run(db, tx, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{

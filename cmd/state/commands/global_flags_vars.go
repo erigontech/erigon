@@ -19,6 +19,7 @@ var (
 	snapshotsCli    bool
 	chain           string
 	logdir          string
+	snapshotVersion uint8
 )
 
 func must(err error) {
@@ -37,6 +38,10 @@ func withDataDir(cmd *cobra.Command) {
 
 	cmd.Flags().StringVar(&chaindata, "chaindata", "", "path to the db")
 	must(cmd.MarkFlagDirname("chaindata"))
+}
+
+func withSnapshotVersion(cmd *cobra.Command) {
+	cmd.Flags().Uint8Var(&snapshotVersion, "stapshots.version", 1, "specifies the snapshot file version")
 }
 
 func withStatsfile(cmd *cobra.Command) {

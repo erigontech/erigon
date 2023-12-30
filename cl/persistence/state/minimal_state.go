@@ -7,7 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
@@ -21,6 +21,7 @@ type MinimalBeaconState struct {
 	CurrentEpochAttestationsLength  uint64
 	HistoricalSummariesLength       uint64
 	HistoricalRootsLength           uint64
+	TotalActiveBalance              uint64
 	// Phase0
 	Eth1Data          *cltypes.Eth1Data
 	Eth1DepositIndex  uint64
@@ -31,7 +32,7 @@ type MinimalBeaconState struct {
 	NextWithdrawalValidatorIndex uint64
 }
 
-func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
+func MinimalBeaconStateFromBeaconState(s *state.CachingBeaconState) *MinimalBeaconState {
 	justificationCopy := &cltypes.JustificationBits{}
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
@@ -49,8 +50,8 @@ func MinimalBeaconStateFromBeaconState(s *raw.BeaconState) *MinimalBeaconState {
 		JustificationBits:               justificationCopy,
 		NextWithdrawalIndex:             s.NextWithdrawalIndex(),
 		NextWithdrawalValidatorIndex:    s.NextWithdrawalValidatorIndex(),
+		TotalActiveBalance:              s.GetTotalActiveBalance(),
 	}
-
 }
 
 // Serialize serializes the state into a byte slice with zstd compression.
@@ -106,7 +107,7 @@ func (m *MinimalBeaconState) ReadFrom(r io.Reader) error {
 }
 
 func (m *MinimalBeaconState) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, m.JustificationBits, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+	schema := []interface{}{m.Eth1Data, &m.TotalActiveBalance, m.Fork, &m.Eth1DepositIndex, m.JustificationBits, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}

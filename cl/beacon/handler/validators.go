@@ -248,7 +248,11 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 		return nil, err
 	}
 	if state == nil {
-		validatorSet, balances, err := a.stateReader.ReadValidatorsData(tx, *slot)
+		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}
@@ -320,7 +324,6 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	fmt.Println(validatorId)
 
 	validatorIndex, err := parseQueryValidatorIndex(tx, validatorId)
 	if err != nil {
@@ -352,7 +355,11 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 		return nil, err
 	}
 	if state == nil {
-		validatorSet, balances, err := a.stateReader.ReadValidatorsData(tx, *slot)
+		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}

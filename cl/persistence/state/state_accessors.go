@@ -243,7 +243,13 @@ func ReadCurrentEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.List
 		return nil, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		has, err := tx.Has(kv.CurrentEpochAttestations, base_encoding.Encode64ToBytes4(slot))
+		if err != nil {
+			return nil, err
+		}
+		if !has {
+			return nil, nil
+		}
 	}
 	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
 	reader, err := zstd.NewReader(bytes.NewReader(v))
@@ -267,7 +273,13 @@ func ReadPreviousEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.Lis
 		return nil, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		has, err := tx.Has(kv.PreviousEpochAttestations, base_encoding.Encode64ToBytes4(slot))
+		if err != nil {
+			return nil, err
+		}
+		if !has {
+			return nil, nil
+		}
 	}
 	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
 	reader, err := zstd.NewReader(bytes.NewReader(v))
@@ -312,5 +324,17 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	}
 	out.slot = slot
 	return err
+}
 
+func ReadActiveIndicies(tx kv.Tx, epoch uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(epoch)
+	v, err := tx.GetOne(kv.ActiveValidatorIndicies, key)
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	buf := bytes.NewBuffer(v)
+	return base_encoding.ReadRabbits(nil, buf)
 }

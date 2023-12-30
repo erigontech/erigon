@@ -1,4 +1,4 @@
-package test
+package stagedsynctest
 
 import (
 	"github.com/ledgerwatch/erigon-lib/chain"

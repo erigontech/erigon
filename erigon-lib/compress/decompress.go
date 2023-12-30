@@ -347,6 +347,10 @@ func (d *Decompressor) ModTime() time.Time {
 	return d.modTime
 }
 
+func (d *Decompressor) IsOpen() bool {
+	return d != nil && d.f != nil
+}
+
 func (d *Decompressor) Close() {
 	if d.f != nil {
 		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
