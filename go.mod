@@ -5,7 +5,6 @@ go 1.20
 require (
 	github.com/erigontech/mdbx-go v0.27.21
 	github.com/erigontech/silkworm-go v0.10.0
-	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -58,6 +57,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/klauspost/compress v1.17.3
+	github.com/ledgerwatch/erigon-lib v1.0.0
 	github.com/libp2p/go-libp2p v0.31.0
 	github.com/libp2p/go-libp2p-mplex v0.9.0
 	github.com/libp2p/go-libp2p-pubsub v0.9.3
