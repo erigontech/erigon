@@ -31,7 +31,10 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	httpClient := mock.NewMockHttpClient(ctrl)
 	httpClient.EXPECT().
 		Do(gomock.Any()).
-		Return(&http.Response{StatusCode: 404, Body: emptyBodyReadCloser{}}, nil).
+		Return(&http.Response{
+			StatusCode: 404,
+			Body:       emptyBodyReadCloser{},
+		}, nil).
 		Times(5)
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, 100*time.Millisecond, 5, logger)
@@ -39,4 +42,23 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	spanRes, err := heimdallClient.Span(ctx, 1534)
 	require.Nil(t, spanRes)
 	require.Error(t, err)
+}
+
+func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBody(t *testing.T) {
+	ctx := context.Background()
+	ctrl := gomock.NewController(t)
+	httpClient := mock.NewMockHttpClient(ctrl)
+	httpClient.EXPECT().
+		Do(gomock.Any()).
+		Return(&http.Response{
+			StatusCode: 200,
+			Body:       emptyBodyReadCloser{},
+		}, nil).
+		Times(2)
+	logger := testlog.Logger(t, log.LvlDebug)
+	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, time.Millisecond, 2, logger)
+
+	spanRes, err := heimdallClient.StateSyncEvents(ctx, 100, time.Now().Unix())
+	require.Nil(t, spanRes)
+	require.ErrorIs(t, err, ErrNoResponse)
 }
