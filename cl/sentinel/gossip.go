@@ -193,7 +193,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
-	topicScoreParams := s.topicScoreParams(string(topic.Name))
+	topicScoreParams := s.topicScoreParams(topic.Name)
 	if topicScoreParams != nil {
 		sub.topic.SetScoreParams(topicScoreParams)
 	}

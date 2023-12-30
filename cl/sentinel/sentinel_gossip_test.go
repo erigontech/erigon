@@ -85,7 +85,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 
 	ans := <-ch
 	require.Equal(t, ans.Data, msg)
-	previousTopic = string(ans.TopicName)
+	previousTopic = ans.TopicName
 
 	bcfg.AltairForkEpoch = clparams.MainnetBeaconConfig.AltairForkEpoch
 	bcfg.InitializeForkSchedule()

@@ -278,7 +278,7 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
 
 	data := pkt.Data
-	topic := string(pkt.TopicName)
+	topic := pkt.TopicName
 	// If we use snappy codec then decompress it accordingly.
 	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
 		data, err = utils.DecompressSnappy(data)
