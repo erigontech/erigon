@@ -29,6 +29,7 @@ type ForkGraph interface {
 	AnchorSlot() uint64
 	Prune(uint64) error
 	GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
+	LowestAvaiableSlot() uint64
 
 	// extra methods for validator api
 	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)

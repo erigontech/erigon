@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -28,10 +29,15 @@ type ApiHandler struct {
 	operationsPool  pool.OperationsPool
 	syncedData      *synced_data.SyncedDataManager
 	stateReader     *historical_states_reader.HistoricalStatesReader
+
+	// pools
+	randaoMixesPool sync.Pool
 }
 
 func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader}
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
+		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
+	}}}
 }
 
 func (a *ApiHandler) init() {
@@ -79,6 +85,7 @@ func (a *ApiHandler) init() {
 				r.Route("/states", func(r chi.Router) {
 					r.Get("/head/validators/{index}", http.NotFound) // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
+						r.Get("/randao", beaconhttp.HandleEndpointFunc(a.getRandao))
 						r.Get("/committees", beaconhttp.HandleEndpointFunc(a.getCommittees))
 						r.Get("/sync_committees", beaconhttp.HandleEndpointFunc(a.getSyncCommittees)) // otterscan
 						r.Get("/finality_checkpoints", beaconhttp.HandleEndpointFunc(a.getFinalityCheckpoints))
