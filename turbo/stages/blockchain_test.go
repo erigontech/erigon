@@ -32,8 +32,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
+	libchain "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -616,7 +615,7 @@ func TestEIP155Transition(t *testing.T) {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = libcommon.Address{1}
 		gspec      = &types.Genesis{
-			Config: &chain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -689,7 +688,7 @@ func TestEIP155Transition(t *testing.T) {
 	}
 
 	// generate an invalid chain id transaction
-	config := &chain2.Config{ChainID: big.NewInt(2), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)}
+	config := &libchain.Config{ChainID: big.NewInt(2), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)}
 	chain, chainErr = core.GenerateChain(config, chain.TopBlock, m.Engine, m.DB, 4, func(i int, block *core.BlockGen) {
 		var (
 			basicTx = func(signer types.Signer) (types.Transaction, error) {
@@ -741,7 +740,7 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = libcommon.Address{1}
 		gspec      = &types.Genesis{
-			Config: &chain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Config: &libchain.Config{ChainID: big.NewInt(1), TangerineWhistleBlock: big.NewInt(0), SpuriousDragonBlock: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  types.GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 	)
@@ -959,7 +958,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 		funds   = big.NewInt(1000000000)
 		theAddr = libcommon.Address{1}
 		gspec   = &types.Genesis{
-			Config: &chain.Config{
+			Config: &libchain.Config{
 				ChainID:               big.NewInt(1),
 				HomesteadBlock:        new(big.Int),
 				TangerineWhistleBlock: new(big.Int),

@@ -143,7 +143,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *exec22.TxTask) {
 		if txTask.BlockNum == 0 {
 			// Genesis block
 			// fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
-			_, ibs, err = core.GenesisToBlock(rw.genesis, "")
+			_, ibs, err = core.GenesisToBlock(rw.genesis, "", logger)
 			if err != nil {
 				panic(err)
 			}

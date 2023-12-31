@@ -92,7 +92,7 @@ func (s *Sentinel) createLocalNode(
 	udpPort, tcpPort int,
 	tmpDir string,
 ) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(s.ctx, "", tmpDir)
+	db, err := enode.OpenDB(s.ctx, "", tmpDir, s.logger)
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}

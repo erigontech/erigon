@@ -111,7 +111,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideCancunTime *b
 			custom = false
 		}
 		applyOverrides(genesis.Config)
-		block, _, err1 := write(tx, genesis, tmpDir)
+		block, _, err1 := write(tx, genesis, tmpDir, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -123,7 +123,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideCancunTime *b
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, _, err1 := GenesisToBlock(genesis, tmpDir)
+		block, _, err1 := GenesisToBlock(genesis, tmpDir, logger)
 		if err1 != nil {
 			return genesis.Config, nil, err1
 		}
@@ -180,8 +180,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideCancunTime *b
 	return newCfg, storedBlock, nil
 }
 
-func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err := GenesisToBlock(g, tmpDir)
+func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err := GenesisToBlock(g, tmpDir, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -229,13 +229,13 @@ func WriteGenesisState(g *types.Genesis, tx kv.RwTx, tmpDir string) (*types.Bloc
 	}
 	return block, statedb, nil
 }
-func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block {
+func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string, logger log.Logger) *types.Block {
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		panic(err)
 	}
 	defer tx.Rollback()
-	block, _, err := write(tx, g, tmpDir)
+	block, _, err := write(tx, g, tmpDir, logger)
 	if err != nil {
 		panic(err)
 	}
@@ -248,8 +248,8 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, tmpDir string) *types.Block
 
 // Write writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
-	block, statedb, err2 := WriteGenesisState(g, tx, tmpDir)
+func write(tx kv.RwTx, g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
+	block, statedb, err2 := WriteGenesisState(g, tx, tmpDir, logger)
 	if err2 != nil {
 		return block, statedb, err2
 	}
@@ -309,9 +309,9 @@ func write(tx kv.RwTx, g *types.Genesis, tmpDir string) (*types.Block, *state.In
 }
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
-func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, tmpDir string) *types.Block {
+func GenesisBlockForTesting(db kv.RwDB, addr libcommon.Address, balance *big.Int, tmpDir string, logger log.Logger) *types.Block {
 	g := types.Genesis{Alloc: types.GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
-	block := MustCommitGenesis(&g, db, tmpDir)
+	block := MustCommitGenesis(&g, db, tmpDir, logger)
 	return block
 }
 
@@ -320,14 +320,14 @@ type GenAccount struct {
 	Balance *big.Int
 }
 
-func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, tmpDir string) *types.Block {
+func GenesisWithAccounts(db kv.RwDB, accs []GenAccount, tmpDir string, logger log.Logger) *types.Block {
 	g := types.Genesis{Config: params.TestChainConfig}
 	allocs := make(map[libcommon.Address]types.GenesisAccount)
 	for _, acc := range accs {
 		allocs[acc.Addr] = types.GenesisAccount{Balance: acc.Balance}
 	}
 	g.Alloc = allocs
-	block := MustCommitGenesis(&g, db, tmpDir)
+	block := MustCommitGenesis(&g, db, tmpDir, logger)
 	return block
 }
 
@@ -489,7 +489,7 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.IntraBlockState, error) {
+func GenesisToBlock(g *types.Genesis, tmpDir string, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	_ = g.Alloc //nil-check
 
 	head := &types.Header{
@@ -556,7 +556,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
 
-		genesisTmpDB := mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
+		genesisTmpDB := mdbx.NewMDBX(logger).InMem(tmpDir).MapSize(2 * datasize.GB).GrowthStep(1 * datasize.MB).MustOpen()
 		defer genesisTmpDB.Close()
 		var tx kv.RwTx
 		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
