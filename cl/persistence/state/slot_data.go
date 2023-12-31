@@ -11,7 +11,7 @@ import (
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
-type MinimalBeaconState struct {
+type SlotData struct {
 	// Block Header and Execution Headers can be retrieved from block snapshots
 	Version clparams.StateVersion
 	// Lengths
@@ -19,43 +19,39 @@ type MinimalBeaconState struct {
 	Eth1DataLength                  uint64
 	PreviousEpochAttestationsLength uint64
 	CurrentEpochAttestationsLength  uint64
-	HistoricalSummariesLength       uint64
-	HistoricalRootsLength           uint64
-	TotalActiveBalance              uint64
 	// Phase0
-	Eth1Data          *cltypes.Eth1Data
-	Eth1DepositIndex  uint64
-	JustificationBits *cltypes.JustificationBits
-	Fork              *cltypes.Fork
+	Eth1Data         *cltypes.Eth1Data
+	Eth1DepositIndex uint64
 	// Capella
 	NextWithdrawalIndex          uint64
 	NextWithdrawalValidatorIndex uint64
+
+	// BlockRewards for proposer
+	AttestationsRewards  uint64
+	SyncAggregateRewards uint64
+	ProposerSlashings    uint64
+	AttesterSlashings    uint64
 }
 
-func MinimalBeaconStateFromBeaconState(s *state.CachingBeaconState) *MinimalBeaconState {
+func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 	justificationCopy := &cltypes.JustificationBits{}
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
-	return &MinimalBeaconState{
-		Fork:                            s.Fork(),
+	return &SlotData{
 		ValidatorLength:                 uint64(s.ValidatorLength()),
 		Eth1DataLength:                  uint64(s.Eth1DataVotes().Len()),
 		PreviousEpochAttestationsLength: uint64(s.PreviousEpochAttestations().Len()),
 		CurrentEpochAttestationsLength:  uint64(s.CurrentEpochAttestations().Len()),
-		HistoricalSummariesLength:       s.HistoricalSummariesLength(),
-		HistoricalRootsLength:           s.HistoricalRootsLength(),
 		Version:                         s.Version(),
 		Eth1Data:                        s.Eth1Data(),
 		Eth1DepositIndex:                s.Eth1DepositIndex(),
-		JustificationBits:               justificationCopy,
 		NextWithdrawalIndex:             s.NextWithdrawalIndex(),
 		NextWithdrawalValidatorIndex:    s.NextWithdrawalValidatorIndex(),
-		TotalActiveBalance:              s.GetTotalActiveBalance(),
 	}
 }
 
 // Serialize serializes the state into a byte slice with zstd compression.
-func (m *MinimalBeaconState) WriteTo(w io.Writer) error {
+func (m *SlotData) WriteTo(w io.Writer) error {
 	buf, err := ssz2.MarshalSSZ(nil, m.getSchema()...)
 	if err != nil {
 		return err
@@ -76,10 +72,8 @@ func (m *MinimalBeaconState) WriteTo(w io.Writer) error {
 }
 
 // Deserialize deserializes the state from a byte slice with zstd compression.
-func (m *MinimalBeaconState) ReadFrom(r io.Reader) error {
+func (m *SlotData) ReadFrom(r io.Reader) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
-	m.JustificationBits = &cltypes.JustificationBits{}
-	m.Fork = &cltypes.Fork{}
 	var err error
 
 	versionByte := make([]byte, 1)
@@ -106,8 +100,8 @@ func (m *MinimalBeaconState) ReadFrom(r io.Reader) error {
 	return ssz2.UnmarshalSSZ(buf, int(m.Version), m.getSchema()...)
 }
 
-func (m *MinimalBeaconState) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, &m.TotalActiveBalance, m.Fork, &m.Eth1DepositIndex, m.JustificationBits, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+func (m *SlotData) getSchema() []interface{} {
+	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}

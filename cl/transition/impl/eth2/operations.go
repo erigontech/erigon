@@ -71,8 +71,11 @@ func (I *impl) ProcessProposerSlashing(s abstract.BeaconState, propSlashing *clt
 	}
 
 	// Set whistleblower index to 0 so current proposer gets reward.
-	s.SlashValidator(h1.ProposerIndex, nil)
-	return nil
+	pr, err := s.SlashValidator(h1.ProposerIndex, nil)
+	if I.BlockRewardsCollector != nil {
+		I.BlockRewardsCollector.ProposerSlashings += pr
+	}
+	return err
 }
 
 func (I *impl) ProcessAttesterSlashing(s abstract.BeaconState, attSlashing *cltypes.AttesterSlashing) error {
@@ -109,9 +112,12 @@ func (I *impl) ProcessAttesterSlashing(s abstract.BeaconState, attSlashing *clty
 			return err
 		}
 		if validator.IsSlashable(currentEpoch) {
-			err := s.SlashValidator(ind, nil)
+			pr, err := s.SlashValidator(ind, nil)
 			if err != nil {
 				return fmt.Errorf("unable to slash validator: %d", ind)
+			}
+			if I.BlockRewardsCollector != nil {
+				I.BlockRewardsCollector.AttesterSlashings += pr
 			}
 			slashedAny = true
 		}
@@ -305,7 +311,7 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.
 }
 
 func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error {
-	votedKeys, err := processSyncAggregate(s, sync)
+	votedKeys, err := I.processSyncAggregate(s, sync)
 	if err != nil {
 		return err
 	}
@@ -335,7 +341,7 @@ func (I *impl) ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAg
 // processSyncAggregate applies all the logic in the spec function `process_sync_aggregate` except
 // verifying the BLS signatures. It returns the modified beacons state and the list of validators'
 // public keys that voted, for future signature verification.
-func processSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) ([][]byte, error) {
+func (I *impl) processSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) ([][]byte, error) {
 	currentSyncCommittee := s.CurrentSyncCommittee()
 
 	if currentSyncCommittee == nil {
@@ -382,6 +388,9 @@ func processSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) (
 		}
 	}
 
+	if I.BlockRewardsCollector != nil {
+		I.BlockRewardsCollector.SyncAggregate = earnedProposerReward
+	}
 	return votedKeys, state.IncreaseBalance(s, proposerIndex, earnedProposerReward)
 }
 
@@ -478,7 +487,7 @@ func (I *impl) ProcessAttestations(s abstract.BeaconState, attestations *solid.L
 	c := h.Tag("attestation_step", "process")
 	var err error
 	if err := solid.RangeErr[*solid.Attestation](attestations, func(i int, a *solid.Attestation, _ int) error {
-		if attestingIndiciesSet[i], err = processAttestation(s, a, baseRewardPerIncrement); err != nil {
+		if attestingIndiciesSet[i], err = I.processAttestation(s, a, baseRewardPerIncrement); err != nil {
 			return err
 		}
 		return nil
@@ -505,7 +514,7 @@ func (I *impl) ProcessAttestations(s abstract.BeaconState, attestations *solid.L
 	return nil
 }
 
-func processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Attestation, baseRewardPerIncrement uint64) ([]uint64, error) {
+func (I *impl) processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Attestation, baseRewardPerIncrement uint64) ([]uint64, error) {
 	data := attestation.AttestantionData()
 	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
@@ -560,11 +569,14 @@ func processAttestationPostAltair(s abstract.BeaconState, attestation *solid.Att
 	c.PutSince()
 	proposerRewardDenominator := (beaconConfig.WeightDenominator - beaconConfig.ProposerWeight) * beaconConfig.WeightDenominator / beaconConfig.ProposerWeight
 	reward := proposerRewardNumerator / proposerRewardDenominator
+	if I.BlockRewardsCollector != nil {
+		I.BlockRewardsCollector.Attestations += reward
+	}
 	return attestingIndicies, state.IncreaseBalance(s, proposer, reward)
 }
 
 // processAttestationsPhase0 implements the rules for phase0 processing.
-func processAttestationPhase0(s abstract.BeaconState, attestation *solid.Attestation) ([]uint64, error) {
+func (I *impl) processAttestationPhase0(s abstract.BeaconState, attestation *solid.Attestation) ([]uint64, error) {
 	data := attestation.AttestantionData()
 	committee, err := s.GetBeaconCommitee(data.Slot(), data.ValidatorIndex())
 	if err != nil {
@@ -675,7 +687,7 @@ func processAttestationPhase0(s abstract.BeaconState, attestation *solid.Attesta
 }
 
 // ProcessAttestation takes an attestation and process it.
-func processAttestation(s abstract.BeaconState, attestation *solid.Attestation, baseRewardPerIncrement uint64) ([]uint64, error) {
+func (I *impl) processAttestation(s abstract.BeaconState, attestation *solid.Attestation, baseRewardPerIncrement uint64) ([]uint64, error) {
 	data := attestation.AttestantionData()
 	currentEpoch := state.Epoch(s)
 	previousEpoch := state.PreviousEpoch(s)
@@ -693,9 +705,9 @@ func processAttestation(s abstract.BeaconState, attestation *solid.Attestation, 
 	}
 	// check if we need to use rules for phase0 or post-altair.
 	if s.Version() == clparams.Phase0Version {
-		return processAttestationPhase0(s, attestation)
+		return I.processAttestationPhase0(s, attestation)
 	}
-	return processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
+	return I.processAttestationPostAltair(s, attestation, baseRewardPerIncrement)
 }
 
 func verifyAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation], attestingIndicies [][]uint64) (bool, error) {

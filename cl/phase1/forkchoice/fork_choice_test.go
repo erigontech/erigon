@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -106,4 +107,22 @@ func TestForkChoiceBasic(t *testing.T) {
 	}, true)
 	require.NoError(t, err)
 	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
+}
+
+func TestForkChoiceChainBellatrix(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+	// Initialize forkchoice store
+	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
+	store.OnTick(2000)
+	require.NoError(t, err)
+	for _, block := range blocks {
+		require.NoError(t, store.OnBlock(block, false, true))
+	}
+	root1, err := blocks[20].Block.HashSSZ()
+	require.NoError(t, err)
+
+	rewards, ok := store.BlockRewards(libcommon.Hash(root1))
+	require.True(t, ok)
+	require.Equal(t, rewards.Attestations, uint64(0x511ad))
 }
