@@ -181,3 +181,11 @@ func (f *ForkChoiceStorageMock) BlockRewards(root common.Hash) (*eth2.BlockRewar
 func (f *ForkChoiceStorageMock) TotalActiveBalance(root common.Hash) (uint64, bool) {
 	panic("implement me")
 }
+
+func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.HashListSSZ) bool {
+	return false
+}
+
+func (f *ForkChoiceStorageMock) LowestAvaiableSlot() uint64 {
+	return f.FinalizedSlotVal
+}
