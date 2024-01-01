@@ -35,7 +35,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconRe
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err).Error())
 	}
 	if len(idxsStr) == 0 {
-		return newBeaconResponse([]string{}).withOptimistic(false), nil
+		return newBeaconResponse([]string{}), nil
 	}
 	idxSet := map[int]struct{}{}
 	// convert the request to uint64

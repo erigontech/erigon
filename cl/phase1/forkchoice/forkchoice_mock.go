@@ -59,6 +59,8 @@ type ForkChoiceStorageMock struct {
 	SlotVal                uint64
 	TimeVal                uint64
 
+	ParticipationVal *solid.BitList
+
 	StateAtBlockRootVal       map[common.Hash]*state.CachingBeaconState
 	StateAtSlotVal            map[uint64]*state.CachingBeaconState
 	GetSyncCommitteesVal      map[common.Hash][2]*solid.SyncCommittee
@@ -191,5 +193,5 @@ func (f *ForkChoiceStorageMock) LowestAvaiableSlot() uint64 {
 }
 
 func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, bool) {
-	panic("implement me")
+	return f.ParticipationVal, f.ParticipationVal != nil
 }
