@@ -133,6 +133,9 @@ func (a *ApiHandler) getSyncDuties(r *http.Request) (*beaconResponse, error) {
 	// Now we can convert the map to a slice
 	duties := make([]*syncDutyResponse, 0, len(dutiesSet))
 	for _, duty := range dutiesSet {
+		if len(duty.ValidatorSyncCommitteeIndicies) == 0 {
+			continue
+		}
 		duties = append(duties, duty)
 	}
 	sort.Slice(duties, func(i, j int) bool {
