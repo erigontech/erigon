@@ -17,7 +17,7 @@ type committeeResponse struct {
 	Validators []string `json:"validators"` // do string directly but it is still a base10 number
 }
 
-func (a *ApiHandler) getCommittees(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	epochReq, err := uint64FromQueryParams(r, "epoch")
