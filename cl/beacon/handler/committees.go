@@ -67,8 +67,8 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("slot %d is not in epoch %d", *slotFilter, epoch))
 	}
 	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
-
-	if a.forkchoiceStore.FinalizedSlot() <= slot {
+	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	if a.forkchoiceStore.LowestAvaiableSlot() <= slot {
 		// non-finality case
 		s, cn := a.syncedData.HeadState()
 		defer cn()
@@ -100,7 +100,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 				resp = append(resp, data)
 			}
 		}
-		return newBeaconResponse(resp).withFinalized(false), nil
+		return newBeaconResponse(resp).withFinalized(isFinalized), nil
 	}
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
@@ -143,5 +143,5 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 			resp = append(resp, data)
 		}
 	}
-	return newBeaconResponse(resp).withFinalized(true), nil
+	return newBeaconResponse(resp).withFinalized(isFinalized), nil
 }

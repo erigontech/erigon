@@ -357,3 +357,63 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 
 	return newBeaconResponse(response).withFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
+
+type randaoResponse struct {
+	Randao libcommon.Hash `json:"randao"`
+}
+
+func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+	ctx := r.Context()
+
+	tx, err := a.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	blockId, err := stateIdFromRequest(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+
+	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+	}
+
+	epochReq, err := uint64FromQueryParams(r, "epoch")
+	if err != nil {
+		return nil, err
+	}
+	slotPtr, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if slotPtr == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read block slot: %x", blockRoot))
+	}
+	slot := *slotPtr
+	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+	if epochReq != nil {
+		epoch = *epochReq
+	}
+	randaoMixes := a.randaoMixesPool.Get().(solid.HashListSSZ)
+	defer a.randaoMixesPool.Put(randaoMixes)
+
+	if a.forkchoiceStore.RandaoMixes(blockRoot, randaoMixes) {
+		mix := randaoMixes.Get(int(epoch % a.beaconChainCfg.EpochsPerHistoricalVector))
+		return newBeaconResponse(randaoResponse{Randao: mix}).withFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	}
+	// check if the block is canonical
+	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil {
+		return nil, err
+	}
+	if canonicalRoot != blockRoot {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read randao: %x", blockRoot))
+	}
+	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, slot, epoch%a.beaconChainCfg.EpochsPerHistoricalVector)
+	if err != nil {
+		return nil, err
+	}
+	return newBeaconResponse(randaoResponse{Randao: mix}).withFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
+}

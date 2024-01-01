@@ -47,7 +47,8 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "block not found")
 	}
 	slot := blk.Header.Slot
-	if slot >= a.forkchoiceStore.FinalizedSlot() {
+	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
+	if slot >= a.forkchoiceStore.LowestAvaiableSlot() {
 		// finalized case
 		blkRewards, ok := a.forkchoiceStore.BlockRewards(root)
 		if !ok {
@@ -60,7 +61,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 			AttesterSlashings: blkRewards.AttesterSlashings,
 			SyncAggregate:     blkRewards.SyncAggregate,
 			Total:             blkRewards.Attestations + blkRewards.ProposerSlashings + blkRewards.AttesterSlashings + blkRewards.SyncAggregate,
-		}).withFinalized(false), nil
+		}).withFinalized(isFinalized), nil
 	}
 	slotData, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {
@@ -76,7 +77,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 		AttesterSlashings: slotData.AttesterSlashings,
 		SyncAggregate:     slotData.SyncAggregateRewards,
 		Total:             slotData.AttestationsRewards + slotData.ProposerSlashings + slotData.AttesterSlashings + slotData.SyncAggregateRewards,
-	}).withFinalized(true), nil
+	}).withFinalized(isFinalized), nil
 }
 
 type syncCommitteeReward struct {
