@@ -246,6 +246,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		if err := executionPayload.DecodeSSZ(v[:len(v)-1-32], int(version)); err != nil {
 			return fmt.Errorf("error decoding execution payload during collection: %s", err)
 		}
+		if executionPayload.BlockNumber%10000 == 0 {
+			cfg.logger.Info("Inserting execution payload", "blockNumber", executionPayload.BlockNumber)
+		}
 		body := executionPayload.Body()
 
 		header, err := executionPayload.RlpHeader(&parentRoot)
