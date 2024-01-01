@@ -33,6 +33,7 @@ type ForkChoiceStorageReader interface {
 	GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	Slot() uint64
 	Time() uint64
+	Partecipation(epoch uint64) (*solid.BitList, bool)
 	RandaoMixes(blockRoot libcommon.Hash, out solid.HashListSSZ) bool
 	BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
 	TotalActiveBalance(root libcommon.Hash) (uint64, bool)

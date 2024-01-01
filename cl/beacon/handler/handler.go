@@ -113,6 +113,7 @@ func (a *ApiHandler) init() {
 				r.Get("/sync_committee_contribution", http.NotFound)
 				r.Post("/contribution_and_proofs", http.NotFound)
 				r.Post("/prepare_beacon_proposer", http.NotFound)
+				r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 			})
 		})
 		r.Route("/v2", func(r chi.Router) {

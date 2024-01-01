@@ -189,3 +189,7 @@ func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.Has
 func (f *ForkChoiceStorageMock) LowestAvaiableSlot() uint64 {
 	return f.FinalizedSlotVal
 }
+
+func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, bool) {
+	panic("implement me")
+}

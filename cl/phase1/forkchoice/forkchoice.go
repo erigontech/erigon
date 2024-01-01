@@ -74,6 +74,8 @@ type ForkChoiceStore struct {
 	// Randao mixes
 	randaoMixesLists *lru.Cache[libcommon.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
 	randaoDeltas     *lru.Cache[libcommon.Hash, randaoDelta]       // small entry can be lots of elements.
+	// participation tracking
+	participation *lru.Cache[uint64, *solid.BitList] // epoch -> [partecipation]
 
 	mu sync.Mutex
 	// EL
@@ -149,6 +151,14 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	if err != nil {
 		return nil, err
 	}
+
+	participation, err := lru.New[uint64, *solid.BitList](16)
+	if err != nil {
+		return nil, err
+	}
+
+	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
+
 	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
 	r := solid.NewHashVector(int(anchorState.BeaconConfig().EpochsPerHistoricalVector))
 	anchorState.RandaoMixes().CopyTo(r)
@@ -178,6 +188,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		totalActiveBalances:           totalActiveBalances,
 		randaoMixesLists:              randaoMixesLists,
 		randaoDeltas:                  randaoDeltas,
+		participation:                 participation,
 	}, nil
 }
 
@@ -383,4 +394,8 @@ func (f *ForkChoiceStore) RandaoMixes(blockRoot libcommon.Hash, out solid.HashLi
 		out.Set(int(epoch%f.beaconCfg.EpochsPerHistoricalVector), delta.delta)
 	}
 	return true
+}
+
+func (f *ForkChoiceStore) Partecipation(epoch uint64) (*solid.BitList, bool) {
+	return f.participation.Get(epoch)
 }

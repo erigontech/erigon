@@ -86,6 +86,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 			delta: lastProcessedState.GetRandaoMixes(state.Epoch(lastProcessedState)),
 		})
 	}
+	f.participation.Add(state.Epoch(lastProcessedState), lastProcessedState.CurrentEpochParticipation().Copy())
 	f.preverifiedSizes.Add(blockRoot, preverifiedAppendListsSizes{
 		validatorLength:           uint64(lastProcessedState.ValidatorLength()),
 		historicalRootsLength:     lastProcessedState.HistoricalRootsLength(),

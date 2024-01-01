@@ -92,6 +92,10 @@ func (b *BeaconState) PreviousEpochParticipation() *solid.BitList {
 	return b.previousEpochParticipation
 }
 
+func (b *BeaconState) CurrentEpochParticipation() *solid.BitList {
+	return b.currentEpochParticipation
+}
+
 func (b *BeaconState) ValidatorLength() int {
 	return b.validators.Length()
 }

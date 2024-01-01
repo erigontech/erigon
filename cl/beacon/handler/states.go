@@ -362,7 +362,7 @@ type randaoResponse struct {
 	Randao libcommon.Hash `json:"randao"`
 }
 
-func (a *ApiHandler) getRandao(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)

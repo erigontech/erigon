@@ -143,4 +143,9 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	for i := 0; i < mixes.Length(); i++ {
 		require.Equal(t, mixes.Get(i), intermediaryState.RandaoMixes().Get(i), fmt.Sprintf("mixes mismatch at index %d, have: %x, expected: %x", i, mixes.Get(i), intermediaryState.RandaoMixes().Get(i)))
 	}
+	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(intermediaryBlockRoot)
+	require.True(t, ok)
+
+	require.Equal(t, intermediaryState.CurrentSyncCommittee(), currentIntermediarySyncCommittee)
+	require.Equal(t, intermediaryState.NextSyncCommittee(), nextIntermediarySyncCommittee)
 }

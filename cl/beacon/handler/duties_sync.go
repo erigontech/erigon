@@ -20,7 +20,7 @@ type syncDutyResponse struct {
 	ValidatorSyncCommitteeIndicies []string          `json:"validator_sync_committee_indicies"`
 }
 
-func (a *ApiHandler) getSyncDuties(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	epoch, err := epochFromRequest(r)
 	if err != nil {
 		return nil, err

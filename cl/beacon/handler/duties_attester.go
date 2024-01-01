@@ -22,7 +22,7 @@ type attesterDutyResponse struct {
 	Slot                    uint64            `json:"slot,string"`
 }
 
-func (a *ApiHandler) getAttesterDuties(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	epoch, err := epochFromRequest(r)
 	if err != nil {
 		return nil, err
@@ -30,14 +30,13 @@ func (a *ApiHandler) getAttesterDuties(r *http.Request) (*beaconResponse, error)
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err).Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required", err).Error())
 	}
 	if len(idxsStr) == 0 {
 		return newBeaconResponse([]string{}).withOptimistic(false), nil
 	}
 	idxSet := map[int]struct{}{}
 	// convert the request to uint64
-	idxs := make([]uint64, 0, len(idxsStr))
 	for _, idxStr := range idxsStr {
 
 		idx, err := strconv.ParseUint(idxStr, 10, 64)
@@ -47,7 +46,6 @@ func (a *ApiHandler) getAttesterDuties(r *http.Request) (*beaconResponse, error)
 		if _, ok := idxSet[int(idx)]; ok {
 			continue
 		}
-		idxs = append(idxs, idx)
 		idxSet[int(idx)] = struct{}{}
 	}
 
