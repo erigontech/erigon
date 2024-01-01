@@ -100,9 +100,9 @@ func (a *ApiHandler) init() {
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Route("/duties", func(r chi.Router) {
-					r.Post("/attester/{epoch}", http.NotFound)
+					r.Post("/attester/{epoch}", beaconhttp.HandleEndpointFunc(a.getAttesterDuties))
 					r.Get("/proposer/{epoch}", beaconhttp.HandleEndpointFunc(a.getDutiesProposer))
-					r.Post("/sync/{epoch}", http.NotFound)
+					r.Post("/sync/{epoch}", beaconhttp.HandleEndpointFunc(a.getSyncDuties))
 				})
 				r.Get("/blinded_blocks/{slot}", http.NotFound)
 				r.Get("/attestation_data", http.NotFound)

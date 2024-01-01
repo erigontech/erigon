@@ -403,7 +403,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		}
 		oldRoots = append(oldRoots, hash)
 	}
-	f.lowestAvaiableSlot = pruneSlot - 1
+	f.lowestAvaiableSlot = pruneSlot + 1
 	for _, root := range oldRoots {
 		delete(f.badBlocks, root)
 		delete(f.blocks, root)
