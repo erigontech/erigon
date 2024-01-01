@@ -100,7 +100,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := state.NewSharedDomains(tx)
+	domains := state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 	domains.SetTxNum(0)
 
@@ -212,7 +212,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx)
+	domains = state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 
 	//{
@@ -236,7 +236,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "")
+	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -245,7 +245,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx)
+	domains = state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 	writer = state2.NewWriterV4(domains)
 
@@ -304,7 +304,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := state.NewSharedDomains(tx)
+	domains := state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 	domains.SetTxNum(0)
 
@@ -394,7 +394,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx)
+	domains = state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 
 	_, err = domains.SeekCommitment(ctx, tx)
@@ -404,7 +404,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx.Close()
 	domains.Close()
 
-	err = reset2.ResetExec(ctx, db, networkname.Test, "")
+	err = reset2.ResetExec(ctx, db, networkname.Test, "", log.New())
 	require.NoError(t, err)
 	// ======== reset domains end ========
 
@@ -413,7 +413,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx)
+	domains = state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 
 	writer = state2.NewWriterV4(domains)
@@ -480,7 +480,7 @@ func TestCommit(t *testing.T) {
 
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
-	domains := state.NewSharedDomains(tx)
+	domains := state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 
 	//buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 0)

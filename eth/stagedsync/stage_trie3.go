@@ -24,7 +24,7 @@ import (
 )
 
 func collectAndComputeCommitment(ctx context.Context, tx kv.RwTx, tmpDir string, toTxNum uint64) ([]byte, error) {
-	domains := state.NewSharedDomains(tx)
+	domains := state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 	ac := domains.AggCtx().(*state.AggregatorV3Context)
 

@@ -135,7 +135,7 @@ func TestExec(t *testing.T) {
 }
 
 func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
-	domains := libstate.NewSharedDomains(tx)
+	domains := libstate.NewSharedDomains(tx, logger)
 
 	rs := state.NewStateV3(domains, logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)

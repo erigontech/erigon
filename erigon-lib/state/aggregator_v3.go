@@ -753,7 +753,7 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 	// not all blocks have commitment
 	//fmt.Printf("CanUnwindBeforeBlockNum: blockNum=%d unwindTo=%d\n", blockNum, unwindToTxNum)
-	domains := NewSharedDomains(tx)
+	domains := NewSharedDomains(tx, ac.a.logger)
 	defer domains.Close()
 
 	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)

@@ -207,7 +207,7 @@ func ExecV3(ctx context.Context,
 	if inMemExec {
 		doms = applyTx.(*state2.SharedDomains)
 	} else {
-		doms = state2.NewSharedDomains(applyTx)
+		doms = state2.NewSharedDomains(applyTx, log.New())
 		defer doms.Close()
 	}
 
@@ -903,7 +903,7 @@ Loop:
 							return err
 						}
 					}
-					doms = state2.NewSharedDomains(applyTx)
+					doms = state2.NewSharedDomains(applyTx, logger)
 					doms.SetTxNum(inputTxNum)
 					rs = state.NewStateV3(doms, logger)
 

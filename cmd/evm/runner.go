@@ -154,7 +154,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "")
+		core.MustCommitGenesis(gen, db, "", log.Root())
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {

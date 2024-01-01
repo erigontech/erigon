@@ -94,7 +94,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 		stateWriter state.StateWriter
 	)
 	if histV3 {
-		domains = state2.NewSharedDomains(tx)
+		domains = state2.NewSharedDomains(tx, logger)
 		defer domains.Close()
 		stateWriter = state.NewWriterV4(domains)
 		stateReader = state.NewReaderV4(domains)
@@ -132,7 +132,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
 			if histV3 {
-				domains = state2.NewSharedDomains(tx)
+				domains = state2.NewSharedDomains(tx, logger)
 				defer domains.Close()
 				simStateReader = state.NewReaderV4(domains)
 			} else {

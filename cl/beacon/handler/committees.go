@@ -50,7 +50,6 @@ func (a *ApiHandler) getCommittees(r *http.Request) (*beaconResponse, error) {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
-	fmt.Println("A")
 	slotPtr, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		return nil, err
