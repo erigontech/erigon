@@ -236,12 +236,12 @@ func (v *ValidatorApiHandler) GetEthV3ValidatorBlocksSlot(w http.ResponseWriter,
 		return nil, fmt.Errorf("fail to parse graffiti: %w", err)
 	}
 	skip_randao_verification := r.URL.Query().Has("skip_randao_verification")
-	if skip_randao_verification {
-		////if isInfinity(randaoReveal) {
-		//// return nil, beaconhttp.NewEndpointError(400, "randao reveal must be set to infinity if skip randao verification is set")
-		////}
-	}
-	_, _, _ = slot, graffiti, randaoReveal
+	//if skip_randao_verification {
+	//  if isInfinity(randaoReveal) {
+	//   return nil, beaconhttp.NewEndpointError(400, "randao reveal must be set to infinity if skip randao verification is set")
+	//  }
+	//}
+	_, _, _, _ = slot, graffiti, randaoReveal, skip_randao_verification
 	return o, nil
 }
 
