@@ -53,7 +53,6 @@ func TestBorHeimdallForwardFetchesNextSpanDuringLastSprintOfCurrentSpan(t *testi
 	// heimdall prepares the next span a number of sprints before the end of the current one
 	// we should be fetching the next span once we reach the last sprint of the current span
 	// this mimics the behaviour in bor
-	//
 	t.Parallel()
 
 	ctx := context.Background()
