@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 )
 
-func (a *ApiHandler) getHeaders(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	querySlot, err := uint64FromQueryParams(r, "slot")
@@ -89,7 +89,7 @@ func (a *ApiHandler) getHeaders(r *http.Request) (*beaconResponse, error) {
 	return newBeaconResponse(headers), nil
 }
 
-func (a *ApiHandler) getHeader(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
