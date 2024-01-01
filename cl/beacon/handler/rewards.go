@@ -23,7 +23,7 @@ type blockRewardsResponse struct {
 	Total             uint64 `json:"total,string"`
 }
 
-func (a *ApiHandler) getBlockRewards(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -85,7 +85,7 @@ type syncCommitteeReward struct {
 	Reward         int64  `json:"reward,string"`
 }
 
-func (a *ApiHandler) getSyncCommitteesRewards(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)

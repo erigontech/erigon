@@ -12,9 +12,9 @@ import (
  * to be aggregated and the BLS signature of the attestation.
  */
 type AggregateAndProof struct {
-	AggregatorIndex uint64
-	Aggregate       *solid.Attestation
-	SelectionProof  libcommon.Bytes96
+	AggregatorIndex uint64             `json:"aggregator_index,string"`
+	Aggregate       *solid.Attestation `json:"aggregate"`
+	SelectionProof  libcommon.Bytes96  `json:"selection_proof"`
 }
 
 func (a *AggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
@@ -39,8 +39,8 @@ func (a *AggregateAndProof) HashSSZ() ([32]byte, error) {
 }
 
 type SignedAggregateAndProof struct {
-	Message   *AggregateAndProof
-	Signature libcommon.Bytes96
+	Message   *AggregateAndProof `json:"message"`
+	Signature libcommon.Bytes96  `json:"signature"`
 }
 
 func (a *SignedAggregateAndProof) EncodeSSZ(dst []byte) ([]byte, error) {

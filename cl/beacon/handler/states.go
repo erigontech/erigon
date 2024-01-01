@@ -71,7 +71,7 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 	return v - 1
 }
 
-func (a *ApiHandler) getStateFork(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -110,7 +110,7 @@ func (a *ApiHandler) getStateFork(r *http.Request) (*beaconResponse, error) {
 	}), nil
 }
 
-func (a *ApiHandler) getStateRoot(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -152,7 +152,7 @@ func (a *ApiHandler) getStateRoot(r *http.Request) (*beaconResponse, error) {
 		withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
-func (a *ApiHandler) getFullState(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -210,7 +210,7 @@ type finalityCheckpointsResponse struct {
 	PreviousJustifiedCheckpoint solid.Checkpoint `json:"previous_justified_checkpoint"`
 }
 
-func (a *ApiHandler) getFinalityCheckpoints(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -267,7 +267,7 @@ type syncCommitteesResponse struct {
 	ValidatorAggregates [][]string `json:"validator_aggregates"`
 }
 
-func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)

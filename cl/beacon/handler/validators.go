@@ -184,7 +184,7 @@ func checkValidValidatorId(s string) (bool, error) {
 	return false, nil
 }
 
-func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -308,7 +308,7 @@ func parseQueryValidatorIndicies(tx kv.Tx, ids []string) ([]uint64, error) {
 	return filterIndicies, nil
 }
 
-func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -375,7 +375,7 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 	return responseValidator(validatorIndex, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
-func (a *ApiHandler) getAllValidatorsBalances(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
