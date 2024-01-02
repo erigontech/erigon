@@ -514,6 +514,14 @@ func delegateIssuance(tx kv.Tx, block *types.Block, chainConfig *chain.Config) (
 		return internalIssuance{}, nil
 	}
 
+	if chainConfig.TerminalTotalDifficulty != nil {
+		isPos := block.HeaderNoCopy().Difficulty.Cmp(common.Big0) == 0 || block.HeaderNoCopy().Difficulty.Cmp(chainConfig.TerminalTotalDifficulty) >= 0
+		if isPos {
+			// No execution layer issuance in PoS
+			return internalIssuance{}, nil
+		}
+	}
+
 	minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, block.Header(), block.Uncles())
 	issuance := minerReward
 	for _, r := range uncleRewards {
