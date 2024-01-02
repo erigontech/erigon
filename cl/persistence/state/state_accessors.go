@@ -123,16 +123,16 @@ func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	return ret, err
 }
 
-func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, error) {
+func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, bool, error) {
 	var index []byte
 	var err error
 	if index, err = tx.GetOne(kv.InvertedValidatorPublicKeys, key[:]); err != nil {
-		return 0, err
+		return 0, false, err
 	}
 	if len(index) == 0 {
-		return 0, nil
+		return 0, false, nil
 	}
-	return base_encoding.Decode64FromBytes4(index), nil
+	return base_encoding.Decode64FromBytes4(index), true, nil
 }
 
 func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {
@@ -150,9 +150,9 @@ func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
 }
 
-func ReadMinimalBeaconState(tx kv.Tx, slot uint64) (*MinimalBeaconState, error) {
-	minimalState := &MinimalBeaconState{}
-	v, err := tx.GetOne(kv.MinimalBeaconState, base_encoding.Encode64ToBytes4(slot))
+func ReadSlotData(tx kv.Tx, slot uint64) (*SlotData, error) {
+	sd := &SlotData{}
+	v, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -161,20 +161,40 @@ func ReadMinimalBeaconState(tx kv.Tx, slot uint64) (*MinimalBeaconState, error) 
 	}
 	buf := bytes.NewBuffer(v)
 
-	return minimalState, minimalState.ReadFrom(buf)
+	return sd, sd.ReadFrom(buf)
+}
+
+func ReadEpochData(tx kv.Tx, slot uint64) (*EpochData, error) {
+	ed := &EpochData{}
+	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	buf := bytes.NewBuffer(v)
+
+	return ed, ed.ReadFrom(buf)
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
 func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, err error) {
-	v, err := tx.GetOne(kv.Checkpoints, base_encoding.Encode64ToBytes4(slot))
+	ed := &EpochData{}
+	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if len(v) == 0 {
 		return nil, nil, nil, nil
 	}
+	buf := bytes.NewBuffer(v)
+
+	if err := ed.ReadFrom(buf); err != nil {
+		return nil, nil, nil, err
+	}
 	// Current, Pre
-	return solid.Checkpoint(v[0:40]), solid.Checkpoint(v[40:80]), solid.Checkpoint(v[80:120]), nil
+	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, nil
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
@@ -326,8 +346,8 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	return err
 }
 
-func ReadActiveIndicies(tx kv.Tx, epoch uint64) ([]uint64, error) {
-	key := base_encoding.Encode64ToBytes4(epoch)
+func ReadActiveIndicies(tx kv.Tx, slot uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(slot)
 	v, err := tx.GetOne(kv.ActiveValidatorIndicies, key)
 	if err != nil {
 		return nil, err

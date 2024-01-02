@@ -86,7 +86,7 @@ func runAggregatorOnActualDatadir(t *testing.T, datadir string) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := state.NewSharedDomains(tx)
+	domains := state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 
 	offt, err := domains.SeekCommitment(ctx, tx)

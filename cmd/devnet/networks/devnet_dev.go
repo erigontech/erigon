@@ -1,4 +1,4 @@
-package tests
+package networks
 
 import (
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -14,9 +14,26 @@ func NewDevDevnet(
 	dataDir string,
 	baseRpcHost string,
 	baseRpcPort int,
+	producerCount int,
 	logger log.Logger,
 ) devnet.Devnet {
 	faucetSource := accounts.NewAccount("faucet-source")
+
+	var nodes []devnet.Node
+
+	if producerCount == 0 {
+		producerCount++
+	}
+
+	for i := 0; i < producerCount; i++ {
+		nodes = append(nodes, &args.BlockProducer{
+			NodeArgs: args.NodeArgs{
+				ConsoleVerbosity: "0",
+				DirVerbosity:     "5",
+			},
+			AccountSlots: 200,
+		})
+	}
 
 	network := devnet.Network{
 		DataDir:            dataDir,
@@ -32,21 +49,13 @@ func NewDevDevnet(
 			account_services.NewFaucet(networkname.DevChainName, faucetSource),
 		},
 		MaxNumberOfEmptyBlockChecks: 30,
-		Nodes: []devnet.Node{
-			&args.BlockProducer{
+		Nodes: append(nodes,
+			&args.BlockConsumer{
 				NodeArgs: args.NodeArgs{
 					ConsoleVerbosity: "0",
 					DirVerbosity:     "5",
 				},
-				AccountSlots: 200,
-			},
-			&args.NonBlockProducer{
-				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
-				},
-			},
-		},
+			}),
 	}
 
 	return devnet.Devnet{&network}

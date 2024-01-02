@@ -328,7 +328,7 @@ func unwindExec3(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context,
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 
-	domains := libstate.NewSharedDomains(tx)
+	domains := libstate.NewSharedDomains(tx, logger)
 	defer domains.Close()
 	rs := state.NewStateV3(domains, logger)
 

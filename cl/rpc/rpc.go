@@ -186,7 +186,7 @@ func (b *BeaconRpcP2P) PropagateBlock(block *cltypes.SignedBeaconBlock) error {
 	}
 	_, err = b.sentinel.PublishGossip(b.ctx, &sentinel.GossipData{
 		Data: encoded,
-		Type: sentinel.GossipType_BeaconBlockGossipType,
+		Name: "beacon_block",
 	})
 	return err
 }

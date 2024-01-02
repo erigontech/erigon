@@ -710,7 +710,7 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
 
-		domains := libstate.NewSharedDomains(tx)
+		domains := libstate.NewSharedDomains(tx, logger)
 		defer domains.Close()
 		//txnUm := domains.TxNum()
 		blockNum := domains.BlockNum()
@@ -991,7 +991,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		if err := reset2.ResetExec(ctx, db, chain, ""); err != nil {
+		if err := reset2.ResetExec(ctx, db, chain, "", logger); err != nil {
 			return err
 		}
 		return nil

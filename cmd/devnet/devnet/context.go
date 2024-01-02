@@ -145,6 +145,10 @@ func CurrentNetwork(ctx context.Context) *Network {
 		}
 	}
 
+	if devnet, ok := ctx.Value(ckDevnet).(Devnet); ok {
+		return devnet.SelectNetwork(ctx, 0)
+	}
+
 	return nil
 }
 

@@ -115,7 +115,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 	stateTx, err := stateDb.BeginRw(ctx)
 	must(err)
 	defer stateTx.Rollback()
-	domains := state3.NewSharedDomains(stateTx)
+	domains := state3.NewSharedDomains(stateTx, logger)
 	defer agg.Close()
 
 	r := state.NewReaderV4(domains)

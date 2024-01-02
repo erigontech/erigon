@@ -103,6 +103,16 @@ var snapshotCommand = cli.Command{
 				&erigoncli.UploadFromFlag,
 				&erigoncli.FrozenBlockLimitFlag,
 			}),
+			Before: func(context *cli.Context) error {
+				erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
+				erigoncli.SyncLoopBlockLimitFlag.Value = 100000
+				erigoncli.SyncLoopPruneLimitFlag.Value = 100000
+				erigoncli.FrozenBlockLimitFlag.Value = 1500000
+				utils.NoDownloaderFlag.Value = true
+				utils.HTTPEnabledFlag.Value = false
+				utils.TxPoolDisableFlag.Value = true
+				return nil
+			},
 		},
 		{
 			Name:   "uncompress",
@@ -671,7 +681,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		}
 		ac := agg.MakeContext()
 		defer ac.Close()
-		sd := libstate.NewSharedDomains(tx)
+		sd := libstate.NewSharedDomains(tx, logger)
 		defer sd.Close()
 		if _, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), ""); err != nil {
 			return err
@@ -774,13 +784,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 }
 
 func uploaderCommandFlags(flags []cli.Flag) []cli.Flag {
-	erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
-	erigoncli.SyncLoopBlockLimitFlag.Value = 100000
-	erigoncli.SyncLoopPruneLimitFlag.Value = 100000
-	erigoncli.FrozenBlockLimitFlag.Value = 1500000
-	utils.NoDownloaderFlag.Value = true
-	utils.HTTPEnabledFlag.Value = false
-	utils.TxPoolDisableFlag.Value = true
 	return joinFlags(erigoncli.DefaultFlags, flags, []cli.Flag{
 		&erigoncli.SyncLoopBreakAfterFlag,
 		&erigoncli.SyncLoopBlockLimitFlag,

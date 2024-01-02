@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/ledgerwatch/erigon/turbo/backup"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -49,7 +50,7 @@ var cmdResetState = &cobra.Command{
 			return
 		}
 
-		if err = reset2.ResetState(db, ctx, chain, ""); err != nil {
+		if err = reset2.ResetState(db, ctx, chain, "", log.Root()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}

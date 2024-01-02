@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/log/v3"
 
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/stretchr/testify/require"
@@ -157,7 +158,7 @@ func TestCreateGas(t *testing.T) {
 		var stateWriter state.StateWriter
 		var domains *state2.SharedDomains
 		if ethconfig.EnableHistoryV4InTest {
-			domains = state2.NewSharedDomains(tx)
+			domains = state2.NewSharedDomains(tx, log.New())
 			defer domains.Close()
 			stateReader = rpchelper.NewLatestStateReader(domains, ethconfig.EnableHistoryV4InTest)
 			stateWriter = rpchelper.NewLatestStateWriter(domains, 0, ethconfig.EnableHistoryV4InTest)

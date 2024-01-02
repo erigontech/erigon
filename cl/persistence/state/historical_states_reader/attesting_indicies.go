@@ -20,7 +20,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation solid.Attestation
 	index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 	count := committeesPerSlot * r.cfg.SlotsPerEpoch
 
-	committee, err := r.computeCommittee(mix, idxs, attestation.Slot(), count, index)
+	committee, err := r.ComputeCommittee(mix, idxs, attestation.Slot(), count, index)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (r *HistoricalStatesReader) attestingIndicies(attestation solid.Attestation
 }
 
 // computeCommittee uses cache to compute compittee
-func (r *HistoricalStatesReader) computeCommittee(mix libcommon.Hash, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
+func (r *HistoricalStatesReader) ComputeCommittee(mix libcommon.Hash, indicies []uint64, slot uint64, count, index uint64) ([]uint64, error) {
 	cfg := r.cfg
 	lenIndicies := uint64(len(indicies))
 

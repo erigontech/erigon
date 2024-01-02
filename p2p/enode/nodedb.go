@@ -82,8 +82,7 @@ type DB struct {
 
 // OpenDB opens a node database for storing and retrieving infos about known peers in the
 // network. If no path is given an in-memory, temporary database is constructed.
-func OpenDB(ctx context.Context, path string, tmpDir string) (*DB, error) {
-	logger := log.New() //TODO: move higher
+func OpenDB(ctx context.Context, path string, tmpDir string, logger log.Logger) (*DB, error) {
 	if path == "" {
 		return newMemoryDB(logger, tmpDir)
 	}
