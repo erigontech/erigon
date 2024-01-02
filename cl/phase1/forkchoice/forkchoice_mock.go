@@ -59,6 +59,8 @@ type ForkChoiceStorageMock struct {
 	SlotVal                uint64
 	TimeVal                uint64
 
+	ParticipationVal *solid.BitList
+
 	StateAtBlockRootVal       map[common.Hash]*state.CachingBeaconState
 	StateAtSlotVal            map[uint64]*state.CachingBeaconState
 	GetSyncCommitteesVal      map[common.Hash][2]*solid.SyncCommittee
@@ -180,4 +182,16 @@ func (f *ForkChoiceStorageMock) BlockRewards(root common.Hash) (*eth2.BlockRewar
 
 func (f *ForkChoiceStorageMock) TotalActiveBalance(root common.Hash) (uint64, bool) {
 	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.HashListSSZ) bool {
+	return false
+}
+
+func (f *ForkChoiceStorageMock) LowestAvaiableSlot() uint64 {
+	return f.FinalizedSlotVal
+}
+
+func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, bool) {
+	return f.ParticipationVal, f.ParticipationVal != nil
 }

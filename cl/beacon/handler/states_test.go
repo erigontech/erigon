@@ -445,3 +445,60 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 		})
 	}
 }
+
+func TestGetRandao(t *testing.T) {
+
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, _, postState, handler, _, _, fcu := setupTestingHandler(t, clparams.BellatrixVersion)
+
+	postRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+
+	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+
+	cases := []struct {
+		blockID string
+		code    int
+	}{
+		{
+			blockID: "0x" + common.Bytes2Hex(postRoot[:]),
+			code:    http.StatusOK,
+		},
+		{
+			blockID: "justified",
+			code:    http.StatusOK,
+		},
+		{
+			blockID: "0x" + common.Bytes2Hex(make([]byte, 32)),
+			code:    http.StatusNotFound,
+		},
+		{
+			blockID: strconv.FormatInt(int64(postState.Slot()), 10),
+			code:    http.StatusOK,
+		},
+	}
+	expected := `{"data":{"randao":"0xdeec617717272914bfd73e02ca1da113a83cf4cf33cd4939486509e2da4ccf4e"},"finalized":false,"execution_optimistic":false}` + "\n"
+	for _, c := range cases {
+		t.Run(c.blockID, func(t *testing.T) {
+			server := httptest.NewServer(handler.mux)
+			defer server.Close()
+			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/randao")
+			require.NoError(t, err)
+
+			defer resp.Body.Close()
+			require.Equal(t, c.code, resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				return
+			}
+			// read the all of the octect
+			out, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, string(out), expected)
+		})
+	}
+}

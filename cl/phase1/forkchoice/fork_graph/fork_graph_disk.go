@@ -92,7 +92,7 @@ type forkGraphDisk struct {
 	beaconCfg   *clparams.BeaconChainConfig
 	genesisTime uint64
 	// highest block seen
-	highestSeen, anchorSlot uint64
+	highestSeen, lowestAvaiableSlot, anchorSlot uint64
 
 	// reusable buffers
 	sszBuffer       bytes.Buffer
@@ -132,9 +132,10 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 		finalizedCheckpoints:        make(map[libcommon.Hash]solid.Checkpoint),
 		blockRewards:                make(map[libcommon.Hash]*eth2.BlockRewardsCollector),
 		// configuration
-		beaconCfg:   anchorState.BeaconConfig(),
-		genesisTime: anchorState.GenesisTime(),
-		anchorSlot:  anchorState.Slot(),
+		beaconCfg:          anchorState.BeaconConfig(),
+		genesisTime:        anchorState.GenesisTime(),
+		anchorSlot:         anchorState.Slot(),
+		lowestAvaiableSlot: anchorState.Slot(),
 	}
 	f.dumpBeaconStateOnDisk(anchorState, anchorRoot)
 	return f
@@ -402,6 +403,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		}
 		oldRoots = append(oldRoots, hash)
 	}
+	f.lowestAvaiableSlot = pruneSlot + 1
 	for _, root := range oldRoots {
 		delete(f.badBlocks, root)
 		delete(f.blocks, root)
@@ -429,4 +431,8 @@ func (f *forkGraphDisk) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.Sync
 func (f *forkGraphDisk) GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
 	obj, has := f.blockRewards[blockRoot]
 	return obj, has
+}
+
+func (f *forkGraphDisk) LowestAvaiableSlot() uint64 {
+	return f.lowestAvaiableSlot
 }

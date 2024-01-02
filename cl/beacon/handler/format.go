@@ -60,6 +60,14 @@ func (r *beaconResponse) withFinalized(finalized bool) (out *beaconResponse) {
 	return out
 }
 
+func (r *beaconResponse) withOptimistic(optimistic bool) (out *beaconResponse) {
+	out = new(beaconResponse)
+	*out = *r
+	out.ExecutionOptimistic = new(bool)
+	out.ExecutionOptimistic = &optimistic
+	return out
+}
+
 func (r *beaconResponse) withVersion(version clparams.StateVersion) (out *beaconResponse) {
 	out = new(beaconResponse)
 	*out = *r
