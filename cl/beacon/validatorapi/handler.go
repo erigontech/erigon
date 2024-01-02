@@ -36,7 +36,6 @@ func (v *ValidatorApiHandler) Route(r chi.Router) {
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
 			r.Route("/beacon", func(r chi.Router) {
-				r.Get("/genesis", beaconhttp.HandleEndpointFunc(v.GetEthV1BeaconGenesis))
 				r.Route("/states", func(r chi.Router) {
 					r.Route("/{state_id}", func(r chi.Router) {
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(v.GetEthV1BeaconStatesStateIdFork))
@@ -51,7 +50,6 @@ func (v *ValidatorApiHandler) Route(r chi.Router) {
 				})
 				r.Get("/node/syncing", beaconhttp.HandleEndpointFunc(v.GetEthV1NodeSyncing))
 			})
-			r.Get("/config/spec", beaconhttp.HandleEndpointFunc(v.GetEthV1ConfigSpec))
 			r.Get("/events", v.EventSourceGetV1Events)
 			r.Route("/validator", func(r chi.Router) {
 				// implemented by archive api (for now)
