@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"golang.org/x/sync/semaphore"
 	"strings"
 	"sync"
 	"time"
@@ -1665,8 +1667,11 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		panic(err)
 	}
 
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+
 	notifications := &shards.Notifications{}
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, chainConfig, notifications.Events, logger)
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, db, chainConfig, notifications.Events, blockSnapBuildSema, logger)
 
 	var (
 		snapDb     kv.RwDB
