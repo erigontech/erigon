@@ -40,7 +40,7 @@ func (v *ValidatorApiHandler) Route(r chi.Router) {
 				r.Route("/states", func(r chi.Router) {
 					r.Route("/{state_id}", func(r chi.Router) {
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(v.GetEthV1BeaconStatesStateIdFork))
-						r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(v.GetEthV1BeaconStatesStateIdValidatorsValidatorId))
+						// r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(v.GetEthV1BeaconStatesStateIdValidatorsValidatorId))
 					})
 				})
 				r.Post("/blocks", beaconhttp.HandleEndpointFunc(v.PostEthV1BeaconBlocks))
