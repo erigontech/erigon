@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"sort"
@@ -45,6 +46,11 @@ const (
 	extraSeal               = 65   // Fixed number of extra-data suffix bytes reserved for signer seal
 )
 
+var (
+	ErrHeaderValidatorsLengthMismatch = errors.New("header validators length mismatch")
+	ErrHeaderValidatorsBytesMismatch  = errors.New("header validators bytes mismatch")
+)
+
 type BorHeimdallCfg struct {
 	db               kv.RwDB
 	snapDb           kv.RwDB // Database to store and retrieve snapshot checkpoints
@@ -55,6 +61,7 @@ type BorHeimdallCfg struct {
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
 	stateReceiverABI abi.ABI
+	loopBreakCheck   func(int) bool
 	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
@@ -68,6 +75,7 @@ func StageBorHeimdallCfg(
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
+	loopBreakCheck func(int) bool,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) BorHeimdallCfg {
@@ -81,6 +89,7 @@ func StageBorHeimdallCfg(
 		hd:               hd,
 		penalize:         penalize,
 		stateReceiverABI: contract.StateReceiver(),
+		loopBreakCheck:   loopBreakCheck,
 		recents:          recents,
 		signatures:       signatures,
 	}
@@ -217,8 +226,12 @@ func BorHeimdallForward(
 		nextSpanId = lastSpanId + 1
 	}
 	var endSpanID uint64
-	if bor.SpanIDAt(headNumber) > 0 {
-		endSpanID = bor.SpanIDAt(headNumber+1) + 1
+	if span.IDAt(headNumber) > 0 {
+		endSpanID = span.IDAt(headNumber + 1)
+	}
+
+	if span.BlockInLastSprintOfSpan(headNumber, cfg.chainConfig.Bor) {
+		endSpanID++
 	}
 
 	lastBlockNum := s.BlockNumber
@@ -266,7 +279,7 @@ func BorHeimdallForward(
 				return err
 			}
 			if header == nil {
-				return fmt.Errorf("["+s.LogPrefix()+"] header not found: %d", blockNum)
+				return fmt.Errorf("header not found: %d", blockNum)
 			}
 
 			// Whitelist service is called to check if the bor chain is
@@ -280,7 +293,15 @@ func BorHeimdallForward(
 					if err := s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()), tx); err != nil {
 						return err
 					}
-					return fmt.Errorf("["+s.LogPrefix()+"] verification failed for header %d: %x", blockNum, header.Hash())
+					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
+				}
+			}
+
+			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
+			spanID := span.IDAt(blockNum)
+			if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
+					return err
 				}
 			}
 		}
@@ -299,31 +320,28 @@ func BorHeimdallForward(
 		var snap *bor.Snapshot
 
 		if header != nil {
-			snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
+			if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
+				snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
 
-			if snap == nil {
-				snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
-					chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
+				if snap == nil {
+					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
+						cfg.heimdallClient, chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
-				if err != nil {
-					return fmt.Errorf("can't initialise validator sets: %w", err)
-				}
-			}
-
-			if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
-				return fmt.Errorf("can't persist validator sets: %w", err)
-			}
-
-			if !mine {
-				sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
-				spanID := bor.SpanIDAt(blockNum)
-				if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
-					if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
-						return err
+					if err != nil {
+						return fmt.Errorf("can't initialise validator sets: %w", err)
 					}
+				}
+
+				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
+					return fmt.Errorf("can't persist validator sets: %w", err)
 				}
 			}
 		}
+
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
+			break
+		}
+
 	}
 
 	if err = s.Update(tx, headNumber); err != nil {
@@ -349,7 +367,7 @@ func checkHeaderExtraData(
 	header *types.Header,
 	config *chain.BorConfig,
 ) error {
-	spanID := bor.SpanIDAt(blockNum + 1)
+	spanID := span.IDAt(blockNum + 1)
 	spanBytes := chain.BorSpan(spanID)
 	var sp span.HeimdallSpan
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
@@ -368,12 +386,12 @@ func checkHeaderExtraData(
 	}
 
 	if len(producerSet) != len(headerVals) {
-		return bor.ErrInvalidSpanValidators
+		return ErrHeaderValidatorsLengthMismatch
 	}
 
 	for i, val := range producerSet {
 		if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
-			return bor.ErrInvalidSpanValidators
+			return ErrHeaderValidatorsBytesMismatch
 		}
 	}
 	return nil
@@ -653,9 +671,10 @@ func persistValidatorSets(
 
 func initValidatorSets(
 	ctx context.Context,
-	tx kv.Tx,
+	tx kv.RwTx,
 	blockReader services.FullBlockReader,
 	config *chain.BorConfig,
+	heimdallClient heimdall.IHeimdallClient,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
@@ -681,8 +700,17 @@ func initValidatorSets(
 
 		// get validators and current span
 		zeroSpanBytes, err := blockReader.Span(ctx, tx, 0)
+
 		if err != nil {
-			return nil, err
+			if _, err := fetchAndWriteSpans(ctx, 0, tx, heimdallClient, logPrefix, logger); err != nil {
+				return nil, err
+			}
+
+			zeroSpanBytes, err = blockReader.Span(ctx, tx, 0)
+
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if zeroSpanBytes == nil {
@@ -799,7 +827,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 		return err
 	}
 	defer spanCursor.Close()
-	lastSpanToKeep := bor.SpanIDAt(u.UnwindPoint)
+	lastSpanToKeep := span.IDAt(u.UnwindPoint)
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
 	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {

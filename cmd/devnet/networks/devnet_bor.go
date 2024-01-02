@@ -1,4 +1,4 @@
-package tests
+package networks
 
 import (
 	"time"
@@ -47,7 +47,7 @@ func NewBorDevnetWithoutHeimdall(
 				},
 				AccountSlots: 200,
 			},
-			&args.NonBlockProducer{
+			&args.BlockConsumer{
 				NodeArgs: args.NodeArgs{
 					ConsoleVerbosity: "0",
 					DirVerbosity:     "5",
@@ -67,6 +67,7 @@ func NewBorDevnetWithHeimdall(
 	heimdall *polygon.Heimdall,
 	heimdallGrpcAddr string,
 	checkpointOwner *accounts.Account,
+	producerCount int,
 	withMilestones bool,
 	logger log.Logger,
 ) devnet.Devnet {
@@ -75,6 +76,23 @@ func NewBorDevnetWithHeimdall(
 	var services []devnet.Service
 	if heimdall != nil {
 		services = append(services, heimdall)
+	}
+
+	var nodes []devnet.Node
+
+	if producerCount == 0 {
+		producerCount++
+	}
+
+	for i := 0; i < producerCount; i++ {
+		nodes = append(nodes, &args.BlockProducer{
+			NodeArgs: args.NodeArgs{
+				ConsoleVerbosity: "0",
+				DirVerbosity:     "5",
+				HeimdallGrpcAddr: heimdallGrpcAddr,
+			},
+			AccountSlots: 20000,
+		})
 	}
 
 	borNetwork := devnet.Network{
@@ -91,39 +109,14 @@ func NewBorDevnetWithHeimdall(
 		Alloc: types.GenesisAlloc{
 			faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
 		},
-		Nodes: []devnet.Node{
-			&args.BlockProducer{
+		Nodes: append(nodes,
+			&args.BlockConsumer{
 				NodeArgs: args.NodeArgs{
 					ConsoleVerbosity: "0",
 					DirVerbosity:     "5",
 					HeimdallGrpcAddr: heimdallGrpcAddr,
 				},
-				AccountSlots: 200,
-			},
-			&args.BlockProducer{
-				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
-					HeimdallGrpcAddr: heimdallGrpcAddr,
-				},
-				AccountSlots: 200,
-			},
-			/*&args.BlockProducer{
-				Node: args.Node{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
-					HeimdallGrpcAddr:     heimdallGrpcAddr,
-				},
-				AccountSlots: 200,
-			},*/
-			&args.NonBlockProducer{
-				NodeArgs: args.NodeArgs{
-					ConsoleVerbosity: "0",
-					DirVerbosity:     "5",
-					HeimdallGrpcAddr: heimdallGrpcAddr,
-				},
-			},
-		},
+			}),
 	}
 
 	devNetwork := devnet.Network{
@@ -150,7 +143,7 @@ func NewBorDevnetWithHeimdall(
 				DevPeriod:    5,
 				AccountSlots: 200,
 			},
-			&args.NonBlockProducer{
+			&args.BlockConsumer{
 				NodeArgs: args.NodeArgs{
 					ConsoleVerbosity: "0",
 					DirVerbosity:     "3",
@@ -169,6 +162,7 @@ func NewBorDevnetWithRemoteHeimdall(
 	dataDir string,
 	baseRpcHost string,
 	baseRpcPort int,
+	producerCount int,
 	logger log.Logger,
 ) devnet.Devnet {
 	heimdallGrpcAddr := ""
@@ -181,6 +175,7 @@ func NewBorDevnetWithRemoteHeimdall(
 		nil,
 		heimdallGrpcAddr,
 		checkpointOwner,
+		producerCount,
 		withMilestones,
 		logger)
 }
@@ -191,6 +186,7 @@ func NewBorDevnetWithLocalHeimdall(
 	baseRpcPort int,
 	heimdallGrpcAddr string,
 	sprintSize uint64,
+	producerCount int,
 	logger log.Logger,
 ) devnet.Devnet {
 	config := *params.BorDevnetChainConfig
@@ -216,6 +212,7 @@ func NewBorDevnetWithLocalHeimdall(
 		heimdall,
 		heimdallGrpcAddr,
 		checkpointOwner,
+		producerCount,
 		// milestones are not supported yet on the local heimdall
 		false,
 		logger)

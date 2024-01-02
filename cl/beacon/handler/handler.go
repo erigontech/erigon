@@ -41,6 +41,7 @@ func (a *ApiHandler) init() {
 	// otterscn specific ones are commented as such
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
+
 			r.Get("/events", http.NotFound)
 			r.Route("/config", func(r chi.Router) {
 				r.Get("/spec", beaconhttp.HandleEndpointFunc(a.getSpec))
@@ -48,6 +49,11 @@ func (a *ApiHandler) init() {
 				r.Get("/fork_schedule", beaconhttp.HandleEndpointFunc(a.getForkSchedule))
 			})
 			r.Route("/beacon", func(r chi.Router) {
+				r.Route("/rewards", func(r chi.Router) {
+					r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.getSyncCommitteesRewards))
+					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlockRewards))
+					r.Post("/attestations/{epoch}", beaconhttp.HandleEndpointFunc(a.getAttestationsRewards))
+				})
 				r.Route("/headers", func(r chi.Router) {
 					r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
 					r.Get("/{block_id}", beaconhttp.HandleEndpointFunc(a.getHeader))
@@ -72,8 +78,8 @@ func (a *ApiHandler) init() {
 				r.Get("/node/syncing", http.NotFound)
 				r.Route("/states", func(r chi.Router) {
 					r.Get("/head/validators/{index}", http.NotFound) // otterscan
-					r.Get("/head/committees", http.NotFound)         // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
+						r.Get("/committees", beaconhttp.HandleEndpointFunc(a.getCommittees))
 						r.Get("/sync_committees", beaconhttp.HandleEndpointFunc(a.getSyncCommittees)) // otterscan
 						r.Get("/finality_checkpoints", beaconhttp.HandleEndpointFunc(a.getFinalityCheckpoints))
 						r.Get("/validators", http.NotFound)

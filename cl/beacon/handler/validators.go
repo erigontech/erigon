@@ -168,7 +168,7 @@ func parseStatuses(s []string) ([]validatorStatus, error) {
 	return statuses, nil
 }
 
-func checkValidValidatorId(s string) (bool, *beaconhttp.EndpointError) {
+func checkValidValidatorId(s string) (bool, error) {
 	// If it starts with 0x, then it must a 48bytes 0x prefixed string
 	if len(s) == 98 && s[:2] == "0x" {
 		// check if it is a valid hex string
@@ -248,7 +248,11 @@ func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) 
 		return nil, err
 	}
 	if state == nil {
-		validatorSet, balances, err := a.stateReader.ReadValidatorsData(tx, *slot)
+		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}
@@ -274,14 +278,21 @@ func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
 		if !has {
 			return math.MaxUint64, nil
 		}
-		return state_accessors.ReadValidatorIndexByPublicKey(tx, b48)
-	} else {
-		idx, err := strconv.ParseUint(id, 10, 64)
+		idx, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, b48)
 		if err != nil {
-			return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+			return 0, err
+		}
+		if !ok {
+			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, "validator not found")
 		}
 		return idx, nil
 	}
+	idx, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+	}
+	return idx, nil
+
 }
 
 func parseQueryValidatorIndicies(tx kv.Tx, ids []string) ([]uint64, error) {
@@ -320,7 +331,6 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	fmt.Println(validatorId)
 
 	validatorIndex, err := parseQueryValidatorIndex(tx, validatorId)
 	if err != nil {
@@ -352,7 +362,11 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 		return nil, err
 	}
 	if state == nil {
-		validatorSet, balances, err := a.stateReader.ReadValidatorsData(tx, *slot)
+		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
+		if err != nil {
+			return nil, err
+		}
+		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}

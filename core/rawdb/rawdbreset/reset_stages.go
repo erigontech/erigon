@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
+func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, logger log.Logger) error {
 	// don't reset senders here
 	if err := Reset(ctx, db, stages.HashState); err != nil {
 		return err
@@ -44,7 +44,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) er
 		return err
 	}
 
-	if err := ResetExec(ctx, db, chain, tmpDir); err != nil {
+	if err := ResetExec(ctx, db, chain, tmpDir, logger); err != nil {
 		return err
 	}
 	return nil
@@ -130,7 +130,7 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 	return
 }
 
-func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (err error) {
+func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, logger log.Logger) (err error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
 
 	cleanupList := make([]string, 0)
@@ -152,7 +152,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 		if !historyV3 {
 			_ = stages.SaveStageProgress(tx, stages.Execution, 0)
 			genesis := core.GenesisBlockByChainName(chain)
-			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir); err != nil {
+			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir, logger); err != nil {
 				return err
 			}
 		} else {
@@ -160,7 +160,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 			agg := v3db.Agg()
 			ct := agg.MakeContext()
 			defer ct.Close()
-			doms := state.NewSharedDomains(tx)
+			doms := state.NewSharedDomains(tx, logger)
 			defer doms.Close()
 			blockNum := doms.BlockNum()
 			if blockNum > 0 {

@@ -95,7 +95,6 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	// Here we need to start mdbx transaction and lock the thread
-	log.Info("[Antiquary]: Stopping Caplin to process historical indicies")
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
@@ -111,6 +110,7 @@ func (a *Antiquary) Loop() error {
 		return err
 	}
 	defer logInterval.Stop()
+	log.Info("[Antiquary]: Stopping Caplin to process historical indicies", "from", from, "to", a.sn.BlocksAvailable())
 
 	// Now write the snapshots as indicies
 	for i := from; i < a.sn.BlocksAvailable(); i++ {
@@ -209,7 +209,7 @@ func (a *Antiquary) Loop() error {
 			if to-from < snaptype.Erigon2MergeLimit {
 				continue
 			}
-			if err := a.antiquate(from, to); err != nil {
+			if err := a.antiquate(a.sn.Version(), from, to); err != nil {
 				return err
 			}
 		case <-a.ctx.Done():
@@ -218,12 +218,12 @@ func (a *Antiquary) Loop() error {
 }
 
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
-func (a *Antiquary) antiquate(from, to uint64) error {
+func (a *Antiquary) antiquate(version uint8, from, to uint64) error {
 	if a.downloader == nil {
 		return nil // Just skip if we don't have a downloader
 	}
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
-	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2MergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
+	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, version, from, to, snaptype.Erigon2MergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 

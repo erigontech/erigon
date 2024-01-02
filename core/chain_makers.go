@@ -326,7 +326,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if histV3 {
-		domains = state2.NewSharedDomains(tx)
+		domains = state2.NewSharedDomains(tx, logger)
 		defer domains.Close()
 		stateReader = state.NewReaderV4(domains)
 		stateWriter = state.NewWriterV4(domains)
