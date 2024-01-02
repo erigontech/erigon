@@ -93,6 +93,7 @@ func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdFork(w http.ResponseWri
 		},
 	}, nil
 }
+
 func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdValidatorsValidatorId(w http.ResponseWriter, r *http.Request) (any, error) {
 	stateId := chi.URLParam(r, "state_id")
 	// grab the correct state for the given state id
