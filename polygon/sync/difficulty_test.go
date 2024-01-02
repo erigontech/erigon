@@ -1,0 +1,19 @@
+package sync
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
+	heimdallspan "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/core/types"
+)
+
+func TestHeaderDifficultyNoSignature(t *testing.T) {
+	borConfig := chain.BorConfig{}
+	span := heimdallspan.HeimdallSpan{}
+	calc := NewDifficultyCalculator(&borConfig, &span)
+	_, err := calc.HeaderDifficulty(new(types.Header))
+	require.ErrorContains(t, err, "signature suffix missing")
+}

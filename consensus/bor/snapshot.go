@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Snapshot is the state of the authorization voting at a given point in time.
@@ -244,18 +245,9 @@ func (s *Snapshot) Difficulty(signer common.Address) uint64 {
 		return 1
 	}
 
-	validators := s.ValidatorSet.Validators
-	proposer := s.ValidatorSet.GetProposer().Address
-	totalValidators := len(validators)
-
-	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
-	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
-
-	// temp index
-	tempIndex := signerIndex
-	if tempIndex < proposerIndex {
-		tempIndex = tempIndex + totalValidators
+	if d, err := s.ValidatorSet.Difficulty(signer); err == nil {
+		return d
+	} else {
+		return 0
 	}
-
-	return uint64(totalValidators - (tempIndex - proposerIndex))
 }
