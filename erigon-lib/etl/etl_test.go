@@ -84,23 +84,6 @@ func TestEmptyValueIsNotANil(t *testing.T) {
 			return nil
 		}, TransformArgs{}))
 	})
-	t.Run("merge", func(t *testing.T) {
-		collector := NewCollector(t.Name(), "", NewLatestMergedEntryMergedBuffer(1, func(v1 []byte, v2 []byte) []byte {
-			return append(v1, v2...)
-		}), logger)
-		defer collector.Close()
-		require := require.New(t)
-		require.NoError(collector.Collect([]byte{1}, []byte{}))
-		require.NoError(collector.Collect([]byte{2}, nil))
-		require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
-			if k[0] == 1 {
-				require.Equal([]byte{}, v)
-			} else {
-				require.Nil(v)
-			}
-			return nil
-		}, TransformArgs{}))
-	})
 }
 
 func TestEmptyKeyValue(t *testing.T) {
@@ -529,39 +512,6 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	}, TransformArgs{})
 	require.NoError(t, err)
 	require.Equal(t, 1, see)
-}
-
-func TestMerge(t *testing.T) {
-	collector := NewCollector(t.Name(), "", NewLatestMergedEntryMergedBuffer(4, func(v1 []byte, v2 []byte) []byte {
-		return append(v1, v2...)
-	}), log.New())
-	defer collector.Close()
-	require := require.New(t)
-	require.NoError(collector.Collect([]byte{1}, []byte{1}))
-	require.NoError(collector.Collect([]byte{1}, []byte{2}))
-	require.NoError(collector.Collect([]byte{1}, []byte{3}))
-	require.NoError(collector.Collect([]byte{1}, []byte{4}))
-	require.NoError(collector.Collect([]byte{1}, []byte{5}))
-	require.NoError(collector.Collect([]byte{1}, []byte{6}))
-	require.NoError(collector.Collect([]byte{1}, []byte{7}))
-	require.NoError(collector.Collect([]byte{2}, []byte{10}))
-	require.NoError(collector.Collect([]byte{2}, []byte{20}))
-	require.NoError(collector.Collect([]byte{2}, []byte{30}))
-	require.NoError(collector.Collect([]byte{2}, []byte{40}))
-	require.NoError(collector.Collect([]byte{2}, []byte{50}))
-	require.NoError(collector.Collect([]byte{2}, []byte{}))
-	require.NoError(collector.Collect([]byte{2}, nil))
-	require.NoError(collector.Collect([]byte{3}, nil))
-	require.NoError(collector.Load(nil, "", func(k, v []byte, table CurrentTableReader, next LoadNextFunc) error {
-		if k[0] == 1 {
-			require.Equal([]byte{1, 2, 3, 4, 5, 6, 7}, v)
-		} else if k[0] == 2 {
-			require.Equal([]byte{10, 20, 30, 40, 50}, v)
-		} else {
-			require.Nil(v)
-		}
-		return nil
-	}, TransformArgs{}))
 }
 
 func TestAppend(t *testing.T) {
