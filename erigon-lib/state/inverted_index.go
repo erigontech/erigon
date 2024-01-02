@@ -971,8 +971,9 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		pruneCount uint64
 	)
 	//defer func() {
-	//	ii.logger.Info("[snapshots] prune index",
+	//	ii.logger.Error("[snapshots] prune index",
 	//		"name", ii.filenameBase,
+	//		"forced", forced,
 	//		"pruned tx", fmt.Sprintf("%.2f-%.2f", float64(minTxnum)/float64(ic.ii.aggregationStep), float64(maxTxnum)/float64(ic.ii.aggregationStep)),
 	//		"pruned values", pruneCount,
 	//		"tx until limit", limit)

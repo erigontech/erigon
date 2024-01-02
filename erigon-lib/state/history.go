@@ -448,7 +448,7 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte) (err e
 	}
 
 	//defer func() {
-	//	fmt.Printf("addPrevValue: %x tx %x %x lv=%t buffered=%t\n", key1, ic.txNumBytes, original, h.largeValues, h.buffered)
+	//	fmt.Printf("addPrevValue [%p;tx=%d] '%x' -> '%x'\n", w, w.ii.txNum, key1, original)
 	//}()
 
 	if w.largeValues {
@@ -1054,18 +1054,11 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 
 	var (
 		seek     = make([]byte, 8, 256)
-		valsC    kv.RwCursor
 		valsCDup kv.RwCursorDupSort
 		err      error
 	)
 
-	if hc.h.historyLargeValues {
-		valsC, err = rwTx.RwCursor(hc.h.historyValsTable)
-		if err != nil {
-			return err
-		}
-		defer valsC.Close()
-	} else {
+	if !hc.h.historyLargeValues {
 		valsCDup, err = rwTx.RwCursorDupSort(hc.h.historyValsTable)
 		if err != nil {
 			return err
@@ -1073,15 +1066,15 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		defer valsCDup.Close()
 	}
 
-	prunevalus := func(k, txnm []byte) error {
+	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
 		if txNum >= txTo { //[txFrom; txTo)
 			return nil
 		}
 
 		if hc.h.historyLargeValues {
-			seek = append(append(seek[:0], txnm...), k...)
-			if err := valsC.Delete(seek); err != nil {
+			seek = append(append(seek[:0], k...), txnm...)
+			if err := rwTx.Delete(hc.h.historyValsTable, seek); err != nil {
 				return err
 			}
 		} else {
@@ -1100,7 +1093,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		mxPruneSizeHistory.Inc()
 		return nil
 	}
-	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, prunevalus, forced); err != nil {
+	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, pruneValue, forced); err != nil {
 		return err
 	}
 	return nil

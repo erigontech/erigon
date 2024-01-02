@@ -1843,6 +1843,7 @@ func TestDomain_Unwind(t *testing.T) {
 		dc.Close()
 		tx.Commit()
 
+		fmt.Printf("=====write expected data===== \n\n")
 		tmpDb, expected := testDbAndDomain(t, log.New())
 		defer expected.Close()
 		defer tmpDb.Close()
@@ -1924,12 +1925,7 @@ func TestDomain_Unwind(t *testing.T) {
 		t.Run("HistoryRange"+suf, func(t *testing.T) {
 			t.Helper()
 
-			tmpDb2, expected2 := testDbAndDomain(t, log.New())
-			defer expected2.Close()
-			defer tmpDb2.Close()
-			writeKeys(t, expected2, tmpDb2, unwindTo)
-
-			etx, err := tmpDb2.BeginRo(ctx)
+			etx, err := tmpDb.BeginRo(ctx)
 			defer etx.Rollback()
 			require.NoError(t, err)
 
@@ -1937,7 +1933,7 @@ func TestDomain_Unwind(t *testing.T) {
 			defer utx.Rollback()
 			require.NoError(t, err)
 
-			ectx := expected2.MakeContext()
+			ectx := expected.MakeContext()
 			defer ectx.Close()
 			uc := d.MakeContext()
 			defer uc.Close()
@@ -2002,10 +1998,12 @@ func TestDomain_Unwind(t *testing.T) {
 func compareIterators(t *testing.T, et, ut iter.KV) {
 	t.Helper()
 
+	/* uncomment when mismatches amount of keys in expectedIter and unwindedIter*/
 	//i := 0
 	//for {
 	//	ek, ev, err1 := et.Next()
 	//	fmt.Printf("ei=%d %s %s %v\n", i, ek, ev, err1)
+	//	i++
 	//	if !et.HasNext() {
 	//		break
 	//	}
@@ -2027,7 +2025,7 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 		require.EqualValues(t, ek, uk)
 		require.EqualValues(t, ev, uv)
 		if !et.HasNext() {
-			require.False(t, ut.HasNext(), "unwindedIter has extra keys\n")
+			require.False(t, ut.HasNext(), "unwindedIter has more keys than expectedIter got\n")
 			break
 		}
 	}
