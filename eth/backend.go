@@ -675,7 +675,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 			logger)
 		// We start the mining step
-		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultPOSCh
@@ -796,7 +796,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
 		return nil, err
 	}
 
@@ -1025,7 +1025,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
 
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
@@ -1153,7 +1153,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				works = true
 				hasWork = false
 				mineEvery.Reset(cfg.Recommit)
-				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
+				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir, logger) }()
 			}
 		}
 	}()

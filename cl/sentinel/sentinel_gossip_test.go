@@ -85,7 +85,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 
 	ans := <-ch
 	require.Equal(t, ans.Data, msg)
-	previousTopic = string(ans.Topic)
+	previousTopic = ans.TopicName
 
 	bcfg.AltairForkEpoch = clparams.MainnetBeaconConfig.AltairForkEpoch
 	bcfg.InitializeForkSchedule()
@@ -94,12 +94,12 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	msg = []byte("hello1")
 	go func() {
 		// delay to make sure that the connection is established
-		sub1 = sentinel1.subManager.GetMatchingSubscription(string(BeaconBlockSsz.Name))
+		sub1 = sentinel1.subManager.GetMatchingSubscription(BeaconBlockSsz.Name)
 		sub1.Publish(msg)
 	}()
 
 	ans = <-ch
 	require.Equal(t, ans.Data, msg)
-	require.NotEqual(t, previousTopic, ans.Topic)
+	require.NotEqual(t, previousTopic, ans.TopicName)
 
 }

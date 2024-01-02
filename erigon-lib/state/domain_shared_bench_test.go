@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -24,7 +25,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	defer domains.Close()
 	maxTx := stepSize * 258
 

@@ -334,9 +334,12 @@ func (a *ApiHandler) getSyncCommittees(r *http.Request) (*beaconResponse, error)
 	}
 	for i, publicKey := range committee {
 		// get the validator index of the committee
-		validatorIndex, err := state_accessors.ReadValidatorIndexByPublicKey(tx, publicKey)
+		validatorIndex, ok, err := state_accessors.ReadValidatorIndexByPublicKey(tx, publicKey)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("could not read validator index: %x", publicKey)
 		}
 		idx := strconv.FormatInt(int64(validatorIndex), 10)
 		response.Validators[i] = idx

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
@@ -68,7 +69,9 @@ func HandleEndpointFunc[T any](h EndpointHandlerFunc[T]) http.HandlerFunc {
 
 func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
 		ans, err := h.Handle(r)
+		log.Debug("beacon api request", "endpoint", r.URL.Path, "duration", time.Since(start))
 		if err != nil {
 			log.Error("beacon api request error", "err", err)
 			var endpointError *EndpointError

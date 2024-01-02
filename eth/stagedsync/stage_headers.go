@@ -326,7 +326,7 @@ Loop:
 	if headerInserter.Unwind() {
 		if cfg.historyV3 {
 			unwindTo := headerInserter.UnwindPoint()
-			doms := state.NewSharedDomains(tx) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
+			doms := state.NewSharedDomains(tx, logger) //TODO: if remove this line TestBlockchainHeaderchainReorgConsistency failing
 			defer doms.Close()
 
 			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindTo, tx)

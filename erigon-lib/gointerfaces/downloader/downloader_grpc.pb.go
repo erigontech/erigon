@@ -31,7 +31,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type DownloaderClient interface {
-	// Erigon "download once" - means restart/upgrade will not download files (and will be fast)
+	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 	// After "download once" - Erigon will produce and seed new files
 	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 	ProhibitNewDownloads(ctx context.Context, in *ProhibitNewDownloadsRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
@@ -101,7 +101,7 @@ func (c *downloaderClient) Stats(ctx context.Context, in *StatsRequest, opts ...
 // All implementations must embed UnimplementedDownloaderServer
 // for forward compatibility
 type DownloaderServer interface {
-	// Erigon "download once" - means restart/upgrade will not download files (and will be fast)
+	// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 	// After "download once" - Erigon will produce and seed new files
 	// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 	ProhibitNewDownloads(context.Context, *ProhibitNewDownloadsRequest) (*emptypb.Empty, error)

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"golang.org/x/exp/slices"
@@ -82,6 +83,8 @@ type forkGraphDisk struct {
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints map[libcommon.Hash]solid.Checkpoint
 	finalizedCheckpoints        map[libcommon.Hash]solid.Checkpoint
+	// keep track of rewards too
+	blockRewards map[libcommon.Hash]*eth2.BlockRewardsCollector
 	// for each block root we keep track of the sync committees for head retrieval.
 	syncCommittees map[libcommon.Hash]syncCommittees
 
@@ -127,6 +130,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 		// checkpoints trackers
 		currentJustifiedCheckpoints: make(map[libcommon.Hash]solid.Checkpoint),
 		finalizedCheckpoints:        make(map[libcommon.Hash]solid.Checkpoint),
+		blockRewards:                make(map[libcommon.Hash]*eth2.BlockRewardsCollector),
 		// configuration
 		beaconCfg:   anchorState.BeaconConfig(),
 		genesisTime: anchorState.GenesisTime(),
@@ -173,8 +177,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, MissingSegment, nil
 	}
 
+	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 	// Execute the state
-	if invalidBlockErr := transition.TransitionState(newState, signedBlock, fullValidation); invalidBlockErr != nil {
+	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", invalidBlockErr)
 		f.badBlocks[blockRoot] = struct{}{}
@@ -188,6 +193,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 		return nil, InvalidBlock, invalidBlockErr
 	}
+
+	f.blockRewards[blockRoot] = blockRewardsCollector
 	f.syncCommittees[blockRoot] = syncCommittees{
 		currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
 		nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
@@ -316,7 +323,7 @@ func (f *forkGraphDisk) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.Cac
 
 	// Traverse the blocks from top to bottom.
 	for _, block := range blocksInTheWay {
-		if err := transition.TransitionState(copyReferencedState, block, false); err != nil {
+		if err := transition.TransitionState(copyReferencedState, block, nil, false); err != nil {
 			return nil, err
 		}
 	}
@@ -365,7 +372,7 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 
 	// Traverse the blocks from top to bottom.
 	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
-		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], false); err != nil {
+		if err := transition.TransitionState(copyReferencedState, blocksInTheWay[i], nil, false); err != nil {
 			return nil, err
 		}
 	}
@@ -403,6 +410,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		delete(f.headers, root)
 		delete(f.saveStates, root)
 		delete(f.syncCommittees, root)
+		delete(f.blockRewards, root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		f.fs.Remove(getBeaconStateCacheFilename(root))
 	}
@@ -416,4 +424,9 @@ func (f *forkGraphDisk) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.Sync
 		return nil, nil, false
 	}
 	return obj.currentSyncCommittee, obj.nextSyncCommittee, true
+}
+
+func (f *forkGraphDisk) GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
+	obj, has := f.blockRewards[blockRoot]
+	return obj, has
 }

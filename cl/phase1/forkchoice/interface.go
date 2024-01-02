@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 )
 
 type ForkChoiceStorage interface {
@@ -31,6 +32,8 @@ type ForkChoiceStorageReader interface {
 	GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	Slot() uint64
 	Time() uint64
+	BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
+	TotalActiveBalance(root libcommon.Hash) (uint64, bool)
 
 	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)

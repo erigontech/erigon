@@ -334,7 +334,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	return nil
 }
 
-func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir string) (err error) {
+func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -357,7 +357,7 @@ func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir
 	//	defer sd.Close()
 	//	miningBatch = sd
 	//} else {
-	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir)
+	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
 	defer mb.Rollback()
 	miningBatch = mb
 	//}

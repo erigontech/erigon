@@ -68,7 +68,7 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
 	defer domains.Close()
 
 	b.ReportAllocs()

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 )
 
 const (
@@ -12,10 +12,9 @@ const (
 )
 
 type gossipObject struct {
-	data      []byte              // gossip data
-	t         sentinel.GossipType // determine which gossip message we are notifying of
-	pid       string              // pid is the peer id of the sender
-	blobIndex *uint32             // index of the blob
+	data []byte // gossip data
+	t    string // determine which gossip message we are notifying of
+	pid  string // pid is the peer id of the sender
 }
 
 type gossipNotifier struct {
@@ -30,7 +29,7 @@ func newGossipNotifier() *gossipNotifier {
 	}
 }
 
-func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte, pid string) {
+func (g *gossipNotifier) notify(t string, data []byte, pid string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
@@ -43,18 +42,15 @@ func (g *gossipNotifier) notify(t sentinel.GossipType, data []byte, pid string) 
 	}
 }
 
-func (g *gossipNotifier) notifyBlob(t sentinel.GossipType, data []byte, pid string, blobIndex int) {
+func (g *gossipNotifier) notifyBlob(data []byte, pid string, blobIndex int) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	index := new(uint32)
-	*index = uint32(blobIndex)
 	for _, ch := range g.notifiers {
 		ch <- gossipObject{
-			data:      data,
-			t:         t,
-			pid:       pid,
-			blobIndex: index,
+			data: data,
+			t:    gossip.TopicNameBlobSidecar(blobIndex),
+			pid:  pid,
 		}
 	}
 }

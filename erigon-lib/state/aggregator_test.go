@@ -38,7 +38,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	}()
 	ac := agg.MakeContext()
 	defer ac.Close()
-	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	defer domains.Close()
 
 	txs := uint64(100000)
@@ -173,7 +173,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
@@ -244,7 +244,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	startTx := anotherAgg.EndTxNumMinimax()
 	ac2 := anotherAgg.MakeContext()
 	defer ac2.Close()
-	dom2 := NewSharedDomains(WrapTxWithCtx(rwTx, ac2))
+	dom2 := NewSharedDomains(WrapTxWithCtx(rwTx, ac2), log.New())
 	defer dom2.Close()
 
 	_, err = dom2.SeekCommitment(ctx, rwTx)
@@ -288,7 +288,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	}()
 	ac := agg.MakeContext()
 	defer ac.Close()
-	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
 	defer domains.Close()
 
 	txs := aggStep * 5
@@ -355,7 +355,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	ac = newAgg.MakeContext()
 	defer ac.Close()
-	newDoms := NewSharedDomains(WrapTxWithCtx(newTx, ac))
+	newDoms := NewSharedDomains(WrapTxWithCtx(newTx, ac), log.New())
 	defer newDoms.Close()
 
 	_, err = newDoms.SeekCommitment(ctx, newTx)
@@ -408,7 +408,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 
 	ac := agg.MakeContext()
 	defer ac.Close()
-	domains := NewSharedDomains(WrapTxWithCtx(tx, ac))
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
 	defer domains.Close()
 
 	var latestCommitTxNum uint64
@@ -421,7 +421,7 @@ func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
 		tx, err = db.BeginRw(context.Background())
 		require.NoError(t, err)
 		ac = agg.MakeContext()
-		domains = NewSharedDomains(WrapTxWithCtx(tx, ac))
+		domains = NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
 		atomic.StoreUint64(&latestCommitTxNum, txn)
 		return nil
 	}
@@ -677,7 +677,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	defer domains.Close()
 
 	keys, vals := generateInputData(t, 20, 16, 10)
@@ -714,7 +714,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	ac = agg.MakeContext()
 	defer ac.Close()
-	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	defer domains.Close()
 	err = domains.Unwind(context.Background(), rwTx, pruneFrom)
 	require.NoError(t, err)
@@ -747,7 +747,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 
 	ac = agg.MakeContext()
 	defer ac.Close()
-	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac))
+	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	defer domains.Close()
 
 	err = domains.Unwind(context.Background(), rwTx, pruneFrom)

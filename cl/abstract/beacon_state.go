@@ -22,7 +22,7 @@ type BeaconStateUpgradable interface {
 }
 
 type BeaconStateExtension interface {
-	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) error
+	SlashValidator(slashedInd uint64, whistleblowerInd *uint64) (uint64, error)
 	InitiateValidatorExit(index uint64) error
 	GetActiveValidatorsIndices(epoch uint64) (indicies []uint64)
 	GetTotalActiveBalance() uint64
