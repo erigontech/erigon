@@ -168,7 +168,7 @@ func NewSnapCfg(enabled, keepBlocks, produce bool) BlocksFreezing {
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
-	Sync Sync
+	Sync
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -252,8 +252,6 @@ type Config struct {
 	SentinelPort                uint64
 
 	OverrideCancunTime *big.Int `toml:",omitempty"`
-
-	ForcePartialCommit bool
 
 	// Embedded Silkworm support
 	SilkwormExecution bool

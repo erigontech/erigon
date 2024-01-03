@@ -102,7 +102,7 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash libcom
 	rawdb.WriteForkchoiceHead(tx, blockHash)
 }
 
-const BIG_JUMP = 2_000
+var BIG_JUMP uint64 = 2_000
 
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash libcommon.Hash, outcomeCh chan forkchoiceOutcome) {
 	if !e.semaphore.TryAcquire(1) {

@@ -43,7 +43,8 @@ import (
 )
 
 // StageLoop runs the continuous loop of staged sync
-func StageLoop(ctx context.Context,
+func StageLoop(
+	ctx context.Context,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
@@ -52,7 +53,6 @@ func StageLoop(ctx context.Context,
 	logger log.Logger,
 	blockReader services.FullBlockReader,
 	hook *Hook,
-	forcePartialCommit bool,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -68,7 +68,7 @@ func StageLoop(ctx context.Context,
 		}
 
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, nil, sync, initialCycle, logger, blockReader, hook, forcePartialCommit)
+		err := StageLoopIteration(ctx, db, nil, sync, initialCycle, logger, blockReader, hook)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -99,7 +99,7 @@ func StageLoop(ctx context.Context,
 	}
 }
 
-func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook, forcePartialCommit bool) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -121,9 +121,6 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, tx kv.RwTx, sync *stage
 	canRunCycleInOneTransaction := isSynced
 	if externalTx {
 		canRunCycleInOneTransaction = true
-	}
-	if forcePartialCommit {
-		canRunCycleInOneTransaction = false
 	}
 
 	// Main steps:
