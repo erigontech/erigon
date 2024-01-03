@@ -92,6 +92,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
+	fmt.Printf("[dbg] sn_stage: histV3=%t\n", histV3)
 	// build all download requests
 	for _, p := range preverifiedBlockSnapshots {
 		if !histV3 {
@@ -107,6 +108,8 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 		}
 
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
+
+		fmt.Printf("[dbg] sn_stage: p.Name=%s\n", p.Name)
 	}
 
 	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", logPrefix))
