@@ -466,7 +466,7 @@ func NewDefaultZkStages(ctx context.Context,
 	// Hence we run it in the test mode.
 	runInTestMode := cfg.ImportMode
 
-	return stagedsync.DefaultZkStages(ctx,
+	return zkStages.DefaultZkStages(ctx,
 		stagedsync.StageSnapshotsCfg(db,
 			*controlServer.ChainConfig,
 			dirs,

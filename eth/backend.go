@@ -110,6 +110,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
 )
@@ -714,7 +715,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		zkL1Syncer := syncer.NewL1Syncer(etherMan.EthClient, cfg.L1ContractAddress, cfg.L1BlockRange, cfg.L1QueryDelay)
 
 		backend.syncStages = stages2.NewDefaultZkStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine, zkL1Syncer, &datastreamClient)
-		backend.syncUnwindOrder = stagedsync.ZkUnwindOrder
+		backend.syncUnwindOrder = zkStages.ZkUnwindOrder
 		// TODO: prune order
 	} else {
 		backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient, allSnapshots, backend.agg, backend.forkValidator, backend.engine)

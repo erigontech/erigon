@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v4"
 	"github.com/ledgerwatch/erigon-lib/common"
 	ethTypes "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 	"github.com/ledgerwatch/erigon/zkevm/log"
@@ -779,17 +780,20 @@ func (e *EthEndpoints) newPendingTransactionFilter(wsConn *websocket.Conn) (inte
 // - for Sequencer nodes it tries to add the tx to the pool
 // - for Non-Sequencer nodes it relays the Tx to the Sequencer node
 func (e *EthEndpoints) SendRawTransaction(httpRequest *http.Request, input string) (interface{}, types.Error) {
-	if e.cfg.SequencerNodeURI != "" {
-		return e.relayTxToSequencerNode(input)
-	} else {
+	if sequencer.IsSequencer() {
 		ip := ""
-		ips := httpRequest.Header.Get("X-Forwarded-For")
 
-		if ips != "" {
+		if ips := httpRequest.Header.Get("X-Forwarded-For"); ips != "" {
 			ip = strings.Split(ips, ",")[0]
 		}
 
 		return e.tryToAddTxToPool(input, ip)
+	} else {
+		if e.cfg.SequencerNodeURI != "" {
+			return e.relayTxToSequencerNode(input)
+		} else {
+			return rpcErrorResponse(types.DefaultErrorCode, "failed to relay tx to the sequencer node: no sequencer URL provider", nil)
+		}
 	}
 }
 

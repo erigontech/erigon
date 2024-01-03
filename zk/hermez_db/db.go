@@ -123,6 +123,21 @@ func (db *HermezDbReader) GetL2BlockNosByBatch(batchNo uint64) ([]uint64, error)
 	return blockNos, err
 }
 
+func (db *HermezDbReader) GetLatestDownloadedBatchNo() (uint64, error) {
+	c, err := db.tx.Cursor(BLOCKBATCHES)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	_, v, err := c.Last()
+	if err != nil {
+		return 0, err
+	}
+	return BytesToUint64(v), nil
+
+}
+
 func (db *HermezDbReader) GetHighestBlockInBatch(batchNo uint64) (uint64, error) {
 	blocks, err := db.GetL2BlockNosByBatch(batchNo)
 	if err != nil {

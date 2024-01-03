@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 	txtype "github.com/ledgerwatch/erigon/zk/tx"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -69,6 +70,10 @@ func SpawnStageBatches(
 ) error {
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting batches stage", logPrefix))
+	if sequencer.IsSequencer() {
+		log.Info(fmt.Sprintf("[%s] skipping -- sequencer", logPrefix))
+		return nil
+	}
 	defer log.Info(fmt.Sprintf("[%s] Finished Batches stage", logPrefix))
 
 	if tx == nil {

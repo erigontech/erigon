@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/types"
 )
 
@@ -59,6 +60,10 @@ func SpawnStageL1Syncer(
 
 	logPrefix := s.LogPrefix()
 	log.Info(fmt.Sprintf("[%s] Starting L1 sync stage", logPrefix))
+	if sequencer.IsSequencer() {
+		log.Info(fmt.Sprintf("[%s] skipping -- sequencer", logPrefix))
+		return nil
+	}
 	defer log.Info(fmt.Sprintf("[%s] Finished L1 sync stage ", logPrefix))
 
 	if tx == nil {
