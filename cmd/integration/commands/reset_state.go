@@ -9,6 +9,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/ledgerwatch/erigon/turbo/backup"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -30,26 +31,26 @@ var cmdResetState = &cobra.Command{
 	Short: "Reset StateStages (5,6,7,8,9,10) and buckets",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, snapshotVersion, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
 		}
 		ctx, _ := common.RootContext()
 		defer db.Close()
-		sn, borSn, agg := allSnapshots(ctx, db, logger)
+		sn, borSn, agg := allSnapshots(ctx, db, snapshotVersion, logger)
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
 
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
 			return
 		}
 
-		if err = reset2.ResetState(db, ctx, chain, ""); err != nil {
+		if err = reset2.ResetState(db, ctx, chain, "", log.Root()); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -58,7 +59,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, agg) }); err != nil {
+		if err := db.View(ctx, func(tx kv.Tx) error { return printStages(tx, sn, borSn, agg) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -73,7 +74,7 @@ var cmdClearBadBlocks = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common.RootContext()
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, snapshotVersion, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return err
@@ -90,14 +91,15 @@ func init() {
 	withConfig(cmdResetState)
 	withDataDir(cmdResetState)
 	withChain(cmdResetState)
-
+	withSnapshotVersion(cmdResetState)
 	rootCmd.AddCommand(cmdResetState)
 
 	withDataDir(cmdClearBadBlocks)
+	withSnapshotVersion(cmdClearBadBlocks)
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.AggregatorV3) error {
+func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, borSn *freezeblocks.BorRoSnapshots, agg *state.AggregatorV3) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -121,18 +123,16 @@ func printStages(tx kv.Tx, snapshots *freezeblocks.RoSnapshots, agg *state.Aggre
 	}
 	fmt.Fprintf(w, "--\n")
 	fmt.Fprintf(w, "prune distance: %s\n\n", pm.String())
-	fmt.Fprintf(w, "blocks.v2: %t, blocks=%d, segments=%d, indices=%d\n\n", snapshots.Cfg().Enabled, snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
+	fmt.Fprintf(w, "blocks.v2: %t, blocks=%d, segments=%d, indices=%d\n", snapshots.Cfg().Enabled, snapshots.BlocksAvailable(), snapshots.SegmentsMax(), snapshots.IndicesMax())
+	fmt.Fprintf(w, "blocks.bor.v2: segments=%d, indices=%d\n\n", borSn.SegmentsMax(), borSn.IndicesMax())
 	h3, err := kvcfg.HistoryV3.Enabled(tx)
-	if err != nil {
-		return err
-	}
-	lastK, lastV, err := rawdbv3.Last(tx, kv.MaxTxNum)
 	if err != nil {
 		return err
 	}
 
 	_, lastBlockInHistSnap, _ := rawdbv3.TxNums.FindBlockNum(tx, agg.EndTxNumMinimax())
-	fmt.Fprintf(w, "history.v3: %t,  idx steps: %.02f, lastMaxTxNum=%d->%d, lastBlockInSnap=%d\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), u64or0(lastK), u64or0(lastV), lastBlockInHistSnap)
+	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)
+	fmt.Fprintf(w, "history.v3: %t,  idx steps: %.02f, lastBlockInSnap=%d, TxNums_Index(%d,%d)\n\n", h3, rawdbhelpers.IdxStepsCountV3(tx), lastBlockInHistSnap, _lb, _lt)
 	s1, err := tx.ReadSequence(kv.EthTx)
 	if err != nil {
 		return err

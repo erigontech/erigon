@@ -15,10 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -246,7 +246,8 @@ type BlockReader struct {
 }
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
-	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSnapshots.(*BorRoSnapshots)}
+	borSn, _ := borSnapshots.(*BorRoSnapshots)
+	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSn}
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
@@ -261,8 +262,13 @@ func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	return nil
 }
 
-func (r *BlockReader) FrozenBlocks() uint64    { return r.sn.BlocksAvailable() }
-func (r *BlockReader) FrozenBorBlocks() uint64 { return r.borSn.BlocksAvailable() }
+func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
+func (r *BlockReader) FrozenBorBlocks() uint64 {
+	if r.borSn != nil {
+		return r.borSn.BlocksAvailable()
+	}
+	return 0
+}
 func (r *BlockReader) FrozenFiles() []string {
 	files := r.sn.Files()
 	if r.borSn != nil {
@@ -278,16 +284,18 @@ func (r *BlockReader) HeadersRange(ctx context.Context, walker func(header *type
 }
 
 func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHeight uint64) (h *types.Header, err error) {
-	blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
-	if err != nil {
-		return nil, err
-	}
-	if blockHash == (common.Hash{}) {
-		return nil, nil
-	}
-	h = rawdb.ReadHeader(tx, blockHash, blockHeight)
-	if h != nil {
-		return h, nil
+	if tx != nil {
+		blockHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if blockHash == (common.Hash{}) {
+			return nil, nil
+		}
+		h = rawdb.ReadHeader(tx, blockHash, blockHeight)
+		if h != nil {
+			return h, nil
+		}
 	}
 
 	view := r.sn.View()
@@ -365,9 +373,11 @@ func (r *BlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockHeig
 }
 
 func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (h *types.Header, err error) {
-	h = rawdb.ReadHeader(tx, hash, blockHeight)
-	if h != nil {
-		return h, nil
+	if tx != nil {
+		h = rawdb.ReadHeader(tx, hash, blockHeight)
+		if h != nil {
+			return h, nil
+		}
 	}
 
 	view := r.sn.View()
@@ -384,13 +394,14 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
-
-	body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
-	if err != nil {
-		return nil, err
-	}
-	if body != nil {
-		return body, nil
+	if tx != nil {
+		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if body != nil {
+			return body, nil
+		}
 	}
 
 	view := r.sn.View()
@@ -576,7 +587,7 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *HeaderSegment, 
 func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *HeaderSegment, buf []byte) (*types.Header, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.ranges.from, sn.ranges.to, dbg.Stack()))
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.from, sn.to, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 
@@ -628,7 +639,7 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *BodySegment, buf 
 func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.BodyForStorage, []byte, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.ranges.from, sn.ranges.to, dbg.Stack()))
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.from, sn.to, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 
@@ -658,7 +669,7 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySeg
 func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.ranges.from, txsSeg.ranges.to, dbg.Stack()))
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.from, txsSeg.to, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 
@@ -842,7 +853,7 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 
 		var buf []byte
 		g := sn.seg.MakeGetter()
-		blockNum := sn.ranges.from
+		blockNum := sn.from
 		var b types.BodyForStorage
 		for g.HasNext() {
 			buf, _ = g.Next(buf[:0])
@@ -952,6 +963,10 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 		return *n, true, nil
 	}
 
+	if r.borSn == nil {
+		return 0, false, nil
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 
@@ -1044,10 +1059,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	result := []rlp.RawValue{}
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		if sn.ranges.from > blockHeight {
+		if sn.from > blockHeight {
 			continue
 		}
-		if sn.ranges.to <= blockHeight {
+		if sn.to <= blockHeight {
 			continue
 		}
 		if sn.IdxBorTxnHash == nil {
@@ -1070,13 +1085,27 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 }
 
 func (r *BlockReader) LastFrozenEventID() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Events()
 	if len(segments) == 0 {
 		return 0
 	}
-	lastSegment := segments[len(segments)-1]
+	// find the last segment which has a built index
+	var lastSegment *BorEventSegment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].IdxBorTxnHash != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
 	var lastEventID uint64
 	gg := lastSegment.seg.MakeGetter()
 	var buf []byte
@@ -1088,25 +1117,39 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 }
 
 func (r *BlockReader) LastFrozenSpanID() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
 	view := r.borSn.View()
 	defer view.Close()
 	segments := view.Spans()
 	if len(segments) == 0 {
 		return 0
 	}
-	lastSegment := segments[len(segments)-1]
-	var lastSpanID uint64
-	if lastSegment.ranges.to > zerothSpanEnd {
-		lastSpanID = (lastSegment.ranges.to - zerothSpanEnd - 1) / spanLength
+	// find the last segment which has a built index
+	var lastSegment *BorSpanSegment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].idx != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+	if lastSegment == nil {
+		return 0
+	}
+
+	lastSpanID := span.IDAt(lastSegment.to)
+	if lastSpanID > 0 {
+		lastSpanID--
 	}
 	return lastSpanID
 }
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
-	// Compute starting block of the span
 	var endBlock uint64
 	if spanId > 0 {
-		endBlock = (spanId)*spanLength + zerothSpanEnd
+		endBlock = span.EndBlockNum(spanId)
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1117,7 +1160,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 			return nil, err
 		}
 		if v == nil {
-			return nil, fmt.Errorf("span %d not found (db)", spanId)
+			return nil, fmt.Errorf("span %d not found (db), frosenBlocks=%d", spanId, maxBlockNumInFiles)
 		}
 		return common.Copy(v), nil
 	}
@@ -1129,17 +1172,11 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx == nil {
 			continue
 		}
-		var spanFrom uint64
-		if sn.ranges.from > zerothSpanEnd {
-			spanFrom = 1 + (sn.ranges.from-zerothSpanEnd-1)/spanLength
-		}
+		spanFrom := span.IDAt(sn.from)
 		if spanId < spanFrom {
 			continue
 		}
-		var spanTo uint64
-		if sn.ranges.to > zerothSpanEnd {
-			spanTo = 1 + (sn.ranges.to-zerothSpanEnd-1)/spanLength
-		}
+		spanTo := span.IDAt(sn.to)
 		if spanId >= spanTo {
 			continue
 		}
@@ -1175,10 +1212,10 @@ func (r *BlockReader) Integrity(ctx context.Context) error {
 	view := r.sn.View()
 	defer view.Close()
 	for _, seg := range view.Headers() {
-		if err := r.ensureHeaderNumber(seg.ranges.from, seg); err != nil {
+		if err := r.ensureHeaderNumber(seg.from, seg); err != nil {
 			return err
 		}
-		if err := r.ensureHeaderNumber(seg.ranges.to-1, seg); err != nil {
+		if err := r.ensureHeaderNumber(seg.to-1, seg); err != nil {
 			return err
 		}
 	}

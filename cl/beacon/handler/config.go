@@ -9,20 +9,19 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func (a *ApiHandler) getSpec(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSpec(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	return newBeaconResponse(a.beaconChainCfg), nil
 }
 
-func (a *ApiHandler) getDepositContract(r *http.Request) (*beaconResponse, error) {
-
+func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	return newBeaconResponse(struct {
-		ChainId         uint64 `json:"chain_id"`
+		ChainId         uint64 `json:"chain_id,string"`
 		DepositContract string `json:"address"`
 	}{ChainId: a.beaconChainCfg.DepositChainID, DepositContract: a.beaconChainCfg.DepositContractAddress}), nil
 
 }
 
-func (a *ApiHandler) getForkSchedule(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	response := []cltypes.Fork{}
 	// create first response (unordered and incomplete)
 	for currentVersion, epoch := range a.beaconChainCfg.ForkVersionSchedule {

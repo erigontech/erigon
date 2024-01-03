@@ -26,40 +26,42 @@ import (
 )
 
 type StageHistoryReconstructionCfg struct {
-	genesisCfg         *clparams.GenesisConfig
-	beaconCfg          *clparams.BeaconChainConfig
-	downloader         *network.BackwardBeaconDownloader
-	sn                 *freezeblocks.CaplinSnapshots
-	startingRoot       libcommon.Hash
-	backfilling        bool
-	waitForAllRoutines bool
-	startingSlot       uint64
-	tmpdir             string
-	db                 persistence.BeaconChainDatabase
-	indiciesDB         kv.RwDB
-	engine             execution_client.ExecutionEngine
-	antiquary          *antiquary.Antiquary
-	logger             log.Logger
+	genesisCfg            *clparams.GenesisConfig
+	beaconCfg             *clparams.BeaconChainConfig
+	downloader            *network.BackwardBeaconDownloader
+	sn                    *freezeblocks.CaplinSnapshots
+	startingRoot          libcommon.Hash
+	backfilling           bool
+	waitForAllRoutines    bool
+	startingSlot          uint64
+	tmpdir                string
+	db                    persistence.BeaconChainDatabase
+	indiciesDB            kv.RwDB
+	engine                execution_client.ExecutionEngine
+	antiquary             *antiquary.Antiquary
+	logger                log.Logger
+	backfillingThrottling time.Duration
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:         genesisCfg,
-		beaconCfg:          beaconCfg,
-		downloader:         downloader,
-		startingRoot:       startingRoot,
-		tmpdir:             tmpdir,
-		startingSlot:       startinSlot,
-		waitForAllRoutines: waitForAllRoutines,
-		logger:             logger,
-		backfilling:        backfilling,
-		indiciesDB:         indiciesDB,
-		antiquary:          antiquary,
-		db:                 db,
-		engine:             engine,
-		sn:                 sn,
+		genesisCfg:            genesisCfg,
+		beaconCfg:             beaconCfg,
+		downloader:            downloader,
+		startingRoot:          startingRoot,
+		tmpdir:                tmpdir,
+		startingSlot:          startinSlot,
+		waitForAllRoutines:    waitForAllRoutines,
+		logger:                logger,
+		backfilling:           backfilling,
+		indiciesDB:            indiciesDB,
+		antiquary:             antiquary,
+		db:                    db,
+		engine:                engine,
+		sn:                    sn,
+		backfillingThrottling: backfillingThrottling,
 	}
 }
 
@@ -116,7 +118,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, fmt.Errorf("error encoding execution payload during download: %s", err)
 			}
 			// Use snappy compression that the temporary files do not take too much disk.
-			encodedPayload = utils.CompressSnappy(append(encodedPayload, byte(blk.Version())))
+			encodedPayload = utils.CompressSnappy(append(encodedPayload, append(blk.Block.ParentRoot[:], byte(blk.Version()))...))
 			if err := executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payload.BlockHash), encodedPayload); err != nil {
 				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
 			}
@@ -211,7 +213,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-time.After(5 * time.Second):
 		}
 	}
-	cfg.downloader.SetThrottle(600 * time.Millisecond) // throttle to 0.6 second for backfilling
+	cfg.downloader.SetThrottle(cfg.backfillingThrottling) // throttle to 0.6 second for backfilling
 	cfg.downloader.SetNeverSkip(false)
 	// If i do not give it a database, erigon lib starts to cry uncontrollably
 	db2 := memdb.New(cfg.tmpdir)
@@ -238,12 +240,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		version := clparams.StateVersion(v[len(v)-1])
+		parentRoot := libcommon.BytesToHash(v[len(v)-1-32 : len(v)-1])
+
 		executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
-		if err := executionPayload.DecodeSSZ(v[:len(v)-1], int(version)); err != nil {
+		if err := executionPayload.DecodeSSZ(v[:len(v)-1-32], int(version)); err != nil {
 			return fmt.Errorf("error decoding execution payload during collection: %s", err)
 		}
+		if executionPayload.BlockNumber%10000 == 0 {
+			cfg.logger.Info("Inserting execution payload", "blockNumber", executionPayload.BlockNumber)
+		}
 		body := executionPayload.Body()
-		header, err := executionPayload.RlpHeader()
+
+		header, err := executionPayload.RlpHeader(&parentRoot)
 		if err != nil {
 			return fmt.Errorf("error parsing rlp header during collection: %s", err)
 		}

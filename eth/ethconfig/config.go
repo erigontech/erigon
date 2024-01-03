@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // AggregationStep number of transactions in smallest static file
@@ -77,6 +78,7 @@ var Defaults = Config{
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
+		PruneLimit:                 100,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -99,7 +101,7 @@ var Defaults = Config{
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
-		Enabled:    false,
+		Enabled:    true,
 		KeepBlocks: false,
 		Produce:    true,
 	},
@@ -269,6 +271,13 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
+	PruneLimit                 int //the maxumum records to delete from the DB during pruning
+	BreakAfterStage            string
+	LoopBlockLimit             uint
+
+	UploadLocation   string
+	UploadFrom       rpc.BlockNumber
+	FrozenBlockLimit uint64
 }
 
 // Chains where snapshots are enabled by default

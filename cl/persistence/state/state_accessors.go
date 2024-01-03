@@ -31,6 +31,9 @@ func InitializeStaticTables(tx kv.RwTx, state *state.CachingBeaconState) error {
 		if err = tx.Append(kv.ValidatorPublicKeys, key, v.PublicKeyBytes()); err != nil {
 			return false
 		}
+		if err = tx.Put(kv.InvertedValidatorPublicKeys, v.PublicKeyBytes(), key); err != nil {
+			return false
+		}
 		return true
 	})
 	if err != nil {
@@ -70,6 +73,9 @@ func IncrementPublicKeyTable(tx kv.RwTx, state *state.CachingBeaconState, prever
 		}
 		// We put as there could be reorgs and thus some of overwriting
 		if err := tx.Put(kv.ValidatorPublicKeys, key, pubKey[:]); err != nil {
+			return err
+		}
+		if err := tx.Put(kv.InvertedValidatorPublicKeys, pubKey[:], key); err != nil {
 			return err
 		}
 	}
@@ -117,6 +123,18 @@ func ReadPublicKeyByIndex(tx kv.Tx, index uint64) (libcommon.Bytes48, error) {
 	return ret, err
 }
 
+func ReadValidatorIndexByPublicKey(tx kv.Tx, key libcommon.Bytes48) (uint64, bool, error) {
+	var index []byte
+	var err error
+	if index, err = tx.GetOne(kv.InvertedValidatorPublicKeys, key[:]); err != nil {
+		return 0, false, err
+	}
+	if len(index) == 0 {
+		return 0, false, nil
+	}
+	return base_encoding.Decode64FromBytes4(index), true, nil
+}
+
 func GetStateProcessingProgress(tx kv.Tx) (uint64, error) {
 	progressByytes, err := tx.GetOne(kv.StatesProcessingProgress, kv.StatesProcessingKey)
 	if err != nil {
@@ -132,9 +150,9 @@ func SetStateProcessingProgress(tx kv.RwTx, progress uint64) error {
 	return tx.Put(kv.StatesProcessingProgress, kv.StatesProcessingKey, base_encoding.Encode64ToBytes4(progress))
 }
 
-func ReadMinimalBeaconState(tx kv.Tx, slot uint64) (*MinimalBeaconState, error) {
-	minimalState := &MinimalBeaconState{}
-	v, err := tx.GetOne(kv.MinimalBeaconState, base_encoding.Encode64ToBytes4(slot))
+func ReadSlotData(tx kv.Tx, slot uint64) (*SlotData, error) {
+	sd := &SlotData{}
+	v, err := tx.GetOne(kv.SlotData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, err
 	}
@@ -143,20 +161,40 @@ func ReadMinimalBeaconState(tx kv.Tx, slot uint64) (*MinimalBeaconState, error) 
 	}
 	buf := bytes.NewBuffer(v)
 
-	return minimalState, minimalState.ReadFrom(buf)
+	return sd, sd.ReadFrom(buf)
+}
+
+func ReadEpochData(tx kv.Tx, slot uint64) (*EpochData, error) {
+	ed := &EpochData{}
+	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	buf := bytes.NewBuffer(v)
+
+	return ed, ed.ReadFrom(buf)
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
 func ReadCheckpoints(tx kv.Tx, slot uint64) (current solid.Checkpoint, previous solid.Checkpoint, finalized solid.Checkpoint, err error) {
-	v, err := tx.GetOne(kv.Checkpoints, base_encoding.Encode64ToBytes4(slot))
+	ed := &EpochData{}
+	v, err := tx.GetOne(kv.EpochData, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	if len(v) == 0 {
 		return nil, nil, nil, nil
 	}
+	buf := bytes.NewBuffer(v)
+
+	if err := ed.ReadFrom(buf); err != nil {
+		return nil, nil, nil, err
+	}
 	// Current, Pre
-	return solid.Checkpoint(v[0:40]), solid.Checkpoint(v[40:80]), solid.Checkpoint(v[80:120]), nil
+	return ed.CurrentJustifiedCheckpoint, ed.PreviousJustifiedCheckpoint, ed.FinalizedCheckpoint, nil
 }
 
 // ReadCheckpoints reads the checkpoints from the database, Current, Previous and Finalized
@@ -225,7 +263,13 @@ func ReadCurrentEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.List
 		return nil, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		has, err := tx.Has(kv.CurrentEpochAttestations, base_encoding.Encode64ToBytes4(slot))
+		if err != nil {
+			return nil, err
+		}
+		if !has {
+			return nil, nil
+		}
 	}
 	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
 	reader, err := zstd.NewReader(bytes.NewReader(v))
@@ -249,7 +293,13 @@ func ReadPreviousEpochAttestations(tx kv.Tx, slot uint64, limit int) (*solid.Lis
 		return nil, err
 	}
 	if len(v) == 0 {
-		return nil, nil
+		has, err := tx.Has(kv.PreviousEpochAttestations, base_encoding.Encode64ToBytes4(slot))
+		if err != nil {
+			return nil, err
+		}
+		if !has {
+			return nil, nil
+		}
 	}
 	attestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](limit)
 	reader, err := zstd.NewReader(bytes.NewReader(v))
@@ -294,5 +344,17 @@ func ReadValidatorsTable(tx kv.Tx, out *StaticValidatorTable) error {
 	}
 	out.slot = slot
 	return err
+}
 
+func ReadActiveIndicies(tx kv.Tx, slot uint64) ([]uint64, error) {
+	key := base_encoding.Encode64ToBytes4(slot)
+	v, err := tx.GetOne(kv.ActiveValidatorIndicies, key)
+	if err != nil {
+		return nil, err
+	}
+	if len(v) == 0 {
+		return nil, nil
+	}
+	buf := bytes.NewBuffer(v)
+	return base_encoding.ReadRabbits(nil, buf)
 }

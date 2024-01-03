@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
@@ -119,6 +119,18 @@ var (
 		Usage: "internal flag",
 	}
 
+	txCountFlag = cli.IntFlag{
+		Name:  "txcount",
+		Usage: "Transaction count, (scenario dependent - may be total or reoccurring)",
+		Value: 100,
+	}
+
+	BlockProducersFlag = cli.UintFlag{
+		Name:  "block-producers",
+		Usage: "The number of block producers to instantiate in the network",
+		Value: 1,
+	}
+
 	WaitFlag = cli.BoolFlag{
 		Name:  "wait",
 		Usage: "Wait until interrupted after all scenarios have run",
@@ -156,6 +168,8 @@ func main() {
 		&insecureFlag,
 		&metricsURLsFlag,
 		&WaitFlag,
+		&txCountFlag,
+		&BlockProducersFlag,
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
 		&logging.LogDirVerbosityFlag,
@@ -175,7 +189,7 @@ func setupLogger(ctx *cli.Context) (log.Logger, error) {
 		return nil, err
 	}
 
-	logger := logging.SetupLoggerCtx("devnet", ctx, false /* rootLogger */)
+	logger := logging.SetupLoggerCtx("devnet", ctx, log.LvlInfo, log.LvlInfo, false /* rootLogger */)
 
 	// Make root logger fail
 	log.Root().SetHandler(PanicHandler{})
@@ -241,7 +255,8 @@ func mainContext(ctx *cli.Context) error {
 	go connectDiagnosticsIfEnabled(ctx, logger)
 
 	enabledScenarios := strings.Split(ctx.String(ScenariosFlag.Name), ",")
-	if err = allScenarios(runCtx).Run(runCtx, enabledScenarios...); err != nil {
+
+	if err = allScenarios(ctx, runCtx).Run(runCtx, enabledScenarios...); err != nil {
 		return err
 	}
 
@@ -256,7 +271,7 @@ func mainContext(ctx *cli.Context) error {
 	return nil
 }
 
-func allScenarios(runCtx devnet.Context) scenarios.Scenarios {
+func allScenarios(cliCtx *cli.Context, runCtx devnet.Context) scenarios.Scenarios {
 	// unsubscribe from all the subscriptions made
 	defer services.UnsubscribeAll()
 
@@ -313,6 +328,11 @@ func allScenarios(runCtx devnet.Context) scenarios.Scenarios {
 				//{Text: "BatchProcessTransfers", Args: []any{"child-funder", 1, 10, 2, 2}},
 			},
 		},
+		"block-production": {
+			Steps: []*scenarios.Step{
+				{Text: "SendTxLoad", Args: []any{recipientAddress, accounts.DevAddress, sendValue, cliCtx.Uint(txCountFlag.Name)}},
+			},
+		},
 	}
 }
 
@@ -321,21 +341,22 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	chainName := ctx.String(ChainFlag.Name)
 	baseRpcHost := ctx.String(BaseRpcHostFlag.Name)
 	baseRpcPort := ctx.Int(BaseRpcPortFlag.Name)
+	producerCount := int(ctx.Uint(BlockProducersFlag.Name))
 
 	switch chainName {
 	case networkname.BorDevnetChainName:
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
-			return tests.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, logger), nil
+			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, logger), nil
 		} else if ctx.Bool(LocalHeimdallFlag.Name) {
 			heimdallGrpcAddr := ctx.String(HeimdallGrpcAddressFlag.Name)
 			sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name))
-			return tests.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, logger), nil
+			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, logger), nil
 		} else {
-			return tests.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, logger), nil
+			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, logger), nil
 		}
 
 	case networkname.DevChainName:
-		return tests.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, logger), nil
+		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, logger), nil
 
 	default:
 		return nil, fmt.Errorf("unknown network: '%s'", chainName)

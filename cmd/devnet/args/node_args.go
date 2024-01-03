@@ -182,18 +182,18 @@ func (n *BlockProducer) IsBlockProducer() bool {
 	return true
 }
 
-type NonBlockProducer struct {
+type BlockConsumer struct {
 	NodeArgs
 	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool" json:"http.api"`
 	TorrentPort string `arg:"--torrent.port" default:"42070" json:"torrent.port"`
 	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"nodiscover"`
 }
 
-func (n *NonBlockProducer) IsBlockProducer() bool {
+func (n *BlockConsumer) IsBlockProducer() bool {
 	return false
 }
 
-func (n *NonBlockProducer) Account() *accounts.Account {
+func (n *BlockConsumer) Account() *accounts.Account {
 	return nil
 }
 

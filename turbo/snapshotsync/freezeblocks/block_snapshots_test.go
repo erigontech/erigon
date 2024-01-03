@@ -19,10 +19,11 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, dir string, logger log.Logger) {
-	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(from, to, name)), dir, 100, 1, log.LvlDebug, logger)
+func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, dir string, version uint8, logger log.Logger) {
+	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(version, from, to, name)), dir, 100, 1, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
+	c.DisableFsync()
 	err = c.AddWord([]byte{1})
 	require.NoError(t, err)
 	err = c.Compress()
@@ -31,11 +32,12 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 		KeyCount:   1,
 		BucketSize: 10,
 		TmpDir:     dir,
-		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(from, to, name.String())),
+		IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, name.String())),
 		LeafSize:   8,
 	}, logger)
 	require.NoError(t, err)
 	defer idx.Close()
+	idx.DisableFsync()
 	err = idx.AddKey([]byte{1}, 0)
 	require.NoError(t, err)
 	err = idx.Build(context.Background())
@@ -45,7 +47,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(from, to, snaptype.Transactions2Block.String())),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, snaptype.Transactions2Block.String())),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -59,6 +61,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Type, di
 
 func TestFindMergeRange(t *testing.T) {
 	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
+	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
 		var ranges []Range
 		for i := 0; i < 24; i++ {
@@ -66,12 +69,8 @@ func TestFindMergeRange(t *testing.T) {
 		}
 		found := merger.FindMergeRanges(ranges, uint64(24*100_000))
 
-		expect := []Range{
-			{0, 500_000},
-			{500_000, 1_000_000},
-			{1_000_000, 1_500_000},
-		}
-		require.Equal(t, Ranges(expect).String(), Ranges(found).String())
+		expect := Ranges{}
+		require.Equal(t, expect.String(), Ranges(found).String())
 	})
 
 	t.Run("small", func(t *testing.T) {
@@ -80,33 +79,12 @@ func TestFindMergeRange(t *testing.T) {
 			ranges = append(ranges, Range{from: uint64(i * 10_000), to: uint64((i + 1) * 10_000)})
 		}
 		found := merger.FindMergeRanges(ranges, uint64(240*10_000))
-
-		expect := Ranges{
-			{0, 500_000},
-			{500_000, 1_000_000},
-			{1_000_000, 1_500_000},
-			{1_500_000, 1_600_000},
-			{1_600_000, 1_700_000},
-			{1_700_000, 1_800_000},
-			{1_800_000, 1_900_000},
-			{1_900_000, 2_000_000},
-			{2_000_000, 2_100_000},
-			{2_100_000, 2_200_000},
-			{2_200_000, 2_300_000},
-			{2_300_000, 2_400_000},
+		var expect Ranges
+		for i := uint64(0); i < 24; i++ {
+			expect = append(expect, Range{from: i * snaptype.Erigon2MergeLimit, to: (i + 1) * snaptype.Erigon2MergeLimit})
 		}
 
 		require.Equal(t, expect.String(), Ranges(found).String())
-	})
-
-	t.Run("IsRecent", func(t *testing.T) {
-		require.True(t, Range{500_000, 599_000}.IsRecent(1_000_000))
-		require.True(t, Range{500_000, 501_000}.IsRecent(1_000_000))
-		require.False(t, Range{499_000, 500_000}.IsRecent(1_000_000))
-		require.False(t, Range{400_000, 500_000}.IsRecent(1_000_000))
-		require.False(t, Range{400_000, 401_000}.IsRecent(1_000_000))
-
-		require.False(t, Range{500_000, 501_000}.IsRecent(1_100_000))
 	})
 
 }
@@ -116,55 +94,48 @@ func TestMergeSnapshots(t *testing.T) {
 	dir, require := t.TempDir(), require.New(t)
 	createFile := func(from, to uint64) {
 		for _, snT := range snaptype.BlockSnapshotTypes {
-			createTestSegmentFile(t, from, to, snT, dir, logger)
+			createTestSegmentFile(t, from, to, snT, dir, 1, logger)
 		}
 	}
 
-	N := uint64(17)
-	createFile(0, snaptype.Erigon2MergeLimit)
-	for i := uint64(snaptype.Erigon2MergeLimit); i < snaptype.Erigon2MergeLimit+N*100_000; i += 100_000 {
-		createFile(i, i+100_000)
+	N := uint64(70)
+	for i := uint64(0); i < N; i++ {
+		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 1, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+		merger.DisableFsync()
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
-			return nil
-		}, func(l []string) error {
-			return nil
-		})
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
-	expectedFileName := snaptype.SegmentFileName(500_000, 1_000_000, snaptype.Transactions)
+	expectedFileName := snaptype.SegmentFileName(1, 100_000, 200_000, snaptype.Transactions)
 	d, err := compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()
-	require.Equal(5, a)
+	require.Equal(10, a)
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+		merger.DisableFsync()
 		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
 		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, func(r Range) error {
-			return nil
-		}, func(l []string) error {
-			return nil
-		})
+		err := merger.Merge(context.Background(), s, ranges, s.Dir(), false, nil, nil)
 		require.NoError(err)
 	}
 
-	expectedFileName = snaptype.SegmentFileName(1_800_000, 1_900_000, snaptype.Transactions)
+	expectedFileName = snaptype.SegmentFileName(1, 600_000, 700_000, snaptype.Transactions)
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()
-	require.Equal(1, a)
+	require.Equal(10, a)
 }
 
 func TestCanRetire(t *testing.T) {
@@ -175,25 +146,25 @@ func TestCanRetire(t *testing.T) {
 	}{
 		{0, 1234, 0, 1000, true},
 		{1_000_000, 1_120_000, 1_000_000, 1_100_000, true},
-		{2_500_000, 4_100_000, 2_500_000, 3_000_000, true},
+		{2_500_000, 4_100_000, 2_500_000, 2_600_000, true},
 		{2_500_000, 2_500_100, 2_500_000, 2_500_000, false},
 		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
-	for _, tc := range cases {
+	for i, tc := range cases {
 		from, to, can := canRetire(tc.inFrom, tc.inTo)
-		require.Equal(int(tc.outFrom), int(from))
-		require.Equal(int(tc.outTo), int(to))
-		require.Equal(tc.can, can, tc.inFrom, tc.inTo)
+		require.Equal(int(tc.outFrom), int(from), i)
+		require.Equal(int(tc.outTo), int(to), i)
+		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)
 	}
 }
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	dir, require := t.TempDir(), require.New(t)
-	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, nil, nil)
+	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, 0)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
 	cfg := ethconfig.BlocksFreezing{Enabled: true}
-	createFile := func(from, to uint64, name snaptype.Type) { createTestSegmentFile(t, from, to, name, dir, logger) }
-	s := NewRoSnapshots(cfg, dir, logger)
+	createFile := func(from, to uint64, name snaptype.Type) { createTestSegmentFile(t, from, to, name, dir, 1, logger) }
+	s := NewRoSnapshots(cfg, dir, 1, logger)
 	defer s.Close()
 	err := s.ReopenFolder()
 	require.NoError(err)
@@ -201,14 +172,14 @@ func TestOpenAllSnapshot(t *testing.T) {
 	s.Close()
 
 	createFile(500_000, 1_000_000, snaptype.Bodies)
-	s = NewRoSnapshots(cfg, dir, logger)
+	s = NewRoSnapshots(cfg, dir, 1, logger)
 	defer s.Close()
 	require.Equal(0, len(s.Bodies.segments)) //because, no headers and transactions snapshot files are created
 	s.Close()
 
 	createFile(500_000, 1_000_000, snaptype.Headers)
 	createFile(500_000, 1_000_000, snaptype.Transactions)
-	s = NewRoSnapshots(cfg, dir, logger)
+	s = NewRoSnapshots(cfg, dir, 1, logger)
 	err = s.ReopenFolder()
 	require.NoError(err)
 	require.Equal(0, len(s.Headers.segments))
@@ -217,7 +188,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(0, 500_000, snaptype.Bodies)
 	createFile(0, 500_000, snaptype.Headers)
 	createFile(0, 500_000, snaptype.Transactions)
-	s = NewRoSnapshots(cfg, dir, logger)
+	s = NewRoSnapshots(cfg, dir, 1, logger)
 	defer s.Close()
 
 	err = s.ReopenFolder()
@@ -229,11 +200,11 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 	seg, ok := view.TxsSegment(10)
 	require.True(ok)
-	require.Equal(int(seg.ranges.to), 500_000)
+	require.Equal(int(seg.to), 500_000)
 
 	seg, ok = view.TxsSegment(500_000)
 	require.True(ok)
-	require.Equal(int(seg.ranges.to), 1_000_000)
+	require.Equal(int(seg.to), 1_000_000)
 
 	_, ok = view.TxsSegment(1_000_000)
 	require.False(ok)
@@ -241,7 +212,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
 	// ExpectedBlocks - says only how much block must come from Torrent
 	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
-	s = NewRoSnapshots(cfg, dir, logger)
+	s = NewRoSnapshots(cfg, dir, 1, logger)
 	err = s.ReopenFolder()
 	require.NoError(err)
 	defer s.Close()
@@ -251,7 +222,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 	createFile(500_000, 900_000, snaptype.Bodies)
 	createFile(500_000, 900_000, snaptype.Transactions)
 	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-	s = NewRoSnapshots(cfg, dir, logger)
+	s = NewRoSnapshots(cfg, dir, 1, logger)
 	defer s.Close()
 	err = s.ReopenFolder()
 	require.NoError(err)

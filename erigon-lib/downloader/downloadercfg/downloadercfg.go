@@ -17,9 +17,9 @@
 package downloadercfg
 
 import (
-	"io/ioutil"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -54,6 +54,7 @@ type Cfg struct {
 	WebSeedS3Tokens                 []string
 	ExpectedTorrentFilesHashes      snapcfg.Preverified
 	DownloadTorrentFilesFromWebseed bool
+	AddTorrentsFromDisk             bool
 	ChainName                       string
 
 	Dirs datadir.Dirs
@@ -188,17 +189,17 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
 	//TODO: if don't pass "downloaded files list here" (which we store in db) - synced erigon will download new .torrent files. And erigon can't work with "unfinished" files.
-	snapCfg := snapcfg.KnownCfg(chainName, nil, nil)
+	snapCfg := snapcfg.KnownCfg(chainName, 0)
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
-		DownloadTorrentFilesFromWebseed: false, ExpectedTorrentFilesHashes: snapCfg.Preverified,
+		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, ExpectedTorrentFilesHashes: snapCfg.Preverified,
 	}, nil
 }
 
 func getIpv6Enabled() bool {
 	if runtime.GOOS == "linux" {
-		file, err := ioutil.ReadFile("/sys/module/ipv6/parameters/disable")
+		file, err := os.ReadFile("/sys/module/ipv6/parameters/disable")
 		if err != nil {
 			log.Warn("could not read /sys/module/ipv6/parameters/disable for ipv6 detection")
 			return false

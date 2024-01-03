@@ -3,7 +3,7 @@
 
 tests:
 	GIT_LFS_SKIP_SMUDGE=1 git clone https://github.com/ethereum/consensus-spec-tests
-	cd consensus-spec-tests && git checkout 70dc28b18c71f3ae080c02f51bd3421e0b60609b && git lfs pull --exclude=tests/general,tests/minimal && cd ..
+	cd consensus-spec-tests && git checkout 99549a414c10baa9e69abcb08eb256fc1a8d54f6 && git lfs pull --exclude=tests/general,tests/minimal && cd ..
 	mv consensus-spec-tests/tests .
 	rm -rf consensus-spec-tests
 	rm -rf tests/minimal

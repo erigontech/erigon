@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
@@ -74,7 +75,8 @@ type Sentinel struct {
 	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
-	db persistence.RawBeaconBlockChain
+	db         persistence.RawBeaconBlockChain
+	indiciesDB kv.RoDB
 
 	discoverConfig       discover.Config
 	pubsub               *pubsub.PubSub
@@ -90,7 +92,7 @@ func (s *Sentinel) createLocalNode(
 	udpPort, tcpPort int,
 	tmpDir string,
 ) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(s.ctx, "", tmpDir)
+	db, err := enode.OpenDB(s.ctx, "", tmpDir, s.logger)
 	if err != nil {
 		return nil, fmt.Errorf("could not open node's peer database: %w", err)
 	}
@@ -166,7 +168,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2).Start()
+	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2, s.cfg.EnableBlocks).Start()
 
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
@@ -180,14 +182,16 @@ func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
 	db persistence.RawBeaconBlockChain,
+	indiciesDB kv.RoDB,
 	logger log.Logger,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:     ctx,
-		cfg:     cfg,
-		db:      db,
-		metrics: true,
-		logger:  logger,
+		ctx:        ctx,
+		cfg:        cfg,
+		db:         db,
+		indiciesDB: indiciesDB,
+		metrics:    true,
+		logger:     logger,
 	}
 
 	// Setup discovery
@@ -258,7 +262,7 @@ func (s *Sentinel) ReqRespHandler() http.Handler {
 	return s.httpApi
 }
 
-func (s *Sentinel) RecvGossip() <-chan *pubsub.Message {
+func (s *Sentinel) RecvGossip() <-chan *GossipMessage {
 	return s.subManager.Recv()
 }
 
@@ -286,6 +290,7 @@ func (s *Sentinel) Start() error {
 	s.subManager = NewGossipManager(s.ctx)
 
 	go s.listenForPeers()
+	go s.forkWatcher()
 
 	return nil
 }

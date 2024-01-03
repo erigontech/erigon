@@ -2,6 +2,7 @@ package eth1
 
 import (
 	"context"
+	"errors"
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -182,7 +183,7 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 	extendingHash := e.forkValidator.ExtendingForkHeadHash()
 	extendCanonical := extendingHash == libcommon.Hash{} && header.ParentHash == currentHeadHash
 
-	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical)
+	status, lvh, validationError, criticalError := e.forkValidator.ValidatePayload(tx, header, body.RawBody(), extendCanonical, e.logger)
 	if criticalError != nil {
 		return nil, criticalError
 	}
@@ -228,14 +229,25 @@ func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx,
 func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	e.semaphore.Acquire(ctx, 1)
 	defer e.semaphore.Release(1)
-	// Run the forkchoice
-	if err := e.executionPipeline.Run(e.db, nil, true); err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
-		return
-	}
-	if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
-		e.logger.Error("Could not start execution service", "err", err)
-		return
+
+	more := true
+
+	for more {
+		var err error
+
+		if more, err = e.executionPipeline.Run(e.db, nil, true); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
+			continue
+		}
+
+		if err := e.executionPipeline.RunPrune(e.db, nil, true); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				e.logger.Error("Could not start execution service", "err", err)
+			}
+			continue
+		}
 	}
 }
 

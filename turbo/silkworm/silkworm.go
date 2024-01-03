@@ -2,10 +2,11 @@ package silkworm
 
 import (
 	"errors"
+	"math/big"
+
 	"github.com/erigontech/silkworm-go"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
-	"math/big"
 )
 
 type Silkworm = silkworm_go.Silkworm
@@ -69,4 +70,8 @@ func ExecuteBlocks(s *Silkworm, txn kv.Tx, chainID *big.Int, startBlock uint64, 
 		return lastExecutedBlock, consensus.ErrInvalidBlock
 	}
 	return lastExecutedBlock, err
+}
+
+type CanAddSnapshotsToSilkwarm interface {
+	AddSnapshotsToSilkworm(*Silkworm) error
 }
