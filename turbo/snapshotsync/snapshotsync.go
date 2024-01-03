@@ -161,6 +161,7 @@ Loop:
 					Alloc:            m.Alloc,
 					Sys:              m.Sys,
 					DownloadFinished: stats.Completed,
+					LogPrefix:        logPrefix,
 				})
 
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
@@ -179,6 +180,7 @@ Loop:
 					Sys:                  m.Sys,
 					DownloadFinished:     stats.Completed,
 					TorrentMetadataReady: stats.MetadataReady,
+					LogPrefix:            logPrefix,
 				})
 
 				if stats.MetadataReady < stats.FilesTotal {

@@ -54,13 +54,13 @@ func (e *EndpointError) WriteTo(w http.ResponseWriter) {
 }
 
 type EndpointHandler[T any] interface {
-	Handle(r *http.Request) (T, error)
+	Handle(w http.ResponseWriter, r *http.Request) (T, error)
 }
 
-type EndpointHandlerFunc[T any] func(r *http.Request) (T, error)
+type EndpointHandlerFunc[T any] func(w http.ResponseWriter, r *http.Request) (T, error)
 
-func (e EndpointHandlerFunc[T]) Handle(r *http.Request) (T, error) {
-	return e(r)
+func (e EndpointHandlerFunc[T]) Handle(w http.ResponseWriter, r *http.Request) (T, error) {
+	return e(w, r)
 }
 
 func HandleEndpointFunc[T any](h EndpointHandlerFunc[T]) http.HandlerFunc {
@@ -70,7 +70,7 @@ func HandleEndpointFunc[T any](h EndpointHandlerFunc[T]) http.HandlerFunc {
 func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ans, err := h.Handle(r)
+		ans, err := h.Handle(w, r)
 		log.Debug("beacon api request", "endpoint", r.URL.Path, "duration", time.Since(start))
 		if err != nil {
 			log.Error("beacon api request error", "err", err)
@@ -83,7 +83,6 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			endpointError.WriteTo(w)
 			return
 		}
-		// TODO: ssz handler
 		// TODO: potentially add a context option to buffer these
 		contentType := r.Header.Get("Accept")
 		contentTypes := strings.Split(contentType, ",")
@@ -102,15 +101,31 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			}
 			w.Write(encoded)
 		case contentType == "*/*", contentType == "", slices.Contains(contentTypes, "text/html"), slices.Contains(contentTypes, "application/json"):
-			w.Header().Add("content-type", "application/json")
-			err := json.NewEncoder(w).Encode(ans)
-			if err != nil {
-				// this error is fatal, log to console
-				log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)
+			if !isNil(ans) {
+				w.Header().Add("content-type", "application/json")
+				err := json.NewEncoder(w).Encode(ans)
+				if err != nil {
+					// this error is fatal, log to console
+					log.Error("beaconapi failed to encode json", "type", reflect.TypeOf(ans), "err", err)
+				}
+			} else {
+				w.WriteHeader(200)
 			}
 		default:
 			http.Error(w, "content type must be application/json or application/octet-stream", http.StatusBadRequest)
-
 		}
 	})
+}
+
+func isNil[T any](t T) bool {
+	v := reflect.ValueOf(t)
+	kind := v.Kind()
+	// Must be one of these types to be nillable
+	return (kind == reflect.Ptr ||
+		kind == reflect.Interface ||
+		kind == reflect.Slice ||
+		kind == reflect.Map ||
+		kind == reflect.Chan ||
+		kind == reflect.Func) &&
+		v.IsNil()
 }

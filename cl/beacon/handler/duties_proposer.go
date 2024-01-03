@@ -21,7 +21,7 @@ type proposerDuties struct {
 	Slot           uint64            `json:"slot,string"`
 }
 
-func (a *ApiHandler) getDutiesProposer(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	epoch, err := epochFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())

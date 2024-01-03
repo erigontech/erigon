@@ -40,6 +40,10 @@ type CaplinCliCfg struct {
 	EngineAPIPort         int           `json:"engine_api_port"`
 	JwtSecret             []byte
 
+	AllowedMethods   []string `json:"allowed_methods"`
+	AllowedOrigins   []string `json:"allowed_origins"`
+	AllowCredentials bool     `json:"allow_credentials"`
+
 	InitalState *state.CachingBeaconState
 	Dirs        datadir.Dirs
 }
@@ -72,6 +76,9 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Int(caplinflags.BeaconApiPort.Name))
+	cfg.AllowCredentials = ctx.Bool(utils.BeaconApiAllowCredentialsFlag.Name)
+	cfg.AllowedMethods = ctx.StringSlice(utils.BeaconApiAllowMethodsFlag.Name)
+	cfg.AllowedOrigins = ctx.StringSlice(utils.BeaconApiAllowOriginsFlag.Name)
 	cfg.BeaconProtocol = "tcp"
 	cfg.RecordMode = ctx.Bool(caplinflags.RecordModeFlag.Name)
 	cfg.RecordDir = ctx.String(caplinflags.RecordModeDir.Name)

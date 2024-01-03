@@ -132,11 +132,14 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), 0).Version
 
 	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, snapshotVersion, beacon_router_configuration.RouterConfiguration{
-		Protocol:        cfg.BeaconProtocol,
-		Address:         cfg.BeaconAddr,
-		ReadTimeTimeout: cfg.BeaconApiReadTimeout,
-		WriteTimeout:    cfg.BeaconApiWriteTimeout,
-		IdleTimeout:     cfg.BeaconApiWriteTimeout,
-		Active:          !cfg.NoBeaconApi,
+		Protocol:         cfg.BeaconProtocol,
+		Address:          cfg.BeaconAddr,
+		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
+		WriteTimeout:     cfg.BeaconApiWriteTimeout,
+		IdleTimeout:      cfg.BeaconApiWriteTimeout,
+		Active:           !cfg.NoBeaconApi,
+		AllowedOrigins:   cfg.AllowedOrigins,
+		AllowedMethods:   cfg.AllowedMethods,
+		AllowCredentials: cfg.AllowCredentials,
 	}, nil, nil, false, false, historyDB, indiciesDB, nil)
 }

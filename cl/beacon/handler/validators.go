@@ -184,7 +184,7 @@ func checkValidValidatorId(s string) (bool, error) {
 	return false, nil
 }
 
-func (a *ApiHandler) getAllValidators(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -308,7 +308,7 @@ func parseQueryValidatorIndicies(tx kv.Tx, ids []string) ([]uint64, error) {
 	return filterIndicies, nil
 }
 
-func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -375,7 +375,7 @@ func (a *ApiHandler) getSingleValidator(r *http.Request) (*beaconResponse, error
 	return responseValidator(validatorIndex, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
-func (a *ApiHandler) getAllValidatorsBalances(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -463,7 +463,7 @@ func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatu
 			}
 		}
 		first = false
-		if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, i, status.String(), balances.Get(i), v.PublicKey(), v.WithdrawalCredentials().String(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
+		if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, i, status.String(), balances.Get(i), v.PublicKey(), v.WithdrawalCredentials(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
 			return false
 		}
 		return true
@@ -487,7 +487,7 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 	v := validators.Get(int(idx))
 	status := validatorStatusFromValidator(v, stateEpoch, balances.Get(int(idx)))
 
-	if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, idx, status.String(), balances.Get(int(idx)), v.PublicKey(), v.WithdrawalCredentials().String(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
+	if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, idx, status.String(), balances.Get(int(idx)), v.PublicKey(), v.WithdrawalCredentials(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
 		return nil, err
 	}
 
