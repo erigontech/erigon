@@ -742,7 +742,7 @@ func doBodiesIncrement(cliCtx *cli.Context) error {
 			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
 				return err
 			}
-			body.BaseTxId += 1
+			body.BaseTxId -= 2
 			dstBuf.Reset()
 			if err := rlp.Encode(dstBuf, body); err != nil {
 				return err
