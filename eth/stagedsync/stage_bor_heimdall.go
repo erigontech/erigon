@@ -299,7 +299,7 @@ func BorHeimdallForward(
 				}
 			}
 
-			sprintLength := cfg.borConfig.CalculateSprint(blockNum)
+			sprintLength := cfg.borConfig.CalculateSprintLength(blockNum)
 			spanID := span.IDAt(blockNum)
 			if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
 				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.borConfig); err != nil {
@@ -308,7 +308,7 @@ func BorHeimdallForward(
 			}
 		}
 
-		if blockNum > 0 && blockNum%cfg.borConfig.CalculateSprint(blockNum) == 0 {
+		if blockNum > 0 && blockNum%cfg.borConfig.CalculateSprintLength(blockNum) == 0 {
 			var callTime time.Duration
 			var records int
 			if lastEventId, records, callTime, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.borConfig, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
@@ -430,7 +430,7 @@ func fetchAndWriteBorEvents(
 		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
 		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
 	} else {
-		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprint(blockNum))
+		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
 		if err != nil {
 			return lastEventId, 0, time.Since(fetchStart), err
 		}

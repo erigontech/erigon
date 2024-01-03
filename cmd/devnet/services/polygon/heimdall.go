@@ -162,7 +162,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
 	}
 
-	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.borConfig.CalculateSprint(nextSpan.StartBlock)) - 1
+	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.borConfig.CalculateSprintLength(nextSpan.StartBlock)) - 1
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
@@ -186,10 +186,10 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 
 func (h *Heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
-		return int(h.borConfig.CalculateSprint(h.currentSpan.StartBlock))
+		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
 	}
 
-	return int(h.borConfig.CalculateSprint(256))
+	return int(h.borConfig.CalculateSprintLength(256))
 }
 
 func (h *Heimdall) getSpanOverrideHeight() uint64 {

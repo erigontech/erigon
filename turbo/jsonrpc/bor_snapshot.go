@@ -527,7 +527,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		number := header.Number.Uint64()
 
 		// Delete the oldest signer from the recent list to allow it signing again
-		currentSprint := s.config.CalculateSprint(number)
+		currentSprint := s.config.CalculateSprintLength(number)
 		if number >= currentSprint {
 			delete(snap.Recents, number-currentSprint)
 		}

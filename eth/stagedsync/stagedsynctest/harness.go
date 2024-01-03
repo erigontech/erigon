@@ -575,7 +575,7 @@ func (h *Harness) mockHeimdallClient() {
 		StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*clerk.EventRecordWithTime, error) {
 			h.heimdallLastEventID++
-			h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprint(h.heimdallLastEventHeaderNum)
+			h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
 			stateSyncDelay := h.borConfig.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)
 			newEvent := clerk.EventRecordWithTime{
 				EventRecord: clerk.EventRecord{

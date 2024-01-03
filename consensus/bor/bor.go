@@ -214,7 +214,7 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	// When the block is the first block of the sprint, it is expected to be delayed by `producerDelay`.
 	// That is to allow time for block propagation in the last sprint
 	delay := c.CalculatePeriod(number)
-	if number%c.CalculateSprint(number) == 0 {
+	if number%c.CalculateSprintLength(number) == 0 {
 		delay = c.CalculateProducerDelay(number)
 	}
 
@@ -288,7 +288,7 @@ func New(
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
 	// Set any missing consensus parameters to their defaults
-	if borConfig != nil && borConfig.CalculateSprint(0) == 0 {
+	if borConfig != nil && borConfig.CalculateSprintLength(0) == 0 {
 		borConfig.Sprint = defaultSprintLength
 	}
 
@@ -356,7 +356,7 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
 	// Set any missing consensus parameters to their defaults
-	if borConfig != nil && borConfig.CalculateSprint(0) == 0 {
+	if borConfig != nil && borConfig.CalculateSprintLength(0) == 0 {
 		borConfig.Sprint = defaultSprintLength
 	}
 
@@ -449,7 +449,7 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	}
 
 	// check extr adata
-	isSprintEnd := isSprintStart(number+1, c.config.CalculateSprint(number))
+	isSprintEnd := isSprintStart(number+1, c.config.CalculateSprintLength(number))
 
 	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
 	signersBytes := len(GetValidatorBytes(header, c.config))
@@ -838,7 +838,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// client calls `GetCurrentValidators` because it makes a contract call
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
-	if isSprintStart(number+1, c.config.CalculateSprint(number)) {
+	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
 		spanID := span.IDAt(number + 1)
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
@@ -933,7 +933,7 @@ func (c *Bor) Finalize(config *chain.Config, header *types.Header, state *state.
 		return nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
-	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
+	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
@@ -999,7 +999,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 		return nil, nil, nil, consensus.ErrUnexpectedWithdrawals
 	}
 
-	if isSprintStart(headerNumber, c.config.CalculateSprint(headerNumber)) {
+	if isSprintStart(headerNumber, c.config.CalculateSprintLength(headerNumber)) {
 		cx := statefull.ChainContext{Chain: chain, Bor: c}
 
 		if c.blockReader != nil {
@@ -1294,7 +1294,7 @@ func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool
 	if currentSpan.EndBlock == 0 {
 		return true
 	}
-	sprintLength := c.config.CalculateSprint(headerNumber)
+	sprintLength := c.config.CalculateSprintLength(headerNumber)
 
 	// if current block is first block of last sprint in current span
 	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
@@ -1458,7 +1458,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 		spanBor.StartBlock = spanBor.EndBlock + 1
 	}
 
-	spanBor.EndBlock = spanBor.StartBlock + (100 * c.config.CalculateSprint(headerNumber)) - 1
+	spanBor.EndBlock = spanBor.StartBlock + (100 * c.config.CalculateSprintLength(headerNumber)) - 1
 
 	selectedProducers := make([]valset.Validator, len(snap.ValidatorSet.Validators))
 	for i, v := range snap.ValidatorSet.Validators {

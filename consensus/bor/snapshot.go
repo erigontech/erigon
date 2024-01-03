@@ -140,7 +140,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-		sprintLen := s.config.CalculateSprint(number)
+		sprintLen := s.config.CalculateSprintLength(number)
 
 		// Delete the oldest signer from the recent list to allow it signing again
 		if number >= sprintLen {

@@ -40,7 +40,7 @@ func (c *BorConfig) CalculateProducerDelay(number uint64) uint64 {
 	return borKeyValueConfigHelper(c.ProducerDelay, number)
 }
 
-func (c *BorConfig) CalculateSprint(number uint64) uint64 {
+func (c *BorConfig) CalculateSprintLength(number uint64) uint64 {
 	if c.sprints == nil {
 		c.sprints = asSprints(c.Sprint)
 	}

@@ -29,7 +29,7 @@ func EndBlockNum(spanID uint64) uint64 {
 func BlockInLastSprintOfSpan(blockNum uint64, config *borcfg.BorConfig) bool {
 	spanNum := IDAt(blockNum)
 	endBlockNum := EndBlockNum(spanNum)
-	sprintLen := config.CalculateSprint(blockNum)
+	sprintLen := config.CalculateSprintLength(blockNum)
 	startBlockNum := endBlockNum - sprintLen + 1
 	return startBlockNum <= blockNum && blockNum <= endBlockNum
 }
