@@ -3,6 +3,7 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
@@ -11,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/spf13/afero"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -111,6 +113,16 @@ func TestForkChoiceBasic(t *testing.T) {
 
 func TestForkChoiceChainBellatrix(t *testing.T) {
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
+
+	intermediaryState, err := anchorState.Copy()
+	require.NoError(t, err)
+
+	intermediaryBlockRoot := blocks[0].Block.ParentRoot
+	for i := 0; i < 35; i++ {
+		require.NoError(t, transition.TransitionState(intermediaryState, blocks[i], nil, false))
+		intermediaryBlockRoot, err = blocks[i].Block.HashSSZ()
+		require.NoError(t, err)
+	}
 	// Initialize forkchoice store
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
@@ -125,4 +137,15 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	rewards, ok := store.BlockRewards(libcommon.Hash(root1))
 	require.True(t, ok)
 	require.Equal(t, rewards.Attestations, uint64(0x511ad))
+	// test randao mix
+	mixes := solid.NewHashVector(int(clparams.MainnetBeaconConfig.EpochsPerHistoricalVector))
+	require.True(t, store.RandaoMixes(intermediaryBlockRoot, mixes))
+	for i := 0; i < mixes.Length(); i++ {
+		require.Equal(t, mixes.Get(i), intermediaryState.RandaoMixes().Get(i), fmt.Sprintf("mixes mismatch at index %d, have: %x, expected: %x", i, mixes.Get(i), intermediaryState.RandaoMixes().Get(i)))
+	}
+	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(intermediaryBlockRoot)
+	require.True(t, ok)
+
+	require.Equal(t, intermediaryState.CurrentSyncCommittee(), currentIntermediarySyncCommittee)
+	require.Equal(t, intermediaryState.NextSyncCommittee(), nextIntermediarySyncCommittee)
 }
