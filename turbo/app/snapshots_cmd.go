@@ -763,6 +763,10 @@ func doBodiesIncrement(cliCtx *cli.Context) error {
 		if err := dst.Compress(); err != nil {
 			return err
 		}
+		src.Close()
+		dst.Close()
+		os.Rename(srcF, srcF+".back")
+		os.Rename(dstF, srcF)
 		return nil
 	}
 	for _, f := range l {
