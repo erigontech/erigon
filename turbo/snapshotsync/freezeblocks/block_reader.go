@@ -878,7 +878,7 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 	var expectedFirstTxnID uint64
 	for _, snb := range view.Bodies() {
 		firstBlockNum := snb.idxBodyNumber.BaseDataID()
-		sn, _ := view.TxsSegment(snb.idxBodyNumber.BaseDataID())
+		sn, _ := view.TxsSegment(firstBlockNum)
 		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err
