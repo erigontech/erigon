@@ -115,6 +115,7 @@ func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 		onlyName := fileName[:len(fileName)-len(ext)]
 		parts := strings.Split(onlyName, "-")
 		if parts[3] != "headers" {
+			fmt.Printf("[dbg] skip4: %s\n", fileName)
 			continue
 		}
 		to, err := strconv.ParseUint(parts[2], 10, 64)
