@@ -61,6 +61,7 @@ func SnapshotVersion(version uint8) {
 
 func newCfg(preverified Preverified, version uint8) *Cfg {
 
+	fmt.Printf("[dbg] newCfg: %d\n", version)
 	if version == 0 {
 		version = snapshotVersion
 
@@ -71,7 +72,7 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 					pv = append(pv, p)
 				} else {
-					fmt.Printf("skip1: %s\n", p.Name)
+					fmt.Printf("[dbg] skip1: %s\n", p.Name)
 				}
 			}
 		}
@@ -85,7 +86,7 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 					if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 						pv = append(pv, p)
 					} else {
-						fmt.Printf("skip2: %s\n", p.Name)
+						fmt.Printf("[dbg] skip2: %s\n", p.Name)
 					}
 				}
 			}
@@ -101,6 +102,8 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 	max := uint64(0)
 	version := defaultVersion
+
+	fmt.Printf("[dbg] cfgInfo: %d\n", defaultVersion)
 
 	for _, p := range preverified {
 		_, fileName := filepath.Split(p.Name)
@@ -124,6 +127,9 @@ func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 		if vp := parts[0]; strings.HasPrefix(vp, "v") {
 			if v, err := strconv.ParseUint(vp[1:], 10, 8); err == nil {
 				version = uint8(v)
+			} else {
+				fmt.Printf("[dbg] skip2: %d\n", fileName)
+
 			}
 		}
 	}
