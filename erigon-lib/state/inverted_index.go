@@ -969,6 +969,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		minTxnum   uint64 = math.MaxUint64
 		maxTxnum   uint64 = 0
 		pruneCount uint64
+		txKey      [8]byte
 	)
 	//defer func() {
 	//	ii.logger.Error("[snapshots] prune index",
@@ -979,7 +980,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	//		"tx until limit", limit)
 	//}()
 
-	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	k, v, err := keysCursor.Seek(txKey[:])
 	if err != nil {
@@ -1001,17 +1001,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 
-	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxCForDeletes.Close()
-	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return err
-	}
-	defer idxC.Close()
-
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
@@ -1020,7 +1009,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo || limit == 0 { // [txFrom; txTo)
+		if txNum >= txTo || limit == 0 {
 			break
 		}
 		limit--
@@ -1045,8 +1034,19 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("iterate over %s keys: %w", ii.filenameBase, err)
+		return fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 	}
+
+	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxCForDeletes.Close()
+	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
+	if err != nil {
+		return err
+	}
+	defer idxC.Close()
 
 	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		for txnm, err := idxC.SeekBothRange(key, txKey[:]); txnm != nil; _, txnm, err = idxC.NextDup() {
