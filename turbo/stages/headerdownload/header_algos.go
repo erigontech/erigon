@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -641,6 +642,7 @@ func (hd *HeaderDownload) InsertHeaders(hf FeedHeaderFunc, headerLimit uint, ter
 		}
 
 		if headerLimit > 0 && hd.highestInDb-startHeight > uint64(headerLimit) {
+			log.Info("[dbg] headerLimit reached", "headerLimit", headerLimit)
 			break
 		}
 	}
