@@ -109,6 +109,7 @@ func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 		_, fileName := filepath.Split(p.Name)
 		ext := filepath.Ext(fileName)
 		if ext != ".seg" {
+			fmt.Printf("[dbg] skip3: %s\n", fileName)
 			continue
 		}
 		onlyName := fileName[:len(fileName)-len(ext)]
@@ -129,7 +130,6 @@ func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 				version = uint8(v)
 			} else {
 				fmt.Printf("[dbg] skip2: %s\n", fileName)
-
 			}
 		}
 	}
