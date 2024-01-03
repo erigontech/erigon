@@ -185,4 +185,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.RPCSlowFlag,
 
 	&utils.TxPoolGossipDisableFlag,
+	&SyncLoopBlockLimitFlag,
 }
