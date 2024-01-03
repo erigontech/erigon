@@ -83,7 +83,9 @@ type Config struct {
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 	Bor    *BorConfig    `json:"bor,omitempty"`
 
-	//For not pruning these contracts (e.g. depsoit contract logs needed by CL)
+	// For not pruning the logs of these contracts
+	// For depsoit contract logs are needed by CL to validate/produce blocks.
+	// All logs should be available to a validating node through eth_getLogs
 	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
 }
 

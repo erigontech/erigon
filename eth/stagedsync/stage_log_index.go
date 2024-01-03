@@ -82,7 +82,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	startBlock := s.BlockNumber
-	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)		//endBlock - prune.r.older
+	pruneTo := cfg.prune.Receipts.PruneTo(endBlock) //endBlock - prune.r.older
 	// if startBlock < pruneTo {
 	// 	startBlock = pruneTo
 	// }
@@ -177,7 +177,7 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		}
 
 		for _, l := range ll {
-			if cfg.noPruneContracts != nil && !cfg.noPruneContracts[l.Address] && l.BlockNumber < pruneBlock {
+			if l.BlockNumber < pruneBlock && cfg.noPruneContracts != nil && !cfg.noPruneContracts[l.Address] {
 				continue
 			}
 			for _, topic := range l.Topics {

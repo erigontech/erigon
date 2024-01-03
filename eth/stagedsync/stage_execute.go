@@ -207,7 +207,7 @@ func executeBlock(
 func filterNoPruneReceipts(receipts types.Receipts, chainCfg *chain.Config) types.Receipts {
 	cr := types.Receipts{}
 	for _, r := range receipts {
-		for _, l := range r.Logs{
+		for _, l := range r.Logs {
 			if chainCfg.NoPruneContracts[l.Address] {
 				cr = append(cr, r)
 				break
