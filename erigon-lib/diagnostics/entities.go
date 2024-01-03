@@ -73,6 +73,14 @@ type SnapshotSegmentIndexingFinishedUpdate struct {
 	SegmentName string `json:"segmentName"`
 }
 
+type SyncStagesList struct {
+	Stages []string `json:"stages"`
+}
+
+type CurrentSyncStage struct {
+	Stage uint `json:"stage"`
+}
+
 func (ti SnapshotDownloadStatistics) Type() Type {
 	return TypeOf(ti)
 }
@@ -86,5 +94,13 @@ func (ti SnapshotIndexingStatistics) Type() Type {
 }
 
 func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti SyncStagesList) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti CurrentSyncStage) Type() Type {
 	return TypeOf(ti)
 }

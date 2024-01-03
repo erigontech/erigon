@@ -67,7 +67,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -163,6 +163,11 @@ Loop:
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
+				isDiagEnabled := diagnostics.TypeOf(diagnostics.SyncStagesList{}).Enabled()
+				if isDiagEnabled {
+					diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesList})
+				}
+
 				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 					Downloaded:           stats.BytesCompleted,
 					Total:                stats.BytesTotal,

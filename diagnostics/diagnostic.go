@@ -17,6 +17,8 @@ type DiagnosticClient struct {
 	node       *node.ErigonNode
 
 	snapshotDownload diaglib.SnapshotDownloadStatistics
+	syncStagesList   diaglib.SyncStagesList
+	currentSyncStage diaglib.CurrentSyncStage
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
@@ -28,6 +30,8 @@ func (d *DiagnosticClient) Setup() {
 	d.runSegmentDownloadingListener()
 	d.runSegmentIndexingListener()
 	d.runSegmentIndexingFinishedListener()
+	d.runCurrentSyncStageListener()
+	d.runSyncStagesListListener()
 }
 
 func (d *DiagnosticClient) runSnapshotListener() {
@@ -173,4 +177,48 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd diaglib.SnapshotI
 	}
 
 	d.snapshotDownload.SegmentIndexing.TimeElapsed = upd.TimeElapsed
+}
+
+func (d *DiagnosticClient) runSyncStagesListListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.SyncStagesList](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SyncStagesList{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.syncStagesList = info
+				return
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runCurrentSyncStageListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.CurrentSyncStage](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.CurrentSyncStage{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.currentSyncStage = info
+				if int(d.currentSyncStage.Stage) >= len(d.syncStagesList.Stages) {
+					return
+				}
+			}
+		}
+	}()
 }
