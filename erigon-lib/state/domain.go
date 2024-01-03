@@ -2074,10 +2074,8 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 	var (
 		prunedKeys uint64
-		//prunedMaxStep uint64
-		//prunedMinStep = uint64(math.MaxUint64)
-		seek    = make([]byte, 0, 256)
-		limiter = limit
+		seek       = make([]byte, 0, 256)
+		limiter    = limit
 	)
 	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dc.d.filenameBase, txFrom, txTo, step, limit)
 	//defer func() {
@@ -2132,14 +2130,14 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
-				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			}
+			//if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+			//	dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
+			//}
 			return ctx.Err()
 		case <-logEvery.C:
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
-				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			}
+			//if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+			//	dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
+			//}
 			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase,
 				"pruned keys", prunedKeys,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dc.d.aggregationStep), float64(txTo)/float64(dc.d.aggregationStep)))
@@ -2147,9 +2145,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 	}
 
-	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
-		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
-	}
+	//if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
+	//	dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
+	//}
 
 	mxPruneTookDomain.ObserveDuration(st)
 

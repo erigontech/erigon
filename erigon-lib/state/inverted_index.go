@@ -949,7 +949,7 @@ func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 }
 
 // [txFrom; txTo)
-func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, fn func(key []byte, txnum []byte) error, forced bool) error {
+func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
 	if !forced && !ic.CanPrune(rwTx) {
 		return nil
 	}
