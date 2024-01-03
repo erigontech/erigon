@@ -27,6 +27,11 @@ const (
 	allowedCachedStates = 8
 )
 
+type randaoDelta struct {
+	epoch uint64
+	delta libcommon.Hash
+}
+
 type finalityCheckpoints struct {
 	finalizedCheckpoint         solid.Checkpoint
 	currentJustifiedCheckpoint  solid.Checkpoint
@@ -66,6 +71,11 @@ type ForkChoiceStore struct {
 	preverifiedSizes    *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
 	finalityCheckpoints *lru.Cache[libcommon.Hash, finalityCheckpoints]
 	totalActiveBalances *lru.Cache[libcommon.Hash, uint64]
+	// Randao mixes
+	randaoMixesLists *lru.Cache[libcommon.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
+	randaoDeltas     *lru.Cache[libcommon.Hash, randaoDelta]       // small entry can be lots of elements.
+	// participation tracking
+	participation *lru.Cache[uint64, *solid.BitList] // epoch -> [partecipation]
 
 	mu sync.Mutex
 	// EL
@@ -103,6 +113,16 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		return nil, err
 	}
 
+	randaoMixesLists, err := lru.New[libcommon.Hash, solid.HashListSSZ](allowedCachedStates)
+	if err != nil {
+		return nil, err
+	}
+
+	randaoDeltas, err := lru.New[libcommon.Hash, randaoDelta](checkpointsPerCache)
+	if err != nil {
+		return nil, err
+	}
+
 	finalityCheckpoints, err := lru.New[libcommon.Hash, finalityCheckpoints](checkpointsPerCache)
 	if err != nil {
 		return nil, err
@@ -131,8 +151,18 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	if err != nil {
 		return nil, err
 	}
-	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
 
+	participation, err := lru.New[uint64, *solid.BitList](16)
+	if err != nil {
+		return nil, err
+	}
+
+	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
+
+	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
+	r := solid.NewHashVector(int(anchorState.BeaconConfig().EpochsPerHistoricalVector))
+	anchorState.RandaoMixes().CopyTo(r)
+	randaoMixesLists.Add(anchorRoot, r)
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -156,6 +186,9 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		preverifiedSizes:              preverifiedSizes,
 		finalityCheckpoints:           finalityCheckpoints,
 		totalActiveBalances:           totalActiveBalances,
+		randaoMixesLists:              randaoMixesLists,
+		randaoDeltas:                  randaoDeltas,
+		participation:                 participation,
 	}, nil
 }
 
@@ -235,7 +268,7 @@ func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 func (f *ForkChoiceStore) FinalizedSlot() uint64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch())
+	return f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch()) + (f.beaconCfg.SlotsPerEpoch - 1)
 }
 
 // FinalizedCheckpoint returns justified checkpoint
@@ -320,4 +353,49 @@ func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsC
 
 func (f *ForkChoiceStore) TotalActiveBalance(root libcommon.Hash) (uint64, bool) {
 	return f.totalActiveBalances.Get(root)
+}
+
+func (f *ForkChoiceStore) LowestAvaiableSlot() uint64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forkGraph.LowestAvaiableSlot()
+}
+
+func (f *ForkChoiceStore) RandaoMixes(blockRoot libcommon.Hash, out solid.HashListSSZ) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	relevantDeltas := map[uint64]randaoDelta{}
+	currentBlockRoot := blockRoot
+	var currentSlot uint64
+	for {
+		h, ok := f.forkGraph.GetHeader(currentBlockRoot)
+		if !ok {
+			return false
+		}
+		currentSlot = h.Slot
+		if f.randaoMixesLists.Contains(currentBlockRoot) {
+			break
+		}
+		randaoDelta, ok := f.randaoDeltas.Get(currentBlockRoot)
+		if !ok {
+			return false
+		}
+		currentBlockRoot = h.ParentRoot
+		if _, ok := relevantDeltas[currentSlot/f.beaconCfg.SlotsPerEpoch]; !ok {
+			relevantDeltas[currentSlot/f.beaconCfg.SlotsPerEpoch] = randaoDelta
+		}
+	}
+	randaoMixes, ok := f.randaoMixesLists.Get(currentBlockRoot)
+	if !ok {
+		return false
+	}
+	randaoMixes.CopyTo(out)
+	for epoch, delta := range relevantDeltas {
+		out.Set(int(epoch%f.beaconCfg.EpochsPerHistoricalVector), delta.delta)
+	}
+	return true
+}
+
+func (f *ForkChoiceStore) Partecipation(epoch uint64) (*solid.BitList, bool) {
+	return f.participation.Get(epoch)
 }

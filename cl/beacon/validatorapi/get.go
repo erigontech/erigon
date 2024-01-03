@@ -5,10 +5,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"unicode"
 
+	"github.com/gfx-labs/sse"
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -17,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func (v *ValidatorApiHandler) GetEthV1NodeSyncing(r *http.Request) (any, error) {
+func (v *ValidatorApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request) (any, error) {
 	_, slot, err := v.FC.GetHead()
 	if err != nil {
 		return nil, err
@@ -50,17 +51,14 @@ func (v *ValidatorApiHandler) GetEthV1NodeSyncing(r *http.Request) (any, error) 
 	}, nil
 }
 
-func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
-}
-
-func (v *ValidatorApiHandler) GetEthV1ConfigSpec(r *http.Request) (*clparams.BeaconChainConfig, error) {
+func (v *ValidatorApiHandler) GetEthV1ConfigSpec(w http.ResponseWriter, r *http.Request) (*clparams.BeaconChainConfig, error) {
 	if v.BeaconChainCfg == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "beacon config not found")
 	}
 	return v.BeaconChainCfg, nil
 }
 
-func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(r *http.Request) (any, error) {
+func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(w http.ResponseWriter, r *http.Request) (any, error) {
 	if v.GenesisCfg == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "genesis config not found")
 	}
@@ -75,7 +73,7 @@ func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(r *http.Request) (any, error
 	}, nil
 }
 
-func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdFork(r *http.Request) (any, error) {
+func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdFork(w http.ResponseWriter, r *http.Request) (any, error) {
 	stateId := chi.URLParam(r, "state_id")
 	state, err := v.privateGetStateFromStateId(stateId)
 	if err != nil {
@@ -95,7 +93,8 @@ func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdFork(r *http.Request) (
 		},
 	}, nil
 }
-func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdValidatorsValidatorId(r *http.Request) (any, error) {
+
+func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdValidatorsValidatorId(w http.ResponseWriter, r *http.Request) (any, error) {
 	stateId := chi.URLParam(r, "state_id")
 	// grab the correct state for the given state id
 	beaconState, err := v.privateGetStateFromStateId(stateId)
@@ -206,44 +205,59 @@ func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdValidatorsValidatorId(r
 	}, nil
 }
 
-func (v *ValidatorApiHandler) privateGetStateFromStateId(stateId string) (*state.CachingBeaconState, error) {
-	switch {
-	case stateId == "head":
-		// Now check the head
-		headRoot, _, err := v.FC.GetHead()
-		if err != nil {
-			return nil, err
-		}
-		return v.FC.GetStateAtBlockRoot(headRoot, true)
-	case stateId == "genesis":
-		// not supported
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "genesis block not found")
-	case stateId == "finalized":
-		return v.FC.GetStateAtBlockRoot(v.FC.FinalizedCheckpoint().BlockRoot(), true)
-	case stateId == "justified":
-		return v.FC.GetStateAtBlockRoot(v.FC.JustifiedCheckpoint().BlockRoot(), true)
-	case strings.HasPrefix(stateId, "0x"):
-		// assume is hex has, so try to parse
-		hsh := common.Hash{}
-		err := hsh.UnmarshalText([]byte(stateId))
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("Invalid state ID: %s", stateId))
-		}
-		return v.FC.GetStateAtStateRoot(hsh, true)
-	case isInt(stateId):
-		// ignore the error bc isInt check succeeded. yes this doesn't protect for overflow, they will request slot 0 and it will fail. good
-		val, _ := strconv.ParseUint(stateId, 10, 64)
-		return v.FC.GetStateAtSlot(val, true)
-	default:
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("Invalid state ID: %s", stateId))
+func (v *ValidatorApiHandler) GetEthV1EthNodeSyncing(w http.ResponseWriter, r *http.Request) (any, error) {
+	// TODO: populate this map
+	o := map[string]any{
+		"data": map[string]any{},
 	}
+	return o, nil
+}
+func (v *ValidatorApiHandler) GetEthV3ValidatorBlocksSlot(w http.ResponseWriter, r *http.Request) (any, error) {
+	// TODO: populate this map
+	o := map[string]any{
+		"data": map[string]any{},
+	}
+
+	slotString := chi.URLParam(r, "slot")
+	slot, err := strconv.ParseUint(slotString, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("fail to parse slot: %w", err)
+	}
+	randaoRevealString := r.URL.Query().Get("randao_reveal")
+	randaoReveal, err := hexutil.Decode(randaoRevealString)
+	if err != nil {
+		return nil, fmt.Errorf("fail to parse randao_reveal: %w", err)
+	}
+	graffitiString := r.URL.Query().Get("randao_reveal")
+	if graffitiString == "" {
+		graffitiString = "0x"
+	}
+	graffiti, err := hexutil.Decode(graffitiString)
+	if err != nil {
+		return nil, fmt.Errorf("fail to parse graffiti: %w", err)
+	}
+	skip_randao_verification := r.URL.Query().Has("skip_randao_verification")
+	//if skip_randao_verification {
+	//  if isInfinity(randaoReveal) {
+	//   return nil, beaconhttp.NewEndpointError(400, "randao reveal must be set to infinity if skip randao verification is set")
+	//  }
+	//}
+	_, _, _, _ = slot, graffiti, randaoReveal, skip_randao_verification
+	return o, nil
 }
 
-func isInt(s string) bool {
-	for _, c := range s {
-		if !unicode.IsDigit(c) {
-			return false
-		}
+func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
+	sink, err := sse.DefaultUpgrader.Upgrade(w, r)
+	if err != nil {
+		// OK to ignore this error.
+		return
 	}
-	return true
+	topics := r.URL.Query()["topics"]
+	for _, topic := range topics {
+		sink.Encode(&sse.Event{
+			Event: []byte(topic),
+			Data:  nil,
+		})
+		// OK to ignore this error. maybe should log it later
+	}
 }

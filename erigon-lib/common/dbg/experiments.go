@@ -47,6 +47,11 @@ var (
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+
+	// allow simultaneous build of multiple snapshot types.
+	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
+
+	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
 )
 
 func ReadMemStats(m *runtime.MemStats) {

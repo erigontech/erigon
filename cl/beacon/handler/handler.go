@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -28,10 +29,15 @@ type ApiHandler struct {
 	operationsPool  pool.OperationsPool
 	syncedData      *synced_data.SyncedDataManager
 	stateReader     *historical_states_reader.HistoricalStatesReader
+
+	// pools
+	randaoMixesPool sync.Pool
 }
 
 func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader}
+	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
+		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
+	}}}
 }
 
 func (a *ApiHandler) init() {
@@ -77,8 +83,8 @@ func (a *ApiHandler) init() {
 				})
 				r.Get("/node/syncing", http.NotFound)
 				r.Route("/states", func(r chi.Router) {
-					r.Get("/head/validators/{index}", http.NotFound) // otterscan
 					r.Route("/{state_id}", func(r chi.Router) {
+						r.Get("/randao", beaconhttp.HandleEndpointFunc(a.getRandao))
 						r.Get("/committees", beaconhttp.HandleEndpointFunc(a.getCommittees))
 						r.Get("/sync_committees", beaconhttp.HandleEndpointFunc(a.getSyncCommittees)) // otterscan
 						r.Get("/finality_checkpoints", beaconhttp.HandleEndpointFunc(a.getFinalityCheckpoints))
@@ -93,9 +99,9 @@ func (a *ApiHandler) init() {
 			})
 			r.Route("/validator", func(r chi.Router) {
 				r.Route("/duties", func(r chi.Router) {
-					r.Post("/attester/{epoch}", http.NotFound)
+					r.Post("/attester/{epoch}", beaconhttp.HandleEndpointFunc(a.getAttesterDuties))
 					r.Get("/proposer/{epoch}", beaconhttp.HandleEndpointFunc(a.getDutiesProposer))
-					r.Post("/sync/{epoch}", http.NotFound)
+					r.Post("/sync/{epoch}", beaconhttp.HandleEndpointFunc(a.getSyncDuties))
 				})
 				r.Get("/blinded_blocks/{slot}", http.NotFound)
 				r.Get("/attestation_data", http.NotFound)
@@ -106,6 +112,7 @@ func (a *ApiHandler) init() {
 				r.Get("/sync_committee_contribution", http.NotFound)
 				r.Post("/contribution_and_proofs", http.NotFound)
 				r.Post("/prepare_beacon_proposer", http.NotFound)
+				r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 			})
 		})
 		r.Route("/v2", func(r chi.Router) {
