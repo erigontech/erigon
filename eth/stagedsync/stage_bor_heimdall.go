@@ -41,7 +41,7 @@ import (
 
 const (
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
+	InMemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 	extraVanity             = 32   // Fixed number of extra-data prefix bytes reserved for signer vanity
 	extraSeal               = 65   // Fixed number of extra-data suffix bytes reserved for signer seal
@@ -246,7 +246,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
-	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
 	if err != nil {
 		return err
 	}
@@ -732,7 +732,7 @@ func initValidatorSets(
 		g.SetLimit(estimate.AlmostAllCPUs())
 		defer g.Wait()
 
-		batchSize := 128 // must be < inmemorySignatures
+		batchSize := 128 // must be < InMemorySignatures
 		initialHeaders := make([]*types.Header, 0, batchSize)
 		parentHeader := zeroHeader
 		for i := uint64(1); i <= blockNum; i++ {
@@ -740,7 +740,7 @@ func initValidatorSets(
 			{
 				// `snap.apply` bottleneck - is recover of signer.
 				// to speedup: recover signer in background goroutines and save in `sigcache`
-				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
+				// `batchSize` < `InMemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 				g.Go(func() error {
 					if header == nil {
 						return nil

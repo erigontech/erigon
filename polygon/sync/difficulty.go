@@ -2,6 +2,7 @@ package sync
 
 import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -20,13 +21,16 @@ type difficultyCalculatorImpl struct {
 	borConfig       *borcfg.BorConfig
 	span            *heimdallspan.HeimdallSpan
 	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address]
+
+	log log.Logger
 }
 
 func NewDifficultyCalculator(
 	borConfig *borcfg.BorConfig,
 	span *heimdallspan.HeimdallSpan,
+	log log.Logger,
 ) DifficultyCalculator {
-	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](4096)
+	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
@@ -34,6 +38,8 @@ func NewDifficultyCalculator(
 		borConfig:       borConfig,
 		span:            span,
 		signaturesCache: signaturesCache,
+
+		log: log,
 	}
 }
 
@@ -47,7 +53,7 @@ func (impl *difficultyCalculatorImpl) HeaderDifficulty(header *types.Header) (ui
 
 	sprintCount := impl.borConfig.CalculateSprintNumber(header.Number.Uint64())
 	if sprintCount > 0 {
-		validatorSet.IncrementProposerPriority(int(sprintCount), log.New())
+		validatorSet.IncrementProposerPriority(int(sprintCount), impl.log)
 	}
 
 	return validatorSet.Difficulty(signer)

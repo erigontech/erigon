@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"github.com/ledgerwatch/log/v3"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -13,7 +14,8 @@ import (
 func TestHeaderDifficultyNoSignature(t *testing.T) {
 	borConfig := borcfg.BorConfig{}
 	span := heimdallspan.HeimdallSpan{}
-	calc := NewDifficultyCalculator(&borConfig, &span)
+	logger := log.New()
+	calc := NewDifficultyCalculator(&borConfig, &span, logger)
 	_, err := calc.HeaderDifficulty(new(types.Header))
 	require.ErrorContains(t, err, "signature suffix missing")
 }

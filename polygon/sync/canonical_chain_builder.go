@@ -147,9 +147,10 @@ func mapSlice[T any, U any](s []T, mapFunc func(T) U) []U {
 func (impl *canonicalChainBuilderImpl) updateTipIfNeeded(tipCandidate *forkTreeNode) {
 	if tipCandidate.totalDifficulty > impl.tip.totalDifficulty {
 		impl.tip = tipCandidate
-	} else if tipCandidate.totalDifficulty == impl.tip.totalDifficulty {
-		// TODO: is it possible? which one is selected?
 	}
+	// else if tipCandidate.totalDifficulty == impl.tip.totalDifficulty {
+	// TODO: is it possible? which one is selected?
+	// }
 }
 
 func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
@@ -219,7 +220,12 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 			return fmt.Errorf("canonicalChainBuilderImpl.Connect: header difficulty error %w", err)
 		}
 		if (header.Difficulty == nil) || (header.Difficulty.Uint64() != difficulty) {
-			return &bor.WrongDifficultyError{header.Number.Uint64(), difficulty, header.Difficulty.Uint64(), []byte{}}
+			return &bor.WrongDifficultyError{
+				Number:   header.Number.Uint64(),
+				Expected: difficulty,
+				Actual:   header.Difficulty.Uint64(),
+				Signer:   []byte{},
+			}
 		}
 
 		slot := producerSlotIndex(difficulty)
