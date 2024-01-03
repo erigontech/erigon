@@ -38,7 +38,6 @@ func fromToml(in []byte) (out Preverified) {
 	if err := toml.Unmarshal(in, &outMap); err != nil {
 		panic(err)
 	}
-	fmt.Printf("[dbg] inMap: %s\n", string(in))
 	return doSort(outMap)
 }
 func doSort(in preverified) Preverified {
@@ -75,6 +74,8 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 				} else {
 					fmt.Printf("[dbg] skip1: %s\n", p.Name)
 				}
+			} else {
+				fmt.Printf("[dbg] skip11: %s\n", p.Name)
 			}
 		}
 
@@ -89,6 +90,8 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 					} else {
 						fmt.Printf("[dbg] skip2: %s\n", p.Name)
 					}
+				} else {
+					fmt.Printf("[dbg] skip21: %s\n", p.Name)
 				}
 			}
 		}
