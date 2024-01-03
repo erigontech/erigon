@@ -38,6 +38,7 @@ func fromToml(in []byte) (out Preverified) {
 	if err := toml.Unmarshal(in, &outMap); err != nil {
 		panic(err)
 	}
+	fmt.Printf("[dbg] inMap: %s\n", string(in))
 	return doSort(outMap)
 }
 func doSort(in preverified) Preverified {
