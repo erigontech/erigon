@@ -33,6 +33,8 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 		CurrentJustifiedCheckpoint:  s.CurrentJustifiedCheckpoint(),
 		PreviousJustifiedCheckpoint: s.PreviousJustifiedCheckpoint(),
 		FinalizedCheckpoint:         s.FinalizedCheckpoint(),
+		HistoricalSummariesLength:   s.HistoricalSummariesLength(),
+		HistoricalRootsLength:       s.HistoricalRootsLength(),
 	}
 }
 

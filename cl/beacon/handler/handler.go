@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
@@ -29,15 +30,16 @@ type ApiHandler struct {
 	operationsPool  pool.OperationsPool
 	syncedData      *synced_data.SyncedDataManager
 	stateReader     *historical_states_reader.HistoricalStatesReader
+	sentinel        sentinel.SentinelClient
 
 	// pools
 	randaoMixesPool sync.Pool
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader) *ApiHandler {
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient) *ApiHandler {
 	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
 		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
-	}}}
+	}}, sentinel: sentinel}
 }
 
 func (a *ApiHandler) init() {
@@ -73,13 +75,17 @@ func (a *ApiHandler) init() {
 				r.Get("/genesis", beaconhttp.HandleEndpointFunc(a.getGenesis))
 				r.Get("/blinded_blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlindedBlock))
 				r.Route("/pool", func(r chi.Router) {
-					r.Post("/attestations", http.NotFound)
-					r.Get("/voluntary_exits", beaconhttp.HandleEndpointFunc(a.poolVoluntaryExits))
-					r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.poolAttesterSlashings))
-					r.Get("/proposer_slashings", beaconhttp.HandleEndpointFunc(a.poolProposerSlashings))
-					r.Get("/bls_to_execution_changes", beaconhttp.HandleEndpointFunc(a.poolBlsToExecutionChanges))
-					r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.poolAttestations))
-					r.Post("/sync_committees", http.NotFound)
+					r.Get("/voluntary_exits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolVoluntaryExits))
+					r.Post("/voluntary_exits", a.PostEthV1BeaconPoolVoluntaryExits)
+					r.Get("/attester_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttesterSlashings))
+					r.Post("/attester_slashings", a.PostEthV1BeaconPoolAttesterSlashings)
+					r.Get("/proposer_slashings", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolProposerSlashings))
+					r.Post("/proposer_slashings", a.PostEthV1BeaconPoolProposerSlashings)
+					r.Get("/bls_to_execution_changes", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolBLSExecutionChanges))
+					r.Post("/bls_to_execution_changes", a.PostEthV1BeaconPoolBlsToExecutionChanges)
+					r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttestations))
+					r.Post("/attestations", http.NotFound)    // TODO
+					r.Post("/sync_committees", http.NotFound) // TODO
 				})
 				r.Get("/node/syncing", http.NotFound)
 				r.Route("/states", func(r chi.Router) {
