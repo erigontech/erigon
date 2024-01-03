@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/cors"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/beacon/validatorapi"
@@ -25,6 +26,14 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 	}
 	defer listener.Close()
 	mux := chi.NewRouter()
+
+	mux.Use(cors.Handler(
+		cors.Options{
+			AllowedOrigins:   routerCfg.AllowedOrigins,
+			AllowedMethods:   routerCfg.AllowedMethods,
+			AllowCredentials: routerCfg.AllowCredentials,
+			MaxAge:           4,
+		}))
 	// enforce json content type
 	mux.Use(func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

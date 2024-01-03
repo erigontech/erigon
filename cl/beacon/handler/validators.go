@@ -463,7 +463,7 @@ func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatu
 			}
 		}
 		first = false
-		if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, i, status.String(), balances.Get(i), v.PublicKey(), v.WithdrawalCredentials().String(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
+		if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, i, status.String(), balances.Get(i), v.PublicKey(), v.WithdrawalCredentials(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
 			return false
 		}
 		return true
@@ -487,7 +487,7 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 	v := validators.Get(int(idx))
 	status := validatorStatusFromValidator(v, stateEpoch, balances.Get(int(idx)))
 
-	if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, idx, status.String(), balances.Get(int(idx)), v.PublicKey(), v.WithdrawalCredentials().String(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
+	if _, err = b.WriteString(fmt.Sprintf(validatorJsonTemplate, idx, status.String(), balances.Get(int(idx)), v.PublicKey(), v.WithdrawalCredentials(), v.EffectiveBalance(), v.Slashed(), v.ActivationEligibilityEpoch(), v.ActivationEpoch(), v.ExitEpoch(), v.WithdrawableEpoch())); err != nil {
 		return nil, err
 	}
 

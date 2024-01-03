@@ -44,6 +44,7 @@ type SnapshotDownloadStatistics struct {
 	SegmentsDownloading  map[string]SegmentDownloadStatistics `json:"segmentsDownloading"`
 	SegmentIndexing      SnapshotIndexingStatistics           `json:"segmentsIndexing"`
 	TorrentMetadataReady int32                                `json:"torrentMetadataReady"`
+	LogPrefix            string                               `json:"logPrefix"`
 }
 
 type SegmentDownloadStatistics struct {
