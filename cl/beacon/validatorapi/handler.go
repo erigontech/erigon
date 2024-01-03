@@ -48,7 +48,9 @@ func (v *ValidatorApiHandler) Route(r chi.Router) {
 					r.Post("/attestations", beaconhttp.HandleEndpointFunc(v.PostEthV1BeaconPoolAttestations))
 					r.Post("/sync_committees", beaconhttp.HandleEndpointFunc(v.PostEthV1BeaconPoolAttestations))
 				})
-				r.Get("/node/syncing", beaconhttp.HandleEndpointFunc(v.GetEthV1NodeSyncing))
+			})
+			r.Route("/node", func(r chi.Router) {
+				r.Get("/syncing", beaconhttp.HandleEndpointFunc(v.GetEthV1NodeSyncing))
 			})
 			r.Get("/events", v.EventSourceGetV1Events)
 			r.Route("/validator", func(r chi.Router) {
