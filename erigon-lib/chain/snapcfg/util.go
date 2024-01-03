@@ -128,7 +128,7 @@ func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 			if v, err := strconv.ParseUint(vp[1:], 10, 8); err == nil {
 				version = uint8(v)
 			} else {
-				fmt.Printf("[dbg] skip2: %d\n", fileName)
+				fmt.Printf("[dbg] skip2: %s\n", fileName)
 
 			}
 		}
