@@ -720,8 +720,6 @@ func doBodiesIncrement(cliCtx *cli.Context) error {
 		l = append(l, f)
 	}
 	migrateSingleBody := func(srcF, dstF string) error {
-		fmt.Printf("[dbg] %s -> %s\n", srcF, dstF)
-		return nil
 		src, err := compress.NewDecompressor(srcF)
 		if err != nil {
 			return err
