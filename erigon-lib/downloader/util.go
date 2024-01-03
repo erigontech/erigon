@@ -254,7 +254,6 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("[dbg] alex: %t\n", dbg.DownloaderOnlyBlocks)
 	if dbg.DownloaderOnlyBlocks {
 		return files, nil
 	}

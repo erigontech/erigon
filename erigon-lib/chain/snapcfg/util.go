@@ -2,7 +2,6 @@ package snapcfg
 
 import (
 	_ "embed"
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -61,7 +60,6 @@ func SnapshotVersion(version uint8) {
 
 func newCfg(preverified Preverified, version uint8) *Cfg {
 
-	fmt.Printf("[dbg] newCfg: %d\n", version)
 	if version == 0 {
 		version = snapshotVersion
 
@@ -96,15 +94,12 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 	}
 
 	maxBlockNum, version := cfgInfo(preverified, version)
-	fmt.Printf("[dbg] version: %d\n", version)
 	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, Version: version}
 }
 
 func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 	max := uint64(0)
 	version := defaultVersion
-
-	fmt.Printf("[dbg] cfgInfo: %d\n", defaultVersion)
 
 	for _, p := range preverified {
 		_, fileName := filepath.Split(p.Name)
@@ -128,8 +123,6 @@ func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
 		if vp := parts[0]; strings.HasPrefix(vp, "v") {
 			if v, err := strconv.ParseUint(vp[1:], 10, 8); err == nil {
 				version = uint8(v)
-			} else {
-				fmt.Printf("[dbg] skip2: %s\n", fileName)
 			}
 		}
 	}
