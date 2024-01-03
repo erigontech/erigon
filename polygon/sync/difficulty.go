@@ -4,9 +4,9 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	heimdallspan "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -17,13 +17,13 @@ type DifficultyCalculator interface {
 }
 
 type difficultyCalculatorImpl struct {
-	borConfig       *chain.BorConfig
+	borConfig       *borcfg.BorConfig
 	span            *heimdallspan.HeimdallSpan
 	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
 
 func NewDifficultyCalculator(
-	borConfig *chain.BorConfig,
+	borConfig *borcfg.BorConfig,
 	span *heimdallspan.HeimdallSpan,
 ) DifficultyCalculator {
 	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](4096)

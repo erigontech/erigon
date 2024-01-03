@@ -5,13 +5,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	heimdallspan "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func TestHeaderDifficultyNoSignature(t *testing.T) {
-	borConfig := chain.BorConfig{}
+	borConfig := borcfg.BorConfig{}
 	span := heimdallspan.HeimdallSpan{}
 	calc := NewDifficultyCalculator(&borConfig, &span)
 	_, err := calc.HeaderDifficulty(new(types.Header))

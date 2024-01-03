@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
@@ -56,6 +57,7 @@ type BorHeimdallCfg struct {
 	snapDb           kv.RwDB // Database to store and retrieve snapshot checkpoints
 	miningState      MiningState
 	chainConfig      chain.Config
+	borConfig        *borcfg.BorConfig
 	heimdallClient   heimdall.IHeimdallClient
 	blockReader      services.FullBlockReader
 	hd               *headerdownload.HeaderDownload
@@ -79,11 +81,17 @@ func StageBorHeimdallCfg(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) BorHeimdallCfg {
+	var borConfig *borcfg.BorConfig
+	if chainConfig.Bor != nil {
+		borConfig = chainConfig.Bor.(*borcfg.BorConfig)
+	}
+
 	return BorHeimdallCfg{
 		db:               db,
 		snapDb:           snapDb,
 		miningState:      miningState,
 		chainConfig:      chainConfig,
+		borConfig:        borConfig,
 		heimdallClient:   heimdallClient,
 		blockReader:      blockReader,
 		hd:               hd,
@@ -106,7 +114,7 @@ func BorHeimdallForward(
 ) (err error) {
 	processStart := time.Now()
 
-	if cfg.chainConfig.Bor == nil {
+	if cfg.borConfig == nil {
 		return
 	}
 	if cfg.heimdallClient == nil {
@@ -226,7 +234,7 @@ func BorHeimdallForward(
 		endSpanID = span.IDAt(headNumber + 1)
 	}
 
-	if span.BlockInLastSprintOfSpan(headNumber, cfg.chainConfig.Bor) {
+	if span.BlockInLastSprintOfSpan(headNumber, cfg.borConfig) {
 		endSpanID++
 	}
 
@@ -291,19 +299,19 @@ func BorHeimdallForward(
 				}
 			}
 
-			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
+			sprintLength := cfg.borConfig.CalculateSprint(blockNum)
 			spanID := span.IDAt(blockNum)
 			if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
-				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.borConfig); err != nil {
 					return err
 				}
 			}
 		}
 
-		if blockNum > 0 && blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
+		if blockNum > 0 && blockNum%cfg.borConfig.CalculateSprint(blockNum) == 0 {
 			var callTime time.Duration
 			var records int
-			if lastEventId, records, callTime, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
+			if lastEventId, records, callTime, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.borConfig, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 
@@ -315,10 +323,10 @@ func BorHeimdallForward(
 
 		if header != nil {
 			if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
-				snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
+				snap = loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
 
 				if snap == nil {
-					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
+					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.borConfig,
 						cfg.heimdallClient, chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
 					if err != nil {
@@ -326,7 +334,7 @@ func BorHeimdallForward(
 					}
 				}
 
-				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
+				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.borConfig, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
 					return fmt.Errorf("can't persist validator sets: %w", err)
 				}
 			}
@@ -359,7 +367,7 @@ func checkHeaderExtraData(
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	header *types.Header,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 ) error {
 	spanID := span.IDAt(blockNum + 1)
 	spanBytes := chain.BorSpan(spanID)
@@ -394,7 +402,7 @@ func checkHeaderExtraData(
 func fetchAndWriteBorEvents(
 	ctx context.Context,
 	blockReader services.FullBlockReader,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	header *types.Header,
 	lastEventId uint64,
 	chainID string,
@@ -523,7 +531,7 @@ func fetchAndWriteSpans(
 	return spanId, nil
 }
 
-func loadSnapshot(blockNum uint64, hash libcommon.Hash, config *chain.BorConfig, recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
+func loadSnapshot(blockNum uint64, hash libcommon.Hash, config *borcfg.BorConfig, recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
 	logger log.Logger) *bor.Snapshot {
@@ -548,7 +556,7 @@ func persistValidatorSets(
 	u Unwinder,
 	tx kv.Tx,
 	blockReader services.FullBlockReader,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	hash libcommon.Hash,
@@ -665,7 +673,7 @@ func initValidatorSets(
 	ctx context.Context,
 	tx kv.RwTx,
 	blockReader services.FullBlockReader,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	heimdallClient heimdall.IHeimdallClient,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
@@ -767,7 +775,7 @@ func initValidatorSets(
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
-	if cfg.chainConfig.Bor == nil {
+	if cfg.borConfig == nil {
 		return
 	}
 	useExternalTx := tx != nil
@@ -840,7 +848,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 }
 
 func BorHeimdallPrune(s *PruneState, ctx context.Context, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
-	if cfg.chainConfig.Bor == nil {
+	if cfg.borConfig == nil {
 		return
 	}
 	return

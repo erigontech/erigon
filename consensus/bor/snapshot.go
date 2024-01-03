@@ -8,16 +8,16 @@ import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config   *chain.BorConfig                           // Consensus engine parameters to fine tune behavior
+	config   *borcfg.BorConfig                          // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache[common.Hash, common.Address] // Cache of recent block signatures to speed up ecrecover
 
 	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
@@ -39,7 +39,7 @@ const BorSeparate = "BorSeparate"
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
 func NewSnapshot(
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	sigcache *lru.ARCCache[common.Hash, common.Address],
 	number uint64,
 	hash common.Hash,
@@ -58,7 +58,7 @@ func NewSnapshot(
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func LoadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache[common.Hash, common.Address], db kv.RwDB, hash common.Hash) (*Snapshot, error) {
+func LoadSnapshot(config *borcfg.BorConfig, sigcache *lru.ARCCache[common.Hash, common.Address], db kv.RwDB, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
