@@ -10,9 +10,9 @@ import (
 )
 
 type genesisResponse struct {
-	GenesisTime          uint64           `json:"genesis_time,omitempty,string"`
-	GenesisValidatorRoot common.Hash      `json:"genesis_validators_root,omitempty"`
-	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version,omitempty"`
+	GenesisTime          uint64           `json:"genesis_time,string"`
+	GenesisValidatorRoot common.Hash      `json:"genesis_validators_root"`
+	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version"`
 }
 
 func (a *ApiHandler) getGenesis(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
