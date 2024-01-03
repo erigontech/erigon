@@ -72,8 +72,6 @@ func MiningStages(
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from tx pool",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				//fmt.Println("SpawnMiningExecStage")
-				//defer fmt.Println("SpawnMiningExecStage", "DONE")
 				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },

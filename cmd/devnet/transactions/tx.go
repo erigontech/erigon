@@ -3,6 +3,7 @@ package transactions
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -361,7 +362,7 @@ func signEIP1559TxsLowerThanBaseFee(ctx context.Context, n int, baseFeePerGas ui
 
 		transaction := types.NewEIP1559Transaction(chainId, *nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
 
-		devnet.Logger(ctx).Info("LOWER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
+		devnet.Logger(ctx).Trace("LOWER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
 
 		signedTransaction, err := types.SignTx(transaction, signer, accounts.SigKey(fromAddress))
 
@@ -379,6 +380,8 @@ func signEIP1559TxsLowerThanBaseFee(ctx context.Context, n int, baseFeePerGas ui
 // signEIP1559TxsHigherThanBaseFee creates amount number of transactions with gasFeeCap higher than baseFeePerGas
 func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas uint64, nonce *uint64, toAddress, fromAddress libcommon.Address) ([]types.Transaction, error) {
 	var signedTransactions []types.Transaction
+
+	baseFeePerGas = baseFeePerGas + uint64(math.Ceil((float64(baseFeePerGas) * 0.3)))
 
 	var (
 		minFeeCap = baseFeePerGas
@@ -402,7 +405,7 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 
 		transaction := types.NewEIP1559Transaction(chainId, *nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
 
-		devnet.Logger(ctx).Info("HIGHER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
+		devnet.Logger(ctx).Trace("HIGHER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
 
 		signerKey := accounts.SigKey(fromAddress)
 		if signerKey == nil {
@@ -424,7 +427,7 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 func SendManyTransactions(ctx context.Context, signedTransactions []types.Transaction) ([]libcommon.Hash, error) {
 	logger := devnet.Logger(ctx)
 
-	logger.Info("Sending multiple transactions to the txpool...")
+	logger.Info(fmt.Sprintf("Sending %d transactions to the txpool...", len(signedTransactions)))
 	hashes := make([]libcommon.Hash, len(signedTransactions))
 
 	for idx, tx := range signedTransactions {

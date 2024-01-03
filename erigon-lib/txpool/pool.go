@@ -126,7 +126,6 @@ type metaTx struct {
 	timestamp                 uint64 // when it was added to pool
 	subPool                   SubPoolMarker
 	currentSubPool            SubPoolType
-	alreadyYielded            bool
 	minedBlockNum             uint64
 }
 
@@ -211,6 +210,7 @@ type TxPool struct {
 	cfg                     txpoolcfg.Config
 	chainID                 uint256.Int
 	lastSeenBlock           atomic.Uint64
+	lastSeenCond            *sync.Cond
 	lastFinalizedBlock      atomic.Uint64
 	started                 atomic.Bool
 	pendingBaseFee          atomic.Uint64
@@ -249,8 +249,11 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		tracedSenders[common.BytesToAddress([]byte(sender))] = struct{}{}
 	}
 
+	lock := &sync.Mutex{}
+
 	res := &TxPool{
-		lock:                    &sync.Mutex{},
+		lock:                    lock,
+		lastSeenCond:            sync.NewCond(lock),
 		byHash:                  map[string]*metaTx{},
 		isLocalLRU:              localsHistory,
 		discardReasonsLRU:       discardHistory,
@@ -314,19 +317,29 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	}
 	defer coreTx.Rollback()
 
-	p.lastSeenBlock.Store(stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight)
 	if !p.started.Load() {
 		if err := p.fromDBWithLock(ctx, tx, coreTx); err != nil {
 			return fmt.Errorf("OnNewBlock: loading txs from DB: %w", err)
 		}
 	}
+
 	cacheView, err := cache.View(ctx, coreTx)
+
 	if err != nil {
 		return err
 	}
 
+	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
+
 	p.lock.Lock()
-	defer p.lock.Unlock()
+	defer func() {
+		if err == nil {
+			p.lastSeenBlock.Store(block)
+			p.lastSeenCond.Broadcast()
+		}
+
+		p.lock.Unlock()
+	}()
 
 	if assert.Enable {
 		if _, err := kvcache.AssertCheckValues(ctx, coreTx, cache); err != nil {
@@ -350,10 +363,13 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	p.setBlobFee(pendingBlobFee)
 
 	p.blockGasLimit.Store(stateChanges.BlockGasLimit)
-	if err := p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs, p.logger); err != nil {
+
+	if err = p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs, p.logger); err != nil {
 		return err
 	}
+
 	_, unwindTxs, err = p.validateTxs(&unwindTxs, cacheView)
+
 	if err != nil {
 		return err
 	}
@@ -371,21 +387,25 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	if err := p.processMinedFinalizedBlobs(coreTx, minedTxs.Txs, stateChanges.FinalizedBlock); err != nil {
-		return err
-	}
-	if err := removeMined(p.all, minedTxs.Txs, p.pending, p.baseFee, p.queued, p.discardLocked, p.logger); err != nil {
+	if err = p.processMinedFinalizedBlobs(coreTx, minedTxs.Txs, stateChanges.FinalizedBlock); err != nil {
 		return err
 	}
 
-	//p.logger.Debug("[txpool] new block", "unwinded", len(unwindTxs.txs), "mined", len(minedTxs.txs), "baseFee", baseFee, "blockHeight", blockHeight)
+	if err = removeMined(p.all, minedTxs.Txs, p.pending, p.baseFee, p.queued, p.discardLocked, p.logger); err != nil {
+		return err
+	}
 
-	announcements, err := addTxsOnNewBlock(p.lastSeenBlock.Load(), cacheView, stateChanges, p.senders, unwindTxs, /* newTxs */
-		pendingBaseFee, stateChanges.BlockGasLimit,
-		p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, p.logger)
+	var announcements types.Announcements
+
+	announcements, err = addTxsOnNewBlock(block, cacheView, stateChanges, p.senders, unwindTxs, /* newTxs */
+		pendingBaseFee, stateChanges.BlockGasLimit, p.pending, p.baseFee, p.queued, p.all, p.byHash, p.addLocked, p.discardLocked, p.logger)
+
 	if err != nil {
 		return err
 	}
+
+	available := len(p.pending.best.ms)
+
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
@@ -405,7 +425,8 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	//p.logger.Info("[txpool] new block", "number", p.lastSeenBlock.Load(), "pendngBaseFee", pendingBaseFee, "in", time.Since(t))
+	p.logger.Debug("[txpool] new block", "block", block, "unwound", len(unwindTxs.Txs), "mined", len(minedTxs.Txs), "baseFee", baseFee, "available-pre", available, "available-post", len(p.pending.best.ms))
+
 	return nil
 }
 
@@ -610,20 +631,30 @@ func (p *TxPool) IsLocal(idHash []byte) bool {
 func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.AddPeer(peerID) }
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
-func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
+func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
 	// First wait for the corresponding block to arrive
-	if p.lastSeenBlock.Load() < onTopOf {
-		return false, 0, nil // Too early
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
+		p.logger.Debug("[txpool] waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "txAvailable", len(p.pending.best.ms))
+		p.lastSeenCond.Wait()
 	}
 
-	isShanghai := p.isShanghai() || p.isAgra()
 	best := p.pending.best
+
+	isShanghai := p.isShanghai() || p.isAgra()
 
 	txs.Resize(uint(cmp.Min(int(n), len(best.ms))))
 	var toRemove []*metaTx
 	count := 0
+	i := 0
 
-	for i := 0; count < int(n) && i < len(best.ms); i++ {
+	defer func() {
+		p.logger.Debug("[txpool] processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
+	}()
+
+	for ; count < int(n) && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
 		if availableGas < fixedgas.TxGas {
 			break
@@ -631,7 +662,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 
 		mt := best.ms[i]
 
-		if toSkip.Contains(mt.Tx.IDHash) {
+		if yielded.Contains(mt.Tx.IDHash) {
 			continue
 		}
 
@@ -669,7 +700,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 		txs.Txs[count] = rlpTx
 		copy(txs.Senders.At(count), sender.Bytes())
 		txs.IsLocal[count] = isLocal
-		toSkip.Add(mt.Tx.IDHash) // TODO: Is this unnecessary
+		yielded.Add(mt.Tx.IDHash)
 		count++
 	}
 
@@ -682,25 +713,12 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	return true, count, nil
 }
 
-func (p *TxPool) ResetYieldedStatus() {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	best := p.pending.best
-	for i := 0; i < len(best.ms); i++ {
-		best.ms[i].alreadyYielded = false
-	}
-}
-
 func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, toSkip mapset.Set[[32]byte]) (bool, int, error) {
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	return p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, toSkip)
 }
 
 func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, set)
 	return onTime, err
 }
@@ -1724,7 +1742,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				var remoteTxSizes []uint32
 				var remoteTxHashes types.Hashes
 				var remoteTxRlps [][]byte
-				var broadCastedHashes types.Hashes
+				var broadcastHashes types.Hashes
 				slotsRlp := make([][]byte, 0, announcements.Len())
 
 				if err := db.View(ctx, func(tx kv.Tx) error {
@@ -1748,7 +1766,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 							// "Nodes MUST NOT automatically broadcast blob transactions to their peers" - EIP-4844
 							if t != types.BlobTxType {
 								localTxRlps = append(localTxRlps, slotRlp)
-								broadCastedHashes = append(broadCastedHashes, hash...)
+								broadcastHashes = append(broadcastHashes, hash...)
 							}
 						} else {
 							remoteTxTypes = append(remoteTxTypes, t)
@@ -1775,12 +1793,12 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 				const localTxsBroadcastMaxPeers uint64 = 10
 				txSentTo := send.BroadcastPooledTxs(localTxRlps, localTxsBroadcastMaxPeers)
 				for i, peer := range txSentTo {
-					p.logger.Info("Local tx broadcasted", "txHash", hex.EncodeToString(broadCastedHashes.At(i)), "to peer", peer)
+					p.logger.Trace("Local tx broadcast", "txHash", hex.EncodeToString(broadcastHashes.At(i)), "to peer", peer)
 				}
 				hashSentTo := send.AnnouncePooledTxs(localTxTypes, localTxSizes, localTxHashes, localTxsBroadcastMaxPeers*2)
 				for i := 0; i < localTxHashes.Len(); i++ {
 					hash := localTxHashes.At(i)
-					p.logger.Info("Local tx announced", "txHash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
+					p.logger.Trace("Local tx announced", "txHash", hex.EncodeToString(hash), "to peer", hashSentTo[i], "baseFee", p.pendingBaseFee.Load())
 				}
 
 				// broadcast remote transactions
@@ -1844,6 +1862,7 @@ func (p *TxPool) flush(ctx context.Context, db kv.RwDB) (written uint64, err err
 	}
 	return written, nil
 }
+
 func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	for i, mt := range p.deletedTxs {
 		id := mt.Tx.SenderID
@@ -1932,6 +1951,7 @@ func (p *TxPool) fromDBWithLock(ctx context.Context, tx kv.Tx, coreTx kv.Tx) err
 	defer p.lock.Unlock()
 	return p.fromDB(ctx, tx, coreTx)
 }
+
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
