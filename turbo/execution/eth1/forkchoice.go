@@ -367,7 +367,6 @@ TooBigJumpStep:
 	}
 	// Run the forkchoice
 	initialCycle := tooBigJump
-	panic(initialCycle)
 	if _, err := e.executionPipeline.Run(e.db, tx, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
