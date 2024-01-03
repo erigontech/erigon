@@ -45,9 +45,9 @@ func (impl *difficultyCalculatorImpl) HeaderDifficulty(header *types.Header) (ui
 
 	validatorSet := valset.NewValidatorSet(impl.span.ValidatorSet.Validators, log.New())
 
-	sprintCount := impl.borConfig.CalculateSprintCount(0, header.Number.Uint64())
+	sprintCount := impl.borConfig.CalculateSprintNumber(header.Number.Uint64())
 	if sprintCount > 0 {
-		validatorSet.IncrementProposerPriority(sprintCount, log.New())
+		validatorSet.IncrementProposerPriority(int(sprintCount), log.New())
 	}
 
 	return validatorSet.Difficulty(signer)

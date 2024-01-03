@@ -54,49 +54,36 @@ func (c *BorConfig) CalculateSprintLength(number uint64) uint64 {
 	return c.sprints[len(c.sprints)-1].size
 }
 
-func (c *BorConfig) CalculateSprintCount(from, to uint64) int {
-	switch {
-	case from > to:
-		return 0
-	case from < to:
-		to--
-	}
-
+func (c *BorConfig) CalculateSprintNumber(number uint64) uint64 {
 	if c.sprints == nil {
 		c.sprints = asSprints(c.Sprint)
 	}
 
-	count := uint64(0)
-	startCalc := from
-
-	zeroth := func(boundary uint64, size uint64) uint64 {
-		if boundary%size == 0 {
-			return 1
-		}
-
+	// unknown sprint size
+	if (len(c.sprints) == 0) || (number < c.sprints[0].from) {
 		return 0
 	}
 
-	for i := 0; i < len(c.sprints)-1; i++ {
-		if startCalc >= c.sprints[i].from && startCalc < c.sprints[i+1].from {
-			if to >= c.sprints[i].from && to < c.sprints[i+1].from {
-				if startCalc == to {
-					return int(count + zeroth(startCalc, c.sprints[i].size))
-				}
-				return int(count + zeroth(startCalc, c.sprints[i].size) + (to-startCalc)/c.sprints[i].size)
-			} else {
-				endCalc := c.sprints[i+1].from - 1
-				count += zeroth(startCalc, c.sprints[i].size) + (endCalc-startCalc)/c.sprints[i].size
-				startCalc = endCalc + 1
-			}
-		}
+	// remove sprint configs that are not in effect yet
+	sprints := c.sprints
+	for number < sprints[len(sprints)-1].from {
+		sprints = sprints[:len(sprints)-1]
 	}
 
-	if startCalc == to {
-		return int(count + zeroth(startCalc, c.sprints[len(c.sprints)-1].size))
+	var count uint64
+	end := number
+	for len(sprints) > 0 {
+		sprint := sprints[len(sprints)-1]
+		count += (end - sprint.from) / sprint.size
+
+		sprints = sprints[:len(sprints)-1]
+		end = sprint.from
 	}
 
-	return int(count + zeroth(startCalc, c.sprints[len(c.sprints)-1].size) + (to-startCalc)/c.sprints[len(c.sprints)-1].size)
+	if c.sprints[0].from > 0 {
+		count++
+	}
+	return count
 }
 
 func (c *BorConfig) CalculateBackupMultiplier(number uint64) uint64 {
