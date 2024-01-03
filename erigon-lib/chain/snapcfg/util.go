@@ -96,6 +96,7 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 	}
 
 	maxBlockNum, version := cfgInfo(preverified, version)
+	fmt.Printf("[dbg] version: %d\n", version)
 	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, Version: version}
 }
 
