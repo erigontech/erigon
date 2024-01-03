@@ -162,3 +162,19 @@ func (arr *RawUint64List) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(strs)
 }
+
+func (arr *RawUint64List) UnmarshalJSON(data []byte) error {
+	var strs []string
+	if err := json.Unmarshal(data, &strs); err != nil {
+		return err
+	}
+	arr.u = make([]uint64, len(strs))
+	for i, s := range strs {
+		v, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return err
+		}
+		arr.u[i] = v
+	}
+	return nil
+}
