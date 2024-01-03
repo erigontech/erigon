@@ -766,6 +766,10 @@ func doBodiesIncrement(cliCtx *cli.Context) error {
 		os.Rename(srcF, srcF+".back")
 		os.Rename(dstF, srcF)
 		os.Remove(srcF + ".torrent")
+		os.Remove(srcF + ".idx")
+		ext := filepath.Ext(srcF)
+		withoutExt := srcF[:len(srcF)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
 		return nil
 	}
 	for _, f := range l {
