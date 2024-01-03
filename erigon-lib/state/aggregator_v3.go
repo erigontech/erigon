@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"golang.org/x/sync/semaphore"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -74,6 +75,7 @@ type AggregatorV3 struct {
 	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
+	snapshotBuildSema *semaphore.Weighted
 
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
@@ -1270,6 +1272,12 @@ func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
 	return a
 }
 
+func (a *AggregatorV3) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
+	a.snapshotBuildSema = semaphore
+}
+
+const aggregatorSnapBuildWeight int64 = 1
+
 // Returns channel which is closed when aggregation is done
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
@@ -1290,6 +1298,13 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
+
+		if a.snapshotBuildSema != nil {
+			if !a.snapshotBuildSema.TryAcquire(aggregatorSnapBuildWeight) {
+				return //nolint
+			}
+			defer a.snapshotBuildSema.Release(aggregatorSnapBuildWeight)
+		}
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts)
