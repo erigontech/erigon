@@ -740,7 +740,7 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
 				return err
 			}
-			body.BaseTxId -= 2
+			body.BaseTxId -= 1
 			dstBuf.Reset()
 			if err := rlp.Encode(dstBuf, body); err != nil {
 				return err
