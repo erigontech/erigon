@@ -71,11 +71,9 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 			if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
 				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 					pv = append(pv, p)
-				} else {
-					fmt.Printf("[dbg] skip1: %s\n", p.Name)
 				}
 			} else {
-				fmt.Printf("[dbg] skip11: %s\n", p.Name)
+				pv = append(pv, p)
 			}
 		}
 
@@ -87,11 +85,9 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 				if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
 					if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 						pv = append(pv, p)
-					} else {
-						fmt.Printf("[dbg] skip2: %s\n", p.Name)
 					}
 				} else {
-					fmt.Printf("[dbg] skip21: %s\n", p.Name)
+					pv = append(pv, p)
 				}
 			}
 		}
