@@ -60,7 +60,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 
 		d.faucet.deployer = nil
 		d.faucet.transactOpts = nil
-		logger.Error("failed to deploy faucet", "chain", d.faucet.chainName, "err", err)
+		logger.Error("failed while waiting to deploy faucet", "chain", d.faucet.chainName, "err", err)
 		return
 	}
 
@@ -92,7 +92,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 
 		d.faucet.deployer = nil
 		d.faucet.transactOpts = nil
-		logger.Error("failed to deploy faucet", "chain", d.faucet.chainName, "err", err)
+		logger.Error("failed while waiting to receive faucet funds", "chain", d.faucet.chainName, "err", err)
 		return
 	}
 
@@ -111,7 +111,7 @@ func NewFaucet(chainName string, source *accounts.Account) *Faucet {
 	}
 }
 
-func (f *Faucet) Start(context context.Context) error {
+func (f *Faucet) Start(_ context.Context) error {
 	return nil
 }
 
@@ -157,7 +157,7 @@ func (f *Faucet) Send(ctx context.Context, destination *accounts.Account, eth fl
 	}
 
 	if f.transactOpts == nil {
-		return nil, libcommon.Hash{}, fmt.Errorf("Faucet not initialized")
+		return nil, libcommon.Hash{}, fmt.Errorf("faucet not initialized")
 	}
 
 	node := devnet.SelectNode(ctx)
@@ -208,7 +208,7 @@ func (f *Faucet) Receive(ctx context.Context, source *accounts.Account, eth floa
 	return transactOpts.Value, trn.Hash(), nil
 }
 
-func (f *Faucet) NodeCreated(ctx context.Context, node devnet.Node) {
+func (f *Faucet) NodeCreated(_ context.Context, _ devnet.Node) {
 }
 
 func (f *Faucet) NodeStarted(ctx context.Context, node devnet.Node) {

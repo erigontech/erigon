@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -28,7 +27,6 @@ func TestGetStateFork(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fmt.Println(fcu.HeadSlotVal)
 
 	cases := []struct {
 		blockID string
@@ -87,7 +85,6 @@ func TestGetStateRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fmt.Println(fcu.HeadSlotVal)
 
 	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
 
@@ -213,7 +210,6 @@ func TestGetStateFullForkchoice(t *testing.T) {
 	require.NoError(t, err)
 
 	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
-	fmt.Println(fcu.HeadSlotVal)
 
 	fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
 
@@ -429,12 +425,69 @@ func TestGetStateFinalityCheckpoints(t *testing.T) {
 			code:    http.StatusOK,
 		},
 	}
-	expected := `{"data":{"finalized_checkpoint":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified_checkpoint":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified_checkpoint":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"finalized":false,"version":0,"execution_optimistic":false}` + "\n"
+	expected := `{"data":{"finalized_checkpoint":{"epoch":"1","root":"0xde46b0f2ed5e72f0cec20246403b14c963ec995d7c2825f3532b0460c09d5693"},"current_justified_checkpoint":{"epoch":"3","root":"0xa6e47f164b1a3ca30ea3b2144bd14711de442f51e5b634750a12a1734e24c987"},"previous_justified_checkpoint":{"epoch":"2","root":"0x4c3ee7969e485696669498a88c17f70e6999c40603e2f4338869004392069063"}},"finalized":false,"version":2,"execution_optimistic":false}` + "\n"
 	for _, c := range cases {
 		t.Run(c.blockID, func(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/finality_checkpoints")
+			require.NoError(t, err)
+
+			defer resp.Body.Close()
+			require.Equal(t, c.code, resp.StatusCode)
+			if resp.StatusCode != http.StatusOK {
+				return
+			}
+			// read the all of the octect
+			out, err := io.ReadAll(resp.Body)
+			require.NoError(t, err)
+			require.Equal(t, string(out), expected)
+		})
+	}
+}
+
+func TestGetRandao(t *testing.T) {
+
+	// setupTestingHandler(t, clparams.Phase0Version)
+	_, blocks, _, _, postState, handler, _, _, fcu := setupTestingHandler(t, clparams.BellatrixVersion)
+
+	postRoot, err := postState.HashSSZ()
+	require.NoError(t, err)
+
+	fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(t, err)
+
+	fcu.HeadSlotVal = blocks[len(blocks)-1].Block.Slot
+
+	fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(fcu.HeadVal, fcu.HeadSlotVal/32)
+
+	cases := []struct {
+		blockID string
+		code    int
+	}{
+		{
+			blockID: "0x" + common.Bytes2Hex(postRoot[:]),
+			code:    http.StatusOK,
+		},
+		{
+			blockID: "justified",
+			code:    http.StatusOK,
+		},
+		{
+			blockID: "0x" + common.Bytes2Hex(make([]byte, 32)),
+			code:    http.StatusNotFound,
+		},
+		{
+			blockID: strconv.FormatInt(int64(postState.Slot()), 10),
+			code:    http.StatusOK,
+		},
+	}
+	expected := `{"data":{"randao":"0xdeec617717272914bfd73e02ca1da113a83cf4cf33cd4939486509e2da4ccf4e"},"finalized":false,"execution_optimistic":false}` + "\n"
+	for _, c := range cases {
+		t.Run(c.blockID, func(t *testing.T) {
+			server := httptest.NewServer(handler.mux)
+			defer server.Close()
+			resp, err := http.Get(server.URL + "/eth/v1/beacon/states/" + c.blockID + "/randao")
 			require.NoError(t, err)
 
 			defer resp.Body.Close()

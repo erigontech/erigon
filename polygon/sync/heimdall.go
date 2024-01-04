@@ -8,7 +8,6 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
@@ -137,7 +136,7 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]
 }
 
 func (impl *HeimdallImpl) FetchSpan(ctx context.Context, start uint64) (*span.HeimdallSpan, error) {
-	return impl.client.Span(ctx, bor.SpanIDAt(start))
+	return impl.client.Span(ctx, span.IDAt(start))
 }
 
 func (impl *HeimdallImpl) OnMilestoneEvent(ctx context.Context, callback func(*milestone.Milestone)) error {

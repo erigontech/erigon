@@ -60,6 +60,14 @@ func (r *beaconResponse) withFinalized(finalized bool) (out *beaconResponse) {
 	return out
 }
 
+func (r *beaconResponse) withOptimistic(optimistic bool) (out *beaconResponse) {
+	out = new(beaconResponse)
+	*out = *r
+	out.ExecutionOptimistic = new(bool)
+	out.ExecutionOptimistic = &optimistic
+	return out
+}
+
 func (r *beaconResponse) withVersion(version clparams.StateVersion) (out *beaconResponse) {
 	out = new(beaconResponse)
 	*out = *r
@@ -67,51 +75,6 @@ func (r *beaconResponse) withVersion(version clparams.StateVersion) (out *beacon
 	out.Version = &version
 	return out
 }
-
-//// In case of it being a json we need to also expose finalization, version, etc...
-//type beaconHandlerFn func(r *http.Request) *beaconResponse
-//
-//func beaconHandlerWrapper(fn beaconHandlerFn, supportSSZ bool) func(w http.ResponseWriter, r *http.Request) {
-//	return func(w http.ResponseWriter, r *http.Request) {
-//		accept := r.Header.Get("Accept")
-//		isSSZ := !strings.Contains(accept, "application/json") && strings.Contains(accept, "application/stream-octect")
-//		start := time.Now()
-//		defer func() {
-//			log.Debug("[Beacon API] finished", "method", r.Method, "path", r.URL.Path, "duration", time.Since(start))
-//		}()
-//
-//		resp := fn(r)
-//		if resp.internalError != nil {
-//			http.Error(w, resp.internalError.Error(), http.StatusInternalServerError)
-//			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.internalError.Error(), "ssz", isSSZ)
-//			return
-//		}
-//
-//		if resp.apiError != nil {
-//			http.Error(w, resp.apiError.err.Error(), resp.apiError.code)
-//			log.Debug("[Beacon API] failed", "method", r.Method, "err", resp.apiError.err.Error(), "ssz", isSSZ)
-//			return
-//		}
-//
-//		if isSSZ && supportSSZ {
-//			data := resp.Data
-//			// SSZ encoding
-//			encoded, err := data.(ssz.Marshaler).EncodeSSZ(nil)
-//			if err != nil {
-//				http.Error(w, err.Error(), http.StatusInternalServerError)
-//				log.Debug("[Beacon API] failed", "method", r.Method, "err", err, "accepted", accept)
-//				return
-//			}
-//			w.Header().Set("Content-Type", "application/octet-stream")
-//			w.Write(encoded)
-//			return
-//		}
-//		w.Header().Set("Content-Type", "application/json")
-//		if err := json.NewEncoder(w).Encode(resp); err != nil {
-//			log.Warn("[Beacon API] failed", "method", r.Method, "err", err, "ssz", isSSZ)
-//		}
-//	}
-//}
 
 type chainTag int
 

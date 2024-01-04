@@ -84,6 +84,18 @@ func (b *BeaconState) Eth1DepositIndex() uint64 {
 	return b.eth1DepositIndex
 }
 
+func (b *BeaconState) ValidatorSet() *solid.ValidatorSet {
+	return b.validators
+}
+
+func (b *BeaconState) PreviousEpochParticipation() *solid.BitList {
+	return b.previousEpochParticipation
+}
+
+func (b *BeaconState) CurrentEpochParticipation() *solid.BitList {
+	return b.currentEpochParticipation
+}
+
 func (b *BeaconState) ValidatorLength() int {
 	return b.validators.Length()
 }

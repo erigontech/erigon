@@ -8,8 +8,6 @@ import (
 	"math"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -17,10 +15,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-
+	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -1141,7 +1139,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 		return 0
 	}
 
-	lastSpanID := bor.SpanIDAt(lastSegment.to)
+	lastSpanID := span.IDAt(lastSegment.to)
 	if lastSpanID > 0 {
 		lastSpanID--
 	}
@@ -1151,7 +1149,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	var endBlock uint64
 	if spanId > 0 {
-		endBlock = bor.SpanEndBlockNum(spanId)
+		endBlock = span.EndBlockNum(spanId)
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1174,11 +1172,11 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx == nil {
 			continue
 		}
-		spanFrom := bor.SpanIDAt(sn.from)
+		spanFrom := span.IDAt(sn.from)
 		if spanId < spanFrom {
 			continue
 		}
-		spanTo := bor.SpanIDAt(sn.to)
+		spanTo := span.IDAt(sn.to)
 		if spanId >= spanTo {
 			continue
 		}

@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
@@ -37,8 +37,21 @@ type Timing struct {
 	took     time.Duration
 }
 
-func (s *Sync) Len() int                 { return len(s.stages) }
-func (s *Sync) PrevUnwindPoint() *uint64 { return s.prevUnwindPoint }
+func (s *Sync) Len() int {
+	return len(s.stages)
+}
+
+func (s *Sync) UnwindPoint() uint64 {
+	return *s.unwindPoint
+}
+
+func (s *Sync) UnwindReason() UnwindReason {
+	return s.unwindReason
+}
+
+func (s *Sync) PrevUnwindPoint() *uint64 {
+	return s.prevUnwindPoint
+}
 
 func (s *Sync) NewUnwindState(id stages.SyncStage, unwindPoint, currentProgress uint64) *UnwindState {
 	return &UnwindState{id, unwindPoint, currentProgress, UnwindReason{nil, nil}, s}
