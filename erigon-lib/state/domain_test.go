@@ -25,6 +25,7 @@ import (
 	"math"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2031,4 +2032,80 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 			break
 		}
 	}
+}
+
+func TestDomain_PruneSimple(t *testing.T) {
+	t.Parallel()
+
+	t.Run("simple", func(t *testing.T) {
+		db, d := testDbAndDomain(t, log.New())
+		defer d.Close()
+		defer db.Close()
+		ctx := context.Background()
+
+		d.aggregationStep = 16
+
+		dc := d.MakeContext()
+		defer dc.Close()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		writer := dc.NewWriter()
+		defer writer.close()
+
+		for i := 0; uint64(i) < d.aggregationStep+1; i++ {
+			writer.SetTxNum(uint64(i))
+			err = writer.PutWithPrev([]byte("key1"), nil, []byte(fmt.Sprintf("value1.%d", i)), nil)
+			require.NoError(t, err)
+		}
+
+		err = writer.Flush(ctx, tx)
+		require.NoError(t, err)
+
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// prune history
+
+		tx, err = db.BeginRw(ctx)
+		require.NoError(t, err)
+		pruneFrom, pruneTo := uint64(4), uint64(12)
+		err = dc.hc.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, time.NewTicker(time.Second))
+		require.NoError(t, err)
+		err = tx.Commit()
+		require.NoError(t, err)
+
+		// check
+		dc.Close()
+		dc = d.MakeContext()
+		defer dc.Close()
+
+		tx, err = db.BeginRw(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+
+		it, err := dc.hc.IdxRange([]byte("key1"), 0, int(d.aggregationStep), order.Asc, math.MaxInt, tx)
+		require.NoError(t, err)
+
+		for it.HasNext() {
+			txn, err := it.Next()
+			require.NoError(t, err)
+			require.Truef(t, txn < pruneFrom || txn >= pruneTo, "txn %d should be pruned", txn)
+		}
+
+		hit, err := dc.hc.HistoryRange(0, int(d.aggregationStep), order.Asc, math.MaxInt, tx)
+		require.NoError(t, err)
+
+		for hit.HasNext() {
+			k, v, err := hit.Next()
+			require.NoError(t, err)
+
+			require.EqualValues(t, []byte("key1"), k)
+			if len(v) > 0 {
+				txn, err := strconv.Atoi(string(bytes.Split(v, []byte("."))[1]))
+				require.NoError(t, err)
+				require.Truef(t, uint64(txn) < pruneFrom || uint64(txn) >= pruneTo, "txn %d should be pruned", txn)
+			}
+		}
+	})
 }

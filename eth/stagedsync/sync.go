@@ -501,7 +501,7 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, b
 	took := time.Since(start)
 	logPrefix := s.LogPrefix()
 	if took > 60*time.Second {
-		s.logger.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
+		s.logger.Info(fmt.Sprintf("[%s] DONE", logPrefix), "in", took, "block", stageState.BlockNumber)
 	} else {
 		s.logger.Debug(fmt.Sprintf("[%s] DONE", logPrefix), "in", took)
 	}
