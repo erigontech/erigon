@@ -216,11 +216,9 @@ func TmpFiles(dir string, version uint8) (res []string, err error) {
 		return nil, err
 	}
 
-	panic(version)
-	v := fmt.Sprint("v", version)
-
 	for _, f := range files {
-		if f.IsDir() || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		//if f.IsDir() || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		if f.IsDir() || len(f.Name()) < 3 {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".tmp" {
