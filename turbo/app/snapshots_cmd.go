@@ -337,25 +337,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	agg := openAgg(ctx, dirs, chainDB, logger)
-
-	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func doIntegrity(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
-
-	ctx := cliCtx.Context
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -372,9 +353,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
-	//if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-	//	return err
-	//}
+	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+		return err
+	}
 
 	return nil
 }
