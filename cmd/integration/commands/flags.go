@@ -173,5 +173,5 @@ func withCommitment(cmd *cobra.Command) {
 }
 
 func withSnapshotVersion(cmd *cobra.Command) {
-	cmd.Flags().Uint8Var(&snapshotVersion, "stapshots.version", 1, "specifies the snapshot file version")
+	cmd.Flags().Uint8Var(&snapshotVersion, "snapshots.version", 1, "specifies the snapshot file version")
 }
