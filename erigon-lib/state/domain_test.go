@@ -2037,13 +2037,13 @@ func compareIterators(t *testing.T, et, ut iter.KV) {
 func TestDomain_PruneSimple(t *testing.T) {
 	t.Parallel()
 
-	t.Run("simple", func(t *testing.T) {
-		db, d := testDbAndDomain(t, log.New())
-		defer d.Close()
-		defer db.Close()
+	pruningKey := common.FromHex("701b39aee8d1ee500442d2874a6e6d0cc9dad8d9")
+	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx, stepSize uint64) {
+		t.Helper()
+
 		ctx := context.Background()
 
-		d.aggregationStep = 16
+		d.aggregationStep = stepSize
 
 		dc := d.MakeContext()
 		defer dc.Close()
@@ -2055,7 +2055,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		for i := 0; uint64(i) < d.aggregationStep+1; i++ {
 			writer.SetTxNum(uint64(i))
-			err = writer.PutWithPrev([]byte("key1"), nil, []byte(fmt.Sprintf("value1.%d", i)), nil)
+			err = writer.PutWithPrev(pruningKey, nil, []byte(fmt.Sprintf("value.%d", i)), nil)
 			require.NoError(t, err)
 		}
 
@@ -2064,27 +2064,29 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		err = tx.Commit()
 		require.NoError(t, err)
+	}
 
+	pruneOneKey := func(t *testing.T, dc *DomainContext, db kv.RwDB, pruneFrom, pruneTo uint64) {
+		t.Helper()
 		// prune history
-
-		tx, err = db.BeginRw(ctx)
+		ctx := context.Background()
+		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		pruneFrom, pruneTo := uint64(4), uint64(12)
 		err = dc.hc.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
+	}
 
-		// check
-		dc.Close()
-		dc = d.MakeContext()
-		defer dc.Close()
+	checkKeyPruned := func(t *testing.T, dc *DomainContext, db kv.RwDB, stepSize, pruneFrom, pruneTo uint64) {
+		t.Helper()
 
-		tx, err = db.BeginRw(ctx)
+		ctx := context.Background()
+		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		it, err := dc.hc.IdxRange([]byte("key1"), 0, int(d.aggregationStep), order.Asc, math.MaxInt, tx)
+		it, err := dc.hc.IdxRange(pruningKey, 0, int(stepSize), order.Asc, math.MaxInt, tx)
 		require.NoError(t, err)
 
 		for it.HasNext() {
@@ -2093,19 +2095,64 @@ func TestDomain_PruneSimple(t *testing.T) {
 			require.Truef(t, txn < pruneFrom || txn >= pruneTo, "txn %d should be pruned", txn)
 		}
 
-		hit, err := dc.hc.HistoryRange(0, int(d.aggregationStep), order.Asc, math.MaxInt, tx)
+		hit, err := dc.hc.HistoryRange(0, int(stepSize), order.Asc, math.MaxInt, tx)
 		require.NoError(t, err)
 
 		for hit.HasNext() {
 			k, v, err := hit.Next()
 			require.NoError(t, err)
 
-			require.EqualValues(t, []byte("key1"), k)
+			require.EqualValues(t, pruningKey, k)
 			if len(v) > 0 {
-				txn, err := strconv.Atoi(string(bytes.Split(v, []byte("."))[1]))
+				txn, err := strconv.Atoi(string(bytes.Split(v, []byte("."))[1])) // value.<txn>
 				require.NoError(t, err)
 				require.Truef(t, uint64(txn) < pruneFrom || uint64(txn) >= pruneTo, "txn %d should be pruned", txn)
 			}
 		}
+	}
+
+	t.Run("simple history inside 1step", func(t *testing.T) {
+		db, d := testDbAndDomain(t, log.New())
+		defer db.Close()
+		defer d.Close()
+
+		stepSize, pruneFrom, pruneTo := uint64(10), uint64(13), uint64(17)
+		writeOneKey(t, d, db, 3*stepSize, stepSize)
+
+		dc := d.MakeContext()
+		defer dc.Close()
+		pruneOneKey(t, dc, db, pruneFrom, pruneTo)
+
+		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
+	})
+
+	t.Run("simple history between 2 steps", func(t *testing.T) {
+		db, d := testDbAndDomain(t, log.New())
+		defer db.Close()
+		defer d.Close()
+
+		stepSize, pruneFrom, pruneTo := uint64(10), uint64(8), uint64(17)
+		writeOneKey(t, d, db, 3*stepSize, stepSize)
+
+		dc := d.MakeContext()
+		defer dc.Close()
+		pruneOneKey(t, dc, db, pruneFrom, pruneTo)
+
+		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
+	})
+
+	t.Run("simple history discard", func(t *testing.T) {
+		db, d := testDbAndDomain(t, log.New())
+		defer db.Close()
+		defer d.Close()
+
+		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(20)
+		writeOneKey(t, d, db, 2*stepSize, stepSize)
+
+		dc := d.MakeContext()
+		defer dc.Close()
+		pruneOneKey(t, dc, db, pruneFrom, pruneTo)
+
+		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
 	})
 }

@@ -793,7 +793,6 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return err
 		}
 		if localTimeout.Err() != nil {
-			fmt.Printf("lt %v\n", localTimeout.Err())
 			return nil //nolint
 		}
 		if ctx.Err() != nil {
