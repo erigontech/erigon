@@ -983,13 +983,13 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	return opts
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.AggregatorV3 {
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.Snap, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err = agg.OpenFolder(true); err != nil {
 		panic(err)
 	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	return agg
 }
