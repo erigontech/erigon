@@ -79,7 +79,8 @@ var Defaults = Config{
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
-		PruneLimit:                 100,
+		//LoopBlockLimit:             100_000,
+		PruneLimit: 100,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -168,7 +169,7 @@ func NewSnapCfg(enabled, keepBlocks, produce bool) BlocksFreezing {
 
 // Config contains configuration options for ETH protocol.
 type Config struct {
-	Sync Sync
+	Sync
 
 	// The genesis block, which is inserted if the database is empty.
 	// If nil, the Ethereum main net block is used.
@@ -252,8 +253,6 @@ type Config struct {
 	SentinelPort                uint64
 
 	OverrideCancunTime *big.Int `toml:",omitempty"`
-
-	ForcePartialCommit bool
 
 	// Embedded Silkworm support
 	SilkwormExecution bool

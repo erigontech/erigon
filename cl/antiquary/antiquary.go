@@ -263,7 +263,7 @@ func (a *Antiquary) antiquate(version uint8, from, to uint64) error {
 	}
 	// Notify bittorent to seed the new snapshots
 	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
-		return err
+		log.Warn("[Antiquary]: Failed to add items to bittorent", "err", err)
 	}
 
 	tx, err := a.mainDB.BeginRw(a.ctx)

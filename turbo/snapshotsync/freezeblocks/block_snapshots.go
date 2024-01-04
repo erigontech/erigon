@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/semaphore"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -1356,14 +1357,13 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.snapshots()
-	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
 
 	if ok {
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, snapshots.version, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBlocks(ctx, snapshots.version, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
@@ -1595,21 +1595,24 @@ func (br *BlockRetire) buildBorMissedIndicesIfNeed(ctx context.Context, logPrefi
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
 	chainConfig := fromdb.ChainConfig(chainDB)
 
+	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
+		lastTxNum, err := dumpBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger)
+		if err != nil {
 			return err
 		}
+		firstTxNum = lastTxNum + 1
 	}
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -1619,21 +1622,21 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot Headers", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
 		if err != nil {
-			return err
+			return lastTxNum, err
 		}
 		defer sn.Close()
 		if err := DumpHeaders(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
 		}); err != nil {
-			return fmt.Errorf("DumpHeaders: %w", err)
+			return lastTxNum, fmt.Errorf("DumpHeaders: %w", err)
 		}
 		if err := sn.Compress(); err != nil {
-			return fmt.Errorf("compress: %w", err)
+			return lastTxNum, fmt.Errorf("compress: %w", err)
 		}
 
 		p := &background.Progress{}
 		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
-			return err
+			return lastTxNum, err
 		}
 	}
 
@@ -1643,21 +1646,22 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot Bodies", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
 		if err != nil {
-			return err
+			return lastTxNum, err
 		}
 		defer sn.Close()
-		if err := DumpBodies(ctx, chainDB, blockFrom, blockTo, firstTxNum, workers, lvl, logger, func(v []byte) error {
+		lastTxNum, err = DumpBodies(ctx, chainDB, blockFrom, blockTo, firstTxNum, lvl, logger, func(v []byte) error {
 			return sn.AddWord(v)
-		}); err != nil {
-			return fmt.Errorf("DumpBodies: %w", err)
+		})
+		if err != nil {
+			return lastTxNum, fmt.Errorf("DumpBodies: %w", err)
 		}
 		if err := sn.Compress(); err != nil {
-			return fmt.Errorf("compress: %w", err)
+			return lastTxNum, fmt.Errorf("compress: %w", err)
 		}
 
 		p := &background.Progress{}
 		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
-			return err
+			return lastTxNum, err
 		}
 	}
 
@@ -1667,7 +1671,7 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot Txs", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
 		if err != nil {
-			return fmt.Errorf("NewCompressor: %w, %s", err, f.Path)
+			return lastTxNum, fmt.Errorf("NewCompressor: %w, %s", err, f.Path)
 		}
 		defer sn.Close()
 
@@ -1675,10 +1679,10 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 			return sn.AddWord(v)
 		})
 		if err != nil {
-			return fmt.Errorf("DumpTxs: %w", err)
+			return lastTxNum, fmt.Errorf("DumpTxs: %w", err)
 		}
 		if expectedCount != sn.Count() {
-			return fmt.Errorf("incorrect tx count: %d, expected from db: %d", sn.Count(), expectedCount)
+			return lastTxNum, fmt.Errorf("incorrect tx count: %d, expected from db: %d", sn.Count(), expectedCount)
 		}
 		snapDir, fileName := filepath.Split(f.Path)
 		ext := filepath.Ext(fileName)
@@ -1686,23 +1690,23 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 		t := time.Now()
 		_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(snapDir, version, blockFrom, blockTo)
 		if err != nil {
-			return err
+			return lastTxNum, err
 		}
 		if expectedCount != sn.Count() {
-			return fmt.Errorf("incorrect tx count: %d, expected from snapshots: %d", sn.Count(), expectedCount)
+			return lastTxNum, fmt.Errorf("incorrect tx count: %d, expected from snapshots: %d", sn.Count(), expectedCount)
 		}
 		if err := sn.Compress(); err != nil {
-			return fmt.Errorf("compress: %w", err)
+			return lastTxNum, fmt.Errorf("compress: %w", err)
 		}
 		logger.Log(lvl, "[snapshots] Compression", "took", time.Since(t), "ratio", sn.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
 
 		p := &background.Progress{}
 		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
-			return err
+			return lastTxNum, err
 		}
 	}
 
-	return nil
+	return lastTxNum, nil
 }
 
 func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
@@ -1992,7 +1996,7 @@ func DumpHeaders(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wor
 }
 
 // DumpBodies - [from, to)
-func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firstTxNum uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firstTxNum uint64, lvl log.Lvl, logger log.Logger, collect func([]byte) error) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -2049,10 +2053,10 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 		}
 		return true, nil
 	}); err != nil {
-		return err
+		return firstTxNum, err
 	}
 
-	return nil
+	return firstTxNum, nil
 }
 
 var EmptyTxHash = common2.Hash{}
