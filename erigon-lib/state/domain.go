@@ -76,6 +76,8 @@ var (
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
+
+	mxPruneDbgSizeDomainSkipBeforeFirst = metrics.GetOrCreateCounter(`domain_prune_skipped`)
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -2100,6 +2102,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 		is := ^binary.BigEndian.Uint64(v)
 		if is > step {
+			mxPruneDbgSizeDomainSkipBeforeFirst.Inc()
 			continue
 		}
 		if limiter == 0 {
