@@ -2113,7 +2113,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			continue
 		}
 		if limiter == 0 {
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			return nil
@@ -2140,12 +2140,12 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			return ctx.Err()
 		case <-logEvery.C:
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase,
