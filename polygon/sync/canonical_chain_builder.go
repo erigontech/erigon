@@ -102,7 +102,7 @@ func (impl *canonicalChainBuilderImpl) Headers() []*types.Header {
 		headers = append(headers, node.header)
 		node = node.parent
 	}
-	reverse(headers)
+	libcommon.SliceReverse(headers)
 	return headers
 }
 
@@ -136,14 +136,6 @@ func (impl *canonicalChainBuilderImpl) Prune(newRootNum uint64) error {
 	return nil
 }
 
-func mapSlice[T any, U any](s []T, mapFunc func(T) U) []U {
-	out := make([]U, 0, len(s))
-	for _, x := range s {
-		out = append(out, mapFunc(x))
-	}
-	return out
-}
-
 func (impl *canonicalChainBuilderImpl) updateTipIfNeeded(tipCandidate *forkTreeNode) {
 	if tipCandidate.totalDifficulty > impl.tip.totalDifficulty {
 		impl.tip = tipCandidate
@@ -166,7 +158,7 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 		return errors.New("canonicalChainBuilderImpl.Connect: can't connect headers")
 	}
 
-	headersHashes := mapSlice(headers, func(header *types.Header) libcommon.Hash {
+	headersHashes := libcommon.SliceMap(headers, func(header *types.Header) libcommon.Hash {
 		return header.Hash()
 	})
 
