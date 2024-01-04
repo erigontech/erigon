@@ -665,6 +665,13 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 		}
 	}()
 
+	go func() {
+		if err := cli.StartDataStream(httpRpcCfg); err != nil {
+			log.Error(err.Error())
+			return
+		}
+	}()
+
 	// Register the backend on the node
 	stack.RegisterLifecycle(backend)
 	return backend, nil

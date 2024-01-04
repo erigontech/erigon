@@ -412,6 +412,16 @@ var (
 		Usage: "RPC rate limit in requests per second.",
 		Value: 0,
 	}
+	DataStreamPort = cli.UintFlag{
+		Name:  "zkevm.data-stream-port",
+		Usage: "Define the port used for the zkevm data stream",
+		Value: 0,
+	}
+	DataStreamHost = cli.StringFlag{
+		Name:  "zkevm.data-stream-host",
+		Usage: "Define the host used for the zkevm data stream",
+		Value: "",
+	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
 		Name:  "rpc.batch.concurrency",
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",
