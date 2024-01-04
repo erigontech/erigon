@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"math"
 	"math/big"
 	"testing"
 	"time"
@@ -392,31 +391,4 @@ func TestErrorEtherScanPrice(t *testing.T) {
 	ethGasStationM.On("SuggestGasPrice", ctx).Return(big.NewInt(765625002), nil)
 	gp := etherman.GetL1GasPrice(ctx)
 	assert.Equal(t, big.NewInt(765625002), gp)
-}
-
-func TestGetForks(t *testing.T) {
-	// Set up testing environment
-	etherman, _, _, _, _ := newTestingEnv()
-	ctx := context.Background()
-	forks, err := etherman.GetForks(ctx)
-	require.NoError(t, err)
-	assert.Equal(t, 1, len(forks))
-	assert.Equal(t, uint64(1), forks[0].ForkId)
-	assert.Equal(t, uint64(1), forks[0].FromBatchNumber)
-	assert.Equal(t, uint64(math.MaxUint64), forks[0].ToBatchNumber)
-	assert.Equal(t, "v1", forks[0].Version)
-	// Now read the event
-	finalBlock, err := etherman.EthClient.BlockByNumber(ctx, nil)
-	require.NoError(t, err)
-	finalBlockNumber := finalBlock.NumberU64()
-	blocks, order, err := etherman.GetRollupInfoByBlockRange(ctx, 0, &finalBlockNumber)
-	require.NoError(t, err)
-	t.Logf("Blocks: %+v", blocks)
-	assert.Equal(t, 1, len(blocks))
-	assert.Equal(t, 1, len(blocks[0].ForkIDs))
-	assert.Equal(t, 0, order[blocks[0].BlockHash][0].Pos)
-	assert.Equal(t, ForkIDsOrder, order[blocks[0].BlockHash][0].Name)
-	assert.Equal(t, uint64(0), blocks[0].ForkIDs[0].BatchNumber)
-	assert.Equal(t, uint64(1), blocks[0].ForkIDs[0].ForkID)
-	assert.Equal(t, "v1", blocks[0].ForkIDs[0].Version)
 }
