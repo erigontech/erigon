@@ -740,6 +740,7 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
+	fmt.Printf("[dbg]: %s\n", list)
 	return s.ReopenList(list, false)
 }
 
