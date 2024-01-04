@@ -190,7 +190,7 @@ func (d *DiagnosticClient) runSyncStagesListListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.syncStats.SyncStagesList = info
+				d.syncStats.SyncStages.StagesList = info.Stages
 				return
 			}
 		}
@@ -211,8 +211,8 @@ func (d *DiagnosticClient) runCurrentSyncStageListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.syncStats.CurrentSyncStage = info
-				if int(d.syncStats.CurrentSyncStage.Stage) >= len(d.syncStats.SyncStagesList.Stages) {
+				d.syncStats.SyncStages.CurrentStage = info.Stage
+				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
 					return
 				}
 			}

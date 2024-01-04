@@ -30,8 +30,7 @@ type PeerStatistics struct {
 }
 
 type SyncStatistics struct {
-	SyncStagesList   SyncStagesList             `json:"syncStagesList"`
-	CurrentSyncStage CurrentSyncStage           `json:"currentSyncStage"`
+	SyncStages       SyncStages                 `json:"syncStages"`
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
 }
@@ -84,6 +83,11 @@ type SyncStagesList struct {
 
 type CurrentSyncStage struct {
 	Stage uint `json:"stage"`
+}
+
+type SyncStages struct {
+	StagesList   []string `json:"stagesList"`
+	CurrentStage uint     `json:"currentStage"`
 }
 
 func (ti SnapshotDownloadStatistics) Type() Type {
