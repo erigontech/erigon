@@ -1226,11 +1226,7 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 			}
 			l = append(l, f)
 		}
-		fmt.Printf("[dbg1] %+v\n", l)
-		fmt.Printf("[dbg2] %+v\n", segmentsTypeCheck(dir, l))
-		fmt.Printf("[dbg3] %+v\n", noOverlaps(segmentsTypeCheck(dir, l)))
 		l, _ = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
-		fmt.Printf("[dbg4] %+v\n", l)
 		res = append(res, l...)
 	}
 	{
