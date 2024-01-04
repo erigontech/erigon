@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
-	"github.com/ledgerwatch/erigon/zkevm/state"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 )
@@ -26,6 +26,13 @@ var (
 	Safe = "safe"
 	// Finalized contains the string to represent the last verified block known.
 	Finalized = "finalized"
+)
+
+var (
+	// ZeroHash is the hash 0x0000000000000000000000000000000000000000000000000000000000000000
+	ZeroHash = common.Hash{}
+	// ZeroAddress is the address 0x0000000000000000000000000000000000000000
+	ZeroAddress = common.Address{}
 )
 
 // ArgUint64 helps to marshal uint64 values provided in the RPC requests
@@ -201,55 +208,6 @@ type TxArgs struct {
 	Nonce    *ArgUint64
 }
 
-// // ToTransaction transforms txnArgs into a Transaction
-// func (args *TxArgs) ToTransaction(ctx context.Context, st StateInterface, maxCumulativeGasUsed uint64, root common.Hash, defaultSenderAddress common.Address, dbTx pgx.Tx) (common.Address, *types.Transaction, error) {
-// 	sender := defaultSenderAddress
-// 	nonce := uint64(0)
-// 	if args.From != nil && *args.From != state.ZeroAddress {
-// 		sender = *args.From
-// 		n, err := st.GetNonce(ctx, sender, root)
-// 		if err != nil {
-// 			return common.Address{}, nil, err
-// 		}
-// 		nonce = n
-// 	}
-
-// 	value := big.NewInt(0)
-// 	if args.Value != nil {
-// 		value.SetBytes(*args.Value)
-// 	}
-
-// 	gasPrice := big.NewInt(0)
-// 	if args.GasPrice != nil {
-// 		gasPrice.SetBytes(*args.GasPrice)
-// 	}
-
-// 	var data []byte
-// 	if args.Data != nil {
-// 		data = *args.Data
-// 	} else if args.Input != nil {
-// 		data = *args.Input
-// 	} else if args.To == nil {
-// 		return common.Address{}, nil, fmt.Errorf("contract creation without data provided")
-// 	}
-
-// 	gas := maxCumulativeGasUsed
-// 	if args.Gas != nil && uint64(*args.Gas) > 0 && uint64(*args.Gas) < maxCumulativeGasUsed {
-// 		gas = uint64(*args.Gas)
-// 	}
-
-// 	tx := types.NewTx(&types.LegacyTx{
-// 		Nonce:    nonce,
-// 		To:       args.To,
-// 		Value:    value,
-// 		Gas:      gas,
-// 		GasPrice: gasPrice,
-// 		Data:     data,
-// 	})
-
-// 	return sender, tx, nil
-// }
-
 func LeftPadBytes(slice []byte, l int) []byte {
 	if l <= len(slice) {
 		return slice
@@ -378,75 +336,6 @@ type Batch struct {
 	BatchL2Data         ArgBytes       `json:"batchL2Data"`
 }
 
-// // NewBatch creates a Batch instance
-// func NewBatch(batch *state.Batch, virtualBatch *state.VirtualBatch, verifiedBatch *state.VerifiedBatch, blocks []types.Block, receipts []types.Receipt, fullTx, includeReceipts bool, ger *state.GlobalExitRoot) (*Batch, error) {
-// 	batchL2Data := batch.BatchL2Data
-// 	closed := batch.StateRoot.String() != state.ZeroHash.String() || batch.BatchNumber == 0
-// 	res := &Batch{
-// 		Number:          ArgUint64(batch.BatchNumber),
-// 		GlobalExitRoot:  batch.GlobalExitRoot,
-// 		MainnetExitRoot: ger.MainnetExitRoot,
-// 		RollupExitRoot:  ger.RollupExitRoot,
-// 		AccInputHash:    batch.AccInputHash,
-// 		Timestamp:       ArgUint64(batch.Timestamp.Unix()),
-// 		StateRoot:       batch.StateRoot,
-// 		Coinbase:        batch.Coinbase,
-// 		LocalExitRoot:   batch.LocalExitRoot,
-// 		BatchL2Data:     ArgBytes(batchL2Data),
-// 		Closed:          closed,
-// 	}
-// 	if batch.ForcedBatchNum != nil {
-// 		fb := ArgUint64(*batch.ForcedBatchNum)
-// 		res.ForcedBatchNumber = &fb
-// 	}
-
-// 	if virtualBatch != nil {
-// 		res.SendSequencesTxHash = &virtualBatch.TxHash
-// 	}
-
-// 	if verifiedBatch != nil {
-// 		res.VerifyBatchTxHash = &verifiedBatch.TxHash
-// 	}
-
-// 	receiptsMap := make(map[common.Hash]types.Receipt, len(receipts))
-// 	for _, receipt := range receipts {
-// 		receiptsMap[receipt.TxHash] = receipt
-// 	}
-
-// 	for _, tx := range batch.Transactions {
-// 		if fullTx {
-// 			var receiptPtr *types.Receipt
-// 			if receipt, found := receiptsMap[tx.Hash()]; found {
-// 				receiptPtr = &receipt
-// 			}
-// 			rpcTx, err := NewTransaction(tx, receiptPtr, includeReceipts)
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			res.Transactions = append(res.Transactions, TransactionOrHash{Tx: rpcTx})
-// 		} else {
-// 			h := tx.Hash()
-// 			res.Transactions = append(res.Transactions, TransactionOrHash{Hash: &h})
-// 		}
-// 	}
-
-// 	for _, b := range blocks {
-// 		b := b
-// 		if fullTx {
-// 			block, err := NewBlock(&b, nil, false, false)
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			res.Blocks = append(res.Blocks, BlockOrHash{Block: block})
-// 		} else {
-// 			h := b.Hash()
-// 			res.Blocks = append(res.Blocks, BlockOrHash{Hash: &h})
-// 		}
-// 	}
-
-// 	return res, nil
-// }
-
 // TransactionOrHash for union type of transaction and types.Hash
 type TransactionOrHash struct {
 	Hash *common.Hash
@@ -540,6 +429,18 @@ type Transaction struct {
 	Receipt     *Receipt        `json:"receipt,omitempty"`
 }
 
+// GetSender gets the sender from the transaction's signature
+func GetSender(tx types.Transaction) (common.Address, error) {
+	// TODO: fix the hardcoded chain config for the l2
+	signer := types.MakeSigner(params.HermezTestnetChainConfig, 0)
+
+	sender, err := signer.Sender(tx)
+	if err != nil {
+		return common.Address{}, err
+	}
+	return sender, nil
+}
+
 // NewTransaction creates a transaction instance
 func NewTransaction(
 	tx types.Transaction,
@@ -548,7 +449,7 @@ func NewTransaction(
 ) (*Transaction, error) {
 	v, r, s := tx.RawSignatureValues()
 
-	from, _ := state.GetSender(tx)
+	from, _ := GetSender(tx)
 	hash := common.HexToHash(tx.Hash().Hex())
 	res := &Transaction{
 		Nonce:    ArgUint64(tx.GetNonce()),
@@ -613,7 +514,7 @@ func NewReceipt(tx types.Transaction, r *types.Receipt) (Receipt, error) {
 	}
 
 	var contractAddress *common.Address
-	if r.ContractAddress != state.ZeroAddress {
+	if r.ContractAddress != ZeroAddress {
 		ca := r.ContractAddress
 		contractAddress = &ca
 	}
@@ -623,7 +524,7 @@ func NewReceipt(tx types.Transaction, r *types.Receipt) (Receipt, error) {
 		blockNumber = ArgUint64(r.BlockNumber.Uint64())
 	}
 
-	from, err := state.GetSender(tx)
+	from, err := GetSender(tx)
 	if err != nil {
 		return Receipt{}, err
 	}
