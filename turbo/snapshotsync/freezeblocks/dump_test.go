@@ -1,6 +1,7 @@
 package freezeblocks_test
 
 import (
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"math/big"
 	"testing"
 
@@ -51,9 +52,9 @@ func TestDump(t *testing.T) {
 	}
 
 	withConfig := func(config chain.Config, sprints map[string]uint64) *chain.Config {
-		bor := *config.Bor
+		bor := *config.Bor.(*borcfg.BorConfig)
+		bor.Sprint = sprints
 		config.Bor = &bor
-		config.Bor.Sprint = sprints
 		return &config
 	}
 

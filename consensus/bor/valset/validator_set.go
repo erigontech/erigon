@@ -4,14 +4,16 @@ package valset
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
 	"sort"
 	"strings"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
 // MaxTotalVotingPower - the maximum allowed total voting power.
@@ -654,6 +656,30 @@ func (vals *ValidatorSet) UpdateValidatorMap() {
 // is not changed.
 func (vals *ValidatorSet) UpdateWithChangeSet(changes []*Validator, logger log.Logger) error {
 	return vals.updateWithChangeSet(changes, true, logger)
+}
+
+// Difficulty returns the difficulty for a particular signer at the current snapshot number
+func (vals *ValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
+	proposer := vals.GetProposer()
+	if proposer == nil {
+		return 0, errors.New("ValidatorSet.Difficulty: proposer not found")
+	}
+
+	proposerIndex, _ := vals.GetByAddress(proposer.Address)
+	if proposerIndex < 0 {
+		return 0, errors.New("ValidatorSet.Difficulty: proposer index not found")
+	}
+
+	signerIndex, _ := vals.GetByAddress(signer)
+	if signerIndex < 0 {
+		return 0, errors.New("ValidatorSet.Difficulty: signer index not found")
+	}
+
+	indexDiff := signerIndex - proposerIndex
+	if indexDiff < 0 {
+		indexDiff += len(vals.Validators)
+	}
+	return uint64(len(vals.Validators) - indexDiff), nil
 }
 
 //-----------------

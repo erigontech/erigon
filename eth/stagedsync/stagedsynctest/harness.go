@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"math/big"
 	"testing"
 	"time"
@@ -90,6 +91,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		chainDataDB:               chainDataDB,
 		borConsensusDB:            borConsensusDB,
 		chainConfig:               cfg.ChainConfig,
+		borConfig:                 cfg.ChainConfig.Bor.(*borcfg.BorConfig),
 		blockReader:               blockReader,
 		stateSyncStages:           stateSyncStages,
 		stateSync:                 stateSync,
@@ -141,6 +143,7 @@ type Harness struct {
 	chainDataDB                kv.RwDB
 	borConsensusDB             kv.RwDB
 	chainConfig                *chain.Config
+	borConfig                  *borcfg.BorConfig
 	blockReader                services.BlockReader
 	stateSyncStages            []*stagedsync.Stage
 	stateSync                  *stagedsync.Sync
@@ -159,6 +162,10 @@ type Harness struct {
 
 func (h *Harness) Logger() log.Logger {
 	return h.logger
+}
+
+func (h *Harness) BorConfig() *borcfg.BorConfig {
+	return h.borConfig
 }
 
 func (h *Harness) SaveStageProgress(ctx context.Context, t *testing.T, stageID stages.SyncStage, progress uint64) {
@@ -417,8 +424,8 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 	if h.chainConfig.Bor != nil {
 		genesisContracts := contract.NewGenesisContractsClient(
 			h.chainConfig,
-			h.chainConfig.Bor.ValidatorContract,
-			h.chainConfig.Bor.StateReceiverContract,
+			h.borConfig.ValidatorContract,
+			h.borConfig.StateReceiverContract,
 			h.logger,
 		)
 
@@ -568,8 +575,8 @@ func (h *Harness) mockHeimdallClient() {
 		StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*clerk.EventRecordWithTime, error) {
 			h.heimdallLastEventID++
-			h.heimdallLastEventHeaderNum += h.chainConfig.Bor.CalculateSprint(h.heimdallLastEventHeaderNum)
-			stateSyncDelay := h.chainConfig.Bor.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)
+			h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
+			stateSyncDelay := h.borConfig.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)
 			newEvent := clerk.EventRecordWithTime{
 				EventRecord: clerk.EventRecord{
 					ID:      h.heimdallLastEventID,
