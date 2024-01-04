@@ -2097,7 +2097,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		step = ^prunedStep
 		k, v, err = keysCursor.Seek(prunedKey)
 	} else {
-		k, v, err = keysCursor.First()
+		k, v, err = keysCursor.Last()
 	}
 	if err != nil {
 		return err
