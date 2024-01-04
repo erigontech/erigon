@@ -20,8 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethclient"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/etherscan"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/ethgasstation"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/matic"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevm"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevmglobalexitroot"
@@ -155,15 +153,6 @@ func NewClient(cfg Config) (*Client, error) {
 	scAddresses = append(scAddresses, cfg.PoEAddr, cfg.GlobalExitRootManagerAddr)
 
 	gProviders := []ethereum.GasPricer{ethClient}
-	if cfg.MultiGasProvider {
-		if cfg.Etherscan.ApiKey == "" {
-			log.Info("No ApiKey provided for etherscan. Ignoring provider...")
-		} else {
-			log.Info("ApiKey detected for etherscan")
-			gProviders = append(gProviders, etherscan.NewEtherscanService(cfg.Etherscan.ApiKey))
-		}
-		gProviders = append(gProviders, ethgasstation.NewEthGasStationService())
-	}
 
 	l1Conf := params.MainnetChainConfig
 	l2Conf := params.HermezMainnetChainConfig
@@ -179,7 +168,7 @@ func NewClient(cfg Config) (*Client, error) {
 		GlobalExitRootManager: globalExitRoot,
 		SCAddresses:           scAddresses,
 		GasProviders: externalGasProviders{
-			MultiGasProvider: cfg.MultiGasProvider,
+			MultiGasProvider: false,
 			Providers:        gProviders,
 		},
 		cfg:           cfg,

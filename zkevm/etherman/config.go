@@ -2,7 +2,6 @@ package etherman
 
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/etherscan"
 )
 
 // Config represents the configuration of the etherman
@@ -16,7 +15,4 @@ type Config struct {
 
 	PrivateKeyPath     string `mapstructure:"PrivateKeyPath"`
 	PrivateKeyPassword string `mapstructure:"PrivateKeyPassword"`
-
-	MultiGasProvider bool `mapstructure:"MultiGasProvider"`
-	Etherscan        etherscan.Config
 }
