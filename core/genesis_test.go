@@ -68,6 +68,22 @@ func TestHermezBlockRoots(t *testing.T) {
 			t.Errorf("wrong Hermez Testnet genesis state root, got %v, want %v", block.Root(), params.HermezTestnetGenesisHash)
 		}
 	})
+
+	t.Run("Hermez Cardona", func(t *testing.T) {
+		block, _, err := core.GenesisToBlock(core.HermezCardonaGenesisBlock(), "")
+		require.NoError(err)
+		if block.Root() != params.HermezCardonaGenesisHash {
+			t.Errorf("wrong Hermez Cardona genesis state root, got %v, want %v", block.Root(), params.HermezCardonaGenesisHash)
+		}
+	})
+
+	t.Run("Hermez Cardona Internal", func(t *testing.T) {
+		block, _, err := core.GenesisToBlock(core.HermezCardonaInternalGenesisBlock(), "")
+		require.NoError(err)
+		if block.Root() != params.HermezCardonaInternalGenesisHash {
+			t.Errorf("wrong Hermez Cardona Internal genesis state root, got %v, want %v", block.Root(), params.HermezCardonaInternalGenesisHash)
+		}
+	})
 }
 
 func TestGenesisBlockRoots(t *testing.T) {
@@ -95,18 +111,6 @@ func TestGenesisBlockRoots(t *testing.T) {
 	}
 	if block.Hash() != params.ChiadoGenesisHash {
 		t.Errorf("wrong Chiado genesis hash, got %v, want %v", block.Hash(), params.ChiadoGenesisHash)
-	}
-
-	block, _, err = core.GenesisToBlock(core.HermezMainnetGenesisBlock(), "")
-	require.NoError(err)
-	if block.Root() != params.HermezMainnetGenesisHash {
-		t.Errorf("wrong Hermez Mainnet genesis state root, got %v, want %v", block.Root(), params.HermezMainnetGenesisHash)
-	}
-
-	block, _, err = core.GenesisToBlock(core.HermezTestnetGenesisBlock(), "")
-	require.NoError(err)
-	if block.Root() != params.HermezTestnetGenesisHash {
-		t.Errorf("wrong Hermez Testnet genesis state root, got %v, want %v", block.Root(), params.HermezTestnetGenesisHash)
 	}
 }
 

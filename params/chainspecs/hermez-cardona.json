@@ -1,0 +1,26 @@
+{
+  "ChainName": "devnet",
+  "chainId": 2442,
+  "consensus": "ethash",
+  "homesteadBlock": 0,
+  "daoForkBlock": 0,
+  "eip150Block": 0,
+  "eip155Block": 0,
+  "byzantiumBlock": 0,
+  "constantinopleBlock": 0,
+  "petersburgBlock": 0,
+  "istanbulBlock": 0,
+  "muirGlacierBlock": 0,
+  "berlinBlock": 0,
+  "londonBlock": 9999999999999999999999999999999999999999999999999,
+  "arrowGlacierBlock": 9999999999999999999999999999999999999999999999999,
+  "grayGlacierBlock": 9999999999999999999999999999999999999999999999999,
+  "terminalTotalDifficulty": 58750000000000000000000,
+  "terminalTotalDifficultyPassed": false,
+  "shanghaiTime": 9999999999999999999999999999999999999999999999999,
+  "cancunTime": 9999999999999999999999999999999999999999999999999,
+  "pragueTime": 9999999999999999999999999999999999999999999999999,
+  "ethash": {},
+  "mordorBlock": 0
+}
+
