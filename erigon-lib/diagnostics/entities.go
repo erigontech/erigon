@@ -29,6 +29,13 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
+type SyncStatistics struct {
+	SyncStagesList   SyncStagesList             `json:"syncStagesList"`
+	CurrentSyncStage CurrentSyncStage           `json:"currentSyncStage"`
+	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
+	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
+}
+
 type SnapshotDownloadStatistics struct {
 	Downloaded           uint64                               `json:"downloaded"`
 	Total                uint64                               `json:"total"`
@@ -42,9 +49,7 @@ type SnapshotDownloadStatistics struct {
 	Sys                  uint64                               `json:"sys"`
 	DownloadFinished     bool                                 `json:"downloadFinished"`
 	SegmentsDownloading  map[string]SegmentDownloadStatistics `json:"segmentsDownloading"`
-	SegmentIndexing      SnapshotIndexingStatistics           `json:"segmentsIndexing"`
 	TorrentMetadataReady int32                                `json:"torrentMetadataReady"`
-	LogPrefix            string                               `json:"logPrefix"`
 }
 
 type SegmentDownloadStatistics struct {

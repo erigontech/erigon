@@ -14,5 +14,5 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) {
 }
 
 func writeStages(w http.ResponseWriter, diag *DiagnosticClient) {
-	json.NewEncoder(w).Encode(diag.SnapshotDownload())
+	json.NewEncoder(w).Encode(diag.SyncStatistics())
 }
