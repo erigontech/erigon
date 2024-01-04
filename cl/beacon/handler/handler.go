@@ -125,6 +125,7 @@ func (a *ApiHandler) init() {
 			r.Route("/debug", func(r chi.Router) {
 				r.Route("/beacon", func(r chi.Router) {
 					r.Get("/states/{state_id}", beaconhttp.HandleEndpointFunc(a.getFullState))
+					r.Get("/heads", beaconhttp.HandleEndpointFunc(a.GetEthV2DebugBeaconHeads))
 				})
 			})
 			r.Route("/beacon", func(r chi.Router) {
