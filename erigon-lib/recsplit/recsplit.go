@@ -558,10 +558,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
+	defer rs.indexF.Close()
 
 	rs.logger.Debug("[index] created", "file", rs.tmpFilePath, "fs", rs.indexF)
-
-	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
 	// Write minimal app-specific dataID in this index file
 	binary.BigEndian.PutUint64(rs.numBuf[:], rs.baseDataID)
