@@ -2087,16 +2087,23 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	//		"keys until limit", limit,
 	//		"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
 	//}()
-	//prunedStep, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
-	//if err != nil {
-	//	dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
-	//}
-	//
-	//if prunedStep != 0 {
-	//	step = ^prunedStep
-	//}
+	prunedStep, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	if err != nil {
+		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
+	}
 
-	for k, v, err := keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
+	var k, v []byte
+	if prunedStep != 0 && prunedKey != nil {
+		step = ^prunedStep
+		k, v, err = keysCursor.Seek(prunedKey)
+	} else {
+		k, v, err = keysCursor.First()
+	}
+	if err != nil {
+		return err
+	}
+
+	for ; k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
@@ -2133,14 +2140,14 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
-			//if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
-			//	dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			//}
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
+			}
 			return ctx.Err()
 		case <-logEvery.C:
-			//if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
-			//	dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			//}
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
+				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
+			}
 			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase,
 				"pruned keys", prunedKeys,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dc.d.aggregationStep), float64(txTo)/float64(dc.d.aggregationStep)))
@@ -2148,9 +2155,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 	}
 
-	//if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
-	//	dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
-	//}
+	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
+		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
+	}
 
 	mxPruneTookDomain.ObserveDuration(st)
 

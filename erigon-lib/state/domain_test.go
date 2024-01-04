@@ -1846,7 +1846,7 @@ func TestDomain_Unwind(t *testing.T) {
 		dc.Close()
 		tx.Commit()
 
-		fmt.Printf("=====write expected data===== \n\n")
+		t.Log("=====write expected data===== \n\n")
 		tmpDb, expected := testDbAndDomain(t, log.New())
 		defer expected.Close()
 		defer tmpDb.Close()
