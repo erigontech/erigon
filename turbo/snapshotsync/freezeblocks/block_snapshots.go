@@ -1120,17 +1120,18 @@ func typeOfSegmentsMustExist(dir string, in []snaptype.FileInfo, types []snaptyp
 MainLoop:
 	for _, f := range in {
 		if f.From == f.To {
-			if f.T == snaptype.Bodies {
-				fmt.Printf("[dbg] skip11: %s\n", f.Path)
-			}
 			continue
 		}
 		for _, t := range types {
-			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t))
-			if !dir2.FileExist(p) {
-				if f.T == snaptype.Bodies {
-					fmt.Printf("[dbg] skip22: %s, %s\n", f.Path, p)
+			found := false
+			for v := f.Version; v > 0; v-- {
+				p := filepath.Join(dir, snaptype.SegmentFileName(v, f.From, f.To, t))
+				if dir2.FileExist(p) {
+					found = true
+					break
 				}
+			}
+			if !found {
 				continue MainLoop
 			}
 		}
