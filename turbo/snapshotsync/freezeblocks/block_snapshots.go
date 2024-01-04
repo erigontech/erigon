@@ -1129,7 +1129,7 @@ MainLoop:
 			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t))
 			if !dir2.FileExist(p) {
 				if f.T == snaptype.Bodies {
-					fmt.Printf("[dbg] skip22: %s\n", f.Path)
+					fmt.Printf("[dbg] skip22: %s, %s\n", f.Path, p)
 				}
 				continue MainLoop
 			}
