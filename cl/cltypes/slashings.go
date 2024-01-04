@@ -33,6 +33,13 @@ type AttesterSlashing struct {
 	Attestation_2 *IndexedAttestation `json:"attestation_2"`
 }
 
+func NewAttesterSlashing() *AttesterSlashing {
+	return &AttesterSlashing{
+		Attestation_1: NewIndexedAttestation(),
+		Attestation_2: NewIndexedAttestation(),
+	}
+}
+
 func (a *AttesterSlashing) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, a.Attestation_1, a.Attestation_2)
 }

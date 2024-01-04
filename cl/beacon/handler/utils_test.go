@@ -49,6 +49,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, f, preState)
 	opPool = pool.NewOperationsPool(&bcfg)
+	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
 	gC := clparams.GenesisConfigs[clparams.MainnetNetwork]
 	handler = NewApiHandler(
@@ -60,7 +61,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 		opPool,
 		reader,
 		syncedData,
-		statesReader)
+		statesReader,
+		nil)
 	handler.init()
 	return
 }
