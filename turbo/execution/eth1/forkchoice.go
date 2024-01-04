@@ -102,8 +102,6 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash libcom
 	rawdb.WriteForkchoiceHead(tx, blockHash)
 }
 
-const BIG_JUMP = 2_000
-
 func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash libcommon.Hash, outcomeCh chan forkchoiceOutcome) {
 	if !e.semaphore.TryAcquire(1) {
 		sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
@@ -152,7 +150,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 
-	tooBigJump := finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > BIG_JUMP
+	tooBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
 
 	if tooBigJump {
 		isSynced = false
@@ -324,10 +322,10 @@ TooBigJumpStep:
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	tooBigJump = finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore && fcuHeader.Number.Uint64()-finishProgressBefore > BIG_JUMP
+	tooBigJump = e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64() > finishProgressBefore && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
 	if tooBigJump { //jump forward by 1K blocks
-		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+BIG_JUMP, "bigJumpTo", fcuHeader.Number.Uint64())
-		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+BIG_JUMP)
+		log.Info("[sync] jump by 1K blocks", "currentJumpTo", finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit), "bigJumpTo", fcuHeader.Number.Uint64())
+		blockHash, err = e.blockReader.CanonicalHash(ctx, tx, finishProgressBefore+uint64(e.syncCfg.LoopBlockLimit))
 		if err != nil {
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return

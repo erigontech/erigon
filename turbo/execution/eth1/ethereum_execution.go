@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -54,17 +55,18 @@ type EthereumExecutionModule struct {
 	stateChangeConsumer shards.StateChangeConsumer
 
 	// configuration
-	config             *chain.Config
-	historyV3          bool
-	forcePartialCommit bool
+	config    *chain.Config
+	historyV3 bool
 	// consensus
 	engine consensus.Engine
+
+	syncCfg ethconfig.Sync
 
 	execution.UnimplementedExecutionServer
 }
 
 func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, engine consensus.Engine, historyV3 bool, forcePartialCommit bool) *EthereumExecutionModule {
+	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, engine consensus.Engine, historyV3 bool, syncCfg ethconfig.Sync) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
 		db:                  db,
@@ -80,7 +82,6 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
 		historyV3:           historyV3,
-		forcePartialCommit:  forcePartialCommit,
 	}
 }
 
