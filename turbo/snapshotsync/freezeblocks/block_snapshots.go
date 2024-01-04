@@ -740,7 +740,6 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	fmt.Printf("[dbg] %s\n", list)
 	return s.ReopenList(list, false)
 }
 
@@ -1212,6 +1211,7 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 				continue
 			}
 			l = append(l, f)
+			fmt.Printf("[dbg] %s\n", f.Path)
 		}
 		l, _ = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
 		res = append(res, l...)
