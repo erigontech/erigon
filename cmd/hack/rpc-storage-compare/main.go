@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/iden3/go-iden3-crypto/keccak256"
 )
 

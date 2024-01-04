@@ -1,19 +1,15 @@
 package types
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
 
-	"github.com/jackc/pgx/v4"
 	"github.com/ledgerwatch/erigon-lib/common"
-	ericommon "github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
-	"github.com/ledgerwatch/erigon/zkevm/state"
 
 	"github.com/holiman/uint256"
 )
@@ -191,57 +187,6 @@ type TxArgs struct {
 	Nonce    *ArgUint64
 }
 
-// ToTransaction transforms txnArgs into a Transaction
-func (args *TxArgs) ToTransaction(ctx context.Context, st StateInterface, maxCumulativeGasUsed uint64, root common.Hash, defaultSenderAddress common.Address, dbTx pgx.Tx) (common.Address, types.Transaction, error) {
-	sender := defaultSenderAddress
-	nonce := uint64(0)
-	if args.From != nil && *args.From != state.ZeroAddress {
-		sender = *args.From
-		n, err := st.GetNonce(ctx, sender, root)
-		if err != nil {
-			return common.Address{}, nil, err
-		}
-		nonce = n
-	}
-
-	value := big.NewInt(0)
-	if args.Value != nil {
-		value.SetBytes(*args.Value)
-	}
-
-	gasPrice := big.NewInt(0)
-	if args.GasPrice != nil {
-		gasPrice.SetBytes(*args.GasPrice)
-	}
-
-	var data []byte
-	if args.Data != nil {
-		data = *args.Data
-	} else if args.Input != nil {
-		data = *args.Input
-	} else if args.To == nil {
-		return common.Address{}, nil, fmt.Errorf("contract creation without data provided")
-	}
-
-	gas := maxCumulativeGasUsed
-	if args.Gas != nil && uint64(*args.Gas) > 0 && uint64(*args.Gas) < maxCumulativeGasUsed {
-		gas = uint64(*args.Gas)
-	}
-
-	tx := &types.LegacyTx{
-		types.CommonTx{
-			Nonce: nonce,
-			To:    args.To,
-			Value: b2i(value),
-			Gas:   gas,
-			Data:  data,
-		},
-		b2i(gasPrice),
-	}
-
-	return sender, tx, nil
-}
-
 func b2i(s *big.Int) *uint256.Int {
 	iii := &uint256.Int{}
 	iii.SetBytes(s.Bytes())
@@ -272,68 +217,6 @@ type Block struct {
 	Uncles          []common.Hash       `json:"uncles"`
 }
 
-// NewBlock creates a Block instance
-func NewBlock(b *types.Block, fullTx bool) *Block {
-	h := b.Header()
-
-	n := big.NewInt(0).SetUint64(h.Nonce.Uint64())
-	nonce := ericommon.LeftPadBytes(n.Bytes(), 8) //nolint:gomnd
-
-	var difficulty uint64
-	if h.Difficulty != nil {
-		difficulty = h.Difficulty.Uint64()
-	} else {
-		difficulty = uint64(0)
-	}
-
-	res := &Block{
-		ParentHash:      h.ParentHash,
-		Sha3Uncles:      h.UncleHash,
-		Miner:           h.Coinbase,
-		StateRoot:       h.Root,
-		TxRoot:          h.TxHash,
-		ReceiptsRoot:    h.ReceiptHash,
-		LogsBloom:       h.Bloom,
-		Difficulty:      ArgUint64(difficulty),
-		TotalDifficulty: ArgUint64(difficulty),
-		Size:            ArgUint64(b.Size()),
-		Number:          ArgUint64(b.Number().Uint64()),
-		GasLimit:        ArgUint64(h.GasLimit),
-		GasUsed:         ArgUint64(h.GasUsed),
-		Timestamp:       ArgUint64(h.Time),
-		ExtraData:       ArgBytes(h.Extra),
-		MixHash:         h.MixDigest,
-		Nonce:           nonce,
-		Hash:            b.Hash(),
-		Transactions:    []TransactionOrHash{},
-		Uncles:          []common.Hash{},
-	}
-
-	for idx, txn := range b.Transactions() {
-		if fullTx {
-			blockHash := b.Hash()
-			txIndex := uint64(idx)
-			tx := NewTransaction(txn, b.Number(), &blockHash, &txIndex)
-			res.Transactions = append(
-				res.Transactions,
-				TransactionOrHash{Tx: tx},
-			)
-		} else {
-			h := txn.Hash()
-			res.Transactions = append(
-				res.Transactions,
-				TransactionOrHash{Hash: &h},
-			)
-		}
-	}
-
-	for _, uncle := range b.Uncles() {
-		res.Uncles = append(res.Uncles, uncle.Hash())
-	}
-
-	return res
-}
-
 // Batch structure
 type Batch struct {
 	Number              ArgUint64           `json:"number"`
@@ -348,48 +231,6 @@ type Batch struct {
 	SendSequencesTxHash *common.Hash        `json:"sendSequencesTxHash"`
 	VerifyBatchTxHash   *common.Hash        `json:"verifyBatchTxHash"`
 	Transactions        []TransactionOrHash `json:"transactions"`
-}
-
-// NewBatch creates a Batch instance
-func NewBatch(batch *state.Batch, virtualBatch *state.VirtualBatch, verifiedBatch *state.VerifiedBatch, receipts []types.Receipt, fullTx bool, ger *state.GlobalExitRoot) *Batch {
-	res := &Batch{
-		Number:          ArgUint64(batch.BatchNumber),
-		GlobalExitRoot:  batch.GlobalExitRoot,
-		MainnetExitRoot: ger.MainnetExitRoot,
-		RollupExitRoot:  ger.RollupExitRoot,
-		AccInputHash:    batch.AccInputHash,
-		Timestamp:       ArgUint64(batch.Timestamp.Unix()),
-		StateRoot:       batch.StateRoot,
-		Coinbase:        batch.Coinbase,
-		LocalExitRoot:   batch.LocalExitRoot,
-	}
-
-	if virtualBatch != nil {
-		res.SendSequencesTxHash = &virtualBatch.TxHash
-	}
-
-	if verifiedBatch != nil {
-		res.VerifyBatchTxHash = &verifiedBatch.TxHash
-	}
-
-	receiptsMap := make(map[common.Hash]types.Receipt, len(receipts))
-	for _, receipt := range receipts {
-		receiptsMap[receipt.TxHash] = receipt
-	}
-
-	for _, tx := range batch.Transactions {
-		if fullTx {
-			receipt := receiptsMap[tx.Hash()]
-			txIndex := uint64(receipt.TransactionIndex)
-			rpcTx := NewTransaction(tx, receipt.BlockNumber, &receipt.BlockHash, &txIndex)
-			res.Transactions = append(res.Transactions, TransactionOrHash{Tx: rpcTx})
-		} else {
-			h := tx.Hash()
-			res.Transactions = append(res.Transactions, TransactionOrHash{Hash: &h})
-		}
-	}
-
-	return res
 }
 
 // TransactionOrHash for union type of transaction and types.Hash
@@ -465,48 +306,6 @@ func (t Transaction) CoreTx() types.Transaction {
 	}
 }
 
-// NewTransaction creates a transaction instance
-func NewTransaction(
-	t types.Transaction,
-	blockNumber *big.Int,
-	blockHash *common.Hash,
-	txIndex *uint64,
-) *Transaction {
-	v, r, s := t.RawSignatureValues()
-
-	from, _ := state.GetSender(t)
-
-	res := &Transaction{
-		Nonce:    ArgUint64(t.GetNonce()),
-		GasPrice: ArgBig(*(t.GetPrice().ToBig())),
-		Gas:      ArgUint64(t.GetGas()),
-		To:       t.GetTo(),
-		Value:    ArgBig(*(t.GetValue().ToBig())),
-		Input:    t.GetData(),
-		V:        ArgBig(*(v.ToBig())),
-		R:        ArgBig(*(r.ToBig())),
-		S:        ArgBig(*(s.ToBig())),
-		Hash:     t.Hash(),
-		From:     from,
-		ChainID:  ArgBig(*(t.GetChainID().ToBig())),
-		Type:     ArgUint64(t.Type()),
-	}
-
-	if blockNumber != nil {
-		bn := ArgUint64(blockNumber.Uint64())
-		res.BlockNumber = &bn
-	}
-
-	res.BlockHash = blockHash
-
-	if txIndex != nil {
-		ti := ArgUint64(*txIndex)
-		res.TxIndex = &ti
-	}
-
-	return res
-}
-
 // Receipt structure
 type Receipt struct {
 	Root              common.Hash     `json:"root"`
@@ -523,48 +322,6 @@ type Receipt struct {
 	ToAddr            *common.Address `json:"to"`
 	ContractAddress   *common.Address `json:"contractAddress"`
 	Type              ArgUint64       `json:"type"`
-}
-
-// NewReceipt creates a new Receipt instance
-func NewReceipt(tx types.Transaction, r *types.Receipt) (Receipt, error) {
-	to := tx.GetTo()
-	logs := r.Logs
-	if logs == nil {
-		logs = []*types.Log{}
-	}
-
-	var contractAddress *common.Address
-	if r.ContractAddress != state.ZeroAddress {
-		ca := r.ContractAddress
-		contractAddress = &ca
-	}
-
-	blockNumber := ArgUint64(0)
-	if r.BlockNumber != nil {
-		blockNumber = ArgUint64(r.BlockNumber.Uint64())
-	}
-
-	from, err := state.GetSender(tx)
-	if err != nil {
-		return Receipt{}, err
-	}
-
-	return Receipt{
-		Root:              common.BytesToHash(r.PostState),
-		CumulativeGasUsed: ArgUint64(r.CumulativeGasUsed),
-		LogsBloom:         r.Bloom,
-		Logs:              logs,
-		Status:            ArgUint64(r.Status),
-		TxHash:            r.TxHash,
-		TxIndex:           ArgUint64(r.TransactionIndex),
-		BlockHash:         r.BlockHash,
-		BlockNumber:       blockNumber,
-		GasUsed:           ArgUint64(r.GasUsed),
-		ContractAddress:   contractAddress,
-		FromAddr:          from,
-		ToAddr:            to,
-		Type:              ArgUint64(r.Type),
-	}, nil
 }
 
 // Log structure

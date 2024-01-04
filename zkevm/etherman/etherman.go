@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"math/big"
 	"strings"
 	"time"
@@ -21,15 +20,11 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethclient"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/etherscan"
-	"github.com/ledgerwatch/erigon/zkevm/etherman/ethgasstation"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/matic"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevm"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevmglobalexitroot"
 	ethmanTypes "github.com/ledgerwatch/erigon/zkevm/etherman/types"
 	"github.com/ledgerwatch/erigon/zkevm/log"
-	"github.com/ledgerwatch/erigon/zkevm/state"
-	"github.com/ledgerwatch/erigon/zkevm/test/operations"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -158,15 +153,6 @@ func NewClient(cfg Config) (*Client, error) {
 	scAddresses = append(scAddresses, cfg.PoEAddr, cfg.GlobalExitRootManagerAddr)
 
 	gProviders := []ethereum.GasPricer{ethClient}
-	if cfg.MultiGasProvider {
-		if cfg.Etherscan.ApiKey == "" {
-			log.Info("No ApiKey provided for etherscan. Ignoring provider...")
-		} else {
-			log.Info("ApiKey detected for etherscan")
-			gProviders = append(gProviders, etherscan.NewEtherscanService(cfg.Etherscan.ApiKey))
-		}
-		gProviders = append(gProviders, ethgasstation.NewEthGasStationService())
-	}
 
 	l1Conf := params.MainnetChainConfig
 	l2Conf := params.HermezMainnetChainConfig
@@ -182,7 +168,7 @@ func NewClient(cfg Config) (*Client, error) {
 		GlobalExitRootManager: globalExitRoot,
 		SCAddresses:           scAddresses,
 		GasProviders: externalGasProviders{
-			MultiGasProvider: cfg.MultiGasProvider,
+			MultiGasProvider: false,
 			Providers:        gProviders,
 		},
 		cfg:           cfg,
@@ -219,47 +205,6 @@ func (etherMan *Client) VerifyGenBlockNumber(ctx context.Context, genBlockNumber
 		return false, nil
 	}
 	return true, nil
-}
-
-// GetForks returns fork information
-func (etherMan *Client) GetForks(ctx context.Context) ([]state.ForkIDInterval, error) {
-	// Filter query
-	query := ethereum.FilterQuery{
-		FromBlock: new(big.Int).SetUint64(1),
-		Addresses: etherMan.SCAddresses,
-		Topics:    [][]common.Hash{{updateZkEVMVersionSignatureHash}},
-	}
-	logs, err := etherMan.EthClient.FilterLogs(ctx, query)
-	if err != nil {
-		return []state.ForkIDInterval{}, err
-	}
-	var forks []state.ForkIDInterval
-	for i, l := range logs {
-		zkevmVersion, err := etherMan.PoE.ParseUpdateZkEVMVersion(l)
-		if err != nil {
-			return []state.ForkIDInterval{}, err
-		}
-		var fork state.ForkIDInterval
-		if i == 0 {
-			fork = state.ForkIDInterval{
-				FromBatchNumber: zkevmVersion.NumBatch + 1,
-				ToBatchNumber:   math.MaxUint64,
-				ForkId:          zkevmVersion.ForkID,
-				Version:         zkevmVersion.Version,
-			}
-		} else {
-			forks[len(forks)-1].ToBatchNumber = zkevmVersion.NumBatch
-			fork = state.ForkIDInterval{
-				FromBatchNumber: zkevmVersion.NumBatch + 1,
-				ToBatchNumber:   math.MaxUint64,
-				ForkId:          zkevmVersion.ForkID,
-				Version:         zkevmVersion.Version,
-			}
-		}
-		forks = append(forks, fork)
-	}
-	log.Debugf("Forks decoded: %+v", forks)
-	return forks, nil
 }
 
 // GetRollupInfoByBlockRange function retrieves the Rollup information that are included in all this ethereum blocks
@@ -456,18 +401,6 @@ func (etherMan *Client) updateGlobalExitRootEvent(ctx context.Context, vLog type
 	}
 	(*blocksOrder)[(*blocks)[len(*blocks)-1].BlockHash] = append((*blocksOrder)[(*blocks)[len(*blocks)-1].BlockHash], or)
 	return nil
-}
-
-// WaitTxToBeMined waits for an L1 tx to be mined. It will return error if the tx is reverted or timeout is exceeded
-func (etherMan *Client) WaitTxToBeMined(ctx context.Context, tx types.Transaction, timeout time.Duration) (bool, error) {
-	err := operations.WaitTxToBeMined(ctx, etherMan.EthClient, tx, timeout)
-	if errors.Is(err, context.DeadlineExceeded) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // EstimateGasSequenceBatches estimates gas for sending batches
@@ -998,12 +931,6 @@ func (etherMan *Client) GetL2ForkID() (uint64, error) {
 	return 1, nil
 }
 
-// GetL2ForkIDIntervals return L2 Fork ID intervals
-func (etherMan *Client) GetL2ForkIDIntervals() ([]state.ForkIDInterval, error) {
-	// TODO: implement this
-	return []state.ForkIDInterval{{FromBatchNumber: 0, ToBatchNumber: math.MaxUint64, ForkId: 1}}, nil
-}
-
 // GetL1GasPrice gets the l1 gas price
 func (etherMan *Client) GetL1GasPrice(ctx context.Context) *big.Int {
 	// Get gasPrice from providers
@@ -1078,27 +1005,6 @@ func (etherMan *Client) SignTx(ctx context.Context, sender common.Address, tx ty
 		return nil, err
 	}
 	return signedTx, nil
-}
-
-// GetRevertMessage tries to get a revert message of a transaction
-func (etherMan *Client) GetRevertMessage(ctx context.Context, tx types.Transaction) (string, error) {
-	if tx == nil {
-		return "", nil
-	}
-
-	receipt, err := etherMan.GetTxReceipt(ctx, tx.Hash())
-	if err != nil {
-		return "", err
-	}
-
-	if receipt.Status == types.ReceiptStatusFailed {
-		revertMessage, err := operations.RevertReason(ctx, etherMan.EthClient, tx, receipt.BlockNumber)
-		if err != nil {
-			return "", err
-		}
-		return revertMessage, nil
-	}
-	return "", nil
 }
 
 // AddOrReplaceAuth adds an authorization or replace an existent one to the same account
