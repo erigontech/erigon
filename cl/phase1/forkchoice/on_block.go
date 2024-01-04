@@ -8,7 +8,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 )
@@ -74,7 +76,17 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", lastProcessedState.Slot(), lastProcessedState, f.recorder); err != nil {
 			return err
 		}
+		// Update randao mixes
+		r := solid.NewHashVector(int(f.beaconCfg.EpochsPerHistoricalVector))
+		lastProcessedState.RandaoMixes().CopyTo(r)
+		f.randaoMixesLists.Add(blockRoot, r)
+	} else {
+		f.randaoDeltas.Add(blockRoot, randaoDelta{
+			epoch: state.Epoch(lastProcessedState),
+			delta: lastProcessedState.GetRandaoMixes(state.Epoch(lastProcessedState)),
+		})
 	}
+	f.participation.Add(state.Epoch(lastProcessedState), lastProcessedState.CurrentEpochParticipation().Copy())
 	f.preverifiedSizes.Add(blockRoot, preverifiedAppendListsSizes{
 		validatorLength:           uint64(lastProcessedState.ValidatorLength()),
 		historicalRootsLength:     lastProcessedState.HistoricalRootsLength(),

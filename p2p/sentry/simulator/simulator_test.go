@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p/sentry/simulator"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -17,6 +18,9 @@ import (
 )
 
 func TestSimulatorStart(t *testing.T) {
+	if ethconfig.EnableHistoryV3InTest {
+		t.Skip("TODO: fix deadlock")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 

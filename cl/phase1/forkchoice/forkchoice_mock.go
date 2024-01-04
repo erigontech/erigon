@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 )
 
@@ -59,10 +60,14 @@ type ForkChoiceStorageMock struct {
 	SlotVal                uint64
 	TimeVal                uint64
 
+	ParticipationVal *solid.BitList
+
 	StateAtBlockRootVal       map[common.Hash]*state.CachingBeaconState
 	StateAtSlotVal            map[uint64]*state.CachingBeaconState
 	GetSyncCommitteesVal      map[common.Hash][2]*solid.SyncCommittee
 	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
+
+	Pool pool.OperationsPool
 }
 
 func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
@@ -155,11 +160,13 @@ func (f *ForkChoiceStorageMock) Time() uint64 {
 }
 
 func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock bool) error {
-	panic("implement me")
+	f.Pool.AttestationsPool.Insert(attestation.Signature(), attestation)
+	return nil
 }
 
 func (f *ForkChoiceStorageMock) OnAttesterSlashing(attesterSlashing *cltypes.AttesterSlashing, test bool) error {
-	panic("implement me")
+	f.Pool.AttesterSlashingsPool.Insert(pool.ComputeKeyForAttesterSlashing(attesterSlashing), attesterSlashing)
+	return nil
 }
 
 func (f *ForkChoiceStorageMock) OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error {
@@ -180,4 +187,31 @@ func (f *ForkChoiceStorageMock) BlockRewards(root common.Hash) (*eth2.BlockRewar
 
 func (f *ForkChoiceStorageMock) TotalActiveBalance(root common.Hash) (uint64, bool) {
 	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) RandaoMixes(blockRoot common.Hash, out solid.HashListSSZ) bool {
+	return false
+}
+
+func (f *ForkChoiceStorageMock) LowestAvaiableSlot() uint64 {
+	return f.FinalizedSlotVal
+}
+
+func (f *ForkChoiceStorageMock) Partecipation(epoch uint64) (*solid.BitList, bool) {
+	return f.ParticipationVal, f.ParticipationVal != nil
+}
+
+func (f *ForkChoiceStorageMock) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
+	f.Pool.VoluntaryExistsPool.Insert(signedVoluntaryExit.VoluntaryExit.ValidatorIndex, signedVoluntaryExit)
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error {
+	f.Pool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(proposerSlashing), proposerSlashing)
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
+	f.Pool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
+	return nil
 }

@@ -21,6 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"golang.org/x/sync/semaphore"
 	"io/fs"
 	"math/big"
 	"net"
@@ -684,7 +686,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	ethBackendRPC := privateapi.NewEthBackendServer(ctx, backend, backend.chainDB, backend.notifications.Events, blockReader, logger, latestBlockBuiltStore)
 	// intiialize engine backend
 
-	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.chainConfig, backend.notifications.Events, logger)
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
+
+	agg.SetSnapshotBuildSema(blockSnapBuildSema)
+	blockRetire := freezeblocks.NewBlockRetire(1, dirs, blockReader, blockWriter, backend.chainDB, backend.chainConfig, backend.notifications.Events, blockSnapBuildSema, logger)
 
 	miningRPC = privateapi.NewMiningServer(ctx, backend, ethashApi, logger)
 
@@ -888,7 +893,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, chainKv)
-			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, snapshotVersion, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive, historyDB, indiciesDB); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, snapshotVersion, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive, historyDB, indiciesDB, blockSnapBuildSema); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
