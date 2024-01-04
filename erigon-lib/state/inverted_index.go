@@ -1074,9 +1074,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 			select {
 			case <-logEvery.C:
-				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase,
-					"prefix", fmt.Sprintf("%x", key[:8]),
-					"pruned values", pruneCount,
+				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned values", pruneCount,
 					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
 			case <-ctx.Done():
 				return ctx.Err()
