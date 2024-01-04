@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/semaphore"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -16,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -739,6 +740,7 @@ func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
+	fmt.Printf("[dbg] %s\n", list)
 	return s.ReopenList(list, false)
 }
 
