@@ -216,6 +216,7 @@ func TmpFiles(dir string, version uint8) (res []string, err error) {
 		return nil, err
 	}
 
+	panic(version)
 	v := fmt.Sprint("v", version)
 
 	for _, f := range files {
