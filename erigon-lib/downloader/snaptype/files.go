@@ -240,14 +240,13 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		return nil, err
 	}
 
-	v := fmt.Sprint("v", version)
-
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
 			return nil, err
 		}
-		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		//if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
 			continue
 		}
 
