@@ -1202,6 +1202,7 @@ func Segments(dir string, version uint8, minBlock uint64) (res []snaptype.FileIn
 
 func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func(dir string, in []snaptype.FileInfo) []snaptype.FileInfo) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	list, err := snaptype.Segments(dir, version)
+	fmt.Printf("[dbg2]: %+v\n", list)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
@@ -1227,7 +1228,6 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 			l = append(l, f)
 		}
 		l, _ = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
-		fmt.Printf("[dbg2]: %+v\n", l)
 		res = append(res, l...)
 	}
 	{
