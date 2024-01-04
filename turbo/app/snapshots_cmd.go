@@ -337,25 +337,6 @@ func doIntegrity(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	agg := openAgg(ctx, dirs, chainDB, logger)
-
-	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func doIntegrity(cliCtx *cli.Context) error {
-	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
-	if err != nil {
-		return err
-	}
-
-	ctx := cliCtx.Context
-	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
@@ -372,9 +353,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
-	//if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
-	//	return err
-	//}
+	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -983,13 +964,13 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	return opts
 }
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.AggregatorV3 {
-	agg, err := libstate.NewAggregatorV3(ctx, dirs.Snap, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, chainDB, logger)
 	if err != nil {
 		panic(err)
 	}
-	if err = agg.OpenFolder(); err != nil {
+	if err = agg.OpenFolder(true); err != nil {
 		panic(err)
 	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 	return agg
 }
