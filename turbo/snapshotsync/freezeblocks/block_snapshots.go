@@ -1210,6 +1210,7 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 			if f.T != snaptype.Bodies {
 				continue
 			}
+			fmt.Printf("[dbg] %s\n", f.Path)
 			l = append(l, f)
 		}
 		l, _ = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
