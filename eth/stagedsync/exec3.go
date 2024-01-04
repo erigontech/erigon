@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -141,7 +142,7 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
@@ -157,6 +158,7 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
+	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
@@ -202,10 +204,10 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
-	inMemExec := state2.IsSharedDomains(applyTx)
+	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
-		doms = applyTx.(*state2.SharedDomains)
+		doms = txc.Doms
 	} else {
 		doms = state2.NewSharedDomains(applyTx, log.New())
 		defer doms.Close()

@@ -163,16 +163,12 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 			return "", [32]byte{}, nil, err
 		}
 		var txc wrap.TxContainer
-		var extendingFork kv.RwTx
+		m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
+		defer m.Close()
+		txc.Tx = m
 		if histV3 {
-			m := state.NewSharedDomains(tx, logger).WithMemBatch()
-			defer m.Close()
-			txc.Tx = m
-			txc.Doms = m
-		} else {
-			m := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
-			defer m.Close()
-			txc.Tx = m
+			txc.Doms = state.NewSharedDomains(tx, logger)
+			defer txc.Doms.Close()
 		}
 		fv.extendingForkNotifications = &shards.Notifications{
 			Events:      shards.NewEvents(),
@@ -186,7 +182,7 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 			return
 		}
 		if validationError == nil {
-			if casted, ok := extendingFork.(HasDiff); ok {
+			if casted, ok := txc.Tx.(HasDiff); ok {
 				fv.memoryDiff, criticalError = casted.Diff()
 				if criticalError != nil {
 					return
@@ -259,15 +255,13 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	if err != nil {
 		return "", [32]byte{}, nil, err
 	}
+	batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
+	defer batch.Rollback()
+	txc.Tx = batch
 	if histV3 {
-		sd := state.NewSharedDomains(tx, logger).WithMemBatch()
+		sd := state.NewSharedDomains(tx, logger)
 		defer sd.Close()
-		txc.Tx = sd
 		txc.Doms = sd
-	} else {
-		batch := membatchwithdb.NewMemoryBatch(tx, fv.tmpDir, logger)
-		defer batch.Rollback()
-		txc.Tx = batch
 	}
 	notifications := &shards.Notifications{
 		Events:      shards.NewEvents(),

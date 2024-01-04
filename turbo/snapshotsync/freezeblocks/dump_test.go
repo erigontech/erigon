@@ -186,7 +186,7 @@ func TestDump(t *testing.T) {
 			txsAmount := uint64(0)
 			var baseIdList []uint64
 			firstTxNum := uint64(0)
-			err := freezeblocks.DumpBodies(m.Ctx, m.DB, 0, uint64(test.chainSize-3), firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
+			_, err := freezeblocks.DumpBodies(m.Ctx, m.DB, 0, uint64(test.chainSize-3), firstTxNum, log.LvlInfo, log.New(), func(v []byte) error {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
@@ -202,7 +202,7 @@ func TestDump(t *testing.T) {
 			firstTxNum += txsAmount
 			i = 0
 			baseIdList = baseIdList[:0]
-			err = freezeblocks.DumpBodies(m.Ctx, m.DB, 2, uint64(2*test.chainSize), firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
+			_, err = freezeblocks.DumpBodies(m.Ctx, m.DB, 2, uint64(2*test.chainSize), firstTxNum, log.LvlInfo, log.New(), func(v []byte) error {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
@@ -220,7 +220,7 @@ func TestDump(t *testing.T) {
 			i := 0
 			var baseIdList []uint64
 			firstTxNum := uint64(1000)
-			err := freezeblocks.DumpBodies(m.Ctx, m.DB, 2, uint64(test.chainSize), firstTxNum, 1, log.LvlInfo, log.New(), func(v []byte) error {
+			lastTxNum, err := freezeblocks.DumpBodies(m.Ctx, m.DB, 2, uint64(test.chainSize), firstTxNum, log.LvlInfo, log.New(), func(v []byte) error {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
@@ -230,6 +230,8 @@ func TestDump(t *testing.T) {
 			require.NoError(err)
 			require.Equal(test.chainSize-2, i)
 			require.Equal(baseIdRange(int(firstTxNum), 3, test.chainSize-2), baseIdList)
+			require.Equal(lastTxNum, baseIdList[len(baseIdList)-1]+3)
+			require.Equal(lastTxNum, firstTxNum+uint64(i*3))
 		})
 		t.Run("blocks", func(t *testing.T) {
 			if test.chainSize < 1000 || test.chainSize%1000 != 0 {
@@ -244,7 +246,7 @@ func TestDump(t *testing.T) {
 			snConfig := snapcfg.KnownCfg(networkname.MainnetChainName, 0)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 1, 0, uint64(test.chainSize), uint64(test.chainSize), tmpDir, snapDir, 0, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
+			err := freezeblocks.DumpBlocks(m.Ctx, 1, 0, uint64(test.chainSize), uint64(test.chainSize), tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
 			require.NoError(err)
 		})
 	}

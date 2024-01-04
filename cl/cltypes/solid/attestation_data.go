@@ -62,6 +62,8 @@ func (a AttestationData) UnmarshalJSON(buf []byte) error {
 		Source          Checkpoint     `json:"source"`
 		Target          Checkpoint     `json:"target"`
 	}
+	tmp.Source = NewCheckpoint()
+	tmp.Target = NewCheckpoint()
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}
