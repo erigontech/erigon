@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -21,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type BridgeEvent string
@@ -292,7 +293,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			h.Unlock()
 			h.unsubscribe()
 			h.Lock()
-			h.logger.Error("Failed to deploy state sender", "err", err)
+			h.logger.Error("Failed to create transact opts for deploying state sender", "err", err)
 			return
 		}
 
