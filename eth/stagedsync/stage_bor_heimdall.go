@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/contract"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
@@ -40,7 +41,7 @@ import (
 
 const (
 	inmemorySnapshots       = 128  // Number of recent vote snapshots to keep in memory
-	inmemorySignatures      = 4096 // Number of recent block signatures to keep in memory
+	InMemorySignatures      = 4096 // Number of recent block signatures to keep in memory
 	snapshotPersistInterval = 1024 // Number of blocks after which to persist the vote snapshot to the database
 	extraVanity             = 32   // Fixed number of extra-data prefix bytes reserved for signer vanity
 	extraSeal               = 65   // Fixed number of extra-data suffix bytes reserved for signer seal
@@ -56,6 +57,7 @@ type BorHeimdallCfg struct {
 	snapDb           kv.RwDB // Database to store and retrieve snapshot checkpoints
 	miningState      MiningState
 	chainConfig      chain.Config
+	borConfig        *borcfg.BorConfig
 	heimdallClient   heimdall.IHeimdallClient
 	blockReader      services.FullBlockReader
 	hd               *headerdownload.HeaderDownload
@@ -79,11 +81,17 @@ func StageBorHeimdallCfg(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) BorHeimdallCfg {
+	var borConfig *borcfg.BorConfig
+	if chainConfig.Bor != nil {
+		borConfig = chainConfig.Bor.(*borcfg.BorConfig)
+	}
+
 	return BorHeimdallCfg{
 		db:               db,
 		snapDb:           snapDb,
 		miningState:      miningState,
 		chainConfig:      chainConfig,
+		borConfig:        borConfig,
 		heimdallClient:   heimdallClient,
 		blockReader:      blockReader,
 		hd:               hd,
@@ -106,7 +114,7 @@ func BorHeimdallForward(
 ) (err error) {
 	processStart := time.Now()
 
-	if cfg.chainConfig.Bor == nil {
+	if cfg.borConfig == nil {
 		return
 	}
 	if cfg.heimdallClient == nil {
@@ -230,7 +238,7 @@ func BorHeimdallForward(
 		endSpanID = span.IDAt(headNumber + 1)
 	}
 
-	if span.BlockInLastSprintOfSpan(headNumber, cfg.chainConfig.Bor) {
+	if span.BlockInLastSprintOfSpan(headNumber, cfg.borConfig) {
 		endSpanID++
 	}
 
@@ -242,7 +250,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
-	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](inmemorySignatures)
+	signatures, err := lru.NewARC[libcommon.Hash, libcommon.Address](InMemorySignatures)
 	if err != nil {
 		return err
 	}
@@ -297,19 +305,19 @@ func BorHeimdallForward(
 				}
 			}
 
-			sprintLength := cfg.chainConfig.Bor.CalculateSprint(blockNum)
+			sprintLength := cfg.borConfig.CalculateSprintLength(blockNum)
 			spanID := span.IDAt(blockNum)
 			if (spanID > 0) && ((blockNum+1)%sprintLength == 0) {
-				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.chainConfig.Bor); err != nil {
+				if err = checkHeaderExtraData(u, ctx, chain, blockNum, header, cfg.borConfig); err != nil {
 					return err
 				}
 			}
 		}
 
-		if blockNum > 0 && blockNum%cfg.chainConfig.Bor.CalculateSprint(blockNum) == 0 {
+		if blockNum > 0 && blockNum%cfg.borConfig.CalculateSprintLength(blockNum) == 0 {
 			var callTime time.Duration
 			var records int
-			if lastEventId, records, callTime, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.chainConfig.Bor, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
+			if lastEventId, records, callTime, err = fetchAndWriteBorEvents(ctx, cfg.blockReader, cfg.borConfig, header, lastEventId, cfg.chainConfig.ChainID.String(), tx, cfg.heimdallClient, cfg.stateReceiverABI, s.LogPrefix(), logger); err != nil {
 				return err
 			}
 
@@ -321,10 +329,10 @@ func BorHeimdallForward(
 
 		if header != nil {
 			if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
-				snap = loadSnapshot(blockNum, header.Hash(), cfg.chainConfig.Bor, recents, signatures, cfg.snapDb, logger)
+				snap = loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
 
 				if snap == nil {
-					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.chainConfig.Bor,
+					snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.borConfig,
 						cfg.heimdallClient, chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
 
 					if err != nil {
@@ -332,7 +340,7 @@ func BorHeimdallForward(
 					}
 				}
 
-				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.chainConfig.Bor, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
+				if err = persistValidatorSets(ctx, snap, u, tx, cfg.blockReader, cfg.borConfig, chain, blockNum, header.Hash(), recents, signatures, cfg.snapDb, logger, s.LogPrefix()); err != nil {
 					return fmt.Errorf("can't persist validator sets: %w", err)
 				}
 			}
@@ -365,7 +373,7 @@ func checkHeaderExtraData(
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	header *types.Header,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 ) error {
 	spanID := span.IDAt(blockNum + 1)
 	spanBytes := chain.BorSpan(spanID)
@@ -400,7 +408,7 @@ func checkHeaderExtraData(
 func fetchAndWriteBorEvents(
 	ctx context.Context,
 	blockReader services.FullBlockReader,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	header *types.Header,
 	lastEventId uint64,
 	chainID string,
@@ -428,7 +436,7 @@ func fetchAndWriteBorEvents(
 		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
 		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
 	} else {
-		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprint(blockNum))
+		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
 		if err != nil {
 			return lastEventId, 0, time.Since(fetchStart), err
 		}
@@ -529,7 +537,7 @@ func fetchAndWriteSpans(
 	return spanId, nil
 }
 
-func loadSnapshot(blockNum uint64, hash libcommon.Hash, config *chain.BorConfig, recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
+func loadSnapshot(blockNum uint64, hash libcommon.Hash, config *borcfg.BorConfig, recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	snapDb kv.RwDB,
 	logger log.Logger) *bor.Snapshot {
@@ -554,7 +562,7 @@ func persistValidatorSets(
 	u Unwinder,
 	tx kv.Tx,
 	blockReader services.FullBlockReader,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	hash libcommon.Hash,
@@ -673,7 +681,7 @@ func initValidatorSets(
 	ctx context.Context,
 	tx kv.RwTx,
 	blockReader services.FullBlockReader,
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	heimdallClient heimdall.IHeimdallClient,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
@@ -732,7 +740,7 @@ func initValidatorSets(
 		g.SetLimit(estimate.AlmostAllCPUs())
 		defer g.Wait()
 
-		batchSize := 128 // must be < inmemorySignatures
+		batchSize := 128 // must be < InMemorySignatures
 		initialHeaders := make([]*types.Header, 0, batchSize)
 		parentHeader := zeroHeader
 		for i := uint64(1); i <= blockNum; i++ {
@@ -740,7 +748,7 @@ func initValidatorSets(
 			{
 				// `snap.apply` bottleneck - is recover of signer.
 				// to speedup: recover signer in background goroutines and save in `sigcache`
-				// `batchSize` < `inmemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
+				// `batchSize` < `InMemorySignatures`: means all current batch will fit in cache - and `snap.apply` will find it there.
 				g.Go(func() error {
 					if header == nil {
 						return nil
@@ -775,7 +783,7 @@ func initValidatorSets(
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
-	if cfg.chainConfig.Bor == nil {
+	if cfg.borConfig == nil {
 		return
 	}
 	useExternalTx := tx != nil
@@ -848,7 +856,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 }
 
 func BorHeimdallPrune(s *PruneState, ctx context.Context, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {
-	if cfg.chainConfig.Bor == nil {
+	if cfg.borConfig == nil {
 		return
 	}
 	return
