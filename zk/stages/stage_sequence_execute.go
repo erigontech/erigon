@@ -71,7 +71,7 @@ type headerDownloader interface {
 	ReportBadHeaderPoS(badHeader, lastValidAncestor common.Hash)
 }
 
-type ExecuteBlockCfg struct {
+type SequenceBlockCfg struct {
 	db            kv.RwDB
 	batchSize     datasize.ByteSize
 	prune         prune.Mode
@@ -93,7 +93,7 @@ type ExecuteBlockCfg struct {
 	zk        *ethconfig.Zk
 }
 
-func StageExecuteBlocksCfg(
+func StageSequenceBlocksCfg(
 	db kv.RwDB,
 	pm prune.Mode,
 	batchSize datasize.ByteSize,
@@ -113,8 +113,8 @@ func StageExecuteBlocksCfg(
 	syncCfg ethconfig.Sync,
 	agg *libstate.AggregatorV3,
 	zk *ethconfig.Zk,
-) ExecuteBlockCfg {
-	return ExecuteBlockCfg{
+) SequenceBlockCfg {
+	return SequenceBlockCfg{
 		db:            db,
 		prune:         pm,
 		batchSize:     batchSize,
@@ -142,7 +142,7 @@ func executeBlock(
 	tx kv.RwTx,
 	batch ethdb.Database,
 	gers []*dstypes.GerUpdate,
-	cfg ExecuteBlockCfg,
+	cfg SequenceBlockCfg,
 	vmConfig vm.Config, // emit copy, because will modify it
 	writeChangesets bool,
 	writeReceipts bool,
@@ -265,7 +265,15 @@ func newStateReaderWriter(
 	return stateReader, stateWriter, nil
 }
 
-func SpawnSequenceExecuteBlock(s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
+func SpawnSequencingStage(s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool, quiet bool) (err error) {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Starting sequencing stage", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished sequencing stage", logPrefix))
+
+	log.Info(fmt.Sprintf("[%s] Waiting for txs from the pool", logPrefix))
+	time.Sleep(1 * time.Second) // give some time to start other stages
+
+	return
 
 	quit := ctx.Done()
 	useExternalTx := tx != nil
@@ -275,14 +283,6 @@ func SpawnSequenceExecuteBlock(s *sync_stages.StageState, u sync_stages.Unwinder
 			return err
 		}
 		defer tx.Rollback()
-	}
-
-	shouldShortCircuit, noProgressTo, err := utils.ShouldShortCircuitExecution(tx)
-	if err != nil {
-		return err
-	}
-	if shouldShortCircuit {
-		return nil
 	}
 
 	prevStageProgress, errStart := sync_stages.GetStageProgress(tx, sync_stages.Senders)
@@ -295,13 +295,9 @@ func SpawnSequenceExecuteBlock(s *sync_stages.StageState, u sync_stages.Unwinder
 	}
 	nextStagesExpectData := nextStageProgress > 0 // Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
 
-	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
-	}
-	if to <= s.BlockNumber {
-		return nil
 	}
 
 	stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
@@ -333,44 +329,27 @@ func SpawnSequenceExecuteBlock(s *sync_stages.StageState, u sync_stages.Unwinder
 		batch.Rollback()
 	}()
 
-	if s.BlockNumber == 0 {
-		to = noProgressTo
-	}
-
-	// limit execution to 100 blocks at a time for faster sync near tip
-	// [TODO] remove it after Interhashes  incremental is optimized
-	total := to - stageProgress
-	if total > cfg.zk.RebuildTreeAfter && total < 100000 {
-		to = stageProgress + cfg.zk.RebuildTreeAfter
-		total = cfg.zk.RebuildTreeAfter
-	}
-	if !quiet && to > s.BlockNumber+16 {
-		log.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
-	}
-
-	initialBlock := stageProgress + 1
 	eridb := erigon_db.NewErigonDb(tx)
+
+	/*
+	* SEQ: Here we are pre-creating a candidate batch
+	 */
 Loop:
+	/*
+	* SEQ: here is a `while` there are txs in the txpool
+	 */
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		stageProgress = blockNum
+		/*
+		* SEQ: pre-creating a candidate block
+		* Adding a single transaction to it
+		* No GER stuff and no state root
+		* We execute the tx afterwards and then add the info (state root, etc), to the block.
+		 */
 
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-
-		//[zkevm] - get the last batch number so we can check for empty batches in between it and the new one
-		lastBatchInserted, err := hermezDb.GetBatchNoByL2Block(stageProgress - 1)
-		if err != nil {
-			return fmt.Errorf("failed to get last batch inserted: %v", err)
-		}
-
-		// write batches between last block and this if they exist
-		currentBatch, err := hermezDb.GetBatchNoByL2Block(blockNum)
-		if err != nil {
-			return err
-		}
-
-		gers := []*dstypes.GerUpdate{}
 
 		blockHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
@@ -394,6 +373,25 @@ Loop:
 			continue
 		}
 
+		//[zkevm] - get the last batch number so we can check for empty batches in between it and the new one
+		lastBatchInserted, err := hermezDb.GetBatchNoByL2Block(stageProgress - 1)
+		if err != nil {
+			return fmt.Errorf("failed to get last batch inserted: %v", err)
+		}
+
+		/*
+		* SEQ: here we have our candidate batch
+		 */
+		// write batches between last block and this if they exist
+		currentBatch, err := hermezDb.GetBatchNoByL2Block(blockNum)
+		if err != nil {
+			return err
+		}
+
+		/*
+		* SEQ: here in theory we should get GERs from the L1 and write them down before
+		* execution into a separate table.
+		 */
 		//[zkevm] get batches between last block and this one
 		// plus this blocks ger
 		gersInBetween, err := hermezDb.GetBatchGlobalExitRoots(lastBatchInserted, currentBatch)
@@ -401,10 +399,13 @@ Loop:
 			return err
 		}
 
+		gers := []*dstypes.GerUpdate{}
+
 		if gersInBetween != nil {
 			gers = append(gers, gersInBetween...)
 		}
 
+		/* SEQ: here probably something about GER from L1 if needed (Local ER can be done via EVM) */
 		blockGer, err := hermezDb.GetBlockGlobalExitRoot(blockNum)
 		if err != nil {
 			return err
@@ -423,7 +424,15 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
+		/*
+		* SEQ: We execute the block and we need to add the witness generation (or at least the retain list generation for the block)
+		* Also these retain lists should be able to be composed together
+		 */
 		if err = executeBlock(block, header, tx, batch, gers, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
+			/*
+			* SEQ: okay, if fails -- we need to append a reverted tx to the block (need a testcase)
+			* The code under is definitely not needed -- we can't report bad header if we are the only one sequencing.
+			 */
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -469,6 +478,7 @@ Loop:
 		gasUsed := header.GasUsed
 		gas = gas + gasUsed
 		currentStateGas = currentStateGas + gasUsed
+		/* SEQ: here we can actually write header with the actual gas! */
 
 		// TODO: how can we store this data right first time?  Or mop up old data as we're currently duping storage
 		/*
@@ -504,10 +514,14 @@ Loop:
 		// write the new block lookup entries
 		rawdb.WriteTxLookupEntries(tx, block)
 
+		/*
+		* SEQ: we report progress as soon as we create a block or a batch
+		 */
+
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, total, initialBlock, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch)
+			logBlock, logTx, logTime = logProgress(logPrefix /*total*/, 1000 /*initialBlock*/, 0, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch)
 			gas = 0
 			tx.CollectMetrics()
 			sync_stages.Metrics[sync_stages.Execution].Set(blockNum)
@@ -567,7 +581,7 @@ func logProgress(logPrefix string, total, initialBlock, prevBlock uint64, prevTi
 	return currentBlock, currentTx, currentTime
 }
 
-func UnwindExecutionStage(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {
+func UnwindSequenceExecutionStage(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) (err error) {
 	if u.UnwindPoint >= s.BlockNumber {
 		return nil
 	}
@@ -597,7 +611,7 @@ func UnwindExecutionStage(u *sync_stages.UnwindState, s *sync_stages.StageState,
 	return nil
 }
 
-func unwindExecutionStage(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) error {
+func unwindExecutionStage(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) error {
 	logPrefix := s.LogPrefix()
 	stateBucket := kv.PlainState
 	storageKeyLength := length.Addr + length.Incarnation + length.Hash
@@ -741,7 +755,7 @@ func recoverCodeHashPlain(acc *accounts.Account, db kv.Tx, key []byte) {
 	}
 }
 
-func PruneExecutionStage(s *sync_stages.PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx context.Context, initialCycle bool) (err error) {
+func PruneSequenceExecutionStage(s *sync_stages.PruneState, tx kv.RwTx, cfg SequenceBlockCfg, ctx context.Context, initialCycle bool) (err error) {
 	logPrefix := s.LogPrefix()
 	useExternalTx := tx != nil
 	if !useExternalTx {

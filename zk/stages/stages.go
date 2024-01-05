@@ -9,15 +9,12 @@ import (
 	"github.com/ledgerwatch/erigon/sync_stages"
 )
 
-func DefaultZkSequencerStages(
+func SequencerZkStages(
 	ctx context.Context,
-	snapshots stagedsync.SnapshotsCfg,
-	l1SyncerCfg L1SyncerCfg,
-	batchesCfg BatchesCfg,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
 	blockHashCfg stagedsync.BlockHashesCfg,
 	senders stagedsync.SendersCfg,
-	exec stagedsync.ExecuteBlockCfg,
+	exec SequenceBlockCfg,
 	hashState stagedsync.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
 	history stagedsync.HistoryCfg,
@@ -45,19 +42,8 @@ func DefaultZkSequencerStages(
 				},
 			},
 		*/
-		{
-			ID:          sync_stages.BlockHashes,
-			Description: "Write block hashes",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnBlockHashStage(s, tx, blockHashCfg, ctx)
-			},
-			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindBlockHashStage(u, tx, blockHashCfg, ctx)
-			},
-			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneBlockHashStage(p, tx, blockHashCfg, ctx)
-			},
-		},
+		/* TODO: here should be some stage of getting GERs from the L1 and writing to the DB for future batches
+		 */
 		{
 			ID:          sync_stages.Senders,
 			Description: "Recover senders from tx signatures",
@@ -96,15 +82,15 @@ func DefaultZkSequencerStages(
 				it should also generate a retainlist for the future batch witness generation
 			*/
 			ID:          sync_stages.Execution,
-			Description: "Execute blocks w/o hash checks",
+			Description: "Sequence transactions",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle, quiet)
+				return SpawnSequencingStage(s, u, tx, 0, ctx, exec, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle)
+				return UnwindSequenceExecutionStage(u, s, tx, ctx, exec, firstCycle)
 			},
 			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneExecutionStage(p, tx, exec, ctx, firstCycle)
+				return PruneSequenceExecutionStage(p, tx, exec, ctx, firstCycle)
 			},
 		},
 		{
@@ -213,7 +199,6 @@ func DefaultZkSequencerStages(
 		*/
 		/*
 			TODO: datastream update stage -- send updated data to the datastream
-			- store for future reference
 		*/
 		{
 			ID:          sync_stages.Finish,
@@ -233,7 +218,6 @@ func DefaultZkSequencerStages(
 
 func DefaultZkStages(
 	ctx context.Context,
-	snapshots stagedsync.SnapshotsCfg,
 	l1SyncerCfg L1SyncerCfg,
 	batchesCfg BatchesCfg,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
@@ -439,6 +423,7 @@ func DefaultZkStages(
 				return stagedsync.PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
 			},
 		},
+		/* TODO insert here the stage that updates the datastream */
 		{
 			ID:          sync_stages.Finish,
 			Description: "Final: update current block for the RPC API",
@@ -455,6 +440,19 @@ func DefaultZkStages(
 	}
 }
 
+var ZkSequencerUnwindOrder = sync_stages.UnwindOrder{
+	sync_stages.IntermediateHashes, // need to unwind SMT before we remove history
+	sync_stages.Execution,
+	sync_stages.HashState,
+	sync_stages.Senders,
+	sync_stages.CallTraces,
+	sync_stages.AccountHistoryIndex,
+	sync_stages.StorageHistoryIndex,
+	sync_stages.LogIndex,
+	sync_stages.TxLookup,
+	sync_stages.Finish,
+}
+
 var ZkUnwindOrder = sync_stages.UnwindOrder{
 	sync_stages.L1Syncer,
 	sync_stages.Batches,
@@ -464,7 +462,6 @@ var ZkUnwindOrder = sync_stages.UnwindOrder{
 	sync_stages.Execution,
 	sync_stages.HashState,
 	sync_stages.Senders,
-	sync_stages.Translation,
 	sync_stages.CallTraces,
 	sync_stages.AccountHistoryIndex,
 	sync_stages.StorageHistoryIndex,
