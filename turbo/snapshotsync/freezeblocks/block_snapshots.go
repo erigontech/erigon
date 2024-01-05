@@ -958,6 +958,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	if err != nil {
 		panic(err)
 	}
+	fmt.Printf("[dbg] here2: %+v\n", segments)
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
 
@@ -1226,7 +1227,6 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 				continue
 			}
 			l = append(l, f)
-			fmt.Printf("[dbg] before: %s\n", f.Path)
 		}
 		l, _ = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
 		res = append(res, l...)
