@@ -385,18 +385,21 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 	if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
 		return err
 	}
+	prevHash, err := rawdb.ReadCanonicalHash(batch, currentHeight)
+	if err != nil {
+		return err
+	}
 	if err := rawdb.WriteCanonicalHash(batch, currentHash, currentHeight); err != nil {
 		return err
 	}
 	if err := rawdb.WriteHeadHeaderHash(batch, currentHash); err != nil {
 		return err
 	}
-	var ok bool
-	var err error
-	if ok, err = rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
+	if _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
 		return err
 	}
-	if histV3 && ok {
+	fmt.Printf("addAndVerifyBlockStep currentHeight %d, histV3 %t, prevHash == currentHash %t\n", currentHeight, histV3, prevHash == currentHash)
+	if histV3 && prevHash != currentHash {
 		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
 			return err
 		}

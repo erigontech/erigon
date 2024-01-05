@@ -477,6 +477,7 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 	if err != nil {
 		return err
 	}
+	//fmt.Printf("WriteBodyForStorage %d %x %s\n", number, hash, debug.Stack())
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 
@@ -613,6 +614,7 @@ func WriteRawBodyIfNotExists(db kv.RwTx, hash common.Hash, number uint64, body *
 		return false, err
 	}
 	if exists {
+		fmt.Printf("%d %x already exists\n", number, hash)
 		return false, nil
 	}
 	return WriteRawBody(db, hash, number, body)
@@ -690,18 +692,22 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) (err error) {
 		nextBaseTxNum++
 	}
 	for blockNum := from; ; blockNum++ {
+		fmt.Printf("AppendCanonicalTxNums blockNum=%d ", blockNum)
 		h, err := ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return err
 		}
 		if h == (common.Hash{}) {
+			fmt.Printf("Break empty hash\n")
 			break
 		}
 
 		data := ReadStorageBodyRLP(tx, h, blockNum)
 		if len(data) == 0 {
+			fmt.Printf("Break empty data\n")
 			break
 		}
+		fmt.Printf("\n")
 		bodyForStorage := types.BodyForStorage{}
 		if err := rlp.DecodeBytes(data, &bodyForStorage); err != nil {
 			return err

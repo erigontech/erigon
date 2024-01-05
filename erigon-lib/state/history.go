@@ -25,6 +25,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"runtime/debug"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -2196,6 +2197,7 @@ func (hc *HistoryContext) idxRangeRecent(key []byte, startTxNum, endTxNum int, a
 		}
 		dbIt = iter.TransformKV2U64(it, func(k, v []byte) (uint64, error) {
 			if len(v) < 8 {
+				fmt.Printf("Stack: %s\n", debug.Stack())
 				return 0, fmt.Errorf("unexpected small value length %d", len(v))
 			}
 			return binary.BigEndian.Uint64(v), nil
