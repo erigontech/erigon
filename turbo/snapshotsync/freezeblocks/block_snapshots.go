@@ -994,7 +994,6 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				continue
 			}
 			sn := segment
-			fmt.Printf("[dbg] %s\n", sn.Path)
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
