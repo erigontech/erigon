@@ -1655,7 +1655,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 					//if traceGetLatest == dc.d.filenameBase {
 					//	fmt.Printf("GetLatest(%s, %x) -> existence index %s -> false\n", dc.d.filenameBase, filekey, dc.files[i].src.existence.FileName)
 					//}
-					if i == len(dc.files)-1 {
+					if i == 0 {
 						A++
 					}
 					continue
@@ -1677,7 +1677,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 			return nil, false, err
 		}
 		if !found {
-			if i == len(dc.files)-1 {
+			if i == 0 {
 				B++
 				if traceGetLatest == dc.d.filenameBase {
 					fmt.Printf("GetLatest(%s, %x) -> not found in file %s (false positive existence idx)\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
