@@ -461,13 +461,13 @@ func HermezTestnetGenesisBlock() *types.Genesis {
 	}
 }
 
-func HermezDevnetGenesisBlock() *types.Genesis {
+func HermezBlueberryGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.HermezDevnetChainConfig,
+		Config:     params.HermezBlueberryChainConfig,
 		Timestamp:  1676996964,
 		GasLimit:   0x0,
 		Difficulty: big.NewInt(0x0),
-		Alloc:      readPrealloc("allocs/hermez-devnet.json"),
+		Alloc:      readPrealloc("allocs/hermez-blueberry.json"),
 	}
 }
 
@@ -738,8 +738,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HermezMainnetGenesisBlock()
 	case networkname.HermezTestnetChainName:
 		return HermezTestnetGenesisBlock()
-	case networkname.HermezDevnetChainName:
-		return HermezDevnetGenesisBlock()
+	case networkname.HermezBlueberryChainName:
+		return HermezBlueberryGenesisBlock()
 	case networkname.HermezCardonaChainName:
 		return HermezCardonaGenesisBlock()
 	case networkname.HermezCardonaInternalChainName:

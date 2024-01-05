@@ -1,5 +1,5 @@
 datadir : '/Volumes/External/hermez/blueberry'
-chain : "hermez-devnet"
+chain : "hermez-blueberry"
 http : true
 private.api.addr : "localhost:9093"
 zkevm.l2-chain-id: 1440

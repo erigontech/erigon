@@ -61,7 +61,7 @@ var (
 	ChiadoGenesisHash                = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
 	HermezMainnetGenesisHash         = libcommon.HexToHash("0x3f86b09b43e3e49a41fc20a07579b79eba044253367817d5c241d23c0e2bc5c9")
 	HermezTestnetGenesisHash         = libcommon.HexToHash("0x13a14c4a8288e782863d7ce916d224546c69dc428fbfa7115a0cc33a27a05b26")
-	HermezDevnetGenesisHash          = libcommon.HexToHash("0x45cff376044a08f8f33f0244d589f2178ea4f4c5234d912daa2ff3c496b17862")
+	HermezBlueberryGenesisHash       = libcommon.HexToHash("0x45cff376044a08f8f33f0244d589f2178ea4f4c5234d912daa2ff3c496b17862")
 	HermezCardonaGenesisHash         = libcommon.HexToHash("0xf1a89745a08cfd1af739b93f960ad89546e3cec2a7babe8607703eb1e4e94b4d")
 	HermezCardonaInternalGenesisHash = libcommon.HexToHash("0x676657dd8a7dce782f4fe8a97ba794de3ff732b40233fce01da77d1ba1a24ee1")
 )
@@ -141,7 +141,7 @@ var (
 
 	HermezTestnetChainConfig = readChainSpec("chainspecs/hermez-testnet.json")
 
-	HermezDevnetChainConfig = readChainSpec("chainspecs/hermez-devnet.json")
+	HermezBlueberryChainConfig = readChainSpec("chainspecs/hermez-blueberry.json")
 
 	HermezCardonaChainConfig = readChainSpec("chainspecs/hermez-cardona.json")
 
@@ -231,8 +231,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return HermezMainnetChainConfig
 	case networkname.HermezTestnetChainName:
 		return HermezTestnetChainConfig
-	case networkname.HermezDevnetChainName:
-		return HermezDevnetChainConfig
+	case networkname.HermezBlueberryChainName:
+		return HermezBlueberryChainConfig
 	case networkname.HermezCardonaChainName:
 		return HermezCardonaChainConfig
 	case networkname.HermezCardonaInternalChainName:
@@ -266,8 +266,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &HermezMainnetGenesisHash
 	case networkname.HermezTestnetChainName:
 		return &HermezTestnetGenesisHash
-	case networkname.HermezDevnetChainName:
-		return &HermezDevnetGenesisHash
+	case networkname.HermezBlueberryChainName:
+		return &HermezBlueberryGenesisHash
 	case networkname.HermezCardonaChainName:
 		return &HermezCardonaGenesisHash
 	case networkname.HermezCardonaInternalChainName:
@@ -301,8 +301,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return HermezMainnetChainConfig
 	case genesisHash == HermezTestnetGenesisHash:
 		return HermezTestnetChainConfig
-	case genesisHash == HermezDevnetGenesisHash:
-		return HermezDevnetChainConfig
+	case genesisHash == HermezBlueberryGenesisHash:
+		return HermezBlueberryChainConfig
 	case genesisHash == HermezCardonaGenesisHash:
 		return HermezCardonaChainConfig
 	case genesisHash == HermezCardonaInternalGenesisHash:
