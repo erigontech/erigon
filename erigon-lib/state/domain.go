@@ -1811,14 +1811,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 		return nil, false, err
 	}
 
-	var foundInvStep []byte
-	if traceGetLatest == dc.d.filenameBase {
-		defer func() {
-			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t)\n", dc.d.filenameBase, key, v, foundInvStep != nil)
-		}()
-	}
-
-	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value
+	_, foundInvStep, err := keysC.SeekExact(key) // reads first DupSort value
 	if err != nil {
 		return nil, false, err
 	}
