@@ -188,6 +188,13 @@ var snapshotCommand = cli.Command{
 			}),
 		},
 		{
+			Name:   "meta",
+			Action: doMeta,
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{Name: "src", Required: true},
+			}),
+		},
+		{
 			Name:   "debug",
 			Action: doDebugKey,
 			Flags: joinFlags([]cli.Flag{
@@ -388,6 +395,17 @@ func doDiff(cliCtx *cli.Context) error {
 			return nil
 		}
 	}
+	return nil
+}
+
+func doMeta(cliCtx *cli.Context) error {
+	srcF := cliCtx.String("src")
+	src, err := compress.NewDecompressor(srcF)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	log.Info("meta", "count", src.Count(), "size", src.Size(), "name", src.FileName())
 	return nil
 }
 
