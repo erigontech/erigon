@@ -956,7 +956,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 
 	segments, _, err := Segments(dir, version, minIndex)
 	if err != nil {
-		return err
+		panic(err)
 	}
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
