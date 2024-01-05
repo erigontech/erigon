@@ -1003,6 +1003,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				if err := buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
 					return fmt.Errorf("%s: %w", sn.Name(), err)
 				}
+				return nil
 			})
 		}
 	}
