@@ -1563,7 +1563,7 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	}
 
 	if err := snapshots.ReopenFolder(); err != nil {
-		return err
+		panic(err)
 	}
 	snapshots.LogStat("missed-idx:reopen")
 	if notifier != nil {
