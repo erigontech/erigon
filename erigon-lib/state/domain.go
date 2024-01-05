@@ -1678,7 +1678,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 			B++
 			if traceGetLatest == dc.d.filenameBase {
 				fmt.Printf("GetLatest(%s, %x) -> not found in file %s (false positive existence idx)\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
-				fmt.Printf("bloom false-positive probability: %s, %f, a-b=%d-%d\n", dc.files[i].src.existence.FileName, dc.files[i].src.existence.filter.FalsePosititveProbability(), a, b)
+				fmt.Printf("bloom false-positive probability: %s, %f, a-b=%d-%d\n", dc.files[i].src.existence.FileName, dc.files[i].src.existence.filter.FalsePosititveProbability(), A, B)
 			}
 			//	LatestStateReadGrindNotFound.ObserveDuration(t)
 			continue
