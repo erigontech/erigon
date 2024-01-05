@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -31,8 +30,6 @@ import (
 var (
 	ErrHeaderValidatorsLengthMismatch = errors.New("header validators length mismatch")
 	ErrHeaderValidatorsBytesMismatch  = errors.New("header validators bytes mismatch")
-
-	fetchSpanZeroForMiningOnce = sync.Once{}
 )
 
 // LastSpanID TODO - move to block reader
@@ -103,26 +100,22 @@ func FetchSpanZeroForMiningIfNeeded(
 	blockReader services.FullBlockReader,
 	heimdallClient heimdall.IHeimdallClient,
 	logger log.Logger,
-) (err error) {
-	fetchSpanZeroForMiningOnce.Do(func() {
-		err = db.Update(ctx, func(tx kv.RwTx) error {
-			_, err := blockReader.Span(ctx, tx, 0)
-			if err == nil {
-				return err
-			}
-
-			// TODO refactor to use errors.Is
-			if !strings.Contains(err.Error(), "not found") {
-				// span exists, no need to fetch
-				return nil
-			}
-
-			_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
+) error {
+	return db.Update(ctx, func(tx kv.RwTx) error {
+		_, err := blockReader.Span(ctx, tx, 0)
+		if err == nil {
 			return err
-		})
-	})
+		}
 
-	return
+		// TODO refactor to use errors.Is
+		if !strings.Contains(err.Error(), "not found") {
+			// span exists, no need to fetch
+			return nil
+		}
+
+		_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
+		return err
+	})
 }
 
 func fetchRequiredHeimdallSpansIfNeeded(
