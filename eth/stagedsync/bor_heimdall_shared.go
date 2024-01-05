@@ -190,6 +190,7 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 ) (uint64, int, time.Duration, error) {
 	headerNum := header.Number.Uint64()
 	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
+		// we fetch events only at beginning of each sprint
 		return 0, 0, 0, nil
 	}
 
