@@ -21,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -144,6 +145,20 @@ var snapshotCommand = cli.Command{
 				},
 			}),
 		},
+		{
+			Name:   "integrity",
+			Action: doIntegrity,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		//{
+		//	Name:   "bodies_decrement_datafix",
+		//	Action: doBodiesDecrement,
+		//	Flags: joinFlags([]cli.Flag{
+		//		&utils.DataDirFlag,
+		//	}),
+		//},
 	},
 }
 
@@ -173,6 +188,39 @@ var (
 		Usage: "Force rebuild",
 	}
 )
+
+func doIntegrity(cliCtx *cli.Context) error {
+	logger, _, err := debug.Setup(cliCtx, true /* root logger */)
+	if err != nil {
+		return err
+	}
+
+	ctx := cliCtx.Context
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
+	defer chainDB.Close()
+
+	cfg := ethconfig.NewSnapCfg(true, false, true)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	blockSnaps, borSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer blockSnaps.Close()
+	defer borSnaps.Close()
+	defer agg.Close()
+
+	blockReader, _ := blockRetire.IO()
+	if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+		return err
+	}
+
+	//if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
+	//	return err
+	//}
+
+	return nil
+}
 
 func doDiff(cliCtx *cli.Context) error {
 	defer log.Info("Done")
@@ -243,6 +291,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}()
 	return nil
 }
+
 func doRam(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
@@ -279,19 +328,17 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	rebuild := cliCtx.Bool(SnapshotRebuildFlag.Name)
-	//from := cliCtx.Uint64(SnapshotFromFlag.Name)
-
-	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
+	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
 	dir.MustExist(dirs.SnapHistory)
-	chainConfig := fromdb.ChainConfig(chainDB)
 
 	if rebuild {
 		panic("not implemented")
 	}
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
+	chainConfig := fromdb.ChainConfig(chainDB)
 	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
 
 	if err != nil {
@@ -325,13 +372,16 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 	borSnaps.LogStat("open")
-
-	agg, err = libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
-	if err != nil {
-		return
-	}
-	agg.SetWorkers(estimate.CompressSnapshot.Workers())
-	err = agg.OpenFolder()
+	agg = openAgg(ctx, dirs, chainDB, logger)
+	err = chainDB.View(ctx, func(tx kv.Tx) error {
+		ac := agg.MakeContext()
+		defer ac.Close()
+		//ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+		//	return histBlockNumProgress
+		//})
+		return nil
+	})
 	if err != nil {
 		return
 	}
@@ -461,7 +511,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 	version := uint8(cliCtx.Int(SnapshotVersionFlag.Name))
 
-	db := mdbx.NewMDBX(logger).Label(kv.ChainDB).Path(dirs.Chaindata).MustOpen()
+	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
@@ -640,4 +690,114 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 		log.Error("error while serving an Erigon node", "err", err)
 	}
 	return err
+}
+
+/*
+func doBodiesDecrement(cliCtx *cli.Context) error {
+	logger, _, err := debug.Setup(cliCtx, true)
+	if err != nil {
+		return err
+	}
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	ctx := cliCtx.Context
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	list, err := snaptype.Segments(dirs.Snap, 1)
+	if err != nil {
+		return err
+	}
+	var l []snaptype.FileInfo
+	for _, f := range list {
+		if f.T != snaptype.Bodies {
+			continue
+		}
+		if f.From < 14_500_000 {
+			continue
+		}
+		l = append(l, f)
+	}
+	migrateSingleBody := func(srcF, dstF string) error {
+		src, err := compress.NewDecompressor(srcF)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		dst, err := compress.NewCompressor(ctx, "compress", dstF, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
+		if err != nil {
+			return err
+		}
+		defer dst.Close()
+
+		i := 0
+		srcG := src.MakeGetter()
+		var buf []byte
+		dstBuf := bytes.NewBuffer(nil)
+		for srcG.HasNext() {
+			i++
+			buf, _ = srcG.Next(buf[:0])
+			body := &types.BodyForStorage{}
+			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
+				return err
+			}
+			body.BaseTxId -= 1
+			dstBuf.Reset()
+			if err := rlp.Encode(dstBuf, body); err != nil {
+				return err
+			}
+
+			if err := dst.AddWord(dstBuf.Bytes()); err != nil {
+				return err
+			}
+
+			select {
+			case <-logEvery.C:
+				logger.Info("[bodies] progress", "f", src.FileName(), "progress", fmt.Sprintf("%dK/%dK", i/1_000, src.Count()/1_000))
+			default:
+			}
+		}
+		if err := dst.Compress(); err != nil {
+			return err
+		}
+		src.Close()
+		dst.Close()
+		os.Rename(srcF, srcF+".back")
+		os.Rename(dstF, srcF)
+		os.Remove(srcF + ".torrent")
+		os.Remove(srcF + ".idx")
+		ext := filepath.Ext(srcF)
+		withoutExt := srcF[:len(srcF)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+		return nil
+	}
+	for _, f := range l {
+		srcF, dstF := f.Path, f.Path+"2"
+		if err := migrateSingleBody(srcF, dstF); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+*/
+
+func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
+	const ThreadsLimit = 9_000
+	limiterB := semaphore.NewWeighted(ThreadsLimit)
+	opts := mdbx.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
+	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
+	// to read all options from DB, instead of overriding them
+	opts = opts.Accede()
+	return opts
+}
+func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *libstate.AggregatorV3 {
+	agg, err := libstate.NewAggregatorV3(ctx, dirs.Snap, dirs.Tmp, ethconfig.HistoryV3AggregationStep, chainDB, logger)
+	if err != nil {
+		panic(err)
+	}
+	if err = agg.OpenFolder(); err != nil {
+		panic(err)
+	}
+	agg.SetWorkers(estimate.CompressSnapshot.Workers())
+	return agg
 }

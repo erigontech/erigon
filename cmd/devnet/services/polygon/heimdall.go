@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -16,12 +18,12 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type BridgeEvent string
@@ -67,6 +69,7 @@ type CheckpointConfig struct {
 type Heimdall struct {
 	sync.Mutex
 	chainConfig        *chain.Config
+	borConfig          *borcfg.BorConfig
 	grpcAddr           string
 	validatorSet       *valset.ValidatorSet
 	pendingCheckpoint  *checkpoint.Checkpoint
@@ -96,6 +99,7 @@ func NewHeimdall(
 ) *Heimdall {
 	heimdall := &Heimdall{
 		chainConfig:        chainConfig,
+		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
 		grpcAddr:           grpcAddr,
 		checkpointConfig:   *checkpointConfig,
 		spans:              map[uint64]*span.HeimdallSpan{},
@@ -158,7 +162,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
 	}
 
-	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.chainConfig.Bor.CalculateSprint(nextSpan.StartBlock)) - 1
+	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.borConfig.CalculateSprintLength(nextSpan.StartBlock)) - 1
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
@@ -182,10 +186,10 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 
 func (h *Heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
-		return int(h.chainConfig.Bor.CalculateSprint(h.currentSpan.StartBlock))
+		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
 	}
 
-	return int(h.chainConfig.Bor.CalculateSprint(256))
+	return int(h.borConfig.CalculateSprintLength(256))
 }
 
 func (h *Heimdall) getSpanOverrideHeight() uint64 {
@@ -292,7 +296,7 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 			h.Unlock()
 			h.unsubscribe()
 			h.Lock()
-			h.logger.Error("Failed to deploy state sender", "err", err)
+			h.logger.Error("Failed to create transact opts for deploying state sender", "err", err)
 			return
 		}
 
