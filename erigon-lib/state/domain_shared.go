@@ -1072,6 +1072,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Conte
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.sd.trace)
+	sdc.patriciaTrie.SetTrace(true)
 	sdc.Reset()
 
 	switch sdc.mode {
