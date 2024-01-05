@@ -1663,7 +1663,6 @@ func (hi *StateAsOfIterDB) advanceLargeVals() error {
 			copy(seek[:len(k)-8], k[:len(k)-8])
 			continue
 		}
-		fmt.Printf("txnum %d %x\n", binary.BigEndian.Uint64(k[len(k)-8:]), k[:len(k)-8])
 		hi.nextKey = k[:len(k)-8]
 		hi.nextVal = v
 		return nil
@@ -1703,7 +1702,6 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 		}
 		hi.nextKey = k
 		hi.nextVal = v[8:]
-		fmt.Printf("txnum %d %x\n", binary.BigEndian.Uint64(v[:8]), k)
 		return nil
 	}
 	hi.nextKey = nil

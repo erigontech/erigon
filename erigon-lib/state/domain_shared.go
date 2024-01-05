@@ -1183,13 +1183,13 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		if err != nil {
 			return 0, 0, nil, err
 		}
-		v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
+		state, err = cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
 		if err != nil {
 			return 0, 0, nil, err
 		}
 		if len(state) >= 16 {
-			txNum, blockNum = decodeTxBlockNums(v)
-			return blockNum, txNum, v, err
+			txNum, blockNum = decodeTxBlockNums(state)
+			return blockNum, txNum, state, nil
 		}
 	}
 
@@ -1217,7 +1217,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	}
 
 	txNum, blockNum = decodeTxBlockNums(state)
-	return blockNum, txNum, state, err
+	return blockNum, txNum, state, nil
 }
 
 // SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted
