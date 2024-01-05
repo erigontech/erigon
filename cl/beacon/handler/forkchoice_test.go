@@ -12,7 +12,12 @@ import (
 
 func TestGetHeads(t *testing.T) {
 	// find server
-	_, _, _, _, _, handler, _, _, fcu := setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, p, handler, _, sm, fcu := setupTestingHandler(t, clparams.Phase0Version)
+	sm.OnHeadState(p)
+	s, cancel := sm.HeadState()
+	s.SetSlot(789274827847783)
+	cancel()
+
 	fcu.HeadSlotVal = 128
 	fcu.HeadVal = libcommon.Hash{1, 2, 3}
 	server := httptest.NewServer(handler.mux)
