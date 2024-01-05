@@ -491,6 +491,16 @@ func HermezCardonaInternalGenesisBlock() *types.Genesis {
 	}
 }
 
+func HermezLocalDevnetGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HermezLocalDevnetChainConfig,
+		Timestamp:  1676996964,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/hermez-dev.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -736,6 +746,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return ChiadoGenesisBlock()
 	case networkname.HermezMainnetChainName:
 		return HermezMainnetGenesisBlock()
+	case networkname.HermezLocalDevnetChainName:
+		return HermezLocalDevnetGenesisBlock()
 	case networkname.HermezTestnetChainName:
 		return HermezTestnetGenesisBlock()
 	case networkname.HermezBlueberryChainName:

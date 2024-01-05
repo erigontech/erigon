@@ -12,8 +12,6 @@ import (
 func SequencerZkStages(
 	ctx context.Context,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
-	blockHashCfg stagedsync.BlockHashesCfg,
-	senders stagedsync.SendersCfg,
 	exec SequenceBlockCfg,
 	hashState stagedsync.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
@@ -44,19 +42,6 @@ func SequencerZkStages(
 		*/
 		/* TODO: here should be some stage of getting GERs from the L1 and writing to the DB for future batches
 		 */
-		{
-			ID:          sync_stages.Senders,
-			Description: "Recover senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnRecoverSendersStage(senders, s, u, tx, 0, ctx, quiet)
-			},
-			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindSendersStage(u, tx, senders, ctx)
-			},
-			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneSendersStage(p, tx, senders, ctx)
-			},
-		},
 		{
 			/*
 				TODO:
@@ -444,7 +429,6 @@ var ZkSequencerUnwindOrder = sync_stages.UnwindOrder{
 	sync_stages.IntermediateHashes, // need to unwind SMT before we remove history
 	sync_stages.Execution,
 	sync_stages.HashState,
-	sync_stages.Senders,
 	sync_stages.CallTraces,
 	sync_stages.AccountHistoryIndex,
 	sync_stages.StorageHistoryIndex,
@@ -457,7 +441,6 @@ var ZkUnwindOrder = sync_stages.UnwindOrder{
 	sync_stages.L1Syncer,
 	sync_stages.Batches,
 	sync_stages.BlockHashes,
-
 	sync_stages.IntermediateHashes, // need to unwind SMT before we remove history
 	sync_stages.Execution,
 	sync_stages.HashState,

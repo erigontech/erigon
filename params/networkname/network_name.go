@@ -12,6 +12,7 @@ const (
 	GnosisChainName                = "gnosis"
 	ChiadoChainName                = "chiado"
 	HermezMainnetChainName         = "hermez-mainnet"
+	HermezLocalDevnetChainName     = "hermez-dev"
 	HermezTestnetChainName         = "hermez-testnet"
 	HermezBlueberryChainName       = "hermez-blueberry"
 	HermezCardonaChainName         = "hermez-cardona"
@@ -29,6 +30,7 @@ var All = []string{
 	GnosisChainName,
 	ChiadoChainName,
 	HermezMainnetChainName,
+	HermezLocalDevnetChainName,
 	HermezTestnetChainName,
 	HermezBlueberryChainName,
 	HermezCardonaChainName,

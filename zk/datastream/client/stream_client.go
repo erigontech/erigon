@@ -53,9 +53,9 @@ const (
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(server string) StreamClient {
+func NewClient(server string) *StreamClient {
 	// Create the client data stream
-	c := StreamClient{
+	c := &StreamClient{
 		server:     server,
 		streamType: StSequencer,
 		id:         "",

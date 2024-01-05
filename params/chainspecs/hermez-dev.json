@@ -1,6 +1,6 @@
 {
-  "ChainName": "blueberry",
-  "chainId": 1440,
+  "ChainName": "hermez-dev",
+  "chainId": 999999,
   "consensus": "ethash",
   "homesteadBlock": 0,
   "daoForkBlock": 0,
@@ -21,6 +21,5 @@
   "cancunTime": 9999999999999999999999999999999999999999999999999,
   "pragueTime": 9999999999999999999999999999999999999999999999999,
   "ethash": {},
-  "mordorBlock": 390152
+  "mordorBlock":0 
 }
-
