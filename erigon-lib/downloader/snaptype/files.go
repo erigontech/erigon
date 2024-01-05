@@ -216,10 +216,9 @@ func TmpFiles(dir string, version uint8) (res []string, err error) {
 		return nil, err
 	}
 
-	v := fmt.Sprint("v", version)
-
 	for _, f := range files {
-		if f.IsDir() || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		//if f.IsDir() || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		if f.IsDir() || len(f.Name()) < 3 {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".tmp" {
@@ -241,14 +240,13 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		return nil, err
 	}
 
-	v := fmt.Sprint("v", version)
-
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
 			return nil, err
 		}
-		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		//if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
 			continue
 		}
 
@@ -259,9 +257,6 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		res = append(res, meta)
 	}
 	slices.SortFunc(res, func(i, j FileInfo) int {
-		if i.Version != j.Version {
-			return cmp.Compare(i.Version, j.Version)
-		}
 		if i.From != j.From {
 			return cmp.Compare(i.From, j.From)
 		}
@@ -270,6 +265,9 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		}
 		if i.T != j.T {
 			return cmp.Compare(i.T, j.T)
+		}
+		if i.Version != j.Version {
+			return cmp.Compare(i.Version, j.Version)
 		}
 		return cmp.Compare(i.Ext, j.Ext)
 	})

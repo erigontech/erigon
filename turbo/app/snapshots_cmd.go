@@ -203,6 +203,20 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 			}),
 		},
+		{
+			Name:   "integrity",
+			Action: doIntegrity,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
+		//{
+		//	Name:   "bodies_decrement_datafix",
+		//	Action: doBodiesDecrement,
+		//	Flags: joinFlags([]cli.Flag{
+		//		&utils.DataDirFlag,
+		//	}),
+		//},
 	},
 }
 
@@ -323,7 +337,21 @@ func doIntegrity(cliCtx *cli.Context) error {
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	agg := openAgg(ctx, dirs, chainDB, logger)
+
+	cfg := ethconfig.NewSnapCfg(true, false, true)
+	chainConfig := fromdb.ChainConfig(chainDB)
+	blockSnaps, borSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	defer blockSnaps.Close()
+	defer borSnaps.Close()
+	defer agg.Close()
+
+	blockReader, _ := blockRetire.IO()
+	if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+		return err
+	}
 
 	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
 		return err
@@ -836,6 +864,95 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	}
 	return err
 }
+
+/*
+func doBodiesDecrement(cliCtx *cli.Context) error {
+	logger, _, err := debug.Setup(cliCtx, true)
+	if err != nil {
+		return err
+	}
+	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
+	ctx := cliCtx.Context
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	list, err := snaptype.Segments(dirs.Snap, 1)
+	if err != nil {
+		return err
+	}
+	var l []snaptype.FileInfo
+	for _, f := range list {
+		if f.T != snaptype.Bodies {
+			continue
+		}
+		if f.From < 14_500_000 {
+			continue
+		}
+		l = append(l, f)
+	}
+	migrateSingleBody := func(srcF, dstF string) error {
+		src, err := compress.NewDecompressor(srcF)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		dst, err := compress.NewCompressor(ctx, "compress", dstF, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
+		if err != nil {
+			return err
+		}
+		defer dst.Close()
+
+		i := 0
+		srcG := src.MakeGetter()
+		var buf []byte
+		dstBuf := bytes.NewBuffer(nil)
+		for srcG.HasNext() {
+			i++
+			buf, _ = srcG.Next(buf[:0])
+			body := &types.BodyForStorage{}
+			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
+				return err
+			}
+			body.BaseTxId -= 1
+			dstBuf.Reset()
+			if err := rlp.Encode(dstBuf, body); err != nil {
+				return err
+			}
+
+			if err := dst.AddWord(dstBuf.Bytes()); err != nil {
+				return err
+			}
+
+			select {
+			case <-logEvery.C:
+				logger.Info("[bodies] progress", "f", src.FileName(), "progress", fmt.Sprintf("%dK/%dK", i/1_000, src.Count()/1_000))
+			default:
+			}
+		}
+		if err := dst.Compress(); err != nil {
+			return err
+		}
+		src.Close()
+		dst.Close()
+		os.Rename(srcF, srcF+".back")
+		os.Rename(dstF, srcF)
+		os.Remove(srcF + ".torrent")
+		os.Remove(srcF + ".idx")
+		ext := filepath.Ext(srcF)
+		withoutExt := srcF[:len(srcF)-len(ext)]
+		_ = os.Remove(withoutExt + ".idx")
+		return nil
+	}
+	for _, f := range l {
+		srcF, dstF := f.Path, f.Path+"2"
+		if err := migrateSingleBody(srcF, dstF); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+*/
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000
