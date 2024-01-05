@@ -22,6 +22,7 @@ func TestNodeSyncing(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, 666, resp.StatusCode)
 }
 
@@ -43,5 +44,6 @@ func TestNodeSyncingTip(t *testing.T) {
 
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
+	defer resp.Body.Close()
 	require.Equal(t, 200, resp.StatusCode)
 }
