@@ -78,6 +78,7 @@ var (
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 
 	mxPruneDbgSizeDomainSkipBeforeFirst = metrics.GetOrCreateCounter(`domain_prune_skipped`)
+	mxPruneDbgSizeDomainStepScanned     = metrics.GetOrCreateGauge(`domain_prune_step_scanned`)
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -2055,6 +2056,9 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
 func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	}
 	if !dc.CanPrune(rwTx) {
 		return nil
 	}
@@ -2103,13 +2107,15 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		return err
 	}
 
-	for ; k != nil; k, v, err = keysCursor.Prev() {
+	for k, v, err = keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
 		is := ^binary.BigEndian.Uint64(v)
+		mxPruneDbgSizeDomainStepScanned.Set(float64(is))
 		if is > step {
 			mxPruneDbgSizeDomainSkipBeforeFirst.Inc()
+			//k, v, err = keysCursor.PrevNoDup()
 			continue
 		}
 		if limiter == 0 {
@@ -2137,6 +2143,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			return err
 		}
 		prunedKeys++
+		//k, v, err = keysCursor.Prev()
 
 		select {
 		case <-ctx.Done():
@@ -2161,9 +2168,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 	mxPruneTookDomain.ObserveDuration(st)
 
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
-		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	}
 	return nil
 }
 
