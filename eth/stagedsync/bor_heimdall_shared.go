@@ -33,16 +33,16 @@ var (
 )
 
 // LastSpanID TODO - move to block reader
-func LastSpanID(tx kv.RwTx, blockReader services.FullBlockReader) (uint64, error) {
+func LastSpanID(tx kv.RwTx, blockReader services.FullBlockReader) (uint64, bool, error) {
 	sCursor, err := tx.Cursor(kv.BorSpans)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	defer sCursor.Close()
 	k, _, err := sCursor.Last()
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	var lastSpanId uint64
@@ -57,10 +57,10 @@ func LastSpanID(tx kv.RwTx, blockReader services.FullBlockReader) (uint64, error
 
 	snapshotLastSpanId := blockReader.(LastFrozen).LastFrozenSpanID()
 	if snapshotLastSpanId > lastSpanId {
-		return snapshotLastSpanId, nil
+		return snapshotLastSpanId, true, nil
 	}
 
-	return lastSpanId, nil
+	return lastSpanId, k != nil, nil
 }
 
 // LastStateSyncEventID TODO - move to block reader
@@ -131,16 +131,20 @@ func fetchRequiredHeimdallSpansIfNeeded(
 		requiredSpanID++
 	}
 
-	lastSpanID, err := LastSpanID(tx, cfg.blockReader)
+	lastSpanID, exists, err := LastSpanID(tx, cfg.blockReader)
 	if err != nil {
 		return 0, err
 	}
 
-	if requiredSpanID <= lastSpanID {
+	if exists && requiredSpanID <= lastSpanID {
 		return lastSpanID, nil
 	}
 
-	from := lastSpanID + 1
+	var from uint64
+	if lastSpanID > 0 {
+		from = lastSpanID + 1
+	} // else fetch from span 0
+
 	logger.Info(fmt.Sprintf("[%s] Processing spans...", logPrefix), "from", from, "to", requiredSpanID)
 	for spanID := from; spanID <= requiredSpanID; spanID++ {
 		if _, err = fetchAndWriteHeimdallSpan(ctx, spanID, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
@@ -188,15 +192,15 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	logger log.Logger,
 	lastStateSyncEventIDGetter func() (uint64, error),
 ) (uint64, int, time.Duration, error) {
-	headerNum := header.Number.Uint64()
-	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		// we fetch events only at beginning of each sprint
-		return 0, 0, 0, nil
-	}
-
 	lastStateSyncEventID, err := lastStateSyncEventIDGetter()
 	if err != nil {
 		return 0, 0, 0, err
+	}
+
+	headerNum := header.Number.Uint64()
+	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
+		// we fetch events only at beginning of each sprint
+		return lastStateSyncEventID, 0, 0, nil
 	}
 
 	return fetchAndWriteHeimdallStateSyncEvents(ctx, header, lastStateSyncEventID, tx, cfg, logPrefix, logger)
