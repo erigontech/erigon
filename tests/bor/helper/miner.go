@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
 	"time"
+
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -28,7 +31,6 @@ import (
 
 // InitGenesis initializes genesis file from json with sprint size and chain name as configurable inputs
 func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types.Genesis {
-
 	// sprint size = 8 in genesis
 	genesisData, err := os.ReadFile(fileLocation)
 	if err != nil {
@@ -36,13 +38,22 @@ func InitGenesis(fileLocation string, sprintSize uint64, chainName string) types
 	}
 
 	genesis := &types.Genesis{}
-
 	if err := json.Unmarshal(genesisData, genesis); err != nil {
 		panic(err)
 	}
 
-	genesis.Config.Bor.Sprint["0"] = sprintSize
 	genesis.Config.ChainName = chainName
+
+	if genesis.Config.BorJSON != nil {
+		borConfig := &borcfg.BorConfig{}
+		err = json.Unmarshal(genesis.Config.BorJSON, borConfig)
+		if err != nil {
+			panic(fmt.Sprintf("Could not parse 'bor' config for %s: %v", fileLocation, err))
+		}
+
+		borConfig.Sprint["0"] = sprintSize
+		genesis.Config.Bor = borConfig
+	}
 
 	return *genesis
 }

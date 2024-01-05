@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -211,7 +212,7 @@ type Config struct {
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
-	Bor    chain.BorConfig
+	Bor    borcfg.BorConfig
 
 	// Transaction pool options
 	DeprecatedTxPool DeprecatedTxPoolConfig

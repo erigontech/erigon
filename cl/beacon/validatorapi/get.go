@@ -42,13 +42,14 @@ func (v *ValidatorApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http
 	}
 
 	return map[string]any{
-		"head_slot":     strconv.FormatUint(slot, 10),
-		"sync_distance": syncDistance,
-		"is_syncing":    isSyncing,
-		"el_offline":    elOffline,
-		// TODO: figure out how to populat this field
-		"is_optimistic": true,
-	}, nil
+		"data": map[string]any{
+			"head_slot":     strconv.FormatUint(slot, 10),
+			"sync_distance": syncDistance,
+			"is_syncing":    isSyncing,
+			"el_offline":    elOffline,
+			// TODO: figure out how to populat this field
+			"is_optimistic": true,
+		}}, nil
 }
 
 func (v *ValidatorApiHandler) GetEthV1ConfigSpec(w http.ResponseWriter, r *http.Request) (*clparams.BeaconChainConfig, error) {
@@ -67,10 +68,11 @@ func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(w http.ResponseWriter, r *ht
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err.Error())
 	}
 	return map[string]any{
-		"genesis_time":           v.GenesisCfg.GenesisTime,
-		"genesis_validator_root": v.GenesisCfg.GenesisValidatorRoot,
-		"genesis_fork_version":   hexutility.Bytes(digest[:]),
-	}, nil
+		"data": map[string]any{
+			"genesis_time":           v.GenesisCfg.GenesisTime,
+			"genesis_validator_root": v.GenesisCfg.GenesisValidatorRoot,
+			"genesis_fork_version":   hexutility.Bytes(digest[:]),
+		}}, nil
 }
 
 func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdFork(w http.ResponseWriter, r *http.Request) (any, error) {
