@@ -1226,7 +1226,7 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 				continue
 			}
 			l = append(l, f)
-			fmt.Printf("[dbg] before\n", f.Path)
+			fmt.Printf("[dbg] before: %s\n", f.Path)
 		}
 		l, _ = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
 		res = append(res, l...)
