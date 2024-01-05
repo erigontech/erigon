@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	bloomfilter "github.com/holiman/bloomfilter/v2"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 
 	"github.com/ledgerwatch/log/v3"
@@ -23,6 +24,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 )
+
+func TestName(t *testing.T) {
+	m := bloomfilter.OptimalM(10_000_000, 0.01)
+	k := bloomfilter.OptimalK(m, 10_000_000)
+	fmt.Printf("alex: %x\n", k)
+}
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *AggregatorV3) {
 	b.Helper()
