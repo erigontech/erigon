@@ -781,7 +781,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	defer cancel()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	const pruneLimit uint64 = 100
+	const pruneLimit uint64 = 1000
 
 	for {
 		if ac.nothingToPrune(tx) {

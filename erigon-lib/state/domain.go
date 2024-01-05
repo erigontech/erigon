@@ -78,7 +78,6 @@ var (
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
 
 	mxPruneDbgSizeDomainSkipBeforeFirst = metrics.GetOrCreateCounter(`domain_prune_skipped`)
-	mxPruneDbgSizeDomainStepScanned     = metrics.GetOrCreateGauge(`domain_prune_step_scanned`)
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -2059,9 +2058,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	if !dc.CanPrune(rwTx) {
-		return nil
-	}
+	//if !dc.CanPrune(rwTx) {
+	//	return nil
+	//}
 
 	st := time.Now()
 	mxPruneInProgress.Inc()
@@ -2081,7 +2080,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	var (
 		prunedKeys uint64
 		seek       = make([]byte, 0, 256)
-		limiter    = limit
 	)
 	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dc.d.filenameBase, txFrom, txTo, step, limit)
 	//defer func() {
@@ -2096,43 +2094,41 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 
-	//var k, v []byte
-	//if prunedStep != 0 && prunedKey != nil {
-	//	step = ^prunedStep
-	//	k, v, err = keysCursor.Seek(prunedKey)
+	var k, v []byte
+	//if  prunedKey != nil {
+	//	//step = ^prunedStep
+	//	//k, v, err = keysCursor.Seek(prunedKey)
 	//} else {
-	//	k, v, err = keysCursor.Last()
+	k, v, err = keysCursor.Last()
 	//}
-	//if err != nil {
-	//	return err
-	//}
+	if err != nil {
+		return err
+	}
 
 	couldSave := uint64(0)
-	for k, v, err := keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
+	for k != nil {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
 		is := ^binary.BigEndian.Uint64(v)
-		mxPruneDbgSizeDomainStepScanned.Set(float64(is))
 
+		couldSave++
 		if is > step {
 			mxPruneDbgSizeDomainSkipBeforeFirst.Inc()
-			//k, v, err = keysCursor.PrevNoDup()
+			k, v, err = keysCursor.PrevNoDup()
 			continue
 		}
-		if bytes.Equal(k, prunedKey) {
-			fmt.Printf("could save %d Prev before key %x ps %d\n", couldSave, prunedKey, prunedStep)
+		if bytes.Equal(k, prunedKey) && couldSave != 0 {
+			fmt.Printf("could save %d Prev before key %x ps %d s %d\n", couldSave, prunedKey, prunedStep, step)
 			couldSave = 0
-		} else {
-			couldSave++
 		}
-		if limiter == 0 {
+		if limit == 0 {
 			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			return nil
 		}
-		limiter--
+		limit--
 
 		seek = append(append(seek[:0], k...), v...)
 
@@ -2151,7 +2147,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			return err
 		}
 		prunedKeys++
-		//k, v, err = keysCursor.Prev()
+		k, v, err = keysCursor.Prev()
 
 		select {
 		case <-ctx.Done():
