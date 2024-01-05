@@ -2096,30 +2096,38 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 
-	var k, v []byte
-	if prunedStep != 0 && prunedKey != nil {
-		step = ^prunedStep
-		k, v, err = keysCursor.Seek(prunedKey)
-	} else {
-		k, v, err = keysCursor.Last()
-	}
-	if err != nil {
-		return err
-	}
+	//var k, v []byte
+	//if prunedStep != 0 && prunedKey != nil {
+	//	step = ^prunedStep
+	//	k, v, err = keysCursor.Seek(prunedKey)
+	//} else {
+	//	k, v, err = keysCursor.Last()
+	//}
+	//if err != nil {
+	//	return err
+	//}
 
-	for k, v, err = keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
+	couldSave := uint64(0)
+	for k, v, err := keysCursor.Last(); k != nil; k, v, err = keysCursor.Prev() {
 		if err != nil {
 			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
 		is := ^binary.BigEndian.Uint64(v)
 		mxPruneDbgSizeDomainStepScanned.Set(float64(is))
+
 		if is > step {
 			mxPruneDbgSizeDomainSkipBeforeFirst.Inc()
 			//k, v, err = keysCursor.PrevNoDup()
 			continue
 		}
+		if bytes.Equal(k, prunedKey) {
+			fmt.Printf("could save %d Prev before key %x ps %d\n", couldSave, prunedKey, prunedStep)
+			couldSave = 0
+		} else {
+			couldSave++
+		}
 		if limiter == 0 {
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			return nil
@@ -2147,12 +2155,12 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			return ctx.Err()
 		case <-logEvery.C:
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase,
