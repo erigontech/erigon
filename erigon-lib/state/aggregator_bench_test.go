@@ -28,7 +28,7 @@ import (
 func TestName(t *testing.T) {
 	m := bloomfilter.OptimalM(10_000_000, 0.01)
 	k := bloomfilter.OptimalK(m, 10_000_000)
-	fmt.Printf("alex: %x\n", k)
+	fmt.Printf("alex: %x\n", m/1024/1024, k)
 }
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *AggregatorV3) {
