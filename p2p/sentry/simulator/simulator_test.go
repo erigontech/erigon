@@ -23,7 +23,6 @@ func TestSimulatorStart(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	defer cancel()
 
 	logger := log.New()
@@ -31,7 +30,6 @@ func TestSimulatorStart(t *testing.T) {
 	dataDir := t.TempDir()
 
 	sim, err := simulator.NewSentry(ctx, "mumbai", dataDir, 1, logger)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +37,6 @@ func TestSimulatorStart(t *testing.T) {
 	simClient := direct.NewSentryClientDirect(66, sim)
 
 	peerCount, err := simClient.PeerCount(ctx, &sentry.PeerCountRequest{})
-
 	if err != nil {
 		t.Fatal(err)
 	}
