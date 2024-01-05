@@ -456,7 +456,7 @@ func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed Fi
 }
 
 // BuildMissedIndices - produce .efi/.vi/.kvi from .ef/.v/.kv
-func (ii *InvertedIndex) BuildMissedIndicesBuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
+func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *background.ProgressSet) {
 	for _, item := range ii.missedIdxFiles() {
 		item := item
 		g.Go(func() error {
