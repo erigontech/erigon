@@ -1040,28 +1040,53 @@ func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
 	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
 }
 
+type HistoryPruneStat struct {
+	MinTxNum, MaxTxNum, Values uint64
+
+	Index *InvertedIndexPruneStat
+}
+
+func (hs *HistoryPruneStat) String() string {
+	if hs.Index == nil {
+		return fmt.Sprintf("v %d in tx[%.2fM;%.2fM)", hs.Values, float64(hs.MinTxNum)/1_000_000.0, float64(hs.MaxTxNum)/1_000_000.0)
+	}
+	return fmt.Sprintf("v %d in tx[%.2fM;%.2fM); idx %s", hs.Values, float64(hs.MinTxNum)/1_000_000.0, float64(hs.MaxTxNum)/1_000_000.0, hs.Index)
+}
+
+func (hs *HistoryPruneStat) Accumulate(other *HistoryPruneStat) {
+	hs.MinTxNum = min(hs.MinTxNum, other.MinTxNum)
+	hs.MaxTxNum = max(hs.MaxTxNum, other.MaxTxNum)
+	hs.Values += other.Values
+	if hs.Index == nil {
+		hs.Index = other.Index
+	} else {
+		hs.Index.Accumulate(other.Index)
+	}
+}
+
 // Prune [txFrom; txTo)
 // `force` flag to prune even if CanPrune returns false (when Unwind is needed, CanPrune always returns false)
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) error {
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*HistoryPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
 	if !forced && !hc.CanPrune(rwTx) {
-		return nil
+		return nil, nil
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
 	var (
 		seek     = make([]byte, 8, 256)
 		valsCDup kv.RwCursorDupSort
+		stat     = &HistoryPruneStat{MinTxNum: math.MaxUint64}
 		err      error
 	)
 
 	if !hc.h.historyLargeValues {
 		valsCDup, err = rwTx.RwCursorDupSort(hc.h.historyValsTable)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		defer valsCDup.Close()
 	}
@@ -1071,6 +1096,9 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		if txNum >= txTo { //[txFrom; txTo)
 			return nil
 		}
+
+		stat.MinTxNum = min(stat.MinTxNum, txNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
 		if hc.h.historyLargeValues {
 			seek = append(append(seek[:0], k...), txnm...)
@@ -1089,14 +1117,15 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 				return err
 			}
 		}
+		stat.Values++
 
 		mxPruneSizeHistory.Inc()
 		return nil
 	}
-	if err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue); err != nil {
-		return err
+	if stat.Index, err = hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue); err != nil {
+		return nil, err
 	}
-	return nil
+	return stat, nil
 }
 
 func (hc *HistoryContext) Close() {

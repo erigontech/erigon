@@ -216,7 +216,8 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.NoError(err)
 		defer rwTx.Rollback()
 
-		require.NoError(ac.Prune(ctx, rwTx, 0, nil))
+		_, err := ac.Prune(ctx, rwTx, 0, nil)
+		require.NoError(err)
 		domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 
 		defer domains.Close()

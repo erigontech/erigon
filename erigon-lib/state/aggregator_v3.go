@@ -779,34 +779,40 @@ func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx) bool {
 func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
 	localTimeout, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	logEvery := time.NewTicker(30 * time.Second)
+	logEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
 	defer logEvery.Stop()
+
+	aggLogEvery := time.NewTicker(30 * time.Second)
+	defer aggLogEvery.Stop()
+
 	const pruneLimit uint64 = 1000
+
+	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
 	for {
 		if ac.nothingToPrune(tx) {
 			return nil
 		}
 
-		if err := ac.Prune(context.Background(), tx, pruneLimit, logEvery); err != nil {
+		stat, err := ac.Prune(context.Background(), tx, pruneLimit, logEvery)
+		if err != nil {
 			log.Warn("[snapshots] PruneSmallBatches", "err", err)
 			return err
 		}
-		if localTimeout.Err() != nil {
-			return nil //nolint
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+		fullStat.Accumulate(stat)
 
 		select {
-		case <-logEvery.C:
+		case <-aggLogEvery.C:
 			dd, _ := localTimeout.Deadline()
-			ac.a.logger.Debug("aggregator prune",
-				"time left", time.Until(dd),
-				"limit keys/txns", pruneLimit,
-				"step", ac.a.aggregatedStep.Load(),
-				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
+			ac.a.logger.Info("aggregator prune",
+				"until timeout", time.Until(dd).String(),
+				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
+				"progress", stat.String(),
+			)
+		case <-localTimeout.Done():
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		default:
 		}
 
@@ -826,9 +832,42 @@ func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
 	}, ", ")
 }
 
-func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) error {
+type AggregatorPruneStat struct {
+	Domains map[string]*DomainPruneStat
+	Indices map[string]*InvertedIndexPruneStat
+}
+
+func (as *AggregatorPruneStat) String() string {
+	var sb strings.Builder
+	for k, v := range as.Domains {
+		sb.WriteString(fmt.Sprintf("[%s| %s];", k, v.String()))
+	}
+	for k, v := range as.Indices {
+		sb.WriteString(fmt.Sprintf("(%s| %s);", k, v.String()))
+	}
+	return sb.String()
+}
+
+func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
+	for k, v := range other.Domains {
+		if _, ok := as.Domains[k]; !ok {
+			as.Domains[k] = v
+		} else {
+			as.Domains[k].Accumulate(v)
+		}
+	}
+	for k, v := range other.Indices {
+		if _, ok := as.Indices[k]; !ok {
+			as.Indices[k] = v
+		} else {
+			as.Indices[k].Accumulate(v)
+		}
+	}
+}
+
+func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
 	if dbg.NoPrune() {
-		return nil
+		return nil, nil
 	}
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
@@ -848,31 +887,49 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
 	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
 	//
-	if err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	ap, err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.storage.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	sp, err := ac.storage.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.code.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	cp, err := ac.code.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	comps, err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil); err != nil {
-		return err
+	lap, err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil); err != nil {
-		return err
+	ltp, err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil); err != nil {
-		return err
+	tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil); err != nil {
-		return err
+	ttp, err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	aggStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+	aggStat.Domains[ac.account.d.filenameBase] = ap
+	aggStat.Domains[ac.storage.d.filenameBase] = sp
+	aggStat.Domains[ac.code.d.filenameBase] = cp
+	aggStat.Domains[ac.commitment.d.filenameBase] = comps
+	aggStat.Indices[ac.logAddrs.ii.filenameBase] = lap
+	aggStat.Indices[ac.logTopics.ii.filenameBase] = ltp
+	aggStat.Indices[ac.tracesFrom.ii.filenameBase] = tfp
+	aggStat.Indices[ac.tracesTo.ii.filenameBase] = ttp
+
+	return aggStat, nil
 }
 
 func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {

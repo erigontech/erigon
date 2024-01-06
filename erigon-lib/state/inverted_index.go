@@ -948,10 +948,26 @@ func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
 }
 
+type InvertedIndexPruneStat struct {
+	MinTxNum   uint64
+	MaxTxNum   uint64
+	PruneCount uint64
+}
+
+func (is *InvertedIndexPruneStat) String() string {
+	return fmt.Sprintf("ii %d, tx %.2fM-%.2fM", is.PruneCount, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+}
+
+func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
+	is.MinTxNum = min(is.MinTxNum, other.MinTxNum)
+	is.MaxTxNum = max(is.MaxTxNum, other.MaxTxNum)
+	is.PruneCount += other.PruneCount
+}
+
 // [txFrom; txTo)
-func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) error {
+func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	if !forced && !ic.CanPrune(rwTx) {
-		return nil
+		return stat, nil
 	}
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
@@ -961,16 +977,12 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
 	if err != nil {
-		return fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
 	}
 	defer keysCursor.Close()
 
-	var (
-		minTxnum   uint64 = math.MaxUint64
-		maxTxnum   uint64 = 0
-		pruneCount uint64
-		txKey      [8]byte
-	)
+	var txKey [8]byte
+
 	//defer func() {
 	//	ii.logger.Error("[snapshots] prune index",
 	//		"name", ii.filenameBase,
@@ -983,10 +995,10 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	k, v, err := keysCursor.Seek(txKey[:])
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if k == nil {
-		return nil
+		return nil, nil
 	}
 
 	txFrom = binary.BigEndian.Uint64(k)
@@ -994,18 +1006,19 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		limit = math.MaxUint64
 	}
 	if txFrom >= txTo {
-		return nil
+		return nil, nil
 	}
 
 	collector := etl.NewCollector("snapshots", ii.dirs.Tmp, etl.NewOldestEntryBuffer(etl.BufferOptimalSize), ii.logger)
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 
+	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
@@ -1013,38 +1026,38 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			break
 		}
 		limit--
-		minTxnum = min(minTxnum, txNum)
-		maxTxnum = max(maxTxnum, txNum)
+		stat.MinTxNum = min(stat.MinTxNum, txNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
-				return err
+				return nil, err
 			}
 			if err := collector.Collect(v, nil); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err != nil {
-		return fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+		return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 	}
 
 	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer idxCForDeletes.Close()
 	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer idxC.Close()
 
@@ -1069,12 +1082,12 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err = idxCForDeletes.DeleteCurrent(); err != nil {
 				return err
 			}
-			pruneCount++
+			stat.PruneCount++
 			mxPruneSizeIndex.Inc()
 
 			select {
 			case <-logEvery.C:
-				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned values", pruneCount,
+				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned values", stat.PruneCount,
 					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
 			case <-ctx.Done():
 				return ctx.Err()
@@ -1084,7 +1097,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return nil
 	}, etl.TransformArgs{})
 
-	return err
+	return stat, err
 }
 
 // FrozenInvertedIdxIter allows iteration over range of tx numbers
