@@ -162,11 +162,7 @@ Loop:
 				log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(downloadStartTime).String())
 				break Loop
 			} else {
-				isDiagEnabled := diagnostics.TypeOf(diagnostics.SyncStagesList{}).Enabled()
-				if isDiagEnabled {
-					diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
-				}
-
+				diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
 				diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 					Downloaded:           stats.BytesCompleted,
 					Total:                stats.BytesTotal,
