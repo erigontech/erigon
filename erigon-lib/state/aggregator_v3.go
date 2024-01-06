@@ -840,10 +840,14 @@ type AggregatorPruneStat struct {
 func (as *AggregatorPruneStat) String() string {
 	var sb strings.Builder
 	for k, v := range as.Domains {
-		sb.WriteString(fmt.Sprintf("[%s| %s];", k, v.String()))
+		if v != nil {
+			sb.WriteString(fmt.Sprintf("[%s| %s];", k, v.String()))
+		}
 	}
 	for k, v := range as.Indices {
-		sb.WriteString(fmt.Sprintf("(%s| %s);", k, v.String()))
+		if v != nil {
+			sb.WriteString(fmt.Sprintf("(%s| %s);", k, v.String()))
+		}
 	}
 	return sb.String()
 }
