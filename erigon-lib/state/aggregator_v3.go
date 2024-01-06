@@ -804,10 +804,10 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		select {
 		case <-aggLogEvery.C:
 			dd, _ := localTimeout.Deadline()
-			ac.a.logger.Info("aggregator prune",
+			ac.a.logger.Info("[agg] pruning",
 				"until timeout", time.Until(dd).String(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
-				"progress", stat.String(),
+				"pruned", stat.String(),
 			)
 		case <-localTimeout.Done():
 			return nil
@@ -841,12 +841,12 @@ func (as *AggregatorPruneStat) String() string {
 	var sb strings.Builder
 	for k, v := range as.Domains {
 		if v != nil {
-			sb.WriteString(fmt.Sprintf("[%s| %s];", k, v.String()))
+			sb.WriteString(fmt.Sprintf("%s| %s;", k, v.String()))
 		}
 	}
 	for k, v := range as.Indices {
 		if v != nil {
-			sb.WriteString(fmt.Sprintf("(%s| %s);", k, v.String()))
+			sb.WriteString(fmt.Sprintf("%s| %s;", k, v.String()))
 		}
 	}
 	return sb.String()

@@ -2061,9 +2061,9 @@ type DomainPruneStat struct {
 
 func (dc *DomainPruneStat) String() string {
 	if dc.History == nil {
-		return fmt.Sprintf("kv %d in %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
+		return fmt.Sprintf("kv %d step %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
 	}
-	return fmt.Sprintf("kv %d in %d-%d; v %s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
+	return fmt.Sprintf("kv %d step %d-%d; %s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
 }
 
 func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {

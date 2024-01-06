@@ -1048,9 +1048,9 @@ type HistoryPruneStat struct {
 
 func (hs *HistoryPruneStat) String() string {
 	if hs.Index == nil {
-		return fmt.Sprintf("v %d in tx[%.2fM;%.2fM)", hs.Values, float64(hs.MinTxNum)/1_000_000.0, float64(hs.MaxTxNum)/1_000_000.0)
+		return fmt.Sprintf("v %d tx %.2fM-%.2fM", hs.Values, float64(hs.MinTxNum)/1_000_000.0, float64(hs.MaxTxNum)/1_000_000.0)
 	}
-	return fmt.Sprintf("v %d in tx[%.2fM;%.2fM); idx %s", hs.Values, float64(hs.MinTxNum)/1_000_000.0, float64(hs.MaxTxNum)/1_000_000.0, hs.Index)
+	return fmt.Sprintf("v %d tx %.2fM-%.2fM; %s", hs.Values, float64(hs.MinTxNum)/1_000_000.0, float64(hs.MaxTxNum)/1_000_000.0, hs.Index)
 }
 
 func (hs *HistoryPruneStat) Accumulate(other *HistoryPruneStat) {

@@ -955,7 +955,7 @@ type InvertedIndexPruneStat struct {
 }
 
 func (is *InvertedIndexPruneStat) String() string {
-	return fmt.Sprintf("ii %d, tx %.2fM-%.2fM", is.PruneCount, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("ii %d tx %.2fM-%.2fM", is.PruneCount, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
@@ -1029,8 +1029,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			break
 		}
 		limit--
-		stat.MinTxNum = min(stat.MinTxNum, txNum)
-		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
@@ -1073,6 +1071,8 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if txNum >= txTo { // [txFrom; txTo)
 				break
 			}
+			stat.MinTxNum = min(stat.MinTxNum, txNum)
+			stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
 			if fn != nil {
 				if err := fn(key, txnm); err != nil {
