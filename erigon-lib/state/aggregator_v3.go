@@ -841,12 +841,12 @@ func (as *AggregatorPruneStat) String() string {
 	var sb strings.Builder
 	for k, v := range as.Domains {
 		if v != nil {
-			sb.WriteString(fmt.Sprintf("%s| %s;", k, v.String()))
+			sb.WriteString(fmt.Sprintf("%s| %s; ", k, v.String()))
 		}
 	}
 	for k, v := range as.Indices {
 		if v != nil {
-			sb.WriteString(fmt.Sprintf("%s| %s;", k, v.String()))
+			sb.WriteString(fmt.Sprintf("%s| %s; ", k, v.String()))
 		}
 	}
 	return sb.String()
