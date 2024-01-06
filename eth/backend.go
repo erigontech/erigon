@@ -32,6 +32,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -509,7 +510,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else if chainConfig.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = &config.Bor
+		consensusConfig = chainConfig.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}

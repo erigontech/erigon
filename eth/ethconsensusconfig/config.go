@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -95,12 +96,12 @@ func CreateConsensusEngine(ctx context.Context, nodeConfig *nodecfg.Config, chai
 				panic(err)
 			}
 		}
-	case *chain.BorConfig:
+	case *borcfg.BorConfig:
 		// If Matic bor consensus is requested, set it up
 		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
 		// Then, bor != nil will also be enabled for ethash and clique. Only enable Bor for real if there is a validator contract present.
-		if chainConfig.Bor != nil && chainConfig.Bor.ValidatorContract != "" {
-			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, chainConfig.Bor.ValidatorContract, chainConfig.Bor.StateReceiverContract, logger)
+		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
+			genesisContractsClient := contract.NewGenesisContractsClient(chainConfig, consensusCfg.ValidatorContract, consensusCfg.StateReceiverContract, logger)
 
 			spanner := span.NewChainSpanner(contract.ValidatorSet(), chainConfig, withoutHeimdall, logger)
 

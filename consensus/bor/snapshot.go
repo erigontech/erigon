@@ -6,17 +6,18 @@ import (
 	"encoding/json"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/log/v3"
 )
 
 // Snapshot is the state of the authorization voting at a given point in time.
 type Snapshot struct {
-	config   *chain.BorConfig                           // Consensus engine parameters to fine tune behavior
+	config   *borcfg.BorConfig                          // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache[common.Hash, common.Address] // Cache of recent block signatures to speed up ecrecover
 
 	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
@@ -38,7 +39,7 @@ const BorSeparate = "BorSeparate"
 // method does not initialize the set of recent signers, so only ever use if for
 // the genesis block.
 func NewSnapshot(
-	config *chain.BorConfig,
+	config *borcfg.BorConfig,
 	sigcache *lru.ARCCache[common.Hash, common.Address],
 	number uint64,
 	hash common.Hash,
@@ -57,7 +58,7 @@ func NewSnapshot(
 }
 
 // loadSnapshot loads an existing snapshot from the database.
-func LoadSnapshot(config *chain.BorConfig, sigcache *lru.ARCCache[common.Hash, common.Address], db kv.RwDB, hash common.Hash) (*Snapshot, error) {
+func LoadSnapshot(config *borcfg.BorConfig, sigcache *lru.ARCCache[common.Hash, common.Address], db kv.RwDB, hash common.Hash) (*Snapshot, error) {
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
 		return nil, err
@@ -139,7 +140,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
-		sprintLen := s.config.CalculateSprint(number)
+		sprintLen := s.config.CalculateSprintLength(number)
 
 		// Delete the oldest signer from the recent list to allow it signing again
 		if number >= sprintLen {
@@ -244,18 +245,9 @@ func (s *Snapshot) Difficulty(signer common.Address) uint64 {
 		return 1
 	}
 
-	validators := s.ValidatorSet.Validators
-	proposer := s.ValidatorSet.GetProposer().Address
-	totalValidators := len(validators)
-
-	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
-	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
-
-	// temp index
-	tempIndex := signerIndex
-	if tempIndex < proposerIndex {
-		tempIndex = tempIndex + totalValidators
+	if d, err := s.ValidatorSet.Difficulty(signer); err == nil {
+		return d
+	} else {
+		return 0
 	}
-
-	return uint64(totalValidators - (tempIndex - proposerIndex))
 }

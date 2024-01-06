@@ -5,26 +5,31 @@ import (
 	"encoding/json"
 	"math/big"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor/abi"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type ChainSpanner struct {
 	validatorSet    abi.ABI
 	chainConfig     *chain.Config
+	borConfig       *borcfg.BorConfig
 	logger          log.Logger
 	withoutHeimdall bool
 }
 
 func NewChainSpanner(validatorSet abi.ABI, chainConfig *chain.Config, withoutHeimdall bool, logger log.Logger) *ChainSpanner {
+	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	return &ChainSpanner{
 		validatorSet:    validatorSet,
 		chainConfig:     chainConfig,
+		borConfig:       borConfig,
 		logger:          logger,
 		withoutHeimdall: withoutHeimdall,
 	}
@@ -42,7 +47,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*Span, erro
 		return nil, err
 	}
 
-	result, err := syscall(libcommon.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
+	result, err := syscall(libcommon.HexToAddress(c.borConfig.ValidatorContract), data)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +154,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan HeimdallSpan, syscall consensus.S
 		return err
 	}
 
-	_, err = syscall(libcommon.HexToAddress(c.chainConfig.Bor.ValidatorContract), data)
+	_, err = syscall(libcommon.HexToAddress(c.borConfig.ValidatorContract), data)
 
 	return err
 }

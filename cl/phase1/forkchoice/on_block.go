@@ -66,6 +66,9 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if block.Block.Slot > f.highestSeen {
 		f.highestSeen = block.Block.Slot
 	}
+	// Remove the parent from the head set
+	delete(f.headSet, block.Block.ParentRoot)
+	f.headSet[blockRoot] = struct{}{}
 	// Add proposer score boost if the block is timely
 	timeIntoSlot := (f.time - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
 	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
