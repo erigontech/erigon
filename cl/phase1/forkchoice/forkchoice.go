@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -19,6 +20,31 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
+
+// Schema
+/*
+{
+      "slot": "1",
+      "block_root": "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "parent_root": "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "justified_epoch": "1",
+      "finalized_epoch": "1",
+      "weight": "1",
+      "validity": "valid",
+      "execution_block_hash": "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
+      "extra_data": {}
+    }
+*/
+type ForkNode struct {
+	Slot           uint64         `json:"slot,string"`
+	BlockRoot      libcommon.Hash `json:"block_root"`
+	ParentRoot     libcommon.Hash `json:"parent_root"`
+	JustifiedEpoch uint64         `json:"justified_epoch,string"`
+	FinalizedEpoch uint64         `json:"finalized_epoch,string"`
+	Weight         uint64         `json:"weight,string"`
+	Validity       string         `json:"validity"`
+	ExecutionBlock libcommon.Hash `json:"execution_block_hash"`
+}
 
 type checkpointComparable string
 
@@ -57,6 +83,7 @@ type ForkChoiceStore struct {
 	headHash    libcommon.Hash
 	headSlot    uint64
 	genesisTime uint64
+	weights     map[libcommon.Hash]uint64
 	headSet     map[libcommon.Hash]struct{}
 	// childrens
 	childrens map[libcommon.Hash]childrens
@@ -194,6 +221,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		randaoMixesLists:              randaoMixesLists,
 		randaoDeltas:                  randaoDeltas,
 		headSet:                       headSet,
+		weights:                       make(map[libcommon.Hash]uint64),
 		participation:                 participation,
 	}, nil
 }
@@ -404,4 +432,40 @@ func (f *ForkChoiceStore) RandaoMixes(blockRoot libcommon.Hash, out solid.HashLi
 
 func (f *ForkChoiceStore) Partecipation(epoch uint64) (*solid.BitList, bool) {
 	return f.participation.Get(epoch)
+}
+
+func (f *ForkChoiceStore) ForkNodes() []ForkNode {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	forkNodes := make([]ForkNode, 0, len(f.weights))
+	for blockRoot, weight := range f.weights {
+		header, has := f.forkGraph.GetHeader(blockRoot)
+		if !has {
+			continue
+		}
+		justifiedCheckpoint, has := f.forkGraph.GetCurrentJustifiedCheckpoint(blockRoot)
+		if !has {
+			continue
+		}
+		finalizedCheckpoint, has := f.forkGraph.GetFinalizedCheckpoint(blockRoot)
+		if !has {
+			continue
+		}
+		blockHash, _ := f.eth2Roots.Get(blockRoot)
+
+		forkNodes = append(forkNodes, ForkNode{
+			Weight:         weight,
+			BlockRoot:      blockRoot,
+			ParentRoot:     header.ParentRoot,
+			JustifiedEpoch: justifiedCheckpoint.Epoch(),
+			FinalizedEpoch: finalizedCheckpoint.Epoch(),
+			Slot:           header.Slot,
+			Validity:       "valid",
+			ExecutionBlock: blockHash,
+		})
+	}
+	sort.Slice(forkNodes, func(i, j int) bool {
+		return forkNodes[i].Slot < forkNodes[j].Slot
+	})
+	return forkNodes
 }

@@ -53,6 +53,7 @@ func (a *ApiHandler) init() {
 			r.Route("/node", func(r chi.Router) {
 				r.Get("/health", a.GetEthV1NodeHealth)
 			})
+			r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
 			r.Route("/config", func(r chi.Router) {
 				r.Get("/spec", beaconhttp.HandleEndpointFunc(a.getSpec))
 				r.Get("/deposit_contract", beaconhttp.HandleEndpointFunc(a.getDepositContract))

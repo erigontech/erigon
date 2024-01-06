@@ -67,9 +67,9 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 		votes[f.proposerBoostRoot] += (boost * justificationState.beaconConfig.ProposerScoreBoost) / 100
 	}
 	// Account for weights on each head fork
-	weights := make(map[libcommon.Hash]uint64)
+	f.weights = make(map[libcommon.Hash]uint64)
 	for head := range f.headSet {
-		f.accountWeights(votes, weights, f.justifiedCheckpoint.BlockRoot(), head)
+		f.accountWeights(votes, f.weights, f.justifiedCheckpoint.BlockRoot(), head)
 	}
 
 	for {
@@ -104,9 +104,9 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 
 		// After sorting is done determine best fit.
 		f.headHash = children[0]
-		maxWeight := weights[children[0]]
+		maxWeight := f.weights[children[0]]
 		for i := 1; i < len(children); i++ {
-			weight := weights[children[i]]
+			weight := f.weights[children[i]]
 			// Lexicographical order is king.
 			if weight >= maxWeight {
 				f.headHash = children[i]
