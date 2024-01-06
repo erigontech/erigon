@@ -3,7 +3,6 @@ package transactions
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -248,9 +247,12 @@ func CreateManyEIP1559TransactionsHigherThanBaseFee(ctx context.Context, to, fro
 	fromAddress := libcommon.HexToAddress(from)
 
 	baseFeePerGas, err := blocks.BaseFeeFromBlock(ctx)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
 	}
+
+	baseFeePerGas = baseFeePerGas * 2
 
 	devnet.Logger(ctx).Info("BaseFeePerGas2", "val", baseFeePerGas)
 
@@ -380,8 +382,6 @@ func signEIP1559TxsLowerThanBaseFee(ctx context.Context, n int, baseFeePerGas ui
 // signEIP1559TxsHigherThanBaseFee creates amount number of transactions with gasFeeCap higher than baseFeePerGas
 func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas uint64, nonce *uint64, toAddress, fromAddress libcommon.Address) ([]types.Transaction, error) {
 	var signedTransactions []types.Transaction
-
-	baseFeePerGas = baseFeePerGas + uint64(math.Ceil((float64(baseFeePerGas) * 0.3)))
 
 	var (
 		minFeeCap = baseFeePerGas

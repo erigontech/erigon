@@ -39,6 +39,7 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -302,9 +303,6 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 }
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
-	if err := minedTxs.Valid(); err != nil {
-		return err
-	}
 
 	defer newBlockTimer.ObserveDuration(time.Now())
 	//t := time.Now()
@@ -312,15 +310,23 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	coreDB, cache := p.coreDBWithCache()
 	cache.OnNewBlock(stateChanges)
 	coreTx, err := coreDB.BeginRo(ctx)
+
 	if err != nil {
 		return err
 	}
+
 	defer coreTx.Rollback()
 
-	if !p.started.Load() {
-		if err := p.fromDBWithLock(ctx, tx, coreTx); err != nil {
-			return fmt.Errorf("OnNewBlock: loading txs from DB: %w", err)
-		}
+	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
+	baseFee := stateChanges.PendingBlockBaseFee
+	available := len(p.pending.best.ms)
+
+	defer func() {
+		p.logger.Debug("[txpool] New block", "block", block, "unwound", len(unwindTxs.Txs), "mined", len(minedTxs.Txs), "baseFee", baseFee, "pending-pre", available, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(), "err", err)
+	}()
+
+	if err = minedTxs.Valid(); err != nil {
+		return err
 	}
 
 	cacheView, err := cache.View(ctx, coreTx)
@@ -328,8 +334,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if err != nil {
 		return err
 	}
-
-	block := stateChanges.ChangeBatch[len(stateChanges.ChangeBatch)-1].BlockHeight
 
 	p.lock.Lock()
 	defer func() {
@@ -346,7 +350,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 			p.logger.Error("AssertCheckValues", "err", err, "stack", stack.Trace().String())
 		}
 	}
-	baseFee := stateChanges.PendingBlockBaseFee
 
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	// Update pendingBase for all pool queues and slices
@@ -404,8 +407,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
-	available := len(p.pending.best.ms)
-
 	p.pending.EnforceWorstInvariants()
 	p.baseFee.EnforceInvariants()
 	p.queued.EnforceInvariants()
@@ -414,10 +415,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
 
-	if p.started.CompareAndSwap(false, true) {
-		p.logger.Info("[txpool] Started")
-	}
-
 	if p.promoted.Len() > 0 {
 		select {
 		case p.newPendingTxs <- p.promoted.Copy():
@@ -425,13 +422,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		}
 	}
 
-	p.logger.Debug("[txpool] new block", "block", block, "unwound", len(unwindTxs.Txs), "mined", len(minedTxs.Txs), "baseFee", baseFee, "available-pre", available, "available-post", len(p.pending.best.ms))
-
 	return nil
 }
 
 func (p *TxPool) processRemoteTxs(ctx context.Context) error {
-	if !p.started.Load() {
+	if !p.Started() {
 		return fmt.Errorf("txpool not started yet")
 	}
 
@@ -632,12 +627,11 @@ func (p *TxPool) AddNewGoodPeer(peerID types.PeerID) { p.recentlyConnectedPeers.
 func (p *TxPool) Started() bool                      { return p.started.Load() }
 
 func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64, yielded mapset.Set[[32]byte]) (bool, int, error) {
-	// First wait for the corresponding block to arrive
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
-		p.logger.Debug("[txpool] waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "txAvailable", len(p.pending.best.ms))
+		p.logger.Debug("[txpool] Waiting for block", "expecting", onTopOf, "lastSeen", last, "txRequested", n, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 		p.lastSeenCond.Wait()
 	}
 
@@ -651,7 +645,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	i := 0
 
 	defer func() {
-		p.logger.Debug("[txpool] processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
+		p.logger.Debug("[txpool] Processing best request", "last", onTopOf, "txRequested", n, "txAvailable", len(best.ms), "txProcessed", i, "txReturned", count)
 	}()
 
 	for ; count < int(n) && i < len(best.ms); i++ {
@@ -719,7 +713,7 @@ func (p *TxPool) YieldBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, avail
 
 func (p *TxPool) PeekBest(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableGas, availableBlobGas uint64) (bool, error) {
 	set := mapset.NewThreadUnsafeSet[[32]byte]()
-	onTime, _, err := p.best(n, txs, tx, onTopOf, availableGas, availableBlobGas, set)
+	onTime, _, err := p.YieldBest(n, txs, tx, onTopOf, availableGas, availableBlobGas, set)
 	return onTime, err
 }
 
@@ -1093,15 +1087,6 @@ func (p *TxPool) AddLocalTxs(ctx context.Context, newTransactions types.TxSlots,
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if !p.Started() {
-		if err := p.fromDB(ctx, tx, coreTx); err != nil {
-			return nil, fmt.Errorf("AddLocalTxs: loading txs from DB: %w", err)
-		}
-		if p.started.CompareAndSwap(false, true) {
-			p.logger.Info("[txpool] Started")
-		}
-	}
-
 	if err = p.senders.registerNewSenders(&newTransactions, p.logger); err != nil {
 		return nil, err
 	}
@@ -1450,27 +1435,34 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 	}
 
 	var toDel []*metaTx // can't delete items while iterate them
+
+	discarded := 0
+	pendingRemoved := 0
+	baseFeeRemoved := 0
+	queuedRemoved := 0
+
 	for senderID, nonce := range noncesToRemove {
-		//if sender.all.Len() > 0 {
-		//logger.Debug("[txpool] removing mined", "senderID", tx.senderID, "sender.all.len()", sender.all.Len())
-		//}
-		// delete mined transactions from everywhere
+
 		byNonce.ascend(senderID, func(mt *metaTx) bool {
-			//logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", it.metaTx.Tx.nonce, "sender.nonce", sender.nonce)
+			logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", mt.Tx.Nonce, "sender.nonce", nonce)
+
 			if mt.Tx.Nonce > nonce {
 				return false
 			}
-			if mt.Tx.Traced {
-				logger.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IDHash, mt.Tx.SenderID, mt.currentSubPool))
-			}
+			//if mt.Tx.Traced {
+			logger.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IDHash, mt.Tx.SenderID, mt.currentSubPool))
+			//}
 			toDel = append(toDel, mt)
 			// del from sub-pool
 			switch mt.currentSubPool {
 			case PendingSubPool:
+				pendingRemoved++
 				pending.Remove(mt)
 			case BaseFeeSubPool:
+				baseFeeRemoved++
 				baseFee.Remove(mt)
 			case QueuedSubPool:
+				queuedRemoved++
 				queued.Remove(mt)
 			default:
 				//already removed
@@ -1478,11 +1470,18 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 			return true
 		})
 
+		discarded += len(toDel)
+
 		for _, mt := range toDel {
 			discard(mt, txpoolcfg.Mined)
 		}
 		toDel = toDel[:0]
 	}
+
+	if discarded > 0 {
+		logger.Debug("Discarding Transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
+	}
+
 	return nil
 }
 
@@ -1674,6 +1673,32 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	defer commitEvery.Stop()
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
+
+	err := db.View(ctx, func(tx kv.Tx) error {
+		coreDb, _ := p.coreDBWithCache()
+		coreTx, err := coreDb.BeginRo(ctx)
+
+		if err != nil {
+			return err
+		}
+
+		defer coreTx.Rollback()
+
+		if err := p.fromDB(ctx, tx, coreTx); err != nil {
+			return fmt.Errorf("loading pool from DB: %w", err)
+		}
+
+		if p.started.CompareAndSwap(false, true) {
+			p.logger.Info("[txpool] Started")
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		p.logger.Error("[txpool] Failed to start", "err", err)
+		return
+	}
 
 	for {
 		select {
@@ -1958,7 +1983,25 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		if err != nil {
 			return err
 		}
+
 		p.lastSeenBlock.Store(lastSeenBlock)
+	}
+
+	// this is neccessary as otherwise best - which waits for sync events
+	// may wait for ever if blocks have been process before the txpool
+	// starts with an empty db
+	lastSeenProgress, err := stages.GetStageProgress(coreTx, stages.Execution)
+
+	if err != nil {
+		return err
+	}
+
+	if p.lastSeenBlock.Load() < lastSeenProgress {
+		// TODO we need to process the blocks since the
+		// last seen to make sure that the tx pool is in
+		// sync with the processed blocks
+
+		p.lastSeenBlock.Store(lastSeenProgress)
 	}
 
 	cacheView, err := p._stateCache.View(ctx, coreTx)
@@ -2113,7 +2156,7 @@ func (p *TxPool) printDebug(prefix string) {
 	}
 }
 func (p *TxPool) logStats() {
-	if !p.started.Load() {
+	if !p.Started() {
 		//p.logger.Info("[txpool] Not started yet, waiting for new blocks...")
 		return
 	}

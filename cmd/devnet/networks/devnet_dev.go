@@ -17,6 +17,7 @@ func NewDevDevnet(
 	baseRpcHost string,
 	baseRpcPort int,
 	producerCount int,
+	gasLimit uint64,
 	logger log.Logger,
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
@@ -46,8 +47,11 @@ func NewDevDevnet(
 		BasePrivateApiAddr: "localhost:10090",
 		BaseRPCHost:        baseRpcHost,
 		BaseRPCPort:        baseRpcPort,
-		Alloc: types.GenesisAlloc{
-			faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+		Genesis: &types.Genesis{
+			Alloc: types.GenesisAlloc{
+				faucetSource.Address: {Balance: accounts.EtherAmount(200_000)},
+			},
+			GasLimit: gasLimit,
 		},
 		Services: []devnet.Service{
 			account_services.NewFaucet(networkname.DevChainName, faucetSource),
