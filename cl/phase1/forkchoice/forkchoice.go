@@ -53,10 +53,13 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint solid.Checkpoint
 	unrealizedFinalizedCheckpoint solid.Checkpoint
 	proposerBoostRoot             libcommon.Hash
-	headHash                      libcommon.Hash
-	headSlot                      uint64
-	genesisTime                   uint64
-	childrens                     map[libcommon.Hash]childrens
+	// head data
+	headHash    libcommon.Hash
+	headSlot    uint64
+	genesisTime uint64
+	headSet     map[libcommon.Hash]struct{}
+	// childrens
+	childrens map[libcommon.Hash]childrens
 
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies map[uint64]struct{}
@@ -163,6 +166,8 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	r := solid.NewHashVector(int(anchorState.BeaconConfig().EpochsPerHistoricalVector))
 	anchorState.RandaoMixes().CopyTo(r)
 	randaoMixesLists.Add(anchorRoot, r)
+	headSet := make(map[libcommon.Hash]struct{})
+	headSet[anchorRoot] = struct{}{}
 	return &ForkChoiceStore{
 		ctx:                           ctx,
 		highestSeen:                   anchorState.Slot(),
@@ -188,6 +193,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		totalActiveBalances:           totalActiveBalances,
 		randaoMixesLists:              randaoMixesLists,
 		randaoDeltas:                  randaoDeltas,
+		headSet:                       headSet,
 		participation:                 participation,
 	}, nil
 }
