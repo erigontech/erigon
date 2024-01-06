@@ -344,7 +344,7 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err != nil {
 		return err
 	}
-	if err := rs.Unwind(ctx, txc.Tx, txNum, accumulator); err != nil {
+	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
 	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {

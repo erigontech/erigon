@@ -257,7 +257,7 @@ func (rs *StateV3) ApplyLogsAndTraces4(txTask *TxTask, domains *libstate.SharedD
 	return nil
 }
 
-func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, accumulator *shards.Accumulator) error {
+func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwindTo uint64, accumulator *shards.Accumulator) error {
 	unwindToLimit := tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindDomainsToTxNum()
 	if txUnwindTo < unwindToLimit {
 		return fmt.Errorf("can't unwind to txNum=%d, limit is %d", txUnwindTo, unwindToLimit)
@@ -338,7 +338,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, txUnwindTo uint64, ac
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
-	if err := rs.domains.Unwind(ctx, tx, txUnwindTo); err != nil {
+	if err := rs.domains.Unwind(ctx, tx, blockUnwindTo, txUnwindTo); err != nil {
 		return err
 	}
 
