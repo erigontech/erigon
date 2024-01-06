@@ -1054,6 +1054,9 @@ func (hs *HistoryPruneStat) String() string {
 }
 
 func (hs *HistoryPruneStat) Accumulate(other *HistoryPruneStat) {
+	if other == nil {
+		return
+	}
 	hs.MinTxNum = min(hs.MinTxNum, other.MinTxNum)
 	hs.MaxTxNum = max(hs.MaxTxNum, other.MaxTxNum)
 	hs.Values += other.Values

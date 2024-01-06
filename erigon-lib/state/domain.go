@@ -2067,6 +2067,9 @@ func (dc *DomainPruneStat) String() string {
 }
 
 func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
+	if other == nil {
+		return
+	}
 	dc.MinStep = min(dc.MinStep, other.MinStep)
 	dc.MaxStep = max(dc.MaxStep, other.MaxStep)
 	dc.Values += other.Values

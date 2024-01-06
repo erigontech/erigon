@@ -959,6 +959,9 @@ func (is *InvertedIndexPruneStat) String() string {
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
+	if other == nil {
+		return
+	}
 	is.MinTxNum = min(is.MinTxNum, other.MinTxNum)
 	is.MaxTxNum = max(is.MaxTxNum, other.MaxTxNum)
 	is.PruneCount += other.PruneCount
