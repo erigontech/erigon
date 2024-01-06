@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
@@ -403,6 +404,13 @@ func ConsensusClStages(ctx context.Context,
 									cfg.rpc.BanPeer(blocks.Peer)
 									continue MainLoop
 								}
+								block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
+									if err = cfg.forkChoice.OnAttestation(a, true); err != nil {
+										log.Debug("bad attestation received", "err", err)
+									}
+									return true
+								})
+
 								if block.Block.Slot >= args.targetSlot {
 									break MainLoop
 								}
@@ -424,17 +432,6 @@ func ConsensusClStages(ctx context.Context,
 					return ListenForForks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-
-					// TODO: we need to get the last run block in order to process attestations here
-					////////block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-					////////	if err = g.forkChoice.OnAttestation(a, true); err != nil {
-					////////		return false
-					////////	}
-					////////	return true
-					////////})
-					////////if err != nil {
-					////////	return err
-					////////}
 
 					// Now check the head
 					headRoot, headSlot, err := cfg.forkChoice.GetHead()

@@ -32,6 +32,9 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	defer s.mu.Unlock()
 	if s.headState == nil {
 		s.headState, err = newState.Copy()
+		if err != nil {
+			return err
+		}
 	}
 	err = newState.CopyInto(s.headState)
 	if err != nil {
@@ -56,7 +59,7 @@ func (s *SyncedDataManager) Syncing() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.headState == nil {
-		return false
+		return true
 	}
 
 	headEpoch := utils.GetCurrentEpoch(s.headState.GenesisTime(), s.cfg.SecondsPerSlot, s.cfg.SlotsPerEpoch)

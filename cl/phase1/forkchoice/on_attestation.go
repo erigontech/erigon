@@ -85,20 +85,63 @@ func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *sol
 	}()
 }
 
+func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
+	if index >= uint64(len(f.latestMessages)) {
+		if index >= uint64(cap(f.latestMessages)) {
+			tmp := make([]LatestMessage, index+1, index*2)
+			copy(tmp, f.latestMessages)
+			f.latestMessages = tmp
+		}
+		f.latestMessages = f.latestMessages[:index+1]
+	}
+	f.latestMessages[index] = message
+}
+
+func (f *ForkChoiceStore) getLatestMessage(validatorIndex uint64) (LatestMessage, bool) {
+	if validatorIndex >= uint64(len(f.latestMessages)) || f.latestMessages[validatorIndex] == (LatestMessage{}) {
+		return LatestMessage{}, false
+	}
+	return f.latestMessages[validatorIndex], true
+}
+
+func (f *ForkChoiceStore) isUnequivocating(validatorIndex uint64) bool {
+	// f.equivocatingIndicies is a bitlist
+	index := int(validatorIndex) / 8
+	if index >= len(f.equivocatingIndicies) {
+		return false
+	}
+	subIndex := int(validatorIndex) % 8
+	return f.equivocatingIndicies[index]&(1<<uint(subIndex)) != 0
+}
+
+func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
+	index := int(validatorIndex) / 8
+	if index >= len(f.equivocatingIndicies) {
+		if index >= cap(f.equivocatingIndicies) {
+			tmp := make([]byte, index+1, index*2)
+			copy(tmp, f.equivocatingIndicies)
+			f.equivocatingIndicies = tmp
+		}
+		f.equivocatingIndicies = f.equivocatingIndicies[:index+1]
+	}
+	subIndex := int(validatorIndex) % 8
+	f.equivocatingIndicies[index] |= 1 << uint(subIndex)
+}
+
 func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestation, indicies []uint64) {
 	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
 	target := attestation.AttestantionData().Target()
 
 	for _, index := range indicies {
-		if _, ok := f.equivocatingIndicies[index]; ok {
+		if f.isUnequivocating(index) {
 			continue
 		}
-		validatorMessage, has := f.latestMessages[index]
+		validatorMessage, has := f.getLatestMessage(index)
 		if !has || target.Epoch() > validatorMessage.Epoch {
-			f.latestMessages[index] = &LatestMessage{
+			f.setLatestMessage(index, LatestMessage{
 				Epoch: target.Epoch(),
 				Root:  beaconBlockRoot,
-			}
+			})
 		}
 	}
 }
