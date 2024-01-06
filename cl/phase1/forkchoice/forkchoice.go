@@ -62,11 +62,11 @@ type ForkChoiceStore struct {
 	childrens map[libcommon.Hash]childrens
 
 	// Use go map because this is actually an unordered set
-	equivocatingIndicies map[uint64]struct{}
+	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
 	checkpointStates map[checkpointComparable]*checkpointState // We keep ssz snappy of it as the full beacon state is full of rendundant data.
-	latestMessages   map[uint64]*LatestMessage
+	latestMessages   []LatestMessage
 	anchorPublicKeys []byte
 	// We keep track of them so that we can forkchoice with EL.
 	eth2Roots *lru.Cache[libcommon.Hash, libcommon.Hash] // ETH2 root -> ETH1 hash
@@ -177,8 +177,8 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		unrealizedJustifiedCheckpoint: anchorCheckpoint.Copy(),
 		unrealizedFinalizedCheckpoint: anchorCheckpoint.Copy(),
 		forkGraph:                     forkGraph,
-		equivocatingIndicies:          map[uint64]struct{}{},
-		latestMessages:                map[uint64]*LatestMessage{},
+		equivocatingIndicies:          make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:                make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
 		checkpointStates:              make(map[checkpointComparable]*checkpointState),
 		eth2Roots:                     eth2Roots,
 		engine:                        engine,

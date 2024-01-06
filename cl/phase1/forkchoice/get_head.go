@@ -45,12 +45,22 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 	if err != nil {
 		return libcommon.Hash{}, 0, err
 	}
-	// Filter all validators deemed as bad
-	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState, justificationState.epoch)
 	// Do a simple scan to determine the fork votes.
 	votes := make(map[libcommon.Hash]uint64)
-	for _, validatorIndex := range filteredIndicies {
-		votes[f.latestMessages[validatorIndex].Root] += justificationState.balances[validatorIndex]
+	for validatorIndex, message := range f.latestMessages {
+		if message == (LatestMessage{}) {
+			continue
+		}
+		if !readFromBitset(justificationState.actives, validatorIndex) || readFromBitset(justificationState.slasheds, validatorIndex) {
+			continue
+		}
+		if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
+			continue
+		}
+		if f.isUnequivocating(uint64(validatorIndex)) {
+			continue
+		}
+		votes[message.Root] += justificationState.balances[validatorIndex]
 	}
 	if f.proposerBoostRoot != (libcommon.Hash{}) {
 		boost := justificationState.activeBalance / justificationState.beaconConfig.SlotsPerEpoch
@@ -113,10 +123,10 @@ func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointSt
 		if !readFromBitset(c.actives, validatorIndex) || readFromBitset(c.slasheds, validatorIndex) {
 			continue
 		}
-		if _, hasLatestMessage := f.latestMessages[uint64(validatorIndex)]; !hasLatestMessage {
+		if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
 			continue
 		}
-		if _, isUnequivocating := f.equivocatingIndicies[uint64(validatorIndex)]; isUnequivocating {
+		if f.isUnequivocating(uint64(validatorIndex)) {
 			continue
 		}
 		filtered = append(filtered, uint64(validatorIndex))
