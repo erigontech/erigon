@@ -9,13 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMinimalState(t *testing.T) {
-	m := &MinimalBeaconState{
+func TestSlotData(t *testing.T) {
+	m := &SlotData{
 		Version:                      clparams.CapellaVersion,
 		Eth1Data:                     &cltypes.Eth1Data{},
-		Fork:                         &cltypes.Fork{},
 		Eth1DepositIndex:             0,
-		JustificationBits:            &cltypes.JustificationBits{},
 		NextWithdrawalIndex:          0,
 		NextWithdrawalValidatorIndex: 0,
 	}
@@ -23,7 +21,7 @@ func TestMinimalState(t *testing.T) {
 	if err := m.WriteTo(&b); err != nil {
 		t.Fatal(err)
 	}
-	m2 := &MinimalBeaconState{}
+	m2 := &SlotData{}
 	if err := m2.ReadFrom(&b); err != nil {
 		t.Fatal(err)
 	}

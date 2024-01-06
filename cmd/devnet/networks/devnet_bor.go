@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
@@ -11,9 +13,9 @@ import (
 	account_services "github.com/ledgerwatch/erigon/cmd/devnet/services/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func NewBorDevnetWithoutHeimdall(
@@ -214,8 +216,9 @@ func NewBorDevnetWithLocalHeimdall(
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
 	config := *params.BorDevnetChainConfig
+	borConfig := config.Bor.(*borcfg.BorConfig)
 	if sprintSize > 0 {
-		config.Bor.Sprint = map[string]uint64{"0": sprintSize}
+		borConfig.Sprint = map[string]uint64{"0": sprintSize}
 	}
 
 	checkpointOwner := accounts.NewAccount("checkpoint-owner")

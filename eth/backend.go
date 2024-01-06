@@ -32,6 +32,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -509,7 +510,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else if chainConfig.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = &config.Bor
+		consensusConfig = chainConfig.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}
@@ -1111,14 +1112,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		mineEvery := time.NewTicker(cfg.Recommit)
 		defer mineEvery.Stop()
 
-		// Listen on a new head subscription. This allows us to maintain the block time by
-		// triggering mining after the block is passed through all stages.
-		//newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
-		//defer closeNewHeadCh()
-
 		s.logger.Info("Starting to mine", "etherbase", eb)
 
-		var works bool
+		var working bool
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
 
@@ -1129,17 +1125,15 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				mineEvery.Reset(cfg.Recommit)
 			}
 
-			// Only check for case if you're already mining (i.e. works = true) and
+			// Only check for case if you're already mining (i.e. working = true) and
 			// waiting for error or you don't have any work yet (i.e. hasWork = false).
-			if works || !hasWork {
+			if working || !hasWork {
 				select {
 				case <-stateChangeCh:
 					// TODO - can do mining clean up here as we have previous
 					// block info in the state channel
 					hasWork = true
 
-					//				case <-newHeadCh:
-					//					hasWork = true
 				case <-s.notifyMiningAboutNewTxs:
 					// Skip mining based on new tx notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
@@ -1148,9 +1142,9 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					}
 				case <-mineEvery.C:
 					s.logger.Debug("Start mining new block based on miner.recommit")
-					hasWork = true
+					hasWork = !working
 				case err := <-errc:
-					works = false
+					working = false
 					hasWork = false
 					if errors.Is(err, libcommon.ErrStopped) {
 						return
@@ -1163,8 +1157,8 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				}
 			}
 
-			if !works && hasWork {
-				works = true
+			if !working && hasWork {
+				working = true
 				hasWork = false
 				mineEvery.Reset(cfg.Recommit)
 				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir, logger) }()

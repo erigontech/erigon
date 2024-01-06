@@ -137,7 +137,7 @@ func AllComponents(ctx context.Context, cfg txpoolcfg.Config, cache kvcache.Cach
 	shanghaiTime := chainConfig.ShanghaiTime
 	var agraBlock *big.Int
 	if chainConfig.Bor != nil {
-		agraBlock = chainConfig.Bor.AgraBlock
+		agraBlock = chainConfig.Bor.GetAgraBlock()
 	}
 	cancunTime := chainConfig.CancunTime
 	if cfg.OverrideCancunTime != nil {
