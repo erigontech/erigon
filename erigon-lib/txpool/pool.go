@@ -1444,14 +1444,18 @@ func removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot, pending *P
 	for senderID, nonce := range noncesToRemove {
 
 		byNonce.ascend(senderID, func(mt *metaTx) bool {
-			logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", mt.Tx.Nonce, "sender.nonce", nonce)
-
 			if mt.Tx.Nonce > nonce {
+				if mt.Tx.Traced {
+					logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", mt.Tx.Nonce, "sender.nonce", nonce)
+				}
+
 				return false
 			}
-			//if mt.Tx.Traced {
-			logger.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IDHash, mt.Tx.SenderID, mt.currentSubPool))
-			//}
+
+			if mt.Tx.Traced {
+				logger.Info(fmt.Sprintf("TX TRACING: removeMined idHash=%x senderId=%d, currentSubPool=%s", mt.Tx.IDHash, mt.Tx.SenderID, mt.currentSubPool))
+			}
+
 			toDel = append(toDel, mt)
 			// del from sub-pool
 			switch mt.currentSubPool {

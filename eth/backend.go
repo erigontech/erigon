@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -620,7 +621,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
-	backend.minedBlocks = miner.MiningResultCh
 
 	var (
 		snapDb     kv.RwDB
@@ -784,7 +784,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, stateDiffClient, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, stateDiffClient, mining, miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
 		return nil, err
 	}
 
@@ -1014,7 +1014,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient *direct.StateDiffClientDirect, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient *direct.StateDiffClientDirect, mining *stagedsync.Sync, miner stagedsync.MiningState, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
 
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
@@ -1028,7 +1028,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}
 
 	//if borcfg == nil {
-	if !cfg.Enabled {
+	if !miner.MiningConfig.Enabled {
 		return nil
 	}
 	//}
@@ -1041,14 +1041,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}
 
 	if borcfg != nil {
-		if cfg.Enabled {
-			if cfg.SigKey == nil {
+		if miner.MiningConfig.Enabled {
+			if miner.MiningConfig.SigKey == nil {
 				s.logger.Error("Etherbase account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %w", err)
 			}
 
 			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-				return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 			})
 		} else {
 			// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
@@ -1074,13 +1074,13 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		}
 	}
 	if clq != nil {
-		if cfg.SigKey == nil {
+		if miner.MiningConfig.SigKey == nil {
 			s.logger.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
 		clq.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+			return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 		})
 	}
 
@@ -1109,27 +1109,34 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 		defer close(s.waitForMiningStop)
 		defer streamCancel()
 
-		mineEvery := time.NewTicker(cfg.Recommit)
+		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
 		defer mineEvery.Stop()
 
 		s.logger.Info("Starting to mine", "etherbase", eb)
 
 		var working bool
+		var waiting atomic.Bool
+
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
+
+		workCtx, workCancel := context.WithCancel(ctx)
+		defer workCancel()
 
 		for {
 			// Only reset if some work was done previously as we'd like to rely
 			// on the `miner.recommit` as backup.
 			if hasWork {
-				mineEvery.Reset(cfg.Recommit)
+				mineEvery.Reset(miner.MiningConfig.Recommit)
 			}
 
 			// Only check for case if you're already mining (i.e. working = true) and
 			// waiting for error or you don't have any work yet (i.e. hasWork = false).
 			if working || !hasWork {
 				select {
-				case <-stateChangeCh:
+				case stateChanges := <-stateChangeCh:
+					block := stateChanges.BlockHeight
+					s.logger.Debug("Start mining new block based on previous block", "block", block)
 					// TODO - can do mining clean up here as we have previous
 					// block info in the state channel
 					hasWork = true
@@ -1141,8 +1148,10 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 						s.logger.Debug("Start mining new block based on txpool notif")
 					}
 				case <-mineEvery.C:
-					s.logger.Debug("Start mining new block based on miner.recommit")
-					hasWork = !working
+					if !(working || waiting.Load()) {
+						s.logger.Debug("Start mining new block based on miner.recommit", "duration", miner.MiningConfig.Recommit)
+					}
+					hasWork = !(working || waiting.Load())
 				case err := <-errc:
 					working = false
 					hasWork = false
@@ -1160,8 +1169,33 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 			if !working && hasWork {
 				working = true
 				hasWork = false
-				mineEvery.Reset(cfg.Recommit)
-				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir, logger) }()
+				mineEvery.Reset(miner.MiningConfig.Recommit)
+				go func() {
+					err := stages2.MiningStep(ctx, db, mining, tmpDir, logger)
+
+					waiting.Store(true)
+					defer waiting.Store(false)
+
+					errc <- err
+
+					if err != nil {
+						return
+					}
+
+					for {
+						select {
+						case block := <-miner.MiningResultCh:
+							if block != nil {
+								s.logger.Debug("Mined block", "block", block.Number())
+								s.minedBlocks <- block
+							}
+							return
+						case <-workCtx.Done():
+							errc <- workCtx.Err()
+							return
+						}
+					}
+				}()
 			}
 		}
 	}()
