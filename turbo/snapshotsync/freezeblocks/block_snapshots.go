@@ -1101,16 +1101,10 @@ func noGaps(in []snaptype.FileInfo, from uint64) (out []snaptype.FileInfo, missi
 	prevTo := from
 	for _, f := range in {
 		if f.To <= prevTo {
-			if f.T == snaptype.Bodies {
-				fmt.Printf("[dbg] skip1: %s\n", f.Path)
-			}
 			continue
 		}
 		if f.From != prevTo { // no gaps
 			missingSnapshots = append(missingSnapshots, Range{prevTo, f.From})
-			if f.T == snaptype.Bodies {
-				fmt.Printf("[dbg] skip2: %s\n", f.Path)
-			}
 			continue
 		}
 		prevTo = f.To
