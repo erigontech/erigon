@@ -40,6 +40,7 @@ type ForkChoiceStorageReader interface {
 
 	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
+	ForkNodes() []ForkNode
 }
 
 type ForkChoiceStorageWriter interface {

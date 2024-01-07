@@ -289,7 +289,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, blockReader ser
 	} else if cc.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
-		consensusConfig = &config.Bor
+		consensusConfig = cc.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}

@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 )
 
 func TestSpanIDAt(t *testing.T) {
@@ -31,7 +31,7 @@ func TestSpanEndBlockNum(t *testing.T) {
 }
 
 func TestBlockInLastSprintOfSpan(t *testing.T) {
-	config := &chain.BorConfig{
+	config := &borcfg.BorConfig{
 		Sprint: map[string]uint64{
 			"0": 16,
 		},

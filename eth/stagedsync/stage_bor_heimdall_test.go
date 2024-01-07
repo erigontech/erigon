@@ -189,7 +189,7 @@ func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
 	invalidHeader.Extra = bytes.Repeat([]byte{0x00}, types.ExtraVanityLength+types.ExtraSealLength)
 	validatorKey1, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	sighash, err := crypto.Sign(crypto.Keccak256(bor.BorRLP(invalidHeader, chainConfig.Bor)), validatorKey1)
+	sighash, err := crypto.Sign(crypto.Keccak256(bor.BorRLP(invalidHeader, testHarness.BorConfig())), validatorKey1)
 	require.NoError(t, err)
 	copy(invalidHeader.Extra[len(invalidHeader.Extra)-types.ExtraSealLength:], sighash)
 	testHarness.SaveHeader(ctx, t, invalidHeader)
