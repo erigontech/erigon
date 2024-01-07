@@ -41,6 +41,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	for k, children := range f.childrens {
 		if children.parentSlot <= newFinalized.Epoch()*f.beaconCfg.SlotsPerEpoch {
 			delete(f.childrens, k)
+			delete(f.headSet, k)
 			continue
 		}
 	}

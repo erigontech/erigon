@@ -514,7 +514,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else if chainConfig.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = &config.Bor
+		consensusConfig = chainConfig.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}

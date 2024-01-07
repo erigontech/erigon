@@ -5,6 +5,8 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
@@ -56,9 +58,9 @@ func TestDump(t *testing.T) {
 	}
 
 	withConfig := func(config chain.Config, sprints map[string]uint64) *chain.Config {
-		bor := *config.Bor
+		bor := *config.Bor.(*borcfg.BorConfig)
+		bor.Sprint = sprints
 		config.Bor = &bor
-		config.Bor.Sprint = sprints
 		return &config
 	}
 

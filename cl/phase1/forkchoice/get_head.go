@@ -16,6 +16,23 @@ func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	return f.getHead()
 }
 
+// accountWeights updates the weights of the validators, given the vote and given an head leaf.
+func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint64, justifedRoot, leaf libcommon.Hash) {
+	curr := leaf
+	accumulated := uint64(0)
+	for curr != justifedRoot {
+		accumulated += votes[curr]
+		votes[curr] = 0 // make sure we don't double count
+		weights[curr] += accumulated
+		header, has := f.forkGraph.GetHeader(curr)
+		if !has {
+			return
+		}
+		curr = header.ParentRoot
+	}
+	return
+}
+
 func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 	if f.headHash != (libcommon.Hash{}) {
 		return f.headHash, f.headSlot, nil
@@ -28,8 +45,33 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 	if err != nil {
 		return libcommon.Hash{}, 0, err
 	}
-	// Filter all validators deemed as bad
-	filteredIndicies := f.filterValidatorSetForAttestationScores(justificationState, justificationState.epoch)
+	// Do a simple scan to determine the fork votes.
+	votes := make(map[libcommon.Hash]uint64)
+	for validatorIndex, message := range f.latestMessages {
+		if message == (LatestMessage{}) {
+			continue
+		}
+		if !readFromBitset(justificationState.actives, validatorIndex) || readFromBitset(justificationState.slasheds, validatorIndex) {
+			continue
+		}
+		if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
+			continue
+		}
+		if f.isUnequivocating(uint64(validatorIndex)) {
+			continue
+		}
+		votes[message.Root] += justificationState.balances[validatorIndex]
+	}
+	if f.proposerBoostRoot != (libcommon.Hash{}) {
+		boost := justificationState.activeBalance / justificationState.beaconConfig.SlotsPerEpoch
+		votes[f.proposerBoostRoot] += (boost * justificationState.beaconConfig.ProposerScoreBoost) / 100
+	}
+	// Account for weights on each head fork
+	f.weights = make(map[libcommon.Hash]uint64)
+	for head := range f.headSet {
+		f.accountWeights(votes, f.weights, f.justifiedCheckpoint.BlockRoot(), head)
+	}
+
 	for {
 		// Filter out current head children.
 		unfilteredChildren := f.children(f.headHash)
@@ -62,9 +104,9 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 
 		// After sorting is done determine best fit.
 		f.headHash = children[0]
-		maxWeight := f.getWeight(children[0], filteredIndicies, justificationState)
+		maxWeight := f.weights[children[0]]
 		for i := 1; i < len(children); i++ {
-			weight := f.getWeight(children[i], filteredIndicies, justificationState)
+			weight := f.weights[children[i]]
 			// Lexicographical order is king.
 			if weight >= maxWeight {
 				f.headHash = children[i]
@@ -81,10 +123,10 @@ func (f *ForkChoiceStore) filterValidatorSetForAttestationScores(c *checkpointSt
 		if !readFromBitset(c.actives, validatorIndex) || readFromBitset(c.slasheds, validatorIndex) {
 			continue
 		}
-		if _, hasLatestMessage := f.latestMessages[uint64(validatorIndex)]; !hasLatestMessage {
+		if _, hasLatestMessage := f.getLatestMessage(uint64(validatorIndex)); !hasLatestMessage {
 			continue
 		}
-		if _, isUnequivocating := f.equivocatingIndicies[uint64(validatorIndex)]; isUnequivocating {
+		if f.isUnequivocating(uint64(validatorIndex)) {
 			continue
 		}
 		filtered = append(filtered, uint64(validatorIndex))

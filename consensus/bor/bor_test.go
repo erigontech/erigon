@@ -7,6 +7,8 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,12 +36,23 @@ import (
 type test_heimdall struct {
 	currentSpan  *span.HeimdallSpan
 	chainConfig  *chain.Config
+	borConfig    *borcfg.BorConfig
 	validatorSet *valset.ValidatorSet
 	spans        map[uint64]*span.HeimdallSpan
 }
 
 func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
-	return &test_heimdall{nil, chainConfig, nil, map[uint64]*span.HeimdallSpan{}}
+	return &test_heimdall{
+		currentSpan:  nil,
+		chainConfig:  chainConfig,
+		borConfig:    chainConfig.Bor.(*borcfg.BorConfig),
+		validatorSet: nil,
+		spans:        map[uint64]*span.HeimdallSpan{},
+	}
+}
+
+func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
+	return h.borConfig
 }
 
 func (h test_heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
@@ -67,7 +80,7 @@ func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*span.Heimdall
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
 	}
 
-	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.chainConfig.Bor.CalculateSprint(nextSpan.StartBlock)) - 1
+	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.borConfig.CalculateSprintLength(nextSpan.StartBlock)) - 1
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
@@ -91,10 +104,10 @@ func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*span.Heimdall
 
 func (h test_heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
-		return int(h.chainConfig.Bor.CalculateSprint(h.currentSpan.StartBlock))
+		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
 	}
 
-	return int(h.chainConfig.Bor.CalculateSprint(256))
+	return int(h.borConfig.CalculateSprintLength(256))
 }
 
 func (h test_heimdall) FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error) {
@@ -346,11 +359,11 @@ func TestVerifyRun(t *testing.T) {
 }
 
 func TestVerifySprint(t *testing.T) {
-	//testVerify(t, 10, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
+	//testVerify(t, 10, 4, int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func TestVerifySpan(t *testing.T) {
-	//testVerify(t, 10, 4 /*100**/ *int(params.BorDevnetChainConfig.Bor.CalculateSprint(256)))
+	//testVerify(t, 10, 4 /*100**/ *int(params.BorDevnetChainConfig.Bor.CalculateSprintLength(256)))
 }
 
 func testVerify(t *testing.T, noValidators int, chainLength int) {
@@ -392,7 +405,7 @@ func testVerify(t *testing.T, noValidators int, chainLength int) {
 			if isProposer {
 
 				if vi != lastProposerIndex {
-					sprintLen := params.BorDevnetChainConfig.Bor.CalculateSprint(block.NumberU64())
+					sprintLen := heimdall.BorConfig().CalculateSprintLength(block.NumberU64())
 					if block.NumberU64() > 1 && block.NumberU64()%sprintLen != 0 {
 						t.Fatalf("Unexpected sprint boundary at %d for: %d", bi, block.NumberU64())
 					}
