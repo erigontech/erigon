@@ -170,7 +170,7 @@ func stateIdFromRequest(r *http.Request) (*segmentID, error) {
 
 	stateId := chi.URLParam(r, "state_id")
 	if !regex.MatchString(stateId) {
-		return nil, fmt.Errorf("invalid path variable: {block_id}")
+		return nil, fmt.Errorf("invalid path variable: {state_id}")
 	}
 
 	if stateId == "head" {
