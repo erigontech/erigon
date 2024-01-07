@@ -807,7 +807,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			ac.a.logger.Info("[agg] pruning",
 				"until timeout", time.Until(dd).String(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
-				"pruned", stat.String(),
+				"pruned", fullStat.String(),
 			)
 		case <-localTimeout.Done():
 			return nil
