@@ -813,6 +813,7 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	w.close()
 	return nil
 }
 

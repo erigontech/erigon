@@ -748,22 +748,21 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
-	if err != nil {
-		return err
-	}
-	if sd.trace {
-		_, f, l, _ := runtime.Caller(1)
-		fmt.Printf("[SD aggCtx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggCtx.id, sd.TxNum(), fh, filepath.Base(f), l)
-	}
-
-	defer mxFlushTook.ObserveDuration(time.Now())
 
 	if sd.noFlush > 0 {
 		sd.noFlush--
 	}
 
 	if sd.noFlush == 0 {
+		defer mxFlushTook.ObserveDuration(time.Now())
+		fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+		if err != nil {
+			return err
+		}
+		if sd.trace {
+			_, f, l, _ := runtime.Caller(1)
+			fmt.Printf("[SD aggCtx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggCtx.id, sd.TxNum(), fh, filepath.Base(f), l)
+		}
 		if err := sd.accountWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
@@ -789,14 +788,20 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 			return err
 		}
 
-		sd.accountWriter.close()
-		sd.storageWriter.close()
-		sd.codeWriter.close()
-		sd.commitmentWriter.close()
+		//sd.accountWriter.close()
+		//sd.storageWriter.close()
+		//sd.codeWriter.close()
+		//sd.commitmentWriter.close()
 		sd.logAddrsWriter.close()
 		sd.logTopicsWriter.close()
 		sd.tracesFromWriter.close()
 		sd.tracesToWriter.close()
+
+		err = sd.aggCtx.PruneSmallBatches(ctx, time.Second, tx)
+		if err != nil {
+			return err
+		}
+
 	}
 	return nil
 }
