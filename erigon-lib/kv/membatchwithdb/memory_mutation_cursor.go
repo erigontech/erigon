@@ -402,7 +402,6 @@ func (m *memoryMutationCursor) Last() ([]byte, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	//fmt.Printf("memValue = %x, dbValue = %x\n", memValue, dbValue)
 
 	dbKey, dbValue, err = m.skipIntersection(memKey, memValue, dbKey, dbValue, Normal)
 	if err != nil {

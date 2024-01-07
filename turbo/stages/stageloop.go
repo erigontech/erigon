@@ -398,7 +398,6 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine consensus.Engine, chainReader c
 	if _, err := rawdb.WriteRawBodyIfNotExists(batch, currentHash, currentHeight, currentBody); err != nil {
 		return err
 	}
-	fmt.Printf("addAndVerifyBlockStep currentHeight %d, histV3 %t, prevHash == currentHash %t\n", currentHeight, histV3, prevHash == currentHash)
 	if histV3 && prevHash != currentHash {
 		if err := rawdb.AppendCanonicalTxNums(batch, currentHeight); err != nil {
 			return err

@@ -213,7 +213,6 @@ func ExecV3(ctx context.Context,
 		defer doms.Close()
 	}
 
-	fmt.Printf("ExecV3 to = %d s.blockNumber = %d, useExternalTx %t, applyTx %T, inMemExec %t, inputTxNum %d\n", maxBlockNum, execStage.BlockNumber, useExternalTx, applyTx, inMemExec, doms.TxNum())
 	var (
 		inputTxNum    = doms.TxNum()
 		stageProgress = execStage.BlockNumber
@@ -281,7 +280,6 @@ func ExecV3(ctx context.Context,
 		if _nothing, err := nothingToExec(applyTx); err != nil {
 			return err
 		} else if _nothing {
-			fmt.Printf("nothingToExec\n")
 			return nil
 		}
 

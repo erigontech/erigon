@@ -157,7 +157,7 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	sd.aggCtx.a.logger.Info("aggregator unwind", "step", step,
-		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggCtx.a.StepsRangeInDBAsStr(rwTx), "rwTx", fmt.Sprintf("%T", rwTx))
+		"txUnwindTo", txUnwindTo, "stepsRangeInDB", sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
 	//fmt.Printf("aggregator unwind step %d txUnwindTo %d stepsRangeInDB %s\n", step, txUnwindTo, sd.aggCtx.a.StepsRangeInDBAsStr(rwTx))
 
 	if err := sd.Flush(ctx, rwTx); err != nil {
@@ -192,7 +192,6 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	sd.ClearRam(true)
 	sd.SetTxNum(txUnwindTo)
 	sd.SetBlockNum(blockUnwindTo)
-	sd.aggCtx.a.logger.Info("aggregator unwind 2")
 	return sd.Flush(ctx, rwTx)
 }
 
@@ -295,8 +294,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 
 	sd.storage = btree2.NewMap[string, []byte](128)
 	sd.estSize = 0
-	//sd.SetTxNum(0)
-	//sd.SetBlockNum(0)
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {

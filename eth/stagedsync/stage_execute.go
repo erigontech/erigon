@@ -275,7 +275,6 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
 	if to < s.BlockNumber {
-		fmt.Printf("return to = %d, s.BlockNumber = %d\n", to, s.BlockNumber)
 		return nil
 	}
 	if to > s.BlockNumber+16 {
