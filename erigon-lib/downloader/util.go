@@ -409,6 +409,11 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 	}
 	span.InitIndex()
 	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 		p := info.Piece(i)
 		hash := sha1.New()
 		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
