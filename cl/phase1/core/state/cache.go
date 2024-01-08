@@ -334,11 +334,16 @@ func readUint64WithBuffer(r io.Reader, buf []byte, out *uint64) error {
 
 // internal encoding/decoding algos
 func (b *CachingBeaconState) encodeActiveValidatorsCache(w io.Writer, num []byte) error {
-	keys := b.activeValidatorsCache.Keys()
-	lists := make([][]uint64, len(keys))
-
-	for i, key := range keys {
-		lists[i], _ = b.activeValidatorsCache.Get(key)
+	keysA := b.activeValidatorsCache.Keys()
+	keys := make([]uint64, 0, len(keysA))
+	lists := make([][]uint64, 0, len(keys))
+	for _, key := range keysA {
+		l, ok := b.activeValidatorsCache.Get(key)
+		if !ok || len(l) == 0 {
+			continue
+		}
+		keys = append(keys, key)
+		lists = append(lists, l)
 	}
 	// Write the total length
 	if err := writeUint64WithBuffer(w, uint64(len(keys)), num); err != nil {
@@ -396,11 +401,17 @@ func (b *CachingBeaconState) decodeActiveValidatorsCache(r io.Reader, num []byte
 
 // internal encoding/decoding algos
 func (b *CachingBeaconState) encodeShuffledSetsCache(w io.Writer, num []byte) error {
-	keys := b.shuffledSetsCache.Keys()
-	lists := make([][]uint64, len(keys))
+	keysA := b.shuffledSetsCache.Keys()
+	keys := make([]common.Hash, 0, len(keysA))
+	lists := make([][]uint64, 0, len(keys))
 
-	for i, key := range keys {
-		lists[i], _ = b.shuffledSetsCache.Get(key)
+	for _, key := range keysA {
+		l, ok := b.shuffledSetsCache.Get(key)
+		if !ok || len(l) == 0 {
+			continue
+		}
+		keys = append(keys, key)
+		lists = append(lists, l)
 	}
 	// Write the total length
 	if err := writeUint64WithBuffer(w, uint64(len(keys)), num); err != nil {
