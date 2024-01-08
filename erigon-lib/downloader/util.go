@@ -418,14 +418,14 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		if err != nil {
 			return err
 		}
-		defer mm.Unmap()
 		if int64(len(mm.Bytes())) != file.Length {
 			return fmt.Errorf("file %q has wrong length", filename)
 		}
 		span.Append(mm)
 	}
 	span.InitIndex()
-	for i, numPieces := 0, info.NumPieces(); i < numPieces; i += 1 {
+	defer span.Close()
+	for i := 0; i < info.NumPieces(); i++ {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
