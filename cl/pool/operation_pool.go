@@ -21,7 +21,10 @@ func NewOperationPool[K comparable, T any](maxOperationsPerBlock int, matricName
 	if err != nil {
 		panic(err)
 	}
-	return &OperationPool[K, T]{pool: pool}
+	return &OperationPool[K, T]{
+		pool:         pool,
+		recentlySeen: make(map[K]time.Time),
+	}
 }
 
 func (o *OperationPool[K, T]) Insert(k K, operation T) {
