@@ -521,6 +521,7 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
+			fmt.Printf("[dbg] verify: %d\n", len(onlyFiles))
 			if len(onlyFiles) > 0 && !slices.Contains(onlyFiles, t.Name()) {
 				continue
 			}
