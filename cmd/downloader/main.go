@@ -229,6 +229,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	defer grpcServer.GracefulStop()
 
+	if len(_verifyFiles) > 0 {
+		verifyFiles = strings.Split(_verifyFiles, ",")
+	}
 	verifyFiles = strings.Split(_verifyFiles, ",")
 	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
 		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
