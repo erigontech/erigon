@@ -49,6 +49,7 @@ func (a *ApiHandler) init() {
 	// otterscn specific ones are commented as such
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
+			r.Get("/builder/states/{state_id}/expected_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEth1V1BuilderStatesExpectedWit))
 			r.Get("/events", http.NotFound)
 			r.Route("/node", func(r chi.Router) {
 				r.Get("/health", a.GetEthV1NodeHealth)
