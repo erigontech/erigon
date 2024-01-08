@@ -411,6 +411,7 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 
 func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
 	span := new(mmap_span.MMapSpan)
+	defer span.Close()
 	info := t.Info()
 	for _, file := range info.UpvertedFiles() {
 		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
@@ -424,7 +425,6 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		span.Append(mm)
 	}
 	span.InitIndex()
-	defer span.Close()
 	for i := 0; i < info.NumPieces(); i++ {
 		select {
 		case <-ctx.Done():
