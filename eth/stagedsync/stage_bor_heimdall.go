@@ -325,7 +325,7 @@ func BorHeimdallForward(
 			if blockNum > cfg.blockReader.BorSnapshots().SegmentsMin() {
 				// SegmentsMin is only set if running as an uploader process (check SnapshotsCfg.snapshotUploader and
 				// UploadLocationFlag) when we remove snapshots based on FrozenBlockLimit and number of uploaded snapshots
-				// avoid calling this if block for blockNums < SegmentsMin to avoid reinsertion of snapshots
+				// avoid calling this if block for blockNums <= SegmentsMin to avoid reinsertion of snapshots
 				snap = loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
 
 				if snap == nil {
