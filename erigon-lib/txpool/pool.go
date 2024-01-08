@@ -39,7 +39,6 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -1988,7 +1987,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	// this is neccessary as otherwise best - which waits for sync events
 	// may wait for ever if blocks have been process before the txpool
 	// starts with an empty db
-	lastSeenProgress, err := stages.GetStageProgress(coreTx, stages.Execution)
+	lastSeenProgress, err := getExecutionProgress(coreTx)
 
 	if err != nil {
 		return err
@@ -2092,6 +2091,24 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	p.pendingBlobFee.Store(pendingBlobFee)
 	return nil
 }
+
+func getExecutionProgress(db kv.Getter) (uint64, error) {
+	data, err := db.GetOne(kv.SyncStageProgress, []byte("Execution"))
+	if err != nil {
+		return 0, err
+	}
+
+	if len(data) == 0 {
+		return 0, nil
+	}
+
+	if len(data) < 8 {
+		return 0, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
+	}
+
+	return binary.BigEndian.Uint64(data[:8]), nil
+}
+
 func LastSeenBlock(tx kv.Getter) (uint64, error) {
 	v, err := tx.GetOne(kv.PoolInfo, PoolLastSeenBlockKey)
 	if err != nil {
