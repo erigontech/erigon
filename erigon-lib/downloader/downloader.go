@@ -516,15 +516,18 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 
 func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	total := 0
-	_torrents := d.torrentClient.Torrents()
-	torrents := make([]*torrent.Torrent, 0, len(_torrents))
-	for _, t := range _torrents {
+	allTorrents := d.torrentClient.Torrents()
+	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
+	d.logger.Info("[snapshots] Verify start")
+	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify))
+
+	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
 			if len(onlyFiles) > 0 && !slices.Contains(onlyFiles, t.Name()) {
 				continue
 			}
-			torrents = append(torrents, t)
+			toVerify = append(toVerify, t)
 			total += t.NumPieces()
 		case <-ctx.Done():
 			return ctx.Err()
@@ -534,8 +537,6 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	completedPieces := &atomic.Uint64{}
 
 	{
-		d.logger.Info("[snapshots] Verify start")
-		defer d.logger.Info("[snapshots] Verify done")
 		logEvery := time.NewTicker(20 * time.Second)
 		defer logEvery.Stop()
 		d.wg.Add(1)
@@ -557,8 +558,8 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
-	fmt.Printf("[dbg] verify2: %s\n", len(torrents))
-	for _, t := range torrents {
+	fmt.Printf("[dbg] verify2: %d\n", len(toVerify))
+	for _, t := range toVerify {
 		t := t
 		fmt.Printf("[dbg] verify: %s\n", t.Name())
 		g.Go(func() error {
