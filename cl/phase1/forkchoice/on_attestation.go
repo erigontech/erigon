@@ -61,6 +61,10 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	cache.StoreAttestation(&data, attestation.AggregationBits(), attestationIndicies)
 	// Lastly update latest messages.
 	f.processAttestingIndicies(attestation, attestationIndicies)
+	if !fromBlock {
+		// Add to the pool when verified.
+		f.operationsPool.AttestationsPool.Insert(attestation.Signature(), attestation)
+	}
 	return nil
 }
 
