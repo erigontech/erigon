@@ -310,7 +310,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 		}
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
-			s.logger.Warn("--sync.loop.break caused stage break")
+			s.logger.Warn("--sync.loop.break.after caused stage break")
 			break
 		}
 
@@ -385,7 +385,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 		}
 
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
-			s.logger.Warn("--sync.loop.break caused stage break")
+			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
 				ptx := tx
 

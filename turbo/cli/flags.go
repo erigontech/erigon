@@ -156,7 +156,7 @@ var (
 	}
 
 	SyncLoopBreakAfterFlag = cli.StringFlag{
-		Name:  "sync.loop.break",
+		Name:  "sync.loop.break.after",
 		Usage: "Sets the last stage of the sync loop to run",
 		Value: "",
 	}
