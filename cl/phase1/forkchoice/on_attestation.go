@@ -77,7 +77,7 @@ func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *sol
 					continue
 				}
 				if err := f.OnAttestation(attestation, false); err != nil {
-					log.Trace("could not process scheduled attestation", "reason", err)
+					log.Debug("could not process scheduled attestation", "reason", err)
 				}
 				return
 			}
