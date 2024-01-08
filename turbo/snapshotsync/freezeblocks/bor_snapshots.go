@@ -194,7 +194,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 	merger := NewBorMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
-	logger.Warn("[bor snapshots] Retire Bor Blocks", "rangesToMerge", fmt.Sprintf("%s", Ranges(rangesToMerge)))
+	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", fmt.Sprintf("%s", Ranges(rangesToMerge)))
 	if len(rangesToMerge) == 0 {
 		return ok, nil
 	}

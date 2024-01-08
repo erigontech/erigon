@@ -163,7 +163,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 }
 
 func (g *GossipManager) Start(ctx context.Context) {
-	subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.EmptyMessage{})
+	subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.SubscriptionData{})
 	if err != nil {
 		return
 	}
