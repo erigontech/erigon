@@ -519,7 +519,7 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
 	d.logger.Info("[snapshots] Verify start")
-	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify))
+	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "onlyFiles", onlyFiles)
 
 	for _, t := range allTorrents {
 		select {
