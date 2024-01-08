@@ -524,21 +524,21 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteListOfFiles []string) 
 	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
-			name := t.Name()
-			fmt.Printf("before filter: %s\n", t.Name())
-			slices.ContainsFunc(whiteListOfFiles, func(s string) bool { return strings.HasSuffix(s, name) })
-			if len(whiteListOfFiles) > 0 {
-				partialMatch := slices.ContainsFunc(whiteListOfFiles, func(s string) bool { return strings.HasSuffix(s, name) || strings.HasPrefix(s, name) })
-				exactMatch := slices.Contains(whiteListOfFiles, t.Name())
-				if !(partialMatch || exactMatch) {
-					continue
-				}
-			}
-			toVerify = append(toVerify, t)
-			total += t.NumPieces()
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+
+		name := t.Name()
+		slices.ContainsFunc(whiteListOfFiles, func(s string) bool { return strings.HasSuffix(s, name) })
+		if len(whiteListOfFiles) > 0 {
+			partialMatch := slices.ContainsFunc(whiteListOfFiles, func(s string) bool { return strings.HasSuffix(s, name) || strings.HasPrefix(s, name) })
+			exactMatch := slices.Contains(whiteListOfFiles, t.Name())
+			if !(partialMatch || exactMatch) {
+				continue
+			}
+		}
+		toVerify = append(toVerify, t)
+		total += t.NumPieces()
 	}
 
 	completedPieces := &atomic.Uint64{}
