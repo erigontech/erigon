@@ -477,7 +477,6 @@ func WriteBodyForStorage(db kv.Putter, hash common.Hash, number uint64, body *ty
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("WriteBodyForStorage %d %x %s\n", number, hash, debug.Stack())
 	return db.Put(kv.BlockBody, dbutils.BlockBodyKey(number, hash), data)
 }
 

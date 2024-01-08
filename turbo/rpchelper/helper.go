@@ -145,7 +145,7 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 	return r, nil
 }
 
-func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
+func NewLatestStateReader(tx kv.Tx, histV3 bool) state.StateReader {
 	if histV3 {
 		return state.NewReaderV4(tx.(kv.TemporalGetter))
 	}
@@ -161,7 +161,7 @@ func NewLatestStateWriter(txc wrap.TxContainer, blockNum uint64, histV3 bool) st
 		domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in begining of block */ 1))
 		return state.NewWriterV4(domains)
 	}
-	return state.NewPlainStateWriter(tx, tx, blockNum)
+	return state.NewPlainStateWriter(txc.Tx, txc.Tx, blockNum)
 }
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.Tx, histV3 bool) state.StateReader {

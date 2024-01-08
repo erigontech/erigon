@@ -52,8 +52,7 @@ func (l *KvList) Swap(i, j int) {
 }
 
 type SharedDomains struct {
-	withHashBatch bool
-	noFlush       int
+	noFlush int
 
 	aggCtx *AggregatorV3Context
 	sdCtx  *SharedDomainsCommitmentContext
