@@ -518,7 +518,8 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	total := 0
 	_torrents := d.torrentClient.Torrents()
 	torrents := make([]*torrent.Torrent, 0, len(_torrents))
-	for _, t := range torrents {
+	fmt.Printf("[dbg] verify1: %d\n", len(_torrents))
+	for _, t := range _torrents {
 		select {
 		case <-t.GotInfo():
 			fmt.Printf("[dbg] verify: %d\n", len(onlyFiles))
