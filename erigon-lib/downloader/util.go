@@ -402,6 +402,7 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		if err != nil {
 			return err
 		}
+		defer mm.Unmap()
 		if int64(len(mm.Bytes())) != file.Length {
 			return fmt.Errorf("file %q has wrong length", filename)
 		}
