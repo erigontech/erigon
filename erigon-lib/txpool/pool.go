@@ -1975,12 +1975,6 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 	return nil
 }
 
-func (p *TxPool) fromDBWithLock(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
-	p.lock.Lock()
-	defer p.lock.Unlock()
-	return p.fromDB(ctx, tx, coreTx)
-}
-
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
