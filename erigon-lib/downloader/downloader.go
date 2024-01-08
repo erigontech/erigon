@@ -511,16 +511,15 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 			completePieces.Add(1)
 			return nil
 		})
-
-		g.Go(func() error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-t.Complete.On():
-				return nil
-			}
-		})
 	}
+	g.Go(func() error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.Complete.On():
+			return nil
+		}
+	})
 
 	return g.Wait()
 }
