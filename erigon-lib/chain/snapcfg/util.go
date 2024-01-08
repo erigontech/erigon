@@ -60,7 +60,7 @@ func SnapshotVersion(version uint8) {
 }
 
 func newCfg(preverified Preverified, version uint8) *Cfg {
-
+	fmt.Printf("preverified: %v\n", preverified)
 	if version == 0 {
 		version = snapshotVersion
 
