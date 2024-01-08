@@ -515,6 +515,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		toVerify = append(toVerify, t)
 		total += t.NumPieces()
 	}
+	fmt.Printf("check2: %d\n", len(toVerify))
 
 	completedPieces := &atomic.Uint64{}
 
