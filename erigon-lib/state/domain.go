@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"hash"
 	"math"
 	"os"
@@ -76,8 +77,6 @@ var (
 	mxFlushTook            = metrics.GetOrCreateSummary("domain_flush_took")
 	mxCommitmentRunning    = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook       = metrics.GetOrCreateSummary("domain_commitment_took")
-
-	mxPruneDbgSizeDomainSkipBeforeFirst = metrics.GetOrCreateCounter(`domain_prune_skipped`)
 )
 
 // StepsInColdFile - files of this size are completely frozen/immutable.
@@ -2050,21 +2049,66 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	//fmt.Printf("CanPrune %s: %v %v\n", dc.d.filenameBase, dc.hc.ic.CanPruneFrom(tx), dc.maxTxNumInDomainFiles(false))
-	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)
+	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false) && dc.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep
+}
+
+func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
+	ps, prk, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	if err != nil {
+		return math.MaxUint64
+	}
+	if ps > 0 && prk != nil {
+		return cmp.Min(ps, math.MaxUint64)
+	}
+
+	c, err := tx.CursorDupSort(dc.d.keysTable)
+	if err != nil {
+		return math.MaxUint64
+	}
+	defer c.Close()
+
+	minStep := uint64(math.MaxUint64)
+
+	k, v, err := c.First()
+	if err != nil || k == nil {
+		return math.MaxUint64
+	}
+	minStep = min(minStep, ^binary.BigEndian.Uint64(v))
+
+	//k, v, err = c.NextNoDup()
+	//if err != nil || k == nil {
+	//	return math.MaxUint64
+	//}
+	//minStep = min(minStep, ^binary.BigEndian.Uint64(v))
+
+	fv, err := c.FirstDup()
+	if err != nil {
+		return math.MaxUint64
+	}
+	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
+	fmt.Printf("found CanPrune from %x %d\n", k, minStep)
+
+	return minStep
 }
 
 type DomainPruneStat struct {
 	MinStep uint64
 	MaxStep uint64
 	Values  uint64
-	History *HistoryPruneStat
+	History *InvertedIndexPruneStat
 }
 
 func (dc *DomainPruneStat) String() string {
-	if dc.History == nil {
-		return fmt.Sprintf("kv %d step %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
+	if dc.MinStep == math.MaxUint64 && dc.Values == 0 {
+		if dc.History == nil {
+			return ""
+		}
+		return dc.History.String()
 	}
-	return fmt.Sprintf("kv %d step %d-%d; %s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
+	if dc.History == nil {
+		return fmt.Sprintf("%d kv's step %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
+	}
+	return fmt.Sprintf("%d kv's step %d-%d; v, %s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
 }
 
 func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
@@ -2133,9 +2177,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		return nil, err
 	}
 
-	var seek = make([]byte, 0, 256)
-
-	//withNewStep:
+	seek := make([]byte, 0, 256)
 	for k != nil {
 		if err != nil {
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
@@ -2144,7 +2186,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		is := ^binary.BigEndian.Uint64(v)
 		if is > step {
 			k, v, err = keysCursor.PrevNoDup()
-			mxPruneDbgSizeDomainSkipBeforeFirst.Inc()
 			continue
 		}
 		if limit == 0 {
@@ -2177,10 +2218,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
-				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			}
-			return stat, ctx.Err()
+			return stat, ctx.Err() // since we c
 		case <-logEvery.C:
 			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
@@ -2191,13 +2229,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		default:
 		}
 	}
-	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
+	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, nil); err != nil {
 		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
-	//if limit > 0 && srcStep > step {
-	//	step = srcStep
-	//	goto withNewStep
-	//}
 	mxPruneTookDomain.ObserveDuration(st)
 	return stat, nil
 }

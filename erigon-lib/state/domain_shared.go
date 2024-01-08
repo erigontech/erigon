@@ -748,7 +748,6 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-
 	if sd.noFlush > 0 {
 		sd.noFlush--
 	}
@@ -787,15 +786,6 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := sd.tracesToWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-
-		//sd.accountWriter.close()
-		//sd.storageWriter.close()
-		//sd.codeWriter.close()
-		//sd.commitmentWriter.close()
-		sd.logAddrsWriter.close()
-		sd.logTopicsWriter.close()
-		sd.tracesFromWriter.close()
-		sd.tracesToWriter.close()
 
 		err = sd.aggCtx.PruneSmallBatches(ctx, time.Second, tx)
 		if err != nil {

@@ -777,12 +777,12 @@ func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx) bool {
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
-	localTimeout, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-	logEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
+	started := time.Now()
+	localTimeout := time.NewTicker(timeout)
+	defer localTimeout.Stop()
+	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-
-	aggLogEvery := time.NewTicker(30 * time.Second)
+	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
 	defer aggLogEvery.Stop()
 
 	const pruneLimit uint64 = 1000
@@ -794,7 +794,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return nil
 		}
 
-		stat, err := ac.Prune(context.Background(), tx, pruneLimit, logEvery)
+		stat, err := ac.Prune(context.Background(), tx, pruneLimit, aggLogEvery)
 		if err != nil {
 			log.Warn("[snapshots] PruneSmallBatches", "err", err)
 			return err
@@ -802,14 +802,13 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		fullStat.Accumulate(stat)
 
 		select {
-		case <-aggLogEvery.C:
-			dd, _ := localTimeout.Deadline()
+		case <-logEvery.C:
 			ac.a.logger.Info("[agg] pruning",
-				"until timeout", time.Until(dd).String(),
+				"until timeout", time.Until(started.Add(timeout)).String(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
-		case <-localTimeout.Done():
+		case <-localTimeout.C:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
