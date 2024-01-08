@@ -2160,7 +2160,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	_, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
-		err = nil
 	}
 
 	//srcStep := step
