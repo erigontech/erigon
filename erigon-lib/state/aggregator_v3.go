@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"golang.org/x/sync/semaphore"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -30,6 +29,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/log/v3"
@@ -891,6 +892,19 @@ func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
 }
 
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
+func (a *AggregatorV3) FilesAmount() []int {
+	return []int{
+		a.accounts.files.Len(),
+		a.storage.files.Len(),
+		a.code.files.Len(),
+		a.commitment.files.Len(),
+		a.tracesFrom.files.Len(),
+		a.tracesTo.files.Len(),
+		a.logAddrs.files.Len(),
+		a.logTopics.files.Len(),
+	}
+}
+
 func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
 	return cmp.Min(
 		cmp.Min(
