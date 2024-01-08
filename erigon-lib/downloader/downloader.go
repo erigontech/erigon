@@ -496,6 +496,7 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 	}
 
 	g := &errgroup.Group{}
+	g.SetLimit(16)
 	for i := 0; i < t.NumPieces(); i++ {
 		i := i
 		g.Go(func() error {
