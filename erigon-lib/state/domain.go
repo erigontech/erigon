@@ -2052,7 +2052,8 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	//fmt.Printf("CanPrune %s: %v %v\n", dc.d.filenameBase, dc.hc.ic.CanPruneFrom(tx), dc.maxTxNumInDomainFiles(false))
-	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false) && dc.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep
+	inFiles := dc.maxTxNumInDomainFiles(false)
+	return dc.hc.ic.CanPruneFrom(tx) < inFiles || dc.CanPruneFrom(tx) < inFiles/dc.d.aggregationStep
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
