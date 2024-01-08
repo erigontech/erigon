@@ -214,12 +214,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	if err := addPreConfiguredHashes(ctx, d); err != nil {
 		return err
 	}
-	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
-			return err
-		}
-		//return nil
-	}
 
 	d.MainLoopInBackground(false)
 
@@ -233,6 +227,12 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	defer grpcServer.GracefulStop()
+
+	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
+		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+			return err
+		}
+	}
 
 	<-ctx.Done()
 	return nil
