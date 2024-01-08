@@ -566,10 +566,8 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
-	fmt.Printf("[dbg] verify2: %d\n", len(toVerify))
 	for _, t := range toVerify {
 		t := t
-		fmt.Printf("[dbg] verify: %s\n", t.Name())
 		g.Go(func() error {
 			if failFast {
 				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
