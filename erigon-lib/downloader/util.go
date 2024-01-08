@@ -428,11 +428,6 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 
 	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
 		p := info.Piece(i)
 		hasher.Reset()
 		_, err := io.Copy(hasher, io.NewSectionReader(span, p.Offset(), p.Length()))
@@ -443,7 +438,13 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		if !good {
 			return fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
 		}
+
 		completePieces.Add(1)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 	}
 	return nil
 }
