@@ -537,6 +537,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string) error {
 				continue
 			}
 		}
+		fmt.Printf("[dbg] len: %d\n", t.Length())
 		toVerify = append(toVerify, t)
 		total += t.NumPieces()
 	}
