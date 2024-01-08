@@ -425,6 +425,7 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		span.Append(mm)
 	}
 	span.InitIndex()
+	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {
 		select {
 		case <-ctx.Done():
@@ -432,12 +433,12 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		default:
 		}
 		p := info.Piece(i)
-		hash := sha1.New()
-		_, err := io.Copy(hash, io.NewSectionReader(span, p.Offset(), p.Length()))
+		hasher.Reset()
+		_, err := io.Copy(hasher, io.NewSectionReader(span, p.Offset(), p.Length()))
 		if err != nil {
 			return err
 		}
-		good := bytes.Equal(hash.Sum(nil), p.Hash().Bytes())
+		good := bytes.Equal(hasher.Sum(nil), p.Hash().Bytes())
 		if !good {
 			return fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
 		}
