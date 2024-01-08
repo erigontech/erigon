@@ -395,6 +395,7 @@ func IsLocal(path string) bool {
 
 func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
 	span := new(mmap_span.MMapSpan)
+	info := t.Info()
 	for _, file := range info.UpvertedFiles() {
 		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
 		mm, err := mmapFile(filename)
