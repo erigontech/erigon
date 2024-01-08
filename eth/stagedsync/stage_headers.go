@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 
@@ -187,7 +186,12 @@ func HeadersPOW(
 	}
 	TEMP TESTING */
 	headerInserter := headerdownload.NewHeaderInserter(logPrefix, localTd, startProgress, cfg.blockReader)
-	cfg.hd.SetHeaderReader(consensuschain.NewReader(&cfg.chainConfig, tx, cfg.blockReader, logger))
+	cfg.hd.SetHeaderReader(&ChainReaderImpl{
+		config:      &cfg.chainConfig,
+		tx:          tx,
+		blockReader: cfg.blockReader,
+		logger:      logger,
+	})
 
 	stopped := false
 	var noProgressCounter uint = 0

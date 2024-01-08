@@ -84,7 +84,7 @@ Loop:
 	unwindTo := uint64(commitStep * rnd.Intn(int(maxTx)/commitStep))
 
 	acu := agg.MakeContext()
-	err = domains.Unwind(ctx, rwTx, unwindTo)
+	err = domains.Unwind(ctx, rwTx, 0, unwindTo)
 	require.NoError(t, err)
 	acu.Close()
 

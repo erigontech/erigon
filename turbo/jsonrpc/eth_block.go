@@ -8,11 +8,13 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -294,7 +296,8 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
 
 	if chainConfig.Bor != nil {
-		response["miner"], _ = ecrecover(block.Header(), chainConfig.Bor)
+		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
+		response["miner"], _ = ecrecover(block.Header(), borConfig)
 	}
 
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {

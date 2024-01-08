@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	borfinality "github.com/ledgerwatch/erigon/consensus/bor/finality"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -145,15 +145,15 @@ func CreateHistoryStateReader(tx kv.Tx, blockNumber uint64, txnIndex int, histor
 	return r, nil
 }
 
-func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
+func NewLatestStateReader(tx kv.Tx, histV3 bool) state.StateReader {
 	if histV3 {
 		return state.NewReaderV4(tx.(kv.TemporalGetter))
 	}
 	return state.NewPlainStateReader(tx)
 }
-func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
+func NewLatestStateWriter(txc wrap.TxContainer, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
-		domains := tx.(*state2.SharedDomains)
+		domains := txc.Doms
 		minTxNum, err := rawdbv3.TxNums.Min(domains.Tx(), blockNum)
 		if err != nil {
 			panic(err)
@@ -161,7 +161,7 @@ func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateW
 		domains.SetTxNum(uint64(int(minTxNum) + /* 1 system txNum in begining of block */ 1))
 		return state.NewWriterV4(domains)
 	}
-	return state.NewPlainStateWriter(tx, tx, blockNum)
+	return state.NewPlainStateWriter(txc.Tx, txc.Tx, blockNum)
 }
 
 func CreateLatestCachedStateReader(cache kvcache.CacheView, tx kv.Tx, histV3 bool) state.StateReader {

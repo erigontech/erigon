@@ -14,8 +14,6 @@ import (
 	"unsafe"
 
 	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/kv/membatch"
-	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/log/v3"
 
 	btree2 "github.com/tidwall/btree"
@@ -54,9 +52,7 @@ func (l *KvList) Swap(i, j int) {
 }
 
 type SharedDomains struct {
-	kv.RwTx
-	withHashBatch, withMemBatch bool
-	noFlush                     int
+	noFlush int
 
 	aggCtx *AggregatorV3Context
 	sdCtx  *SharedDomainsCommitmentContext
@@ -89,16 +85,7 @@ type HasAggCtx interface {
 	AggCtx() interface{}
 }
 
-func IsSharedDomains(tx kv.Tx) bool {
-	_, ok := tx.(*SharedDomains)
-	return ok
-}
-
 func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
-	if casted, ok := tx.(*SharedDomains); ok {
-		casted.noFlush++
-		return casted
-	}
 
 	var ac *AggregatorV3Context
 	if casted, ok := tx.(HasAggCtx); ok {
@@ -140,19 +127,9 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
 }
 
 func (sd *SharedDomains) AggCtx() interface{} { return sd.aggCtx }
-func (sd *SharedDomains) WithMemBatch() *SharedDomains {
-	sd.RwTx = membatchwithdb.NewMemoryBatch(sd.roTx, sd.aggCtx.a.dirs.Tmp, sd.logger)
-	sd.withMemBatch = true
-	return sd
-}
-func (sd *SharedDomains) WithHashBatch(ctx context.Context) *SharedDomains {
-	sd.RwTx = membatch.NewHashBatch(sd.roTx, ctx.Done(), sd.aggCtx.a.dirs.Tmp, sd.aggCtx.a.logger)
-	sd.withHashBatch = true
-	return sd
-}
 
 // aggregator context should call aggCtx.Unwind before this one.
-func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo uint64) error {
+func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64) error {
 	step := txUnwindTo / sd.aggCtx.a.aggregationStep
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -190,6 +167,8 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, txUnwindTo ui
 	}
 
 	sd.ClearRam(true)
+	sd.SetTxNum(txUnwindTo)
+	sd.SetBlockNum(blockUnwindTo)
 	return sd.Flush(ctx, rwTx)
 }
 
@@ -292,8 +271,6 @@ func (sd *SharedDomains) ClearRam(resetCommitment bool) {
 
 	sd.storage = btree2.NewMap[string, []byte](128)
 	sd.estSize = 0
-	sd.SetTxNum(0)
-	sd.SetBlockNum(0)
 }
 
 func (sd *SharedDomains) put(table kv.Domain, key string, val []byte) {
@@ -738,13 +715,6 @@ func (sd *SharedDomains) Close() {
 		sd.sdCtx.updates.keys = nil
 		sd.sdCtx.updates.tree.Clear(true)
 	}
-
-	if sd.RwTx != nil {
-		if casted, ok := sd.RwTx.(kv.Closer); ok {
-			casted.Close()
-		}
-		sd.RwTx = nil
-	}
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -1178,13 +1148,13 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		if err != nil {
 			return 0, 0, nil, err
 		}
-		v, err := cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
+		state, err = cd.GetAsOf(keyCommitmentState, txn+1, tx) //WHYYY +1 ???
 		if err != nil {
 			return 0, 0, nil, err
 		}
 		if len(state) >= 16 {
-			txNum, blockNum = decodeTxBlockNums(v)
-			return blockNum, txNum, v, err
+			txNum, blockNum = decodeTxBlockNums(state)
+			return blockNum, txNum, state, nil
 		}
 	}
 
@@ -1212,7 +1182,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	}
 
 	txNum, blockNum = decodeTxBlockNums(state)
-	return blockNum, txNum, state, err
+	return blockNum, txNum, state, nil
 }
 
 // SeekCommitment [sinceTx, untilTx] searches for last encoded state from DomainCommitted

@@ -1,6 +1,8 @@
 package span
 
-import "github.com/ledgerwatch/erigon-lib/chain"
+import (
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
+)
 
 const (
 	spanLength    = 6400 // Number of blocks in a span
@@ -24,10 +26,10 @@ func EndBlockNum(spanID uint64) uint64 {
 }
 
 // BlockInLastSprintOfSpan returns true if a block num is within the last sprint of a span and false otherwise.
-func BlockInLastSprintOfSpan(blockNum uint64, config *chain.BorConfig) bool {
+func BlockInLastSprintOfSpan(blockNum uint64, config *borcfg.BorConfig) bool {
 	spanNum := IDAt(blockNum)
 	endBlockNum := EndBlockNum(spanNum)
-	sprintLen := config.CalculateSprint(blockNum)
+	sprintLen := config.CalculateSprintLength(blockNum)
 	startBlockNum := endBlockNum - sprintLen + 1
 	return startBlockNum <= blockNum && blockNum <= endBlockNum
 }

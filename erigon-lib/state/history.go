@@ -1639,7 +1639,6 @@ func (hi *StateAsOfIterDB) advanceSmallVals() error {
 		}
 		hi.nextKey = k
 		hi.nextVal = v[8:]
-		fmt.Printf("txnum %d %x\n", binary.BigEndian.Uint64(v[:8]), k)
 		return nil
 	}
 	hi.nextKey = nil

@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -249,7 +250,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 
 		// Run the unwind
-		if err := e.executionPipeline.RunUnwind(e.db, tx); err != nil {
+		if err := e.executionPipeline.RunUnwind(e.db, wrap.TxContainer{Tx: tx}); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
@@ -367,7 +368,7 @@ TooBigJumpStep:
 	}
 	// Run the forkchoice
 	initialCycle := tooBigJump
-	if _, err := e.executionPipeline.Run(e.db, tx, initialCycle); err != nil {
+	if _, err := e.executionPipeline.Run(e.db, wrap.TxContainer{Tx: tx}, initialCycle); err != nil {
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return

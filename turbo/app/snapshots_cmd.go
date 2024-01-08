@@ -91,6 +91,7 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
+				&SnapshotVersionFlag,
 			}),
 		},
 		{
@@ -194,13 +195,6 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 				&cli.StringFlag{Name: "key", Required: true},
 				&cli.StringFlag{Name: "domain", Required: true},
-			}),
-		},
-		{
-			Name:   "integrity",
-			Action: doIntegrity,
-			Flags: joinFlags([]cli.Flag{
-				&utils.DataDirFlag,
 			}),
 		},
 		{
@@ -624,16 +618,15 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 	version := uint8(cliCtx.Int(SnapshotVersionFlag.Name))
+	if version != 0 {
+		snapcfg.SnapshotVersion(version)
+	}
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, version, db, logger)
-	if err != nil {
-		return err
-	}
-	err = agg.OpenFolder(true)
 	if err != nil {
 		return err
 	}

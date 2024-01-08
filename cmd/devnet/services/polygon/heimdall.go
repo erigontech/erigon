@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
+	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
@@ -68,6 +69,7 @@ type CheckpointConfig struct {
 type Heimdall struct {
 	sync.Mutex
 	chainConfig        *chain.Config
+	borConfig          *borcfg.BorConfig
 	grpcAddr           string
 	validatorSet       *valset.ValidatorSet
 	pendingCheckpoint  *checkpoint.Checkpoint
@@ -97,6 +99,7 @@ func NewHeimdall(
 ) *Heimdall {
 	heimdall := &Heimdall{
 		chainConfig:        chainConfig,
+		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
 		grpcAddr:           grpcAddr,
 		checkpointConfig:   *checkpointConfig,
 		spans:              map[uint64]*span.HeimdallSpan{},
@@ -159,7 +162,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
 	}
 
-	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.chainConfig.Bor.CalculateSprint(nextSpan.StartBlock)) - 1
+	nextSpan.EndBlock = nextSpan.StartBlock + (100 * h.borConfig.CalculateSprintLength(nextSpan.StartBlock)) - 1
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
@@ -183,10 +186,10 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 
 func (h *Heimdall) currentSprintLength() int {
 	if h.currentSpan != nil {
-		return int(h.chainConfig.Bor.CalculateSprint(h.currentSpan.StartBlock))
+		return int(h.borConfig.CalculateSprintLength(h.currentSpan.StartBlock))
 	}
 
-	return int(h.chainConfig.Bor.CalculateSprint(256))
+	return int(h.borConfig.CalculateSprintLength(256))
 }
 
 func (h *Heimdall) getSpanOverrideHeight() uint64 {
