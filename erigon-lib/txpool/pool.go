@@ -301,6 +301,33 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 	return res, nil
 }
 
+func (p *TxPool) Start(ctx context.Context, db kv.RwDB) error {
+	if p.started.Load() {
+		return nil
+	}
+
+	return db.View(ctx, func(tx kv.Tx) error {
+		coreDb, _ := p.coreDBWithCache()
+		coreTx, err := coreDb.BeginRo(ctx)
+
+		if err != nil {
+			return err
+		}
+
+		defer coreTx.Rollback()
+
+		if err := p.fromDB(ctx, tx, coreTx); err != nil {
+			return fmt.Errorf("loading pool from DB: %w", err)
+		}
+
+		if p.started.CompareAndSwap(false, true) {
+			p.logger.Info("[txpool] Started")
+		}
+
+		return nil
+	})
+}
+
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
 
 	defer newBlockTimer.ObserveDuration(time.Now())
@@ -1677,26 +1704,7 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	logEvery := time.NewTicker(p.cfg.LogEvery)
 	defer logEvery.Stop()
 
-	err := db.View(ctx, func(tx kv.Tx) error {
-		coreDb, _ := p.coreDBWithCache()
-		coreTx, err := coreDb.BeginRo(ctx)
-
-		if err != nil {
-			return err
-		}
-
-		defer coreTx.Rollback()
-
-		if err := p.fromDB(ctx, tx, coreTx); err != nil {
-			return fmt.Errorf("loading pool from DB: %w", err)
-		}
-
-		if p.started.CompareAndSwap(false, true) {
-			p.logger.Info("[txpool] Started")
-		}
-
-		return nil
-	})
+	err := p.Start(ctx, db)
 
 	if err != nil {
 		p.logger.Error("[txpool] Failed to start", "err", err)
