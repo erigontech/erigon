@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
@@ -70,7 +71,7 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, nil, mockSentry.Sync, initialCycle, log.New(), mockSentry.BlockReader, nil, false); err != nil {
+	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, wrap.TxContainer{}, mockSentry.Sync, initialCycle, log.New(), mockSentry.BlockReader, nil, false); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -38,6 +38,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -965,10 +967,11 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 		defer tx.Rollback()
 	}
+	txc := wrap.TxContainer{Tx: tx}
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
-		err := stagedsync.UnwindExecutionStage(u, s, tx, ctx, cfg, true, logger)
+		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, true, logger)
 		if err != nil {
 			return err
 		}
@@ -987,7 +990,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, true /* initialCycle */, logger)
 	if err != nil {
 		return err
 	}
