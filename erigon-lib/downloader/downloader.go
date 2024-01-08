@@ -489,11 +489,12 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
+	defer func(tt time.Time) { fmt.Printf("downloader.go:498: %s, %s\n", time.Since(tt), t.Name()) }(time.Now())
+
 	for i := 0; i < t.NumPieces(); i++ {
 		t.Piece(i).VerifyData()
 
 		completePieces.Add(1)
-
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
