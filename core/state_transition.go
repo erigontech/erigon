@@ -157,14 +157,9 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 
 	gas := msg.GasPrice()
 
-	// check if we have an effective gas price percentage in the message and apply it
-	ep := msg.EffectiveGasPricePercentage()
-	if ep > zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED {
-		val := gas.Clone()
-		epi := new(uint256.Int).SetUint64(uint64(ep))
-		epi = epi.Add(epi, u256.Num1)
-		val = val.Mul(val, epi)
-		gas = gas.Div(val, zktypes.EFFECTIVE_GAS_PRICE_MAX_VAL)
+	if evm.ChainRules().IsMordor {
+		ep := msg.EffectiveGasPricePercentage()
+		gas = CalculateEffectiveGas(gas, ep)
 	}
 
 	return &StateTransition{
@@ -183,6 +178,16 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 
 		isBor: isBor,
 	}
+}
+
+func CalculateEffectiveGas(gas *uint256.Int, ep uint8) *uint256.Int {
+	val := gas.Clone()
+	epi := new(uint256.Int).SetUint64(uint64(ep))
+	epi = epi.Add(epi, u256.Num1)
+	val = val.Mul(val, epi)
+	gas = gas.Div(val, zktypes.EFFECTIVE_GAS_PRICE_MAX_VAL)
+
+	return gas
 }
 
 // ApplyMessage computes the new state by applying the given message
