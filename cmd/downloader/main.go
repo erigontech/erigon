@@ -209,7 +209,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
+	if forceVerify || len(forceVerifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
 		if err = d.VerifyData(ctx, forceVerifyFiles); err != nil {
 			return err
 		}
