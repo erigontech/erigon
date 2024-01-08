@@ -524,6 +524,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteListOfFiles []string) 
 	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
+			fmt.Printf("before filter: %s\n", t.Name())
 			if len(whiteListOfFiles) > 0 && !slices.Contains(whiteListOfFiles, t.Name()) {
 				continue
 			}
