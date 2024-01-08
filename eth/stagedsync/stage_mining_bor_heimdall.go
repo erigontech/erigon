@@ -57,11 +57,6 @@ func MiningBorHeimdallForward(
 		return err
 	}
 
-	chainReader := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
-	if err = checkBorHeaderExtraDataIfRequired(chainReader, header, cfg.borConfig); err != nil {
-		return err
-	}
-
 	lastStateSyncEventID, records, fetchTime, err := fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		ctx,
 		header,

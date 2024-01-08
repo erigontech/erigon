@@ -1,10 +1,12 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -24,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -515,6 +518,50 @@ func initValidatorSets(
 	}
 
 	return snap, nil
+}
+
+func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
+	blockNum := header.Number.Uint64()
+	sprintLength := cfg.CalculateSprintLength(blockNum)
+	if (blockNum+1)%sprintLength != 0 {
+		// not last block of a sprint in a span, so no check needed (we only check last block of a sprint)
+		return nil
+	}
+
+	return checkBorHeaderExtraData(chr, header, cfg)
+}
+
+func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
+	spanID := span.IDAt(header.Number.Uint64() + 1)
+	spanBytes := chr.BorSpan(spanID)
+	var sp span.HeimdallSpan
+	if err := json.Unmarshal(spanBytes, &sp); err != nil {
+		return err
+	}
+
+	producerSet := make([]*valset.Validator, len(sp.SelectedProducers))
+	for i := range sp.SelectedProducers {
+		producerSet[i] = &sp.SelectedProducers[i]
+	}
+
+	sort.Sort(valset.ValidatorsByAddress(producerSet))
+
+	headerVals, err := valset.ParseValidators(bor.GetValidatorBytes(header, cfg))
+	if err != nil {
+		return err
+	}
+
+	if len(producerSet) != len(headerVals) {
+		return ErrHeaderValidatorsLengthMismatch
+	}
+
+	for i, val := range producerSet {
+		if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
+			return ErrHeaderValidatorsBytesMismatch
+		}
+	}
+
+	return nil
 }
 
 func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv.RwTx, cfg BorHeimdallCfg) (err error) {

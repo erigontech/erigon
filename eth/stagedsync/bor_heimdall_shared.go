@@ -1,14 +1,12 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,12 +14,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
 	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -316,56 +310,4 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	}
 
 	return lastStateSyncEventID, len(eventRecords), time.Since(fetchStart), nil
-}
-
-func checkBorHeaderExtraDataIfRequired(
-	chainHeaderReader consensus.ChainHeaderReader,
-	header *types.Header,
-	cfg *borcfg.BorConfig,
-) error {
-	blockNum := header.Number.Uint64()
-	sprintLength := cfg.CalculateSprintLength(blockNum)
-	if (blockNum+1)%sprintLength != 0 {
-		// not last block of a sprint in a span, so no check needed (we only check last block of a sprint)
-		return nil
-	}
-
-	return checkBorHeaderExtraData(chainHeaderReader, header, cfg)
-}
-
-func checkBorHeaderExtraData(
-	chainHeaderReader consensus.ChainHeaderReader,
-	header *types.Header,
-	cfg *borcfg.BorConfig,
-) error {
-	spanID := span.IDAt(header.Number.Uint64() + 1)
-	spanBytes := chainHeaderReader.BorSpan(spanID)
-	var sp span.HeimdallSpan
-	if err := json.Unmarshal(spanBytes, &sp); err != nil {
-		return err
-	}
-
-	producerSet := make([]*valset.Validator, len(sp.SelectedProducers))
-	for i := range sp.SelectedProducers {
-		producerSet[i] = &sp.SelectedProducers[i]
-	}
-
-	sort.Sort(valset.ValidatorsByAddress(producerSet))
-
-	headerVals, err := valset.ParseValidators(bor.GetValidatorBytes(header, cfg))
-	if err != nil {
-		return err
-	}
-
-	if len(producerSet) != len(headerVals) {
-		return ErrHeaderValidatorsLengthMismatch
-	}
-
-	for i, val := range producerSet {
-		if !bytes.Equal(val.HeaderBytes(), headerVals[i].HeaderBytes()) {
-			return ErrHeaderValidatorsBytesMismatch
-		}
-	}
-
-	return nil
 }
