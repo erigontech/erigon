@@ -537,7 +537,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	g, ctx := errgroup.WithContext(ctx)
 	// torrent lib internally limiting amount of hashers per file
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
-	g.SetLimit(runtime.GOMAXPROCS(-1) * 16)
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
 	for _, t := range toVerify {
 		t := t
