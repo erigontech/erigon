@@ -488,10 +488,6 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	return rates, averageRate
 }
 
-func VerifyFile2(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
-	return verifyTorrent(t.Info(), root)
-}
-
 func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
 	select {
 	case <-ctx.Done():
@@ -500,7 +496,6 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 	}
 
 	g := &errgroup.Group{}
-	fmt.Printf(":NumPieces %d\n", t.NumPieces())
 	for i := 0; i < t.NumPieces(); i++ {
 		i := i
 		g.Go(func() error {
@@ -516,19 +511,10 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 			return nil
 		})
 	}
-	g.Go(func() error {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-t.Complete.On():
-			return nil
-		}
-	})
-
 	return g.Wait()
 }
 
-func (d *Downloader) VerifyData(ctx context.Context, whiteList []string) error {
+func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFast bool) error {
 	total := 0
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
@@ -585,8 +571,9 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string) error {
 		t := t
 		fmt.Printf("[dbg] verify: %s\n", t.Name())
 		g.Go(func() error {
-			//return VerifyFile2(ctx, t, d.SnapDir(), completedPieces)
-
+			if failFast {
+				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
+			}
 			return VerifyFile(ctx, t, completedPieces)
 		})
 	}

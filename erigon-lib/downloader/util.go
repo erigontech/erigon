@@ -393,7 +393,7 @@ func IsLocal(path string) bool {
 	return isLocal(path)
 }
 
-func verifyTorrent(info *metainfo.Info, root string) error {
+func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
 	span := new(mmap_span.MMapSpan)
 	for _, file := range info.UpvertedFiles() {
 		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
