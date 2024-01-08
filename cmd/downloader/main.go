@@ -276,23 +276,6 @@ var manifestCmd = &cobra.Command{
 	},
 }
 
-var torrentVerify = &cobra.Command{
-	Use:     "torrent_verify",
-	Example: "go run ./cmd/downloader torrent_verify <path_to_torrent_file>",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return fmt.Errorf("please pass .torrent file path by first argument")
-		}
-		fPath := args[0]
-		mi, err := metainfo.LoadFromFile(fPath)
-		if err != nil {
-			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
-		}
-
-		fmt.Printf("%s\n", mi.HashInfoBytes())
-		return nil
-	},
-}
 var torrentCat = &cobra.Command{
 	Use:     "torrent_cat",
 	Example: "go run ./cmd/downloader torrent_cat <path_to_torrent_file>",
