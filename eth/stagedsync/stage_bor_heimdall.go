@@ -286,6 +286,7 @@ func BorHeimdallForward(
 				return fmt.Errorf("header not found: %d", blockNum)
 			}
 
+<<<<<<< Updated upstream
 			// Whitelist service is called to check if the bor chain is
 			// on the cannonical chain according to milestones
 			if service != nil {
@@ -296,6 +297,33 @@ func BorHeimdallForward(
 					dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
 					s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
 					return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
+=======
+		// Whitelist whitelistService is called to check if the bor chain is
+		// on the cannonical chain according to milestones
+		if whitelistService != nil && !whitelistService.IsValidChain(blockNum, []*types.Header{header}) {
+			logger.Debug("["+s.LogPrefix()+"] Verification failed for header", "height", blockNum, "hash", header.Hash())
+			cfg.penalize(ctx, []headerdownload.PenaltyItem{{
+				Penalty: headerdownload.BadBlockPenalty,
+				PeerID:  cfg.hd.SourcePeerId(header.Hash()),
+			}})
+			dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
+			s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
+			return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
+		}
+
+		if blockNum > cfg.blockReader.BorSnapshots().SegmentsMin() {
+			// SegmentsMin is only set if running as an uploader process (check SnapshotsCfg.snapshotUploader and
+			// UploadLocationFlag) when we remove snapshots based on FrozenBlockLimit and number of uploaded snapshots
+			// avoid calling this if block for blockNums < SegmentsMin to avoid reinsertion of snapshots
+			snap := loadSnapshot(blockNum, header.Hash(), cfg.borConfig, recents, signatures, cfg.snapDb, logger)
+
+			if snap == nil {
+				snap, err = initValidatorSets(ctx, tx, cfg.blockReader, cfg.borConfig,
+					cfg.heimdallClient, chain, blockNum, recents, signatures, cfg.snapDb, logger, s.LogPrefix())
+
+				if err != nil {
+					return fmt.Errorf("can't initialise validator sets: %w", err)
+>>>>>>> Stashed changes
 				}
 			}
 
