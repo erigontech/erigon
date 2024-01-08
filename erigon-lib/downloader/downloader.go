@@ -642,6 +642,8 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink: skip already have", "name", name)
 		return nil
 	}
+	d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink", "name", name)
+
 	d.wg.Add(1)
 	go func(t *torrent.Torrent) {
 		defer d.wg.Done()
