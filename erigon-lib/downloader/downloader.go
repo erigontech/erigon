@@ -524,9 +524,15 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteListOfFiles []string) 
 	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
+			name := t.Name()
 			fmt.Printf("before filter: %s\n", t.Name())
-			if len(whiteListOfFiles) > 0 && !slices.Contains(whiteListOfFiles, t.Name()) {
-				continue
+			slices.ContainsFunc(whiteListOfFiles, func(s string) bool { return strings.HasSuffix(s, name) })
+			if len(whiteListOfFiles) > 0 {
+				partialMatch := slices.ContainsFunc(whiteListOfFiles, func(s string) bool { return strings.HasSuffix(s, name) || strings.HasPrefix(s, name) })
+				exactMatch := slices.Contains(whiteListOfFiles, t.Name())
+				if !(partialMatch || exactMatch) {
+					continue
+				}
 			}
 			toVerify = append(toVerify, t)
 			total += t.NumPieces()
