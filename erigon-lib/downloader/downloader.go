@@ -518,11 +518,9 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	total := 0
 	_torrents := d.torrentClient.Torrents()
 	torrents := make([]*torrent.Torrent, 0, len(_torrents))
-	fmt.Printf("[dbg] verify1: %d\n", len(_torrents))
 	for _, t := range _torrents {
 		select {
 		case <-t.GotInfo():
-			fmt.Printf("[dbg] verify: %d\n", len(onlyFiles))
 			if len(onlyFiles) > 0 && !slices.Contains(onlyFiles, t.Name()) {
 				continue
 			}
@@ -561,6 +559,7 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 
 	for _, t := range torrents {
 		t := t
+		fmt.Printf("[dbg] verify: %s\n", t.Name())
 		g.Go(func() error {
 			return VerifyFile(ctx, t, completedPieces)
 		})
