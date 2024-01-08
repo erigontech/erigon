@@ -2075,18 +2075,12 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(v))
 
-	//k, v, err = c.NextNoDup()
-	//if err != nil || k == nil {
-	//	return math.MaxUint64
-	//}
-	//minStep = min(minStep, ^binary.BigEndian.Uint64(v))
-
 	fv, err := c.FirstDup()
 	if err != nil {
 		return math.MaxUint64
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
-	fmt.Printf("found CanPrune from %x %d\n", k, minStep)
+	//fmt.Printf("found CanPrune from %x %d\n", k, minStep)
 
 	return minStep
 }
