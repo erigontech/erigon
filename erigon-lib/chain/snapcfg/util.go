@@ -14,6 +14,11 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+func init() {
+
+	fmt.Printf("alex: %s\n", snapshothashes.Mainnet)
+}
+
 var (
 	Mainnet = fromToml(snapshothashes.Mainnet)
 	// Holesky    = fromToml(snapshothashes.Holesky)
