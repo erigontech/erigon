@@ -71,7 +71,7 @@ func (tf *TorrentFiles) CreateTorrentFromMetaInfo(fPath string, mi *metainfo.Met
 	return tf.createTorrentFromMetaInfo(fPath, mi)
 }
 func (tf *TorrentFiles) createTorrentFromMetaInfo(fPath string, mi *metainfo.MetaInfo) error {
-	file, err := os.Create(fPath)
+	file, err := os.Create(fPath + ".tmp")
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,15 @@ func (tf *TorrentFiles) createTorrentFromMetaInfo(fPath string, mi *metainfo.Met
 	if err := mi.Write(file); err != nil {
 		return err
 	}
-	file.Sync()
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(fPath+".tmp", fPath); err != nil {
+		return err
+	}
 	return nil
 }
 
