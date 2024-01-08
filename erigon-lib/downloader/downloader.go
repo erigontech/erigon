@@ -497,24 +497,19 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 
 	defer func(tt time.Time) { fmt.Printf("downloader.go:498: %s, %s\n", time.Since(tt), t.Name()) }(time.Now())
 
-	g := &errgroup.Group{}
-	g.SetLimit(16)
 	for i := 0; i < t.NumPieces(); i++ {
 		i := i
-		g.Go(func() error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
 
-			t.Piece(i).VerifyData()
+		t.Piece(i).VerifyData()
 
-			completePieces.Add(1)
-			return nil
-		})
+		completePieces.Add(1)
 	}
-	return g.Wait()
+	return nil
 }
 
 func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFast bool) error {
