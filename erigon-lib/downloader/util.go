@@ -425,7 +425,6 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		if !good {
 			return fmt.Errorf("hash mismatch at piece %d", i)
 		}
-		//fmt.Printf("%d: %v: %v\n", i, p.Hash(), good)
 		completePieces.Add(1)
 	}
 	return nil
