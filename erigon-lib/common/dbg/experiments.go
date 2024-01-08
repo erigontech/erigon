@@ -52,6 +52,8 @@ var (
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
+
+	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
