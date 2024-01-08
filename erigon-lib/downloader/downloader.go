@@ -620,11 +620,11 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
-		d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink: skip alreadyHaveThisName", "t.Name", name)
+		d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink: skip alreadyHaveThisName", "name", name)
 		return nil
 	}
 	if d.newDownloadsAreProhibited() {
-		d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink: skip newDownloadsAreProhibited", "t.Name", name)
+		d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink: skip newDownloadsAreProhibited", "name", name)
 		return nil
 	}
 
@@ -639,7 +639,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return err
 	}
 	if !ok {
-		d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink: skip already have", "t.Name", name)
+		d.logger.Log(d.verbosity, "[snapshots] AddMagnetLink: skip already have", "name", name)
 		return nil
 	}
 	d.wg.Add(1)
