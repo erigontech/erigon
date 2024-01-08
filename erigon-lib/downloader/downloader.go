@@ -514,12 +514,12 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 	return g.Wait()
 }
 
-func (d *Downloader) VerifyData(ctx context.Context, whiteListOfFiles []string) error {
+func (d *Downloader) VerifyData(ctx context.Context, whiteList []string) error {
 	total := 0
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
 	d.logger.Info("[snapshots] Verify start")
-	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteListOfFiles", whiteListOfFiles)
+	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
 	for _, t := range allTorrents {
 		select {
@@ -529,10 +529,10 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteListOfFiles []string) 
 		}
 
 		name := t.Name()
-		slices.ContainsFunc(whiteListOfFiles, func(s string) bool { return strings.HasSuffix(s, name) })
-		if len(whiteListOfFiles) > 0 {
-			exactMatch := slices.Contains(whiteListOfFiles, t.Name())
-			partialMatch := slices.ContainsFunc(whiteListOfFiles, func(s string) bool {
+		slices.ContainsFunc(whiteList, func(s string) bool { return strings.HasSuffix(s, name) })
+		if len(whiteList) > 0 {
+			exactMatch := slices.Contains(whiteList, t.Name())
+			partialMatch := slices.ContainsFunc(whiteList, func(s string) bool {
 				return strings.HasSuffix(s, name) || strings.HasPrefix(s, name)
 			})
 			if !(exactMatch || partialMatch) {
