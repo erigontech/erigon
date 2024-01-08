@@ -22,6 +22,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
@@ -217,7 +218,7 @@ func (h *Harness) RunStageForwardWithReturnError(t *testing.T, id stages.SyncSta
 	stageState, err := h.stateSync.StageState(id, nil, h.chainDataDB)
 	require.NoError(t, err)
 
-	return stage.Forward(true, false, stageState, h.stateSync, nil, h.logger)
+	return stage.Forward(true, false, stageState, h.stateSync, wrap.TxContainer{}, h.logger)
 }
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*span.HeimdallSpan, err error) {

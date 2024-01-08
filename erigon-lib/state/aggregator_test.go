@@ -716,7 +716,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	defer ac.Close()
 	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	defer domains.Close()
-	err = domains.Unwind(context.Background(), rwTx, pruneFrom)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
@@ -750,7 +750,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	domains = NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
 	defer domains.Close()
 
-	err = domains.Unwind(context.Background(), rwTx, pruneFrom)
+	err = domains.Unwind(context.Background(), rwTx, 0, pruneFrom)
 	require.NoError(t, err)
 
 	for i = int(pruneFrom); i < len(vals); i++ {
