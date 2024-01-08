@@ -424,7 +424,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	}()
 
 	var readAhead chan uint64
-	if initialCycle {
+	if initialCycle && cfg.silkworm == nil {
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -438,7 +438,7 @@ Loop:
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		if initialCycle {
+		if initialCycle && cfg.silkworm == nil {
 			select {
 			case readAhead <- blockNum:
 			default:
