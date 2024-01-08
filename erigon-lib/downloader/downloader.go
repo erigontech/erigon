@@ -557,6 +557,7 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
 
+	fmt.Printf("[dbg] verify2: %s\n", len(torrents))
 	for _, t := range torrents {
 		t := t
 		fmt.Printf("[dbg] verify: %s\n", t.Name())
