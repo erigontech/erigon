@@ -88,7 +88,7 @@ func TestRegressionWithValidation(store *forkchoice.ForkChoiceStore, block *clty
 		return err
 	}
 	block.Block.Body.Attestations.Range(func(index int, value *solid2.Attestation, length int) bool {
-		store.OnAttestation(value, true)
+		store.OnAttestation(value, true, true)
 		return true
 	})
 	return nil
