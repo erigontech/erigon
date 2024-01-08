@@ -495,6 +495,8 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 	case <-t.GotInfo():
 	}
 
+	defer func(tt time.Time) { fmt.Printf("downloader.go:498: %s, %s\n", time.Since(tt), t.Name()) }(time.Now())
+
 	g := &errgroup.Group{}
 	g.SetLimit(16)
 	for i := 0; i < t.NumPieces(); i++ {
