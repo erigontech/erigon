@@ -61,6 +61,7 @@ var (
 	forceRebuild                   bool
 	verify                         bool
 	verifyFailfast                 bool
+	_verifyFiles                   string
 	verifyFiles                    []string
 	downloaderApiAddr              string
 	natSetting                     string
@@ -97,7 +98,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
-	rootCmd.PersistentFlags().StringArrayVar(&verifyFiles, "verify.files", nil, "Limit list of files to verify")
+	rootCmd.PersistentFlags().StringVar(&_verifyFiles, "verify.files", "", "Limit list of files to verify")
 	rootCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
 
 	withDataDir(createTorrent)
@@ -228,6 +229,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	defer grpcServer.GracefulStop()
 
+	verifyFiles = strings.Split(_verifyFiles, ",")
 	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
 		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
