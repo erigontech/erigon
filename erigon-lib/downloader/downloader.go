@@ -496,6 +496,7 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 	}
 
 	g := &errgroup.Group{}
+	fmt.Printf(":NumPieces %d\n", t.NumPieces())
 	for i := 0; i < t.NumPieces(); i++ {
 		i := i
 		g.Go(func() error {
@@ -506,10 +507,11 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 			}
 
 			t.Piece(i).VerifyData()
+			//<-t.Complete.On()
+
 			completePieces.Add(1)
 			return nil
 		})
-		<-t.Complete.On()
 	}
 	return g.Wait()
 }
