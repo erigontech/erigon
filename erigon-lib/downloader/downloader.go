@@ -492,9 +492,6 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	total := 0
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
-	d.logger.Info("[snapshots] Verify start")
-	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
-
 	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
@@ -515,7 +512,8 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		toVerify = append(toVerify, t)
 		total += t.NumPieces()
 	}
-	fmt.Printf("check2: %d\n", len(toVerify))
+	d.logger.Info("[snapshots] Verify start")
+	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
 	completedPieces := &atomic.Uint64{}
 
