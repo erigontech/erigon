@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime"
 	"sync"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -152,49 +150,42 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return next(k, k, v)
 	}
 
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc91 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
-
-	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	effectiveBalance := etl.NewCollector(kv.ValidatorEffectiveBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer effectiveBalance.Close()
-	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	balances := etl.NewCollector(kv.ValidatorBalance, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer balances.Close()
-	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	randaoMixes := etl.NewCollector(kv.RandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer randaoMixes.Close()
-	intraRandaoMixes := etl.NewCollector(kv.IntraRandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	intraRandaoMixes := etl.NewCollector(kv.IntraRandaoMixes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer intraRandaoMixes.Close()
-	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	proposers := etl.NewCollector(kv.Proposers, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer proposers.Close()
-	slashings := etl.NewCollector(kv.ValidatorSlashings, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	slashings := etl.NewCollector(kv.ValidatorSlashings, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer slashings.Close()
-	blockRoots := etl.NewCollector(kv.BlockRoot, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	blockRoots := etl.NewCollector(kv.BlockRoot, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer blockRoots.Close()
-	stateRoots := etl.NewCollector(kv.StateRoot, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	stateRoots := etl.NewCollector(kv.StateRoot, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer stateRoots.Close()
-	slotData := etl.NewCollector(kv.SlotData, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	slotData := etl.NewCollector(kv.SlotData, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer slotData.Close()
-	epochData := etl.NewCollector(kv.EpochData, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	epochData := etl.NewCollector(kv.EpochData, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer epochData.Close()
-	inactivityScoresC := etl.NewCollector(kv.InactivityScores, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	inactivityScoresC := etl.NewCollector(kv.InactivityScores, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer inactivityScoresC.Close()
-	nextSyncCommittee := etl.NewCollector(kv.NextSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	nextSyncCommittee := etl.NewCollector(kv.NextSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer nextSyncCommittee.Close()
-	currentSyncCommittee := etl.NewCollector(kv.CurrentSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	currentSyncCommittee := etl.NewCollector(kv.CurrentSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer currentSyncCommittee.Close()
-	currentEpochAttestations := etl.NewCollector(kv.CurrentEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	currentEpochAttestations := etl.NewCollector(kv.CurrentEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer currentEpochAttestations.Close()
-	previousEpochAttestations := etl.NewCollector(kv.PreviousEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	previousEpochAttestations := etl.NewCollector(kv.PreviousEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer previousEpochAttestations.Close()
-	eth1DataVotes := etl.NewCollector(kv.Eth1DataVotes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	eth1DataVotes := etl.NewCollector(kv.Eth1DataVotes, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer eth1DataVotes.Close()
-	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer stateEvents.Close()
-	activeValidatorIndicies := etl.NewCollector(kv.ActiveValidatorIndicies, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize/32), s.logger)
+	activeValidatorIndicies := etl.NewCollector(kv.ActiveValidatorIndicies, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer activeValidatorIndicies.Close()
-
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc92 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
 
 	progress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
@@ -206,9 +197,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	} else {
 		progress = 0
 	}
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc93 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
-
 	progress, err = findNearestSlotBackwards(tx, s.cfg, progress) // Maybe the guess was a missed slot.
 	if err != nil {
 		return err
@@ -253,9 +241,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		s.balances32 = s.balances32[:0]
 		s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 	}
-
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc94 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
 
 	logLvl := log.LvlInfo
 	if to-s.currentState.Slot() < 96 {
@@ -371,9 +356,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	})
 	log.Log(logLvl, "Starting state processing", "from", slot, "to", to)
 	// Set up a timer to log progress
-
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc95 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
 	prevSlot := slot
@@ -504,9 +486,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	tx.Rollback()
 
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc96 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
-
 	log.Debug("Finished beacon state iteration", "elapsed", time.Since(start))
 
 	rwTx, err := s.mainDB.BeginRw(ctx)
@@ -591,9 +570,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	s.validatorsTable.SetSlot(s.currentState.Slot())
 
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc97 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
-
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if _, ok := changedValidators[validatorIndex]; !ok {
 			return true
@@ -613,17 +589,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err := rwTx.Commit(); err != nil {
 		return err
 	}
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc98 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
 	endTime := time.Since(start)
 	stateRoot, err := s.currentState.HashSSZ()
 	if err != nil {
 		return err
 	}
 	log.Info("Historical states antiquated", "slot", s.currentState.Slot(), "root", libcommon.Hash(stateRoot), "latency", endTime)
-
-	dbg.ReadMemStats(&m)
-	fmt.Printf("alloc99 %s, sys %s\n", libcommon.ByteCount(m.Alloc), libcommon.ByteCount(m.Sys))
 	return nil
 }
 
@@ -649,9 +620,6 @@ func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompresse
 	if err := compressor.Flush(); err != nil {
 		return err
 	}
-	//if err := compressor.Close(); err != nil {
-	//	return err
-	//}
 	return balancesFile.Sync()
 }
 
