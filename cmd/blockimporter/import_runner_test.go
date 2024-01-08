@@ -86,6 +86,6 @@ func TestImport(t *testing.T) {
 		time.Sleep(time.Second)
 		close(settings.Terminated)
 	}()
-	err := RunImport(&settings, NewFileBasedMockBlockSource())
+	err := RunImport(&settings, NewFileBasedMockBlockSource(), nil)
 	require.Empty(t, err)
 }

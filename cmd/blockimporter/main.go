@@ -13,8 +13,9 @@ import (
 func main() {
 	// Parse commandline arguments
 	var (
-		dbPath = flag.String("db", "./db", "database path")
-		evmUrl = flag.String("evm", "http://127.0.0.1:8545", "EVM canister HTTP endpoint URL")
+		dbPath                  = flag.String("db", "./db", "database path")
+		evmUrl                  = flag.String("evm", "http://127.0.0.1:8545", "EVM canister HTTP endpoint URL")
+		secondaryBlockSourceUrl = flag.String("secondary-blocks-url", "", "URL of the secondary blocks source")
 	)
 	flag.Parse()
 
@@ -36,7 +37,12 @@ func main() {
 	}()
 
 	blockSource := NewHttpBlockSource(*evmUrl)
-	err := RunImport(&settings, &blockSource)
+	var secondaryBlockSource BlockSource
+	if *secondaryBlockSourceUrl != "" {
+		secondarySource := NewHttpBlockSource(*secondaryBlockSourceUrl)
+		secondaryBlockSource = &secondarySource
+	}
+	err := RunImport(&settings, &blockSource, secondaryBlockSource)
 
 	if err != nil {
 		logger.Error(err.Error())

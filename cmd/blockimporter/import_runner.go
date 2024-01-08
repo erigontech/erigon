@@ -16,7 +16,7 @@ type Settings struct {
 	PollInterval  time.Duration
 }
 
-func RunImport(settings *Settings, blockSource BlockSource) error {
+func RunImport(settings *Settings, blockSource BlockSource, secondaryBlocksSource BlockSource) error {
 	db, err := NewDB(settings.DBPath, settings.Logger)
 	if err != nil {
 		return err
@@ -39,7 +39,7 @@ func RunImport(settings *Settings, blockSource BlockSource) error {
 	}
 
 	blockNum := state.BlockNum()
-	blockSource = makeBlockSource(settings, blockSource)
+	blockSource = makeBlockSource(settings, blockSource, secondaryBlocksSource)
 	for {
 		select {
 		case <-settings.Terminated:
@@ -66,7 +66,16 @@ func RunImport(settings *Settings, blockSource BlockSource) error {
 	}
 }
 
-func makeBlockSource(settings *Settings, blockSource BlockSource) BlockSource {
+func makeBlockSource(settings *Settings, blockSource BlockSource, secondaryBlockSource BlockSource) BlockSource {
+	primarySource := makeSingleBlockSource(settings, blockSource)
+	if secondaryBlockSource != nil {
+		return WithSecondaryBlocksSource(primarySource, makeSingleBlockSource(settings, secondaryBlockSource))
+	} else {
+		return primarySource
+	}
+}
+
+func makeSingleBlockSource(settings *Settings, blockSource BlockSource) BlockSource {
 	if settings.RetryCount > 0 {
 		blockSource = WithRetries(blockSource, settings.RetryCount, settings.RetryInterval, settings.Terminated)
 	}

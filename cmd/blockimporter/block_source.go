@@ -341,3 +341,31 @@ func (decorator *retryBlockSourceDecorator) GetChainID() (int64, error) {
 
 	return 0, err
 }
+
+type secondaryBlocksSourceDecorator struct {
+	primarySource         BlockSource
+	secondaryBlocksSource BlockSource
+}
+
+func WithSecondaryBlocksSource(primarySource BlockSource, secondaryBlocksSource BlockSource) BlockSource {
+	return &secondaryBlocksSourceDecorator{
+		primarySource:         primarySource,
+		secondaryBlocksSource: secondaryBlocksSource,
+	}
+}
+
+func (decorator *secondaryBlocksSourceDecorator) PollBlocks(fromBlock uint64) ([]types.Block, error) {
+	if blocks, err := decorator.primarySource.PollBlocks(fromBlock); err == nil {
+		return blocks, err
+	}
+
+	return decorator.secondaryBlocksSource.PollBlocks(fromBlock)
+}
+
+func (decorator *secondaryBlocksSourceDecorator) GetInitialBalances() ([]BalanceEntry, error) {
+	return decorator.primarySource.GetInitialBalances()
+}
+
+func (decorator *secondaryBlocksSourceDecorator) GetChainID() (int64, error) {
+	return decorator.primarySource.GetChainID()
+}
