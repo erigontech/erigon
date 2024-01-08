@@ -303,8 +303,11 @@ var torrentCat = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
 		}
-
-		fmt.Printf("%s\n", mi.HashInfoBytes())
+		bytes, err := toml.Marshal(mi)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", string(bytes))
 		return nil
 	},
 }
