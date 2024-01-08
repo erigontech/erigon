@@ -507,6 +507,11 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 			}
 
 			t.Piece(i).VerifyData()
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-t.Complete.On():
+			}
 
 			completePieces.Add(1)
 			return nil
