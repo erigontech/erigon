@@ -528,9 +528,8 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string) error {
 			return ctx.Err()
 		}
 
-		name := t.Name()
-		slices.ContainsFunc(whiteList, func(s string) bool { return strings.HasSuffix(s, name) })
 		if len(whiteList) > 0 {
+			name := t.Name()
 			exactOrPartialMatch := slices.ContainsFunc(whiteList, func(s string) bool {
 				return name == s || strings.HasSuffix(name, s) || strings.HasPrefix(name, s)
 			})
