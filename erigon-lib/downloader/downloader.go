@@ -504,7 +504,6 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			exactOrPartialMatch := slices.ContainsFunc(whiteList, func(s string) bool {
 				return name == s || strings.HasSuffix(name, s) || strings.HasPrefix(name, s)
 			})
-			fmt.Printf("[dbg] verify: %d\n", len(onlyFiles))
 			if !exactOrPartialMatch {
 				continue
 			}
