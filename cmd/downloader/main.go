@@ -209,6 +209,9 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
+	if err := addPreConfiguredHashes(ctx, d); err != nil {
+		return err
+	}
 	if forceVerify || len(forceVerifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
 		if err = d.VerifyData(ctx, forceVerifyFiles); err != nil {
 			return err
@@ -217,10 +220,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 
 	d.MainLoopInBackground(false)
-
-	if err := addPreConfiguredHashes(ctx, d); err != nil {
-		return err
-	}
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
