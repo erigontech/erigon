@@ -514,17 +514,17 @@ func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.
 	return g.Wait()
 }
 
-func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
+func (d *Downloader) VerifyData(ctx context.Context, whiteListOfFiles []string) error {
 	total := 0
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
 	d.logger.Info("[snapshots] Verify start")
-	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "onlyFiles", onlyFiles)
+	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteListOfFiles", whiteListOfFiles)
 
 	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
-			if len(onlyFiles) > 0 && !slices.Contains(onlyFiles, t.Name()) {
+			if len(whiteListOfFiles) > 0 && !slices.Contains(whiteListOfFiles, t.Name()) {
 				continue
 			}
 			toVerify = append(toVerify, t)
