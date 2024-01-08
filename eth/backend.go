@@ -1085,10 +1085,10 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	}
 
 	streamCtx, streamCancel := context.WithCancel(ctx)
-
 	stream, err := stateDiffClient.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
 
 	if err != nil {
+		streamCancel()
 		return err
 	}
 
