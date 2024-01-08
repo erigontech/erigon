@@ -585,7 +585,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string) error {
 		t := t
 		fmt.Printf("[dbg] verify: %s\n", t.Name())
 		g.Go(func() error {
-			return VerifyFile2(ctx, t, d.SnapDir(), completedPieces)
+			//return VerifyFile2(ctx, t, d.SnapDir(), completedPieces)
 
 			return VerifyFile(ctx, t, completedPieces)
 		})
