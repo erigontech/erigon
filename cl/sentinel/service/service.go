@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+var _ sentinelrpc.SentinelServer = (*SentinelServer)(nil)
 
 type SentinelServer struct {
 	sentinelrpc.UnimplementedSentinelServer
@@ -108,7 +111,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
 
-func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(data *sentinelrpc.SubscriptionData, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -122,6 +125,9 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 		case <-stream.Context().Done():
 			return nil
 		case packet := <-ch:
+			if !s.gossipMatchSubscription(packet, data) {
+				continue
+			}
 			if err := stream.Send(&sentinelrpc.GossipData{
 				Data: packet.data,
 				Name: packet.t,
@@ -133,6 +139,17 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 			}
 		}
 	}
+}
+
+func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelrpc.SubscriptionData) bool {
+	if data.Filter != nil {
+		filter := data.GetFilter()
+		matched, err := path.Match(obj.t, filter)
+		if err != nil || !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
