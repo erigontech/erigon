@@ -9,7 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	borfinality "github.com/ledgerwatch/erigon/consensus/bor/finality"
 	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -151,9 +151,9 @@ func NewLatestStateReader(tx kv.Getter, histV3 bool) state.StateReader {
 	}
 	return state.NewPlainStateReader(tx)
 }
-func NewLatestStateWriter(tx kv.RwTx, blockNum uint64, histV3 bool) state.StateWriter {
+func NewLatestStateWriter(txc wrap.TxContainer, blockNum uint64, histV3 bool) state.StateWriter {
 	if histV3 {
-		domains := tx.(*state2.SharedDomains)
+		domains := txc.Doms
 		minTxNum, err := rawdbv3.TxNums.Min(domains.Tx(), blockNum)
 		if err != nil {
 			panic(err)

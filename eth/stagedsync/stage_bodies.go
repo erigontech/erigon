@@ -102,7 +102,6 @@ func BodiesForward(
 		return err
 	}
 	bodyProgress = s.BlockNumber
-	fmt.Printf("Processing bodies from %d to %d\n", bodyProgress, headerProgress)
 	if bodyProgress >= headerProgress {
 		return nil
 	}
