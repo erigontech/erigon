@@ -439,7 +439,7 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		}
 		good := bytes.Equal(hash.Sum(nil), p.Hash().Bytes())
 		if !good {
-			return fmt.Errorf("hash mismatch at piece %d", i)
+			return fmt.Errorf("hash mismatch at piece %d, file: %s", i, t.Name())
 		}
 		completePieces.Add(1)
 	}
