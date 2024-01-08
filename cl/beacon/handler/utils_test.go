@@ -62,7 +62,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 		reader,
 		syncedData,
 		statesReader,
-		nil)
+		nil,
+		"test-version")
 	handler.init()
 	return
 }
