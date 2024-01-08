@@ -488,54 +488,35 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	return rates, averageRate
 }
 
-func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.GotInfo():
-	}
-
-	g := &errgroup.Group{}
-	for i := 0; i < t.NumPieces(); i++ {
-		i := i
-		g.Go(func() error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			t.Piece(i).VerifyData()
-			completePieces.Add(1)
-			return nil
-		})
-		//<-t.Complete.On()
-	}
-	return g.Wait()
-}
-
-func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
+func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFast bool) error {
 	total := 0
-	_torrents := d.torrentClient.Torrents()
-	torrents := make([]*torrent.Torrent, 0, len(_torrents))
-	for _, t := range torrents {
+	allTorrents := d.torrentClient.Torrents()
+	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
+	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
-			if len(onlyFiles) > 0 && !slices.Contains(onlyFiles, t.Name()) {
-				continue
-			}
-			torrents = append(torrents, t)
-			total += t.NumPieces()
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+
+		if len(whiteList) > 0 {
+			name := t.Name()
+			exactOrPartialMatch := slices.ContainsFunc(whiteList, func(s string) bool {
+				return name == s || strings.HasSuffix(name, s) || strings.HasPrefix(name, s)
+			})
+			if !exactOrPartialMatch {
+				continue
+			}
+		}
+		toVerify = append(toVerify, t)
+		total += t.NumPieces()
 	}
+	d.logger.Info("[snapshots] Verify start")
+	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
 	completedPieces := &atomic.Uint64{}
 
 	{
-		d.logger.Info("[snapshots] Verify start")
-		defer d.logger.Info("[snapshots] Verify done")
 		logEvery := time.NewTicker(20 * time.Second)
 		defer logEvery.Stop()
 		d.wg.Add(1)
@@ -556,11 +537,13 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	// torrent lib internally limiting amount of hashers per file
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-
-	for _, t := range torrents {
+	for _, t := range toVerify {
 		t := t
 		g.Go(func() error {
-			return VerifyFile(ctx, t, completedPieces)
+			if failFast {
+				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
+			}
+			return ScheduleVerifyFile(ctx, t, completedPieces)
 		})
 	}
 
