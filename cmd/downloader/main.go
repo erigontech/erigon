@@ -213,7 +213,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		if err = d.VerifyData(ctx, forceVerifyFiles); err != nil {
 			return err
 		}
-		logger.Info("[snapshots] Verify done")
 		return nil
 	}
 
