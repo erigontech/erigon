@@ -488,7 +488,7 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	return rates, averageRate
 }
 
-func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
+func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -574,7 +574,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			if failFast {
 				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
 			}
-			return VerifyFile(ctx, t, completedPieces)
+			return ScheduleVerifyFile(ctx, t, completedPieces)
 		})
 	}
 
