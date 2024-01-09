@@ -171,9 +171,15 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelySourceFlagIndex)
 	}
-	if matchingTarget && inclusionDelay <= b.BeaconConfig().SlotsPerEpoch {
+
+	if b.Version() < clparams.DenebVersion && matchingTarget && inclusionDelay <= b.BeaconConfig().SlotsPerEpoch {
 		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelyTargetFlagIndex)
 	}
+
+	if b.Version() >= clparams.DenebVersion && matchingTarget {
+		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelyTargetFlagIndex)
+	}
+
 	if matchingHead && inclusionDelay == b.BeaconConfig().MinAttestationInclusionDelay {
 		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelyHeadFlagIndex)
 	}
