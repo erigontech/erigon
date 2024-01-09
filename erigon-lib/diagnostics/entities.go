@@ -29,6 +29,12 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
+type SyncStatistics struct {
+	SyncStages       SyncStages                 `json:"syncStages"`
+	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
+	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
+}
+
 type SnapshotDownloadStatistics struct {
 	Downloaded           uint64                               `json:"downloaded"`
 	Total                uint64                               `json:"total"`
@@ -42,9 +48,7 @@ type SnapshotDownloadStatistics struct {
 	Sys                  uint64                               `json:"sys"`
 	DownloadFinished     bool                                 `json:"downloadFinished"`
 	SegmentsDownloading  map[string]SegmentDownloadStatistics `json:"segmentsDownloading"`
-	SegmentIndexing      SnapshotIndexingStatistics           `json:"segmentsIndexing"`
 	TorrentMetadataReady int32                                `json:"torrentMetadataReady"`
-	LogPrefix            string                               `json:"logPrefix"`
 }
 
 type SegmentDownloadStatistics struct {
@@ -73,6 +77,19 @@ type SnapshotSegmentIndexingFinishedUpdate struct {
 	SegmentName string `json:"segmentName"`
 }
 
+type SyncStagesList struct {
+	Stages []string `json:"stages"`
+}
+
+type CurrentSyncStage struct {
+	Stage uint `json:"stage"`
+}
+
+type SyncStages struct {
+	StagesList   []string `json:"stagesList"`
+	CurrentStage uint     `json:"currentStage"`
+}
+
 func (ti SnapshotDownloadStatistics) Type() Type {
 	return TypeOf(ti)
 }
@@ -86,5 +103,13 @@ func (ti SnapshotIndexingStatistics) Type() Type {
 }
 
 func (ti SnapshotSegmentIndexingFinishedUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti SyncStagesList) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti CurrentSyncStage) Type() Type {
 	return TypeOf(ti)
 }
