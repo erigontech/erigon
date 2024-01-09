@@ -223,25 +223,30 @@ func ExecV3(ctx context.Context,
 			log.Info("[commitment] warmup end", "took", time.Since(tt))
 		}()
 	}
-	warmupHashedFunc := func(plainKeys [][]byte) {
-		if len(plainKeys) < 10_000 {
+	warmupHashedFunc := func(hashedKeys [][]byte) {
+		if len(hashedKeys) < 10_000 {
 			return
 		}
 		go func() {
 			tt := time.Now()
-			log.Info("[commitment] warmup started", "len", len(plainKeys))
+			log.Info("[commitment] warmup hashed started", "len", len(hashedKeys))
 			_ = cfg.db.View(ctx, func(tx kv.Tx) error {
 				ttx := tx.(*temporal.Tx)
-				for _, k := range plainKeys {
-					if len(k) == 20 {
-						_, _ = ttx.DomainGet(kv.AccountsDomain, k, nil)
-					} else {
-						_, _ = ttx.DomainGet(kv.StorageDomain, k, nil)
+				for _, k := range hashedKeys {
+					_, _ = ttx.DomainGet(kv.CommitmentDomain, k, nil)
+					if len(k) == 32 {
+						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:1], nil)
+						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:2], nil)
+						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:3], nil)
+					} else if len(k) == 64 {
+						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
+						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+1], nil)
+						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+2], nil)
 					}
 				}
 				return nil
 			})
-			log.Info("[commitment] warmup end", "took", time.Since(tt))
+			log.Info("[commitment] warmup hashed end", "took", time.Since(tt))
 		}()
 	}
 
