@@ -320,32 +320,32 @@ func ExecV3(ctx context.Context,
 						//}
 						v, _ := ttx.DomainGet(kv.CommitmentDomain, k[:2], nil)
 						if v == nil {
-							fmt.Printf("not found3.2: %x\n", k[:2])
+							//fmt.Printf("not found3.2: %x\n", k[:2])
 							continue
 						}
 						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:3], nil)
 						if v == nil {
-							fmt.Printf("not found3.3: %x\n", k[:3])
+							//fmt.Printf("not found3.3: %x\n", k[:3])
 							continue
 						}
 						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:4], nil)
 						if v == nil {
-							fmt.Printf("not found3.4: %x\n", k[:4])
+							//fmt.Printf("not found3.4: %x\n", k[:4])
 						}
 					} else if len(k) >= 64 {
 						v, _ := ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
 						if v == nil {
-							fmt.Printf("not found4.1: %x\n", k[:32])
+							//fmt.Printf("not found4.1: %x\n", k[:32])
 							continue
 						}
 						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+1], nil)
 						if v == nil {
-							fmt.Printf("not found4.2: %x\n", k[:32+1])
+							//fmt.Printf("not found4.2: %x\n", k[:32+1])
 							continue
 						}
 						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+2], nil)
 						if v == nil {
-							fmt.Printf("not found4.3: %x\n", k[:32+2])
+							//fmt.Printf("not found4.3: %x\n", k[:32+2])
 							continue
 						}
 					}
