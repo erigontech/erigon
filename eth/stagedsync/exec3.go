@@ -225,11 +225,13 @@ func ExecV3(ctx context.Context,
 					if len(k) == 20 {
 						v, _ := ttx.DomainGet(kv.AccountsDomain, k, nil)
 						if v == nil {
+							continue
 							//fmt.Printf("not found1: %x, %d\n", k, len(k))
 						}
 					} else {
 						v, _ := ttx.DomainGet(kv.StorageDomain, k, nil)
 						if v == nil {
+							continue
 							//fmt.Printf("not found2: %x, %d\n", k, len(k))
 						}
 					}
@@ -330,6 +332,7 @@ func ExecV3(ctx context.Context,
 						}
 						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:4], nil)
 						if v == nil {
+							continue
 							//fmt.Printf("not found3.4: %x\n", k[:4])
 						}
 					} else if len(k) >= 64 {
@@ -1012,7 +1015,6 @@ Loop:
 				//	t4 = time.Since(tt)
 				//}
 
-				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
