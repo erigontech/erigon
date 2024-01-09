@@ -79,6 +79,8 @@ type History struct {
 	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
+
+	dontProduceFiles bool //don't produce .v and .ef files. old data will be pruned anyway.
 }
 
 type histCfg struct {
@@ -92,6 +94,8 @@ type histCfg struct {
 
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
+
+	dontProduceFiles bool //don't produce .v and .ef files. old data will be pruned anyway.
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
@@ -103,6 +107,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		integrityCheck:     integrityCheck,
 		historyLargeValues: cfg.historyLargeValues,
 		indexList:          withHashMap,
+		dontProduceFiles:   cfg.dontProduceFiles,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
@@ -569,6 +574,10 @@ func (c HistoryCollation) Close() {
 
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
+	if h.dontProduceFiles {
+		return HistoryCollation{}, nil
+	}
+
 	var historyComp ArchiveWriter
 	var err error
 	closeComp := true
@@ -732,6 +741,10 @@ func (h *History) reCalcRoFiles() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (h *History) buildFiles(ctx context.Context, step uint64, collation HistoryCollation, ps *background.ProgressSet) (HistoryFiles, error) {
+	if h.dontProduceFiles {
+		return HistoryFiles{}, nil
+	}
+
 	historyComp := collation.historyComp
 	if h.noFsync {
 		historyComp.DisableFsync()
@@ -928,6 +941,11 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 }
 
 func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
+	defer h.reCalcRoFiles()
+	if h.dontProduceFiles {
+		return
+	}
+
 	h.InvertedIndex.integrateFiles(InvertedFiles{
 		decomp:       sf.efHistoryDecomp,
 		index:        sf.efHistoryIdx,
@@ -940,8 +958,6 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.files.Set(fi)
-
-	h.reCalcRoFiles()
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
