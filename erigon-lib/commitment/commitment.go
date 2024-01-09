@@ -46,6 +46,8 @@ type Trie interface {
 
 	// Process already gathered updates
 	ProcessUpdates(ctx context.Context, pk [][]byte, updates []Update) (rootHash []byte, err error)
+
+	SetCommitmentHashedWarmupFunc(f func(hashedKeys [][]byte))
 }
 
 type PatriciaContext interface {

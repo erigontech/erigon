@@ -117,6 +117,8 @@ type BinPatriciaHashed struct {
 	accountFn func(plainKey []byte, cell *BinaryCell) error
 	// Function used to fetch account with given plain key
 	storageFn func(plainKey []byte, cell *BinaryCell) error
+
+	warmupHashedFunc func(hashedKeys [][]byte)
 }
 
 func NewBinPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *BinPatriciaHashed {
@@ -1286,6 +1288,10 @@ func (bph *BinPatriciaHashed) RootHash() ([]byte, error) {
 	return hash[1:], nil // first byte is 128+hash_len
 }
 
+func (bph *BinPatriciaHashed) SetCommitmentHashedWarmupFunc(f func(hashedKeys [][]byte)) {
+	bph.warmupHashedFunc = f
+}
+
 func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte, logPrefix string) (rootHash []byte, err error) {
 	pks := make(map[string]int, len(plainKeys))
 	hashedKeys := make([][]byte, len(plainKeys))
@@ -1297,6 +1303,10 @@ func (bph *BinPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	sort.Slice(hashedKeys, func(i, j int) bool {
 		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
 	})
+	if bph.warmupHashedFunc != nil {
+		bph.warmupHashedFunc(hashedKeys)
+	}
+
 	stagedBinaryCell := new(BinaryCell)
 	for i, hashedKey := range hashedKeys {
 		select {

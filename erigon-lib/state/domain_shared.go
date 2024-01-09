@@ -891,7 +891,7 @@ func (sd *SharedDomains) SetCommitmentPlainWarmupFunc(f func(plainKeys [][]byte)
 	sd.sdCtx.warmupPlainFunc = f
 }
 func (sd *SharedDomains) SetCommitmentHashedWarmupFunc(f func(hashedKeys [][]byte)) {
-	sd.sdCtx.warmupHashedFunc = f
+	sd.sdCtx.patriciaTrie.SetCommitmentHashedWarmupFunc(f)
 }
 
 type SharedDomainsCommitmentContext struct {
@@ -902,8 +902,7 @@ type SharedDomainsCommitmentContext struct {
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool
 
-	warmupPlainFunc  func(plainKeys [][]byte)
-	warmupHashedFunc func(hashedKeys [][]byte)
+	warmupPlainFunc func(plainKeys [][]byte)
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode CommitmentMode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {

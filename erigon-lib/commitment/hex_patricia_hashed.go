@@ -1313,6 +1313,10 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 	return rh[1:], nil // first byte is 128+hash_len
 }
 
+func (hph *HexPatriciaHashed) SetCommitmentHashedWarmupFunc(f func(hashedKeys [][]byte)) {
+	hph.warmupHashedFunc = f
+}
+
 // Process keys and updates in a single pass. Branch updates are written to PatriciaContext if no error occurs.
 func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byte, logPrefix string) (rootHash []byte, err error) {
 	pks := make(map[string]int, len(plainKeys))
@@ -1326,7 +1330,9 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
 	})
 
-	hph.warmupHashedFunc(hashedKeys)
+	if hph.warmupHashedFunc != nil {
+		hph.warmupHashedFunc(hashedKeys)
+	}
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
