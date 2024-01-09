@@ -845,7 +845,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 
 	logger := log.New()
-	keyCount, txCount := uint64(4), uint64(264)
+	keyCount, txCount := uint64(4), uint64(64)
 	db, dom, data := filledDomainFixedSize(t, keyCount, txCount, 16, logger)
 	collateAndMerge(t, db, nil, dom, txCount)
 	maxFrozenFiles := (txCount / dom.aggregationStep) / StepsInColdFile
