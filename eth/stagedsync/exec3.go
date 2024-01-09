@@ -855,6 +855,28 @@ Loop:
 					t4 = time.Since(tt)
 				}
 
+				doms.SetCommitmentPlainWarmupFunc(func(plainKeys [][]byte) {
+					if len(plainKeys) < 10_000 {
+						return
+					}
+					go func() {
+						tt := time.Now()
+						log.Info("[commitment] warmup started", "len", len(plainKeys))
+						_ = cfg.db.View(ctx, func(tx kv.Tx) error {
+							ttx := tx.(*temporal.Tx)
+							for _, k := range plainKeys {
+								if len(k) == 20 {
+									_, _ = ttx.DomainGet(kv.AccountsDomain, k, nil)
+								} else {
+									_, _ = ttx.DomainGet(kv.StorageDomain, k, nil)
+								}
+							}
+							return nil
+						})
+						log.Info("[commitment] warmup end", "took", time.Since(tt))
+					}()
+				})
+
 				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
