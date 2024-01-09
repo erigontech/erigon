@@ -8,11 +8,12 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 )
 
 // Heimdall is a wrapper of Heimdall HTTP API

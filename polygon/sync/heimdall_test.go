@@ -11,10 +11,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	heimdallclient "github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
-	heimdallmock "github.com/ledgerwatch/erigon/consensus/bor/heimdall/mock"
+	heimdallclient "github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
+	heimdallmock "github.com/ledgerwatch/erigon/polygon/heimdall/mock"
 )
 
 func makeCheckpoint(start uint64, len uint) *checkpoint.Checkpoint {
