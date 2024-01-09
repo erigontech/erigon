@@ -66,7 +66,7 @@ func (b *BeaconResponse) MarshalJSON() ([]byte, error) {
 		o["version"] = *b.Version
 	}
 	if b.ExecutionOptimistic != nil {
-		o["execution_optimistic"] = *b.Version
+		o["execution_optimistic"] = *b.ExecutionOptimistic
 	}
 	for k, v := range b.Extra {
 		o[k] = v
