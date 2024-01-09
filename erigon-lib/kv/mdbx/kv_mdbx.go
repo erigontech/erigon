@@ -337,7 +337,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 
-		fmt.Printf("[dbg1] %d\n", opts.dirtySpace)
 		if opts.dirtySpace > 0 {
 			if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
 				return nil, err
