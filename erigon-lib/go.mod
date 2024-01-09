@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/erigontech/mdbx-go v0.37.0
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240105033351-972955041fcb
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240109021419-00ccd0cac2e6
 	github.com/ledgerwatch/interfaces v0.0.0-20240105174738-fe57049f198c
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
