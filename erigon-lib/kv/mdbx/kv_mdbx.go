@@ -337,9 +337,26 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 
+		fmt.Printf("[dbg1] %d\n", opts.dirtySpace)
 		if opts.dirtySpace > 0 {
 			if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
 				return nil, err
+			}
+		} else {
+			dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+			if err != nil {
+				return nil, err
+			}
+			if dirtyPagesLimit*opts.pageSize > uint64(2*datasize.GB) {
+				if opts.label == kv.ChainDB {
+					if err = env.SetOption(mdbx.OptTxnDpLimit, uint64(2*datasize.GB)/opts.pageSize); err != nil {
+						return nil, err
+					}
+				} else {
+					if err = env.SetOption(mdbx.OptTxnDpLimit, uint64(256*datasize.MB)/opts.pageSize); err != nil {
+						return nil, err
+					}
+				}
 			}
 		}
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
@@ -348,7 +365,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			return nil, err
 		}
 	}
-
 	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
 	if err != nil {
 		return nil, err
