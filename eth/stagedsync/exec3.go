@@ -305,12 +305,12 @@ func ExecV3(ctx context.Context,
 					}
 					k = hexToCompact(k)
 
-					v, _ := ttx.DomainGet(kv.CommitmentDomain, k, nil)
-					if v == nil {
-						fmt.Printf("not found3: %x, %d\n", k, len(k))
-					}
+					//v, _ := ttx.DomainGet(kv.CommitmentDomain, k, nil)
+					//if v == nil {
+					//fmt.Printf("not found3: %x, %d\n", k, len(k))
+					//}
 					if len(k) == 32 {
-						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:1], nil)
+						v, _ := ttx.DomainGet(kv.CommitmentDomain, k[:1], nil)
 						if v == nil {
 							fmt.Printf("not found3.1: %x\n", k[:1])
 						}
@@ -323,7 +323,7 @@ func ExecV3(ctx context.Context,
 							fmt.Printf("not found3.3: %x\n", k[:3])
 						}
 					} else if len(k) == 64 {
-						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
+						v, _ := ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
 						if v == nil {
 							fmt.Printf("not found4.1: %x\n", k[:32])
 						}
