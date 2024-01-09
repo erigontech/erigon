@@ -223,9 +223,15 @@ func ExecV3(ctx context.Context,
 					default:
 					}
 					if len(k) == 20 {
-						_, _ = ttx.DomainGet(kv.AccountsDomain, k, nil)
+						v, _ := ttx.DomainGet(kv.AccountsDomain, k, nil)
+						if v == nil {
+							fmt.Printf("not found1: %x\n", k)
+						}
 					} else {
-						_, _ = ttx.DomainGet(kv.StorageDomain, k, nil)
+						v, _ := ttx.DomainGet(kv.StorageDomain, k, nil)
+						if v == nil {
+							fmt.Printf("not found2: %x\n", k)
+						}
 					}
 				}
 				return nil
@@ -239,13 +245,57 @@ func ExecV3(ctx context.Context,
 		if len(hashedKeys) < 10_000 {
 			return
 		}
+		hasTerm := func(s []byte) bool {
+			return len(s) > 0 && s[len(s)-1] == 16
+		}
+		makeCompactZeroByte := func(key []byte) (compactZeroByte byte, keyPos, keyLen int) {
+			keyLen = len(key)
+			if hasTerm(key) {
+				keyLen--
+				compactZeroByte = 0x20
+			}
+			var firstNibble byte
+			if len(key) > 0 {
+				firstNibble = key[0]
+			}
+			if keyLen&1 == 1 {
+				compactZeroByte |= 0x10 | firstNibble // Odd: (1<<4) + first nibble
+				keyPos++
+			}
+
+			return
+		}
+
+		decodeKey := func(key, buf []byte) []byte {
+			keyLen := len(key)
+			if hasTerm(key) {
+				keyLen--
+			}
+			for keyIndex, bufIndex := 0, 1; keyIndex < keyLen; keyIndex, bufIndex = keyIndex+2, bufIndex+1 {
+				if keyIndex == keyLen-1 {
+					buf[bufIndex] = buf[bufIndex] & 0x0f
+				} else {
+					buf[bufIndex] = key[keyIndex+1]
+				}
+				buf[bufIndex] |= key[keyIndex] << 4
+			}
+			return buf
+		}
+		hexToCompact := func(key []byte) []byte {
+			zeroByte, keyPos, keyLen := makeCompactZeroByte(key)
+			bufLen := keyLen/2 + 1 // always > 0
+			buf := make([]byte, bufLen)
+			buf[0] = zeroByte
+			return decodeKey(key[keyPos:], buf)
+		}
+
 		warmupwg.Go(func() error {
 			tt := time.Now()
 			log.Info("[commitment] warmup hashed started", "len", len(hashedKeys))
 			_ = cfg.db.View(warmupCtx, func(tx kv.Tx) error {
 				ttx := tx.(*temporal.Tx)
 				for i, k := range hashedKeys {
-					if i%2 == 1 {
+					if i%4 != 0 {
 						continue
 					}
 					select {
@@ -253,16 +303,38 @@ func ExecV3(ctx context.Context,
 						return warmupCtx.Err()
 					default:
 					}
+					k = hexToCompact(k)
 
-					_, _ = ttx.DomainGet(kv.CommitmentDomain, k, nil)
+					v, _ := ttx.DomainGet(kv.CommitmentDomain, k, nil)
+					if v == nil {
+						fmt.Printf("not found3: %x\n", k)
+					}
 					if len(k) == 32 {
-						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:1], nil)
-						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:2], nil)
-						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:3], nil)
+						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:1], nil)
+						if v == nil {
+							fmt.Printf("not found3.1: %x\n", k[:1])
+						}
+						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:2], nil)
+						if v == nil {
+							fmt.Printf("not found3.2: %x\n", k[:2])
+						}
+						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:3], nil)
+						if v == nil {
+							fmt.Printf("not found3.3: %x\n", k[:3])
+						}
 					} else if len(k) == 64 {
-						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
-						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+1], nil)
-						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+2], nil)
+						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
+						if v == nil {
+							fmt.Printf("not found4.1: %x\n", k[:32])
+						}
+						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+1], nil)
+						if v == nil {
+							fmt.Printf("not found4.2: %x\n", k[:32+1])
+						}
+						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+2], nil)
+						if v == nil {
+							fmt.Printf("not found4.3: %x\n", k[:32+2])
+						}
 					}
 				}
 				return nil
