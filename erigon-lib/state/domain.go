@@ -2051,7 +2051,7 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
-	//fmt.Printf("CanPrune %s: %v %v\n", dc.d.filenameBase, dc.hc.ic.CanPruneFrom(tx), dc.maxTxNumInDomainFiles(false))
+	//fmt.Printf("CanPrune %s: idx %v in snaps %v domStep %d in snaps \n", dc.d.filenameBase, dc.hc.ic.CanPruneFrom(tx), dc.maxTxNumInDomainFiles(false), dc.CanPruneFrom(tx), dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
 	inFiles := dc.maxTxNumInDomainFiles(false)
 	return dc.hc.ic.CanPruneFrom(tx) < inFiles || dc.CanPruneFrom(tx) < inFiles/dc.d.aggregationStep
 }
@@ -2079,7 +2079,7 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(v))
 
-	fv, err := c.FirstDup()
+	fv, err := c.LastDup()
 	if err != nil {
 		return math.MaxUint64
 	}
@@ -2386,6 +2386,7 @@ func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	if len(lst) > 0 {
 		from = float64(^binary.BigEndian.Uint64(lst[len(lst)-8:]))
 	}
+	//fmt.Printf("first %x (to %f) - %x (from %f)\n", fst, to, lst, from)
 	if to == 0 {
 		to = from
 	}

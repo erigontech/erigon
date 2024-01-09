@@ -666,9 +666,10 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
 	d.integrateFiles(sf, txFrom, txTo)
 
 	dc := d.MakeContext()
-	_, err = dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+	stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 	dc.Close()
 	require.NoError(t, err)
+	t.Logf("prune stat: %s", stat)
 
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
@@ -919,6 +920,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 
 	db, d := testDbAndDomain(t, logger)
 	ctx := context.Background()
+	d.aggregationStep = 16
 
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
