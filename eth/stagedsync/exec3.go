@@ -893,12 +893,12 @@ Loop:
 					t1, t2, t3, t4 time.Duration
 				)
 
-				if casted, ok := applyTx.(kv.CanWarmupDB); ok {
-					if err := casted.WarmupDB(false); err != nil {
-						return err
-					}
-					t4 = time.Since(tt)
-				}
+				//if casted, ok := applyTx.(kv.CanWarmupDB); ok {
+				//	if err := casted.WarmupDB(false); err != nil {
+				//		return err
+				//	}
+				//	t4 = time.Since(tt)
+				//}
 
 				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
