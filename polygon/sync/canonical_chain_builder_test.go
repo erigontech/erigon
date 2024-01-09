@@ -9,7 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	heimdallspan "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
 	"github.com/ledgerwatch/erigon/core/types"
 )
 

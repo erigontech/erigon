@@ -1,8 +1,8 @@
 package sync
 
 import (
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
 )
 
 func statePointsFromCheckpoints(checkpoints []*checkpoint.Checkpoint) statePoints {

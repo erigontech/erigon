@@ -3,9 +3,10 @@ package sync
 import (
 	"math/big"
 
+	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
+
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 )
 
 func statePointFromCheckpoint(checkpoint *checkpoint.Checkpoint) *statePoint {
