@@ -202,16 +202,23 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	warmupwg, warmupCtx := errgroup.WithContext(ctx)
+	defer warmupwg.Wait()
 	warmupPlainFunc := func(plainKeys [][]byte) {
 		if len(plainKeys) < 10_000 {
 			return
 		}
-		go func() {
+		warmupwg.Go(func() error {
 			tt := time.Now()
 			log.Info("[commitment] warmup started", "len", len(plainKeys))
-			_ = cfg.db.View(ctx, func(tx kv.Tx) error {
+			_ = cfg.db.View(warmupCtx, func(tx kv.Tx) error {
 				ttx := tx.(*temporal.Tx)
 				for _, k := range plainKeys {
+					select {
+					case <-warmupCtx.Done():
+						return warmupCtx.Err()
+					default:
+					}
 					if len(k) == 20 {
 						_, _ = ttx.DomainGet(kv.AccountsDomain, k, nil)
 					} else {
@@ -221,18 +228,26 @@ func ExecV3(ctx context.Context,
 				return nil
 			})
 			log.Info("[commitment] warmup end", "took", time.Since(tt))
-		}()
+			return nil
+		})
+
 	}
 	warmupHashedFunc := func(hashedKeys [][]byte) {
 		if len(hashedKeys) < 10_000 {
 			return
 		}
-		go func() {
+		warmupwg.Go(func() error {
 			tt := time.Now()
 			log.Info("[commitment] warmup hashed started", "len", len(hashedKeys))
-			_ = cfg.db.View(ctx, func(tx kv.Tx) error {
+			_ = cfg.db.View(warmupCtx, func(tx kv.Tx) error {
 				ttx := tx.(*temporal.Tx)
 				for _, k := range hashedKeys {
+					select {
+					case <-warmupCtx.Done():
+						return warmupCtx.Err()
+					default:
+					}
+
 					_, _ = ttx.DomainGet(kv.CommitmentDomain, k, nil)
 					if len(k) == 32 {
 						_, _ = ttx.DomainGet(kv.CommitmentDomain, k[:1], nil)
@@ -247,7 +262,8 @@ func ExecV3(ctx context.Context,
 				return nil
 			})
 			log.Info("[commitment] warmup hashed end", "took", time.Since(tt))
-		}()
+			return nil
+		})
 	}
 
 	inMemExec := txc.Doms != nil
