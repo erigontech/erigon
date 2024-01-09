@@ -213,7 +213,10 @@ func ExecV3(ctx context.Context,
 			log.Info("[commitment] warmup started", "len", len(plainKeys))
 			_ = cfg.db.View(warmupCtx, func(tx kv.Tx) error {
 				ttx := tx.(*temporal.Tx)
-				for _, k := range plainKeys {
+				for i, k := range plainKeys {
+					if i%2 == 1 {
+						continue
+					}
 					select {
 					case <-warmupCtx.Done():
 						return warmupCtx.Err()
@@ -241,7 +244,10 @@ func ExecV3(ctx context.Context,
 			log.Info("[commitment] warmup hashed started", "len", len(hashedKeys))
 			_ = cfg.db.View(warmupCtx, func(tx kv.Tx) error {
 				ttx := tx.(*temporal.Tx)
-				for _, k := range hashedKeys {
+				for i, k := range hashedKeys {
+					if i%2 == 1 {
+						continue
+					}
 					select {
 					case <-warmupCtx.Done():
 						return warmupCtx.Err()
