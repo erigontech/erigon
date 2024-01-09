@@ -12,6 +12,7 @@ import (
 func SequencerZkStages(
 	ctx context.Context,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
+	dataStreamCatchupCfg DataStreamCatchupCfg,
 	exec SequenceBlockCfg,
 	hashState stagedsync.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
@@ -42,6 +43,19 @@ func SequencerZkStages(
 		*/
 		/* TODO: here should be some stage of getting GERs from the L1 and writing to the DB for future batches
 		 */
+		{
+			ID:          sync_stages.DataStream,
+			Description: "Update the data stream with missing details",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnStageDataStreamCatchup(s, ctx, tx, dataStreamCatchupCfg)
+			},
+			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
+				return nil
+			},
+		},
 		{
 			/*
 				TODO:
@@ -205,6 +219,7 @@ func DefaultZkStages(
 	ctx context.Context,
 	l1SyncerCfg L1SyncerCfg,
 	batchesCfg BatchesCfg,
+	dataStreamCatchupCfg DataStreamCatchupCfg,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
 	blockHashCfg stagedsync.BlockHashesCfg,
 	senders stagedsync.SendersCfg,
@@ -293,6 +308,19 @@ func DefaultZkStages(
 			},
 			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
 				return stagedsync.PruneSendersStage(p, tx, senders, ctx)
+			},
+		},
+		{
+			ID:          sync_stages.DataStream,
+			Description: "Update the data stream with missing details",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnStageDataStreamCatchup(s, ctx, tx, dataStreamCatchupCfg)
+			},
+			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
+				return nil
 			},
 		},
 		{

@@ -44,3 +44,13 @@ func DecodeL2Transaction(data []byte) (*L2Transaction, error) {
 		Encoded:                     encoded,
 	}, nil
 }
+
+func EncodeL2Transaction(tx L2Transaction) []byte {
+	bytes := make([]byte, 0)
+	bytes = append(bytes, tx.EffectiveGasPricePercentage)
+	bytes = append(bytes, tx.IsValid)
+	bytes = append(bytes, tx.StateRoot[:]...)
+	bytes = binary.LittleEndian.AppendUint32(bytes, tx.EncodedLength)
+	bytes = append(bytes, tx.Encoded...)
+	return bytes
+}

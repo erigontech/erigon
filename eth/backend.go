@@ -64,6 +64,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/chain"
 
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
+	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	clcore "github.com/ledgerwatch/erigon/cmd/erigon-cl/core"
 	"github.com/ledgerwatch/erigon/cmd/lightclient/lightclient"
@@ -181,6 +183,9 @@ type Ethereum struct {
 	blockSnapshots *snapshotsync.RoSnapshots
 	blockReader    services.FullBlockReader
 	kvRPC          *remotedbserver.KvServer
+
+	// zk
+	dataStream *datastreamer.StreamServer
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -696,6 +701,22 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	}
 
 	if backend.config.Zk != nil {
+		// zkevm: create a data stream server if we have the appropriate config for one.  This will be started on the call to Init
+		// alongside the http server
+		httpCfg := stack.Config().Http
+		if httpCfg.DataStreamPort > 0 && httpCfg.DataStreamHost != "" {
+			file := stack.Config().Dirs.DataDir + "/data-stream"
+			logConfig := &log2.Config{
+				Environment: "production",
+				Level:       "warn",
+				Outputs:     nil,
+			}
+			backend.dataStream, err = datastreamer.NewServer(uint16(httpCfg.DataStreamPort), datastreamer.StreamType(1), file, logConfig)
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		// entering ZK territory!
 		if sequencer.IsSequencer() {
 			// if we are sequencing transactions, we do the sequencing loop...
@@ -711,6 +732,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.agg,
 				backend.forkValidator,
 				backend.engine,
+				backend.dataStream,
 			)
 
 			backend.syncUnwindOrder = zkStages.ZkSequencerUnwindOrder
@@ -751,6 +773,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.engine,
 				zkL1Syncer,
 				datastreamClient,
+				backend.dataStream,
 			)
 
 			backend.syncUnwindOrder = zkStages.ZkUnwindOrder
@@ -866,7 +889,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	}()
 
 	go func() {
-		if err := cli.StartDataStream(httpRpcCfg); err != nil {
+		if err := cli.StartDataStream(backend.dataStream); err != nil {
 			log.Error(err.Error())
 			return
 		}

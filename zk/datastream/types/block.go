@@ -49,6 +49,17 @@ func DecodeStartL2Block(data []byte) (*StartL2Block, error) {
 	}, nil
 }
 
+func EncodeStartL2Block(block *StartL2Block) []byte {
+	bytes := make([]byte, 0)
+	bytes = binary.LittleEndian.AppendUint64(bytes, block.BatchNumber)
+	bytes = binary.LittleEndian.AppendUint64(bytes, block.L2BlockNumber)
+	bytes = binary.LittleEndian.AppendUint64(bytes, uint64(block.Timestamp))
+	bytes = append(bytes, block.GlobalExitRoot.Bytes()...)
+	bytes = append(bytes, block.Coinbase.Bytes()...)
+	bytes = binary.LittleEndian.AppendUint16(bytes, block.ForkId)
+	return bytes
+}
+
 type EndL2Block struct {
 	L2BlockNumber uint64      // 8 bytes
 	L2Blockhash   common.Hash // 32 bytes
@@ -66,6 +77,14 @@ func DecodeEndL2Block(data []byte) (*EndL2Block, error) {
 		L2Blockhash:   common.BytesToHash(data[8:40]),
 		StateRoot:     common.BytesToHash(data[40:72]),
 	}, nil
+}
+
+func EncodeEndL2Block(end *EndL2Block) []byte {
+	bytes := make([]byte, 0)
+	bytes = binary.LittleEndian.AppendUint64(bytes, end.L2BlockNumber)
+	bytes = append(bytes, end.L2Blockhash[:]...)
+	bytes = append(bytes, end.StateRoot[:]...)
+	return bytes
 }
 
 type FullL2Block struct {
