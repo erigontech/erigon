@@ -160,7 +160,7 @@ func (f *ForkChoiceStorageMock) Time() uint64 {
 	return f.TimeVal
 }
 
-func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock bool) error {
+func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error {
 	f.Pool.AttestationsPool.Insert(attestation.Signature(), attestation)
 	return nil
 }

@@ -405,7 +405,7 @@ func ConsensusClStages(ctx context.Context,
 									continue MainLoop
 								}
 								block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-									if err = cfg.forkChoice.OnAttestation(a, true); err != nil {
+									if err = cfg.forkChoice.OnAttestation(a, true, false); err != nil {
 										log.Debug("bad attestation received", "err", err)
 									}
 									return true
