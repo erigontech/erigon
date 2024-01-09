@@ -298,6 +298,9 @@ func ExecV3(ctx context.Context,
 					if i%4 != 0 {
 						continue
 					}
+					if len(k) >= 64 { //todo: can't find this keys
+						continue
+					}
 					select {
 					case <-warmupCtx.Done():
 						return warmupCtx.Err()
