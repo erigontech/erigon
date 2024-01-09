@@ -1271,37 +1271,23 @@ func (c *Bor) checkAndCommitSpan(
 ) error {
 	headerNumber := header.Number.Uint64()
 
-	span, err := c.spanner.GetCurrentSpan(syscall)
+	currentSpan, err := c.spanner.GetCurrentSpan(syscall)
 	if err != nil {
 		return err
 	}
 
-	if c.needToCommitSpan(span, headerNumber) {
-		err := c.fetchAndCommitSpan(span.ID+1, state, header, chain, syscall)
-		return err
+	// check span is not set initially
+	if currentSpan.EndBlock == 0 {
+		return c.fetchAndCommitSpan(currentSpan.ID, state, header, chain, syscall)
+	}
+
+	// if current block is first block of last sprint in current span
+	sprintLength := c.config.CalculateSprintLength(headerNumber)
+	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
+		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)
 	}
 
 	return nil
-}
-
-func (c *Bor) needToCommitSpan(currentSpan *span.Span, headerNumber uint64) bool {
-	// if span is nil
-	if currentSpan == nil {
-		return false
-	}
-
-	// check span is not set initially
-	if currentSpan.EndBlock == 0 {
-		return true
-	}
-	sprintLength := c.config.CalculateSprintLength(headerNumber)
-
-	// if current block is first block of last sprint in current span
-	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
-		return true
-	}
-
-	return false
 }
 
 func (c *Bor) fetchAndCommitSpan(

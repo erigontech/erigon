@@ -3,12 +3,13 @@ package stagedsync
 import (
 	"context"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type ChainEventNotifier interface {
@@ -40,13 +41,13 @@ func MiningStages(
 			Prune: func(firstCycle bool, u *PruneState, tx kv.RwTx, logger log.Logger) error { return nil },
 		},
 		{
-			ID:          stages.BorHeimdall,
+			ID:          stages.MiningBorHeimdall,
 			Description: "Download Bor-specific data from Heimdall",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				if badBlockUnwind {
 					return nil
 				}
-				return BorHeimdallForward(s, u, ctx, txc.Tx, borHeimdallCfg, true, logger)
+				return MiningBorHeimdallForward(ctx, borHeimdallCfg, s, u, txc.Tx, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)
@@ -59,8 +60,6 @@ func MiningStages(
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from tx pool",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				//fmt.Println("SpawnMiningExecStage")
-				//defer fmt.Println("SpawnMiningExecStage", "DONE")
 				return SpawnMiningExecStage(s, txc.Tx, execCfg, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
