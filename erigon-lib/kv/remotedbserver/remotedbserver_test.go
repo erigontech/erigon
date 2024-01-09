@@ -21,14 +21,16 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 )
 
 func TestKvServer_renew(t *testing.T) {
+	//goland:noinspection GoBoolExpressions
 	if runtime.GOOS == "windows" {
 		t.Skip("fix me on win please")
 	}
@@ -44,7 +46,7 @@ func TestKvServer_renew(t *testing.T) {
 		return nil
 	}))
 
-	s := NewKvServer(ctx, db, nil, nil, log.New())
+	s := NewKvServer(ctx, db, nil, nil, nil, log.New())
 	g, ctx := errgroup.WithContext(ctx)
 	testCase := func() error {
 		id, err := s.begin(ctx)
@@ -94,4 +96,12 @@ func TestKvServer_renew(t *testing.T) {
 		g.Go(testCase)
 	}
 	require.NoError(g.Wait())
+}
+
+func TestKVServerSnapshotsReturnsBorSnapshots(t *testing.T) {
+	//
+	// TODO
+	//
+	//ctx := context.Background()
+	//s := NewKvServer(ctx, nil, nil, nil, nil, log.New())
 }
