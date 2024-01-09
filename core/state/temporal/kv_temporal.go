@@ -236,15 +236,15 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return it, nil
 }
 
-func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err error) {
-	v, ok, err := tx.aggCtx.GetLatest(name, k, k2, tx.MdbxTx)
+func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	v, step, ok, err := tx.aggCtx.GetLatest(name, k, k2, tx.MdbxTx)
 	if err != nil {
-		return nil, err
+		return nil, step, err
 	}
 	if !ok {
-		return nil, nil
+		return nil, step, nil
 	}
-	return v, nil
+	return v, step, nil
 }
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	if key2 != nil {

@@ -1525,7 +1525,7 @@ func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byt
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
 }
-func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, ok bool, err error) {
+func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
 	switch domain {
 	case kv.AccountsDomain:
 		return ac.account.GetLatest(k, k2, tx)
