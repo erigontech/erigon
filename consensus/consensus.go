@@ -85,6 +85,12 @@ type Call func(contract libcommon.Address, data []byte) ([]byte, error)
 // different semantics which could lead e.g. to different reward values.
 type RewardKind uint16
 
+// EngineLogger interface for logging blockchain events
+type EngineLogger interface {
+	OnBeaconBlockRootStart(root libcommon.Hash)
+	OnBeaconBlockRootEnd()
+}
+
 const (
 	// RewardAuthor - attributed to the block author.
 	RewardAuthor RewardKind = 0
@@ -145,7 +151,7 @@ type EngineWriter interface {
 
 	// Initialize runs any pre-transaction state modifications (e.g. epoch start)
 	Initialize(config *chain.Config, chain ChainHeaderReader, header *types.Header,
-		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger)
+		state *state.IntraBlockState, syscall SysCallCustom, logger log.Logger, eLogger EngineLogger)
 
 	// Finalize runs any post-transaction state modifications (e.g. block rewards)
 	// but does not assemble the block.

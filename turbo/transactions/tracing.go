@@ -82,7 +82,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
 
 	logger := log.New("tracing")
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger)
+	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger, nil)
 
 	for idx, txn := range block.Transactions() {
 		select {

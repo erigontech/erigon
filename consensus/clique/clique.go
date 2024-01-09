@@ -22,13 +22,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"io"
 	"math/big"
 	"math/rand"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/goccy/go-json"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -366,7 +367,7 @@ func (c *Clique) Prepare(chain consensus.ChainHeaderReader, header *types.Header
 }
 
 func (c *Clique) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+	state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger, eLogger consensus.EngineLogger) {
 }
 
 func (c *Clique) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall,

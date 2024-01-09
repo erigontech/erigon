@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
@@ -904,7 +905,7 @@ func (api *TraceAPIImpl) callManyTransactions(
 	engine := api.engine()
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
 	logger := log.New("trace_filtering")
-	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, block.HeaderNoCopy(), cfg, initialState, logger, nil)
 	if err != nil {
 		return nil, nil, err
 	}

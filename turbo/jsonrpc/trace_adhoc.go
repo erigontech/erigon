@@ -641,6 +641,10 @@ func (ot *OeTracer) OnBlockEnd(err error) {
 func (ot *OeTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
 
+func (ot *OeTracer) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (ot *OeTracer) OnBeaconBlockRootEnd() {}
+
 func (ot *OeTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
 
 func (ot *OeTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}

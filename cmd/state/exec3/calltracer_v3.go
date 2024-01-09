@@ -61,6 +61,10 @@ func (ct *CallTracer) OnBlockEnd(err error) {
 func (ct *CallTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
 
+func (ct *CallTracer) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (ct *CallTracer) OnBeaconBlockRootEnd() {}
+
 func (ct *CallTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
 
 func (ct *CallTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}

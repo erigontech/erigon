@@ -97,6 +97,14 @@ func (p *Printer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 	fmt.Printf("OnGenesisBlock: b=%v, allocLength=%d\n", b.NumberU64(), len(alloc))
 }
 
+func (p *Printer) OnBeaconBlockRootStart(root libcommon.Hash) {
+	fmt.Printf("OnBeaconBlockRootStart: b=%v", root)
+}
+
+func (p *Printer) OnBeaconBlockRootEnd() {
+	fmt.Printf("OnBeaconBlockRootEnd:")
+}
+
 func (p *Printer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
 	fmt.Printf("OnBalanceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }

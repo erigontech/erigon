@@ -85,6 +85,10 @@ func (*NoopTracer) OnBlockEnd(err error) {
 func (*NoopTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
 
+func (*NoopTracer) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (*NoopTracer) OnBeaconBlockRootEnd() {}
+
 func (*NoopTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
 }
 

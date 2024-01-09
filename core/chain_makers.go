@@ -368,7 +368,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 			}
 		}
 		if b.engine != nil {
-			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger)
+			InitializeBlockExecution(b.engine, nil, b.header, config, ibs, logger, nil)
 		}
 		// Execute any user modifications to the block
 		if gen != nil {

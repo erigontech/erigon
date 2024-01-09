@@ -234,6 +234,10 @@ func (l *StructLogger) OnBlockEnd(err error) {
 func (l *StructLogger) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
 
+func (l *StructLogger) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (l *StructLogger) OnBeaconBlockRootEnd() {}
+
 func (l *StructLogger) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
 
 func (l *StructLogger) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
@@ -463,6 +467,10 @@ func (t *mdLogger) OnBlockEnd(err error) {
 
 func (t *mdLogger) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
+
+func (t *mdLogger) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (t *mdLogger) OnBeaconBlockRootEnd() {}
 
 func (t *mdLogger) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
 

@@ -236,6 +236,10 @@ func (a *AccessListTracer) OnBlockEnd(err error) {
 func (a *AccessListTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
 
+func (a *AccessListTracer) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (a *AccessListTracer) OnBeaconBlockRootEnd() {}
+
 func (a *AccessListTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
 
 func (a *AccessListTracer) OnBalanceChange(addr libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {

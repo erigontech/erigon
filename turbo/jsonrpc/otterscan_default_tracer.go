@@ -47,6 +47,10 @@ func (t *DefaultTracer) OnBlockEnd(err error) {
 func (t *DefaultTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
 
+func (t *DefaultTracer) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (t *DefaultTracer) OnBeaconBlockRootEnd() {}
+
 func (t *DefaultTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
 
 func (t *DefaultTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}

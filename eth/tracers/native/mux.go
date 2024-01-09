@@ -149,6 +149,18 @@ func (t *muxTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 	}
 }
 
+func (t *muxTracer) OnBeaconBlockRootStart(root libcommon.Hash) {
+	for _, t := range t.tracers {
+		t.OnBeaconBlockRootStart(root)
+	}
+}
+
+func (t *muxTracer) OnBeaconBlockRootEnd() {
+	for _, t := range t.tracers {
+		t.OnBeaconBlockRootEnd()
+	}
+}
+
 func (t *muxTracer) OnBalanceChange(addr libcommon.Address, prev *uint256.Int, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
 	for _, t := range t.tracers {
 		t.OnBalanceChange(addr, prev, new, reason)

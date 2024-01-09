@@ -207,6 +207,10 @@ func (l *JsonStreamLogger) OnBlockEnd(err error) {
 func (l *JsonStreamLogger) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 }
 
+func (l *JsonStreamLogger) OnBeaconBlockRootStart(root libcommon.Hash) {}
+
+func (l *JsonStreamLogger) OnBeaconBlockRootEnd() {}
+
 func (l *JsonStreamLogger) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
 
 func (l *JsonStreamLogger) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
