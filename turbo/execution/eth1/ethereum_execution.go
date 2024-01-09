@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -235,7 +236,7 @@ func (e *EthereumExecutionModule) Start(ctx context.Context) {
 	for more {
 		var err error
 
-		if more, err = e.executionPipeline.Run(e.db, nil, true); err != nil {
+		if more, err = e.executionPipeline.Run(e.db, wrap.TxContainer{}, true); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				e.logger.Error("Could not start execution service", "err", err)
 			}

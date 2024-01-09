@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
@@ -236,7 +238,7 @@ func (s *Sync) StageState(stage stages.SyncStage, tx kv.Tx, db kv.RoDB) (*StageS
 	return &StageState{s, stage, blockNum}, nil
 }
 
-func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
+func (s *Sync) RunUnwind(db kv.RwDB, txc wrap.TxContainer) error {
 	if s.unwindPoint == nil {
 		return nil
 	}
@@ -244,7 +246,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 		if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 			continue
 		}
-		if err := s.unwindStage(false, s.unwindOrder[j], db, tx); err != nil {
+		if err := s.unwindStage(false, s.unwindOrder[j], db, txc); err != nil {
 			return err
 		}
 	}
@@ -257,7 +259,7 @@ func (s *Sync) RunUnwind(db kv.RwDB, tx kv.RwTx) error {
 	return nil
 }
 
-func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
+func (s *Sync) RunNoInterrupt(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) error {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -268,7 +270,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
+				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, txc); err != nil {
 					return err
 				}
 			}
@@ -300,7 +302,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 			continue
 		}
 
-		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
+		if err := s.runStage(stage, db, txc, firstCycle, badBlockUnwind); err != nil {
 			return err
 		}
 
@@ -325,7 +327,7 @@ func (s *Sync) RunNoInterrupt(db kv.RwDB, tx kv.RwTx, firstCycle bool) error {
 	return nil
 }
 
-func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
+func (s *Sync) Run(db kv.RwDB, txc wrap.TxContainer, firstCycle bool) (bool, error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
 
@@ -338,7 +340,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 				if s.unwindOrder[j] == nil || s.unwindOrder[j].Disabled || s.unwindOrder[j].Unwind == nil {
 					continue
 				}
-				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, tx); err != nil {
+				if err := s.unwindStage(firstCycle, s.unwindOrder[j], db, txc); err != nil {
 					return false, err
 				}
 			}
@@ -375,7 +377,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 			continue
 		}
 
-		if err := s.runStage(stage, db, tx, firstCycle, badBlockUnwind); err != nil {
+		if err := s.runStage(stage, db, txc, firstCycle, badBlockUnwind); err != nil {
 			return false, err
 		}
 
@@ -387,7 +389,7 @@ func (s *Sync) Run(db kv.RwDB, tx kv.RwTx, firstCycle bool) (bool, error) {
 		if string(stage.ID) == s.cfg.BreakAfterStage { // break process loop
 			s.logger.Warn("--sync.loop.break.after caused stage break")
 			if s.posTransition != nil {
-				ptx := tx
+				ptx := txc.Tx
 
 				if ptx == nil {
 					if tx, err := db.BeginRw(context.Background()); err == nil {
@@ -490,14 +492,14 @@ func PrintTables(db kv.RoDB, tx kv.RwTx) []interface{} {
 	return bucketSizes
 }
 
-func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, badBlockUnwind bool) (err error) {
+func (s *Sync) runStage(stage *Stage, db kv.RwDB, txc wrap.TxContainer, firstCycle bool, badBlockUnwind bool) (err error) {
 	start := time.Now()
-	stageState, err := s.StageState(stage.ID, tx, db)
+	stageState, err := s.StageState(stage.ID, txc.Tx, db)
 	if err != nil {
 		return err
 	}
 
-	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, tx, s.logger); err != nil {
+	if err = stage.Forward(firstCycle, badBlockUnwind, stageState, s, txc, s.logger); err != nil {
 		wrappedError := fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 		s.logger.Debug("Error while executing stage", "err", wrappedError)
 		return wrappedError
@@ -514,10 +516,10 @@ func (s *Sync) runStage(stage *Stage, db kv.RwDB, tx kv.RwTx, firstCycle bool, b
 	return nil
 }
 
-func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx) error {
+func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, txc wrap.TxContainer) error {
 	start := time.Now()
 	s.logger.Trace("Unwind...", "stage", stage.ID)
-	stageState, err := s.StageState(stage.ID, tx, db)
+	stageState, err := s.StageState(stage.ID, txc.Tx, db)
 	if err != nil {
 		return err
 	}
@@ -533,7 +535,7 @@ func (s *Sync) unwindStage(firstCycle bool, stage *Stage, db kv.RwDB, tx kv.RwTx
 		return err
 	}
 
-	err = stage.Unwind(firstCycle, unwind, stageState, tx, s.logger)
+	err = stage.Unwind(firstCycle, unwind, stageState, txc, s.logger)
 	if err != nil {
 		return fmt.Errorf("[%s] %w", s.LogPrefix(), err)
 	}
