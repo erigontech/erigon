@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"hash"
 	"math"
 	"os"
@@ -2057,14 +2056,14 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
-	ps, prk, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
-	if err != nil {
-		return math.MaxUint64
-	}
-	if ps > 0 && prk != nil {
-		return cmp.Min(ps, math.MaxUint64)
-	}
-
+	//ps, prk, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	//if err != nil {
+	//	return math.MaxUint64
+	//}
+	//if ps > 0 && prk != nil {
+	//	return cmp.Min(ps, math.MaxUint64)
+	//}
+	//
 	c, err := tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		return math.MaxUint64
