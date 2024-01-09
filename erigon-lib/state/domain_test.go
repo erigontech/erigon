@@ -128,11 +128,11 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		p1, p2 []byte
 	)
 
-	err = writer.PutWithPrev(k1, nil, v1, p1)
+	err = writer.PutWithPrev(k1, nil, v1, p1, 0)
 	require.NoError(t, err)
 
 	writer.SetTxNum(3)
-	err = writer.PutWithPrev(k2, nil, v2, p2)
+	err = writer.PutWithPrev(k2, nil, v2, p2, 0)
 	require.NoError(t, err)
 
 	p1, p2 = v1, v2
@@ -141,23 +141,23 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 	v1, v2 = []byte("value1.2"), []byte("value2.2") //nolint
 
 	writer.SetTxNum(6)
-	err = writer.PutWithPrev(k1, nil, v1, p1)
+	err = writer.PutWithPrev(k1, nil, v1, p1, 0)
 	require.NoError(t, err)
 
 	p1, v1 = v1, []byte("value1.3")
 	writer.SetTxNum(d.aggregationStep + 2)
-	err = writer.PutWithPrev(k1, nil, v1, p1)
+	err = writer.PutWithPrev(k1, nil, v1, p1, 0)
 	require.NoError(t, err)
 
 	p1, v1 = v1, []byte("value1.4")
 	writer.SetTxNum(d.aggregationStep + 3)
-	err = writer.PutWithPrev(k1, nil, v1, p1)
+	err = writer.PutWithPrev(k1, nil, v1, p1, 0)
 	require.NoError(t, err)
 
 	p1, v1 = v1, []byte("value1.5")
 	expectedStep2 := uint64(2)
 	writer.SetTxNum(expectedStep2*d.aggregationStep + 2)
-	err = writer.PutWithPrev(k1, nil, v1, p1)
+	err = writer.PutWithPrev(k1, nil, v1, p1, 0)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -260,19 +260,19 @@ func TestDomain_IterationBasic(t *testing.T) {
 	defer writer.close()
 
 	writer.SetTxNum(2)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc1"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr1"), []byte("loc1"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc2"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr1"), []byte("loc2"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc3"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr1"), []byte("loc3"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc1"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr3"), []byte("loc1"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc2"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr3"), []byte("loc2"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
 	err = writer.Flush(ctx, tx)
 	require.NoError(t, err)
@@ -332,30 +332,30 @@ func TestDomain_AfterPrune(t *testing.T) {
 	)
 
 	writer.SetTxNum(2)
-	err = writer.PutWithPrev(k1, nil, n1, p1)
+	err = writer.PutWithPrev(k1, nil, n1, p1, 0)
 	require.NoError(t, err)
 
 	writer.SetTxNum(3)
-	err = writer.PutWithPrev(k2, nil, n2, p2)
+	err = writer.PutWithPrev(k2, nil, n2, p2, 0)
 	require.NoError(t, err)
 
 	p1, p2 = n1, n2
 	n1, n2 = []byte("value1.2"), []byte("value2.2")
 
 	writer.SetTxNum(6)
-	err = writer.PutWithPrev(k1, nil, n1, p1)
+	err = writer.PutWithPrev(k1, nil, n1, p1, 0)
 	require.NoError(t, err)
 
 	p1, n1 = n1, []byte("value1.3")
 
 	writer.SetTxNum(17)
-	err = writer.PutWithPrev(k1, nil, n1, p1)
+	err = writer.PutWithPrev(k1, nil, n1, p1, 0)
 	require.NoError(t, err)
 
 	p1 = n1
 
 	writer.SetTxNum(18)
-	err = writer.PutWithPrev(k2, nil, n2, p2)
+	err = writer.PutWithPrev(k2, nil, n2, p2, 0)
 	require.NoError(t, err)
 	p2 = n2
 
@@ -372,11 +372,11 @@ func TestDomain_AfterPrune(t *testing.T) {
 	var v []byte
 	dc = d.MakeContext()
 	defer dc.Close()
-	v, found, err := dc.GetLatest(k1, nil, tx)
+	v, _, found, err := dc.GetLatest(k1, nil, tx)
 	require.Truef(t, found, "key1 not found")
 	require.NoError(t, err)
 	require.Equal(t, p1, v)
-	v, found, err = dc.GetLatest(k2, nil, tx)
+	v, _, found, err = dc.GetLatest(k2, nil, tx)
 	require.Truef(t, found, "key2 not found")
 	require.NoError(t, err)
 	require.Equal(t, p2, v)
@@ -388,12 +388,12 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, isEmpty)
 
-	v, found, err = dc.GetLatest(k1, nil, tx)
+	v, _, found, err = dc.GetLatest(k1, nil, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key1 not found")
 	require.Equal(t, p1, v)
 
-	v, found, err = dc.GetLatest(k2, nil, tx)
+	v, _, found, err = dc.GetLatest(k2, nil, tx)
 	require.NoError(t, err)
 	require.Truef(t, found, "key2 not found")
 	require.Equal(t, p2, v)
@@ -427,7 +427,7 @@ func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 				var v [8]byte
 				binary.BigEndian.PutUint64(k[:], keyNum)
 				binary.BigEndian.PutUint64(v[:], valNum)
-				err = writer.PutWithPrev(k[:], nil, v[:], prev[keyNum])
+				err = writer.PutWithPrev(k[:], nil, v[:], prev[keyNum], 0)
 				prev[keyNum] = v[:]
 
 				require.NoError(err)
@@ -478,7 +478,7 @@ func checkHistory(t *testing.T, db kv.RwDB, d *Domain, txs uint64) {
 				require.Nil(val, label)
 			}
 			if txNum == txs {
-				val, found, err := dc.GetLatest(k[:], nil, roTx)
+				val, _, found, err := dc.GetLatest(k[:], nil, roTx)
 				require.True(found, label)
 				require.NoError(err)
 				require.EqualValues(v[:], val, label)
@@ -516,33 +516,33 @@ func TestIterationMultistep(t *testing.T) {
 	defer writer.close()
 
 	writer.SetTxNum(2)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc1"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr1"), []byte("loc1"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc2"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr1"), []byte("loc2"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr1"), []byte("loc3"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr1"), []byte("loc3"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc1"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr3"), []byte("loc1"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr3"), []byte("loc2"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr3"), []byte("loc2"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
 
 	writer.SetTxNum(2 + 16)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc1"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc2"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc3"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc3"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
-	err = writer.PutWithPrev([]byte("addr2"), []byte("loc4"), []byte("value1"), nil)
+	err = writer.PutWithPrev([]byte("addr2"), []byte("loc4"), []byte("value1"), nil, 0)
 	require.NoError(t, err)
 
 	writer.SetTxNum(2 + 16 + 16)
-	err = writer.DeleteWithPrev([]byte("addr2"), []byte("loc1"), nil)
+	err = writer.DeleteWithPrev([]byte("addr2"), []byte("loc1"), nil, 0)
 	require.NoError(t, err)
 
 	err = writer.Flush(ctx, tx)
@@ -731,12 +731,12 @@ func TestDomain_Delete(t *testing.T) {
 	// Put on even txNum, delete on odd txNum
 	for txNum := uint64(0); txNum < uint64(1000); txNum++ {
 		writer.SetTxNum(txNum)
-		original, _, err := dc.GetLatest([]byte("key1"), nil, tx)
+		original, originalStep, _, err := dc.GetLatest([]byte("key1"), nil, tx)
 		require.NoError(err)
 		if txNum%2 == 0 {
-			err = writer.PutWithPrev([]byte("key1"), nil, []byte("value1"), original)
+			err = writer.PutWithPrev([]byte("key1"), nil, []byte("value1"), original, originalStep)
 		} else {
-			err = writer.DeleteWithPrev([]byte("key1"), nil, original)
+			err = writer.DeleteWithPrev([]byte("key1"), nil, original, originalStep)
 		}
 		require.NoError(err)
 	}
@@ -818,7 +818,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
 			//v[0] = 3 // value marker
-			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]))
+			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]), 0)
 			require.NoError(t, err)
 			if _, ok := dat[keyNum]; !ok {
 				dat[keyNum] = make([]bool, txCount+1)
@@ -904,7 +904,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, found, err := dc.GetLatest(k[:], nil, roTx)
+		storedV, _, found, err := dc.GetLatest(k[:], nil, roTx)
 		require.Truef(t, found, label)
 		require.NoError(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
@@ -943,7 +943,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			var v [8]byte
 			binary.BigEndian.PutUint64(k[:], keyNum)
 			binary.BigEndian.PutUint64(v[:], txNum)
-			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]))
+			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]), 0)
 			require.NoError(t, err)
 
 			prev[string(k[:])] = string(v[:])
@@ -1007,7 +1007,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount, keyNum)
 		binary.BigEndian.PutUint64(k[:], keyNum)
 
-		storedV, found, err := dc.GetLatest(k[:], nil, tx)
+		storedV, _, found, err := dc.GetLatest(k[:], nil, tx)
 		require.Truef(t, found, label)
 		require.NoErrorf(t, err, label)
 		require.EqualValues(t, v[:], storedV, label)
@@ -1071,13 +1071,13 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 		s := []byte(fmt.Sprintf("longstorage2.%d", i))
 
 		writer.SetTxNum(uint64(i))
-		err = writer.PutWithPrev([]byte("key1"), nil, v1, preval1)
+		err = writer.PutWithPrev([]byte("key1"), nil, v1, preval1, 0)
 		require.NoError(t, err)
 
-		err = writer.PutWithPrev([]byte("key2"), nil, v2, preval2)
+		err = writer.PutWithPrev([]byte("key2"), nil, v2, preval2, 0)
 		require.NoError(t, err)
 
-		err = writer.PutWithPrev([]byte("key3"), l, s, preval3)
+		err = writer.PutWithPrev([]byte("key3"), l, s, preval3, 0)
 		require.NoError(t, err)
 
 		preval1, preval2, preval3 = v1, v2, s
@@ -1174,7 +1174,7 @@ func TestDomainContext_IteratePrefixAgain(t *testing.T) {
 		}
 
 		values[hex.EncodeToString(common.Append(key, loc))] = common.Copy(value)
-		err := writer.PutWithPrev(key, loc, value, nil)
+		err := writer.PutWithPrev(key, loc, value, nil, 0)
 		require.NoError(t, err)
 	}
 	err = writer.Flush(context.Background(), tx)
@@ -1243,7 +1243,7 @@ func TestDomainContext_IteratePrefix(t *testing.T) {
 		values[hex.EncodeToString(key)] = common.Copy(value)
 
 		writer.SetTxNum(uint64(i))
-		err := writer.PutWithPrev(key, nil, value, nil)
+		err := writer.PutWithPrev(key, nil, value, nil, 0)
 		require.NoError(t, err)
 	}
 	err = writer.Flush(context.Background(), tx)
@@ -1311,7 +1311,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 		for j := 0; j < len(keys); j++ {
 			buf := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*100_000)), nil, 0)
 
-			err = writer.PutWithPrev(keys[j], nil, buf, prev)
+			err = writer.PutWithPrev(keys[j], nil, buf, prev, 0)
 			require.NoError(t, err)
 			prev = buf
 
@@ -1470,7 +1470,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		p := []byte{}
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			writer.PutWithPrev([]byte(key), nil, updates[i].value, p)
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
 			p = common.Copy(updates[i].value)
 		}
 	}
@@ -1502,7 +1502,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
 		require.NoError(t, err)
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
@@ -1540,7 +1540,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		p := []byte{}
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			writer.PutWithPrev([]byte(key), nil, updates[i].value, p)
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
 			p = common.Copy(updates[i].value)
 		}
 	}
@@ -1599,7 +1599,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 		if len(updates) == 0 {
 			continue
 		}
-		v, ok, err := dc.GetLatest([]byte(key), nil, tx)
+		v, _, ok, err := dc.GetLatest([]byte(key), nil, tx)
 		require.NoError(t, err)
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
@@ -1684,7 +1684,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 		p := []byte{}
 		for i := 0; i < len(updates); i++ {
 			writer.SetTxNum(updates[i].txNum)
-			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p)
+			err = writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
 			require.NoError(t, err)
 			p = common.Copy(updates[i].value)
 		}
@@ -1795,14 +1795,14 @@ func TestDomain_Unwind(t *testing.T) {
 			writer.SetTxNum(i)
 			if i%3 == 0 && i > 0 { // once in 3 tx put key3 -> value3.i and skip other keys update
 				if i%12 == 0 { // once in 12 tx delete key3 before update
-					err = writer.DeleteWithPrev([]byte("key3"), nil, preval3)
+					err = writer.DeleteWithPrev([]byte("key3"), nil, preval3, 0)
 					require.NoError(t, err)
 					preval3 = nil
 
 					continue
 				}
 				v3 := []byte(fmt.Sprintf("value3.%d", i))
-				err = writer.PutWithPrev([]byte("key3"), nil, v3, preval3)
+				err = writer.PutWithPrev([]byte("key3"), nil, v3, preval3, 0)
 				require.NoError(t, err)
 				preval3 = v3
 				continue
@@ -1812,11 +1812,11 @@ func TestDomain_Unwind(t *testing.T) {
 			v2 := []byte(fmt.Sprintf("value2.%d", i))
 			nv3 := []byte(fmt.Sprintf("valuen3.%d", i))
 
-			err = writer.PutWithPrev([]byte("key1"), nil, v1, preval1)
+			err = writer.PutWithPrev([]byte("key1"), nil, v1, preval1, 0)
 			require.NoError(t, err)
-			err = writer.PutWithPrev([]byte("key2"), nil, v2, preval2)
+			err = writer.PutWithPrev([]byte("key2"), nil, v2, preval2, 0)
 			require.NoError(t, err)
-			err = writer.PutWithPrev([]byte("k4"), nil, nv3, preval4)
+			err = writer.PutWithPrev([]byte("k4"), nil, nv3, preval4, 0)
 			require.NoError(t, err)
 
 			preval1, preval2, preval4 = v1, v2, nv3

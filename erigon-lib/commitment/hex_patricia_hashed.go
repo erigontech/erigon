@@ -824,7 +824,7 @@ func (hph *HexPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int)
 	if len(key) == 0 {
 		key = temporalReplacementForEmpty
 	}
-	branchData, err := hph.ctx.GetBranch(key)
+	branchData, _, err := hph.ctx.GetBranch(key)
 	if err != nil {
 		return false, err
 	}
@@ -1280,7 +1280,7 @@ func (hph *HexPatriciaHashed) collectBranchUpdate(
 	if err != nil {
 		return 0, err
 	}
-	prev, err := hph.ctx.GetBranch(prefix) // prefix already compacted by fold
+	prev, prevStep, err := hph.ctx.GetBranch(prefix) // prefix already compacted by fold
 	if err != nil {
 		return 0, err
 	}
@@ -1296,7 +1296,7 @@ func (hph *HexPatriciaHashed) collectBranchUpdate(
 	//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%update\n", prefix, stateValue, update, BranchData(update).String())
 
 	cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-	if err = hph.ctx.PutBranch(cp, cu, prev); err != nil {
+	if err = hph.ctx.PutBranch(cp, cu, prev, prevStep); err != nil {
 		return 0, err
 	}
 	mxCommitmentBranchUpdates.Inc()
