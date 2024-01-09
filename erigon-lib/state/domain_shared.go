@@ -890,6 +890,9 @@ func (sd *SharedDomains) Tx() kv.Tx { return sd.roTx }
 func (sd *SharedDomains) SetCommitmentPlainWarmupFunc(f func(plainKeys [][]byte)) {
 	sd.sdCtx.warmupPlainFunc = f
 }
+func (sd *SharedDomains) SetCommitmentHashedWarmupFunc(f func(hashedKeys [][]byte)) {
+	sd.sdCtx.warmupHashedFunc = f
+}
 
 type SharedDomainsCommitmentContext struct {
 	sd           *SharedDomains
@@ -899,7 +902,8 @@ type SharedDomainsCommitmentContext struct {
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool
 
-	warmupPlainFunc func(plainKeys [][]byte)
+	warmupPlainFunc  func(plainKeys [][]byte)
+	warmupHashedFunc func(hashedKeys [][]byte)
 }
 
 func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode CommitmentMode, trieVariant commitment.TrieVariant) *SharedDomainsCommitmentContext {
@@ -1044,7 +1048,9 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Conte
 		rootHash, err = sdc.patriciaTrie.RootHash()
 		return rootHash, err
 	}
-	sdc.warmupPlainFunc(touchedKeys)
+	if sdc.warmupPlainFunc != nil {
+		sdc.warmupPlainFunc(touchedKeys)
+	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
 	sdc.patriciaTrie.SetTrace(sdc.sd.trace)

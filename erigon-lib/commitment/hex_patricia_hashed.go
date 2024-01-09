@@ -83,6 +83,8 @@ type HexPatriciaHashed struct {
 	auxBuffer     *bytes.Buffer // auxiliary buffer used during branch updates encoding
 	branchMerger  *BranchMerger
 	branchEncoder *BranchEncoder
+
+	warmupHashedFunc func(hashedKeys [][]byte)
 }
 
 func NewHexPatriciaHashed(accountKeyLen int, ctx PatriciaContext) *HexPatriciaHashed {
@@ -1323,6 +1325,8 @@ func (hph *HexPatriciaHashed) ProcessKeys(ctx context.Context, plainKeys [][]byt
 	sort.Slice(hashedKeys, func(i, j int) bool {
 		return bytes.Compare(hashedKeys[i], hashedKeys[j]) < 0
 	})
+
+	hph.warmupHashedFunc(hashedKeys)
 
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()

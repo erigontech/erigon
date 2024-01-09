@@ -202,6 +202,49 @@ func ExecV3(ctx context.Context,
 		}
 	}
 
+	warmupPlainFunc := func(plainKeys [][]byte) {
+		if len(plainKeys) < 10_000 {
+			return
+		}
+		go func() {
+			tt := time.Now()
+			log.Info("[commitment] warmup started", "len", len(plainKeys))
+			_ = cfg.db.View(ctx, func(tx kv.Tx) error {
+				ttx := tx.(*temporal.Tx)
+				for _, k := range plainKeys {
+					if len(k) == 20 {
+						_, _ = ttx.DomainGet(kv.AccountsDomain, k, nil)
+					} else {
+						_, _ = ttx.DomainGet(kv.StorageDomain, k, nil)
+					}
+				}
+				return nil
+			})
+			log.Info("[commitment] warmup end", "took", time.Since(tt))
+		}()
+	}
+	warmupHashedFunc := func(plainKeys [][]byte) {
+		if len(plainKeys) < 10_000 {
+			return
+		}
+		go func() {
+			tt := time.Now()
+			log.Info("[commitment] warmup started", "len", len(plainKeys))
+			_ = cfg.db.View(ctx, func(tx kv.Tx) error {
+				ttx := tx.(*temporal.Tx)
+				for _, k := range plainKeys {
+					if len(k) == 20 {
+						_, _ = ttx.DomainGet(kv.AccountsDomain, k, nil)
+					} else {
+						_, _ = ttx.DomainGet(kv.StorageDomain, k, nil)
+					}
+				}
+				return nil
+			})
+			log.Info("[commitment] warmup end", "took", time.Since(tt))
+		}()
+	}
+
 	inMemExec := txc.Doms != nil
 	var doms *state2.SharedDomains
 	if inMemExec {
@@ -209,6 +252,8 @@ func ExecV3(ctx context.Context,
 	} else {
 		doms = state2.NewSharedDomains(applyTx, log.New())
 		defer doms.Close()
+		doms.SetCommitmentPlainWarmupFunc(warmupPlainFunc)
+		doms.SetCommitmentHashedWarmupFunc(warmupHashedFunc)
 	}
 
 	var (
@@ -855,28 +900,6 @@ Loop:
 					t4 = time.Since(tt)
 				}
 
-				doms.SetCommitmentPlainWarmupFunc(func(plainKeys [][]byte) {
-					if len(plainKeys) < 10_000 {
-						return
-					}
-					go func() {
-						tt := time.Now()
-						log.Info("[commitment] warmup started", "len", len(plainKeys))
-						_ = cfg.db.View(ctx, func(tx kv.Tx) error {
-							ttx := tx.(*temporal.Tx)
-							for _, k := range plainKeys {
-								if len(k) == 20 {
-									_, _ = ttx.DomainGet(kv.AccountsDomain, k, nil)
-								} else {
-									_, _ = ttx.DomainGet(kv.StorageDomain, k, nil)
-								}
-							}
-							return nil
-						})
-						log.Info("[commitment] warmup end", "took", time.Since(tt))
-					}()
-				})
-
 				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
@@ -927,6 +950,8 @@ Loop:
 					}
 					doms = state2.NewSharedDomains(applyTx, logger)
 					doms.SetTxNum(inputTxNum)
+					doms.SetCommitmentPlainWarmupFunc(warmupPlainFunc)
+					doms.SetCommitmentHashedWarmupFunc(warmupHashedFunc)
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
