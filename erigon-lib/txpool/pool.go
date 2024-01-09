@@ -74,6 +74,8 @@ var (
 	basefeeSubCounter       = metrics.GetOrCreateGauge(`txpool_basefee`)
 )
 
+var TraceAll = true
+
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
 // there are multiple implementations
@@ -729,7 +731,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	txs.Resize(uint(count))
 	if len(toRemove) > 0 {
 		for _, mt := range toRemove {
-			p.pending.Remove(mt)
+			p.pending.Remove(mt, "best", p.logger)
 		}
 	}
 	return true, count, nil
@@ -1341,7 +1343,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 
 		switch found.currentSubPool {
 		case PendingSubPool:
-			p.pending.Remove(found)
+			p.pending.Remove(found, "add", p.logger)
 		case BaseFeeSubPool:
 			p.baseFee.Remove(found, "add", p.logger)
 		case QueuedSubPool:
@@ -1484,7 +1486,7 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot
 			switch mt.currentSubPool {
 			case PendingSubPool:
 				pendingRemoved++
-				p.pending.Remove(mt)
+				p.pending.Remove(mt, "remove-mined", p.logger)
 			case BaseFeeSubPool:
 				baseFeeRemoved++
 				p.baseFee.Remove(mt, "remove-mined", p.logger)
@@ -1537,7 +1539,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			// del from sub-pool
 			switch mt.currentSubPool {
 			case PendingSubPool:
-				p.pending.Remove(mt)
+				p.pending.Remove(mt, deleteAndContinueReasonLog, p.logger)
 			case BaseFeeSubPool:
 				p.baseFee.Remove(mt, deleteAndContinueReasonLog, p.logger)
 			case QueuedSubPool:
@@ -1618,7 +1620,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		p.discardLocked(mt, txpoolcfg.NonceTooLow)
 	}
 
-	logger.Debug("[txpool] onSenderStateChange", "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+	logger.Debug("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 }
 
 // promote reasserts invariants of the subpool and returns the list of transactions that ended up
@@ -2284,6 +2286,11 @@ func (sc *sendersBatch) getID(addr common.Address) (uint64, bool) {
 }
 func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (uint64, bool) {
 	_, traced := sc.tracedSenders[addr]
+
+	if !traced {
+		traced = TraceAll
+	}
+
 	id, ok := sc.senderIDs[addr]
 	if !ok {
 		sc.senderID++
@@ -2526,7 +2533,10 @@ func (p *PendingPool) Updated(mt *metaTx) {
 }
 func (p *PendingPool) Len() int { return len(p.best.ms) }
 
-func (p *PendingPool) Remove(i *metaTx) {
+func (p *PendingPool) Remove(i *metaTx, reason string, logger log.Logger) {
+	//if i.Tx.Traced {
+	logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.Tx.IDHash), "sender", i.Tx.SenderID, "nonce", i.Tx.Nonce, "reason", reason)
+	//}
 	if i.worstIndex >= 0 {
 		heap.Remove(p.worst, i.worstIndex)
 	}
