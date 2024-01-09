@@ -103,7 +103,7 @@ func TestPostSyncCommitteeRewards(t *testing.T) {
 			blockId:  "0x" + common.Bytes2Hex(fcu.HeadVal[:]),
 			request:  `["1","4"]`,
 			code:     http.StatusOK,
-			expected: `{"data":[{"validator_index":"1","reward":"-698"},{"validator_index":"4","reward":"-698"}],"finalized":true,"execution_optimistic":false}` + "\n", // Add your expected response
+			expected: `{"data":[{"validator_index":"1","reward":"-698"},{"validator_index":"4","reward":"-698"}],"execution_optimistic":false,"finalized":true,}` + "\n", // Add your expected response
 		},
 	}
 	for _, c := range cases {
@@ -132,9 +132,6 @@ func TestPostSyncCommitteeRewards(t *testing.T) {
 			// Read the response body
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			if string(out) != c.expected {
-				panic(string(out))
-			}
 			// Compare the response with the expected result
 			require.Equal(t, c.expected, string(out))
 		})

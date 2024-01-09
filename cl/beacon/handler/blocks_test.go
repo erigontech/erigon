@@ -124,10 +124,7 @@ func TestGetBlock(t *testing.T) {
 			// unmarshal the json
 			out, err := io.ReadAll(resp.Body)
 			require.NoError(t, err)
-			if string(out) != expected {
-				panic(string(out))
-			}
-			require.Equal(t, expected, string(out))
+			require.EqualValues(t, expected, string(out))
 		})
 	}
 }

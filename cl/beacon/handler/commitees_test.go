@@ -44,7 +44,7 @@ func TestGetCommitteesAntiquated(t *testing.T) {
 			blockID:  "0x" + common.Bytes2Hex(postRoot[:]),
 			code:     http.StatusOK,
 			query:    "?slot=" + strconv.FormatUint(fcu.HeadSlotVal, 10),
-			expected: `{"data":[{"index":"0","slot":"8322","validators":["0","104","491","501","379","318","275","504","75","280","105","399","35","401"]}],"finalized":true,"execution_optimistic":false}` + "\n",
+			expected: `{"data":[{"index":"0","slot":"8322","validators":["0","104","491","501","379","318","275","504","75","280","105","399","35","401"]}],"execution_optimistic":false,"finalized":true}` + "\n",
 		},
 		{
 			name:     "empty-index",
@@ -58,7 +58,7 @@ func TestGetCommitteesAntiquated(t *testing.T) {
 			blockID:  "0x" + common.Bytes2Hex(postRoot[:]),
 			code:     http.StatusOK,
 			query:    "?index=0&slot=" + strconv.FormatUint(fcu.HeadSlotVal-32, 10) + "&epoch=" + strconv.FormatUint((fcu.HeadSlotVal/32)-1, 10),
-			expected: `{"data":[{"index":"0","slot":"8290","validators":["127","377","274","85","309","420","423","398","153","480","273","429","374","260"]}],"finalized":true,"execution_optimistic":false}` + "\n",
+			expected: `{"data":[{"index":"0","slot":"8290","validators":["127","377","274","85","309","420","423","398","153","480","273","429","374","260"]}],"execution_optimistic":false,"finalized":true}` + "\n",
 		},
 		{
 			blockID: "0x" + common.Bytes2Hex(make([]byte, 32)),
