@@ -248,7 +248,7 @@ func ExecBlockV3(s *StageState, u Unwinder, txc wrap.TxContainer, toBlock uint64
 	}
 
 	//if initialCycle {
-	//	reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, tx)
+	//	reconstituteToBlock, found, err := reconstituteBlock(cfg.agg, cfg.db, txc.Tx)
 	//	if err != nil {
 	//		return err
 	//	}
@@ -337,7 +337,6 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		domains = txc.Doms
 	}
 	rs := state.NewStateV3(domains, logger)
-
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
 	txNum, err := rawdbv3.TxNums.Min(txc.Tx, u.UnwindPoint+1)
 	if err != nil {
@@ -385,7 +384,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	if dbg.StagesOnlyBlocks {
 		return nil
 	}
-
 	if cfg.historyV3 {
 		if err = ExecBlockV3(s, u, txc, toBlock, ctx, cfg, initialCycle, logger); err != nil {
 			return err

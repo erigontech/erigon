@@ -232,7 +232,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			cfg.notifier.Events.OnNewSnapshot()
 		}
 	} else {
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 	}
@@ -441,16 +441,6 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
-
-	if freezingCfg.Enabled {
-		pruneLimit := 100
-		if initialCycle {
-			pruneLimit = 1_000
-		}
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
-			return err
-		}
-	}
 	if freezingCfg.Enabled {
 		if freezingCfg.Produce {
 			//TODO: initialSync maybe save files progress here
@@ -495,7 +485,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			//cfg.agg.BuildFilesInBackground()
 		}
 
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit); err != nil {
+		pruneLimit := 100
+		if initialCycle {
+			pruneLimit = 1_000
+		}
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
 			return err
 		}
 	}
