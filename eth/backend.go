@@ -780,7 +780,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
 		return nil, err
 	}
 
@@ -1010,8 +1010,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
-
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
@@ -1047,9 +1046,17 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 			})
 
-			err := stagedsync.FetchSpanZeroForMiningIfNeeded(ctx, s.chainDB, s.blockReader, borcfg.HeimdallClient, logger)
-			if err != nil {
-				return err
+			if !s.config.WithoutHeimdall {
+				err := stagedsync.FetchSpanZeroForMiningIfNeeded(
+					ctx,
+					s.chainDB,
+					s.blockReader,
+					borcfg.HeimdallClient,
+					logger,
+				)
+				if err != nil {
+					return err
+				}
 			}
 		} else {
 			// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
