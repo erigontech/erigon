@@ -225,12 +225,12 @@ func ExecV3(ctx context.Context,
 					if len(k) == 20 {
 						v, _ := ttx.DomainGet(kv.AccountsDomain, k, nil)
 						if v == nil {
-							fmt.Printf("not found1: %x, %d\n", k, len(k))
+							//fmt.Printf("not found1: %x, %d\n", k, len(k))
 						}
 					} else {
 						v, _ := ttx.DomainGet(kv.StorageDomain, k, nil)
 						if v == nil {
-							fmt.Printf("not found2: %x, %d\n", k, len(k))
+							//fmt.Printf("not found2: %x, %d\n", k, len(k))
 						}
 					}
 				}
