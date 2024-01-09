@@ -28,6 +28,22 @@ func MiningStages(
 ) []*Stage {
 	return []*Stage{
 		{
+			ID:          stages.BorHeimdall,
+			Description: "Download Bor-specific data from Heimdall",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+				if badBlockUnwind {
+					return nil
+				}
+				return BorHeimdallForward(s, u, ctx, tx, borHeimdallCfg, true, logger)
+			},
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+				return BorHeimdallUnwind(u, ctx, s, tx, borHeimdallCfg)
+			},
+			Prune: func(firstCycle bool, p *PruneState, tx kv.RwTx, logger log.Logger) error {
+				return BorHeimdallPrune(p, ctx, tx, borHeimdallCfg)
+			},
+		},
+		{
 			ID:          stages.MiningCreateBlock,
 			Description: "Mining: construct new block from tx pool",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
@@ -56,8 +72,6 @@ func MiningStages(
 			ID:          stages.MiningExecution,
 			Description: "Mining: execute new block from tx pool",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
-				//fmt.Println("SpawnMiningExecStage")
-				//defer fmt.Println("SpawnMiningExecStage", "DONE")
 				return SpawnMiningExecStage(s, tx, execCfg, ctx.Done(), logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error { return nil },

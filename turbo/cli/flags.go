@@ -478,7 +478,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	}
 
 	if c.Enabled {
-		logger.Info("starting HTTP APIs", "APIs", apis)
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis)
 	}
 
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {

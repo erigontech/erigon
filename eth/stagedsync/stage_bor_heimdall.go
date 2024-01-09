@@ -158,7 +158,8 @@ func BorHeimdallForward(
 		}
 	}
 
-	if mine {
+	// TODO - this needs to be called post mining
+	if mine && false {
 		minedHeader := cfg.miningState.MiningBlock.Header
 
 		if minedHeadNumber := minedHeader.Number.Uint64(); minedHeadNumber > headNumber {
@@ -176,12 +177,13 @@ func BorHeimdallForward(
 			return fmt.Errorf("attempting to mine %d, which is behind current head: %d", minedHeadNumber, headNumber)
 		}
 	}
+	// To here
 
 	if err != nil {
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 
-	if s.BlockNumber == headNumber {
+	if s.BlockNumber != 0 && s.BlockNumber == headNumber {
 		return nil
 	}
 
@@ -218,18 +220,25 @@ func BorHeimdallForward(
 		return err
 	}
 	var lastSpanId uint64
+
 	if k != nil {
 		lastSpanId = binary.BigEndian.Uint64(k)
 	}
+
 	snapshotLastSpanId := cfg.blockReader.(LastFrozen).LastFrozenSpanID()
-	if snapshotLastSpanId > lastSpanId {
+
+	if s.BlockNumber != 0 && snapshotLastSpanId > lastSpanId {
 		lastSpanId = snapshotLastSpanId
 	}
+
 	var nextSpanId uint64
+
 	if lastSpanId > 0 {
 		nextSpanId = lastSpanId + 1
 	}
+
 	var endSpanID uint64
+
 	if span.IDAt(headNumber) > 0 {
 		endSpanID = span.IDAt(headNumber + 1)
 	}
@@ -239,10 +248,13 @@ func BorHeimdallForward(
 	}
 
 	lastBlockNum := s.BlockNumber
+
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
+
 	recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
+
 	if err != nil {
 		return err
 	}
@@ -250,6 +262,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
+
 	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	var blockNum uint64
@@ -260,8 +273,13 @@ func BorHeimdallForward(
 	defer logTimer.Stop()
 
 	if endSpanID >= nextSpanId {
+		if endSpanID == 0 {
+			endSpanID++
+		}
+
 		logger.Info("["+s.LogPrefix()+"] Processing spans...", "from", nextSpanId, "to", endSpanID)
 	}
+
 	for spanID := nextSpanId; spanID <= endSpanID; spanID++ {
 		if lastSpanId, err = fetchAndWriteSpans(ctx, spanID, tx, cfg.heimdallClient, s.LogPrefix(), logger); err != nil {
 			return err
