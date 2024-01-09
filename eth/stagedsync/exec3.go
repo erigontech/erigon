@@ -307,7 +307,7 @@ func ExecV3(ctx context.Context,
 
 					v, _ := ttx.DomainGet(kv.CommitmentDomain, k, nil)
 					if v == nil {
-						fmt.Printf("not found3: %x\n", k)
+						fmt.Printf("not found3: %x, %d\n", k, len(k))
 					}
 					if len(k) == 32 {
 						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:1], nil)
