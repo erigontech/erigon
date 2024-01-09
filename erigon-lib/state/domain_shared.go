@@ -756,11 +756,11 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := sd.tracesToWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
-
-		err = sd.aggCtx.PruneSmallBatches(ctx, time.Second, tx)
-		if err != nil {
-			return err
-		}
+		//
+		//err = sd.aggCtx.PruneSmallBatches(ctx, time.Second, tx)
+		//if err != nil {
+		//	return err
+		//}
 
 	}
 	return nil

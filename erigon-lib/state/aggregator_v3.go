@@ -786,7 +786,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
 	defer aggLogEvery.Stop()
 
-	const pruneLimit uint64 = 1000
+	const pruneLimit uint64 = 10000
 
 	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
