@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"runtime"
+
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 )
 
 func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) {
-	syncingStatus, err := uint64FromQueryParams(r, "syncing_status")
+	syncingStatus, err := beaconhttp.Uint64FromQueryParams(r, "syncing_status")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

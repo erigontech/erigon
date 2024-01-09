@@ -17,20 +17,20 @@ type committeeResponse struct {
 	Validators []string `json:"validators"` // do string directly but it is still a base10 number
 }
 
-func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
-	epochReq, err := uint64FromQueryParams(r, "epoch")
+	epochReq, err := beaconhttp.Uint64FromQueryParams(r, "epoch")
 	if err != nil {
 		return nil, err
 	}
 
-	index, err := uint64FromQueryParams(r, "index")
+	index, err := beaconhttp.Uint64FromQueryParams(r, "index")
 	if err != nil {
 		return nil, err
 	}
 
-	slotFilter, err := uint64FromQueryParams(r, "slot")
+	slotFilter, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -100,7 +100,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 				resp = append(resp, data)
 			}
 		}
-		return newBeaconResponse(resp).withFinalized(isFinalized), nil
+		return newBeaconResponse(resp).WithFinalized(isFinalized), nil
 	}
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
@@ -143,5 +143,5 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 			resp = append(resp, data)
 		}
 	}
-	return newBeaconResponse(resp).withFinalized(isFinalized), nil
+	return newBeaconResponse(resp).WithFinalized(isFinalized), nil
 }

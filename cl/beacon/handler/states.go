@@ -17,21 +17,21 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
-func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *segmentID) (root libcommon.Hash, httpStatusErr int, err error) {
+func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId *beaconhttp.SegmentID) (root libcommon.Hash, httpStatusErr int, err error) {
 	switch {
-	case stateId.head():
+	case stateId.Head():
 		root, _, err = a.forkchoiceStore.GetHead()
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
 		return
-	case stateId.finalized():
+	case stateId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
 		return
-	case stateId.justified():
+	case stateId.Justified():
 		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
 		return
-	case stateId.genesis():
+	case stateId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
@@ -40,17 +40,17 @@ func (a *ApiHandler) blockRootFromStateId(ctx context.Context, tx kv.Tx, stateId
 			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("genesis block not found")
 		}
 		return
-	case stateId.getSlot() != nil:
-		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *stateId.getSlot())
+	case stateId.GetSlot() != nil:
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *stateId.GetSlot())
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
 		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("block not found %d", *stateId.getSlot())
+			return libcommon.Hash{}, http.StatusNotFound, fmt.Errorf("block not found %d", *stateId.GetSlot())
 		}
 		return
-	case stateId.getRoot() != nil:
-		root, err = beacon_indicies.ReadBlockRootByStateRoot(tx, *stateId.getRoot())
+	case stateId.GetRoot() != nil:
+		root, err = beacon_indicies.ReadBlockRootByStateRoot(tx, *stateId.GetRoot())
 		if err != nil {
 			return libcommon.Hash{}, http.StatusInternalServerError, err
 		}
@@ -71,7 +71,7 @@ func previousVersion(v clparams.StateVersion) clparams.StateVersion {
 	return v - 1
 }
 
-func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -80,7 +80,7 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 	}
 	defer tx.Rollback()
 
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -110,7 +110,7 @@ func (a *ApiHandler) getStateFork(w http.ResponseWriter, r *http.Request) (*beac
 	}), nil
 }
 
-func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -119,7 +119,7 @@ func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beac
 	}
 	defer tx.Rollback()
 
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -149,10 +149,10 @@ func (a *ApiHandler) getStateRoot(w http.ResponseWriter, r *http.Request) (*beac
 	}
 
 	return newBeaconResponse(&rootResponse{Root: stateRoot}).
-		withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
-func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -161,7 +161,7 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 	}
 	defer tx.Rollback()
 
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -198,10 +198,10 @@ func (a *ApiHandler) getFullState(w http.ResponseWriter, r *http.Request) (*beac
 		if state == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read state: %x", blockRoot))
 		}
-		return newBeaconResponse(state).withFinalized(true).withVersion(state.Version()), nil
+		return newBeaconResponse(state).WithFinalized(true).WithVersion(state.Version()), nil
 	}
 
-	return newBeaconResponse(state).withFinalized(false).withVersion(state.Version()), nil
+	return newBeaconResponse(state).WithFinalized(false).WithVersion(state.Version()), nil
 }
 
 type finalityCheckpointsResponse struct {
@@ -210,7 +210,7 @@ type finalityCheckpointsResponse struct {
 	PreviousJustifiedCheckpoint solid.Checkpoint `json:"previous_justified_checkpoint"`
 }
 
-func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -218,7 +218,7 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -259,7 +259,7 @@ func (a *ApiHandler) getFinalityCheckpoints(w http.ResponseWriter, r *http.Reque
 		FinalizedCheckpoint:         finalizedCheckpoint,
 		CurrentJustifiedCheckpoint:  currentJustifiedCheckpoint,
 		PreviousJustifiedCheckpoint: previousJustifiedCheckpoint,
-	}).withFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).withVersion(version), nil
+	}).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()).WithVersion(version), nil
 }
 
 type syncCommitteesResponse struct {
@@ -267,7 +267,7 @@ type syncCommitteesResponse struct {
 	ValidatorAggregates [][]string `json:"validator_aggregates"`
 }
 
-func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -275,7 +275,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -312,7 +312,7 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 	}
 	// Now fetch the data we need
 	statePeriod := a.beaconChainCfg.SyncCommitteePeriod(*slot)
-	queryEpoch, err := uint64FromQueryParams(r, "epoch")
+	queryEpoch, err := beaconhttp.Uint64FromQueryParams(r, "epoch")
 	if err != nil {
 		return nil, err
 	}
@@ -355,14 +355,14 @@ func (a *ApiHandler) getSyncCommittees(w http.ResponseWriter, r *http.Request) (
 		return nil, err
 	}
 
-	return newBeaconResponse(response).withFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	return newBeaconResponse(response).WithFinalized(canonicalRoot == blockRoot && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
 
 type randaoResponse struct {
 	Randao libcommon.Hash `json:"randao"`
 }
 
-func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -370,7 +370,7 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconR
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -380,7 +380,7 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconR
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
-	epochReq, err := uint64FromQueryParams(r, "epoch")
+	epochReq, err := beaconhttp.Uint64FromQueryParams(r, "epoch")
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +401,7 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconR
 
 	if a.forkchoiceStore.RandaoMixes(blockRoot, randaoMixes) {
 		mix := randaoMixes.Get(int(epoch % a.beaconChainCfg.EpochsPerHistoricalVector))
-		return newBeaconResponse(randaoResponse{Randao: mix}).withFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
+		return newBeaconResponse(randaoResponse{Randao: mix}).WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
 	}
 	// check if the block is canonical
 	canonicalRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
@@ -415,5 +415,5 @@ func (a *ApiHandler) getRandao(w http.ResponseWriter, r *http.Request) (*beaconR
 	if err != nil {
 		return nil, err
 	}
-	return newBeaconResponse(randaoResponse{Randao: mix}).withFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	return newBeaconResponse(randaoResponse{Randao: mix}).WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }
