@@ -360,7 +360,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 				dirtySpace = dirtySpaceMaxDefault
 			}
 		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize); err != nil {
 			return nil, err
 		}
 
