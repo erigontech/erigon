@@ -32,11 +32,39 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/protobuf/types/known/emptypb"
+
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/downloader"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
+	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
+	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/txpool"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -47,65 +75,17 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
-
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/engineapi"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
-	"github.com/ledgerwatch/erigon/turbo/silkworm"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
-
-	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/protobuf/types/known/emptypb"
-
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/direct"
-	downloader "github.com/ledgerwatch/erigon-lib/downloader"
-	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
-	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli"
 	"github.com/ledgerwatch/erigon/common/debug"
-
-	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/finality/flags"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -118,14 +98,31 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
+	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
+	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/engineapi"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
+	"github.com/ledgerwatch/erigon/turbo/silkworm"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -324,7 +321,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, snapshotVersion, config.Snapshot, config.HistoryV3, chainConfig.Bor != nil, logger)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, snapshotVersion, config.Snapshot, config.HistoryV3, chainConfig.Bor != nil, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +339,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil, err
 	}
 
-	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, agg, logger)
+	kvRPC := remotedbserver.NewKvServer(ctx, backend.chainDB, allSnapshots, allBorSnapshots, agg, logger)
 	backend.notifications.StateChangesConsumer = kvRPC
 	backend.kvRPC = kvRPC
 
@@ -509,7 +506,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else if chainConfig.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if chainConfig.Bor != nil {
-		consensusConfig = &config.Bor
+		consensusConfig = chainConfig.Bor
 	} else {
 		consensusConfig = &config.Ethash
 	}
@@ -528,20 +525,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.engine = ethconsensusconfig.CreateConsensusEngine(ctx, stack.Config(), chainConfig, consensusConfig, config.Miner.Notify, config.Miner.Noverify, heimdallClient, config.WithoutHeimdall, blockReader, false /* readonly */, logger)
 
-	inMemoryExecution := func(batch kv.RwTx, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
+	inMemoryExecution := func(txc wrap.TxContainer, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody,
 		notifications *shards.Notifications) error {
 		terseLogger := log.New()
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
 		stateSync := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
 			dirs, notifications, blockReader, blockWriter, backend.agg, backend.silkworm, terseLogger)
-		chainReader := stagedsync.NewChainReaderImpl(chainConfig, batch, blockReader, logger)
+		chainReader := stagedsync.NewChainReaderImpl(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, backend.engine, batch, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, config.HistoryV3); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, config.HistoryV3); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
-		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
+		progress, err := stages.GetStageProgress(txc.Tx, stages.IntermediateHashes)
 		if err != nil {
 			return err
 		}
@@ -665,7 +662,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			), stagedsync.MiningUnwindOrder, stagedsync.MiningPruneOrder,
 			logger)
 		// We start the mining step
-		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir); err != nil {
+		if err := stages2.MiningStep(ctx, backend.chainDB, proposingSync, tmpdir, logger); err != nil {
 			return nil, err
 		}
 		block := <-miningStatePos.MiningResultPOSCh
@@ -783,7 +780,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
 		return nil, err
 	}
 
@@ -1013,8 +1010,7 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string) error {
-
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
@@ -1049,6 +1045,19 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
 				return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
 			})
+
+			if !s.config.WithoutHeimdall {
+				err := stagedsync.FetchSpanZeroForMiningIfNeeded(
+					ctx,
+					s.chainDB,
+					s.blockReader,
+					borcfg.HeimdallClient,
+					logger,
+				)
+				if err != nil {
+					return err
+				}
+			}
 		} else {
 			// for the bor dev network without heimdall we need the authorizer to be set otherwise there is no
 			// validator defined in the bor validator set and non mining nodes will reject all blocks
@@ -1141,7 +1150,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				works = true
 				hasWork = false
 				mineEvery.Reset(cfg.Recommit)
-				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir) }()
+				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir, logger) }()
 			}
 		}
 	}()
@@ -1240,7 +1249,7 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snashotVersion uint8, snConfig ethconfig.BlocksFreezing, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *libstate.AggregatorV3, error) {
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snashotVersion uint8, snConfig ethconfig.BlocksFreezing, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3, error) {
 	allSnapshots := freezeblocks.NewRoSnapshots(snConfig, dirs.Snap, snashotVersion, logger)
 
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
@@ -1265,12 +1274,12 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snasho
 
 	agg, err := libstate.NewAggregatorV3(ctx, dirs.SnapHistory, dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	if err = agg.OpenFolder(); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
-	return blockReader, blockWriter, allSnapshots, agg, nil
+	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil
 }
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {

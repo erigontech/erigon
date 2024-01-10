@@ -21,6 +21,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/log/v3"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -36,50 +37,38 @@ var (
 
 const SSZSnappyCodec = "ssz_snappy"
 
-type TopicName string
-
-const (
-	BeaconBlockTopic             TopicName = "beacon_block"
-	BeaconAggregateAndProofTopic TopicName = "beacon_aggregate_and_proof"
-	VoluntaryExitTopic           TopicName = "voluntary_exit"
-	ProposerSlashingTopic        TopicName = "proposer_slashing"
-	AttesterSlashingTopic        TopicName = "attester_slashing"
-	BlsToExecutionChangeTopic    TopicName = "bls_to_execution_change"
-	BlobSidecarTopic             TopicName = "blob_sidecar_%d" // This topic needs an index
-)
-
 type GossipTopic struct {
-	Name     TopicName
+	Name     string
 	CodecStr string
 }
 
 var BeaconBlockSsz = GossipTopic{
-	Name:     BeaconBlockTopic,
+	Name:     gossip.TopicNameBeaconBlock,
 	CodecStr: SSZSnappyCodec,
 }
 
 var BeaconAggregateAndProofSsz = GossipTopic{
-	Name:     BeaconAggregateAndProofTopic,
+	Name:     gossip.TopicNameBeaconAggregateAndProof,
 	CodecStr: SSZSnappyCodec,
 }
 
 var VoluntaryExitSsz = GossipTopic{
-	Name:     VoluntaryExitTopic,
+	Name:     gossip.TopicNameVoluntaryExit,
 	CodecStr: SSZSnappyCodec,
 }
 
 var ProposerSlashingSsz = GossipTopic{
-	Name:     ProposerSlashingTopic,
+	Name:     gossip.TopicNameProposerSlashing,
 	CodecStr: SSZSnappyCodec,
 }
 
 var AttesterSlashingSsz = GossipTopic{
-	Name:     AttesterSlashingTopic,
+	Name:     gossip.TopicNameAttesterSlashing,
 	CodecStr: SSZSnappyCodec,
 }
 
 var BlsToExecutionChangeSsz = GossipTopic{
-	Name:     BlsToExecutionChangeTopic,
+	Name:     gossip.TopicNameBlsToExecutionChange,
 	CodecStr: SSZSnappyCodec,
 }
 
@@ -105,7 +94,7 @@ func NewGossipManager(
 func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
 	for i := uint64(0); i < maxBlobs; i++ {
 		ret = append(ret, GossipTopic{
-			Name:     TopicName(fmt.Sprintf(string(BlobSidecarTopic), i)),
+			Name:     gossip.TopicNameBlobSidecar(int(i)),
 			CodecStr: SSZSnappyCodec,
 		})
 	}
@@ -204,7 +193,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (
 	if err != nil {
 		return nil, fmt.Errorf("failed to join topic %s, err=%w", path, err)
 	}
-	topicScoreParams := s.topicScoreParams(string(topic.Name))
+	topicScoreParams := s.topicScoreParams(topic.Name)
 	if topicScoreParams != nil {
 		sub.topic.SetScoreParams(topicScoreParams)
 	}
@@ -225,7 +214,7 @@ func (s *Sentinel) Unsubscribe(topic GossipTopic, opts ...pubsub.TopicOpt) (err 
 
 func (s *Sentinel) topicScoreParams(topic string) *pubsub.TopicScoreParams {
 	switch {
-	case strings.Contains(topic, string(BeaconBlockTopic)):
+	case strings.Contains(topic, gossip.TopicNameBeaconBlock):
 		return s.defaultBlockTopicParams()
 	/*case strings.Contains(topic, GossipAggregateAndProofMessage):
 	return defaultAggregateTopicParams(activeValidators), nil
@@ -334,14 +323,14 @@ func (s *GossipSubscription) Close() {
 }
 
 type GossipMessage struct {
-	From  peer.ID
-	Topic TopicName
-	Data  []byte
+	From      peer.ID
+	TopicName string
+	Data      []byte
 }
 
 // this is a helper to begin running the gossip subscription.
 // function should not be used outside of the constructor for gossip subscription
-func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topic string) {
+func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, topicName string) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
@@ -359,16 +348,16 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				if errors.Is(err, context.Canceled) {
 					return
 				}
-				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topic", topic)
+				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
 			}
 			if msg.GetFrom() == s.host {
 				continue
 			}
 			s.ch <- &GossipMessage{
-				From:  msg.GetFrom(),
-				Topic: TopicName(topic),
-				Data:  common.Copy(msg.Data),
+				From:      msg.GetFrom(),
+				TopicName: topicName,
+				Data:      common.Copy(msg.Data),
 			}
 		}
 	}

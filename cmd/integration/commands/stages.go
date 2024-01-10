@@ -13,18 +13,20 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdallgrpc"
-	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/erigon/node/nodecfg"
-	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdallgrpc"
+
+	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/turbo/builder"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/commitment"
@@ -37,6 +39,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -922,7 +926,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return reset2.WarmupExec(ctx, db)
 	}
 	if reset {
-		return reset2.ResetExec(ctx, db, chain, "")
+		return reset2.ResetExec(ctx, db, chain, "", logger)
 	}
 
 	if txtrace {
@@ -964,10 +968,11 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		}
 		defer tx.Rollback()
 	}
+	txc := wrap.TxContainer{Tx: tx}
 
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.Execution, s.BlockNumber-unwind, s.BlockNumber)
-		err := stagedsync.UnwindExecutionStage(u, s, tx, ctx, cfg, true, logger)
+		err := stagedsync.UnwindExecutionStage(u, s, txc, ctx, cfg, true, logger)
 		if err != nil {
 			return err
 		}
@@ -986,7 +991,7 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		return nil
 	}
 
-	err := stagedsync.SpawnExecuteBlocksStage(s, sync, tx, block, ctx, cfg, true /* initialCycle */, logger)
+	err := stagedsync.SpawnExecuteBlocksStage(s, sync, txc, block, ctx, cfg, true /* initialCycle */, logger)
 	if err != nil {
 		return err
 	}
@@ -1674,7 +1679,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 	} else if cc.Aura != nil {
 		consensusConfig = &config.Aura
 	} else if cc.Bor != nil {
-		consensusConfig = &config.Bor
+		consensusConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
 			if config.HeimdallgRPCAddress != "" {

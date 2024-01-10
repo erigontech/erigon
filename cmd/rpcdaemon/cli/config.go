@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -23,19 +25,26 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/contract"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/contract"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
+
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
+	grpcHealth "google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -47,12 +56,6 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
-	grpcHealth "google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql"
@@ -502,9 +505,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
 
+				borConfig := cc.Bor.(*borcfg.BorConfig)
+
 				engine = bor.NewRo(cc, borKv, blockReader,
 					span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-					contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+					contract.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 
 			default:
 				engine = ethash.NewFaker()
@@ -910,9 +915,11 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			return false
 		}
 
+		borConfig := cc.Bor.(*borcfg.BorConfig)
+
 		e.engine = bor.NewRo(cc, borKv, blockReader,
 			span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-			contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+			contract.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 	} else {
 		e.engine = ethash.NewFaker()
 	}

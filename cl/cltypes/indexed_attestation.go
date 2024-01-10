@@ -16,6 +16,13 @@ type IndexedAttestation struct {
 	Signature        libcommon.Bytes96     `json:"signature"`
 }
 
+func NewIndexedAttestation() *IndexedAttestation {
+	return &IndexedAttestation{
+		AttestingIndices: solid.NewRawUint64List(2048, nil),
+		Data:             solid.NewAttestationData(),
+	}
+}
+
 func (i *IndexedAttestation) Static() bool {
 	return false
 }

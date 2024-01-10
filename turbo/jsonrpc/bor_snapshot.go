@@ -6,22 +6,23 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/finality/whitelist"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
 type Snapshot struct {
-	config *chain.BorConfig // Consensus engine parameters to fine tune behavior
+	config *borcfg.BorConfig // Consensus engine parameters to fine tune behavior
 
 	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
 	Hash         common.Hash               `json:"hash"`         // Block hash where the snapshot was created
@@ -526,7 +527,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 		number := header.Number.Uint64()
 
 		// Delete the oldest signer from the recent list to allow it signing again
-		currentSprint := s.config.CalculateSprint(number)
+		currentSprint := s.config.CalculateSprintLength(number)
 		if number >= currentSprint {
 			delete(snap.Recents, number-currentSprint)
 		}
@@ -628,8 +629,8 @@ func loadSnapshot(api *BorImpl, db kv.Tx, borDb kv.Tx, hash common.Hash) (*Snaps
 	if err := json.Unmarshal(blob, snap); err != nil {
 		return nil, err
 	}
-	config, _ := api.chainConfig(db)
-	snap.config = config.Bor
+	borEngine, _ := api.bor()
+	snap.config = borEngine.Config()
 
 	// update total voting power
 	if err := snap.ValidatorSet.UpdateTotalVotingPower(); err != nil {

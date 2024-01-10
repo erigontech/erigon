@@ -8,11 +8,12 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 // Heimdall is a wrapper of Heimdall HTTP API
@@ -62,12 +63,6 @@ func cmpBlockNumToMilestoneRange(n uint64, m *milestone.Milestone) int {
 	return cmpNumToRange(n, m.StartBlock, m.EndBlock)
 }
 
-func reverse[T any](s []T) {
-	for i, j := 0, len(s)-1; i < j; i, j = i+1, j-1 {
-		s[i], s[j] = s[j], s[i]
-	}
-}
-
 func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([]*checkpoint.Checkpoint, error) {
 	count, err := impl.client.FetchCheckpointCount(ctx)
 	if err != nil {
@@ -96,7 +91,7 @@ func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([
 		}
 	}
 
-	reverse(checkpoints)
+	common.SliceReverse(checkpoints)
 	return checkpoints, nil
 }
 
@@ -112,7 +107,7 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]
 		m, err := impl.client.FetchMilestone(ctx, i)
 		if err != nil {
 			if errors.Is(err, heimdall.ErrNotInMilestoneList) {
-				reverse(milestones)
+				common.SliceReverse(milestones)
 				return milestones, ErrIncompleteMilestoneRange
 			}
 			return nil, err
@@ -132,12 +127,12 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]
 		}
 	}
 
-	reverse(milestones)
+	common.SliceReverse(milestones)
 	return milestones, nil
 }
 
 func (impl *HeimdallImpl) FetchSpan(ctx context.Context, start uint64) (*span.HeimdallSpan, error) {
-	return impl.client.Span(ctx, bor.SpanIDAt(start))
+	return impl.client.Span(ctx, span.IDAt(start))
 }
 
 func (impl *HeimdallImpl) OnMilestoneEvent(ctx context.Context, callback func(*milestone.Milestone)) error {

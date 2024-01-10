@@ -25,7 +25,10 @@ jobs:
     if: ${{ github.event_name == 'push' || !github.event.pull_request.draft }}
     strategy:
       matrix:
-        os: [ ubuntu-22.04, macos-13-xlarge ] # list of os: https://github.com/actions/virtual-environments
+        # list of os: https://github.com/actions/virtual-environments
+        os:
+          - ubuntu-22.04
+          - macos-13
     runs-on: ${{ matrix.os }}
 
     steps:

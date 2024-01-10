@@ -8,7 +8,9 @@ import (
 	"math"
 	"sort"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -17,10 +19,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -870,6 +871,33 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 	}
 	return nil
 }
+
+func (r *BlockReader) IntegrityTxnID(failFast bool) error {
+	defer log.Info("[integrity] IntegrityTxnID done")
+	view := r.sn.View()
+	defer view.Close()
+
+	var expectedFirstTxnID uint64
+	for _, snb := range view.Bodies() {
+		firstBlockNum := snb.idxBodyNumber.BaseDataID()
+		sn, _ := view.TxsSegment(firstBlockNum)
+		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
+		if err != nil {
+			return err
+		}
+		if b.BaseTxId != expectedFirstTxnID {
+			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxId, sn.Seg.Count(), expectedFirstTxnID)
+			if failFast {
+				return err
+			} else {
+				log.Error(err.Error())
+			}
+		}
+		expectedFirstTxnID = b.BaseTxId + uint64(sn.Seg.Count())
+	}
+	return nil
+}
+
 func (r *BlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error) {
 	return rawdb.ReadBadHeaderNumber(tx, hash)
 }
@@ -1141,7 +1169,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 		return 0
 	}
 
-	lastSpanID := bor.SpanIDAt(lastSegment.to)
+	lastSpanID := span.IDAt(lastSegment.to)
 	if lastSpanID > 0 {
 		lastSpanID--
 	}
@@ -1151,7 +1179,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	var endBlock uint64
 	if spanId > 0 {
-		endBlock = bor.SpanEndBlockNum(spanId)
+		endBlock = span.EndBlockNum(spanId)
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1174,11 +1202,11 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx == nil {
 			continue
 		}
-		spanFrom := bor.SpanIDAt(sn.from)
+		spanFrom := span.IDAt(sn.from)
 		if spanId < spanFrom {
 			continue
 		}
-		spanTo := bor.SpanIDAt(sn.to)
+		spanTo := span.IDAt(sn.to)
 		if spanId >= spanTo {
 			continue
 		}

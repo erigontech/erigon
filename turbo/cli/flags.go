@@ -156,7 +156,7 @@ var (
 	}
 
 	SyncLoopBreakAfterFlag = cli.StringFlag{
-		Name:  "sync.loop.break",
+		Name:  "sync.loop.break.after",
 		Usage: "Sets the last stage of the sync loop to run",
 		Value: "",
 	}
@@ -419,7 +419,13 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	apis := ctx.String(utils.HTTPApiFlag.Name)
 
 	c := &httpcfg.HttpCfg{
-		Enabled:           ctx.Bool(utils.HTTPEnabledFlag.Name),
+		Enabled: func() bool {
+			if ctx.IsSet(utils.HTTPEnabledFlag.Name) {
+				return ctx.Bool(utils.HTTPEnabledFlag.Name)
+			}
+
+			return true
+		}(),
 		HttpServerEnabled: ctx.Bool(utils.HTTPServerEnabledFlag.Name),
 		Dirs:              cfg.Dirs,
 

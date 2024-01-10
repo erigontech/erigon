@@ -132,12 +132,18 @@ func (it *lookup) startQueries() bool {
 	return it.queries > 0
 }
 
+type ctxKey int
+
+const (
+	ckNoSlowdown ctxKey = iota
+)
+
 func disableLookupSlowdown(ctx context.Context) context.Context {
-	return context.WithValue(ctx, "p2p.discover.lookup.noSlowdown", true)
+	return context.WithValue(ctx, ckNoSlowdown, true)
 }
 
 func isDisabledLookupSlowdown(ctx context.Context) bool {
-	return ctx.Value("p2p.discover.lookup.noSlowdown") != nil
+	return ctx.Value(ckNoSlowdown) != nil
 }
 
 func (it *lookup) slowdown() {

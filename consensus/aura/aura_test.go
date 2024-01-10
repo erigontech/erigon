@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // Check that the first block of Gnosis Chain, which doesn't have any transactions,
@@ -24,7 +25,7 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := core.GnosisGenesisBlock()
-	genesisBlock, _, err := core.GenesisToBlock(genesis, "")
+	genesisBlock, _, err := core.GenesisToBlock(genesis, "", log.Root())
 	require.NoError(err)
 
 	genesis.Config.TerminalTotalDifficultyPassed = false

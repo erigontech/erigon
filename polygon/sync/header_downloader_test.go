@@ -12,9 +12,10 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
+
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/sync/mock"
 	"github.com/ledgerwatch/erigon/polygon/sync/peerinfo"

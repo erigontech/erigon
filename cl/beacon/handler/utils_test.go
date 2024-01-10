@@ -24,9 +24,12 @@ import (
 )
 
 func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, handler *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
+	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {
 		blocks, preState, postState = tests.GetPhase0Random()
 	} else if v == clparams.BellatrixVersion {
+		bcfg.AltairForkEpoch = 1
+		bcfg.BellatrixForkEpoch = 1
 		blocks, preState, postState = tests.GetBellatrixRandom()
 	} else {
 		require.FailNow(t, "unknown state version")
@@ -37,9 +40,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 	reader, f = tests.LoadChain(blocks, postState, db, t)
 
 	rawDB := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
-
-	bcfg := clparams.MainnetBeaconConfig
 	bcfg.InitializeForkSchedule()
+
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
 	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, true, f)
@@ -47,6 +49,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, f, preState)
 	opPool = pool.NewOperationsPool(&bcfg)
+	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
 	gC := clparams.GenesisConfigs[clparams.MainnetNetwork]
 	handler = NewApiHandler(
@@ -58,7 +61,9 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 		opPool,
 		reader,
 		syncedData,
-		statesReader)
+		statesReader,
+		nil,
+		"test-version")
 	handler.init()
 	return
 }
