@@ -8,10 +8,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
-	heimdallspan "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 )
 
 type testValidatorSetInterface struct {

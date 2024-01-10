@@ -6,12 +6,13 @@ import (
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 
+	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
-	heimdallspan "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 )
 
 type DifficultyCalculator interface {

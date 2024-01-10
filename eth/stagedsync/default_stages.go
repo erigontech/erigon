@@ -3,12 +3,13 @@ package stagedsync
 import (
 	"context"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func DefaultStages(ctx context.Context,
@@ -67,7 +68,7 @@ func DefaultStages(ctx context.Context,
 				if badBlockUnwind {
 					return nil
 				}
-				return BorHeimdallForward(s, u, ctx, txc.Tx, borHeimdallCfg, false, logger)
+				return BorHeimdallForward(s, u, ctx, txc.Tx, borHeimdallCfg, logger)
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				return BorHeimdallUnwind(u, ctx, s, txc.Tx, borHeimdallCfg)

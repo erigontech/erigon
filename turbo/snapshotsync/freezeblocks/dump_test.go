@@ -1,7 +1,7 @@
 package freezeblocks_test
 
 import (
-	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"math/big"
 	"testing"
 
