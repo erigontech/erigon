@@ -5,7 +5,10 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"testing"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
@@ -13,12 +16,24 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/log/v3"
 )
+
+//
+// TODO - do below or actually move all devnet tests in same package so they can run sequentially?
+//        (another part of the problem may be that the ports are not properly released?)
+//
+
+var basePort atomic.Int32
+
+func init() {
+	basePort.Store(40_000)
+}
 
 func initDevnet(chainName string, dataDir string, producerCount int, logger log.Logger) (devnet.Devnet, error) {
 	const baseRpcHost = "localhost"
-	const baseRpcPort = 8545
+	// initDevnet is used for tests across several test packages which may be run in parallel
+	// hence, we use an atomically incremented base port value to minimise port clashes
+	baseRpcPort := int(basePort.Add(50))
 
 	switch chainName {
 	case networkname.BorDevnetChainName:
