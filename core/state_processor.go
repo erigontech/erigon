@@ -37,12 +37,18 @@ import (
 // indicating the block was invalid.
 func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *GasPool, ibs *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx types.Transaction, usedGas *uint64, evm vm.VMInterface, cfg vm.Config, effectiveGasPricePercentage uint8) (*types.Receipt, []byte, error) {
 	rules := evm.ChainRules()
+
 	msg, err := tx.AsMessage(*types.MakeSigner(config, header.Number.Uint64()), header.BaseFee, rules)
 	if err != nil {
 		return nil, nil, err
 	}
 	msg.SetEffectiveGasPricePercentage(effectiveGasPricePercentage)
 	msg.SetCheckNonce(!cfg.StatelessExec)
+
+	// apply effective gas percentage here, so it is actual for all further calculations
+	if evm.ChainRules().IsMordor {
+		msg.SetGasPrice(CalculateEffectiveGas(msg.GasPrice(), effectiveGasPricePercentage))
+	}
 
 	if msg.FeeCap().IsZero() && engine != nil {
 		// Only zero-gas transactions may be service ones

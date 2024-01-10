@@ -537,6 +537,11 @@ func (m Message) DataHashes() []libcommon.Hash { return m.dataHashes }
 func (m *Message) SetEffectiveGasPricePercentage(effectiveGasPricePercentage uint8) {
 	m.effectiveGasPricePercentage = effectiveGasPricePercentage
 }
+
+func (m *Message) SetGasPrice(gasPrice *uint256.Int) {
+	m.gasPrice.Set(gasPrice)
+}
+
 func (m Message) EffectiveGasPricePercentage() uint8 { return m.effectiveGasPricePercentage }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {

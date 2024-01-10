@@ -157,11 +157,6 @@ func NewStateTransition(evm vm.VMInterface, msg Message, gp *GasPool) *StateTran
 
 	gas := msg.GasPrice()
 
-	if evm.ChainRules().IsMordor {
-		ep := msg.EffectiveGasPricePercentage()
-		gas = CalculateEffectiveGas(gas, ep)
-	}
-
 	return &StateTransition{
 		gp:        gp,
 		evm:       evm,
