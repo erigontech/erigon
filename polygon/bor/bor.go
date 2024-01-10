@@ -1112,11 +1112,13 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		select {
 		case <-stop:
 			c.logger.Info("[bor] Stopped sealing operation for block", "number", number)
+			results <- nil
 			return
 		case <-time.After(delay):
 
 			if c.headerProgress != nil && c.headerProgress.Progress() >= number {
 				c.logger.Info("Discarding sealing operation for block", "number", number)
+				results <- nil
 				return
 			}
 

@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func initDevnet(chainName string, dataDir string, producerCount int, logger log.Logger) (devnet.Devnet, error) {
+func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.Logger, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {
 	const baseRpcHost = "localhost"
 	const baseRpcPort = 8545
 
@@ -24,17 +24,17 @@ func initDevnet(chainName string, dataDir string, producerCount int, logger log.
 	case networkname.BorDevnetChainName:
 		heimdallGrpcAddr := polygon.HeimdallGrpcAddressDefault
 		const sprintSize uint64 = 0
-		return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, logger), nil
+		return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 
 	case networkname.DevChainName:
-		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, logger), nil
+		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 
 	case "":
 		envChainName, _ := os.LookupEnv("DEVNET_CHAIN")
 		if envChainName == "" {
 			envChainName = networkname.DevChainName
 		}
-		return initDevnet(envChainName, dataDir, producerCount, logger)
+		return initDevnet(envChainName, dataDir, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel)
 
 	default:
 		return nil, fmt.Errorf("unknown network: '%s'", chainName)
@@ -57,8 +57,12 @@ func ContextStart(t *testing.T, chainName string) (devnet.Context, error) {
 
 	producerCount, _ := strconv.ParseUint(envProducerCount, 10, 64)
 
+	// TODO get log levels from env
+	var dirLogLevel log.Lvl = log.LvlTrace
+	var consoleLogLevel log.Lvl = log.LvlCrit
+
 	var network devnet.Devnet
-	network, err := initDevnet(chainName, dataDir, int(producerCount), logger)
+	network, err := initDevnet(chainName, dataDir, int(producerCount), 0, logger, consoleLogLevel, dirLogLevel)
 	if err != nil {
 		return nil, fmt.Errorf("ContextStart initDevnet failed: %w", err)
 	}
