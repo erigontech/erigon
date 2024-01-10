@@ -1121,16 +1121,8 @@ MainLoop:
 			continue
 		}
 		for _, t := range types {
-			found := false
-			// any version is fine
-			for v := f.Version + 5; v > 0; v-- {
-				p := filepath.Join(dir, snaptype.SegmentFileName(v, f.From, f.To, t))
-				if dir2.FileExist(p) {
-					found = true
-					break
-				}
-			}
-			if !found {
+			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t))
+			if !dir2.FileExist(p) {
 				continue MainLoop
 			}
 		}
