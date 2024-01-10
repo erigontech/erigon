@@ -1,6 +1,11 @@
 package handler
 
-import "net/http"
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"runtime"
+)
 
 func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) {
 	syncingStatus, err := uint64FromQueryParams(r, "syncing_status")
@@ -17,4 +22,15 @@ func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *ApiHandler) GetEthV1NodeVersion(w http.ResponseWriter, r *http.Request) {
+	// Get OS and Arch
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": map[string]interface{}{
+			"version": fmt.Sprintf("Caplin/%s %s/%s", a.version, runtime.GOOS, runtime.GOARCH),
+		},
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }

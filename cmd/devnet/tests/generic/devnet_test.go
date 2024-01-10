@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/admin"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
@@ -14,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
-	"github.com/stretchr/testify/require"
 )
 
 func testDynamicTx(t *testing.T, ctx context.Context) {
@@ -51,8 +52,6 @@ func TestDynamicTxAnyNode(t *testing.T) {
 }
 
 func TestCallContract(t *testing.T) {
-	t.Skip("FIXME: DeployAndCallLogSubscriber step fails: Log result is incorrect expected txIndex: 1, actual txIndex 2")
-
 	runCtx, err := tests.ContextStart(t, "")
 	require.Nil(t, err)
 	ctx := runCtx.WithCurrentNetwork(0)

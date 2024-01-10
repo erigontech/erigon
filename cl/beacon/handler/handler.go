@@ -32,14 +32,16 @@ type ApiHandler struct {
 	stateReader     *historical_states_reader.HistoricalStatesReader
 	sentinel        sentinel.SentinelClient
 
+	version string // Node's version
+
 	// pools
 	randaoMixesPool sync.Pool
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient) *ApiHandler {
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string) *ApiHandler {
 	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
 		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
-	}}, sentinel: sentinel}
+	}}, sentinel: sentinel, version: version}
 }
 
 func (a *ApiHandler) init() {
@@ -49,9 +51,11 @@ func (a *ApiHandler) init() {
 	// otterscn specific ones are commented as such
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
+			r.Get("/builder/states/{state_id}/expected_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEth1V1BuilderStatesExpectedWit))
 			r.Get("/events", http.NotFound)
 			r.Route("/node", func(r chi.Router) {
 				r.Get("/health", a.GetEthV1NodeHealth)
+				r.Get("/version", a.GetEthV1NodeVersion)
 			})
 			r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
 			r.Route("/config", func(r chi.Router) {

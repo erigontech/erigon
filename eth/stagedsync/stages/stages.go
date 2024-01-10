@@ -49,6 +49,7 @@ var (
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
+	MiningBorHeimdall SyncStage = "MiningBorHeimdall"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
 	// Beacon chain stages

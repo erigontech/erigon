@@ -9,9 +9,9 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	checkpoint "github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
-	milestone "github.com/ledgerwatch/erigon/consensus/bor/heimdall/milestone"
-	span "github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
+	checkpoint "github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
+	milestone "github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
+	span "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 )
 
 // MockHeimdall is a mock of Heimdall interface.
