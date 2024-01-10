@@ -883,7 +883,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x0200006f
 	cfg.CapellaForkEpoch = 244224
 	cfg.CapellaForkVersion = 0x0300006f
-	cfg.DenebForkEpoch = 8265728
+	cfg.DenebForkEpoch = 516608
 	cfg.DenebForkVersion = 0x0400006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
