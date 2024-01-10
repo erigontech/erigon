@@ -258,8 +258,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	if subBalance {
 		// CS TODO: cross check
-		st.state.SubBalance(st.msg.From(), gasVal, evmtypes.BalanceChangeGasBuy)
-		st.state.SubBalance(st.msg.From(), blobGasVal, evmtypes.BalanceChangeGasBuy)
+		st.state.SubBalance(st.msg.From(), gasVal, evmtypes.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), blobGasVal, evmtypes.BalanceDecreaseGasBuy)
 	}
 	return nil
 }
@@ -441,12 +441,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	st.state.AddBalance(coinbase, amount, evmtypes.BalanceChangeRewardTransactionFee)
+	st.state.AddBalance(coinbase, amount, evmtypes.BalanceIncreaseRewardTransactionFee)
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context().BlockNumber)
 		if burntContractAddress != nil {
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context().BaseFee)
-			st.state.AddBalance(*burntContractAddress, burnAmount, evmtypes.BalanceChangeBurn)
+			st.state.AddBalance(*burntContractAddress, burnAmount, evmtypes.BalanceChangeUnspecified)
 		}
 	}
 	if st.isBor {
@@ -489,7 +489,7 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), st.gasPrice)
-	st.state.AddBalance(st.msg.From(), remaining, evmtypes.BalanceChangeGasRefund)
+	st.state.AddBalance(st.msg.From(), remaining, evmtypes.BalanceIncreaseGasReturn)
 
 	if st.evm.Config().Tracer != nil && st.gas > 0 {
 		st.evm.Config().Tracer.OnGasChange(st.gas, 0, vm.GasChangeTxLeftOverReturned)

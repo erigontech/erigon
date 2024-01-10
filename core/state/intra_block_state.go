@@ -450,7 +450,7 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 	})
 
 	if sdb.logger != nil && !prevBalance.IsZero() {
-		sdb.logger.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), evmtypes.BalanceChangeSuicideWithdraw)
+		sdb.logger.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), evmtypes.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
@@ -655,7 +655,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		// If ether was sent to account post-selfdestruct it is burnt.
 		if logger != nil && !stateObject.Balance().IsZero() {
-			logger.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), evmtypes.BalanceChangeBurn)
+			logger.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), evmtypes.BalanceDecreaseSelfdestructBurn)
 		}
 
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {

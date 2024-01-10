@@ -579,7 +579,7 @@ func GenesisToBlock(g *types.Genesis, tmpDir string, bcLogger BlockchainLogger) 
 			}
 			// This is not actually logged via tracer because OnGenesisBlock
 			// already captures the allocations.
-			statedb.AddBalance(addr, balance, evmtypes.BalanceChangeGenesisBalance)
+			statedb.AddBalance(addr, balance, evmtypes.BalanceIncreaseGenesisBalance)
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
 			for key, value := range account.Storage {
