@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -845,18 +846,33 @@ type AggregatorPruneStat struct {
 }
 
 func (as *AggregatorPruneStat) String() string {
+	names := make([]string, 0)
+	for k := range as.Domains {
+		names = append(names, k)
+	}
+
+	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+
 	var sb strings.Builder
-	for k, v := range as.Domains {
-		if v != nil {
-			sb.WriteString(fmt.Sprintf("%s| %s; ", k, v.String()))
+	for _, d := range names {
+		v, ok := as.Domains[d]
+		if ok && v != nil {
+			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
 		}
 	}
-	for k, v := range as.Indices {
-		if v != nil {
-			sb.WriteString(fmt.Sprintf("%s| %s; ", k, v.String()))
+	names = names[:0]
+	for k := range as.Indices {
+		names = append(names, k)
+	}
+	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+
+	for _, d := range names {
+		v, ok := as.Domains[d]
+		if ok && v != nil {
+			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
 		}
 	}
-	return sb.String()
+	return strings.TrimSuffix(sb.String(), "; ")
 }
 
 func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
