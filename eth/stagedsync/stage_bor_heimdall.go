@@ -145,7 +145,9 @@ func BorHeimdallForward(
 				PeerID:  cfg.hd.SourcePeerId(hash),
 			}})
 			dataflow.HeaderDownloadStates.AddChange(headNumber, dataflow.HeaderInvalidated)
-			s.state.UnwindTo(unwindPoint, ForkReset(hash))
+			if err := s.state.UnwindTo(unwindPoint, ForkReset(hash), tx); err != nil {
+				return err
+			}
 			var reset uint64 = 0
 			generics.BorMilestoneRewind.Store(&reset)
 			return fmt.Errorf("verification failed for header %d: %x", headNumber, header.Hash())
@@ -212,7 +214,9 @@ func BorHeimdallForward(
 				PeerID:  cfg.hd.SourcePeerId(header.Hash()),
 			}})
 			dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-			s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
+			if err := s.state.UnwindTo(blockNum-1, ForkReset(header.Hash())); err != nil {
+				return err
+			}
 			return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 		}
 
