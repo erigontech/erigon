@@ -7,18 +7,19 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.Logger, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {
 	const baseRpcHost = "localhost"
-	const baseRpcPort = 8545
+	const baseRpcPort = 9545
 
 	switch chainName {
 	case networkname.BorDevnetChainName:
@@ -42,6 +43,7 @@ func initDevnet(chainName string, dataDir string, producerCount int, gasLimit ui
 }
 
 func ContextStart(t *testing.T, chainName string) (devnet.Context, error) {
+	//goland:noinspection GoBoolExpressions
 	if runtime.GOOS == "windows" {
 		t.Skip("FIXME: TempDir RemoveAll cleanup error: remove dev-0\\clique\\db\\clique\\mdbx.dat: The process cannot access the file because it is being used by another process")
 	}
