@@ -1292,7 +1292,7 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snasho
 		return nil, nil, nil, nil, nil, err
 	}
 	if err = agg.OpenFolder(false); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, err
 	}
 	return blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, nil
 }
