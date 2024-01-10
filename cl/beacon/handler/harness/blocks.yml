@@ -1,0 +1,97 @@
+tests:
+  ## blocks
+  - name: by hash
+    expect:
+      file: "./block_1.json"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v2/beacon/blocks/0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660
+  - name: by head
+    expect:
+      file: "./block_1.json"
+      fs: td
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual == expect
+    actual:
+      handler: i
+      path: /eth/v2/beacon/blocks/head
+  - name: not found
+    actual:
+      handler: i
+      path: /eth/v2/beacon/blocks/0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef
+    compare:
+      expr: "actual_code == 404"
+  ## blinded blocks
+  - name: blinded by hash
+    expect:
+      file: "./blinded_block_1.json"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blinded_blocks/0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660
+  - name: blinded by head
+    expect:
+      file: "./blinded_block_1.json"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blinded_blocks/head
+  - name: blinded not found
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blinded_blocks/0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef
+    compare:
+      expr: "actual_code == 404"
+  ### attestations
+  - name: attestations by hash
+    expect:
+      file: "./block_1.json"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660/attestations
+    compare:
+      expr: "size(actual.data) == size(expect.data.message.body.attestations)"
+  - name: attestions by head
+    expect:
+      file: "./block_1.json"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/head/attestations
+    compare:
+      exprs:
+        - actual_code == 200
+        - size(actual.data) == size(expect.data.message.body.attestations)
+  - name: attestions not found
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef/attestations
+    compare:
+      expr: "actual_code == 404"
+  ### root
+  - name: root by hash
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660/root
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.root == "0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660"
+  - name: root by head
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/head/root
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.root == "0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660"
+  - name: root not found
+    actual:
+      handler: i
+      path: /eth/v1/beacon/blocks/19912929/root
+    compare:
+      expr: "actual_code == 404"
