@@ -18,8 +18,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/core/state/temporal"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -32,8 +30,8 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
-	libstate "github.com/ledgerwatch/erigon-lib/state"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/state/exec3"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -41,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -141,7 +140,7 @@ rwloop does:
 When rwLoop has nothing to do - it does Prune, or flush of WAL to RwTx (agg.rotate+agg.Flush)
 */
 func ExecV3(ctx context.Context,
-	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, txc wrap.TxContainer,
 	parallel bool, //nolint
 	maxBlockNum uint64,
 	logger log.Logger,
@@ -157,6 +156,7 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
+	applyTx := txc.Tx
 	useExternalTx := applyTx != nil
 	if !useExternalTx {
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
@@ -195,26 +195,32 @@ func ExecV3(ctx context.Context,
 	}
 	if initialCycle {
 		if casted, ok := applyTx.(*temporal.Tx); ok {
-			casted.AggCtx().LogStats(casted, func(endTxNumMinimax uint64) uint64 {
+			casted.AggCtx().(*state2.AggregatorV3Context).LogStats(casted, func(endTxNumMinimax uint64) uint64 {
 				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
 				return histBlockNumProgress
 			})
 		}
 	}
 
-	stageProgress := execStage.BlockNumber
-	var blockNum uint64
-	var maxTxNum uint64
-	outputTxNum := atomic.Uint64{}
-	blockComplete := atomic.Bool{}
+	inMemExec := txc.Doms != nil
+	var doms *state2.SharedDomains
+	if inMemExec {
+		doms = txc.Doms
+	} else {
+		doms = state2.NewSharedDomains(applyTx, log.New())
+		defer doms.Close()
+	}
+
+	var (
+		inputTxNum    = doms.TxNum()
+		stageProgress = execStage.BlockNumber
+		outputTxNum   = atomic.Uint64{}
+		blockComplete = atomic.Bool{}
+
+		offsetFromBlockBeginning uint64
+		blockNum, maxTxNum       uint64
+	)
 	blockComplete.Store(true)
-
-	// MA setio
-	doms := state2.NewSharedDomains(applyTx)
-	defer doms.Close()
-
-	var inputTxNum = doms.TxNum()
-	var offsetFromBlockBeginning uint64
 
 	nothingToExec := func(applyTx kv.Tx) (bool, error) {
 		_, lastTxNum, err := rawdbv3.TxNums.Last(applyTx)
@@ -299,18 +305,14 @@ func ExecV3(ctx context.Context,
 	blockNum = doms.BlockNum()
 	outputTxNum.Store(doms.TxNum())
 
-	if applyTx != nil {
-		if dbg.DiscardHistory() {
-			doms.DiscardHistory()
-		}
-	}
 	var err error
 
-	log.Warn("execv3 starting",
-		"inputTxNum", inputTxNum, "restored_block", blockNum,
-		"restored_txNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning)
+	if maxBlockNum-blockNum > 16 {
+		log.Info(fmt.Sprintf("[%s] starting", execStage.LogPrefix()),
+			"from", blockNum, "to", maxBlockNum, "fromTxNum", doms.TxNum(), "offsetFromBlockBeginning", offsetFromBlockBeginning, "initialCycle", initialCycle, "useExternalTx", useExternalTx)
+	}
 
-	if initialCycle && blocksFreezeCfg.Produce {
+	if blocksFreezeCfg.Produce {
 		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
@@ -410,11 +412,6 @@ func ExecV3(ctx context.Context,
 			defer tx.Rollback()
 
 			doms.SetTx(tx)
-			if dbg.DiscardHistory() {
-				doms.DiscardHistory()
-			} else {
-				doms.StartWrites()
-			}
 
 			defer applyLoopWg.Wait()
 			applyCtx, cancelApplyCtx := context.WithCancel(ctx)
@@ -446,9 +443,14 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac.Close()
-						if err = doms.Flush(ctx, tx); err != nil {
-							return err
+						if !inMemExec {
+							if err = doms.Flush(ctx, tx); err != nil {
+								return err
+							}
 						}
+						break
+					}
+					if inMemExec {
 						break
 					}
 
@@ -722,6 +724,9 @@ Loop:
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
 			}
+			doms.SetTxNum(txTask.TxNum)
+			doms.SetBlockNum(txTask.BlockNum)
+
 			//if txTask.HistoryExecution { // nolint
 			//	fmt.Printf("[dbg] txNum: %d, hist=%t\n", txTask.TxNum, txTask.HistoryExecution)
 			//}
@@ -782,7 +787,7 @@ Loop:
 					if errors.Is(err, context.Canceled) {
 						return err
 					}
-					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "hash", header.Hash().String(), "err", err)
+					logger.Warn(fmt.Sprintf("[%s] Execution failed", execStage.LogPrefix()), "block", blockNum, "txNum", txTask.TxNum, "hash", header.Hash().String(), "err", err)
 					if cfg.hd != nil && errors.Is(err, consensus.ErrInvalidBlock) {
 						cfg.hd.ReportBadHeaderPoS(header.Hash(), header.ParentHash)
 					}
@@ -833,7 +838,7 @@ Loop:
 			case <-logEvery.C:
 				stepsInDB := rawdbhelpers.IdxStepsCountV3(applyTx)
 				progress.Log(rs, in, rws, count, inputBlockNum.Load(), outputBlockNum.GetValueUint64(), outputTxNum.Load(), execRepeats.GetValueUint64(), stepsInDB)
-				if rs.SizeEstimate() < commitThreshold {
+				if rs.SizeEstimate() < commitThreshold || inMemExec {
 					break
 				}
 				var (
@@ -851,7 +856,7 @@ Loop:
 				}
 
 				tt = time.Now()
-				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u); err != nil {
+				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
 				} else if !ok {
 					break Loop
@@ -884,7 +889,7 @@ Loop:
 									return err
 								}
 							}
-							if err := tx.(state2.HasAggCtx).AggCtx().PruneWithTimeout(ctx, 60*time.Minute, tx); err != nil {
+							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).Prune(ctx, tx); err != nil {
 								return err
 							}
 							return nil
@@ -898,7 +903,8 @@ Loop:
 							return err
 						}
 					}
-					doms = state2.NewSharedDomains(applyTx)
+					doms = state2.NewSharedDomains(applyTx, logger)
+					doms.SetTxNum(inputTxNum)
 					rs = state.NewStateV3(doms, logger)
 
 					applyWorker.ResetTx(applyTx)
@@ -937,7 +943,7 @@ Loop:
 
 	if !u.HasUnwindPoint() {
 		if b != nil {
-			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u)
+			_, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec)
 			if err != nil {
 				return err
 			}
@@ -952,9 +958,6 @@ Loop:
 		if err = applyTx.Commit(); err != nil {
 			return err
 		}
-	}
-	if parallel && blocksFreezeCfg.Produce {
-		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 	return nil
 }
@@ -998,7 +1001,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		doms.Flush(context.Background(), tx)
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			panic(err)
 		}
@@ -1013,7 +1016,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1026,7 +1029,7 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 		}
 	}
 	{
-		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.CommitmentDomain, nil, nil, -1)
 		if err != nil {
 			panic(1)
 		}
@@ -1044,13 +1047,10 @@ func dumpPlainStateDebug(tx kv.RwTx, doms *state2.SharedDomains) {
 }
 
 // flushAndCheckCommitmentV3 - does write state to db and then check commitment
-func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder) (bool, error) {
+func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.RwTx, doms *state2.SharedDomains, cfg ExecuteBlockCfg, e *StageState, maxBlockNum uint64, parallel bool, logger log.Logger, u Unwinder, inMemExec bool) (bool, error) {
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
 	if !parallel {
-		//if err := doms.Flush(ctx, applyTx); err != nil {
-		//	return false, err
-		//}
 		if err := e.Update(applyTx, maxBlockNum); err != nil {
 			return false, err
 		}
@@ -1069,8 +1069,10 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, fmt.Errorf("StateV3.Apply: %w", err)
 	}
 	if bytes.Equal(rh, header.Root.Bytes()) {
-		if err := doms.Flush(ctx, applyTx); err != nil {
-			return false, err
+		if !inMemExec {
+			if err := doms.Flush(ctx, applyTx); err != nil {
+				return false, err
+			}
 		}
 		return true, nil
 	}
@@ -1104,7 +1106,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 		return false, nil
 	}
 
-	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindDomainsToBlockNum(applyTx)
+	unwindToLimit, err := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).CanUnwindDomainsToBlockNum(applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1115,7 +1117,7 @@ func flushAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyT
 	unwindTo := maxBlockNum - jump
 
 	// protect from too far unwind
-	allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().CanUnwindBeforeBlockNum(unwindTo, applyTx)
+	allowedUnwindTo, ok, err := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindTo, applyTx)
 	if err != nil {
 		return false, err
 	}
@@ -1177,6 +1179,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 		}
 
 		if txTask.Final {
+			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
 			err := rs.ApplyState4(ctx, txTask)
 			if err != nil {
 				return outputTxNum, conflicts, triggers, processedBlockNum, false, fmt.Errorf("StateV3.Apply: %w", err)
@@ -1208,7 +1211,7 @@ func processResultQueue(ctx context.Context, in *state.QueueWithRetry, rws *stat
 
 func reconstituteStep(last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
-	as *libstate.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
+	as *state2.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
 	chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine,
 	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
@@ -1314,7 +1317,7 @@ func reconstituteStep(last bool,
 	rs := state.NewReconState(workCh)
 	prevCount := rs.DoneCount()
 	for i := 0; i < workerCount; i++ {
-		var localAs *libstate.AggregatorStep
+		var localAs *state2.AggregatorStep
 		if i == 0 {
 			localAs = as
 		} else {
@@ -1441,7 +1444,7 @@ func reconstituteStep(last bool,
 				return err
 			}
 			if b == nil {
-				return fmt.Errorf("could not find block %d\n", bn)
+				return fmt.Errorf("could not find block %d", bn)
 			}
 			txs := b.Transactions()
 			header := b.HeaderNoCopy()

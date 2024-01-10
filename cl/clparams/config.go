@@ -504,6 +504,10 @@ func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
 	return slot - (slot % slotsPerSyncCommitteePeriod)
 }
 
+func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
+	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
+}
+
 func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
 	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
 	return slot - (slot % p)
@@ -820,7 +824,8 @@ func goerliConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x02001020
 	cfg.CapellaForkEpoch = 162304
 	cfg.CapellaForkVersion = 0x03001020
-	cfg.DenebForkVersion = 0x40001020
+	cfg.DenebForkEpoch = 231680
+	cfg.DenebForkVersion = 0x04001020
 	cfg.TerminalTotalDifficulty = "10790000"
 	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
@@ -876,13 +881,15 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x0100006f
 	cfg.BellatrixForkEpoch = 180
 	cfg.BellatrixForkVersion = 0x0200006f
+	cfg.CapellaForkEpoch = 244224
+	cfg.CapellaForkVersion = 0x0300006f
+	cfg.DenebForkEpoch = 8265728
+	cfg.DenebForkVersion = 0x0400006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.CapellaForkEpoch = math.MaxUint64
-	cfg.DenebForkEpoch = math.MaxUint64
 	cfg.InitializeForkSchedule()
 	return cfg
 }

@@ -23,6 +23,9 @@ var CliFlags = []cli.Flag{
 	&EngineApiPortFlag,
 	&JwtSecret,
 	&utils.DataDirFlag,
+	&utils.BeaconApiAllowCredentialsFlag,
+	&utils.BeaconApiAllowMethodsFlag,
+	&utils.BeaconApiAllowOriginsFlag,
 }
 
 var (
@@ -56,7 +59,6 @@ var (
 		Usage: "sets the port to listen for beacon api requests",
 		Value: 5555,
 	}
-
 	BeaconDBModeFlag = cli.StringFlag{
 		Name:  "beacon-db-mode",
 		Usage: "level of storing on beacon chain, minimal(only 500k blocks stored), full (all blocks stored), light (no blocks stored)",

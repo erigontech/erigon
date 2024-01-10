@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 	"github.com/ledgerwatch/erigon/cl/transition"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -165,12 +166,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer blockRoots.Close()
 	stateRoots := etl.NewCollector(kv.StateRoot, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer stateRoots.Close()
-	minimalBeaconStates := etl.NewCollector(kv.MinimalBeaconState, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer minimalBeaconStates.Close()
+	slotData := etl.NewCollector(kv.SlotData, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer slotData.Close()
+	epochData := etl.NewCollector(kv.EpochData, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer epochData.Close()
 	inactivityScoresC := etl.NewCollector(kv.InactivityScores, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer inactivityScoresC.Close()
-	checkpoints := etl.NewCollector(kv.Checkpoints, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
-	defer checkpoints.Close()
 	nextSyncCommittee := etl.NewCollector(kv.NextSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer nextSyncCommittee.Close()
 	currentSyncCommittee := etl.NewCollector(kv.CurrentSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
@@ -183,6 +184,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer eth1DataVotes.Close()
 	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
 	defer stateEvents.Close()
+	activeValidatorIndicies := etl.NewCollector(kv.ActiveValidatorIndicies, s.dirs.Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), s.logger)
+	defer activeValidatorIndicies.Close()
 
 	progress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
@@ -214,10 +217,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			// Collect genesis state if we are at genesis
-			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, slashings, inactivityScoresC, proposers, minimalBeaconStates, stateEvents, changedValidators); err != nil {
+			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, currentSyncCommittee, nextSyncCommittee, slashings, epochData, inactivityScoresC, proposers, slotData, stateEvents, changedValidators); err != nil {
 				return err
 			}
-			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 		} else {
 			start := time.Now()
 			// progress not 0? we need to load the state from the DB
@@ -232,8 +234,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			log.Info("Recovered Beacon State", "slot", s.currentState.Slot(), "elapsed", end, "root", libcommon.Hash(hashRoot).String())
-			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
+			if err := s.currentState.InitBeaconState(); err != nil {
+				return err
+			}
 		}
+		s.balances32 = s.balances32[:0]
+		s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 	}
 
 	logLvl := log.LvlInfo
@@ -295,17 +301,32 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return s.validatorsTable.AddWithdrawalCredentials(uint64(index), slot, libcommon.BytesToHash(wc))
 		},
 		OnEpochBoundary: func(epoch uint64) error {
-			k := base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot))
-			v := make([]byte, solid.CheckpointSize*3)
-			copy(v, s.currentState.CurrentJustifiedCheckpoint())
-			copy(v[solid.CheckpointSize:], s.currentState.PreviousJustifiedCheckpoint())
-			copy(v[solid.CheckpointSize*2:], s.currentState.FinalizedCheckpoint())
-			if err := checkpoints.Collect(k, v); err != nil {
+			if err := s.storeEpochData(commonBuffer, s.currentState, epochData); err != nil {
 				return err
 			}
-			prevEpoch := epoch - 1
+			var prevEpoch uint64
+			if epoch > 0 {
+				prevEpoch = epoch - 1
+			}
 			mix := s.currentState.GetRandaoMixes(prevEpoch)
 			if err := randaoMixes.Collect(base_encoding.Encode64ToBytes4(prevEpoch*s.cfg.SlotsPerEpoch), mix[:]); err != nil {
+				return err
+			}
+			// Write active validator indicies
+			actives := s.currentState.GetActiveValidatorsIndices(prevEpoch)
+			commonBuffer.Reset()
+			if err := base_encoding.WriteRabbits(actives, commonBuffer); err != nil {
+				return err
+			}
+			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(prevEpoch*s.cfg.SlotsPerEpoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
+				return err
+			}
+			actives = s.currentState.GetActiveValidatorsIndices(epoch)
+			commonBuffer.Reset()
+			if err := base_encoding.WriteRabbits(actives, commonBuffer); err != nil {
+				return err
+			}
+			if err := activeValidatorIndicies.Collect(base_encoding.Encode64ToBytes4(epoch*s.cfg.SlotsPerEpoch), libcommon.Copy(commonBuffer.Bytes())); err != nil {
 				return err
 			}
 			// truncate the file
@@ -379,6 +400,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 					return err
 				}
+				s.balances32 = s.balances32[:0]
+				s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			} else if slot%s.cfg.SlotsPerEpoch == 0 {
 				if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 					return err
@@ -396,20 +419,22 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
 
 		fullValidation := slot%100_000 == 0 || first
+		blockRewardsCollector := &eth2.BlockRewardsCollector{}
 		// We sanity check the state every 100k slots or when we start.
-		if err := transition.TransitionState(s.currentState, block, fullValidation); err != nil {
+		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
+
 		first = false
 
-		// dump the whole sla
+		// dump the whole slashings vector.
 		if slashingOccured {
 			if err := s.antiquateFullUint64List(slashings, slot, s.currentState.RawSlashings(), commonBuffer, compressedWriter); err != nil {
 				return err
 			}
 		}
 
-		if err := s.storeMinimalState(commonBuffer, s.currentState, minimalBeaconStates); err != nil {
+		if err := s.storeSlotData(commonBuffer, s.currentState, blockRewardsCollector, slotData); err != nil {
 			return err
 		}
 		if err := stateEvents.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes()); err != nil {
@@ -424,6 +449,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
 				return err
 			}
+			// Reset it as we antiquated it.
+			s.balances32 = s.balances32[:0]
+			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			continue
 		}
 
@@ -495,8 +523,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err := stateRoots.Load(rwTx, kv.StateRoot, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	if err := activeValidatorIndicies.Load(rwTx, kv.ActiveValidatorIndicies, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 
-	if err := minimalBeaconStates.Load(rwTx, kv.MinimalBeaconState, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := slotData.Load(rwTx, kv.SlotData, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 
@@ -508,7 +539,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 
-	if err := checkpoints.Load(rwTx, kv.Checkpoints, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+	if err := epochData.Load(rwTx, kv.EpochData, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 
@@ -679,7 +710,7 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, slashings, inactivities, proposersCollector, minimalBeaconStateCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, currentSyncCommittee, nextSyncCommittee, slashings, epochData, inactivities, proposersCollector, slotDataCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -713,29 +744,59 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 		return err
 	}
 
+	if err := s.storeEpochData(&commonBuffer, state, epochData); err != nil {
+		return err
+	}
+
 	if state.Version() >= clparams.AltairVersion {
 		// dump inactivity scores
 		if err := s.antiquateFullUint64List(inactivities, slot, state.RawInactivityScores(), &commonBuffer, compressor); err != nil {
 			return err
 		}
+		committeeSlot := s.cfg.RoundSlotToSyncCommitteePeriod(slot)
+		committee := *state.CurrentSyncCommittee()
+		if err := currentSyncCommittee.Collect(base_encoding.Encode64ToBytes4(committeeSlot), libcommon.Copy(committee[:])); err != nil {
+			return err
+		}
+
+		committee = *state.NextSyncCommittee()
+		if err := nextSyncCommittee.Collect(base_encoding.Encode64ToBytes4(committeeSlot), libcommon.Copy(committee[:])); err != nil {
+			return err
+		}
 	}
 
 	var b bytes.Buffer
-	if err := s.storeMinimalState(&b, state, minimalBeaconStateCollector); err != nil {
+	if err := s.storeSlotData(&b, state, nil, slotDataCollector); err != nil {
 		return err
 	}
 
 	return stateEvents.Collect(base_encoding.Encode64ToBytes4(slot), events.CopyBytes())
 }
 
-func (s *Antiquary) storeMinimalState(buffer *bytes.Buffer, st *state.CachingBeaconState, collector *etl.Collector) error {
+func (s *Antiquary) storeSlotData(buffer *bytes.Buffer, st *state.CachingBeaconState, rewardsCollector *eth2.BlockRewardsCollector, collector *etl.Collector) error {
 	buffer.Reset()
-	minimalBeaconState := state_accessors.MinimalBeaconStateFromBeaconState(st.BeaconState)
-
-	if err := minimalBeaconState.WriteTo(buffer); err != nil {
+	slotData := state_accessors.SlotDataFromBeaconState(st)
+	if rewardsCollector != nil {
+		slotData.AttestationsRewards = rewardsCollector.Attestations
+		slotData.SyncAggregateRewards = rewardsCollector.SyncAggregate
+		slotData.AttesterSlashings = rewardsCollector.AttesterSlashings
+		slotData.ProposerSlashings = rewardsCollector.ProposerSlashings
+	}
+	if err := slotData.WriteTo(buffer); err != nil {
 		return err
 	}
-	return collector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), buffer.Bytes())
+	return collector.Collect(base_encoding.Encode64ToBytes4(st.Slot()), libcommon.Copy(buffer.Bytes()))
+}
+
+func (s *Antiquary) storeEpochData(buffer *bytes.Buffer, st *state.CachingBeaconState, collector *etl.Collector) error {
+	buffer.Reset()
+	epochData := state_accessors.EpochDataFromBeaconState(st)
+
+	if err := epochData.WriteTo(buffer); err != nil {
+		return err
+	}
+	roundedSlot := s.cfg.RoundSlotToEpoch(st.Slot())
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), libcommon.Copy(buffer.Bytes()))
 }
 
 func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.Buffer, compressor *zstd.Encoder) error {
@@ -764,7 +825,6 @@ func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.B
 // 	if err := os.WriteFile("b.txt", b, 0644); err != nil {
 // 		s.logger.Error("Failed to write full beacon state", "err", err)
 // 	}
-
 // }
 
 func flattenRandaoMixes(hashes []libcommon.Hash) []byte {

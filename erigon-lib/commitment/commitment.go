@@ -9,9 +9,10 @@ import (
 	"math/bits"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -20,7 +21,6 @@ import (
 
 var (
 	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentWriteTook     = metrics.GetOrCreateHistogram("domain_commitment_write_took")
 	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
 )
 
@@ -52,7 +52,7 @@ type PatriciaContext interface {
 	// load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	GetBranch(prefix []byte) ([]byte, error)
+	GetBranch(prefix []byte) ([]byte, uint64, error)
 	// fetch account with given plain key
 	GetAccount(plainKey []byte, cell *Cell) error
 	// fetch storage with given plain key
@@ -60,7 +60,7 @@ type PatriciaContext interface {
 	// Returns temp directory to use for update collecting
 	TempDir() string
 	// store branch data
-	PutBranch(prefix []byte, data []byte, prevData []byte) error
+	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 }
 
 type TrieVariant string
@@ -165,28 +165,18 @@ func (be *BranchEncoder) initCollector() {
 
 // reads previous comitted value and merges current with it if needed.
 func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
-	merger := NewHexBranchMerger(4096)
 	return func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		stateValue, err := pc.GetBranch(prefix)
+		stateValue, stateStep, err := pc.GetBranch(prefix)
 		if err != nil {
 			return err
-		}
-		if len(stateValue) > 0 {
-			stated := BranchData(stateValue)
-			merged, err := merger.Merge(stated, update)
-			if err != nil {
-				return err
-			}
-			update = merged
 		}
 		// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
 		//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%v\n", prefix, stateValue, update, BranchData(update).String())
 
 		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-		if err = pc.PutBranch(cp, cu, stateValue); err != nil {
+		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
 			return err
 		}
-		mxCommitmentBranchUpdates.Inc()
 		return nil
 	}
 }
@@ -209,7 +199,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err != nil {
 		return 0, err
 	}
-	//fmt.Printf("CollectUpdate [%x] -> [%x]\n", prefix, []byte(v))
+	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, []byte(v))
 	if err := be.updates.Collect(prefix, v); err != nil {
 		return 0, err
 	}
@@ -218,11 +208,6 @@ func (be *BranchEncoder) CollectUpdate(
 
 // Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*Cell, error)) (BranchData, int, error) {
-	//binary.BigEndian.PutUint16(be.bitmapBuf[0:], touchMap)
-	//binary.BigEndian.PutUint16(be.bitmapBuf[2:], afterMap)
-	//bitmapBuf [binary.MaxVarintLen64]byte
-	//branchData = make([]byte, 0, 4)
-	//branchData = append(branchData, be.bitmapBuf[:4]...)
 	be.buf.Reset()
 
 	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {

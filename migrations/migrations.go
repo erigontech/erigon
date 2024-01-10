@@ -36,6 +36,7 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion5,
 		TxsBeginEnd,
 		TxsV3,
+		ProhibitNewDownloadsLock,
 	},
 	kv.TxPoolDB: {},
 	kv.SentryDB: {},

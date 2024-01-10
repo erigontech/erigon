@@ -30,6 +30,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/log/v3"
 	rand2 "golang.org/x/exp/rand"
@@ -47,6 +49,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
+)
+
+var (
+	mxPruneTookAgg = metrics.GetOrCreateSummary(`prune_seconds{type="state"}`)
 )
 
 type AggregatorV3 struct {
@@ -69,6 +76,7 @@ type AggregatorV3 struct {
 	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
+	snapshotBuildSema *semaphore.Weighted
 
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
@@ -310,7 +318,11 @@ func (a *AggregatorV3) SetCompressWorkers(i int) {
 func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
-func (ac *AggregatorV3Context) Files() (res []string) {
+func (ac *AggregatorV3Context) Files() []string {
+	var res []string
+	if ac == nil {
+		return res
+	}
 	res = append(res, ac.account.Files()...)
 	res = append(res, ac.storage.Files()...)
 	res = append(res, ac.code.Files()...)
@@ -321,6 +333,12 @@ func (ac *AggregatorV3Context) Files() (res []string) {
 	res = append(res, ac.tracesTo.Files()...)
 	return res
 }
+func (a *AggregatorV3) Files() []string {
+	ac := a.MakeContext()
+	defer ac.Close()
+	return ac.Files()
+}
+
 func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
 	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
 		return
@@ -408,7 +426,7 @@ func (a *AggregatorV3) BuildMissedIndices(ctx context.Context, workers int) erro
 		if err := g.Wait(); err != nil {
 			return err
 		}
-		if err := a.OpenFolder(false); err != nil {
+		if err := a.OpenFolder(true); err != nil {
 			return err
 		}
 	}
@@ -688,6 +706,9 @@ func (a *AggregatorV3) integrateFiles(sf AggV3StaticFiles, txNumFrom, txNumTo ui
 }
 
 func (a *AggregatorV3) HasNewFrozenFiles() bool {
+	if a == nil {
+		return false
+	}
 	return a.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
@@ -742,7 +763,7 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 	// not all blocks have commitment
 	//fmt.Printf("CanUnwindBeforeBlockNum: blockNum=%d unwindTo=%d\n", blockNum, unwindToTxNum)
-	domains := NewSharedDomains(tx)
+	domains := NewSharedDomains(tx, ac.a.logger)
 	defer domains.Close()
 
 	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
@@ -786,6 +807,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 	if dbg.NoPrune() {
 		return nil
 	}
+	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	step, limit := ac.a.aggregatedStep.Load(), uint64(math2.MaxUint64)
 	txTo := (step + 1) * ac.a.aggregationStep
@@ -809,16 +831,16 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
 	if err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
 		return err
 	}
-	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
 		return err
 	}
-	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
 		return err
 	}
-	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
 		return err
 	}
-	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery); err != nil {
+	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
 		return err
 	}
 	return nil
@@ -877,6 +899,19 @@ func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
 }
 
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
+func (a *AggregatorV3) FilesAmount() []int {
+	return []int{
+		a.accounts.files.Len(),
+		a.storage.files.Len(),
+		a.code.files.Len(),
+		a.commitment.files.Len(),
+		a.tracesFrom.files.Len(),
+		a.tracesTo.files.Len(),
+		a.logAddrs.files.Len(),
+		a.logTopics.files.Len(),
+	}
+}
+
 func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
 	return cmp.Min(
 		cmp.Min(
@@ -1149,7 +1184,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		//predicates.Add(1)
 		g.Go(func() (err error) {
 			//defer predicates.Done()
-			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.a.accounts.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, ac.a.ps)
+			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.account.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, ac.a.ps)
 			return err
 		})
 	}
@@ -1158,13 +1193,13 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		//predicates.Add(1)
 		g.Go(func() (err error) {
 			//defer predicates.Done()
-			mf.storage, mf.storageIdx, mf.storageHist, err = ac.a.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, ac.a.ps)
+			mf.storage, mf.storageIdx, mf.storageHist, err = ac.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, ac.a.ps)
 			return err
 		})
 	}
 	if r.code.any() {
 		g.Go(func() (err error) {
-			mf.code, mf.codeIdx, mf.codeHist, err = ac.a.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, ac.a.ps)
+			mf.code, mf.codeIdx, mf.codeHist, err = ac.code.mergeFiles(ctx, files.code, files.codeIdx, files.codeHist, r.code, ac.a.ps)
 			return err
 		})
 	}
@@ -1172,7 +1207,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		//predicates.Wait()
 		//log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
-			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, files.commitment, files.commitmentIdx, files.commitmentHist, r.commitment, ac.a.ps)
+			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.commitment.mergeFiles(ctx, files.commitment, files.commitmentIdx, files.commitmentHist, r.commitment, ac.a.ps)
 			return err
 			//var v4Files SelectedStaticFiles
 			//var v4MergedF MergedFiles
@@ -1186,28 +1221,28 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.logAddrs {
 		g.Go(func() error {
 			var err error
-			mf.logAddrs, err = ac.a.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
+			mf.logAddrs, err = ac.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.logTopics {
 		g.Go(func() error {
 			var err error
-			mf.logTopics, err = ac.a.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.a.ps)
+			mf.logTopics, err = ac.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.tracesFrom {
 		g.Go(func() error {
 			var err error
-			mf.tracesFrom, err = ac.a.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.a.ps)
+			mf.tracesFrom, err = ac.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.a.ps)
 			return err
 		})
 	}
 	if r.tracesTo {
 		g.Go(func() error {
 			var err error
-			mf.tracesTo, err = ac.a.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, ac.a.ps)
+			mf.tracesTo, err = ac.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, ac.a.ps)
 			return err
 		})
 	}
@@ -1261,6 +1296,12 @@ func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
 	return a
 }
 
+func (a *AggregatorV3) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
+	a.snapshotBuildSema = semaphore
+}
+
+const aggregatorSnapBuildWeight int64 = 1
+
 // Returns channel which is closed when aggregation is done
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
@@ -1281,6 +1322,13 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	go func() {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
+
+		if a.snapshotBuildSema != nil {
+			if !a.snapshotBuildSema.TryAcquire(aggregatorSnapBuildWeight) {
+				return //nolint
+			}
+			defer a.snapshotBuildSema.Release(aggregatorSnapBuildWeight)
+		}
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts)
@@ -1487,7 +1535,7 @@ func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byt
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
 }
-func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, ok bool, err error) {
+func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
 	switch domain {
 	case kv.AccountsDomain:
 		return ac.account.GetLatest(k, k2, tx)
@@ -1536,6 +1584,33 @@ func (ac *AggregatorV3Context) DebugKey(domain kv.Domain, k []byte) error {
 		}
 		if len(l) > 0 {
 			log.Info("[dbg] found in", "files", l)
+		}
+	default:
+		panic(fmt.Sprintf("unexpected: %s", domain))
+	}
+	return nil
+}
+func (ac *AggregatorV3Context) DebugEFKey(domain kv.Domain, k []byte) error {
+	switch domain {
+	case kv.AccountsDomain:
+		err := ac.account.DebugEFKey(k)
+		if err != nil {
+			return err
+		}
+	case kv.StorageDomain:
+		err := ac.code.DebugEFKey(k)
+		if err != nil {
+			return err
+		}
+	case kv.CodeDomain:
+		err := ac.storage.DebugEFKey(k)
+		if err != nil {
+			return err
+		}
+	case kv.CommitmentDomain:
+		err := ac.commitment.DebugEFKey(k)
+		if err != nil {
+			return err
 		}
 	default:
 		panic(fmt.Sprintf("unexpected: %s", domain))
@@ -1599,6 +1674,7 @@ type AggregatorStep struct {
 	keyBuf     []byte
 }
 
+func (a *AggregatorV3) StepSize() uint64 { return a.aggregationStep }
 func (a *AggregatorV3) MakeSteps() ([]*AggregatorStep, error) {
 	frozenAndIndexed := a.EndTxNumDomainsFrozen()
 	accountSteps := a.accounts.MakeSteps(frozenAndIndexed)

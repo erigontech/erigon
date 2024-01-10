@@ -27,11 +27,12 @@ import (
 )
 
 var (
-	doMemstat     = EnvBool("NO_MEMSTAT", true)
-	writeMap      = EnvBool("WRITE_MAP", false)
-	noSync        = EnvBool("NO_SYNC", false)
-	mdbxReadahead = EnvBool("MDBX_READAHEAD", false)
-	mdbxLockInRam = EnvBool("MDBX_LOCK_IN_RAM", false)
+	doMemstat        = EnvBool("NO_MEMSTAT", true)
+	writeMap         = EnvBool("WRITE_MAP", false)
+	noSync           = EnvBool("NO_SYNC", false)
+	mdbxReadahead    = EnvBool("MDBX_READAHEAD", false)
+	mdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
 	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
@@ -46,7 +47,13 @@ var (
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
-	StagesOnlyBlocks     = EnvBool("STAGES_ONLY_BLOCKS", false)
+
+	// allow simultaneous build of multiple snapshot types.
+	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
+
+	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
+
+	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", false)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
@@ -78,8 +85,8 @@ func DirtySpace() uint64 {
 			if err != nil {
 				panic(err)
 			}
+			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
 			dirtySace = uint64(i * 1024 * 1024)
-			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", dirtySace)
 		}
 	})
 	return dirtySace
@@ -187,8 +194,24 @@ func StopAfterReconst() bool {
 		v, _ := os.LookupEnv("STOP_AFTER_RECONSTITUTE")
 		if v == "true" {
 			stopAfterReconst = true
-			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", writeMap)
+			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", stopAfterReconst)
 		}
 	})
 	return stopAfterReconst
+}
+
+var (
+	snapshotVersion     uint8
+	snapshotVersionOnce sync.Once
+)
+
+func SnapshotVersion() uint8 {
+	snapshotVersionOnce.Do(func() {
+		v, _ := os.LookupEnv("SNAPSHOT_VERSION")
+		if i, _ := strconv.ParseUint(v, 10, 8); i > 0 {
+			snapshotVersion = uint8(i)
+			log.Info("[Experiment]", "SNAPSHOT_VERSION", snapshotVersion)
+		}
+	})
+	return snapshotVersion
 }

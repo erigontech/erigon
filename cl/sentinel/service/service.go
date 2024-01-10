@@ -3,16 +3,17 @@ package service
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 
@@ -21,9 +22,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+var _ sentinelrpc.SentinelServer = (*SentinelServer)(nil)
 
 type SentinelServer struct {
 	sentinelrpc.UnimplementedSentinelServer
@@ -51,7 +53,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 // extractBlobSideCarIndex takes a topic and extract the blob sidecar
 func extractBlobSideCarIndex(topic string) int {
 	// compute the index prefixless
-	startIndex := strings.Index(topic, string(sentinel.BlobSidecarTopic)) + len(sentinel.BlobSidecarTopic)
+	startIndex := strings.Index(topic, gossip.TopicNamePrefixBlobSidecar) + len(gossip.TopicNamePrefixBlobSidecar)
 	endIndex := strings.Index(topic[:startIndex], "/")
 	blobIndex, err := strconv.Atoi(topic[startIndex:endIndex])
 	if err != nil {
@@ -78,28 +80,30 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
 
-	s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Type.String(), "unknown", len(compressedData))
+	s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
 
 	var subscription *sentinel.GossipSubscription
 
-	switch msg.Type {
-	case sentinelrpc.GossipType_BeaconBlockGossipType:
-		subscription = manager.GetMatchingSubscription(string(sentinel.BeaconBlockTopic))
-	case sentinelrpc.GossipType_AggregateAndProofGossipType:
-		subscription = manager.GetMatchingSubscription(string(sentinel.BeaconAggregateAndProofTopic))
-	case sentinelrpc.GossipType_VoluntaryExitGossipType:
-		subscription = manager.GetMatchingSubscription(string(sentinel.VoluntaryExitTopic))
-	case sentinelrpc.GossipType_ProposerSlashingGossipType:
-		subscription = manager.GetMatchingSubscription(string(sentinel.ProposerSlashingTopic))
-	case sentinelrpc.GossipType_AttesterSlashingGossipType:
-		subscription = manager.GetMatchingSubscription(string(sentinel.AttesterSlashingTopic))
-	case sentinelrpc.GossipType_BlobSidecarType:
-		if msg.BlobIndex == nil {
-			return &sentinelrpc.EmptyMessage{}, errors.New("cannot publish sidecar blob with no index")
-		}
-		subscription = manager.GetMatchingSubscription(fmt.Sprintf(string(sentinel.BlobSidecarTopic), *msg.BlobIndex))
+	// TODO: this is still wrong... we should build a subscription here to match exactly, meaning that downstream consumers should be
+	// in charge of keeping track of fork id.
+	switch msg.Name {
+	case gossip.TopicNameBeaconBlock:
+		subscription = manager.GetMatchingSubscription(msg.Name)
+	case gossip.TopicNameBeaconAggregateAndProof:
+		subscription = manager.GetMatchingSubscription(msg.Name)
+	case gossip.TopicNameVoluntaryExit:
+		subscription = manager.GetMatchingSubscription(msg.Name)
+	case gossip.TopicNameProposerSlashing:
+		subscription = manager.GetMatchingSubscription(msg.Name)
+	case gossip.TopicNameAttesterSlashing:
+		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
-		return &sentinelrpc.EmptyMessage{}, nil
+		switch {
+		case gossip.IsTopicBlobSidecar(msg.Name):
+			subscription = manager.GetMatchingSubscription(msg.Name)
+		default:
+			return &sentinelrpc.EmptyMessage{}, nil
+		}
 	}
 	if subscription == nil {
 		return &sentinelrpc.EmptyMessage{}, nil
@@ -107,7 +111,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
 
-func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(data *sentinelrpc.SubscriptionData, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -121,18 +125,31 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 		case <-stream.Context().Done():
 			return nil
 		case packet := <-ch:
+			if !s.gossipMatchSubscription(packet, data) {
+				continue
+			}
 			if err := stream.Send(&sentinelrpc.GossipData{
 				Data: packet.data,
-				Type: packet.t,
+				Name: packet.t,
 				Peer: &sentinelrpc.Peer{
 					Pid: packet.pid,
 				},
-				BlobIndex: packet.blobIndex,
 			}); err != nil {
 				s.logger.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
 			}
 		}
 	}
+}
+
+func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelrpc.SubscriptionData) bool {
+	if data.Filter != nil {
+		filter := data.GetFilter()
+		matched, err := path.Match(obj.t, filter)
+		if err != nil || !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
@@ -273,43 +290,43 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
-func (s *SentinelServer) handleGossipPacket(pkt *pubsub.Message) error {
+func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	var err error
-	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.Topic)
+	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.TopicName)
 
-	data := pkt.GetData()
-
+	data := pkt.Data
+	topic := pkt.TopicName
 	// If we use snappy codec then decompress it accordingly.
-	if strings.Contains(*pkt.Topic, sentinel.SSZSnappyCodec) {
+	if strings.Contains(topic, sentinel.SSZSnappyCodec) {
 		data, err = utils.DecompressSnappy(data)
 		if err != nil {
 			return err
 		}
 	}
-	textPid, err := pkt.ReceivedFrom.MarshalText()
+	textPid, err := pkt.From.MarshalText()
 	if err != nil {
 		return err
 	}
 
-	msgType, msgCap := parseTopic(pkt.GetTopic())
+	msgType, msgCap := parseTopic(topic)
 	s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
-	if strings.Contains(*pkt.Topic, string(sentinel.BeaconBlockTopic)) {
-		s.gossipNotifier.notify(sentinelrpc.GossipType_BeaconBlockGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BeaconAggregateAndProofTopic)) {
-		s.gossipNotifier.notify(sentinelrpc.GossipType_AggregateAndProofGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.VoluntaryExitTopic)) {
-		s.gossipNotifier.notify(sentinelrpc.GossipType_VoluntaryExitGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.ProposerSlashingTopic)) {
-		s.gossipNotifier.notify(sentinelrpc.GossipType_ProposerSlashingGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.AttesterSlashingTopic)) {
-		s.gossipNotifier.notify(sentinelrpc.GossipType_AttesterSlashingGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BlsToExecutionChangeTopic)) {
-		s.gossipNotifier.notify(sentinelrpc.GossipType_BlsToExecutionChangeGossipType, data, string(textPid))
-	} else if strings.Contains(*pkt.Topic, string(sentinel.BlobSidecarTopic)) {
+	if strings.Contains(topic, string(gossip.TopicNameBeaconBlock)) {
+		s.gossipNotifier.notify(gossip.TopicNameBeaconBlock, data, string(textPid))
+	} else if strings.Contains(topic, string(gossip.TopicNameBeaconAggregateAndProof)) {
+		s.gossipNotifier.notify(gossip.TopicNameBeaconAggregateAndProof, data, string(textPid))
+	} else if strings.Contains(topic, string(gossip.TopicNameVoluntaryExit)) {
+		s.gossipNotifier.notify(gossip.TopicNameVoluntaryExit, data, string(textPid))
+	} else if strings.Contains(topic, string(gossip.TopicNameProposerSlashing)) {
+		s.gossipNotifier.notify(gossip.TopicNameProposerSlashing, data, string(textPid))
+	} else if strings.Contains(topic, string(gossip.TopicNameAttesterSlashing)) {
+		s.gossipNotifier.notify(gossip.TopicNameAttesterSlashing, data, string(textPid))
+	} else if strings.Contains(topic, string(gossip.TopicNameBlsToExecutionChange)) {
+		s.gossipNotifier.notify(gossip.TopicNameBlsToExecutionChange, data, string(textPid))
+	} else if gossip.IsTopicBlobSidecar(topic) {
 		// extract the index
-		s.gossipNotifier.notifyBlob(sentinelrpc.GossipType_BlobSidecarType, data, string(textPid), extractBlobSideCarIndex(*pkt.Topic))
+		s.gossipNotifier.notifyBlob(data, string(textPid), extractBlobSideCarIndex(topic))
 	}
 	return nil
 }

@@ -196,10 +196,10 @@ func (tx *Tx) ForceReopenAggCtx() {
 	tx.aggCtx = tx.Agg().MakeContext()
 }
 
-func (tx *Tx) WarmupDB(force bool) error          { return tx.MdbxTx.WarmupDB(force) }
-func (tx *Tx) LockDBInRam() error                 { return tx.MdbxTx.LockDBInRam() }
-func (tx *Tx) AggCtx() *state.AggregatorV3Context { return tx.aggCtx }
-func (tx *Tx) Agg() *state.AggregatorV3           { return tx.db.agg }
+func (tx *Tx) WarmupDB(force bool) error { return tx.MdbxTx.WarmupDB(force) }
+func (tx *Tx) LockDBInRam() error        { return tx.MdbxTx.LockDBInRam() }
+func (tx *Tx) AggCtx() interface{}       { return tx.aggCtx }
+func (tx *Tx) Agg() *state.AggregatorV3  { return tx.db.agg }
 func (tx *Tx) Rollback() {
 	tx.autoClose()
 	if tx.MdbxTx == nil { // invariant: it's safe to call Commit/Rollback multiple times
@@ -236,15 +236,15 @@ func (tx *Tx) DomainRange(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return it, nil
 }
 
-func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err error) {
-	v, ok, err := tx.aggCtx.GetLatest(name, k, k2, tx.MdbxTx)
+func (tx *Tx) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
+	v, step, ok, err := tx.aggCtx.GetLatest(name, k, k2, tx.MdbxTx)
 	if err != nil {
-		return nil, err
+		return nil, step, err
 	}
 	if !ok {
-		return nil, nil
+		return nil, step, nil
 	}
-	return v, nil
+	return v, step, nil
 }
 func (tx *Tx) DomainGetAsOf(name kv.Domain, key, key2 []byte, ts uint64) (v []byte, ok bool, err error) {
 	if key2 != nil {
@@ -309,21 +309,21 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, gspec *types.Genesis) (histV3 b
 		return nil
 	})
 
+	var err error
+	agg, err = state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
+	if err != nil {
+		panic(err)
+	}
+	if err := agg.OpenFolder(false); err != nil {
+		panic(err)
+	}
+
+	var sc map[common.Address][]common.CodeRecord
+	if gspec != nil {
+		sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
+	}
+
 	if historyV3 {
-		var err error
-		agg, err = state.NewAggregatorV3(context.Background(), dirs, ethconfig.HistoryV3AggregationStep, db, logger)
-		if err != nil {
-			panic(err)
-		}
-		if err := agg.OpenFolder(false); err != nil {
-			panic(err)
-		}
-
-		var sc map[common.Address][]common.CodeRecord
-		if gspec != nil {
-			sc = systemcontracts.SystemContractCodeLookup[gspec.Config.ChainName]
-		}
-
 		db, err = New(db, agg, sc)
 		if err != nil {
 			panic(err)

@@ -40,15 +40,18 @@ func (c *DummyCache) Len() int                               { return 0 }
 func (c *DummyCache) Get(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	if c.stateV3 {
 		if len(k) == 20 {
-			return tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+			v, _, err := tx.(kv.TemporalTx).DomainGet(kv.AccountsDomain, k, nil)
+			return v, err
 		}
-		return tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
+		v, _, err := tx.(kv.TemporalTx).DomainGet(kv.StorageDomain, k, nil)
+		return v, err
 	}
 	return tx.GetOne(kv.PlainState, k)
 }
 func (c *DummyCache) GetCode(k []byte, tx kv.Tx, id uint64) ([]byte, error) {
 	if c.stateV3 {
-		return tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+		v, _, err := tx.(kv.TemporalTx).DomainGet(kv.CodeDomain, k, nil)
+		return v, err
 	}
 	return tx.GetOne(kv.Code, k)
 }

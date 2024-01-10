@@ -33,6 +33,9 @@ integration stage_history --unwind=N
 integration stage_exec --prune.to=N     
 integration stage_history --prune.to=N
 
+# Reset stage_headers
+integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
+
 # Exec blocks, but don't commit changes (loose them)
 integration stage_exec --no-commit
 ...
@@ -88,7 +91,7 @@ make all
 4. Build integration: cd erigon; make integration
 5. Run: ./build/bin/integration mdbx_to_mdbx --chaindata /existing/erigon/path/chaindata/ --chaindata.to /path/to/copy-to/chaindata/
 6. cp -R /existing/erigon/path/snapshots /path/to/copy-to/snapshots
-7. start erigon in new datadir as usualy
+7. start erigon in new datadir as usually
 ```
 
 ## Clear bad blocks markers table in the case some block was marked as invalid after some error 

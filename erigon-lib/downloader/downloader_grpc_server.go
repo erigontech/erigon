@@ -110,13 +110,13 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 
 		fPath := filepath.Join(s.d.SnapDir(), name)
 		_ = os.Remove(fPath)
-		_ = os.Remove(fPath + ".torrent")
+		s.d.torrentFiles.Delete(name)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
-	err := s.d.VerifyData(ctx, nil)
+	err := s.d.VerifyData(ctx, nil, false)
 	if err != nil {
 		return nil, err
 	}

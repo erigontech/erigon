@@ -350,6 +350,10 @@ func (d *Decompressor) ModTime() time.Time {
 	return d.modTime
 }
 
+func (d *Decompressor) IsOpen() bool {
+	return d != nil && d.f != nil
+}
+
 func (d *Decompressor) Close() {
 	if d.f != nil {
 		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
@@ -383,7 +387,11 @@ func (d *Decompressor) DisableReadAhead() {
 	}
 	leftReaders := d.readAheadRefcnt.Add(-1)
 	if leftReaders == 0 {
-		_ = mmap.MadviseNormal(d.mmapHandle1)
+		if dbg.SnapshotMadvRnd {
+			_ = mmap.MadviseRandom(d.mmapHandle1)
+		} else {
+			_ = mmap.MadviseNormal(d.mmapHandle1)
+		}
 	} else if leftReaders < 0 {
 		log.Warn("read-ahead negative counter", "file", d.FileName())
 	}

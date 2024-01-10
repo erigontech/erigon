@@ -326,7 +326,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if histV3 {
-		domains = state2.NewSharedDomains(tx)
+		domains = state2.NewSharedDomains(tx, logger)
 		defer domains.Close()
 		stateReader = state.NewReaderV4(domains)
 		stateWriter = state.NewWriterV4(domains)
@@ -477,7 +477,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		h := libcommon.NewHasher()
 		defer libcommon.ReturnHasherToPool(h)
 
-		it, err := tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
+		it, err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, -1)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
@@ -502,7 +502,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 			}
 		}
 
-		it, err = tx.(state2.HasAggCtx).AggCtx().DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+		it, err = tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
 		if err != nil {
 			return libcommon.Hash{}, err
 		}

@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/math"
@@ -48,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // StateTest checks transaction processing without block context.
@@ -184,7 +186,7 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	vmconfig.ExtraEips = eips
-	block, _, err := core.GenesisToBlock(t.genesis(config), "")
+	block, _, err := core.GenesisToBlock(t.genesis(config), "", log.Root())
 	if err != nil {
 		return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
@@ -200,15 +202,15 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	var r state.StateReader
 	var w state.StateWriter
 	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
 	if ethconfig.EnableHistoryV4InTest {
-		domains = state2.NewSharedDomains(tx)
+		domains = state2.NewSharedDomains(tx, log.New())
 		defer domains.Close()
-		r = rpchelper.NewLatestStateReader(domains, ethconfig.EnableHistoryV4InTest)
-		w = rpchelper.NewLatestStateWriter(domains, writeBlockNr, ethconfig.EnableHistoryV4InTest)
-	} else {
-		r = rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
-		w = rpchelper.NewLatestStateWriter(tx, writeBlockNr, ethconfig.EnableHistoryV4InTest)
+		txc.Doms = domains
 	}
+	r = rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
+	w = rpchelper.NewLatestStateWriter(txc, writeBlockNr, ethconfig.EnableHistoryV4InTest)
 	statedb := state.New(r)
 
 	var baseFee *big.Int
@@ -351,14 +353,15 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 
 	var w state.StateWriter
 	var domains *state2.SharedDomains
+	var txc wrap.TxContainer
+	txc.Tx = tx
 	if ethconfig.EnableHistoryV4InTest {
-		domains = state2.NewSharedDomains(tx)
+		domains = state2.NewSharedDomains(tx, log.New())
 		defer domains.Close()
 		defer domains.Flush(context2.Background(), tx)
-		w = rpchelper.NewLatestStateWriter(domains, blockNr-1, histV3)
-	} else {
-		w = rpchelper.NewLatestStateWriter(tx, blockNr-1, histV3)
+		txc.Doms = domains
 	}
+	w = rpchelper.NewLatestStateWriter(txc, blockNr-1, histV3)
 
 	// Commit and re-open to start with a clean state.
 	if err := statedb.FinalizeTx(rules, w); err != nil {

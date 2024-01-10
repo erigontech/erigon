@@ -28,18 +28,18 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	// Schedule update.
-	go func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.headState == nil {
-			s.headState, err = newState.Copy()
-		}
-		err = newState.CopyInto(s.headState)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.headState == nil {
+		s.headState, err = newState.Copy()
 		if err != nil {
-			log.Error("failed to copy head state", "err", err)
+			return err
 		}
-	}()
+	}
+	err = newState.CopyInto(s.headState)
+	if err != nil {
+		log.Error("failed to copy head state", "err", err)
+	}
 
 	return
 }
@@ -59,7 +59,7 @@ func (s *SyncedDataManager) Syncing() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.headState == nil {
-		return false
+		return true
 	}
 
 	headEpoch := utils.GetCurrentEpoch(s.headState.GenesisTime(), s.cfg.SecondsPerSlot, s.cfg.SlotsPerEpoch)

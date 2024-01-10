@@ -14,24 +14,24 @@ import (
 
 // ETH1Header represents the ethereum 1 header structure CL-side.
 type Eth1Header struct {
-	ParentHash    libcommon.Hash
-	FeeRecipient  libcommon.Address
-	StateRoot     libcommon.Hash
-	ReceiptsRoot  libcommon.Hash
-	LogsBloom     types.Bloom
-	PrevRandao    libcommon.Hash
-	BlockNumber   uint64
-	GasLimit      uint64
-	GasUsed       uint64
-	Time          uint64
-	Extra         *solid.ExtraData
-	BaseFeePerGas libcommon.Hash
+	ParentHash    libcommon.Hash    `json:"parent_hash"`
+	FeeRecipient  libcommon.Address `json:"fee_recipient"`
+	StateRoot     libcommon.Hash    `json:"state_root"`
+	ReceiptsRoot  libcommon.Hash    `json:"receipts_root"`
+	LogsBloom     types.Bloom       `json:"logs_bloom"`
+	PrevRandao    libcommon.Hash    `json:"prev_randao"`
+	BlockNumber   uint64            `json:"block_number,string"`
+	GasLimit      uint64            `json:"gas_limit,string"`
+	GasUsed       uint64            `json:"gas_used,string"`
+	Time          uint64            `json:"time,string"`
+	Extra         *solid.ExtraData  `json:"extra_data"`
+	BaseFeePerGas libcommon.Hash    `json:"base_fee_per_gas"`
 	// Extra fields
-	BlockHash        libcommon.Hash
-	TransactionsRoot libcommon.Hash
-	WithdrawalsRoot  libcommon.Hash
-	BlobGasUsed      uint64
-	ExcessBlobGas    uint64
+	BlockHash        libcommon.Hash `json:"block_hash"`
+	TransactionsRoot libcommon.Hash `json:"transactions_root"`
+	WithdrawalsRoot  libcommon.Hash `json:"withdrawals_root,omitempty"`
+	BlobGasUsed      uint64         `json:"blob_gas_used,omitempty,string"`
+	ExcessBlobGas    uint64         `json:"excess_blob_gas,omitempty,string"`
 	// internals
 	version clparams.StateVersion
 }

@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/Giulio2002/bls"
@@ -26,6 +27,12 @@ func GetEpochAtSlot(config *clparams.BeaconChainConfig, slot uint64) uint64 {
 // Epoch returns current epoch.
 func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
+}
+
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, slot, committeeIndex uint64, slotSignature libcommon.Bytes96) bool {
+	modulo := utils.Max64(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
+	hashSlotSignatue := utils.Sha256(slotSignature[:])
+	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
 }
 
 // GetTotalBalance return the sum of all balances within the given validator set.
@@ -82,12 +89,9 @@ func InactivityLeaking(b abstract.BeaconState) bool {
 }
 
 // IsUnslashedParticipatingIndex
-func IsUnslashedParticipatingIndex(b abstract.BeaconState, epoch, index uint64, flagIdx int) bool {
-	validator, err := b.ValidatorForValidatorIndex(int(index))
-	if err != nil {
-		return false
-	}
-	return validator.Active(epoch) && cltypes.ParticipationFlags(b.EpochParticipation(false).Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
+func IsUnslashedParticipatingIndex(validatorSet *solid.ValidatorSet, previousEpochParticipation *solid.BitList, epoch, index uint64, flagIdx int) bool {
+	validator := validatorSet.Get(int(index))
+	return validator.Active(epoch) && cltypes.ParticipationFlags(previousEpochParticipation.Get(int(index))).HasFlag(flagIdx) && !validator.Slashed()
 }
 
 // EligibleValidatorsIndicies Implementation of get_eligible_validator_indices as defined in the eth 2.0 specs.

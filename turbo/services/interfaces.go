@@ -90,17 +90,19 @@ type FullBlockReader interface {
 }
 
 type BlockSnapshots interface {
-	LogStat()
+	LogStat(label string)
 	ReopenFolder() error
 	SegmentsMax() uint64
+	SegmentsMin() uint64
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files
 type BlockRetire interface {
-	PruneAncientBlocks(tx kv.RwTx, limit int, includeBor bool) error
-	RetireBlocksInBackground(ctx context.Context, maxBlockNumInDB uint64, includeBor bool, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
+	PruneAncientBlocks(tx kv.RwTx, limit int) error
+	RetireBlocksInBackground(ctx context.Context, miBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []DownloadRequest) error, onDelete func(l []string) error)
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
+	SetWorkers(workers int)
 }
 
 /*
@@ -124,6 +126,7 @@ type DBEventNotifier interface {
 }
 
 type DownloadRequest struct {
+	Version     uint8
 	Path        string
 	TorrentHash string
 }
