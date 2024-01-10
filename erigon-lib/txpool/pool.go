@@ -74,7 +74,7 @@ var (
 	basefeeSubCounter       = metrics.GetOrCreateGauge(`txpool_basefee`)
 )
 
-var TraceAll = true
+var TraceAll = false
 
 // Pool is interface for the transaction pool
 // This interface exists for the convenience of testing, and not yet because
@@ -422,11 +422,9 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 		return err
 	}
 
-	p.logger.Info("Remove Mined")
 	if err = p.removeMined(p.all, minedTxs.Txs); err != nil {
 		return err
 	}
-	p.logger.Info("Done remove Mined")
 
 	var announcements types.Announcements
 
@@ -852,13 +850,13 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 	}
 	if !isLocal && uint64(p.all.count(txn.SenderID)) > p.cfg.AccountSlots {
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
 		return txpoolcfg.Spammer
 	}
 	if !isLocal && p.all.blobCount(txn.SenderID) > p.cfg.BlobSlots {
 		if txn.Traced {
-			log.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
 		return txpoolcfg.Spammer
 	}
@@ -1080,7 +1078,19 @@ func (p *TxPool) punishSpammer(spammer uint64) {
 			count--
 			return count > 0
 		})
+
 		for _, mt := range txsToDelete {
+			switch mt.currentSubPool {
+			case PendingSubPool:
+				p.pending.Remove(mt, "punishSpammer", p.logger)
+			case BaseFeeSubPool:
+				p.baseFee.Remove(mt, "punishSpammer", p.logger)
+			case QueuedSubPool:
+				p.queued.Remove(mt, "punishSpammer", p.logger)
+			default:
+				//already removed
+			}
+
 			p.discardLocked(mt, txpoolcfg.Spammer) // can't call it while iterating by all
 		}
 	}
@@ -1363,7 +1373,7 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 	hashStr := string(mt.Tx.IDHash[:])
 	p.byHash[hashStr] = mt
 
-	if replaced := p.all.replaceOrInsert(mt); replaced != nil {
+	if replaced := p.all.replaceOrInsert(mt, p.logger); replaced != nil {
 		if assert.Enable {
 			panic("must never happen")
 		}
@@ -1385,7 +1395,7 @@ func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
 	hashStr := string(mt.Tx.IDHash[:])
 	delete(p.byHash, hashStr)
 	p.deletedTxs = append(p.deletedTxs, mt)
-	p.all.delete(mt)
+	p.all.delete(mt, reason, p.logger)
 	p.discardReasonsLRU.Add(hashStr, reason)
 }
 
@@ -1466,20 +1476,18 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot
 	queuedRemoved := 0
 
 	for senderID, nonce := range noncesToRemove {
-		p.logger.Debug("[txpool] removing from sender", "id", senderID, "count", byNonce.count(senderID))
-
 		byNonce.ascend(senderID, func(mt *metaTx) bool {
 			if mt.Tx.Nonce > nonce {
-				//if mt.Tx.Traced {
-				p.logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", mt.Tx.Nonce, "sender.nonce", nonce)
-				//}
+				if mt.Tx.Traced {
+					p.logger.Debug("[txpool] removing mined, cmp nonces", "tx.nonce", mt.Tx.Nonce, "sender.nonce", nonce)
+				}
 
 				return false
 			}
 
-			//if mt.Tx.Traced {
-			p.logger.Info("TX TRACING: removeMined", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderId", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "currentSubPool", mt.currentSubPool)
-			//}
+			if mt.Tx.Traced {
+				p.logger.Info("TX TRACING: removeMined", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderId", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "currentSubPool", mt.currentSubPool)
+			}
 
 			toDel = append(toDel, mt)
 			// del from sub-pool
@@ -1508,7 +1516,7 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxs []*types.TxSlot
 	}
 
 	if discarded > 0 {
-		p.logger.Debug("Discarding Transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
+		p.logger.Debug("Discarded transactions", "count", discarded, "pending", pendingRemoved, "baseFee", baseFeeRemoved, "queued", queuedRemoved)
 	}
 
 	return nil
@@ -1533,9 +1541,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
 		if deleteAndContinueReasonLog != "" {
-			//if mt.Tx.Traced {
-			logger.Info("TX TRACING: onSenderStateChange loop iteration remove", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderID", senderID, "senderNonce", senderNonce, "txn.nonce", mt.Tx.Nonce, "currentSubPool", mt.currentSubPool, "reason", deleteAndContinueReasonLog)
-			//}
+			if mt.Tx.Traced {
+				logger.Info("TX TRACING: onSenderStateChange loop iteration remove", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderID", senderID, "senderNonce", senderNonce, "txn.nonce", mt.Tx.Nonce, "currentSubPool", mt.currentSubPool, "reason", deleteAndContinueReasonLog)
+			}
 			// del from sub-pool
 			switch mt.currentSubPool {
 			case PendingSubPool:
@@ -1600,9 +1608,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			mt.subPool |= NotTooMuchGas
 		}
 
-		//if mt.Tx.Traced {
-		logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderId", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "subPool", mt.currentSubPool)
-		//}
+		if mt.Tx.Traced {
+			logger.Info("TX TRACING: onSenderStateChange loop iteration update", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderId", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "subPool", mt.currentSubPool)
+		}
 
 		// Some fields of mt might have changed, need to fix the invariants in the subpool best and worst queues
 		switch mt.currentSubPool {
@@ -1620,7 +1628,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		p.discardLocked(mt, txpoolcfg.NonceTooLow)
 	}
 
-	logger.Debug("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
+	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 }
 
 // promote reasserts invariants of the subpool and returns the list of transactions that ended up
@@ -2297,9 +2305,9 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 		id = sc.senderID
 		sc.senderIDs[addr] = id
 		sc.senderID2Addr[id] = addr
-		//if traced {
-		logger.Info(fmt.Sprintf("TX TRACING: allocated senderID %d to sender %x", id, addr))
-		//}
+		if traced {
+			logger.Info(fmt.Sprintf("TX TRACING: allocated senderID %d to sender %x", id, addr))
+		}
 	}
 	return id, traced
 }
@@ -2374,11 +2382,13 @@ func (b *BySenderAndNonce) nonce(senderID uint64) (nonce uint64, ok bool) {
 	})
 	return nonce, ok
 }
+
 func (b *BySenderAndNonce) ascendAll(f func(*metaTx) bool) {
 	b.tree.Ascend(func(mt *metaTx) bool {
 		return f(mt)
 	})
 }
+
 func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTx) bool) {
 	s := b.search
 	s.Tx.SenderID = senderID
@@ -2390,6 +2400,7 @@ func (b *BySenderAndNonce) ascend(senderID uint64, f func(*metaTx) bool) {
 		return f(mt)
 	})
 }
+
 func (b *BySenderAndNonce) descend(senderID uint64, f func(*metaTx) bool) {
 	s := b.search
 	s.Tx.SenderID = senderID
@@ -2401,12 +2412,15 @@ func (b *BySenderAndNonce) descend(senderID uint64, f func(*metaTx) bool) {
 		return f(mt)
 	})
 }
+
 func (b *BySenderAndNonce) count(senderID uint64) int {
 	return b.senderIDTxnCount[senderID]
 }
+
 func (b *BySenderAndNonce) blobCount(senderID uint64) uint64 {
 	return b.senderIDBlobCount[senderID]
 }
+
 func (b *BySenderAndNonce) hasTxs(senderID uint64) bool {
 	has := false
 	b.ascend(senderID, func(*metaTx) bool {
@@ -2415,6 +2429,7 @@ func (b *BySenderAndNonce) hasTxs(senderID uint64) bool {
 	})
 	return has
 }
+
 func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTx {
 	s := b.search
 	s.Tx.SenderID = senderID
@@ -2429,8 +2444,13 @@ func (b *BySenderAndNonce) get(senderID, txNonce uint64) *metaTx {
 func (b *BySenderAndNonce) has(mt *metaTx) bool {
 	return b.tree.Has(mt)
 }
-func (b *BySenderAndNonce) delete(mt *metaTx) {
+
+func (b *BySenderAndNonce) delete(mt *metaTx, reason txpoolcfg.DiscardReason, logger log.Logger) {
 	if _, ok := b.tree.Delete(mt); ok {
+		if mt.Tx.Traced {
+			logger.Info("TX TRACING: Deleted tx by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "reason", reason)
+		}
+
 		senderID := mt.Tx.SenderID
 		count := b.senderIDTxnCount[senderID]
 		if count > 1 {
@@ -2450,11 +2470,21 @@ func (b *BySenderAndNonce) delete(mt *metaTx) {
 		}
 	}
 }
-func (b *BySenderAndNonce) replaceOrInsert(mt *metaTx) *metaTx {
+
+func (b *BySenderAndNonce) replaceOrInsert(mt *metaTx, logger log.Logger) *metaTx {
 	it, ok := b.tree.ReplaceOrInsert(mt)
+
 	if ok {
+		if mt.Tx.Traced {
+			logger.Info("TX TRACING: Replaced tx by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce)
+		}
 		return it
 	}
+
+	if mt.Tx.Traced {
+		logger.Info("TX TRACING: Inserted tx by nonce", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "sender", mt.Tx.SenderID, "nonce", mt.Tx.Nonce)
+	}
+
 	b.senderIDTxnCount[mt.Tx.SenderID]++
 	if mt.Tx.Type == types.BlobTxType && mt.Tx.Blobs != nil {
 		b.senderIDBlobCount[mt.Tx.SenderID] += uint64(len(mt.Tx.Blobs))
@@ -2534,9 +2564,9 @@ func (p *PendingPool) Updated(mt *metaTx) {
 func (p *PendingPool) Len() int { return len(p.best.ms) }
 
 func (p *PendingPool) Remove(i *metaTx, reason string, logger log.Logger) {
-	//if i.Tx.Traced {
-	logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.Tx.IDHash), "sender", i.Tx.SenderID, "nonce", i.Tx.Nonce, "reason", reason)
-	//}
+	if i.Tx.Traced {
+		logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.Tx.IDHash), "sender", i.Tx.SenderID, "nonce", i.Tx.Nonce, "reason", reason)
+	}
 	if i.worstIndex >= 0 {
 		heap.Remove(p.worst, i.worstIndex)
 	}
@@ -2547,9 +2577,9 @@ func (p *PendingPool) Remove(i *metaTx, reason string, logger log.Logger) {
 }
 
 func (p *PendingPool) Add(i *metaTx, logger log.Logger) {
-	//if i.Tx.Traced {
-	logger.Info(fmt.Sprintf("TX TRACING: added to subpool %s, IdHash=%x, sender=%d, nonce=%d", p.t, i.Tx.IDHash, i.Tx.SenderID, i.Tx.Nonce))
-	//}
+	if i.Tx.Traced {
+		logger.Info(fmt.Sprintf("TX TRACING: added to subpool %s, IdHash=%x, sender=%d, nonce=%d", p.t, i.Tx.IDHash, i.Tx.SenderID, i.Tx.Nonce))
+	}
 	i.currentSubPool = p.t
 	heap.Push(p.worst, i)
 	p.best.UnsafeAdd(i)
@@ -2602,18 +2632,18 @@ func (p *SubPool) PopWorst() *metaTx { //nolint
 }
 func (p *SubPool) Len() int { return p.best.Len() }
 func (p *SubPool) Add(i *metaTx, reason string, logger log.Logger) {
-	//if i.Tx.Traced {
-	logger.Info(fmt.Sprintf("TX TRACING: added to subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.Tx.IDHash), "sender", i.Tx.SenderID, "nonce", i.Tx.Nonce, "reason", reason)
-	//}
+	if i.Tx.Traced {
+		logger.Info(fmt.Sprintf("TX TRACING: added to subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.Tx.IDHash), "sender", i.Tx.SenderID, "nonce", i.Tx.Nonce, "reason", reason)
+	}
 	i.currentSubPool = p.t
 	heap.Push(p.best, i)
 	heap.Push(p.worst, i)
 }
 
 func (p *SubPool) Remove(i *metaTx, reason string, logger log.Logger) {
-	//if i.Tx.Traced {
-	logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.Tx.IDHash), "sender", i.Tx.SenderID, "nonce", i.Tx.Nonce, "reason", reason)
-	//}
+	if i.Tx.Traced {
+		logger.Info(fmt.Sprintf("TX TRACING: removed from subpool %s", p.t), "idHash", fmt.Sprintf("%x", i.Tx.IDHash), "sender", i.Tx.SenderID, "nonce", i.Tx.Nonce, "reason", reason)
+	}
 	heap.Remove(p.best, i.bestIndex)
 	heap.Remove(p.worst, i.worstIndex)
 	i.currentSubPool = 0
