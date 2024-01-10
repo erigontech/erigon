@@ -249,7 +249,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	fmt.Printf("deleted\n")
 
 	err = domains.Flush(ctx, rwTx)
-	require.NoError(t, err)
+	require.NoError(err)
 	rwTx.Rollback()
 
 	domains.Close()
