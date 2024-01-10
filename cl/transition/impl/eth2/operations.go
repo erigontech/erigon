@@ -755,28 +755,26 @@ func batchVerifyAttestations(s abstract.BeaconState, indexedAttestations []*clty
 }
 
 func (I *impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBlock) error {
-	if I.FullValidation {
-		if block.Slot != s.Slot() {
-			return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), block.Slot)
-		}
-		if block.Slot <= s.LatestBlockHeader().Slot {
-			return fmt.Errorf("slock slot: %d, not greater than latest block slot: %d", block.Slot, s.LatestBlockHeader().Slot)
-		}
-		propInd, err := s.GetBeaconProposerIndex()
-		if err != nil {
-			return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
-		}
-		if block.ProposerIndex != propInd {
-			return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
-		}
-		blockHeader := s.LatestBlockHeader()
-		latestRoot, err := (&blockHeader).HashSSZ()
-		if err != nil {
-			return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
-		}
-		if block.ParentRoot != latestRoot {
-			return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
-		}
+	if block.Slot != s.Slot() {
+		return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), block.Slot)
+	}
+	if block.Slot <= s.LatestBlockHeader().Slot {
+		return fmt.Errorf("slock slot: %d, not greater than latest block slot: %d", block.Slot, s.LatestBlockHeader().Slot)
+	}
+	propInd, err := s.GetBeaconProposerIndex()
+	if err != nil {
+		return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
+	}
+	if block.ProposerIndex != propInd {
+		return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
+	}
+	blockHeader := s.LatestBlockHeader()
+	latestRoot, err := (&blockHeader).HashSSZ()
+	if err != nil {
+		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
+	}
+	if block.ParentRoot != latestRoot {
+		return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
 	}
 
 	bodyRoot, err := block.Body.HashSSZ()
