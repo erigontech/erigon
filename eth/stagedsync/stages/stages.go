@@ -19,6 +19,7 @@ package stages
 import (
 	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
@@ -48,6 +49,7 @@ var (
 	Finish              SyncStage = "Finish"              // Nominal stage after all other stages
 
 	MiningCreateBlock SyncStage = "MiningCreateBlock"
+	MiningBorHeimdall SyncStage = "MiningBorHeimdall"
 	MiningExecution   SyncStage = "MiningExecution"
 	MiningFinish      SyncStage = "MiningFinish"
 	// Beacon chain stages

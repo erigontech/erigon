@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"

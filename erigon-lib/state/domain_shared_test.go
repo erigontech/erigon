@@ -60,10 +60,10 @@ Loop:
 		for accs := 0; accs < 256; accs++ {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
-			pv, err := domains.LatestAccount(k0)
+			pv, step, err := domains.LatestAccount(k0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv)
+			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv, step)
 			require.NoError(t, err)
 		}
 
@@ -110,7 +110,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 
 	iterCount := func(domains *SharedDomains) int {
 		var list [][]byte
-		require.NoError(domains.IterateStoragePrefix(nil, func(k []byte, v []byte) error {
+		require.NoError(domains.IterateStoragePrefix(nil, func(k []byte, v []byte, step uint64) error {
 			list = append(list, k)
 			return nil
 		}))
@@ -149,10 +149,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 	addr := acc(1)
 	for i := uint64(0); i < stepSize; i++ {
 		domains.SetTxNum(i)
-		if err = domains.DomainPut(kv.AccountsDomain, addr, nil, acc(i), nil); err != nil {
+		if err = domains.DomainPut(kv.AccountsDomain, addr, nil, acc(i), nil, 0); err != nil {
 			panic(err)
 		}
-		if err = domains.DomainPut(kv.StorageDomain, addr, st(i), acc(i), nil); err != nil {
+		if err = domains.DomainPut(kv.StorageDomain, addr, st(i), acc(i), nil, 0); err != nil {
 			panic(err)
 		}
 	}
@@ -174,18 +174,18 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		require.Equal(int(stepSize), iterCount(domains))
 
 		domains.SetTxNum(stepSize)
-		if err := domains.DomainDel(kv.StorageDomain, addr, st(1), nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, addr, st(1), nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainDel(kv.StorageDomain, addr, st(2), nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, addr, st(2), nil, 0); err != nil {
 			panic(err)
 		}
 		for i := stepSize; i < stepSize*2+2; i++ {
 			domains.SetTxNum(i)
-			if err = domains.DomainPut(kv.AccountsDomain, addr, nil, acc(i), nil); err != nil {
+			if err = domains.DomainPut(kv.AccountsDomain, addr, nil, acc(i), nil, 0); err != nil {
 				panic(err)
 			}
-			if err = domains.DomainPut(kv.StorageDomain, addr, st(i), acc(i), nil); err != nil {
+			if err = domains.DomainPut(kv.StorageDomain, addr, st(i), acc(i), nil, 0); err != nil {
 				panic(err)
 			}
 		}
@@ -228,10 +228,10 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 
 		domains.SetTxNum(stepSize*2 + 1)
-		if err := domains.DomainDel(kv.StorageDomain, addr, st(4), nil); err != nil {
+		if err := domains.DomainDel(kv.StorageDomain, addr, st(4), nil, 0); err != nil {
 			panic(err)
 		}
-		if err := domains.DomainPut(kv.StorageDomain, addr, st(5), acc(5), nil); err != nil {
+		if err := domains.DomainPut(kv.StorageDomain, addr, st(5), acc(5), nil, 0); err != nil {
 			panic(err)
 		}
 		require.Equal(int(stepSize*2+2-3), iterCount(domains))
@@ -296,19 +296,19 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 			v := types.EncodeAccountBytesV3(uint64(i), uint256.NewInt(uint64(i*10e6)+uint64(accs*10e2)), nil, 0)
 			k0[0] = byte(accs)
 
-			pv, err := domains.LatestAccount(k0)
+			pv, step, err := domains.LatestAccount(k0)
 			require.NoError(t, err)
 
-			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv)
+			err = domains.DomainPut(kv.AccountsDomain, k0, nil, v, pv, step)
 			require.NoError(t, err)
 			binary.BigEndian.PutUint64(l0[16:24], uint64(accs))
 
 			for locs := 0; locs < 15000; locs++ {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
-				pv, err := domains.LatestStorage(append(k0, l0...))
+				pv, step, err := domains.LatestStorage(append(k0, l0...))
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, k0, l0, l0[24:], pv)
+				err = domains.DomainPut(kv.StorageDomain, k0, l0, l0[24:], pv, step)
 				require.NoError(t, err)
 			}
 		}
@@ -352,18 +352,18 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	for accs := 0; accs < accounts; accs++ {
 		k0[0] = byte(accs)
-		pv, err := domains.LatestAccount(k0)
+		pv, step, err := domains.LatestAccount(k0)
 		require.NoError(t, err)
 
 		existed := make(map[string]struct{})
-		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte) error {
+		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte, step uint64) error {
 			existed[string(k)] = struct{}{}
 			return nil
 		})
 		require.NoError(t, err)
 
 		missed := 0
-		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte) error {
+		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte, step uint64) error {
 			if _, been := existed[string(k)]; !been {
 				missed++
 			}
@@ -372,11 +372,11 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 		require.NoError(t, err)
 		require.Zero(t, missed)
 
-		err = domains.deleteAccount(k0, pv)
+		err = domains.deleteAccount(k0, pv, step)
 		require.NoError(t, err)
 
 		notRemoved := 0
-		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte) error {
+		err = domains.IterateStoragePrefix(k0, func(k []byte, v []byte, step uint64) error {
 			notRemoved++
 			if _, been := existed[string(k)]; !been {
 				missed++

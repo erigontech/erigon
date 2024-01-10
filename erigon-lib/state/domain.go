@@ -711,23 +711,23 @@ func (d *Domain) Close() {
 	d.reCalcRoFiles()
 }
 
-func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte) error {
+func (w *domainBufferedWriter) PutWithPrev(key1, key2, val, preval []byte, prevStep uint64) error {
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, tx %d, key[%x][%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, val, preval)
 	}
-	if err := w.h.AddPrevValue(key1, key2, preval); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, preval, prevStep); err != nil {
 		return err
 	}
 	return w.addValue(key1, key2, val)
 }
 
-func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte) (err error) {
+func (w *domainBufferedWriter) DeleteWithPrev(key1, key2, prev []byte, prevStep uint64) (err error) {
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("DeleteWithPrev(%s, tx %d, key[%x][%x] preval[%x])\n", w.h.ii.filenameBase, w.h.ii.txNum, key1, key2, prev)
 	}
-	if err := w.h.AddPrevValue(key1, key2, prev); err != nil {
+	if err := w.h.AddPrevValue(key1, key2, prev, prevStep); err != nil {
 		return err
 	}
 	return w.addValue(key1, key2, nil)
@@ -863,6 +863,7 @@ type CursorItem struct {
 	btCursor     *Cursor
 	key          []byte
 	val          []byte
+	step         uint64
 	endTxNum     uint64
 	latestOffset uint64     // offset of the latest value in the file
 	t            CursorType // Whether this item represents state file or DB record, or tree
@@ -1708,7 +1709,7 @@ func (dc *DomainContext) GetAsOf(key []byte, txNum uint64, roTx kv.Tx) ([]byte, 
 		}
 		return v, nil
 	}
-	v, _, err = dc.GetLatest(key, nil, roTx)
+	v, _, _, err = dc.GetLatest(key, nil, roTx)
 	if err != nil {
 		return nil, err
 	}
@@ -1795,7 +1796,9 @@ func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	return dc.keysC, nil
 }
 
-func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool, error) {
+// GetLatest returns value, step in which the value last changed, and bool value which is true if the value
+// is present, and false if it is not present (not set or deleted)
+func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
 	//t := time.Now()
 	key := key1
 	if len(key2) > 0 {
@@ -1809,7 +1812,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 
 	keysC, err := dc.keysCursor(roTx)
 	if err != nil {
-		return nil, false, err
+		return nil, 0, false, err
 	}
 
 	var foundInvStep []byte
@@ -1821,25 +1824,26 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 
 	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value
 	if err != nil {
-		return nil, false, err
+		return nil, 0, false, err
 	}
 	if foundInvStep != nil {
+		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		copy(dc.valKeyBuf[:], key)
 		copy(dc.valKeyBuf[len(key):], foundInvStep)
 
 		valsC, err := dc.valsCursor(roTx)
 		if err != nil {
-			return nil, false, err
+			return nil, foundStep, false, err
 		}
 		_, v, err = valsC.SeekExact(dc.valKeyBuf[:len(key)+8])
 		if err != nil {
-			return nil, false, fmt.Errorf("GetLatest value: %w", err)
+			return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
 		}
 		//if traceGetLatest == dc.d.filenameBase {
 		//	fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
 		//}
 		//LatestStateReadDB.ObserveDuration(t)
-		return v, true, nil
+		return v, foundStep, true, nil
 		//} else {
 		//if traceGetLatest == dc.d.filenameBase {
 		//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
@@ -1863,9 +1867,9 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, bool,
 
 	v, found, err := dc.getLatestFromFiles(key)
 	if err != nil {
-		return nil, false, err
+		return nil, 0, false, err
 	}
-	return v, found, nil
+	return v, 0, found, nil
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {

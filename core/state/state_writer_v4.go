@@ -29,39 +29,36 @@ func (w *WriterV4) UpdateAccountData(address libcommon.Address, original, accoun
 		fmt.Printf("account [%x]=>{Balance: %d, Nonce: %d, Root: %x, CodeHash: %x}\n", address, &account.Balance, account.Nonce, account.Root, account.CodeHash)
 	}
 	if original.Incarnation > account.Incarnation {
-		if err := w.tx.DomainDel(kv.CodeDomain, address.Bytes(), nil, nil); err != nil {
+		if err := w.tx.DomainDel(kv.CodeDomain, address.Bytes(), nil, nil, 0); err != nil {
 			return err
 		}
 		if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
 			return err
 		}
 	}
-	value, origValue := accounts.SerialiseV3(account), []byte{}
-	if original.Initialised {
-		origValue = accounts.SerialiseV3(original)
-	}
-	return w.tx.DomainPut(kv.AccountsDomain, address.Bytes(), nil, value, origValue)
+	value := accounts.SerialiseV3(account)
+	return w.tx.DomainPut(kv.AccountsDomain, address.Bytes(), nil, value, nil, 0)
 }
 
 func (w *WriterV4) UpdateAccountCode(address libcommon.Address, incarnation uint64, codeHash libcommon.Hash, code []byte) error {
 	if w.trace {
 		fmt.Printf("code: %x, %x, valLen: %d\n", address.Bytes(), codeHash, len(code))
 	}
-	return w.tx.DomainPut(kv.CodeDomain, address.Bytes(), nil, code, nil)
+	return w.tx.DomainPut(kv.CodeDomain, address.Bytes(), nil, code, nil, 0)
 }
 
 func (w *WriterV4) DeleteAccount(address libcommon.Address, original *accounts.Account) error {
 	if w.trace {
 		fmt.Printf("del account: %x\n", address)
 	}
-	return w.tx.DomainDel(kv.AccountsDomain, address.Bytes(), nil, nil)
+	return w.tx.DomainDel(kv.AccountsDomain, address.Bytes(), nil, nil, 0)
 }
 
 func (w *WriterV4) WriteAccountStorage(address libcommon.Address, incarnation uint64, key *libcommon.Hash, original, value *uint256.Int) error {
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, *key, value.Bytes())
 	}
-	return w.tx.DomainPut(kv.StorageDomain, address.Bytes(), key.Bytes(), value.Bytes(), original.Bytes())
+	return w.tx.DomainPut(kv.StorageDomain, address.Bytes(), key.Bytes(), value.Bytes(), nil, 0)
 }
 
 func (w *WriterV4) CreateContract(address libcommon.Address) (err error) {

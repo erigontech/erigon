@@ -52,7 +52,7 @@ type PatriciaContext interface {
 	// load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
-	GetBranch(prefix []byte) ([]byte, error)
+	GetBranch(prefix []byte) ([]byte, uint64, error)
 	// fetch account with given plain key
 	GetAccount(plainKey []byte, cell *Cell) error
 	// fetch storage with given plain key
@@ -60,7 +60,7 @@ type PatriciaContext interface {
 	// Returns temp directory to use for update collecting
 	TempDir() string
 	// store branch data
-	PutBranch(prefix []byte, data []byte, prevData []byte) error
+	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 }
 
 type TrieVariant string
@@ -166,7 +166,7 @@ func (be *BranchEncoder) initCollector() {
 // reads previous comitted value and merges current with it if needed.
 func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
 	return func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		stateValue, err := pc.GetBranch(prefix)
+		stateValue, stateStep, err := pc.GetBranch(prefix)
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
 		//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%v\n", prefix, stateValue, update, BranchData(update).String())
 
 		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
-		if err = pc.PutBranch(cp, cu, stateValue); err != nil {
+		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
 			return err
 		}
 		return nil

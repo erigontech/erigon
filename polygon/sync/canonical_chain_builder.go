@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 )
 
 //go:generate mockgen -destination=./mock/canonical_chain_builder_mock.go -package=mock . CanonicalChainBuilder
