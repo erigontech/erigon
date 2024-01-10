@@ -918,9 +918,13 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		i := 0
 		srcG := src.MakeGetter()
 		var buf []byte
+		log.Info("start", "file", src.FileName())
 		dstBuf := bytes.NewBuffer(nil)
 		for srcG.HasNext() {
 			i++
+			if buf == nil {
+				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
+			}
 			buf, _ = srcG.Next(buf[:0])
 			if buf == nil {
 				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
@@ -957,6 +961,7 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		ext := filepath.Ext(srcF)
 		withoutExt := srcF[:len(srcF)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
+		log.Info("done", "file", src.FileName())
 		return nil
 	}
 	for _, f := range l {
