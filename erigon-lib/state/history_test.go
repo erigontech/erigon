@@ -101,26 +101,26 @@ func TestHistoryCollationBuild(t *testing.T) {
 		defer writer.close()
 
 		writer.SetTxNum(2)
-		err = writer.AddPrevValue([]byte("key1"), nil, nil)
+		err = writer.AddPrevValue([]byte("key1"), nil, nil, 0)
 		require.NoError(err)
 
 		writer.SetTxNum(3)
-		err = writer.AddPrevValue([]byte("key2"), nil, nil)
+		err = writer.AddPrevValue([]byte("key2"), nil, nil, 0)
 		require.NoError(err)
 
 		writer.SetTxNum(6)
-		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
+		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"), 0)
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"), 0)
 		require.NoError(err)
 
 		flusher := writer
 		writer = hc.NewWriter()
 
 		writer.SetTxNum(7)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"), 0)
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key3"), nil, nil)
+		err = writer.AddPrevValue([]byte("key3"), nil, nil, 0)
 		require.NoError(err)
 
 		err = flusher.Flush(ctx, tx)
@@ -215,23 +215,23 @@ func TestHistoryAfterPrune(t *testing.T) {
 		defer writer.close()
 
 		writer.SetTxNum(2)
-		err = writer.AddPrevValue([]byte("key1"), nil, nil)
+		err = writer.AddPrevValue([]byte("key1"), nil, nil, 0)
 		require.NoError(err)
 
 		writer.SetTxNum(3)
-		err = writer.AddPrevValue([]byte("key2"), nil, nil)
+		err = writer.AddPrevValue([]byte("key2"), nil, nil, 0)
 		require.NoError(err)
 
 		writer.SetTxNum(6)
-		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"))
+		err = writer.AddPrevValue([]byte("key1"), nil, []byte("value1.1"), 0)
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"))
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.1"), 0)
 		require.NoError(err)
 
 		writer.SetTxNum(7)
-		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"))
+		err = writer.AddPrevValue([]byte("key2"), nil, []byte("value2.2"), 0)
 		require.NoError(err)
-		err = writer.AddPrevValue([]byte("key3"), nil, nil)
+		err = writer.AddPrevValue([]byte("key3"), nil, nil, 0)
 		require.NoError(err)
 
 		err = writer.Flush(ctx, tx)
@@ -301,7 +301,7 @@ func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB,
 				binary.BigEndian.PutUint64(v[:], valNum)
 				k[0] = 1   //mark key to simplify debug
 				v[0] = 255 //mark value to simplify debug
-				err = writer.AddPrevValue(k[:], nil, prevVal[keyNum])
+				err = writer.AddPrevValue(k[:], nil, prevVal[keyNum], 0)
 				require.NoError(tb, err)
 				prevVal[keyNum] = v[:]
 			}
@@ -976,14 +976,14 @@ func writeSomeHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 			if ik == 0 && txNum%33 == 0 {
 				continue
 			}
-			err = writer.AddPrevValue(k, nil, prevVal[ik])
+			err = writer.AddPrevValue(k, nil, prevVal[ik], 0)
 			require.NoError(tb, err)
 
 			prevVal[ik] = v[:]
 		}
 
 		if txNum%33 == 0 {
-			err = writer.AddPrevValue(keys[0], nil, nil)
+			err = writer.AddPrevValue(keys[0], nil, nil, 0)
 			require.NoError(tb, err)
 		}
 

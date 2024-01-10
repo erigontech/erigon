@@ -318,7 +318,8 @@ func (a *AggregatorV3) SetCompressWorkers(i int) {
 func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
-func (ac *AggregatorV3Context) Files() (res []string) {
+func (ac *AggregatorV3Context) Files() []string {
+	var res []string
 	if ac == nil {
 		return res
 	}
@@ -332,6 +333,12 @@ func (ac *AggregatorV3Context) Files() (res []string) {
 	res = append(res, ac.tracesTo.Files()...)
 	return res
 }
+func (a *AggregatorV3) Files() []string {
+	ac := a.MakeContext()
+	defer ac.Close()
+	return ac.Files()
+}
+
 func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
 	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
 		return
@@ -1525,7 +1532,7 @@ func (ac *AggregatorV3Context) DomainGetAsOf(tx kv.Tx, name kv.Domain, key []byt
 		panic(fmt.Sprintf("unexpected: %s", name))
 	}
 }
-func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, ok bool, err error) {
+func (ac *AggregatorV3Context) GetLatest(domain kv.Domain, k, k2 []byte, tx kv.Tx) (v []byte, step uint64, ok bool, err error) {
 	switch domain {
 	case kv.AccountsDomain:
 		return ac.account.GetLatest(k, k2, tx)

@@ -16,7 +16,7 @@ Snapshots supports the following sub commands:
 
 ## cmp - compare snapshots
 
-This command takes the follwoing form: 
+This command takes the following form: 
 
 ```shell
     snapshots cmp <location> <location>
@@ -32,7 +32,7 @@ It is also possible to set the `--types` flag to limit the type of segment file 
 
 This command can be used to copy segment files from one location to another.
 
-This command takes the follwoing form: 
+This command takes the following form: 
 
 ```shell
     snapshots copy <source> <destination>

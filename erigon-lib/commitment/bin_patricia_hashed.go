@@ -837,7 +837,7 @@ func (bph *BinPatriciaHashed) needUnfolding(hashedKey []byte) int {
 
 // unfoldBranchNode returns true if unfolding has been done
 func (bph *BinPatriciaHashed) unfoldBranchNode(row int, deleted bool, depth int) (bool, error) {
-	branchData, err := bph.ctx.GetBranch(binToCompact(bph.currentKey[:bph.currentKeyLen]))
+	branchData, _, err := bph.ctx.GetBranch(binToCompact(bph.currentKey[:bph.currentKeyLen]))
 	if err != nil {
 		return false, err
 	}

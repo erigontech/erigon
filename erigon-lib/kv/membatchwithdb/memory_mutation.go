@@ -693,7 +693,7 @@ func (m *MemoryMutation) AggCtx() interface{} {
 	return m.db.(hasAggCtx).AggCtx()
 }
 
-func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, err error) {
+func (m *MemoryMutation) DomainGet(name kv.Domain, k, k2 []byte) (v []byte, step uint64, err error) {
 	return m.db.(kv.TemporalTx).DomainGet(name, k, k2)
 }
 
