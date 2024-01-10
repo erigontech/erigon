@@ -354,9 +354,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			const dirtySpaceMaxChainDB = uint64(2 * datasize.GB)
 			const dirtySpaceMaxDefault = uint64(256 * datasize.MB)
 
-			if (opts.label == kv.ChainDB) && (dirtySpace > dirtySpaceMaxChainDB) {
+			if opts.label == kv.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
 				dirtySpace = dirtySpaceMaxChainDB
-			} else if (opts.label != kv.ChainDB) && (dirtySpace > dirtySpaceMaxDefault) {
+			} else if opts.label != kv.ChainDB && dirtySpace > dirtySpaceMaxDefault {
 				dirtySpace = dirtySpaceMaxDefault
 			}
 		}
