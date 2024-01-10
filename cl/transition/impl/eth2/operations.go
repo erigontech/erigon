@@ -114,7 +114,7 @@ func (I *impl) ProcessAttesterSlashing(s abstract.BeaconState, attSlashing *clty
 		if validator.IsSlashable(currentEpoch) {
 			pr, err := s.SlashValidator(ind, nil)
 			if err != nil {
-				return fmt.Errorf("unable to slash validator: %d", ind)
+				return fmt.Errorf("unable to slash validator: %d, %s", ind, err)
 			}
 			if I.BlockRewardsCollector != nil {
 				I.BlockRewardsCollector.AttesterSlashings += pr
