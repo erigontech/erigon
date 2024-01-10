@@ -1025,27 +1025,21 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
-		if txNum >= txTo {
+		if txNum >= txTo || limit == 0 {
 			break
 		}
+		limit--
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
 				return nil, err
 			}
-			if limit == 0 {
-				break
-			}
-			limit--
 			if err := collector.Collect(v, nil); err != nil {
 				return nil, err
 			}
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
-		}
-		if limit == 0 { //ye, double-break to avoid tx key deletion when few keys left undeleted
-			break
 		}
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
