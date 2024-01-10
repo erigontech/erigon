@@ -3,9 +3,10 @@ package consensus_tests
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/spectest"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -194,7 +195,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			att := &solid.Attestation{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnAttestation(att, false)
+			err = forkStore.OnAttestation(att, false, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {

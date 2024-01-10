@@ -66,6 +66,7 @@ type ForkChoiceStorageMock struct {
 	StateAtSlotVal            map[uint64]*state.CachingBeaconState
 	GetSyncCommitteesVal      map[common.Hash][2]*solid.SyncCommittee
 	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
+	WeightsMock               []ForkNode
 
 	Pool pool.OperationsPool
 }
@@ -159,7 +160,7 @@ func (f *ForkChoiceStorageMock) Time() uint64 {
 	return f.TimeVal
 }
 
-func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock bool) error {
+func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error {
 	f.Pool.AttestationsPool.Insert(attestation.Signature(), attestation)
 	return nil
 }
@@ -214,4 +215,8 @@ func (f *ForkChoiceStorageMock) OnProposerSlashing(proposerSlashing *cltypes.Pro
 func (f *ForkChoiceStorageMock) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
 	f.Pool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
 	return nil
+}
+
+func (f *ForkChoiceStorageMock) ForkNodes() []ForkNode {
+	return f.WeightsMock
 }

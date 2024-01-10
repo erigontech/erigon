@@ -314,7 +314,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
-	if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
+	if !opts.HasFlag(mdbx.Readonly) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
@@ -326,20 +326,44 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
-			return nil, err
+		if opts.label == kv.ChainDB {
+			if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
+				return nil, err
+			}
+			dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
+			if err != nil {
+				return nil, err
+			}
+			if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+				return nil, err
+			}
 		}
-		dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
-		if err != nil {
-			return nil, err
+
+		var dirtySpace uint64
+		if opts.dirtySpace > 0 {
+			dirtySpace = opts.dirtySpace
+		} else {
+			// the default value is based on the RAM amount
+			dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+			if err != nil {
+				return nil, err
+			}
+			dirtySpace = dirtyPagesLimit * opts.pageSize
+
+			// clamp to max size
+			const dirtySpaceMaxChainDB = uint64(2 * datasize.GB)
+			const dirtySpaceMaxDefault = uint64(256 * datasize.MB)
+
+			if opts.label == kv.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
+				dirtySpace = dirtySpaceMaxChainDB
+			} else if opts.label != kv.ChainDB && dirtySpace > dirtySpaceMaxDefault {
+				dirtySpace = dirtySpaceMaxDefault
+			}
 		}
-		if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize); err != nil {
 			return nil, err
 		}
 
-		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
-			return nil, err
-		}
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
 		// which corresponds to the range from 8192 and to 32768 in units respectively
 		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {

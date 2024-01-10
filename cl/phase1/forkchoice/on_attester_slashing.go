@@ -86,7 +86,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	defer f.mu.Unlock()
 	var anySlashed bool
 	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
-		f.equivocatingIndicies[index] = struct{}{}
+		f.setUnequivocating(index)
 		if !anySlashed {
 			v, err := s.ValidatorForValidatorIndex(int(index))
 			if err != nil {

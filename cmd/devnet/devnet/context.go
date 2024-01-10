@@ -139,10 +139,8 @@ func CurrentNetwork(ctx context.Context) *Network {
 		return cn.network
 	}
 
-	if current := CurrentNode(ctx); current != nil {
-		if n, ok := current.(*devnetNode); ok {
-			return n.network
-		}
+	if cn, ok := ctx.Value(ckNode).(*cnode); ok && cn.node != nil {
+		return cn.node.(*devnetNode).network
 	}
 
 	if devnet, ok := ctx.Value(ckDevnet).(Devnet); ok {
