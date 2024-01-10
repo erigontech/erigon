@@ -55,8 +55,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 
 	if s.Version() < clparams.DenebVersion {
 		domain, err = s.GetDomain(domainType, voluntaryExit.Epoch)
-	} else {
-		fmt.Println("A")
+	} else if s.Version() >= clparams.DenebVersion {
 		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(s.BeaconConfig().CapellaForkVersion), s.GenesisValidatorsRoot())
 	}
 	if err != nil {

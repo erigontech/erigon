@@ -217,7 +217,12 @@ func (I *impl) ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit 
 
 	// We can skip it in some instances if we want to optimistically sync up.
 	if I.FullValidation {
-		domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+		var domain []byte
+		if s.Version() < clparams.DenebVersion {
+			domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+		} else if s.Version() >= clparams.DenebVersion {
+			domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(s.BeaconConfig().CapellaForkVersion), s.GenesisValidatorsRoot())
+		}
 		if err != nil {
 			return err
 		}
@@ -697,7 +702,7 @@ func (I *impl) processAttestation(s abstract.BeaconState, attestation *solid.Att
 	if (data.Target().Epoch() != currentEpoch && data.Target().Epoch() != previousEpoch) || data.Target().Epoch() != state.GetEpochAtSlot(s.BeaconConfig(), data.Slot()) {
 		return nil, errors.New("ProcessAttestation: attestation with invalid epoch")
 	}
-	if s.Version() < clparams.DenebVersion && data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot || stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch {
+	if s.Version() < clparams.DenebVersion && ((data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot) || (stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch)) {
 		return nil, errors.New("ProcessAttestation: attestation slot not in range")
 	}
 	if s.Version() >= clparams.DenebVersion && data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot {
