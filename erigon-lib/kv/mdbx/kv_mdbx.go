@@ -337,27 +337,31 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 
+		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
-			if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
-				return nil, err
-			}
+			dirtySpace = opts.dirtySpace
 		} else {
+			// the default value is based on the RAM amount
 			dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
 			if err != nil {
 				return nil, err
 			}
-			if dirtyPagesLimit*opts.pageSize > uint64(2*datasize.GB) {
-				if opts.label == kv.ChainDB {
-					if err = env.SetOption(mdbx.OptTxnDpLimit, uint64(2*datasize.GB)/opts.pageSize); err != nil {
-						return nil, err
-					}
-				} else {
-					if err = env.SetOption(mdbx.OptTxnDpLimit, uint64(256*datasize.MB)/opts.pageSize); err != nil {
-						return nil, err
-					}
-				}
+			dirtySpace = dirtyPagesLimit * opts.pageSize
+
+			// clamp to max size
+			const dirtySpaceMaxChainDB = uint64(2 * datasize.GB)
+			const dirtySpaceMaxDefault = uint64(256 * datasize.MB)
+
+			if opts.label == kv.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
+				dirtySpace = dirtySpaceMaxChainDB
+			} else if opts.label != kv.ChainDB && dirtySpace > dirtySpaceMaxDefault {
+				dirtySpace = dirtySpaceMaxDefault
 			}
 		}
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize); err != nil {
+			return nil, err
+		}
+
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
 		// which corresponds to the range from 8192 and to 32768 in units respectively
 		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
