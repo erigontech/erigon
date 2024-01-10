@@ -2057,7 +2057,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		for i := 0; uint64(i) < d.aggregationStep+1; i++ {
 			writer.SetTxNum(uint64(i))
-			err = writer.PutWithPrev(pruningKey, nil, []byte(fmt.Sprintf("value.%d", i)), nil)
+			err = writer.PutWithPrev(pruningKey, nil, []byte(fmt.Sprintf("value.%d", i)), nil, uint64(i-1)/d.aggregationStep)
 			require.NoError(t, err)
 		}
 
