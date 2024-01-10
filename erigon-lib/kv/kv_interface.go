@@ -539,7 +539,7 @@ type (
 )
 
 type TemporalGetter interface {
-	DomainGet(name Domain, k, k2 []byte) (v []byte, err error)
+	DomainGet(name Domain, k, k2 []byte) (v []byte, step uint64, err error)
 }
 type TemporalTx interface {
 	Tx
@@ -567,14 +567,14 @@ type TemporalPutDel interface {
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
-	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte) error
+	DomainPut(domain Domain, k1, k2 []byte, val, prevVal []byte, prevStep uint64) error
 
 	// DomainDel
 	// Optimizations:
 	//   - user can prvide `prevVal != nil` - then it will not read prev value from storage
 	//   - user can append k2 into k1, then underlying methods will not preform append
 	//   - if `val == nil` it will call DomainDel
-	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte) error
+	DomainDel(domain Domain, k1, k2 []byte, prevVal []byte, prevStep uint64) error
 	DomainDelPrefix(domain Domain, prefix []byte) error
 }
 

@@ -38,9 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -59,6 +57,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
@@ -263,7 +262,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	histV3, db, agg := temporal.NewTestDB(nil, dirs, gspec)
 	cfg.HistoryV3 = histV3
 
-	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
+	erigonGrpcServeer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
 	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 1, logger)
 	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 1, logger)
 	mock := &MockSentry{

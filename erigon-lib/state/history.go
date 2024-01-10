@@ -438,7 +438,7 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	return nil
 }
 
-func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte) (err error) {
+func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, originalStep uint64) (err error) {
 	if w.discard {
 		return nil
 	}

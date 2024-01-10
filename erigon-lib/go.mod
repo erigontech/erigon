@@ -3,7 +3,7 @@ module github.com/ledgerwatch/erigon-lib
 go 1.21
 
 require (
-	github.com/erigontech/mdbx-go v0.37.0
+	github.com/erigontech/mdbx-go v0.37.1
 	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240109021749-24bfe5bfc932
 	github.com/ledgerwatch/interfaces v0.0.0-20240105174738-fe57049f198c
 	github.com/ledgerwatch/log/v3 v3.9.0
@@ -27,6 +27,7 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.8.1
+	github.com/golang/mock v1.6.0
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/v2 v2.0.4
@@ -41,7 +42,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.6.0
-	golang.org/x/crypto v0.17.0
+	golang.org/x/crypto v0.18.0
 	golang.org/x/exp v0.0.0-20231226003508-02704c960a9b
 	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.16.0

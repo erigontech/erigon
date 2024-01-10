@@ -35,18 +35,18 @@ func (ms *MockState) TempDir() string {
 	return ms.t.TempDir()
 }
 
-func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) error {
+func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
 	// updates already merged by trie
 	ms.cm[string(prefix)] = data
 	return nil
 }
 
-func (ms *MockState) GetBranch(prefix []byte) ([]byte, error) {
+func (ms *MockState) GetBranch(prefix []byte) ([]byte, uint64, error) {
 	if exBytes, ok := ms.cm[string(prefix)]; ok {
 		//fmt.Printf("GetBranch prefix %x, exBytes (%d) %x [%v]\n", prefix, len(exBytes), []byte(exBytes), BranchData(exBytes).String())
-		return exBytes, nil
+		return exBytes, 0, nil
 	}
-	return nil, nil
+	return nil, 0, nil
 }
 
 func (ms *MockState) GetAccount(plainKey []byte, cell *Cell) error {
