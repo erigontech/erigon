@@ -22,7 +22,7 @@ jobs:
     runs-on: self-hosted
     env:
       ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
-      WORKING_TIME_SECONDS: 300
+      WORKING_TIME_SECONDS: 600
 
     steps:
     - name: Check out repository
