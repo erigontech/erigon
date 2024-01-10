@@ -94,12 +94,13 @@ var snapshotCommand = cli.Command{
 			Name:   "uploader",
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
-			Flags: uploaderCommandFlags([]cli.Flag{
-				&SnapshotVersionFlag,
-				&erigoncli.UploadLocationFlag,
-				&erigoncli.UploadFromFlag,
-				&erigoncli.FrozenBlockLimitFlag,
-			}),
+			Flags: joinFlags(erigoncli.DefaultFlags,
+				[]cli.Flag{
+					&SnapshotVersionFlag,
+					&erigoncli.UploadLocationFlag,
+					&erigoncli.UploadFromFlag,
+					&erigoncli.FrozenBlockLimitFlag,
+				}),
 			Before: func(context *cli.Context) error {
 				erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
 				erigoncli.SyncLoopBlockLimitFlag.Value = 100000
@@ -643,14 +644,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	return nil
-}
-
-func uploaderCommandFlags(flags []cli.Flag) []cli.Flag {
-	return joinFlags(erigoncli.DefaultFlags, flags, []cli.Flag{
-		&erigoncli.SyncLoopBreakAfterFlag,
-		&erigoncli.SyncLoopBlockLimitFlag,
-		&erigoncli.SyncLoopPruneLimitFlag,
-	})
 }
 
 func doUploaderCommand(cliCtx *cli.Context) error {
