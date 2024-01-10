@@ -43,7 +43,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 		v := make([]byte, 8)
 		binary.BigEndian.PutUint64(v, i)
 		for j := 0; j < len(keys); j++ {
-			err := domains.DomainPut(kv.AccountsDomain, keys[j], nil, v, nil)
+			err := domains.DomainPut(kv.AccountsDomain, keys[j], nil, v, nil, 0)
 			require.NoError(t, err)
 		}
 
@@ -77,7 +77,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	//t.Run("GetLatest", func(t *testing.B) {
 	for ik := 0; ik < t.N; ik++ {
 		for i := 0; i < len(keys); i++ {
-			v, ok, err := ac2.GetLatest(kv.AccountsDomain, keys[i], nil, rwTx)
+			v, _, ok, err := ac2.GetLatest(kv.AccountsDomain, keys[i], nil, rwTx)
 
 			require.True(t, ok)
 			require.EqualValuesf(t, latest, v, "unexpected %d, wanted %d", binary.BigEndian.Uint64(v), maxTx-1)

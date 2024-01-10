@@ -85,7 +85,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
-		mergeThreshold:  3 * 8192,
+		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
 	}
@@ -312,7 +312,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
-	if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
+	if !opts.HasFlag(mdbx.Readonly) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
@@ -341,6 +341,22 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
 				return nil, err
 			}
+		} else {
+			dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
+			if err != nil {
+				return nil, err
+			}
+			if dirtyPagesLimit*opts.pageSize > uint64(2*datasize.GB) {
+				if opts.label == kv.ChainDB {
+					if err = env.SetOption(mdbx.OptTxnDpLimit, uint64(2*datasize.GB)/opts.pageSize); err != nil {
+						return nil, err
+					}
+				} else {
+					if err = env.SetOption(mdbx.OptTxnDpLimit, uint64(256*datasize.MB)/opts.pageSize); err != nil {
+						return nil, err
+					}
+				}
+			}
 		}
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
 		// which corresponds to the range from 8192 and to 32768 in units respectively
@@ -348,7 +364,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			return nil, err
 		}
 	}
-
 	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
 	if err != nil {
 		return nil, err
