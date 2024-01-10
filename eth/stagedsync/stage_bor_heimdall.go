@@ -214,7 +214,7 @@ func BorHeimdallForward(
 				PeerID:  cfg.hd.SourcePeerId(header.Hash()),
 			}})
 			dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-			if err := s.state.UnwindTo(blockNum-1, ForkReset(header.Hash())); err != nil {
+			if err := s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()), tx); err != nil {
 				return err
 			}
 			return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
