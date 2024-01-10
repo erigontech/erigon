@@ -61,20 +61,20 @@ type BalanceChangeReason byte
 
 const (
 	BalanceChangeUnspecified          BalanceChangeReason = 0
-	BalanceChangeRewardMineUncle                          = 1
-	BalanceChangeRewardMineBlock                          = 2
-	BalanceChangeDaoRefundContract                        = 3
-	BalanceChangeDaoAdjustBalance                         = 4
-	BalanceChangeTransfer                                 = 5
-	BalanceChangeGenesisBalance                           = 6
-	BalanceChangeGasBuy                                   = 7
-	BalanceChangeRewardTransactionFee                     = 8
-	BalanceChangeGasRefund                                = 9
-	BalanceChangeTouchAccount                             = 10
-	BalanceChangeSuicideRefund                            = 11
-	BalanceChangeSuicideWithdraw                          = 12
-	BalanceChangeBurn                                     = 13
-	BalanceChangeWithdrawal                               = 14
+	BalanceChangeRewardMineUncle      BalanceChangeReason = 1
+	BalanceChangeRewardMineBlock      BalanceChangeReason = 2
+	BalanceChangeDaoRefundContract    BalanceChangeReason = 3
+	BalanceChangeDaoAdjustBalance     BalanceChangeReason = 4
+	BalanceChangeTransfer             BalanceChangeReason = 5
+	BalanceChangeGenesisBalance       BalanceChangeReason = 6
+	BalanceChangeGasBuy               BalanceChangeReason = 7
+	BalanceChangeRewardTransactionFee BalanceChangeReason = 8
+	BalanceChangeGasRefund            BalanceChangeReason = 9
+	BalanceChangeTouchAccount         BalanceChangeReason = 10
+	BalanceChangeSuicideRefund        BalanceChangeReason = 11
+	BalanceChangeSuicideWithdraw      BalanceChangeReason = 12
+	BalanceChangeBurn                 BalanceChangeReason = 13
+	BalanceChangeWithdrawal           BalanceChangeReason = 14
 )
 
 // IntraBlockState is an EVM database for full state querying.
