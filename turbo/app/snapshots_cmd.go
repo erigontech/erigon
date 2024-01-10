@@ -214,13 +214,13 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 			}),
 		},
-		//{
-		//	Name:   "bodies_decrement_datafix",
-		//	Action: doBodiesDecrement,
-		//	Flags: joinFlags([]cli.Flag{
-		//		&utils.DataDirFlag,
-		//	}),
-		//},
+		{
+			Name:   "bodies_decrement_datafix",
+			Action: doBodiesDecrement,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
 	},
 }
 
