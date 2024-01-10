@@ -17,10 +17,13 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/integrity"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
@@ -211,13 +214,13 @@ var snapshotCommand = cli.Command{
 				&utils.DataDirFlag,
 			}),
 		},
-		//{
-		//	Name:   "bodies_decrement_datafix",
-		//	Action: doBodiesDecrement,
-		//	Flags: joinFlags([]cli.Flag{
-		//		&utils.DataDirFlag,
-		//	}),
-		//},
+		{
+			Name:   "bodies_decrement_datafix",
+			Action: doBodiesDecrement,
+			Flags: joinFlags([]cli.Flag{
+				&utils.DataDirFlag,
+			}),
+		},
 	},
 }
 
@@ -876,7 +879,6 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	return err
 }
 
-/*
 func doBodiesDecrement(cliCtx *cli.Context) error {
 	logger, _, err := debug.Setup(cliCtx, true)
 	if err != nil {
@@ -920,6 +922,9 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		for srcG.HasNext() {
 			i++
 			buf, _ = srcG.Next(buf[:0])
+			if buf == nil {
+				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
+			}
 			body := &types.BodyForStorage{}
 			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
 				return err
@@ -963,7 +968,6 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 
 	return nil
 }
-*/
 
 func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 	const ThreadsLimit = 9_000
