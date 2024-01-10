@@ -318,7 +318,8 @@ func (a *AggregatorV3) SetCompressWorkers(i int) {
 func (a *AggregatorV3) HasBackgroundFilesBuild() bool { return a.ps.Has() }
 func (a *AggregatorV3) BackgroundProgress() string    { return a.ps.String() }
 
-func (ac *AggregatorV3Context) Files() (res []string) {
+func (ac *AggregatorV3Context) Files() []string {
+	var res []string
 	if ac == nil {
 		return res
 	}
@@ -332,6 +333,12 @@ func (ac *AggregatorV3Context) Files() (res []string) {
 	res = append(res, ac.tracesTo.Files()...)
 	return res
 }
+func (a *AggregatorV3) Files() []string {
+	ac := a.MakeContext()
+	defer ac.Close()
+	return ac.Files()
+}
+
 func (a *AggregatorV3) BuildOptionalMissedIndicesInBackground(ctx context.Context, workers int) {
 	if ok := a.buildingOptionalIndices.CompareAndSwap(false, true); !ok {
 		return
