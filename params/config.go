@@ -65,6 +65,7 @@ var (
 	HermezBlueberryGenesisHash       = libcommon.HexToHash("0x45cff376044a08f8f33f0244d589f2178ea4f4c5234d912daa2ff3c496b17862")
 	HermezCardonaGenesisHash         = libcommon.HexToHash("0xf1a89745a08cfd1af739b93f960ad89546e3cec2a7babe8607703eb1e4e94b4d")
 	HermezCardonaInternalGenesisHash = libcommon.HexToHash("0x676657dd8a7dce782f4fe8a97ba794de3ff732b40233fce01da77d1ba1a24ee1")
+	X1TestnetGenesisHash             = libcommon.HexToHash("0xb2fbff62137228e52809081a425bfcd30c0fdc8c1213085278c739676a7669b8")
 )
 
 var (
@@ -149,6 +150,8 @@ var (
 	HermezCardonaChainConfig = readChainSpec("chainspecs/hermez-cardona.json")
 
 	HermezCardonaInternalChainConfig = readChainSpec("chainspecs/hermez-cardona-internal.json")
+
+	X1TestnetChainConfig = readChainSpec("chainspecs/x1-testnet.json")
 
 	CliqueSnapshot = NewSnapshotConfig(10, 1024, 16384, true, "")
 
@@ -242,6 +245,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return HermezCardonaChainConfig
 	case networkname.HermezCardonaInternalChainName:
 		return HermezCardonaInternalChainConfig
+	case networkname.X1TestnetChainName:
+		return X1TestnetChainConfig
 	default:
 		return nil
 	}
@@ -279,6 +284,8 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &HermezCardonaGenesisHash
 	case networkname.HermezCardonaInternalChainName:
 		return &HermezCardonaInternalGenesisHash
+	case networkname.X1TestnetChainName:
+		return &X1TestnetGenesisHash
 	default:
 		return nil
 	}

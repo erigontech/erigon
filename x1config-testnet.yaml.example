@@ -1,0 +1,19 @@
+datadir : '/Path/to/your/datadirs/x1-testnet'
+chain : "x1-testnet"
+http : true
+private.api.addr : "localhost:9091"
+zkevm.l2-chain-id: 195
+zkevm.l2-sequencer-rpc-url: "https://x1testrpc.okx.com"
+zkevm.l2-datastreamer-url: "teststream.x1.tech:8800"
+zkevm.l1-chain-id: 11155111
+zkevm.l1-rpc-url: "https://rpc.ankr.com/eth_sepolia/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+zkevm.l1-contract-address: "0x6662621411A8DACC3cA7049C8BddABaa9a999ce3"
+zkevm.l1-block-range: 100
+zkevm.l1-query-delay: 6000
+zkevm.l1-matic-contract-address: "0x3F4B6664338F23d2397c953f2AB4Ce8031663f80"
+zkevm.l1-ger-manager-contract-address: "0x66E61bA00F58b857A9DD2C500F3aBc424A46BD20"
+zkevm.l1-first-block: 4648290
+zkevm.rpc-ratelimit: 250
+
+externalcl: true
+http.api : ["eth","debug","net","trace","web3","erigon","zkevm"]

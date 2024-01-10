@@ -33,10 +33,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-
 	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
@@ -501,6 +499,16 @@ func HermezLocalDevnetGenesisBlock() *types.Genesis {
 	}
 }
 
+func X1TestnetGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.X1TestnetChainConfig,
+		Timestamp:  1699369668,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/x1-testnet.json"),
+	}
+}
+
 // Pre-calculated version of:
 //
 //	DevnetSignPrivateKey = crypto.HexToECDSA(sha256.Sum256([]byte("erigon devnet key")))
@@ -702,7 +710,7 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 		keys[i] = string(k.Bytes())
 		i++
 	}
-	slices.Sort(keys)
+	//slices.Sort(keys)
 	return keys
 }
 
@@ -756,6 +764,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HermezCardonaGenesisBlock()
 	case networkname.HermezCardonaInternalChainName:
 		return HermezCardonaInternalGenesisBlock()
+	case networkname.X1TestnetChainName:
+		return X1TestnetGenesisBlock()
 	default:
 		return nil
 	}
