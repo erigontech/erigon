@@ -22,6 +22,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -107,7 +108,7 @@ func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(usedGas), errMsg})
 }
 
-func (l *JSONLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (l *JSONLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
 }
 
 func (l *JSONLogger) OnBlockEnd(err error) {

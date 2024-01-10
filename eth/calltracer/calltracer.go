@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -61,7 +62,8 @@ func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, sc
 func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
-func (ct *CallTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {}
+func (ct *CallTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
+}
 
 func (ct *CallTracer) OnBlockEnd(err error) {}
 

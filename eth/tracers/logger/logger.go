@@ -225,7 +225,7 @@ func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	}
 }
 
-func (l *StructLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (l *StructLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
 }
 
 func (l *StructLogger) OnBlockEnd(err error) {
@@ -459,7 +459,7 @@ func (t *mdLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	t.captureEndOrExit(output, usedGas, err)
 }
 
-func (t *mdLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (t *mdLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
 }
 
 func (t *mdLogger) OnBlockEnd(err error) {

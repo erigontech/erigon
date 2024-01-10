@@ -9,6 +9,7 @@ import (
 
 	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -198,7 +199,7 @@ func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint6
 func (l *JsonStreamLogger) CaptureEnd(output []byte, gasUsed uint64, err error) {
 }
 
-func (l *JsonStreamLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (l *JsonStreamLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
 }
 
 func (l *JsonStreamLogger) OnBlockEnd(err error) {

@@ -392,7 +392,7 @@ func (ot *opcodeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, 
 
 }
 
-func (ot *opcodeTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (ot *opcodeTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain2.Config) {
 }
 
 func (ot *opcodeTracer) OnBlockEnd(err error) {

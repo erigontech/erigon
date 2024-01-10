@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
@@ -38,7 +39,7 @@ func (t *DefaultTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, 
 func (t *DefaultTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
 }
 
-func (t *DefaultTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (t *DefaultTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
 }
 
 func (t *DefaultTracer) OnBlockEnd(err error) {

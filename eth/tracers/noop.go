@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -76,7 +77,7 @@ func (*NoopTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {}
 
 func (*NoopTracer) CaptureTxEnd(receipt *types.Receipt, err error) {}
 
-func (*NoopTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (*NoopTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
 }
 
 func (*NoopTracer) OnBlockEnd(err error) {

@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
@@ -632,7 +633,7 @@ func (ot *OeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scop
 func (ot *OeTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, opDepth int, err error) {
 }
 
-func (ot *OeTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header) {
+func (ot *OeTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
 }
 
 func (ot *OeTracer) OnBlockEnd(err error) {

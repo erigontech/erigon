@@ -65,7 +65,7 @@ type BlockchainLogger interface {
 	consensus.EngineLogger
 	// OnBlockStart is called before executing `block`.
 	// `td` is the total difficulty prior to `block`.
-	OnBlockStart(block *types.Block, td *big.Int, finalized *types.Header, safe *types.Header)
+	OnBlockStart(block *types.Block, td *big.Int, finalized *types.Header, safe *types.Header, chainConfig *chain.Config)
 	OnBlockEnd(err error)
 	OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc)
 }
@@ -132,7 +132,7 @@ func ExecuteBlockEphemerally(
 
 	if bcLogger != nil {
 		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
-		bcLogger.OnBlockStart(block, td, chainReader.CurrentFinalizedHeader(), chainReader.CurrentSafeHeader())
+		bcLogger.OnBlockStart(block, td, chainReader.CurrentFinalizedHeader(), chainReader.CurrentSafeHeader(), chainConfig)
 		defer func() {
 			bcLogger.OnBlockEnd(executeBlockErr)
 		}()
