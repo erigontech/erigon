@@ -312,6 +312,14 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 
+		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
+		// but we want call all `SetOption` before env.Open(), because:
+		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
+		pageSize := opts.pageSize
+		if pageSize == 0 {
+			pageSize = kv.DefaultPageSize()
+		}
+
 		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
 			dirtySpace = opts.dirtySpace
@@ -327,7 +335,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 				dirtySpace = dirtySpaceMaxDefault
 			}
 		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize); err != nil {
+		//can't use real pagesize here - it will be known only after env.Open()
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize); err != nil {
 			return nil, err
 		}
 
@@ -340,17 +349,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 
 	err = env.Open(opts.path, opts.flags, 0664)
 	if err != nil {
-		if err != nil {
-			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-		}
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
 	}
 
 	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
 	in, err := env.Info(nil)
 	if err != nil {
-		if err != nil {
-			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-		}
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
 	}
 
 	opts.pageSize = uint64(in.PageSize)
