@@ -697,7 +697,10 @@ func (I *impl) processAttestation(s abstract.BeaconState, attestation *solid.Att
 	if (data.Target().Epoch() != currentEpoch && data.Target().Epoch() != previousEpoch) || data.Target().Epoch() != state.GetEpochAtSlot(s.BeaconConfig(), data.Slot()) {
 		return nil, errors.New("ProcessAttestation: attestation with invalid epoch")
 	}
-	if data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot || stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch {
+	if s.Version() < clparams.DenebVersion && data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot || stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch {
+		return nil, errors.New("ProcessAttestation: attestation slot not in range")
+	}
+	if s.Version() >= clparams.DenebVersion && data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return nil, errors.New("ProcessAttestation: attestation slot not in range")
 	}
 	if data.ValidatorIndex() >= s.CommitteeCount(data.Target().Epoch()) {
