@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
@@ -20,10 +21,9 @@ type Snapshot struct {
 	config   *borcfg.BorConfig                          // Consensus engine parameters to fine tune behavior
 	sigcache *lru.ARCCache[common.Hash, common.Address] // Cache of recent block signatures to speed up ecrecover
 
-	Number       uint64                    `json:"number"`       // Block number where the snapshot was created
-	Hash         common.Hash               `json:"hash"`         // Block hash where the snapshot was created
-	ValidatorSet *valset.ValidatorSet      `json:"validatorSet"` // Validator set at this moment
-	Recents      map[uint64]common.Address `json:"recents"`      // Set of recent signers for spam protections
+	Number       uint64               `json:"number"`       // Block number where the snapshot was created
+	Hash         common.Hash          `json:"hash"`         // Block hash where the snapshot was created
+	ValidatorSet *valset.ValidatorSet `json:"validatorSet"` // Validator set at this moment
 }
 
 const BorSeparate = "BorSeparate"
@@ -52,7 +52,6 @@ func NewSnapshot(
 		Number:       number,
 		Hash:         hash,
 		ValidatorSet: valset.NewValidatorSet(validators),
-		Recents:      make(map[uint64]common.Address),
 	}
 	return snap
 }
@@ -110,12 +109,7 @@ func (s *Snapshot) copy() *Snapshot {
 		Number:       s.Number,
 		Hash:         s.Hash,
 		ValidatorSet: s.ValidatorSet.Copy(),
-		Recents:      make(map[uint64]common.Address),
 	}
-	for block, signer := range s.Recents {
-		cpy.Recents[block] = signer
-	}
-
 	return cpy
 }
 
@@ -142,36 +136,15 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 		number := header.Number.Uint64()
 		sprintLen := s.config.CalculateSprintLength(number)
 
-		// Delete the oldest signer from the recent list to allow it signing again
-		if number >= sprintLen {
-			delete(snap.Recents, number-sprintLen)
+		if err := ValidateHeaderTime(header, time.Now(), parent, snap.ValidatorSet, s.config, s.sigcache); err != nil {
+			return snap, err
 		}
-		// Resolve the authorization key and check against signers
-		signer, err := Ecrecover(header, s.sigcache, s.config)
 
+		signer, err := Ecrecover(header, s.sigcache, s.config)
 		if err != nil {
 			return nil, err
 		}
 
-		var validSigner bool
-		var succession int
-
-		// check if signer is in validator set
-		if !snap.ValidatorSet.HasAddress(signer) {
-			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
-		}
-		if succession, err = snap.GetSignerSuccessionNumber(signer); err != nil {
-			return snap, err
-		}
-
-		// add recents
-		snap.Recents[number] = signer
-
-		validSigner = true
-
-		if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, s.config) {
-			return snap, &BlockTooSoonError{number, succession}
-		}
 		difficulty := snap.Difficulty(signer)
 		if header.Difficulty.Uint64() != difficulty {
 			return snap, &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
@@ -191,9 +164,6 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 			snap.ValidatorSet = v
 		}
 
-		if number > 64 && !validSigner {
-			return snap, &UnauthorizedSignerError{number, signer.Bytes()}
-		}
 		parent = header
 		snap.Number = number
 		snap.Hash = header.Hash()
@@ -202,30 +172,8 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	return snap, nil
 }
 
-// GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
 func (s *Snapshot) GetSignerSuccessionNumber(signer common.Address) (int, error) {
-	validators := s.ValidatorSet.Validators
-	proposer := s.ValidatorSet.GetProposer().Address
-	proposerIndex, _ := s.ValidatorSet.GetByAddress(proposer)
-
-	if proposerIndex == -1 {
-		return -1, &UnauthorizedProposerError{s.Number, proposer.Bytes()}
-	}
-
-	signerIndex, _ := s.ValidatorSet.GetByAddress(signer)
-
-	if signerIndex == -1 {
-		return -1, &UnauthorizedSignerError{s.Number, signer.Bytes()}
-	}
-
-	tempIndex := signerIndex
-	if proposerIndex != tempIndex {
-		if tempIndex < proposerIndex {
-			tempIndex = tempIndex + len(validators)
-		}
-	}
-
-	return tempIndex - proposerIndex, nil
+	return s.ValidatorSet.GetSignerSuccessionNumber(signer, s.Number)
 }
 
 // signers retrieves the list of authorized signers in ascending order.

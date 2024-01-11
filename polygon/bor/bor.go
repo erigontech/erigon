@@ -226,6 +226,48 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	return delay
 }
 
+func MinNextBlockTime(parent *types.Header, succession int, config *borcfg.BorConfig) uint64 {
+	return parent.Time + CalcProducerDelay(parent.Number.Uint64()+1, succession, config)
+}
+
+// ValidateHeaderTimeSignerSuccessionNumber - valset.ValidatorSet abstraction for unit tests
+type ValidateHeaderTimeSignerSuccessionNumber interface {
+	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
+}
+
+func ValidateHeaderTime(
+	header *types.Header,
+	now time.Time,
+	parent *types.Header,
+	validatorSet ValidateHeaderTimeSignerSuccessionNumber,
+	config *borcfg.BorConfig,
+	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
+) error {
+	if header.Time > uint64(now.Unix()) {
+		return consensus.ErrFutureBlock
+	}
+
+	if parent == nil {
+		return nil
+	}
+
+	signer, err := Ecrecover(header, signaturesCache, config)
+	if err != nil {
+		return err
+	}
+
+	succession, err := validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
+	if err != nil {
+		return err
+	}
+
+	if header.Time < MinNextBlockTime(parent, succession, config) {
+		return &BlockTooSoonError{header.Number.Uint64(), succession}
+	}
+
+	return nil
+}
+
 // BorRLP returns the rlp bytes which needs to be signed for the bor
 // sealing. The RLP to sign consists of the entire header apart from the 65 byte signature
 // contained at the end of the extra data.
@@ -316,7 +358,7 @@ func New(
 		libcommon.Address{},
 		func(_ libcommon.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &UnauthorizedSignerError{0, libcommon.Address{}.Bytes()}
+			return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: libcommon.Address{}.Bytes()}
 		},
 	})
 
@@ -768,21 +810,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	if number == 0 {
 		return errUnknownBlock
 	}
-	// Resolve the authorization key and check against signers
-	signer, err := Ecrecover(header, c.Signatures, c.config)
-	if err != nil {
-		return err
-	}
-
-	if !snap.ValidatorSet.HasAddress(signer) {
-		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
-	}
-
-	succession, err := snap.GetSignerSuccessionNumber(signer)
-	if err != nil {
-		return err
-	}
 
 	var parent *types.Header
 	if len(parents) > 0 { // if parents is nil, len(parents) is zero
@@ -791,12 +818,17 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
 
-	if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, c.config) {
-		return &BlockTooSoonError{number, succession}
+	if err := ValidateHeaderTime(header, time.Now(), parent, snap.ValidatorSet, c.config, c.Signatures); err != nil {
+		return err
 	}
 
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.fakeDiff {
+		signer, err := Ecrecover(header, c.Signatures, c.config)
+		if err != nil {
+			return err
+		}
+
 		difficulty := snap.Difficulty(signer)
 		if header.Difficulty.Uint64() != difficulty {
 			return &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
@@ -804,10 +836,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	}
 
 	return nil
-}
-
-func IsBlockOnTime(parent *types.Header, header *types.Header, number uint64, succession int, cfg *borcfg.BorConfig) bool {
-	return parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, cfg)
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
@@ -901,15 +929,16 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	}
 
 	var succession int
+	signer := c.authorizedSigner.Load().signer
 	// if signer is not empty
-	if signer := c.authorizedSigner.Load().signer; !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
-		succession, err = snap.GetSignerSuccessionNumber(signer)
+	if !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		succession, err = snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 		if err != nil {
 			return err
 		}
 	}
 
-	header.Time = parent.Time + CalcProducerDelay(number, succession, c.config)
+	header.Time = MinNextBlockTime(parent, succession, c.config)
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
@@ -1082,13 +1111,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		return err
 	}
 
-	// Bail out if we're unauthorized to sign a block
-	if !snap.ValidatorSet.HasAddress(signer) {
-		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
-	}
-
-	successionNumber, err := snap.GetSignerSuccessionNumber(signer)
+	successionNumber, err := snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 	if err != nil {
 		return err
 	}
@@ -1176,7 +1199,6 @@ func (c *Bor) IsValidator(header *types.Header) (bool, error) {
 // IsProposer returns true if this instance is the proposer for this block
 func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 	number := header.Number.Uint64()
-
 	if number == 0 {
 		return false, nil
 	}
@@ -1186,14 +1208,8 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 		return false, err
 	}
 
-	currentSigner := c.authorizedSigner.Load()
-
-	if !snap.ValidatorSet.HasAddress(currentSigner.signer) {
-		return false, nil
-	}
-
-	successionNumber, err := snap.GetSignerSuccessionNumber(currentSigner.signer)
-
+	signer := c.authorizedSigner.Load().signer
+	successionNumber, err := snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 	return successionNumber == 0, err
 }
 
