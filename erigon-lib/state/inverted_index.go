@@ -1017,6 +1017,8 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	collector.LogLvl(log.LvlDebug)
 
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
+	collectingKey := make([]byte, 0, 256+8)
+
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
@@ -1034,7 +1036,8 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err != nil {
 				return nil, err
 			}
-			if err := collector.Collect(v, nil); err != nil {
+			collectingKey = append(append(collectingKey[:0], v...), k...)
+			if err := collector.Collect(collectingKey, nil); err != nil {
 				return nil, err
 			}
 		}
@@ -1063,7 +1066,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	defer idxC.Close()
 
 	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		for txnm, err := idxC.SeekBothRange(key, txKey[:]); txnm != nil; _, txnm, err = idxC.NextDup() {
+		for txnm, err := idxC.SeekBothRange(key, key[len(key)-8:]); txnm != nil; _, txnm, err = idxC.NextDup() {
 			if err != nil {
 				return err
 			}
