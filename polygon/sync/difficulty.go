@@ -25,13 +25,11 @@ type difficultyCalculatorImpl struct {
 	span                *heimdallspan.HeimdallSpan
 	validatorSetFactory func() validatorSetInterface
 	signaturesCache     *lru.ARCCache[libcommon.Hash, libcommon.Address]
-
-	log log.Logger
 }
 
 // valset.ValidatorSet abstraction for unit tests
 type validatorSetInterface interface {
-	IncrementProposerPriority(times int, logger log.Logger)
+	IncrementProposerPriority(times int)
 	Difficulty(signer libcommon.Address) (uint64, error)
 }
 
@@ -50,8 +48,6 @@ func NewDifficultyCalculator(
 		span:                span,
 		validatorSetFactory: validatorSetFactory,
 		signaturesCache:     signaturesCache,
-
-		log: log,
 	}
 
 	if validatorSetFactory == nil {
@@ -62,7 +58,7 @@ func NewDifficultyCalculator(
 }
 
 func (impl *difficultyCalculatorImpl) makeValidatorSet() validatorSetInterface {
-	return valset.NewValidatorSet(impl.span.ValidatorSet.Validators, impl.log)
+	return valset.NewValidatorSet(impl.span.ValidatorSet.Validators)
 }
 
 func (impl *difficultyCalculatorImpl) SetSpan(span *heimdallspan.HeimdallSpan) {
@@ -82,7 +78,7 @@ func (impl *difficultyCalculatorImpl) signerDifficulty(signer libcommon.Address,
 
 	sprintNum := impl.borConfig.CalculateSprintNumber(headerNum)
 	if sprintNum > 0 {
-		validatorSet.IncrementProposerPriority(int(sprintNum), impl.log)
+		validatorSet.IncrementProposerPriority(int(sprintNum))
 	}
 
 	return validatorSet.Difficulty(signer)

@@ -51,7 +51,7 @@ func NewSnapshot(
 		sigcache:     sigcache,
 		Number:       number,
 		Hash:         hash,
-		ValidatorSet: valset.NewValidatorSet(validators, logger),
+		ValidatorSet: valset.NewValidatorSet(validators),
 		Recents:      make(map[uint64]common.Address),
 	}
 	return snap
@@ -187,7 +187,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 			// get validators from headers and use that for new validator set
 			newVals, _ := valset.ParseValidators(validatorBytes)
 			v := getUpdatedValidatorSet(snap.ValidatorSet.Copy(), newVals, logger)
-			v.IncrementProposerPriority(1, logger)
+			v.IncrementProposerPriority(1)
 			snap.ValidatorSet = v
 		}
 

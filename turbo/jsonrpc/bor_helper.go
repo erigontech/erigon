@@ -117,6 +117,8 @@ func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Vali
 	return nil, false
 }
 
+type ValidatorSet = valset.ValidatorSet
+
 // getUpdatedValidatorSet applies changes to a validator set and returns a new validator set
 func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*valset.Validator) *ValidatorSet {
 	v := oldValidatorSet

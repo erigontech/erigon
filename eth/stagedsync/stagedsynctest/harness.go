@@ -109,7 +109,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	}
 
 	if cfg.ChainConfig.Bor != nil {
-		h.setHeimdallNextMockSpan(logger)
+		h.setHeimdallNextMockSpan()
 		h.mockBorSpanner()
 		h.mockHeimdallClient()
 	}
@@ -501,7 +501,7 @@ func (h *Harness) mockChainHeaderReader(ctrl *gomock.Controller) consensus.Chain
 	return mockChainHR
 }
 
-func (h *Harness) setHeimdallNextMockSpan(logger log.Logger) {
+func (h *Harness) setHeimdallNextMockSpan() {
 	validators := []*valset.Validator{
 		{
 			ID:               1,
@@ -511,7 +511,7 @@ func (h *Harness) setHeimdallNextMockSpan(logger log.Logger) {
 		},
 	}
 
-	validatorSet := valset.NewValidatorSet(validators, logger)
+	validatorSet := valset.NewValidatorSet(validators)
 	selectedProducers := make([]valset.Validator, len(validators))
 	for i := range validators {
 		selectedProducers[i] = *validators[i]
