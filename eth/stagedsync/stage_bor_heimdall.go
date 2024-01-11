@@ -192,6 +192,7 @@ func BorHeimdallForward(
 	defer logTimer.Stop()
 
 	logger.Info("["+s.LogPrefix()+"] Processing sync events...", "from", lastBlockNum+1, "to", headNumber)
+
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		select {
 		default:

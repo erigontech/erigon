@@ -1145,7 +1145,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 				select {
 				case stateChanges := <-stateChangeCh:
 					block := stateChanges.BlockHeight
-					s.logger.Debug("Start mining new block based on previous block", "block", block)
+					s.logger.Debug("Start mining based on previous block", "block", block)
 					// TODO - can do mining clean up here as we have previous
 					// block info in the state channel
 					hasWork = true
@@ -1154,11 +1154,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 					// Skip mining based on new tx notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
-						s.logger.Debug("Start mining new block based on txpool notif")
+						s.logger.Debug("Start mining based on txpool notif")
 					}
 				case <-mineEvery.C:
 					if !(working || waiting.Load()) {
-						s.logger.Debug("Start mining new block based on miner.recommit", "duration", miner.MiningConfig.Recommit)
+						s.logger.Debug("Start mining based on miner.recommit", "duration", miner.MiningConfig.Recommit)
 					}
 					hasWork = !(working || waiting.Load())
 				case err := <-errc:
