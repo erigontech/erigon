@@ -34,8 +34,8 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
+	"github.com/ledgerwatch/erigon-lib/mmap"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pbnjay/memory"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 
@@ -83,10 +83,6 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:        log,
 		pageSize:   kv.DefaultPageSize(),
-
-		// default is (TOTAL_RAM+AVAILABLE_RAM)/42/pageSize
-		// but for reproducibility of benchmarks - please don't rely on Available RAM
-		dirtySpace: 2 * (memory.TotalMemory() / 42),
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
@@ -280,36 +276,13 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 
-	if opts.flags&mdbx.Accede == 0 {
+	if !opts.HasFlag(mdbx.Accede) {
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 			return nil, err
 		}
 		if err = os.MkdirAll(opts.path, 0744); err != nil {
 			return nil, fmt.Errorf("could not create dir: %s, %w", opts.path, err)
 		}
-	}
-
-	err = env.Open(opts.path, opts.flags, 0664)
-	if err != nil {
-		if err != nil {
-			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-		}
-	}
-
-	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
-	in, err := env.Info(nil)
-	if err != nil {
-		if err != nil {
-			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-		}
-	}
-
-	opts.pageSize = uint64(in.PageSize)
-	opts.mapSize = datasize.ByteSize(in.MapSize)
-	if opts.label == kv.ChainDB {
-		opts.log.Info("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
-	} else {
-		opts.log.Debug("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	}
 
 	// erigon using big transactions
@@ -339,17 +312,19 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 			}
 		}
 
+		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
+		// but we want call all `SetOption` before env.Open(), because:
+		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
+		pageSize := opts.pageSize
+		if pageSize == 0 {
+			pageSize = kv.DefaultPageSize()
+		}
+
 		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
 			dirtySpace = opts.dirtySpace
 		} else {
-			// the default value is based on the RAM amount
-			dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
-			if err != nil {
-				return nil, err
-			}
-			dirtySpace = dirtyPagesLimit * opts.pageSize
-
+			dirtySpace = mmap.TotalMemory() / 42 // it's default of mdbx, but our package also supports cgroups and GOMEMLIMIT
 			// clamp to max size
 			const dirtySpaceMaxChainDB = uint64(2 * datasize.GB)
 			const dirtySpaceMaxDefault = uint64(256 * datasize.MB)
@@ -360,7 +335,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 				dirtySpace = dirtySpaceMaxDefault
 			}
 		}
-		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize); err != nil {
+		//can't use real pagesize here - it will be known only after env.Open()
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize); err != nil {
 			return nil, err
 		}
 
@@ -369,6 +345,25 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
 			return nil, err
 		}
+	}
+
+	err = env.Open(opts.path, opts.flags, 0664)
+	if err != nil {
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+	}
+
+	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
+	in, err := env.Info(nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+	}
+
+	opts.pageSize = uint64(in.PageSize)
+	opts.mapSize = datasize.ByteSize(in.MapSize)
+	if opts.label == kv.ChainDB {
+		opts.log.Info("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
+	} else {
+		opts.log.Debug("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	}
 
 	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
