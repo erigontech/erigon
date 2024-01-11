@@ -360,9 +360,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer progressTimer.Stop()
 	prevSlot := slot
 	first := false
+	blocksBeforeCommit := 100_000
+	blocksProcessed := 0
 	// This tells us that transition and operations do not happen concurrently and access is safe, so we can optimize for GC.
 	// there is optimized custom cache to recycle big GC overhead.
-	for ; slot < to; slot++ {
+	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
 		slashingOccured = false // Set this to false at the beginning of each slot.
 		key := base_encoding.Encode64ToBytes4(slot)
 
@@ -418,12 +420,13 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		prevValSet = prevValSet[:0]
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
 
-		fullValidation := slot%100_000 == 0 || first
+		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
-		// We sanity check the state every 100k slots or when we start.
+		// We sanity check the state every 1k slots or when we start.
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
+		blocksProcessed++
 
 		first = false
 
