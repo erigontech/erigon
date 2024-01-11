@@ -25,8 +25,9 @@ type InvalidStartEndBlockError struct {
 
 func (e *InvalidStartEndBlockError) Error() string {
 	return fmt.Sprintf(
-		"Invalid parameters start: %d and end block: %d params",
+		"Invalid parameters: start=%d, end=%d, current=%d block nums",
 		e.Start,
 		e.End,
+		e.CurrentHeader,
 	)
 }

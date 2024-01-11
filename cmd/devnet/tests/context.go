@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -17,6 +18,8 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
+
+const testLogLvl = log.LvlTrace
 
 func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.Logger, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {
 	const baseRpcHost = "localhost"
@@ -43,14 +46,14 @@ func initDevnet(chainName string, dataDir string, producerCount int, gasLimit ui
 	}
 }
 
-func ContextStart(t *testing.T, chainName string) (devnet.Context, error) {
+func contextStart(t *testing.T, chainName string) (devnet.Context, error) {
 	//goland:noinspection GoBoolExpressions
 	if runtime.GOOS == "windows" {
 		t.Skip("FIXME: TempDir RemoveAll cleanup error: remove dev-0\\clique\\db\\clique\\mdbx.dat: The process cannot access the file because it is being used by another process")
 	}
 
 	debug.RaiseFdLimit()
-	logger := testlog.Logger(t, log.LvlTrace)
+	logger := testlog.Logger(t, testLogLvl)
 	dataDir := t.TempDir()
 
 	envProducerCount, _ := os.LookupEnv("PRODUCER_COUNT")
@@ -67,16 +70,20 @@ func ContextStart(t *testing.T, chainName string) (devnet.Context, error) {
 	var network devnet.Devnet
 	network, err := initDevnet(chainName, dataDir, int(producerCount), 0, logger, consoleLogLevel, dirLogLevel)
 	if err != nil {
-		return nil, fmt.Errorf("ContextStart initDevnet failed: %w", err)
+		return nil, fmt.Errorf("contextStart initDevnet failed: %w", err)
 	}
 
 	runCtx, err := network.Start(logger)
 	if err != nil {
-		return nil, fmt.Errorf("ContextStart devnet start failed: %w", err)
+		return nil, fmt.Errorf("contextStart devnet start failed: %w", err)
 	}
 
 	t.Cleanup(services.UnsubscribeAll)
 	t.Cleanup(network.Stop)
 
 	return runCtx, nil
+}
+
+func withTestLogger(ctx context.Context, t *testing.T) devnet.Context {
+	return devnet.WithLogger(ctx, testlog.Logger(t, testLogLvl))
 }

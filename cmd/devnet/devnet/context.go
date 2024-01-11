@@ -75,6 +75,11 @@ func WithDevnet(ctx context.Context, devnet Devnet, logger log.Logger) Context {
 	return devnetContext{ctx}
 }
 
+func WithLogger(ctx context.Context, logger log.Logger) Context {
+	ctx = context.WithValue(ctx, ckLogger, logger)
+	return devnetContext{ctx}
+}
+
 func WithCurrentNetwork(ctx context.Context, selector interface{}) Context {
 	if current := CurrentNetwork(ctx); current != nil {
 		if devnet, ok := ctx.Value(ckDevnet).(Devnet); ok {

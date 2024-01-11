@@ -428,7 +428,7 @@ func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches i
 			auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
 		}
 
-		logger.Info("Awaiting many send to child transactions", "hashes", hashes)
+		logger.Info("Awaiting many send to child transactions", "hashes", hashesSb.String())
 		blocks, err := waiter.AwaitMany(hashes...)
 
 		if err != nil {
