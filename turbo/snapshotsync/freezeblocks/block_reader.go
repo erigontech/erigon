@@ -503,6 +503,10 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return block, senders, nil
 	}
 
+	if r.sn == nil {
+		return
+	}
+
 	view := r.sn.View()
 	defer view.Close()
 	seg, ok := view.HeadersSegment(blockHeight)

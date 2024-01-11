@@ -39,6 +39,8 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -331,7 +333,6 @@ func (p *TxPool) Start(ctx context.Context, db kv.RwDB) error {
 }
 
 func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
-
 	defer newBlockTimer.ObserveDuration(time.Now())
 	//t := time.Now()
 
@@ -2073,7 +2074,32 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	}
 
 	var pendingBaseFee uint64
-	{
+	var pendingBlobFee uint64 = 1 // MIN_BLOB_GAS_PRICE A/EIP-4844
+	var minBlobGasPrice uint64
+
+	currentBlock, err := (&freezeblocks.BlockReader{}).CurrentBlock(coreTx)
+
+	if err == nil {
+		chainConfig, err := ChainConfig(coreTx)
+
+		if err == nil {
+			if currentBlock.BaseFee() != nil {
+				pendingBaseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
+			}
+
+			if currentBlock.Header().ExcessBlobGas != nil {
+				excessBlobGas := misc.CalcExcessBlobGas(chainConfig, currentBlock.Header())
+				b, err := misc.GetBlobGasPrice(chainConfig, excessBlobGas)
+				if err == nil {
+					pendingBlobFee = b.Uint64()
+				}
+			}
+		}
+
+		minBlobGasPrice = chainConfig.GetMinBlobGasPrice()
+	}
+
+	if pendingBaseFee == 0 {
 		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
 		if err != nil {
 			return err
@@ -2082,8 +2108,8 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 			pendingBaseFee = binary.BigEndian.Uint64(v)
 		}
 	}
-	var pendingBlobFee uint64 = 1 // MIN_BLOB_GAS_PRICE A/EIP-4844
-	{
+
+	if pendingBlobFee == 0 {
 		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
 		if err != nil {
 			return err
@@ -2091,6 +2117,10 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		if len(v) > 0 {
 			pendingBlobFee = binary.BigEndian.Uint64(v)
 		}
+	}
+
+	if pendingBlobFee == 0 {
+		pendingBlobFee = minBlobGasPrice
 	}
 
 	err = p.senders.registerNewSenders(&txs, p.logger)
