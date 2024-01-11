@@ -191,3 +191,35 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
 }
+
+func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter, r *http.Request) {
+	req := []*cltypes.SignedAggregateAndProof{}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	failures := []poolingFailure{}
+	for _, v := range req {
+		if err := a.forkchoiceStore.OnAggregateAndProof(v, false); err != nil {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			continue
+		}
+		// Broadcast to gossip
+		if a.sentinel != nil {
+			encodedSSZ, err := v.EncodeSSZ(nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data: encodedSSZ,
+				Name: gossip.TopicNameBeaconAggregateAndProof,
+			}); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+}

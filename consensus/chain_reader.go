@@ -82,7 +82,7 @@ func (cr ChainReaderImpl) FrozenBlocks() uint64 {
 func (cr ChainReaderImpl) BorSpan(spanId uint64) []byte {
 	spanBytes, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
 	if err != nil {
-		log.Error("BorSpan failed", "err", err)
+		log.Error("[consensus] BorSpan failed", "err", err)
 	}
 	return spanBytes
 }

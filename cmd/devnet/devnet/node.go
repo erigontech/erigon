@@ -167,8 +167,14 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
 	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 
-	for addr, account := range n.network.Alloc {
-		n.ethCfg.Genesis.Alloc[addr] = account
+	if n.network.Genesis != nil {
+		for addr, account := range n.network.Genesis.Alloc {
+			n.ethCfg.Genesis.Alloc[addr] = account
+		}
+
+		if n.network.Genesis.GasLimit != 0 {
+			n.ethCfg.Genesis.GasLimit = n.network.Genesis.GasLimit
+		}
 	}
 
 	if n.network.BorStateSyncDelay > 0 {

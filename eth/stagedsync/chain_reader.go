@@ -17,8 +17,7 @@ import (
 
 // ChainReader implements consensus.ChainReader
 type ChainReader struct {
-	Cfg chain.Config
-
+	Cfg         chain.Config
 	Db          kv.Getter
 	BlockReader services.FullBlockReader
 	Logger      log.Logger
@@ -72,7 +71,7 @@ func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
 func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.Db, hash, number)
 	if err != nil {
-		log.Error("ReadTd failed", "err", err)
+		cr.Logger.Error("ReadTd failed", "err", err)
 		return nil
 	}
 	return td
