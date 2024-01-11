@@ -208,7 +208,7 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				log.Warn("[txpool.handleStateChanges]", "err", err)
+				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
 			}
 		}
 	}()

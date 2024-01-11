@@ -1,6 +1,6 @@
 //go:build integration
 
-package bor
+package tests
 
 import (
 	"context"
@@ -13,11 +13,10 @@ import (
 	contracts_steps "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
 )
 
 func TestStateSync(t *testing.T) {
-	runCtx, err := tests.ContextStart(t, networkname.BorDevnetChainName)
+	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx
 
@@ -56,7 +55,7 @@ func TestStateSync(t *testing.T) {
 func TestChildChainExit(t *testing.T) {
 	t.Skip("FIXME: step CreateAccountWithFunds fails: Failed to get transfer tx: failed to search reserves for hashes: no block heads subscription")
 
-	runCtx, err := tests.ContextStart(t, networkname.BorDevnetChainName)
+	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx
 

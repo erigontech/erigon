@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -616,7 +617,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
-	backend.minedBlocks = miner.MiningResultCh
 
 	var (
 		snapDb     kv.RwDB
@@ -780,7 +780,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, stateDiffClient, mining, miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
 		return nil, err
 	}
 
@@ -1010,7 +1010,8 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient *direct.StateDiffClientDirect, mining *stagedsync.Sync, miner stagedsync.MiningState, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
+
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
@@ -1023,7 +1024,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	}
 
 	//if borcfg == nil {
-	if !cfg.Enabled {
+	if !miner.MiningConfig.Enabled {
 		return nil
 	}
 	//}
@@ -1036,14 +1037,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	}
 
 	if borcfg != nil {
-		if cfg.Enabled {
-			if cfg.SigKey == nil {
+		if miner.MiningConfig.Enabled {
+			if miner.MiningConfig.SigKey == nil {
 				s.logger.Error("Etherbase account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %w", err)
 			}
 
 			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-				return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 			})
 
 			if !s.config.WithoutHeimdall {
@@ -1082,47 +1083,73 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		}
 	}
 	if clq != nil {
-		if cfg.SigKey == nil {
+		if miner.MiningConfig.SigKey == nil {
 			s.logger.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
 		clq.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+			return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 		})
 	}
+
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	stream, err := stateDiffClient.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+
+	if err != nil {
+		streamCancel()
+		return err
+	}
+
+	stateChangeCh := make(chan *remote.StateChange)
+
+	go func() {
+		for req, err := stream.Recv(); ; req, err = stream.Recv() {
+			if err == nil {
+				for _, change := range req.ChangeBatch {
+					stateChangeCh <- change
+				}
+			}
+		}
+	}()
 
 	go func() {
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
+		defer streamCancel()
 
-		mineEvery := time.NewTicker(cfg.Recommit)
+		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
 		defer mineEvery.Stop()
-
-		// Listen on a new head subscription. This allows us to maintain the block time by
-		// triggering mining after the block is passed through all stages.
-		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
-		defer closeNewHeadCh()
 
 		s.logger.Info("Starting to mine", "etherbase", eb)
 
-		var works bool
+		var working bool
+		var waiting atomic.Bool
+
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
+
+		workCtx, workCancel := context.WithCancel(ctx)
+		defer workCancel()
 
 		for {
 			// Only reset if some work was done previously as we'd like to rely
 			// on the `miner.recommit` as backup.
 			if hasWork {
-				mineEvery.Reset(cfg.Recommit)
+				mineEvery.Reset(miner.MiningConfig.Recommit)
 			}
 
-			// Only check for case if you're already mining (i.e. works = true) and
+			// Only check for case if you're already mining (i.e. working = true) and
 			// waiting for error or you don't have any work yet (i.e. hasWork = false).
-			if works || !hasWork {
+			if working || !hasWork {
 				select {
-				case <-newHeadCh:
+				case stateChanges := <-stateChangeCh:
+					block := stateChanges.BlockHeight
+					s.logger.Debug("Start mining new block based on previous block", "block", block)
+					// TODO - can do mining clean up here as we have previous
+					// block info in the state channel
 					hasWork = true
+
 				case <-s.notifyMiningAboutNewTxs:
 					// Skip mining based on new tx notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
@@ -1130,10 +1157,12 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 						s.logger.Debug("Start mining new block based on txpool notif")
 					}
 				case <-mineEvery.C:
-					s.logger.Debug("Start mining new block based on miner.recommit")
-					hasWork = true
+					if !(working || waiting.Load()) {
+						s.logger.Debug("Start mining new block based on miner.recommit", "duration", miner.MiningConfig.Recommit)
+					}
+					hasWork = !(working || waiting.Load())
 				case err := <-errc:
-					works = false
+					working = false
 					hasWork = false
 					if errors.Is(err, libcommon.ErrStopped) {
 						return
@@ -1146,11 +1175,36 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				}
 			}
 
-			if !works && hasWork {
-				works = true
+			if !working && hasWork {
+				working = true
 				hasWork = false
-				mineEvery.Reset(cfg.Recommit)
-				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir, logger) }()
+				mineEvery.Reset(miner.MiningConfig.Recommit)
+				go func() {
+					err := stages2.MiningStep(ctx, db, mining, tmpDir, logger)
+
+					waiting.Store(true)
+					defer waiting.Store(false)
+
+					errc <- err
+
+					if err != nil {
+						return
+					}
+
+					for {
+						select {
+						case block := <-miner.MiningResultCh:
+							if block != nil {
+								s.logger.Debug("Mined block", "block", block.Number())
+								s.minedBlocks <- block
+							}
+							return
+						case <-workCtx.Done():
+							errc <- workCtx.Err()
+							return
+						}
+					}
+				}()
 			}
 		}
 	}()

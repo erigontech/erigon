@@ -157,10 +157,13 @@ func BorHeimdallForward(
 	}
 
 	lastBlockNum := s.BlockNumber
+
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
+
 	recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
+
 	if err != nil {
 		return err
 	}
@@ -168,6 +171,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
+
 	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	var blockNum uint64
