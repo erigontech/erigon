@@ -16,7 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 func TestTxsBeginEnd(t *testing.T) {
@@ -51,7 +51,7 @@ func TestTxsBeginEnd(t *testing.T) {
 			err = rawdb.WriteCanonicalHash(tx, hash, i)
 			require.NoError(err)
 		}
-		if err := sync_stages.SaveStageProgress(tx, sync_stages.Bodies, 9); err != nil {
+		if err := stages.SaveStageProgress(tx, stages.Bodies, 9); err != nil {
 			return err
 		}
 		return nil

@@ -20,7 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 var ErrTxsBeginEndNoMigration = fmt.Errorf("in this Erigon version DB format was changed: added additional first/last system-txs to blocks. There is no DB migration for this change. Please re-sync or switch to earlier version")
@@ -33,7 +33,7 @@ var txsBeginEnd = Migration{
 
 		var latestBlock uint64
 		if err := db.View(context.Background(), func(tx kv.Tx) error {
-			bodiesProgress, err := sync_stages.GetStageProgress(tx, sync_stages.Bodies)
+			bodiesProgress, err := stages.GetStageProgress(tx, stages.Bodies)
 			if err != nil {
 				return err
 			}

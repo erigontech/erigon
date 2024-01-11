@@ -21,32 +21,32 @@ import (
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
 func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string) error {
 	// don't reset senders here
-	if err := Reset(ctx, db, sync_stages.HashState); err != nil {
+	if err := Reset(ctx, db, stages.HashState); err != nil {
 		return err
 	}
-	if err := Reset(ctx, db, sync_stages.IntermediateHashes); err != nil {
+	if err := Reset(ctx, db, stages.IntermediateHashes); err != nil {
 		return err
 	}
-	if err := Reset(ctx, db, sync_stages.AccountHistoryIndex, sync_stages.StorageHistoryIndex); err != nil {
+	if err := Reset(ctx, db, stages.AccountHistoryIndex, stages.StorageHistoryIndex); err != nil {
 		return err
 	}
-	if err := Reset(ctx, db, sync_stages.LogIndex); err != nil {
+	if err := Reset(ctx, db, stages.LogIndex); err != nil {
 		return err
 	}
-	if err := Reset(ctx, db, sync_stages.CallTraces); err != nil {
+	if err := Reset(ctx, db, stages.CallTraces); err != nil {
 		return err
 	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
-	if err := Reset(ctx, db, sync_stages.Finish); err != nil {
+	if err := Reset(ctx, db, stages.Finish); err != nil {
 		return err
 	}
 
@@ -61,13 +61,13 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
 	}
-	if err := sync_stages.SaveStageProgress(tx, sync_stages.Bodies, 1); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Bodies, 1); err != nil {
 		return fmt.Errorf("saving Bodies progress failed: %w", err)
 	}
-	if err := sync_stages.SaveStageProgress(tx, sync_stages.Headers, 1); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Headers, 1); err != nil {
 		return fmt.Errorf("saving Bodies progress failed: %w", err)
 	}
-	if err := sync_stages.SaveStageProgress(tx, sync_stages.Snapshots, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.Snapshots, 0); err != nil {
 		return fmt.Errorf("saving Snapshots progress failed: %w", err)
 	}
 
@@ -117,10 +117,10 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, snapshots *snapshotsync.RoSnapshots, ag
 		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, snapshots, br, cc, engine, agg); err != nil {
 			return err
 		}
-		_ = sync_stages.SaveStageProgress(tx, sync_stages.Snapshots, snapshots.BlocksAvailable())
-		_ = sync_stages.SaveStageProgress(tx, sync_stages.Headers, snapshots.BlocksAvailable())
-		_ = sync_stages.SaveStageProgress(tx, sync_stages.Bodies, snapshots.BlocksAvailable())
-		_ = sync_stages.SaveStageProgress(tx, sync_stages.Senders, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Snapshots, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Headers, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Bodies, snapshots.BlocksAvailable())
+		_ = stages.SaveStageProgress(tx, stages.Senders, snapshots.BlocksAvailable())
 	}
 
 	return nil
@@ -129,7 +129,7 @@ func ResetSenders(ctx context.Context, db kv.RwDB, tx kv.RwTx) error {
 	if err := clearTables(ctx, db, tx, kv.Senders); err != nil {
 		return nil
 	}
-	return clearStageProgress(tx, sync_stages.Senders)
+	return clearStageProgress(tx, stages.Senders)
 }
 
 func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
@@ -153,7 +153,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string) (er
 	}
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
-		if err := clearStageProgress(tx, sync_stages.Execution, sync_stages.HashState, sync_stages.IntermediateHashes); err != nil {
+		if err := clearStageProgress(tx, stages.Execution, stages.HashState, stages.IntermediateHashes); err != nil {
 			return err
 		}
 
@@ -184,23 +184,23 @@ func ResetTxLookup(tx kv.RwTx) error {
 	if err := tx.ClearBucket(kv.TxLookup); err != nil {
 		return err
 	}
-	if err := sync_stages.SaveStageProgress(tx, sync_stages.TxLookup, 0); err != nil {
+	if err := stages.SaveStageProgress(tx, stages.TxLookup, 0); err != nil {
 		return err
 	}
-	if err := sync_stages.SaveStagePruneProgress(tx, sync_stages.TxLookup, 0); err != nil {
+	if err := stages.SaveStagePruneProgress(tx, stages.TxLookup, 0); err != nil {
 		return err
 	}
 	return nil
 }
 
-var Tables = map[sync_stages.SyncStage][]string{
-	sync_stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
-	sync_stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
-	sync_stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
-	sync_stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
-	sync_stages.AccountHistoryIndex: {kv.AccountsHistory},
-	sync_stages.StorageHistoryIndex: {kv.StorageHistory},
-	sync_stages.Finish:              {},
+var Tables = map[stages.SyncStage][]string{
+	stages.HashState:           {kv.HashedAccounts, kv.HashedStorage, kv.ContractCode},
+	stages.IntermediateHashes:  {kv.TrieOfAccounts, kv.TrieOfStorage},
+	stages.CallTraces:          {kv.CallFromIndex, kv.CallToIndex},
+	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
+	stages.AccountHistoryIndex: {kv.AccountsHistory},
+	stages.StorageHistoryIndex: {kv.StorageHistory},
+	stages.Finish:              {},
 }
 var stateBuckets = []string{
 	kv.PlainState, kv.HashedAccounts, kv.HashedStorage, kv.TrieOfAccounts, kv.TrieOfStorage,
@@ -307,7 +307,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl) {
 	}
 	_ = g.Wait()
 }
-func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...sync_stages.SyncStage) error {
+func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...stages.SyncStage) error {
 	for _, st := range stList {
 		for _, tbl := range Tables[st] {
 			WarmupTable(ctx, db, tbl, lvl)
@@ -316,7 +316,7 @@ func Warmup(ctx context.Context, db kv.RwDB, lvl log.Lvl, stList ...sync_stages.
 	return nil
 }
 
-func Reset(ctx context.Context, db kv.RwDB, stagesList ...sync_stages.SyncStage) error {
+func Reset(ctx context.Context, db kv.RwDB, stagesList ...stages.SyncStage) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		for _, st := range stagesList {
 			if err := clearTables(ctx, db, tx, Tables[st]...); err != nil {
@@ -360,12 +360,12 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 	return tx.ClearBucket(table)
 }
 
-func clearStageProgress(tx kv.RwTx, stagesList ...sync_stages.SyncStage) error {
+func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {
 	for _, stage := range stagesList {
-		if err := sync_stages.SaveStageProgress(tx, stage, 0); err != nil {
+		if err := stages.SaveStageProgress(tx, stage, 0); err != nil {
 			return err
 		}
-		if err := sync_stages.SaveStagePruneProgress(tx, stage, 0); err != nil {
+		if err := stages.SaveStagePruneProgress(tx, stage, 0); err != nil {
 			return err
 		}
 	}

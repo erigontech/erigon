@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 )
 
@@ -39,7 +38,7 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engineapi.ForkVali
 	}
 }
 
-func FinishForward(s *sync_stages.StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
+func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -82,7 +81,7 @@ func FinishForward(s *sync_stages.StageState, tx kv.RwTx, cfg FinishCfg, initial
 	return nil
 }
 
-func UnwindFinish(u *sync_stages.UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
+func UnwindFinish(u *UnwindState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -103,7 +102,7 @@ func UnwindFinish(u *sync_stages.UnwindState, tx kv.RwTx, cfg FinishCfg, ctx con
 	return nil
 }
 
-func PruneFinish(u *sync_stages.PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
+func PruneFinish(u *PruneState, tx kv.RwTx, cfg FinishCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

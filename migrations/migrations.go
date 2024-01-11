@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ugorji/go/codec"
 )
@@ -260,7 +260,7 @@ func MarshalMigrationPayload(db kv.Getter) ([]byte, error) {
 	buf := bytes.NewBuffer(nil)
 	encoder := codec.NewEncoder(buf, &codec.CborHandle{})
 
-	for _, stage := range sync_stages.AllStages {
+	for _, stage := range stages.AllStages {
 		v, err := db.GetOne(kv.SyncStageProgress, []byte(stage))
 		if err != nil {
 			return nil, err

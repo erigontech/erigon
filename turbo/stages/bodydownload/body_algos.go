@@ -16,7 +16,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -26,11 +26,11 @@ const BlockBufferSize = 128
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
 func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, headHash libcommon.Hash, headTd256 *uint256.Int, err error) {
 	var headerProgress, bodyProgress uint64
-	headerProgress, err = sync_stages.GetStageProgress(db, sync_stages.Headers)
+	headerProgress, err = stages.GetStageProgress(db, stages.Headers)
 	if err != nil {
 		return 0, 0, libcommon.Hash{}, nil, err
 	}
-	bodyProgress, err = sync_stages.GetStageProgress(db, sync_stages.Bodies)
+	bodyProgress, err = stages.GetStageProgress(db, stages.Bodies)
 	if err != nil {
 		return 0, 0, libcommon.Hash{}, nil, err
 	}

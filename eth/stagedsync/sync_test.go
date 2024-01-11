@@ -1,4 +1,4 @@
-package sync_stages
+package stagedsync
 
 import (
 	"errors"

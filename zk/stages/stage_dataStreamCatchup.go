@@ -4,17 +4,19 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
+	"time"
+
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/log/v3"
-	"math"
-	"time"
 )
 
 type DataStreamCatchupCfg struct {
@@ -30,7 +32,7 @@ func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB) Da
 }
 
 func SpawnStageDataStreamCatchup(
-	s *sync_stages.StageState,
+	s *stagedsync.StageState,
 	ctx context.Context,
 	tx kv.Tx,
 	cfg DataStreamCatchupCfg,
@@ -123,7 +125,7 @@ func SpawnStageDataStreamCatchup(
 
 	// get the latest block so when to terminate the loop.  This is because not all batches contain blocks
 	// so we cannot use this reliably to break the loop.  Block number is more reliable
-	highestSeenBatchNumber, err := sync_stages.GetStageProgress(tx, sync_stages.HighestSeenBatchNumber)
+	highestSeenBatchNumber, err := stages.GetStageProgress(tx, stages.HighestSeenBatchNumber)
 	if err != nil {
 		return err
 	}

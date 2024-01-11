@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 // unable to decode supplied params, or an invalid number of parameters
@@ -36,7 +36,7 @@ func _GetBlockNumber(requireCanonical bool, blockNrOrHash rpc.BlockNumberOrHash,
 	// Due to changed semantics of `lastest` block in RPC request, it is now distinct
 	// from the block block number corresponding to the plain state
 	var plainStateBlockNumber uint64
-	if plainStateBlockNumber, err = sync_stages.GetStageProgress(tx, sync_stages.Execution); err != nil {
+	if plainStateBlockNumber, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return 0, libcommon.Hash{}, false, fmt.Errorf("getting plain state block number: %w", err)
 	}
 	var ok bool

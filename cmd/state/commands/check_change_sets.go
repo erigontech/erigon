@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 )
 
@@ -105,11 +105,11 @@ func CheckChangeSets(genesis *types.Genesis, logger log.Logger, blockNum uint64,
 	}
 	defer rwtx.Rollback()
 
-	execAt, err1 := sync_stages.GetStageProgress(rwtx, sync_stages.Execution)
+	execAt, err1 := stages.GetStageProgress(rwtx, stages.Execution)
 	if err1 != nil {
 		return err1
 	}
-	historyAt, err1 := sync_stages.GetStageProgress(rwtx, sync_stages.StorageHistoryIndex)
+	historyAt, err1 := stages.GetStageProgress(rwtx, stages.StorageHistoryIndex)
 	if err1 != nil {
 		return err1
 	}

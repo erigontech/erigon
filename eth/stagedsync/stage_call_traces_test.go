@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 func genTestCallTraceSet(t *testing.T, tx kv.RwTx, to uint64) {
@@ -48,7 +48,7 @@ func TestCallTrace(t *testing.T) {
 		return b
 	}
 
-	err := sync_stages.SaveStageProgress(tx, sync_stages.Execution, 30)
+	err := stages.SaveStageProgress(tx, stages.Execution, 30)
 	assert.NoError(err)
 
 	// forward 0->20

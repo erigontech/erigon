@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/sync_stages"
 )
 
 // PostExec stage is run after execution stage to peform extra verifications that are only possible when state is available.
@@ -23,7 +22,7 @@ func StagePostExecCfg(db kv.RwDB, borDb kv.RwDB) PostExecCfg {
 	}
 }
 
-func SpawnPostExecStage(s *sync_stages.StageState, tx kv.RwTx, cfg PostExecCfg, ctx context.Context) error {
+func SpawnPostExecStage(s *StageState, tx kv.RwTx, cfg PostExecCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -61,7 +60,7 @@ func SpawnPostExecStage(s *sync_stages.StageState, tx kv.RwTx, cfg PostExecCfg, 
 	return nil
 }
 
-func UnwindPostExecStage(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, cfg PostExecCfg, ctx context.Context) (err error) {
+func UnwindPostExecStage(u *UnwindState, s *StageState, tx kv.RwTx, cfg PostExecCfg, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)

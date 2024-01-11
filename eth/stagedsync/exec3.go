@@ -41,7 +41,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -105,7 +105,7 @@ func (p *Progress) Log(rs *state.StateV3, in *exec22.QueueWithRetry, rws *exec22
 }
 
 func ExecV3(ctx context.Context,
-	execStage *sync_stages.StageState, u sync_stages.Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
+	execStage *StageState, u Unwinder, workerCount int, cfg ExecuteBlockCfg, applyTx kv.RwTx,
 	parallel bool, logPrefix string,
 	maxBlockNum uint64,
 ) error {
@@ -185,7 +185,7 @@ func ExecV3(ctx context.Context,
 	}
 	agg.SetTxNum(inputTxNum)
 
-	var outputBlockNum = sync_stages.Metrics[sync_stages.Execution]
+	var outputBlockNum = Metrics[stages.Execution]
 	inputBlockNum := &atomic.Uint64{}
 	var count uint64
 	var lock sync.RWMutex
@@ -768,7 +768,7 @@ func reconstituteStep(last bool,
 	workerCount int, ctx context.Context, db kv.RwDB, txNum uint64, dirs datadir.Dirs,
 	as *libstate.AggregatorStep, chainDb kv.RwDB, blockReader services.FullBlockReader,
 	chainConfig *chain.Config, logger log.Logger, genesis *types.Genesis, engine consensus.Engine,
-	batchSize datasize.ByteSize, s *sync_stages.StageState, blockNum uint64, total uint64,
+	batchSize datasize.ByteSize, s *StageState, blockNum uint64, total uint64,
 ) error {
 	var startOk, endOk bool
 	startTxNum, endTxNum := as.TxNumRange()
@@ -950,7 +950,7 @@ func reconstituteStep(last bool,
 				log.Info(fmt.Sprintf("[%s] State reconstitution", s.LogPrefix()), "overall progress", fmt.Sprintf("%.2f%%", progress),
 					"step progress", fmt.Sprintf("%.2f%%", stepProgress),
 					"tx/s", fmt.Sprintf("%.1f", speedTx), "workCh", fmt.Sprintf("%d/%d", len(workCh), cap(workCh)),
-					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", sync_stages.Metrics[sync_stages.Execution].Get(),
+					"repeat ratio", fmt.Sprintf("%.2f%%", repeatRatio), "queue.len", rs.QueueLen(), "blk", Metrics[stages.Execution].Get(),
 					"buffer", fmt.Sprintf("%s/%s", common.ByteCount(sizeEstimate), common.ByteCount(commitThreshold)),
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 				if sizeEstimate >= commitThreshold {
@@ -1061,7 +1061,7 @@ func reconstituteStep(last bool,
 				inputTxNum++
 			}
 
-			sync_stages.Metrics[sync_stages.Execution].Set(bn)
+			Metrics[stages.Execution].Set(bn)
 		}
 		return err
 	}(); err != nil {
@@ -1287,7 +1287,7 @@ func safeCloseTxTaskCh(ch chan *exec22.TxTask) {
 	}
 }
 
-func ReconstituteState(ctx context.Context, s *sync_stages.StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
+func ReconstituteState(ctx context.Context, s *StageState, dirs datadir.Dirs, workerCount int, batchSize datasize.ByteSize, chainDb kv.RwDB,
 	blockReader services.FullBlockReader,
 	logger log.Logger, agg *state2.AggregatorV3, engine consensus.Engine,
 	chainConfig *chain.Config, genesis *types.Genesis) (err error) {

@@ -1,17 +1,19 @@
-package sync_stages
+package stagedsync
 
 import (
 	"fmt"
 	"github.com/VictoriaMetrics/metrics"
 	"github.com/huandu/xstrings"
 	"github.com/ledgerwatch/erigon-lib/kv"
+
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
-var Metrics = map[SyncStage]*metrics.Counter{}
+var Metrics = map[stages.SyncStage]*metrics.Counter{}
 
 // TODO: this needs improving to support passing in different sets of stages
 func init() {
-	for _, v := range AllStages {
+	for _, v := range stages.AllStages {
 		Metrics[v] = metrics.GetOrCreateCounter(
 			fmt.Sprintf(
 				`sync{stage="%s"}`,
@@ -25,7 +27,7 @@ func init() {
 // need to fix it in future
 func UpdateMetrics(tx kv.Tx) error {
 	for id, m := range Metrics {
-		progress, err := GetStageProgress(tx, id)
+		progress, err := stages.GetStageProgress(tx, id)
 		if err != nil {
 			return err
 		}

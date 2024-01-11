@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package sync_stages
+package stages
 
 import (
 	"encoding/binary"
@@ -56,15 +56,6 @@ var (
 	BeaconBlocks                SyncStage = "BeaconBlocks"                // BeaconBlocks are downloaded, no verification
 	BeaconState                 SyncStage = "BeaconState"                 // Beacon blocks are sent to the state transition function
 	BeaconIndexes               SyncStage = "BeaconIndexes"               // Fills up Beacon indexes
-
-	// ZK stages
-	L1Syncer                    SyncStage = "L1Syncer"
-	L1VerificationsBatchNo      SyncStage = "L1VerificationsBatchNo"
-	Batches                     SyncStage = "Batches"
-	HighestHashableL2BlockNo    SyncStage = "HighestHashableL2BlockNo"
-	HighestSeenBatchNumber      SyncStage = "HighestSeenBatchNumber"
-	VerificationsStateRootCheck SyncStage = "VerificationStateRootCheck"
-	ForkId                      SyncStage = "ForkId"
 )
 
 var AllStages = []SyncStage{

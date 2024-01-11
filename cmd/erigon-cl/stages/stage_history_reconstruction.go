@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/core/state"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/erigon-cl/network"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -44,7 +44,7 @@ func StageHistoryReconstruction(db kv.RwDB, downloader *network.BackwardBeaconDo
 }
 
 // SpawnStageBeaconsForward spawn the beacon forward stage
-func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *sync_stages.StageState, tx kv.RwTx, ctx context.Context) error {
+func SpawnStageHistoryReconstruction(cfg StageHistoryReconstructionCfg, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context) error {
 	// This stage must be done only once.
 	progress := s.BlockNumber
 	if progress != 0 {

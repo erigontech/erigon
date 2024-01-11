@@ -18,7 +18,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 type ContractCreatorData struct {
@@ -57,7 +57,7 @@ func (api *OtterscanAPIImpl) GetContractCreator(ctx context.Context, addr common
 	var acc accounts.Account
 	if api.historyV3(tx) {
 		ttx := tx.(kv.TemporalTx)
-		headNumber, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
+		headNumber, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return nil, err
 		}

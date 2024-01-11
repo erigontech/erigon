@@ -53,10 +53,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -75,8 +75,8 @@ type MockSentry struct {
 	Engine         consensus.Engine
 	gspec          *types.Genesis
 	ChainConfig    *chain.Config
-	Sync           *sync_stages.Sync
-	MiningSync     *sync_stages.Sync
+	Sync           *stagedsync.Sync
+	MiningSync     *stagedsync.Sync
 	PendingBlocks  chan *types.Block
 	MinedBlocks    chan *types.Block
 	sentriesClient *sentry.MultiClient
@@ -359,7 +359,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 			log.Warn("Could not validate block", "err", err)
 			return err
 		}
-		progress, err := sync_stages.GetStageProgress(batch, sync_stages.IntermediateHashes)
+		progress, err := stages.GetStageProgress(batch, stages.IntermediateHashes)
 		if err != nil {
 			return err
 		}
@@ -397,7 +397,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	var snapshotsDownloader proto_downloader.DownloaderClient
 
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, mock.BlockSnapshots, mock.DB, snapshotsDownloader, mock.Notifications.Events)
-	mock.Sync = sync_stages.New(
+	mock.Sync = stagedsync.New(
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(
 				mock.DB,
@@ -491,7 +491,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	miner := stagedsync.NewMiningState(&miningConfig)
 	mock.PendingBlocks = miner.PendingResultCh
 	mock.MinedBlocks = miner.MiningResultCh
-	mock.MiningSync = sync_stages.New(
+	mock.MiningSync = stagedsync.New(
 		stagedsync.MiningStages(mock.Ctx,
 			stagedsync.StageMiningCreateBlockCfg(mock.DB, miner, *mock.ChainConfig, mock.Engine, mock.TxPool, nil, nil, dirs.Tmp),
 			stagedsync.StageMiningExecCfg(mock.DB, miner, nil, *mock.ChainConfig, mock.Engine, &vm.Config{}, dirs.Tmp, nil, 0, mock.TxPool, nil, mock.BlockSnapshots, cfg.TransactionsV3),
@@ -711,7 +711,7 @@ func (ms *MockSentry) InsertChain(chain *core.ChainPack) error {
 		if rawdb.ReadHeader(tx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
 			return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 		}
-		execAt, err := sync_stages.GetStageProgress(tx, sync_stages.Execution)
+		execAt, err := stages.GetStageProgress(tx, stages.Execution)
 		if err != nil {
 			return err
 		}

@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
 type CumulativeIndexCfg struct {
@@ -29,7 +29,7 @@ func StageCumulativeIndexCfg(db kv.RwDB) CumulativeIndexCfg {
 	}
 }
 
-func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *sync_stages.StageState, tx kv.RwTx, ctx context.Context) error {
+func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx, ctx context.Context) error {
 	useExternalTx := tx != nil
 
 	if !useExternalTx {
@@ -44,7 +44,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *sync_stages.StageState
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	headNumber, err := sync_stages.GetStageProgress(tx, sync_stages.Headers)
+	headNumber, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return fmt.Errorf("getting bodies progress: %w", err)
 	}
@@ -122,7 +122,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *sync_stages.StageState
 	return nil
 }
 
-func UnwindCumulativeIndexStage(u *sync_stages.UnwindState, cfg CumulativeIndexCfg, tx kv.RwTx, ctx context.Context) (err error) {
+func UnwindCumulativeIndexStage(u *UnwindState, cfg CumulativeIndexCfg, tx kv.RwTx, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -145,7 +145,7 @@ func UnwindCumulativeIndexStage(u *sync_stages.UnwindState, cfg CumulativeIndexC
 	return nil
 }
 
-func PruneCumulativeIndexStage(p *sync_stages.PruneState, tx kv.RwTx, ctx context.Context) (err error) {
+func PruneCumulativeIndexStage(p *PruneState, tx kv.RwTx, ctx context.Context) (err error) {
 	useExternalTx := tx != nil
 
 	if !useExternalTx {

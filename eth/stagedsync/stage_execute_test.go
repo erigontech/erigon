@@ -17,7 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/stretchr/testify/require"
 )
 
@@ -31,11 +31,11 @@ func TestExec(t *testing.T) {
 		generateBlocks(t, 1, 25, plainWriterGen(tx1), staticCodeStaticIncarnations)
 		generateBlocks(t, 1, 50, plainWriterGen(tx2), staticCodeStaticIncarnations)
 
-		err := sync_stages.SaveStageProgress(tx2, sync_stages.Execution, 50)
+		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
 		require.NoError(err)
 
-		u := &sync_stages.UnwindState{ID: sync_stages.Execution, UnwindPoint: 25}
-		s := &sync_stages.StageState{ID: sync_stages.Execution, BlockNumber: 50}
+		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
+		s := &StageState{ID: stages.Execution, BlockNumber: 50}
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
@@ -47,11 +47,11 @@ func TestExec(t *testing.T) {
 		generateBlocks(t, 1, 25, plainWriterGen(tx1), changeCodeWithIncarnations)
 		generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeWithIncarnations)
 
-		err := sync_stages.SaveStageProgress(tx2, sync_stages.Execution, 50)
+		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
 		require.NoError(err)
 
-		u := &sync_stages.UnwindState{ID: sync_stages.Execution, UnwindPoint: 25}
-		s := &sync_stages.StageState{ID: sync_stages.Execution, BlockNumber: 50}
+		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
+		s := &StageState{ID: stages.Execution, BlockNumber: 50}
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
@@ -64,12 +64,12 @@ func TestExec(t *testing.T) {
 		generateBlocks(t, 1, 25, plainWriterGen(tx1), changeCodeIndepenentlyOfIncarnations)
 		generateBlocks(t, 1, 50, plainWriterGen(tx2), changeCodeIndepenentlyOfIncarnations)
 
-		err := sync_stages.SaveStageProgress(tx2, sync_stages.Execution, 50)
+		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
 		if err != nil {
 			t.Errorf("error while saving progress: %v", err)
 		}
-		u := &sync_stages.UnwindState{ID: sync_stages.Execution, UnwindPoint: 25}
-		s := &sync_stages.StageState{ID: sync_stages.Execution, BlockNumber: 50}
+		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
+		s := &StageState{ID: stages.Execution, BlockNumber: 50}
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
@@ -80,14 +80,14 @@ func TestExec(t *testing.T) {
 		require, tx := require.New(t), memdb.BeginRw(t, db1)
 
 		generateBlocks(t, 1, 20, plainWriterGen(tx), changeCodeIndepenentlyOfIncarnations)
-		err := sync_stages.SaveStageProgress(tx, sync_stages.Execution, 20)
+		err := stages.SaveStageProgress(tx, stages.Execution, 20)
 		require.NoError(err)
 
 		available, err := historyv2.AvailableFrom(tx)
 		require.NoError(err)
 		require.Equal(uint64(1), available)
 
-		s := &sync_stages.PruneState{ID: sync_stages.Execution, ForwardProgress: 20}
+		s := &PruneState{ID: stages.Execution, ForwardProgress: 20}
 		// check pruning distance > than current stage progress
 		err = PruneExecutionStage(s, tx, ExecuteBlockCfg{prune: prune.Mode{History: prune.Distance(100), Receipts: prune.Distance(101), CallTraces: prune.Distance(200)}}, ctx, false)
 		require.NoError(err)
@@ -185,7 +185,7 @@ func TestExec22(t *testing.T) {
 		beforeBlock, afterBlock, stateWriter = apply(tx2, agg)
 		generateBlocks2(t, 1, 50, stateWriter, beforeBlock, afterBlock, staticCodeStaticIncarnations)
 
-		err := sync_stages.SaveStageProgress(tx2, sync_stages.Execution, 50)
+		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
 		require.NoError(err)
 
 		for i := uint64(0); i < 50; i++ {
@@ -193,8 +193,8 @@ func TestExec22(t *testing.T) {
 			require.NoError(err)
 		}
 
-		u := &sync_stages.UnwindState{ID: sync_stages.Execution, UnwindPoint: 25}
-		s := &sync_stages.StageState{ID: sync_stages.Execution, BlockNumber: 50}
+		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
+		s := &StageState{ID: stages.Execution, BlockNumber: 50}
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 
@@ -209,7 +209,7 @@ func TestExec22(t *testing.T) {
 		beforeBlock, afterBlock, stateWriter = apply(tx2, agg)
 		generateBlocks2(t, 1, 50, stateWriter, beforeBlock, afterBlock, changeCodeWithIncarnations)
 
-		err := sync_stages.SaveStageProgress(tx2, sync_stages.Execution, 50)
+		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
 		require.NoError(err)
 
 		for i := uint64(0); i < 50; i++ {
@@ -217,8 +217,8 @@ func TestExec22(t *testing.T) {
 			require.NoError(err)
 		}
 
-		u := &sync_stages.UnwindState{ID: sync_stages.Execution, UnwindPoint: 25}
-		s := &sync_stages.StageState{ID: sync_stages.Execution, BlockNumber: 50}
+		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
+		s := &StageState{ID: stages.Execution, BlockNumber: 50}
 		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false)
 		require.NoError(err)
 

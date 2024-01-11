@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbreset"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 )
@@ -107,7 +107,7 @@ var resetBlocks4 = Migration{
 			return tx.Commit()
 		}
 
-		headersProgress, _ := sync_stages.GetStageProgress(tx, sync_stages.Headers)
+		headersProgress, _ := stages.GetStageProgress(tx, stages.Headers)
 		if headersProgress > 0 {
 			log.Warn("NOTE: this migration will remove recent blocks (and senders) to fix several recent bugs. Your node will re-download last ~400K blocks, should not take very long")
 		}

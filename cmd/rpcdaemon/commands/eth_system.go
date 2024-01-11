@@ -14,7 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
 
@@ -39,12 +39,12 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	highestBlock, err := sync_stages.GetStageProgress(tx, sync_stages.Headers)
+	highestBlock, err := stages.GetStageProgress(tx, stages.Headers)
 	if err != nil {
 		return false, err
 	}
 
-	currentBlock, err := sync_stages.GetStageProgress(tx, sync_stages.Finish)
+	currentBlock, err := stages.GetStageProgress(tx, stages.Finish)
 	if err != nil {
 		return false, err
 	}
@@ -58,9 +58,9 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		StageName   string         `json:"stage_name"`
 		BlockNumber hexutil.Uint64 `json:"block_number"`
 	}
-	stagesMap := make([]S, len(sync_stages.AllStages))
-	for i, stage := range sync_stages.AllStages {
-		progress, err := sync_stages.GetStageProgress(tx, stage)
+	stagesMap := make([]S, len(stages.AllStages))
+	for i, stage := range stages.AllStages {
+		progress, err := stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return nil, err
 		}

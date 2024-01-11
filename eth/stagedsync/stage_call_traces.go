@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/sync_stages"
 )
 
 type CallTracesCfg struct {
@@ -47,7 +46,7 @@ func StageCallTracesCfg(
 	}
 }
 
-func SpawnCallTraces(s *sync_stages.StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) error {
+func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) error {
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -261,7 +260,7 @@ func finaliseCallTraces(collectorFrom, collectorTo *etl.Collector, logPrefix str
 	return nil
 }
 
-func UnwindCallTraces(u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
+func UnwindCallTraces(u *UnwindState, s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
 	if s.BlockNumber <= u.UnwindPoint {
 		return nil
 	}
@@ -365,7 +364,7 @@ func DoUnwindCallTraces(logPrefix string, db kv.RwTx, from, to uint64, ctx conte
 	return nil
 }
 
-func PruneCallTraces(s *sync_stages.PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
+func PruneCallTraces(s *PruneState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) (err error) {
 	logPrefix := s.LogPrefix()
 
 	useExternalTx := tx != nil

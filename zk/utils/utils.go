@@ -4,12 +4,12 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/sync_stages"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 )
 
 func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
-	intersProgress, err := sync_stages.GetStageProgress(tx, sync_stages.IntermediateHashes)
+	intersProgress, err := stages.GetStageProgress(tx, stages.IntermediateHashes)
 	if err != nil {
 		return false, 0, err
 	}
@@ -21,7 +21,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
 
 	// if there is no inters progress - i.e. first sync, don't skip exec, and execute to the highest block in the highest verified batch that we did download
 	if intersProgress == 0 {
-		highestVerifiedBatchNo, err := sync_stages.GetStageProgress(tx, sync_stages.L1VerificationsBatchNo)
+		highestVerifiedBatchNo, err := stages.GetStageProgress(tx, stages.L1VerificationsBatchNo)
 		if err != nil {
 			return false, 0, err
 		}
@@ -62,7 +62,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
 		return false, max, nil
 	}
 
-	highestHashableL2BlockNo, err := sync_stages.GetStageProgress(tx, sync_stages.HighestHashableL2BlockNo)
+	highestHashableL2BlockNo, err := stages.GetStageProgress(tx, stages.HighestHashableL2BlockNo)
 	if err != nil {
 		return false, 0, err
 	}

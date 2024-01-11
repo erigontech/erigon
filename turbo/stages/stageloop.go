@@ -29,8 +29,8 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/sync_stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -71,7 +71,7 @@ func StageLoop(
 	ctx context.Context,
 	chainConfig *chain.Config,
 	db kv.RwDB,
-	sync *sync_stages.Sync,
+	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
 	notifications *shards.Notifications,
 	updateHead func(ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int),
@@ -125,7 +125,7 @@ func StageLoop(
 	}
 }
 
-func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *sync_stages.Sync, notifications *shards.Notifications, initialCycle bool,
+func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, sync *stagedsync.Sync, notifications *shards.Notifications, initialCycle bool,
 	updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int),
 ) (headBlockHash libcommon.Hash, err error) {
 	/*
@@ -138,7 +138,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 
 	var finishProgressBefore uint64
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		finishProgressBefore, err = sync_stages.GetStageProgress(tx, sync_stages.Finish)
+		finishProgressBefore, err = stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
 		}
@@ -174,7 +174,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	var tableSizes []interface{}
 	var commitTime time.Duration
 	if canRunCycleInOneTransaction {
-		tableSizes = sync_stages.PrintTables(db, tx) // Need to do this before commit to access tx
+		tableSizes = stagedsync.PrintTables(db, tx) // Need to do this before commit to access tx
 		commitStart := time.Now()
 		errTx := tx.Commit()
 		if errTx != nil {
@@ -192,7 +192,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 		var head uint64
 		var headHash libcommon.Hash
 		var plainStateVersion uint64
-		if head, err = sync_stages.GetStageProgress(tx, sync_stages.Headers); err != nil {
+		if head, err = stages.GetStageProgress(tx, stages.Headers); err != nil {
 			return err
 		}
 		if headHash, err = rawdb.ReadCanonicalHash(tx, head); err != nil {
@@ -258,7 +258,7 @@ func StageLoopStep(ctx context.Context, chainConfig *chain.Config, db kv.RwDB, s
 	return headBlockHash, nil
 }
 
-func MiningStep(ctx context.Context, kv kv.RwDB, mining *sync_stages.Sync, tmpDir string) (err error) {
+func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir string) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -281,7 +281,7 @@ func MiningStep(ctx context.Context, kv kv.RwDB, mining *sync_stages.Sync, tmpDi
 	return nil
 }
 
-func StateStep(ctx context.Context, batch kv.RwTx, stateSync *sync_stages.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, quiet bool) (err error) {
+func StateStep(ctx context.Context, batch kv.RwTx, stateSync *stagedsync.Sync, Bd *bodydownload.BodyDownload, header *types.Header, body *types.RawBody, unwindPoint uint64, headersChain []*types.Header, bodiesChain []*types.RawBody, quiet bool) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -334,7 +334,7 @@ func StateStep(ctx context.Context, batch kv.RwTx, stateSync *sync_stages.Sync, 
 		return err
 	}
 
-	if err = sync_stages.SaveStageProgress(batch, sync_stages.Headers, height); err != nil {
+	if err = stages.SaveStageProgress(batch, stages.Headers, height); err != nil {
 		return err
 	}
 	if body != nil {
@@ -358,7 +358,7 @@ func NewDefaultStages(ctx context.Context,
 	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
 	engine consensus.Engine,
-) []*sync_stages.Stage {
+) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
 	blockRetire := snapshotsync.NewBlockRetire(1, dirs.Tmp, snapshots, db, snapDownloader, notifications.Events)
@@ -441,10 +441,10 @@ func NewDefaultStages(ctx context.Context,
 		runInTestMode)
 }
 
-func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) (*sync_stages.Sync, error) {
+func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.MultiClient, dirs datadir.Dirs, notifications *shards.Notifications, snapshots *snapshotsync.RoSnapshots, agg *state.AggregatorV3) (*stagedsync.Sync, error) {
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
 
-	return sync_stages.New(
+	return stagedsync.New(
 		stagedsync.StateStages(ctx,
 			stagedsync.StageHeadersCfg(
 				db,
