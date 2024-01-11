@@ -1030,6 +1030,8 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			break
 		}
 		limit--
+		stat.MinTxNum = min(stat.MinTxNum, txNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
@@ -1057,21 +1059,20 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		return nil, err
 	}
 	defer idxCForDeletes.Close()
-	idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
-	if err != nil {
-		return nil, err
-	}
-	defer idxC.Close()
+	//idxC, err := rwTx.RwCursorDupSort(ii.indexTable)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//defer idxC.Close()
 
 	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		txnm, err := idxC.SeekBothRange(key[:len(key)-8], key[len(key)-8:])
-		if err != nil {
-			return err
-		}
+		//for txnm, err := idxC.SeekBothRange(key, key[len(key)-8:]); txnm != nil; _, txnm, err = idxC.NextDup() {
+		//	if err != nil {
+		//		return err
+		//	}
+		txnm := key[len(key)-8:]
 
 		txNum := binary.BigEndian.Uint64(txnm)
-		stat.MinTxNum = min(stat.MinTxNum, txNum)
-		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
 		if fn != nil {
 			if err := fn(key[:len(key)-8], txnm); err != nil {
@@ -1095,6 +1096,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			return ctx.Err()
 		default:
 		}
+		//}
 		return nil
 	}, etl.TransformArgs{})
 
