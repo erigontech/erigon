@@ -1037,7 +1037,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err != nil {
 				return nil, err
 			}
-			if err := collector.Collect(append(v, k...), nil); err != nil {
+			if err := collector.Collect(v, nil); err != nil {
 				return nil, err
 			}
 		}
@@ -1065,13 +1065,13 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	}
 	defer idxC.Close()
 
+	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
 	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 		for txnm, err := idxC.SeekBothRange(key, txKey[:]); txnm != nil; _, txnm, err = idxC.NextDup() {
 			if err != nil {
 				return err
 			}
 
-			//txnm := key[len(key)-8:]
 			txNum := binary.BigEndian.Uint64(txnm)
 			if txNum < stat.MinTxNum {
 				continue // to bigger txnums
@@ -1081,11 +1081,11 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			}
 
 			if fn != nil {
-				if err := fn(key[:len(key)-8], txnm); err != nil {
+				if err := fn(key, txnm); err != nil {
 					return err
 				}
 			}
-			if _, _, err = idxCForDeletes.SeekBothExact(key[:len(key)-8], txnm); err != nil {
+			if _, _, err = idxCForDeletes.SeekBothExact(key, txnm); err != nil {
 				return err
 			}
 			if err = idxCForDeletes.DeleteCurrent(); err != nil {
