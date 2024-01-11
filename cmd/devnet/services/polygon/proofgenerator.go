@@ -10,13 +10,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -38,7 +38,6 @@ func NewProofGenerator() *ProofGenerator {
 }
 
 func (pg *ProofGenerator) NodeCreated(ctx context.Context, node devnet.Node) {
-
 	if pg.heimdall == nil {
 		if strings.HasPrefix(node.GetName(), "bor") {
 			if network := devnet.CurrentNetwork(ctx); network != nil {
@@ -89,7 +88,7 @@ func (pg *ProofGenerator) GenerateExitPayload(ctx context.Context, burnTxHash li
 			return nil, fmt.Errorf("block not included: %w", err)
 		}
 
-		return nil, fmt.Errorf("null receipt received")
+		return nil, fmt.Errorf("null receipt received: %w", err)
 	}
 
 	if len(result) == 0 {
@@ -251,8 +250,9 @@ func (pg *ProofGenerator) buildPayloadForExit(ctx context.Context, burnTxHash li
 			hexutility.Encode(getReceiptBytes(receipt)), //rpl encoded
 			hexutility.Encode(parentNodesBytes),
 			hexutility.Encode(append([]byte{0}, receiptProof.path...)),
-			logIndex,
-		})
+			uint64(logIndex),
+		},
+	)
 }
 
 type receiptProof struct {

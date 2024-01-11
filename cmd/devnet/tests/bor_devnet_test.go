@@ -53,12 +53,13 @@ func TestStateSync(t *testing.T) {
 }
 
 func TestChildChainExit(t *testing.T) {
-	t.Skip("FIXME: step CreateAccountWithFunds fails: Failed to get transfer tx: failed to search reserves for hashes: no block heads subscription")
-
 	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx
 
+	t.Run("InitSubscriptions", func(t *testing.T) {
+		services.InitSubscriptions(ctx, []requests.SubMethod{requests.Methods.ETHNewHeads})
+	})
 	t.Run("CreateAccountWithFunds", func(t *testing.T) {
 		_, err := accounts_steps.CreateAccountWithFunds(ctx, networkname.DevChainName, "root-funder", 200.0)
 		require.Nil(t, err)
@@ -78,9 +79,6 @@ func TestChildChainExit(t *testing.T) {
 		require.Nil(t, err)
 	})
 	t.Run("ProcessChildTransfers", func(t *testing.T) {
-		require.Nil(t, contracts_steps.ProcessChildTransfers(ctx, "child-funder", 1, 2, 2))
+		require.Nil(t, contracts_steps.ProcessChildTransfers(ctx, "child-funder", 1, 2))
 	})
-	//t.Run("BatchProcessTransfers", func(t *testing.T) {
-	//	require.Nil(t, contracts_steps.BatchProcessTransfers(ctx, "child-funder", 1, 10, 2, 2))
-	//})
 }
