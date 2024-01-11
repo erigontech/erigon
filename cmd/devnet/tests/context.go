@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
 func initDevnet(chainName string, dataDir string, producerCount int, gasLimit uint64, logger log.Logger, consoleLogLevel log.Lvl, dirLogLevel log.Lvl) (devnet.Devnet, error) {
@@ -49,7 +50,7 @@ func ContextStart(t *testing.T, chainName string) (devnet.Context, error) {
 	}
 
 	debug.RaiseFdLimit()
-	logger := log.New()
+	logger := testlog.Logger(t, log.LvlTrace)
 	dataDir := t.TempDir()
 
 	envProducerCount, _ := os.LookupEnv("PRODUCER_COUNT")
@@ -60,8 +61,8 @@ func ContextStart(t *testing.T, chainName string) (devnet.Context, error) {
 	producerCount, _ := strconv.ParseUint(envProducerCount, 10, 64)
 
 	// TODO get log levels from env
-	var dirLogLevel log.Lvl = log.LvlTrace
-	var consoleLogLevel log.Lvl = log.LvlCrit
+	dirLogLevel := log.LvlTrace
+	consoleLogLevel := log.LvlCrit
 
 	var network devnet.Devnet
 	network, err := initDevnet(chainName, dataDir, int(producerCount), 0, logger, consoleLogLevel, dirLogLevel)

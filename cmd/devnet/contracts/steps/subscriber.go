@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/log/v3"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
@@ -54,6 +53,8 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 		return nil, err
 	}
 
+	logger.Info("Awaiting DeploySubsriptionContract transaction", "hash", hash)
+	logger.Info("Awaiting EmitFallbackEvent", "hash", eventHash)
 	txToBlockMap, err := transactions.AwaitTransactions(ctx, hash, eventHash)
 
 	if err != nil {

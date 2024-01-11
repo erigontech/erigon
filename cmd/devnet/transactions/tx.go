@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
@@ -190,6 +191,7 @@ func AwaitBlocks(ctx context.Context, sleepTime time.Duration) error {
 			logger.Info("Txpool subpool sizes", "pending", pendingSize, "queued", queuedSize, "basefee", baseFeeSize)
 		}
 
+		logger.Info("AwaitBlocks sleep time", "sleepTime", sleepTime)
 		time.Sleep(sleepTime)
 	}
 

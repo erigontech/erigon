@@ -52,6 +52,7 @@ func CreateAccountWithFunds(ctx context.Context, chainName string, name string, 
 }
 
 func SendFunds(ctx context.Context, chainName string, name string, ethAmount float64) (uint64, error) {
+	logger := devnet.Logger(ctx)
 	chainCtx := devnet.WithCurrentNetwork(ctx, chainName)
 	faucet := services.Faucet(chainCtx)
 
@@ -69,6 +70,7 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 		return 0, err
 	}
 
+	logger.Info("Awaiting faucet send transaction", "hash", hash)
 	blockMap, err := transactions.AwaitTransactions(chainCtx, hash)
 
 	if err != nil {
@@ -103,8 +105,6 @@ func SendFunds(ctx context.Context, chainName string, name string, ethAmount flo
 	node := devnet.SelectBlockProducer(chainCtx)
 
 	if !sendConfirmed {
-		logger := devnet.Logger(chainCtx)
-
 		traceResults, err := node.TraceTransaction(hash)
 
 		if err != nil {

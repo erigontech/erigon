@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,6 +35,7 @@ func init() {
 }
 
 func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
+	logger := devnet.Logger(ctx)
 	sender := accounts.GetAccount(senderName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -84,6 +86,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 				return err
 			}
 
+			logger.Info("Awaiting state sender sync state transaction", "hash", transaction.Hash())
 			block, err := waiter.Await(transaction.Hash())
 
 			if err != nil {
@@ -131,7 +134,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 
 	receivedCount := 0
 
-	devnet.Logger(ctx).Info("Waiting for receive events")
+	logger.Info("Waiting for receive events")
 
 	for received := range receivedChan {
 		if received.Source != sender.Address {
@@ -152,6 +155,7 @@ func GenerateSyncEvents(ctx context.Context, senderName string, numberOfTransfer
 }
 
 func DeployRootChainSender(ctx context.Context, deployerName string) (context.Context, error) {
+	logger := devnet.Logger(ctx)
 	deployer := accounts.GetAccount(deployerName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -174,19 +178,21 @@ func DeployRootChainSender(ctx context.Context, deployerName string) (context.Co
 		return nil, err
 	}
 
+	logger.Info("Awaiting deployment transaction for DeployRootSender", "hash", transaction.Hash())
 	block, err := waiter.Await(transaction.Hash())
 
 	if err != nil {
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootSender deployed", "chain", networkname.DevChainName, "block", block.Number, "addr", address)
+	logger.Info("RootSender deployed", "chain", networkname.DevChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootSenderAddress", address).
 		WithParam("rootSender", contract), nil
 }
 
 func DeployChildChainReceiver(ctx context.Context, deployerName string) (context.Context, error) {
+	logger := devnet.Logger(ctx)
 	deployer := accounts.GetAccount(deployerName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)
 
@@ -199,19 +205,21 @@ func DeployChildChainReceiver(ctx context.Context, deployerName string) (context
 		return nil, err
 	}
 
+	logger.Info("Awaiting deployment transaction for DeployChildReceiver", "hash", transaction.Hash())
 	block, err := waiter.Await(transaction.Hash())
 
 	if err != nil {
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("ChildReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	logger.Info("ChildReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "childReceiverAddress", address).
 		WithParam("childReceiver", contract), nil
 }
 
 func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int, maxTransfer int) error {
+	logger := devnet.Logger(ctx)
 	source := accounts.GetAccount(sourceName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -257,6 +265,7 @@ func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransf
 				return err
 			}
 
+			logger.Info("Awaiting send to child transaction", "hash", transaction.Hash())
 			block, terr := waiter.Await(transaction.Hash())
 
 			if terr != nil {
@@ -341,7 +350,7 @@ func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransf
 
 	receivedCount := 0
 
-	devnet.Logger(ctx).Info("Waiting for receive events")
+	logger.Info("Waiting for receive events")
 
 	for received := range receivedChan {
 		if received.Source != source.Address {
@@ -362,6 +371,7 @@ func ProcessRootTransfers(ctx context.Context, sourceName string, numberOfTransf
 }
 
 func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches int, transfersPerBatch, minTransfer int, maxTransfer int) error {
+	logger := devnet.Logger(ctx)
 	source := accounts.GetAccount(sourceName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -396,6 +406,7 @@ func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches i
 
 	for b := 0; b < batches; b++ {
 
+		var hashesSb strings.Builder
 		hashes := make([]libcommon.Hash, transfersPerBatch)
 
 		waiter, cancel := blocks.BlockWaiter(ctx, blocks.CompletionChecker)
@@ -412,9 +423,12 @@ func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches i
 			}
 
 			hashes[i] = transaction.Hash()
+			hashesSb.WriteString(hashes[i].String())
+			hashesSb.WriteRune(',')
 			auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
 		}
 
+		logger.Info("Awaiting many send to child transactions", "hashes", hashes)
 		blocks, err := waiter.AwaitMany(hashes...)
 
 		if err != nil {
@@ -487,7 +501,7 @@ func BatchProcessRootTransfers(ctx context.Context, sourceName string, batches i
 
 	receivedCount := 0
 
-	devnet.Logger(ctx).Info("Waiting for receive events")
+	logger.Info("Waiting for receive events")
 
 	for received := range receivedChan {
 		if received.Source != source.Address {

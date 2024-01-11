@@ -52,6 +52,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 		return
 	}
 
+	logger.Info("Awaiting DeployFaucet transaction", "hash", transaction.Hash())
 	block, err := waiter.Await(transaction.Hash())
 
 	if err != nil {
@@ -84,6 +85,7 @@ func (d *deployer) deploy(ctx context.Context, node devnet.Node) {
 		return
 	}
 
+	logger.Info("Awaiting faucet Receive transaction", "hash", receiveHash)
 	block, err = waiter.Await(receiveHash)
 
 	if err != nil {

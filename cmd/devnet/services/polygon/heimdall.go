@@ -329,6 +329,8 @@ func (h *Heimdall) NodeStarted(ctx context.Context, node devnet.Node) {
 
 		go func() {
 			defer cancel()
+			h.logger.Info("Awaiting transaction for DeployTestStateSender", "hash", syncTx.Hash())
+			h.logger.Info("Awaiting transaction for DeployTestRootChain", "hash", rootChainTx.Hash())
 			blocks, err := waiter.AwaitMany(syncTx.Hash(), rootChainTx.Hash())
 
 			if err != nil {

@@ -30,6 +30,7 @@ func init() {
 }
 
 func DeployChildChainSender(ctx context.Context, deployerName string) (context.Context, error) {
+	logger := devnet.Logger(ctx)
 	deployer := accounts.GetAccount(deployerName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)
 
@@ -50,19 +51,21 @@ func DeployChildChainSender(ctx context.Context, deployerName string) (context.C
 		return nil, err
 	}
 
+	logger.Info("Awaiting DeployChildSender transaction", "hash", transaction.Hash())
 	block, err := waiter.Await(transaction.Hash())
 
 	if err != nil {
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("ChildSender deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	logger.Info("ChildSender deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "childSenderAddress", address).
 		WithParam("childSender", contract), nil
 }
 
 func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.Context, error) {
+	logger := devnet.Logger(ctx)
 	deployer := accounts.GetAccount(deployerName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
 
@@ -83,20 +86,21 @@ func DeployRootChainReceiver(ctx context.Context, deployerName string) (context.
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("Awaiting deploy root receiver tx", "hash", transaction.Hash())
+	logger.Info("Awaiting deploy root receiver tx", "hash", transaction.Hash())
 	block, err := waiter.Await(transaction.Hash())
 
 	if err != nil {
 		return nil, err
 	}
 
-	devnet.Logger(ctx).Info("RootReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
+	logger.Info("RootReceiver deployed", "chain", networkname.BorDevnetChainName, "block", block.Number, "addr", address)
 
 	return scenarios.WithParam(ctx, "rootReceiverAddress", address).
 		WithParam("rootReceiver", contract), nil
 }
 
 func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTransfers int, minTransfer int) error {
+	logger := devnet.Logger(ctx)
 	source := accounts.GetAccount(sourceName)
 	childChainCtx := devnet.WithCurrentNetwork(ctx, networkname.BorDevnetChainName)
 	ctx = devnet.WithCurrentNetwork(ctx, networkname.DevChainName)
@@ -152,7 +156,7 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 				return err
 			}
 
-			devnet.Logger(ctx).Info("Waiting for SendToRoot transaction")
+			logger.Info("Waiting for SendToRoot transaction", "hash", transaction.Hash())
 			block, terr := waiter.Await(transaction.Hash())
 
 			if terr != nil {
@@ -248,8 +252,7 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 		auth.Nonce = (&big.Int{}).Add(auth.Nonce, big.NewInt(1))
 	}
 
-	devnet.Logger(ctx).Info("Waiting for checkpoint")
-
+	logger.Info("Awaiting checkpoint", "lastTxBlockNum", lastTxBlockNum)
 	err = heimdall.AwaitCheckpoint(childChainCtx, lastTxBlockNum)
 
 	if err != nil {
@@ -280,6 +283,7 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 				return err
 			}
 
+			logger.Info("Awaiting ReceiveMessage transaction", "hash", transaction.Hash())
 			if _, err := waiter.Await(transaction.Hash()); err != nil {
 				return err
 			}
@@ -296,7 +300,7 @@ func ProcessChildTransfers(ctx context.Context, sourceName string, numberOfTrans
 
 	receivedCount := 0
 
-	devnet.Logger(ctx).Info("Waiting for receive events")
+	logger.Info("Waiting for receive events")
 
 	for received := range receivedChan {
 		if received.Source != source.Address {
