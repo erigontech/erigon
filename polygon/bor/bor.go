@@ -1496,7 +1496,7 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 		}
 	}
 
-	if err := v.UpdateWithChangeSet(changes, logger); err != nil {
+	if err := v.UpdateWithChangeSet(changes); err != nil {
 		logger.Error("[bor] Error while updating change set", "error", err)
 	}
 
