@@ -441,7 +441,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		stateCache = kvcache.NewDummy()
 	} else {
-		// use remote DB
+		// use PrivateApiAddr as remote DB
 		db = remoteKv
 
 		if err = db.View(context.Background(), func(tx kv.Tx) error {
