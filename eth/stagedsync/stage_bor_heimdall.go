@@ -559,7 +559,11 @@ func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Head
 		return err
 	}
 
-	if len(producerSet) != len(headerVals) {
+	// span 0 at least for mumbai has a header mismatch in
+	// its first spam.  Since we control neither the span, not the
+	// the headers (they are external data) - we just don't do the
+	// check as it will hault further processing
+	if len(producerSet) != len(headerVals) && spanID > 0 {
 		return ErrHeaderValidatorsLengthMismatch
 	}
 
