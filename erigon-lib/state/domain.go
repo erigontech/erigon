@@ -1813,27 +1813,25 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 		key = append(append(dc.keyBuf[:0], key1...), key2...)
 	}
 
-	var (
-		v   []byte
-		err error
-	)
-
 	keysC, err := dc.keysCursor(roTx)
 	if err != nil {
 		return nil, 0, false, err
 	}
 
-	var foundInvStep []byte
+	var (
+		v, foundInvStep []byte
+	)
 	if traceGetLatest == dc.d.filenameBase {
 		defer func() {
-			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t)\n", dc.d.filenameBase, key, v, foundInvStep != nil)
+			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; is=%x)\n", dc.d.filenameBase, key, v, foundInvStep != nil, foundInvStep)
 		}()
 	}
 
-	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value
+	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value -- biggest available step
 	if err != nil {
 		return nil, 0, false, err
 	}
+
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		copy(dc.valKeyBuf[:], key)
@@ -1847,9 +1845,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 		if err != nil {
 			return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		//if traceGetLatest == dc.d.filenameBase {
-		//	fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
-		//}
 		//LatestStateReadDB.ObserveDuration(t)
 		return v, foundStep, true, nil
 		//} else {
@@ -2191,7 +2186,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 
 		is := ^binary.BigEndian.Uint64(v)
-		if is >= step {
+		if is > step {
 			k, v, err = keysCursor.PrevNoDup()
 			continue
 		}

@@ -2055,7 +2055,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		writer := dc.NewWriter()
 		defer writer.close()
 
-		for i := 0; uint64(i) < d.aggregationStep+1; i++ {
+		for i := 0; uint64(i) < maxTx; i++ {
 			writer.SetTxNum(uint64(i))
 			err = writer.PutWithPrev(pruningKey, nil, []byte(fmt.Sprintf("value.%d", i)), nil, uint64(i-1)/d.aggregationStep)
 			require.NoError(t, err)
@@ -2068,13 +2068,25 @@ func TestDomain_PruneSimple(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	pruneOneKey := func(t *testing.T, dc *DomainContext, db kv.RwDB, pruneFrom, pruneTo uint64) {
+	pruneOneKeyHistory := func(t *testing.T, dc *DomainContext, db kv.RwDB, pruneFrom, pruneTo uint64) {
 		t.Helper()
 		// prune history
 		ctx := context.Background()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
 		_, err = dc.hc.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, time.NewTicker(time.Second))
+		require.NoError(t, err)
+		err = tx.Commit()
+		require.NoError(t, err)
+	}
+
+	pruneOneKeyDomain := func(t *testing.T, dc *DomainContext, db kv.RwDB, step, pruneFrom, pruneTo uint64) {
+		t.Helper()
+		// prune
+		ctx := context.Background()
+		tx, err := db.BeginRw(ctx)
+		require.NoError(t, err)
+		_, err = dc.Prune(ctx, tx, step, pruneFrom, pruneTo, math.MaxUint64, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -2123,7 +2135,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		dc := d.MakeContext()
 		defer dc.Close()
-		pruneOneKey(t, dc, db, pruneFrom, pruneTo)
+		pruneOneKeyHistory(t, dc, db, pruneFrom, pruneTo)
 
 		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
 	})
@@ -2138,9 +2150,51 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		dc := d.MakeContext()
 		defer dc.Close()
-		pruneOneKey(t, dc, db, pruneFrom, pruneTo)
+		pruneOneKeyHistory(t, dc, db, pruneFrom, pruneTo)
 
 		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
+	})
+
+	t.Run("simple prune whole step", func(t *testing.T) {
+		db, d := testDbAndDomain(t, log.New())
+		defer db.Close()
+		defer d.Close()
+
+		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(10)
+		writeOneKey(t, d, db, 3*stepSize, stepSize)
+
+		ctx := context.Background()
+		rotx, err := db.BeginRo(ctx)
+		require.NoError(t, err)
+
+		dc := d.MakeContext()
+		v, vs, ok, err := dc.GetLatest(pruningKey, nil, rotx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		t.Logf("v=%s vs=%d", v, vs)
+		dc.Close()
+
+		c, err := d.collate(ctx, 0, pruneFrom, pruneTo, rotx)
+		require.NoError(t, err)
+		sf, err := d.buildFiles(ctx, 0, c, background.NewProgressSet())
+		require.NoError(t, err)
+		d.integrateFiles(sf, pruneFrom, pruneTo)
+		rotx.Rollback()
+
+		dc = d.MakeContext()
+		pruneOneKeyDomain(t, dc, db, 0, pruneFrom, pruneTo)
+		dc.Close()
+		//checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
+
+		rotx, err = db.BeginRo(ctx)
+		defer rotx.Rollback()
+		require.NoError(t, err)
+
+		v, vs, ok, err = dc.GetLatest(pruningKey, nil, rotx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		t.Logf("v=%s vs=%d", v, vs)
+		require.EqualValuesf(t, 2, vs, "expected value of step 2")
 	})
 
 	t.Run("simple history discard", func(t *testing.T) {
@@ -2153,7 +2207,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 
 		dc := d.MakeContext()
 		defer dc.Close()
-		pruneOneKey(t, dc, db, pruneFrom, pruneTo)
+		pruneOneKeyHistory(t, dc, db, pruneFrom, pruneTo)
 
 		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
 	})
