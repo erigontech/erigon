@@ -1017,7 +1017,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	collector.LogLvl(log.LvlDebug)
 
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
-	collectingKey := make([]byte, 0, 256+8)
 
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
@@ -1036,8 +1035,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err != nil {
 				return nil, err
 			}
-			collectingKey = append(append(collectingKey[:0], v...), k...)
-			if err := collector.Collect(collectingKey, nil); err != nil {
+			if err := collector.Collect(append(v, k...), nil); err != nil {
 				return nil, err
 			}
 		}
@@ -1066,39 +1064,36 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	defer idxC.Close()
 
 	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		for txnm, err := idxC.SeekBothRange(key, key[len(key)-8:]); txnm != nil; _, txnm, err = idxC.NextDup() {
-			if err != nil {
-				return err
-			}
-			txNum := binary.BigEndian.Uint64(txnm)
-			if txNum >= txTo { // [txFrom; txTo)
-				break
-			}
-			stat.MinTxNum = min(stat.MinTxNum, txNum)
-			stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+		txnm, err := idxC.SeekBothRange(key[:len(key)-8], key[len(key)-8:])
+		if err != nil {
+			return err
+		}
 
-			if fn != nil {
-				if err := fn(key, txnm); err != nil {
-					return err
-				}
-			}
-			if _, _, err = idxCForDeletes.SeekBothExact(key, txnm); err != nil {
-				return err
-			}
-			if err = idxCForDeletes.DeleteCurrent(); err != nil {
-				return err
-			}
-			stat.PruneCount++
-			mxPruneSizeIndex.Inc()
+		txNum := binary.BigEndian.Uint64(txnm)
+		stat.MinTxNum = min(stat.MinTxNum, txNum)
+		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
 
-			select {
-			case <-logEvery.C:
-				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned values", stat.PruneCount,
-					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+		if fn != nil {
+			if err := fn(key[:len(key)-8], txnm); err != nil {
+				return err
 			}
+		}
+		if _, _, err = idxCForDeletes.SeekBothExact(key[:len(key)-8], key[len(key)-8:]); err != nil {
+			return err
+		}
+		if err = idxCForDeletes.DeleteCurrent(); err != nil {
+			return err
+		}
+		stat.PruneCount++
+		mxPruneSizeIndex.Inc()
+
+		select {
+		case <-logEvery.C:
+			ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned values", stat.PruneCount,
+				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
 		}
 		return nil
 	}, etl.TransformArgs{})

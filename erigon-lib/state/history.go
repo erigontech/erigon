@@ -1068,8 +1068,8 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
-		if txNum >= txTo { //[txFrom; txTo)
-			return nil
+		if txNum >= txTo { //[txFrom; txTo), but in this case idx record
+			return fmt.Errorf("pruneValue: txNum %d >= txTo %d", txNum, txTo)
 		}
 
 		if hc.h.historyLargeValues {
