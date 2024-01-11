@@ -1807,7 +1807,7 @@ func (hc *HistoryContext) HistoryRange(fromTxNum, toTxNum int, asc order.By, lim
 		return nil, err
 	}
 
-	return iter.UnionKV(itOnFiles, itOnDB, limit), nil
+	return iter.UnionKV(itOnDB, itOnFiles, limit), nil
 }
 
 type HistoryChangesIterFiles struct {
