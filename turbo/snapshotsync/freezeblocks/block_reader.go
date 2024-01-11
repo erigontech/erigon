@@ -878,6 +878,9 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 
 	var expectedFirstTxnID uint64
 	for _, snb := range view.Bodies() {
+		if snb.idxBodyNumber == nil {
+			return fmt.Errorf("[integrity] file has no index: %s", snb.seg.FileName())
+		}
 		firstBlockNum := snb.idxBodyNumber.BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
 		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
@@ -1189,7 +1192,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 			return nil, err
 		}
 		if v == nil {
-			return nil, fmt.Errorf("span %d not found (db), frosenBlocks=%d", spanId, maxBlockNumInFiles)
+			return nil, fmt.Errorf("span %d not found (db), frozenBlocks=%d", spanId, maxBlockNumInFiles)
 		}
 		return common.Copy(v), nil
 	}

@@ -20,7 +20,7 @@ type testValidatorSetInterface struct {
 	sprintNum int
 }
 
-func (v *testValidatorSetInterface) IncrementProposerPriority(times int, _ log.Logger) {
+func (v *testValidatorSetInterface) IncrementProposerPriority(times int) {
 	v.sprintNum = times
 }
 

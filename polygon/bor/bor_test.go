@@ -306,7 +306,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},
-		}, logger)
+		})
 	} else {
 		heimdall.validatorSet.UpdateWithChangeSet([]*valset.Validator{
 			{
@@ -315,7 +315,7 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 				VotingPower:      1000,
 				ProposerPriority: 1,
 			},
-		}, logger)
+		})
 	}
 
 	bor.Authorize(validatorAddress, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {

@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/integrity"
@@ -25,6 +23,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -35,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
@@ -98,12 +98,13 @@ var snapshotCommand = cli.Command{
 			Name:   "uploader",
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
-			Flags: uploaderCommandFlags([]cli.Flag{
-				&SnapshotVersionFlag,
-				&erigoncli.UploadLocationFlag,
-				&erigoncli.UploadFromFlag,
-				&erigoncli.FrozenBlockLimitFlag,
-			}),
+			Flags: joinFlags(erigoncli.DefaultFlags,
+				[]cli.Flag{
+					&SnapshotVersionFlag,
+					&erigoncli.UploadLocationFlag,
+					&erigoncli.UploadFromFlag,
+					&erigoncli.FrozenBlockLimitFlag,
+				}),
 			Before: func(context *cli.Context) error {
 				erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
 				erigoncli.SyncLoopBlockLimitFlag.Value = 100000
@@ -186,6 +187,13 @@ var snapshotCommand = cli.Command{
 			Flags: joinFlags([]cli.Flag{
 				&cli.PathFlag{Name: "src", Required: true},
 				&cli.PathFlag{Name: "dst", Required: true},
+			}),
+		},
+		{
+			Name:   "meta",
+			Action: doMeta,
+			Flags: joinFlags([]cli.Flag{
+				&cli.PathFlag{Name: "src", Required: true},
 			}),
 		},
 		{
@@ -382,6 +390,17 @@ func doDiff(cliCtx *cli.Context) error {
 			return nil
 		}
 	}
+	return nil
+}
+
+func doMeta(cliCtx *cli.Context) error {
+	srcF := cliCtx.String("src")
+	src, err := compress.NewDecompressor(srcF)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	log.Info("meta", "count", src.Count(), "size", src.Size(), "name", src.FileName())
 	return nil
 }
 
@@ -807,14 +826,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func uploaderCommandFlags(flags []cli.Flag) []cli.Flag {
-	return joinFlags(erigoncli.DefaultFlags, flags, []cli.Flag{
-		&erigoncli.SyncLoopBreakAfterFlag,
-		&erigoncli.SyncLoopBlockLimitFlag,
-		&erigoncli.SyncLoopPruneLimitFlag,
-	})
-}
-
 func doUploaderCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
 	var err error
@@ -859,6 +870,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 }
 
 /*
+
 func doBodiesDecrement(cliCtx *cli.Context) error {
 	logger, _, err := debug.Setup(cliCtx, true)
 	if err != nil {
@@ -878,7 +890,7 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		if f.T != snaptype.Bodies {
 			continue
 		}
-		if f.From < 14_500_000 {
+		if f.From < 18_000_000 {
 			continue
 		}
 		l = append(l, f)
@@ -898,10 +910,17 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		i := 0
 		srcG := src.MakeGetter()
 		var buf []byte
+		log.Info("start", "file", src.FileName())
 		dstBuf := bytes.NewBuffer(nil)
 		for srcG.HasNext() {
 			i++
+			if buf == nil {
+				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
+			}
 			buf, _ = srcG.Next(buf[:0])
+			if buf == nil {
+				panic(fmt.Sprintf("nil val at file: %s\n", srcG.FileName()))
+			}
 			body := &types.BodyForStorage{}
 			if err := rlp.Decode(bytes.NewReader(buf), body); err != nil {
 				return err
@@ -934,6 +953,7 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		ext := filepath.Ext(srcF)
 		withoutExt := srcF[:len(srcF)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
+		log.Info("done", "file", src.FileName())
 		return nil
 	}
 	for _, f := range l {

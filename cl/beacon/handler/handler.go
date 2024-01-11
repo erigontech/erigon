@@ -119,7 +119,7 @@ func (a *ApiHandler) init() {
 				r.Get("/blinded_blocks/{slot}", http.NotFound)
 				r.Get("/attestation_data", http.NotFound)
 				r.Get("/aggregate_attestation", http.NotFound)
-				r.Post("/aggregate_and_proofs", http.NotFound)
+				r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 				r.Post("/beacon_committee_subscriptions", http.NotFound)
 				r.Post("/sync_committee_subscriptions", http.NotFound)
 				r.Get("/sync_committee_contribution", http.NotFound)

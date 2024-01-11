@@ -957,6 +957,10 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	require.True(txPool != nil)
 
 	ctx := context.Background()
+
+	err = txPool.Start(ctx, db)
+	assert.NoError(err)
+
 	var stateVersionID uint64 = 0
 	pendingBaseFee := uint64(1_000_000)
 	// start blocks from 0, set empty hash - then kvcache will also work on this
