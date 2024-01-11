@@ -867,7 +867,7 @@ func (as *AggregatorPruneStat) String() string {
 	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
 
 	for _, d := range names {
-		v, ok := as.Domains[d]
+		v, ok := as.Indices[d]
 		if ok && v != nil {
 			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
 		}

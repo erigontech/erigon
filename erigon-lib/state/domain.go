@@ -2191,7 +2191,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 
 		is := ^binary.BigEndian.Uint64(v)
-		if is > step {
+		if is >= step {
 			k, v, err = keysCursor.PrevNoDup()
 			continue
 		}
