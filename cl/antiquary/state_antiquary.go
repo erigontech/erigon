@@ -422,7 +422,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 		fullValidation := slot%1000 == 0 || first
 		blockRewardsCollector := &eth2.BlockRewardsCollector{}
-		// We sanity check the state every 100k slots or when we start.
+		// We sanity check the state every 1k slots or when we start.
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
