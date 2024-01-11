@@ -63,7 +63,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-	// Force-load native and js packages, to trigger registration
+
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
 )
@@ -613,23 +613,18 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 	return nil
 }
 
-func StartDataStream(cfg httpcfg.HttpCfg) error {
-	if cfg.DataStreamPort == 0 || cfg.DataStreamHost == "" {
-		log.Info("No data stream host or port defined - skipping creation")
+func StartDataStream(server *datastreamer.StreamServer) error {
+	if server == nil {
+		// no stream server to start, we might not have the right flags set to create one
 		return nil
-	}
-	file := cfg.Dirs.DataDir + "/data-stream"
-	// stream type 1 = sequencer
-	server, err := datastreamer.NewServer(uint16(cfg.DataStreamPort), datastreamer.StreamType(1), file, nil)
-	if err != nil {
-		return err
 	}
 
 	log.Info("Starting data stream server...")
-	err = server.Start()
+	err := server.Start()
 	if err != nil {
 		return fmt.Errorf("failed to start data stream server, error: %w", err)
 	}
+
 	return nil
 }
 

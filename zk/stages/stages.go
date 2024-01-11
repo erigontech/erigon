@@ -12,6 +12,7 @@ import (
 func SequencerZkStages(
 	ctx context.Context,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
+	dataStreamCatchupCfg DataStreamCatchupCfg,
 	exec SequenceBlockCfg,
 	hashState stagedsync.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
@@ -182,9 +183,19 @@ func SequencerZkStages(
 		  TODO: verify batches stage -- real executor that verifies batches
 		  if it fails, we need to unwind everything up until before the bad batch
 		*/
-		/*
-			TODO: datastream update stage -- send updated data to the datastream
-		*/
+		{
+			ID:          sync_stages.DataStream,
+			Description: "Update the data stream with missing details",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnStageDataStreamCatchup(s, ctx, tx, dataStreamCatchupCfg)
+			},
+			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
+				return nil
+			},
+		},
 		{
 			ID:          sync_stages.Finish,
 			Description: "Final: update current block for the RPC API",
@@ -205,6 +216,7 @@ func DefaultZkStages(
 	ctx context.Context,
 	l1SyncerCfg L1SyncerCfg,
 	batchesCfg BatchesCfg,
+	dataStreamCatchupCfg DataStreamCatchupCfg,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
 	blockHashCfg stagedsync.BlockHashesCfg,
 	senders stagedsync.SendersCfg,
@@ -408,7 +420,19 @@ func DefaultZkStages(
 				return stagedsync.PruneTxLookup(p, tx, txLookup, ctx, firstCycle)
 			},
 		},
-		/* TODO insert here the stage that updates the datastream */
+		{
+			ID:          sync_stages.DataStream,
+			Description: "Update the data stream with missing details",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *sync_stages.StageState, u sync_stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnStageDataStreamCatchup(s, ctx, tx, dataStreamCatchupCfg)
+			},
+			Unwind: func(firstCycle bool, u *sync_stages.UnwindState, s *sync_stages.StageState, tx kv.RwTx) error {
+				return nil
+			},
+			Prune: func(firstCycle bool, p *sync_stages.PruneState, tx kv.RwTx) error {
+				return nil
+			},
+		},
 		{
 			ID:          sync_stages.Finish,
 			Description: "Final: update current block for the RPC API",

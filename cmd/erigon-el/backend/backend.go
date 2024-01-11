@@ -46,6 +46,7 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/chain"
 
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
 	stages3 "github.com/ledgerwatch/erigon/cmd/erigon-el/stages"
@@ -155,6 +156,9 @@ type Ethereum struct {
 	blockReader             services.FullBlockReader
 
 	agg *libstate.AggregatorV3
+
+	// zk
+	dataStream *datastreamer.StreamServer
 }
 
 // New creates a new Ethereum object (including the
@@ -645,11 +649,22 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 			return nil, err
 		}
 	}
+
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, backend.blockReader, ethBackendRPC, backend.txPool2GrpcServer, miningRPC, stateDiffClient)
 	if err != nil {
 		return nil, err
+	}
+
+	// zkevm: create a data stream server if we have the appropriate config for one.  This will be started on the call to Init
+	// alongside the http server
+	if httpRpcCfg.DataStreamPort > 0 && httpRpcCfg.DataStreamHost != "" {
+		file := stack.Config().Dirs.DataDir + "/data-stream"
+		backend.dataStream, err = datastreamer.NewServer(uint16(httpRpcCfg.DataStreamPort), datastreamer.StreamType(1), file, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var borDb kv.RoDB
@@ -666,7 +681,7 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	}()
 
 	go func() {
-		if err := cli.StartDataStream(httpRpcCfg); err != nil {
+		if err := cli.StartDataStream(backend.dataStream); err != nil {
 			log.Error(err.Error())
 			return
 		}

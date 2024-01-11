@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
@@ -33,6 +34,7 @@ func NewDefaultZkStages(ctx context.Context,
 	engine consensus.Engine,
 	l1Syncer *syncer.L1Syncer,
 	datastreamClient *client.StreamClient,
+	datastreamServer *datastreamer.StreamServer,
 ) []*sync_stages.Stage {
 	dirs := cfg.Dirs
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
@@ -45,6 +47,7 @@ func NewDefaultZkStages(ctx context.Context,
 	return zkStages.DefaultZkStages(ctx,
 		zkStages.StageL1SyncerCfg(db, l1Syncer, cfg.Zk),
 		zkStages.StageBatchesCfg(db, datastreamClient),
+		zkStages.StageDataStreamCatchupCfg(datastreamServer, db),
 		stagedsync.StageCumulativeIndexCfg(db),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockRetire, controlServer.Hd),
@@ -89,6 +92,7 @@ func NewSequencerZkStages(ctx context.Context,
 	agg *state.AggregatorV3,
 	forkValidator *engineapi.ForkValidator,
 	engine consensus.Engine,
+	datastreamServer *datastreamer.StreamServer,
 ) []*sync_stages.Stage {
 	dirs := cfg.Dirs
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
@@ -99,6 +103,7 @@ func NewSequencerZkStages(ctx context.Context,
 
 	return zkStages.SequencerZkStages(ctx,
 		stagedsync.StageCumulativeIndexCfg(db),
+		zkStages.StageDataStreamCatchupCfg(datastreamServer, db),
 		zkStages.StageSequenceBlocksCfg(
 			db,
 			cfg.Prune,

@@ -276,6 +276,10 @@ func SpawnStageBatches(
 		return fmt.Errorf("save stage progress error: %v", err)
 	}
 
+	if err = sync_stages.SaveStageProgress(tx, sync_stages.HighestSeenBatchNumber, highestSeenBatchNo); err != nil {
+		return fmt.Errorf("save stage progress error: %v", err)
+	}
+
 	// store the highest seen forkid
 	if err := sync_stages.SaveStageProgress(tx, sync_stages.ForkId, uint64(lastForkId)); err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
