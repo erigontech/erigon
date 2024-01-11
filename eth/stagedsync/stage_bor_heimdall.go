@@ -157,10 +157,13 @@ func BorHeimdallForward(
 	}
 
 	lastBlockNum := s.BlockNumber
+
 	if cfg.blockReader.FrozenBorBlocks() > lastBlockNum {
 		lastBlockNum = cfg.blockReader.FrozenBorBlocks()
 	}
+
 	recents, err := lru.NewARC[libcommon.Hash, *bor.Snapshot](inmemorySnapshots)
+
 	if err != nil {
 		return err
 	}
@@ -168,6 +171,7 @@ func BorHeimdallForward(
 	if err != nil {
 		return err
 	}
+
 	chain := NewChainReaderImpl(&cfg.chainConfig, tx, cfg.blockReader, logger)
 
 	var blockNum uint64
@@ -188,6 +192,7 @@ func BorHeimdallForward(
 	defer logTimer.Stop()
 
 	logger.Info("["+s.LogPrefix()+"] Processing sync events...", "from", lastBlockNum+1, "to", headNumber)
+
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		select {
 		default:

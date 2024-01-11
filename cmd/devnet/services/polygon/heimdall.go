@@ -357,7 +357,7 @@ func (h *Heimdall) addValidator(validatorAddress libcommon.Address, votingPower 
 				VotingPower:      votingPower,
 				ProposerPriority: proposerPriority,
 			},
-		}, h.logger)
+		})
 	} else {
 		h.validatorSet.UpdateWithChangeSet([]*valset.Validator{
 			{
@@ -366,7 +366,7 @@ func (h *Heimdall) addValidator(validatorAddress libcommon.Address, votingPower 
 				VotingPower:      votingPower,
 				ProposerPriority: proposerPriority,
 			},
-		}, h.logger)
+		})
 	}
 }
 

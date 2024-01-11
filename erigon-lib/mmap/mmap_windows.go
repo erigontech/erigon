@@ -41,7 +41,7 @@ func Mmap(f *os.File, size int) ([]byte, *[MaxMapSize]byte, error) {
 	}
 
 	// Close mapping handle.
-	if err := windows.CloseHandle(windows.Handle(h)); err != nil {
+	if err := windows.CloseHandle(h); err != nil {
 		return nil, nil, os.NewSyscallError("CloseHandle", err)
 	}
 

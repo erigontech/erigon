@@ -41,8 +41,8 @@ type MiningExecCfg struct {
 	tmpdir      string
 	interrupt   *int32
 	payloadId   uint64
-	txPool2     TxPoolForMining
-	txPool2DB   kv.RoDB
+	txPool      TxPoolForMining
+	txPoolDB    kv.RoDB
 }
 
 type TxPoolForMining interface {
@@ -54,7 +54,7 @@ func StageMiningExecCfg(
 	notifier ChainEventNotifier, chainConfig chain.Config,
 	engine consensus.Engine, vmConfig *vm.Config,
 	tmpdir string, interrupt *int32, payloadId uint64,
-	txPool2 TxPoolForMining, txPool2DB kv.RoDB,
+	txPool TxPoolForMining, txPoolDB kv.RoDB,
 	blockReader services.FullBlockReader,
 ) MiningExecCfg {
 	return MiningExecCfg{
@@ -68,8 +68,8 @@ func StageMiningExecCfg(
 		tmpdir:      tmpdir,
 		interrupt:   interrupt,
 		payloadId:   payloadId,
-		txPool2:     txPool2,
-		txPool2DB:   txPool2DB,
+		txPool:      txPool,
+		txPoolDB:    txPoolDB,
 	}
 }
 
@@ -150,7 +150,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 		}
 	}
 
-	logger.Debug("SpawnMiningExecStage", "block txn", current.Txs.Len(), "payload", cfg.payloadId)
+	logger.Debug("SpawnMiningExecStage", "block", current.Header.Number, "txn", current.Txs.Len(), "payload", cfg.payloadId)
 	if current.Uncles == nil {
 		current.Uncles = []*types.Header{}
 	}
@@ -166,7 +166,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 	if err != nil {
 		return err
 	}
-	logger.Debug("FinalizeBlockExecution", "current txn", current.Txs.Len(), "current receipt", current.Receipts.Len(), "payload", cfg.payloadId)
+
+	logger.Debug("FinalizeBlockExecution", "block", current.Header.Number, "txn", current.Txs.Len(), "gas", current.Header.GasUsed, "receipt", current.Receipts.Len(), "payload", cfg.payloadId)
 
 	// hack: pretend that we are real execution stage - next stages will rely on this progress
 	if err := stages.SaveStageProgress(tx, stages.Execution, current.Header.Number.Uint64()); err != nil {
@@ -186,23 +187,20 @@ func getNextTransactions(
 	logger log.Logger,
 ) (types.TransactionsStream, int, error) {
 	txSlots := types2.TxsRlp{}
-	var onTime bool
 	count := 0
-	if err := cfg.txPool2DB.View(context.Background(), func(poolTx kv.Tx) error {
+	if err := cfg.txPoolDB.View(context.Background(), func(poolTx kv.Tx) error {
 		var err error
-		counter := 0
-		for !onTime && counter < 500 {
-			remainingGas := header.GasLimit - header.GasUsed
-			remainingBlobGas := uint64(0)
-			if header.BlobGasUsed != nil {
-				remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
-			}
-			if onTime, count, err = cfg.txPool2.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
-				return err
-			}
-			time.Sleep(1 * time.Millisecond)
-			counter++
+
+		remainingGas := header.GasLimit - header.GasUsed
+		remainingBlobGas := uint64(0)
+		if header.BlobGasUsed != nil {
+			remainingBlobGas = cfg.chainConfig.GetMaxBlobGasPerBlock() - *header.BlobGasUsed
 		}
+
+		if _, count, err = cfg.txPool.YieldBest(amount, &txSlots, poolTx, executionAt, remainingGas, remainingBlobGas, alreadyYielded); err != nil {
+			return err
+		}
+
 		return nil
 	}); err != nil {
 		return nil, 0, err
@@ -375,7 +373,6 @@ func addTransactionsToMiningBlock(logPrefix string, current *MiningBlock, chainC
 		gasSnap := gasPool.Gas()
 		blobGasSnap := gasPool.BlobGas()
 		snap := ibs.Snapshot()
-		logger.Debug("addTransactionsToMiningBlock", "txn hash", txn.Hash())
 		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, header.BlobGasUsed, *vmConfig)
 		if err != nil {
 			ibs.RevertToSnapshot(snap)
@@ -464,7 +461,7 @@ LOOP:
 			txs.Pop()
 		} else if err == nil {
 			// Everything ok, collect the logs and shift in the next transaction from the same account
-			logger.Debug(fmt.Sprintf("[%s] addTransactionsToMiningBlock Successful", logPrefix), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
+			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
 			tcount++
 			txs.Shift()
