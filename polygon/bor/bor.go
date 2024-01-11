@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"sync"
@@ -22,13 +23,15 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
+	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -46,6 +49,8 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -330,29 +335,42 @@ func New(
 	return c
 }
 
-type rwWrapper struct {
-	kv.RoDB
+func NewRemote(
+	chainConfig *chain.Config,
+	blockReader services.FullBlockReader,
+	remoteKV remote.KVClient,
+	logger log.Logger,
+) (*Bor, error) {
+	version := gointerfaces.VersionFromProto(remotedbserver.KvServiceAPIVersion)
+	borKv, err := remotedb.
+		NewRemote(version, logger, remoteKV).
+		WithBucketsConfig(kv.BorTablesCfg).
+		Open()
+	if err != nil {
+		return nil, err
+	}
+
+	return NewRo(chainConfig, borKv, blockReader, logger), nil
 }
 
-func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("Update not implemented")
+func NewRoWithDataDir(ctx context.Context, dir string, chainConfig *chain.Config, blockReader services.FullBlockReader, logger log.Logger) (*Bor, error) {
+	// bor (consensus) specific db
+	borDbPath := filepath.Join(dir, "bor")
+	logger.Info("[rpc] Opening Bor db", "path", borDbPath)
+	borKv, err := mdbx.
+		NewMDBX(logger).
+		Path(borDbPath).
+		Label(kv.ConsensusDB).
+		Accede().
+		Open(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewRo(chainConfig, borKv, blockReader, logger), nil
 }
 
-func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
-	return fmt.Errorf("UpdateNosync not implemented")
-}
-
-func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRw not implemented")
-}
-
-func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
-	return nil, fmt.Errorf("BeginRwNosync not implemented")
-}
-
-// This is used by the rpcdaemon and tests which need read only access to the provided data services
-func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
-	genesisContracts GenesisContract, logger log.Logger) *Bor {
+func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -375,6 +393,26 @@ func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlock
 		execCtx:     context.Background(),
 		closeCh:     make(chan struct{}),
 	}
+}
+
+type rwWrapper struct {
+	kv.RoDB
+}
+
+func (w rwWrapper) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
+	return fmt.Errorf("Update not implemented")
+}
+
+func (w rwWrapper) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
+	return fmt.Errorf("UpdateNosync not implemented")
+}
+
+func (w rwWrapper) BeginRw(ctx context.Context) (kv.RwTx, error) {
+	return nil, fmt.Errorf("BeginRw not implemented")
+}
+
+func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
+	return nil, fmt.Errorf("BeginRwNosync not implemented")
 }
 
 // Type returns underlying consensus engine
