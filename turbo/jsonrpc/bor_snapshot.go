@@ -512,7 +512,7 @@ func (s *Snapshot) apply(headers []*types.Header) (*Snapshot, error) {
 
 		// change validator set and change proposer
 		if number > 0 && (number+1)%currentLen == 0 {
-			if err := bor.ValidateHeaderExtraField(header.Extra); err != nil {
+			if err := bor.ValidateHeaderExtraLength(header.Extra); err != nil {
 				return nil, err
 			}
 			validatorBytes := header.Extra[extraVanity : len(header.Extra)-extraSeal]

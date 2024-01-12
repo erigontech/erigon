@@ -152,7 +152,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 
 		// change validator set and change proposer
 		if number > 0 && (number+1)%sprintLen == 0 {
-			if err := ValidateHeaderExtraField(header.Extra); err != nil {
+			if err := ValidateHeaderExtraLength(header.Extra); err != nil {
 				return snap, err
 			}
 			validatorBytes := GetValidatorBytes(header, s.config)
