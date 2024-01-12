@@ -83,7 +83,7 @@ func (a *Accumulator) ChangeAccount(address libcommon.Address, incarnation uint6
 	case remote.Action_CODE:
 		accountChange.Action = remote.Action_UPSERT_CODE
 	case remote.Action_REMOVE:
-		panic("")
+		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Data = data
@@ -126,7 +126,7 @@ func (a *Accumulator) ChangeCode(address libcommon.Address, incarnation uint64, 
 	case remote.Action_UPSERT:
 		accountChange.Action = remote.Action_UPSERT_CODE
 	case remote.Action_REMOVE:
-		panic("")
+		//panic("")
 	}
 	accountChange.Incarnation = incarnation
 	accountChange.Code = code
@@ -142,9 +142,9 @@ func (a *Accumulator) ChangeStorage(address libcommon.Address, incarnation uint6
 		delete(a.storageChangeIndex, address)
 	}
 	accountChange := a.latestChange.Changes[i]
-	if accountChange.Action == remote.Action_REMOVE {
-		panic("")
-	}
+	//if accountChange.Action == remote.Action_REMOVE {
+	//	panic("")
+	//}
 	accountChange.Incarnation = incarnation
 	si, ok1 := a.storageChangeIndex[address]
 	if !ok1 {

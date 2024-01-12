@@ -531,7 +531,7 @@ func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply
 			return fmt.Errorf("server DB doesn't implement kv.Temporal interface")
 		}
 		if req.Latest {
-			reply.V, reply.Ok, err = ttx.DomainGet(kv.Domain(req.Table), req.K, req.K2)
+			reply.V, _, err = ttx.DomainGet(kv.Domain(req.Table), req.K, req.K2)
 			if err != nil {
 				return err
 			}

@@ -19,11 +19,16 @@ package dir
 import (
 	"os"
 	"path/filepath"
+
+	"golang.org/x/sync/errgroup"
 )
 
 func MustExist(path ...string) {
-	const perm = 0764 // user rwx, group rw, other r
+	const perm = 0700 // user rwx, group rw, other r
 	for _, p := range path {
+		if Exist(p) {
+			continue
+		}
 		if err := os.MkdirAll(p, perm); err != nil {
 			panic(err)
 		}
@@ -103,18 +108,18 @@ func HasFileOfType(dir, ext string) bool {
 
 // nolint
 func DeleteFiles(dirs ...string) error {
+	g := errgroup.Group{}
 	for _, dir := range dirs {
 		files, err := ListFiles(dir)
 		if err != nil {
 			return err
 		}
 		for _, fPath := range files {
-			if err := os.Remove(fPath); err != nil {
-				return err
-			}
+			fPath := fPath
+			g.Go(func() error { return os.Remove(fPath) })
 		}
 	}
-	return nil
+	return g.Wait()
 }
 
 func ListFiles(dir string, extensions ...string) ([]string, error) {

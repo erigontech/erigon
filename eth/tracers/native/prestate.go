@@ -19,9 +19,10 @@ package native
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 

@@ -70,6 +70,8 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 					pv = append(pv, p)
 				}
+			} else {
+				pv = append(pv, p)
 			}
 		}
 
@@ -82,6 +84,8 @@ func newCfg(preverified Preverified, version uint8) *Cfg {
 					if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
 						pv = append(pv, p)
 					}
+				} else {
+					pv = append(pv, p)
 				}
 			}
 		}

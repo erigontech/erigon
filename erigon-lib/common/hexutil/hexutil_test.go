@@ -2,9 +2,10 @@ package hexutil
 
 import (
 	"fmt"
-	"github.com/stretchr/testify/require"
 	"math/big"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 type marshalTest struct {

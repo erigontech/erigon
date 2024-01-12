@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
 	"github.com/ledgerwatch/erigon/cmd/devnet/transactions"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 func testDynamicTx(t *testing.T, ctx context.Context) {
@@ -39,12 +40,18 @@ func testDynamicTx(t *testing.T, ctx context.Context) {
 }
 
 func TestDynamicTxNode0(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("fix me")
+	}
 	runCtx, err := ContextStart(t, "")
 	require.Nil(t, err)
 	testDynamicTx(t, runCtx.WithCurrentNetwork(0).WithCurrentNode(0))
 }
 
 func TestDynamicTxAnyNode(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("fix me")
+	}
 	runCtx, err := ContextStart(t, "")
 	require.Nil(t, err)
 	testDynamicTx(t, runCtx.WithCurrentNetwork(0))

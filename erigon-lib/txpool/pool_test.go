@@ -19,7 +19,6 @@ package txpool
 import (
 	"bytes"
 	"context"
-
 	// "crypto/rand"
 	"fmt"
 	"math"

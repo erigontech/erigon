@@ -2,8 +2,9 @@ package jsonrpc
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/kv"

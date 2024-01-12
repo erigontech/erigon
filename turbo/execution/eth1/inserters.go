@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
@@ -29,11 +30,15 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
 		}
 		body := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
+
+		parentTd := common.Big0
 		height := header.Number.Uint64()
-		// Parent's total difficulty
-		parentTd, err := rawdb.ReadTd(tx, header.ParentHash, height-1)
-		if err != nil || parentTd == nil {
-			return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, header.Number.Uint64()-1, err)
+		if height > 0 {
+			// Parent's total difficulty
+			parentTd, err = rawdb.ReadTd(tx, header.ParentHash, height-1)
+			if err != nil || parentTd == nil {
+				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+			}
 		}
 
 		// Sum TDs.

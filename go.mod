@@ -1,9 +1,9 @@
 module github.com/ledgerwatch/erigon
 
-go 1.20
+go 1.21
 
 require (
-	github.com/erigontech/mdbx-go v0.27.21
+	github.com/erigontech/mdbx-go v0.37.1
 	github.com/erigontech/silkworm-go v0.10.0
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
@@ -15,12 +15,12 @@ require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.40
 	github.com/Giulio2002/bls v0.0.0-20230906201036-c2330c97dc7d
-	github.com/RoaringBitmap/roaring v1.2.3
+	github.com/RoaringBitmap/roaring v1.7.0
 	github.com/VictoriaMetrics/fastcache v1.12.2
-	github.com/alecthomas/kong v0.8.0
+	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
-	github.com/anacrolix/sync v0.4.0
-	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
+	github.com/anacrolix/sync v0.5.1
+	github.com/anacrolix/torrent v1.53.2
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -67,7 +67,7 @@ require (
 	github.com/multiformats/go-multiaddr v0.12.1
 	github.com/nxadm/tail v1.4.9-0.20211216163028-4472660a31a6
 	github.com/pelletier/go-toml v1.9.5
-	github.com/pelletier/go-toml/v2 v2.1.0
+	github.com/pelletier/go-toml/v2 v2.1.1
 	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.0
 	github.com/protolambda/ztyp v0.2.2
@@ -88,9 +88,9 @@ require (
 	github.com/vektah/gqlparser/v2 v2.5.10
 	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/zap v1.26.0
-	golang.org/x/crypto v0.17.0
-	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
-	golang.org/x/net v0.19.0
+	golang.org/x/crypto v0.18.0
+	golang.org/x/exp v0.0.0-20231226003508-02704c960a9b
+	golang.org/x/net v0.20.0
 	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.16.0
 	golang.org/x/time v0.5.0
@@ -144,7 +144,7 @@ require (
 	github.com/benbjohnson/clock v1.3.5 // indirect
 	github.com/benbjohnson/immutable v0.4.1-0.20221220213129-8932b999621d // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.7.0 // indirect
+	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -164,8 +164,8 @@ require (
 	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/fsnotify/fsnotify v1.5.4 // indirect
 	github.com/garslo/gogen v0.0.0-20170307003452-d6ebae628c7c // indirect
-	github.com/go-llsqlite/adapter v0.0.0-20230912124304-94ed0e573c23 // indirect
-	github.com/go-llsqlite/crawshaw v0.0.0-20230910110433-7e901377eb6c // indirect
+	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
+	github.com/go-llsqlite/crawshaw v0.4.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
@@ -177,6 +177,7 @@ require (
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/pprof v0.0.0-20230817174616-7a8ec2ada47b // indirect
 	github.com/google/uuid v1.3.1 // indirect
+	github.com/holiman/bloomfilter/v2 v2.0.3 // indirect
 	github.com/ianlancetaylor/cgosymbolizer v0.0.0-20220405231054-a1ae3e4bba26 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/ipfs/go-cid v0.4.1 // indirect
@@ -187,7 +188,7 @@ require (
 	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240101230756-23fbc6c56a1d // indirect
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240110121555-0acce8cd95b2 // indirect
 	github.com/libp2p/go-buffer-pool v0.1.0 // indirect
 	github.com/libp2p/go-cidranger v1.1.0 // indirect
 	github.com/libp2p/go-flow-metrics v0.1.0 // indirect
@@ -287,4 +288,7 @@ require (
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
 
-replace github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
+replace (
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
+	github.com/tendermint/tendermint => github.com/bnb-chain/tendermint v0.31.12
+)

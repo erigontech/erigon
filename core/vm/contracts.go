@@ -20,8 +20,9 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 
 	"github.com/holiman/uint256"
 

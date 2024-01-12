@@ -60,6 +60,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -93,7 +94,7 @@
               "mode": "off"
             }
           },
-          "decimals": 1,
+          "decimals": 2,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -139,7 +140,7 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sync{instance=~\"$instance\"}",
+          "expr": "sync{instance=~\"$instance\",stage=\"execution\"}",
           "instant": false,
           "legendFormat": "{{ stage }}: {{instance}}",
           "range": true,
@@ -159,6 +160,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -237,7 +239,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "rate(sync{instance=~\"$instance\"}[$rate_interval])",
+          "expr": "rate(sync{instance=~\"$instance\",stage=\"execution\"}[$rate_interval])",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -259,6 +261,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -359,6 +362,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisGridShow": true,
@@ -409,7 +413,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 13,
         "w": 8,
         "x": 8,
         "y": 6
@@ -491,7 +495,7 @@
           "refId": "F"
         }
       ],
-      "title": "Time took",
+      "title": "State: timins",
       "type": "timeseries"
     },
     {
@@ -504,6 +508,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -620,6 +625,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -719,183 +725,7 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 5,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineStyle": {
-              "fill": "solid"
-            },
-            "lineWidth": 1,
-            "pointSize": 4,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "spanNulls": true,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "ops"
-        },
-        "overrides": [
-          {
-            "__systemRef": "hideSeriesFrom",
-            "matcher": {
-              "id": "byNames",
-              "options": {
-                "mode": "exclude",
-                "names": [
-                  "keys committed: mainnet-dev-awskii:6061"
-                ],
-                "prefix": "All except:",
-                "readOnly": true
-              }
-            },
-            "properties": [
-              {
-                "id": "custom.hideFrom",
-                "value": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": true
-                }
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 8,
-        "x": 8,
-        "y": 11
-      },
-      "id": 197,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "9.3.6",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irate(domain_collation_size{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "legendFormat": "collated [domain]: {{instance}}",
-          "range": true,
-          "refId": "D"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irate(domain_collation_hist_size{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "legendFormat": "collated [history]: {{instance}}",
-          "range": true,
-          "refId": "E"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "sum(rate(domain_commitment_keys[$rate_interval])) by (instance)",
-          "hide": false,
-          "legendFormat": "keys committed: {{instance}}",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irate(domain_commitment_updates{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "legendFormat": "commitment node updates: {{instance}}",
-          "range": true,
-          "refId": "C"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irate(domain_commitment_updates_applied{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "legendFormat": "commitment trie node updates: {{instance}}",
-          "range": true,
-          "refId": "F"
-        },
-        {
-          "datasource": {
-            "type": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "irate(domain_prune_size{instance=~\"$instance\"}[$rate_interval])",
-          "hide": false,
-          "legendFormat": "pruned keys [{{type}}]: {{instance}}",
-          "range": true,
-          "refId": "G"
-        }
-      ],
-      "title": "Collate/Prune/Merge/Commitment",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -944,7 +774,7 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 5,
+        "h": 9,
         "w": 8,
         "x": 16,
         "y": 11
@@ -1031,7 +861,253 @@
           "refId": "F"
         }
       ],
-      "title": "Running Collations / Merges / Prunes",
+      "title": "State: running collate/merge/prune",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 16
+      },
+      "id": 200,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "prune_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
+          "instant": false,
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Prune",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 5,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineStyle": {
+              "fill": "solid"
+            },
+            "lineWidth": 1,
+            "pointSize": 4,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": true,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 19
+      },
+      "id": 197,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "9.3.6",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_collation_size{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "legendFormat": "collated [domain]: {{instance}}",
+          "range": true,
+          "refId": "D"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_collation_hist_size{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "legendFormat": "collated [history]: {{instance}}",
+          "range": true,
+          "refId": "E"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(domain_commitment_keys[$rate_interval])) by (instance)",
+          "hide": false,
+          "legendFormat": "keys committed: {{instance}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_commitment_updates{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "legendFormat": "commitment node updates: {{instance}}",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_commitment_updates_applied{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "legendFormat": "commitment trie node updates: {{instance}}",
+          "range": true,
+          "refId": "F"
+        },
+        {
+          "datasource": {
+            "type": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "irate(domain_prune_size{instance=~\"$instance\"}[$rate_interval])",
+          "hide": false,
+          "legendFormat": "pruned keys [{{type}}]: {{instance}}",
+          "range": true,
+          "refId": "G"
+        }
+      ],
+      "title": "State: Collate/Prune/Merge/Commitment",
       "type": "timeseries"
     },
     {
@@ -1043,7 +1119,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 27
       },
       "id": 17,
       "panels": [],
@@ -1068,6 +1144,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1104,8 +1181,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1121,7 +1197,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 17
+        "y": 28
       },
       "id": 141,
       "options": {
@@ -1165,6 +1241,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1200,8 +1277,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1217,7 +1293,7 @@
         "h": 9,
         "w": 16,
         "x": 8,
-        "y": 17
+        "y": 28
       },
       "id": 166,
       "options": {
@@ -1418,6 +1494,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1453,8 +1530,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1470,7 +1546,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 22
+        "y": 33
       },
       "id": 159,
       "options": {
@@ -1522,6 +1598,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1557,8 +1634,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1574,7 +1650,7 @@
         "h": 7,
         "w": 16,
         "x": 8,
-        "y": 26
+        "y": 37
       },
       "id": 168,
       "options": {
@@ -1786,6 +1862,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1821,8 +1898,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -1838,7 +1914,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 27
+        "y": 38
       },
       "id": 167,
       "options": {
@@ -1894,6 +1970,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -1947,7 +2024,7 @@
               "options": {
                 "mode": "exclude",
                 "names": [
-                  "gc_overflow: mainnet2-1:6061"
+                  "exec_steps_in_db: sepolia3-1:6061"
                 ],
                 "prefix": "All except:",
                 "readOnly": true
@@ -1970,7 +2047,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 33
+        "y": 44
       },
       "id": 169,
       "options": {
@@ -2036,6 +2113,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2087,7 +2165,7 @@
         "h": 6,
         "w": 16,
         "x": 8,
-        "y": 33
+        "y": 44
       },
       "id": 150,
       "options": {
@@ -2139,6 +2217,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2189,7 +2268,7 @@
         "h": 8,
         "w": 16,
         "x": 8,
-        "y": 39
+        "y": 50
       },
       "id": 191,
       "options": {
@@ -2388,7 +2467,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 58
       },
       "id": 134,
       "panels": [],
@@ -2425,7 +2504,7 @@
         "h": 18,
         "w": 8,
         "x": 0,
-        "y": 48
+        "y": 59
       },
       "id": 165,
       "options": {
@@ -2444,9 +2523,10 @@
           "titleSize": 14,
           "valueSize": 14
         },
-        "textMode": "auto"
+        "textMode": "auto",
+        "wideLayout": true
       },
-      "pluginVersion": "10.1.4",
+      "pluginVersion": "10.2.2",
       "targets": [
         {
           "datasource": {
@@ -2602,6 +2682,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2653,7 +2734,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 48
+        "y": 59
       },
       "id": 155,
       "links": [],
@@ -2714,6 +2795,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2765,7 +2847,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 48
+        "y": 59
       },
       "id": 153,
       "options": {
@@ -2810,6 +2892,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2861,7 +2944,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 54
+        "y": 65
       },
       "id": 85,
       "links": [],
@@ -2917,6 +3000,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -2968,7 +3052,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 54
+        "y": 65
       },
       "id": 128,
       "options": {
@@ -3022,6 +3106,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3073,7 +3158,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 60
+        "y": 71
       },
       "id": 154,
       "links": [],
@@ -3194,6 +3279,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3245,7 +3331,7 @@
         "h": 5,
         "w": 8,
         "x": 16,
-        "y": 60
+        "y": 71
       },
       "id": 124,
       "options": {
@@ -3289,6 +3375,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3340,7 +3427,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 66
+        "y": 77
       },
       "id": 148,
       "options": {
@@ -3447,6 +3534,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3498,7 +3586,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 71
+        "y": 82
       },
       "id": 86,
       "links": [],
@@ -3559,6 +3647,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3610,7 +3699,7 @@
         "h": 5,
         "w": 8,
         "x": 0,
-        "y": 76
+        "y": 87
       },
       "id": 106,
       "links": [],
@@ -3655,7 +3744,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 81
+        "y": 92
       },
       "id": 173,
       "panels": [],
@@ -3680,6 +3769,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3731,7 +3821,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 82
+        "y": 93
       },
       "id": 175,
       "options": {
@@ -3830,6 +3920,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -3881,7 +3972,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 82
+        "y": 93
       },
       "id": 177,
       "options": {
@@ -3972,6 +4063,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4022,7 +4114,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 90
+        "y": 101
       },
       "id": 176,
       "options": {
@@ -4066,6 +4158,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4116,7 +4209,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 90
+        "y": 101
       },
       "id": 180,
       "options": {
@@ -4171,6 +4264,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4222,7 +4316,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 90
+        "y": 101
       },
       "id": 181,
       "options": {
@@ -4277,6 +4371,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4328,7 +4423,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 96
+        "y": 107
       },
       "id": 178,
       "options": {
@@ -4371,7 +4466,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 102
+        "y": 113
       },
       "id": 183,
       "panels": [],
@@ -4396,6 +4491,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4447,7 +4543,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 103
+        "y": 114
       },
       "id": 185,
       "options": {
@@ -4502,6 +4598,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4553,7 +4650,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 103
+        "y": 114
       },
       "id": 186,
       "options": {
@@ -4597,6 +4694,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4648,7 +4746,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 111
+        "y": 122
       },
       "id": 187,
       "options": {
@@ -4692,6 +4790,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4743,7 +4842,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 111
+        "y": 122
       },
       "id": 188,
       "options": {
@@ -4794,6 +4893,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4845,7 +4945,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 119
+        "y": 130
       },
       "id": 189,
       "options": {
@@ -4922,6 +5022,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -4972,7 +5073,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 119
+        "y": 130
       },
       "id": 184,
       "options": {
@@ -5028,7 +5129,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 125
+        "y": 136
       },
       "id": 75,
       "panels": [],
@@ -5053,6 +5154,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -5129,7 +5231,7 @@
         "h": 9,
         "w": 12,
         "x": 0,
-        "y": 126
+        "y": 137
       },
       "id": 96,
       "links": [],
@@ -5195,6 +5297,7 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
             "axisCenteredZero": false,
             "axisColorMode": "text",
             "axisLabel": "",
@@ -5246,7 +5349,7 @@
         "h": 9,
         "w": 12,
         "x": 12,
-        "y": 126
+        "y": 137
       },
       "id": 77,
       "links": [],
@@ -5310,7 +5413,6 @@
   "refresh": "",
   "revision": 1,
   "schemaVersion": 38,
-  "style": "dark",
   "tags": [],
   "templating": {
     "list": [
@@ -5405,15 +5507,15 @@
         "auto_min": "10s",
         "current": {
           "selected": false,
-          "text": "1m",
-          "value": "1m"
+          "text": "30m",
+          "value": "30m"
         },
         "hide": 0,
         "label": "Rate Interval",
         "name": "rate_interval",
         "options": [
           {
-            "selected": true,
+            "selected": false,
             "text": "1m",
             "value": "1m"
           },
@@ -5423,7 +5525,7 @@
             "value": "10m"
           },
           {
-            "selected": false,
+            "selected": true,
             "text": "30m",
             "value": "30m"
           },
@@ -5507,6 +5609,6 @@
   "timezone": "",
   "title": "Erigon Internals",
   "uid": "b42a61d7-02b1-416c-8ab4-b9c864356174",
-  "version": 14,
+  "version": 19,
   "weekStart": ""
 }

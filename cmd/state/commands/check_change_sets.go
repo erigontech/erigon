@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path"
 	"sort"
 	"syscall"
 	"time"
@@ -21,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -35,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
@@ -82,12 +81,14 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, snapshotVersio
 	if err != nil {
 		return err
 	}
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), path.Join(datadirCli, "snapshots"), snapshotVersion, logger)
+	dirs := datadir.New(datadirCli)
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(true, false, true), dirs.Snap, snapshotVersion, logger)
 	defer allSnapshots.Close()
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil /* BorSnapshots */)
+	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, snapshotVersion, logger)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	chainDb := db
 	defer chainDb.Close()
@@ -124,7 +125,7 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, snapshotVersio
 	commitEvery := time.NewTicker(30 * time.Second)
 	defer commitEvery.Stop()
 
-	engine := initConsensusEngine(ctx, chainConfig, allSnapshots, blockReader, logger)
+	engine := initConsensusEngine(ctx, chainConfig, blockReader, logger)
 
 	for !interrupt {
 
@@ -278,7 +279,7 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, snapshotVersio
 	return nil
 }
 
-func initConsensusEngine(ctx context.Context, cc *chain2.Config, snapshots *freezeblocks.RoSnapshots, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
+func initConsensusEngine(ctx context.Context, cc *chain2.Config, blockReader services.FullBlockReader, logger log.Logger) (engine consensus.Engine) {
 	config := ethconfig.Defaults
 
 	var consensusConfig interface{}

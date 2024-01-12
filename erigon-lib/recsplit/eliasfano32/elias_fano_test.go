@@ -59,7 +59,7 @@ func TestEliasFanoSeek(t *testing.T) {
 	{
 		v2, ok2 := ef.Search(ef.Max())
 		require.True(t, ok2, v2)
-		require.Equal(t, ef.Max(), v2)
+		require.Equal(t, int(ef.Max()), int(v2))
 		it := ef.Iterator()
 		//it.SeekDeprecated(ef.Max())
 		for i := 0; i < int(ef.Count()-1); i++ {

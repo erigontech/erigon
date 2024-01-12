@@ -17,8 +17,9 @@
 package types
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"io"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"

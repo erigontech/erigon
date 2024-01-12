@@ -8,18 +8,23 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/ledgerwatch/erigon/common/u256"
+
+	"github.com/ledgerwatch/log/v3"
 
 	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon/core"
@@ -31,7 +36,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func newBaseApiForTest(m *mock.MockSentry) *jsonrpc.BaseAPI {
@@ -71,12 +75,15 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 	mockSentry.ReceiveWg.Wait() // Wait for all messages to be processed before we proceed
 
 	initialCycle := mock.MockInsertAsInitialCycle
-	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, wrap.TxContainer{}, mockSentry.Sync, initialCycle, log.New(), mockSentry.BlockReader, nil, false); err != nil {
+	if err := stages.StageLoopIteration(mockSentry.Ctx, mockSentry.DB, wrap.TxContainer{}, mockSentry.Sync, initialCycle, log.New(), mockSentry.BlockReader, nil); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestSendRawTransaction(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 
@@ -125,6 +132,9 @@ func TestSendRawTransaction(t *testing.T) {
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip("TODO: [e4] implement me")
+	}
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 

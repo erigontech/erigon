@@ -21,13 +21,14 @@ import (
 	"context"
 	crand "crypto/rand"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math"
 	"math/big"
 	"math/rand"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/goccy/go-json"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

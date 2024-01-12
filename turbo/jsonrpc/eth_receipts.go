@@ -5,8 +5,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring"
 	"github.com/holiman/uint256"
@@ -429,7 +430,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	var blockHash common.Hash
 	var header *types.Header
 
-	iter := MapTxNum2BlockNum(tx, txNumbers)
+	iter := rawdbv3.TxNums2BlockNums(tx, txNumbers, order.Asc)
 	for iter.HasNext() {
 		if err = ctx.Err(); err != nil {
 			return nil, err
@@ -467,7 +468,6 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if err != nil {
 			return nil, err
 		}
-
 		//TODO: logIndex within the block! no way to calc it now
 		//logIndex := uint(0)
 		//for _, log := range rawLogs {
@@ -484,7 +484,7 @@ func (api *APIImpl) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	}
 
 	//stats := api._agg.GetAndResetStats()
-	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.HistoryQueries, "ef search duration", stats.EfSearchTime)
+	//log.Info("Finished", "duration", time.Since(start), "history queries", stats.FilesQueries, "ef search duration", stats.EfSearchTime)
 	return logs, nil
 }
 
@@ -799,67 +799,4 @@ func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *
 		}
 	}
 	return fields
-}
-
-// MapTxNum2BlockNumIter - enrich iterator by TxNumbers, adding more info:
-//   - blockNum
-//   - txIndex in block: -1 means first system tx
-//   - isFinalTxn: last system-txn. BlockRewards and similar things - are attribute to this virtual txn.
-//   - blockNumChanged: means this and previous txNum belongs to different blockNumbers
-//
-// Expect: `it` to return sorted txNums, then blockNum will not change until `it.Next() < maxTxNumInBlock`
-//
-//	it allow certain optimizations.
-type MapTxNum2BlockNumIter struct {
-	it          iter.U64
-	tx          kv.Tx
-	orderAscend bool
-
-	blockNum                         uint64
-	minTxNumInBlock, maxTxNumInBlock uint64
-}
-
-func MapTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: true}
-}
-func MapDescendTxNum2BlockNum(tx kv.Tx, it iter.U64) *MapTxNum2BlockNumIter {
-	return &MapTxNum2BlockNumIter{tx: tx, it: it, orderAscend: false}
-}
-func (i *MapTxNum2BlockNumIter) HasNext() bool { return i.it.HasNext() }
-func (i *MapTxNum2BlockNumIter) Next() (txNum, blockNum uint64, txIndex int, isFinalTxn, blockNumChanged bool, err error) {
-	txNum, err = i.it.Next()
-	if err != nil {
-		return txNum, blockNum, txIndex, isFinalTxn, blockNumChanged, err
-	}
-
-	// txNums are sorted, it means blockNum will not change until `txNum < maxTxNumInBlock`
-	if i.maxTxNumInBlock == 0 || (i.orderAscend && txNum > i.maxTxNumInBlock) || (!i.orderAscend && txNum < i.minTxNumInBlock) {
-		blockNumChanged = true
-
-		var ok bool
-		ok, i.blockNum, err = rawdbv3.TxNums.FindBlockNum(i.tx, txNum)
-		if err != nil {
-			return
-		}
-		if !ok {
-			return txNum, i.blockNum, txIndex, isFinalTxn, blockNumChanged, fmt.Errorf("can't find blockNumber by txnID=%d", txNum)
-		}
-	}
-	blockNum = i.blockNum
-
-	// if block number changed, calculate all related field
-	if blockNumChanged {
-		i.minTxNumInBlock, err = rawdbv3.TxNums.Min(i.tx, blockNum)
-		if err != nil {
-			return
-		}
-		i.maxTxNumInBlock, err = rawdbv3.TxNums.Max(i.tx, blockNum)
-		if err != nil {
-			return
-		}
-	}
-
-	txIndex = int(txNum) - int(i.minTxNumInBlock) - 1
-	isFinalTxn = txNum == i.maxTxNumInBlock
-	return
 }

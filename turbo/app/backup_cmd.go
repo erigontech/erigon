@@ -2,9 +2,10 @@ package app
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"os"
 	"path/filepath"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"

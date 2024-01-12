@@ -3,8 +3,9 @@ package verify
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"

@@ -119,6 +119,9 @@ func (ethash *Ethash) VerifyHeader(chain consensus.ChainHeaderReader, header *ty
 	if chain.GetHeader(header.Hash(), number) != nil {
 		return nil
 	}
+	if number == 0 {
+		return nil
+	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())

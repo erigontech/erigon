@@ -1,21 +1,21 @@
 module github.com/ledgerwatch/erigon-lib
 
-go 1.20
+go 1.21
 
 require (
-	github.com/erigontech/mdbx-go v0.27.21
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240101230756-23fbc6c56a1d
+	github.com/erigontech/mdbx-go v0.37.1
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240110121555-0acce8cd95b2
 	github.com/ledgerwatch/interfaces v0.0.0-20240105174738-fe57049f198c
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
 
 require (
-	github.com/RoaringBitmap/roaring v1.2.3
+	github.com/RoaringBitmap/roaring v1.7.0
 	github.com/anacrolix/dht/v2 v2.20.0
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
-	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
+	github.com/anacrolix/torrent v1.53.2
 	github.com/aws/aws-sdk-go-v2 v1.21.2
 	github.com/aws/aws-sdk-go-v2/config v1.19.0
 	github.com/aws/aws-sdk-go-v2/credentials v1.13.43
@@ -30,19 +30,20 @@ require (
 	github.com/golang/mock v1.6.0
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
-	github.com/hashicorp/golang-lru/v2 v2.0.6
+	github.com/hashicorp/golang-lru/v2 v2.0.4
+	github.com/holiman/bloomfilter/v2 v2.0.3
 	github.com/holiman/uint256 v1.2.3
 	github.com/matryer/moq v0.3.3
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58
-	github.com/pelletier/go-toml/v2 v2.1.0
+	github.com/pelletier/go-toml/v2 v2.1.1
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/client_model v0.5.0
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.6.0
-	golang.org/x/crypto v0.17.0
-	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
+	golang.org/x/crypto v0.18.0
+	golang.org/x/exp v0.0.0-20231226003508-02704c960a9b
 	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.16.0
 	golang.org/x/time v0.5.0
@@ -63,7 +64,7 @@ require (
 	github.com/anacrolix/mmsg v1.0.0 // indirect
 	github.com/anacrolix/multiless v0.3.1-0.20221221005021-2d12701f83f7 // indirect
 	github.com/anacrolix/stm v0.4.1-0.20221221005312-96d17df0e496 // indirect
-	github.com/anacrolix/sync v0.4.0 // indirect
+	github.com/anacrolix/sync v0.5.1 // indirect
 	github.com/anacrolix/upnp v0.1.3-0.20220123035249-922794e51c96 // indirect
 	github.com/anacrolix/utp v0.1.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.4.14 // indirect
@@ -83,7 +84,7 @@ require (
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/benbjohnson/immutable v0.4.1-0.20221220213129-8932b999621d // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/bits-and-blooms/bitset v1.7.0 // indirect
+	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cilium/ebpf v0.9.1 // indirect
@@ -93,8 +94,8 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
-	github.com/go-llsqlite/adapter v0.0.0-20230912124304-94ed0e573c23 // indirect
-	github.com/go-llsqlite/crawshaw v0.0.0-20230910110433-7e901377eb6c // indirect
+	github.com/go-llsqlite/adapter v0.0.0-20230927005056-7f5ce7f0c916 // indirect
+	github.com/go-llsqlite/crawshaw v0.4.0 // indirect
 	github.com/go-logr/logr v1.2.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/godbus/dbus/v5 v5.0.4 // indirect
@@ -148,4 +149,9 @@ require (
 	modernc.org/sqlite v1.26.0 // indirect
 	rsc.io/tmplfunc v0.0.3 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
+)
+
+replace (
+	github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilter/v2 v2.0.8
+	github.com/tidwall/btree => github.com/AskAlexSharov/btree v1.6.2
 )

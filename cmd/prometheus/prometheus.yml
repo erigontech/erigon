@@ -12,6 +12,7 @@ scrape_configs:
           - erigon:6060 # If Erigon runned by default docker-compose, then it's available on `erigon` host.
           - erigon:6061
           - erigon:6062
+          - 46.149.164.51:6060
           - host.docker.internal:6060 # this is how docker-for-mac allow to access host machine
           - host.docker.internal:6061
           - host.docker.internal:6062

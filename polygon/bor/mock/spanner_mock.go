@@ -10,8 +10,8 @@ import (
 	gomock "github.com/golang/mock/gomock"
 	common "github.com/ledgerwatch/erigon-lib/common"
 	consensus "github.com/ledgerwatch/erigon/consensus"
-	span "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 	valset "github.com/ledgerwatch/erigon/polygon/bor/valset"
+	span "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 )
 
 // MockSpanner is a mock of Spanner interface.

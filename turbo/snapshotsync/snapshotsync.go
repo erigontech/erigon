@@ -129,6 +129,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 	defer logEvery.Stop()
 	var m runtime.MemStats
 
+	/*diagnostics.RegisterProvider(diagnostics.ProviderFunc(func(ctx context.Context) error {
+		return nil
+	}), diagnostics.TypeOf(diagnostics.DownloadStatistics{}), log.Root())*/
+
 	// Check once without delay, for faster erigon re-start
 	stats, err := snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
 	if err == nil && stats.Completed {
@@ -227,7 +231,7 @@ Finish:
 			return err
 		}
 	}
-	if err := agg.OpenFolder(); err != nil {
+	if err := agg.OpenFolder(false); err != nil {
 		return err
 	}
 
@@ -238,7 +242,9 @@ Finish:
 		return err
 	}
 
-	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
+	ac := agg.MakeContext()
+	defer ac.Close()
+	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 		return err
 	}
 

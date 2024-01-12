@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"sync"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	proto_txpool "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"

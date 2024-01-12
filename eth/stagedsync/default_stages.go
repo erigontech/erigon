@@ -313,7 +313,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
-			Disabled:    exec.historyV3 && ethconfig.EnableHistoryV4InTest,
+			Disabled:    exec.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
@@ -327,7 +327,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
-			Disabled:    exec.historyV3 && ethconfig.EnableHistoryV4InTest,
+			Disabled:    exec.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				if exec.chainConfig.IsPrague(0) {
 					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
@@ -697,6 +697,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 		{
 			ID:          stages.HashState,
 			Description: "Hash the key in the state",
+			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				return SpawnHashStateStage(s, txc.Tx, hashState, ctx, logger)
 			},
@@ -707,6 +708,7 @@ func StateStages(ctx context.Context, headers HeadersCfg, bodies BodiesCfg, bloc
 		{
 			ID:          stages.IntermediateHashes,
 			Description: "Generate intermediate hashes and computing state root",
+			Disabled:    bodies.historyV3,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				_, err := SpawnIntermediateHashesStage(s, u, txc.Tx, trieCfg, ctx, logger)
 				return err

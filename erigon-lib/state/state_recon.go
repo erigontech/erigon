@@ -28,7 +28,7 @@ import (
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           *compress.Getter
+	g           ArchiveGetter
 	key         []byte
 	txNum       uint64
 	startTxNum  uint64
@@ -43,8 +43,8 @@ func (rh ReconHeap) Len() int {
 	return len(rh)
 }
 
-// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights get evicted first. This means that more recently persisted links are preferred.
-// For non-persisted links, those with the highest block heights get evicted first. This is to prevent "holes" in the block heights that may cause inability to
+// Less (part of heap.Interface) compares two links. For persisted links, those with the lower block heights getBeforeTxNum evicted first. This means that more recently persisted links are preferred.
+// For non-persisted links, those with the highest block heights getBeforeTxNum evicted first. This is to prevent "holes" in the block heights that may cause inability to
 // insert headers in the ascending order of their block heights.
 func (rh ReconHeap) Less(i, j int) bool {
 	c := bytes.Compare(rh[i].key, rh[j].key)
@@ -181,8 +181,8 @@ func (hii *HistoryIteratorInc) advance() {
 	hii.nextKey = nil
 	for hii.nextKey == nil && hii.key != nil {
 		val, _ := hii.indexG.NextUncompressed()
-		ef, _ := eliasfano32.ReadEliasFano(val)
-		if n, ok := ef.Search(hii.uptoTxNum); ok {
+		n, ok := eliasfano32.Seek(val, hii.uptoTxNum)
+		if ok {
 			var txKey [8]byte
 			binary.BigEndian.PutUint64(txKey[:], n)
 			offset := hii.r.Lookup2(txKey[:], hii.key)

@@ -24,6 +24,11 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/log/v3"
+
+	state2 "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/stretchr/testify/require"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -33,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -145,11 +151,22 @@ func TestCreateGas(t *testing.T) {
 	for i, tt := range createGasTests {
 		address := libcommon.BytesToAddress([]byte("contract"))
 
-		tx, _ := db.BeginRw(context.Background())
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
 		defer tx.Rollback()
 
-		stateReader := rpchelper.NewLatestStateReader(tx)
-		stateWriter := rpchelper.NewLatestStateWriter(tx, 0)
+		var stateReader state.StateReader
+		var stateWriter state.StateWriter
+		var domains *state2.SharedDomains
+		var txc wrap.TxContainer
+		txc.Tx = tx
+		if ethconfig.EnableHistoryV4InTest {
+			domains = state2.NewSharedDomains(tx, log.New())
+			defer domains.Close()
+			txc.Doms = domains
+		}
+		stateReader = rpchelper.NewLatestStateReader(tx, ethconfig.EnableHistoryV4InTest)
+		stateWriter = rpchelper.NewLatestStateWriter(txc, 0, ethconfig.EnableHistoryV4InTest)
 
 		s := state.New(stateReader)
 		s.CreateAccount(address, true)

@@ -2,15 +2,26 @@ package commitment
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"hash"
 	"math/bits"
 	"strings"
 
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 
+	"github.com/ledgerwatch/erigon-lib/metrics"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/etl"
+)
+
+var (
+	mxCommitmentKeys          = metrics.GetOrCreateCounter("domain_commitment_keys")
+	mxCommitmentBranchUpdates = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
 )
 
 // Trie represents commitment variant.
@@ -18,24 +29,38 @@ type Trie interface {
 	// RootHash produces root hash of the trie
 	RootHash() (hash []byte, err error)
 
+	// Makes trie more verbose
+	SetTrace(bool)
+
 	// Variant returns commitment trie variant
 	Variant() TrieVariant
 
 	// Reset Drops everything from the trie
 	Reset()
 
-	ReviewKeys(pk, hk [][]byte) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
+	// Set context for state IO
+	ResetContext(ctx PatriciaContext)
 
-	ProcessUpdates(pk, hk [][]byte, updates []Update) (rootHash []byte, branchNodeUpdates map[string]BranchData, err error)
+	// Reads updates from storage
+	ProcessKeys(ctx context.Context, pk [][]byte, logPrefix string) (rootHash []byte, err error)
 
-	ResetFns(
-		branchFn func(prefix []byte) ([]byte, error),
-		accountFn func(plainKey []byte, cell *Cell) error,
-		storageFn func(plainKey []byte, cell *Cell) error,
-	)
+	// Process already gathered updates
+	ProcessUpdates(ctx context.Context, pk [][]byte, updates []Update) (rootHash []byte, err error)
+}
 
-	// Makes trie more verbose
-	SetTrace(bool)
+type PatriciaContext interface {
+	// load branch node and fill up the cells
+	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
+	// and for the extension, account, and leaf type, the `l` and `k`
+	GetBranch(prefix []byte) ([]byte, uint64, error)
+	// fetch account with given plain key
+	GetAccount(plainKey []byte, cell *Cell) error
+	// fetch storage with given plain key
+	GetStorage(plainKey []byte, cell *Cell) error
+	// Returns temp directory to use for update collecting
+	TempDir() string
+	// store branch data
+	PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error
 }
 
 type TrieVariant string
@@ -50,11 +75,11 @@ const (
 func InitializeTrie(tv TrieVariant) Trie {
 	switch tv {
 	case VariantBinPatriciaTrie:
-		return NewBinPatriciaHashed(length.Addr, nil, nil, nil)
+		return NewBinPatriciaHashed(length.Addr, nil)
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
-		return NewHexPatriciaHashed(length.Addr, nil, nil, nil)
+		return NewHexPatriciaHashed(length.Addr, nil)
 	}
 }
 
@@ -70,6 +95,9 @@ const (
 type BranchData []byte
 
 func (branchData BranchData) String() string {
+	if len(branchData) == 0 {
+		return ""
+	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	pos := 4
@@ -114,26 +142,112 @@ func (branchData BranchData) String() string {
 	return sb.String()
 }
 
-func EncodeBranch(bitmap, touchMap, afterMap uint16, retriveCell func(nibble int, skip bool) (*Cell, error)) (branchData BranchData, lastNibble int, err error) {
-	branchData = make(BranchData, 0, 32)
-	var bitmapBuf [binary.MaxVarintLen64]byte
+type BranchEncoder struct {
+	buf       *bytes.Buffer
+	bitmapBuf [binary.MaxVarintLen64]byte
+	updates   *etl.Collector
+	tmpdir    string
+}
 
-	binary.BigEndian.PutUint16(bitmapBuf[0:], touchMap)
-	binary.BigEndian.PutUint16(bitmapBuf[2:], afterMap)
+func NewBranchEncoder(sz uint64, tmpdir string) *BranchEncoder {
+	be := &BranchEncoder{
+		buf:    bytes.NewBuffer(make([]byte, sz)),
+		tmpdir: tmpdir,
+	}
+	be.initCollector()
+	return be
+}
 
-	branchData = append(branchData, bitmapBuf[:4]...)
+func (be *BranchEncoder) initCollector() {
+	be.updates = etl.NewCollector("commitment.BranchEncoder", be.tmpdir, etl.NewOldestEntryBuffer(etl.BufferOptimalSize/2), log.Root().New("branch-encoder"))
+	be.updates.LogLvl(log.LvlDebug)
+}
 
+// reads previous comitted value and merges current with it if needed.
+func loadToPatriciaContextFunc(pc PatriciaContext) etl.LoadFunc {
+	return func(prefix, update []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		stateValue, stateStep, err := pc.GetBranch(prefix)
+		if err != nil {
+			return err
+		}
+		// this updates ensures that if commitment is present, each branch are also present in commitment state at that moment with costs of storage
+		//fmt.Printf("commitment branch encoder merge prefix [%x] [%x]->[%x]\n%v\n", prefix, stateValue, update, BranchData(update).String())
+
+		cp, cu := common.Copy(prefix), common.Copy(update) // has to copy :(
+		if err = pc.PutBranch(cp, cu, stateValue, stateStep); err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+func (be *BranchEncoder) Load(load etl.LoadFunc, args etl.TransformArgs) error {
+	if err := be.updates.Load(nil, "", load, args); err != nil {
+		return err
+	}
+	be.initCollector()
+	return nil
+}
+
+func (be *BranchEncoder) CollectUpdate(
+	prefix []byte,
+	bitmap, touchMap, afterMap uint16,
+	readCell func(nibble int, skip bool) (*Cell, error),
+) (lastNibble int, err error) {
+
+	v, ln, err := be.EncodeBranch(bitmap, touchMap, afterMap, readCell)
+	if err != nil {
+		return 0, err
+	}
+	//fmt.Printf("collectBranchUpdate [%x] -> [%x]\n", prefix, []byte(v))
+	if err := be.updates.Collect(prefix, v); err != nil {
+		return 0, err
+	}
+	return ln, nil
+}
+
+// Encoded result should be copied before next call to EncodeBranch, underlying slice is reused
+func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCell func(nibble int, skip bool) (*Cell, error)) (BranchData, int, error) {
+	be.buf.Reset()
+
+	if err := binary.Write(be.buf, binary.BigEndian, touchMap); err != nil {
+		return nil, 0, err
+	}
+	if err := binary.Write(be.buf, binary.BigEndian, afterMap); err != nil {
+		return nil, 0, err
+	}
+
+	putUvarAndVal := func(size uint64, val []byte) error {
+		n := binary.PutUvarint(be.bitmapBuf[:], size)
+		wn, err := be.buf.Write(be.bitmapBuf[:n])
+		if err != nil {
+			return err
+		}
+		if n != wn {
+			return fmt.Errorf("n != wn size")
+		}
+		wn, err = be.buf.Write(val)
+		if err != nil {
+			return err
+		}
+		if len(val) != wn {
+			return fmt.Errorf("wn != value size")
+		}
+		return nil
+	}
+
+	var lastNibble int
 	for bitset, j := afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
 		for i := lastNibble; i < nibble; i++ {
-			if _, err := retriveCell(i, true /* skip */); err != nil {
+			if _, err := readCell(i, true /* skip */); err != nil {
 				return nil, 0, err
 			} // only writes 0x80 into hasher
 		}
 		lastNibble = nibble + 1
 
-		cell, err := retriveCell(nibble, false)
+		cell, err := readCell(nibble, false)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -152,32 +266,37 @@ func EncodeBranch(bitmap, touchMap, afterMap uint16, retriveCell func(nibble int
 			if cell.hl > 0 {
 				fieldBits |= HashPart
 			}
-			branchData = append(branchData, byte(fieldBits))
-			if cell.extLen > 0 && cell.spl == 0 {
-				n := binary.PutUvarint(bitmapBuf[:], uint64(cell.extLen))
-				branchData = append(branchData, bitmapBuf[:n]...)
-				branchData = append(branchData, cell.extension[:cell.extLen]...)
+			if err := be.buf.WriteByte(byte(fieldBits)); err != nil {
+				return nil, 0, err
 			}
-			if cell.apl > 0 {
-				n := binary.PutUvarint(bitmapBuf[:], uint64(cell.apl))
-				branchData = append(branchData, bitmapBuf[:n]...)
-				branchData = append(branchData, cell.apk[:cell.apl]...)
+			if fieldBits&HashedKeyPart != 0 {
+				if err := putUvarAndVal(uint64(cell.extLen), cell.extension[:cell.extLen]); err != nil {
+					return nil, 0, err
+				}
 			}
-			if cell.spl > 0 {
-				n := binary.PutUvarint(bitmapBuf[:], uint64(cell.spl))
-				branchData = append(branchData, bitmapBuf[:n]...)
-				branchData = append(branchData, cell.spk[:cell.spl]...)
+			if fieldBits&AccountPlainPart != 0 {
+				if err := putUvarAndVal(uint64(cell.apl), cell.apk[:cell.apl]); err != nil {
+					return nil, 0, err
+				}
 			}
-			if cell.hl > 0 {
-				n := binary.PutUvarint(bitmapBuf[:], uint64(cell.hl))
-				branchData = append(branchData, bitmapBuf[:n]...)
-				branchData = append(branchData, cell.h[:cell.hl]...)
+			if fieldBits&StoragePlainPart != 0 {
+				if err := putUvarAndVal(uint64(cell.spl), cell.spk[:cell.spl]); err != nil {
+					return nil, 0, err
+				}
+			}
+			if fieldBits&HashPart != 0 {
+				if err := putUvarAndVal(uint64(cell.hl), cell.h[:cell.hl]); err != nil {
+					return nil, 0, err
+				}
 			}
 		}
 		bitset ^= bit
 	}
-	return branchData, lastNibble, nil
+	//fmt.Printf("EncodeBranch [%x] size: %d\n", be.buf.Bytes(), be.buf.Len())
+	return be.buf.Bytes(), lastNibble, nil
 }
+
+func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
 
 // ExtractPlainKeys parses branchData and extract the plain keys for accounts and storage in the same order
 // they appear witjin the branchData
@@ -260,6 +379,9 @@ func (branchData BranchData) ReplacePlainKeys(accountPlainKeys [][]byte, storage
 	var numBuf [binary.MaxVarintLen64]byte
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
+	if touchMap&afterMap == 0 {
+		return branchData, nil
+	}
 	pos := 4
 	newData = append(newData, branchData[:4]...)
 	var accountI, storageI int
@@ -468,10 +590,10 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 
 // MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
-	if branch2 == nil {
+	if len(branch2) == 0 {
 		return branch1, nil
 	}
-	if branch1 == nil {
+	if len(branch1) == 0 {
 		return branch2, nil
 	}
 
@@ -553,6 +675,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 				}
 				pos1 += n
 				if len(branch1) < pos1+int(l) {
+					fmt.Printf("b1: %x %v\n", branch1, branch1)
+					fmt.Printf("b2: %x\n", branch2)
 					return nil, fmt.Errorf("MergeHexBranches branch1 is too small: expected at least %d got %d bytes", pos1+int(l), len(branch1))
 				}
 				if l > 0 {

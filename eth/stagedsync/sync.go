@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -131,15 +132,31 @@ func (s *Sync) IsAfter(stage1, stage2 stages.SyncStage) bool {
 	return idx1 > idx2
 }
 
-func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason) {
+func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
+func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
+	if tx != nil {
+		if casted, ok := tx.(state.HasAggCtx); ok {
+			// protect from too far unwind
+			unwindPointWithCommitment, ok, err := casted.AggCtx().(*state.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindPoint, tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
+			}
+			unwindPoint = unwindPointWithCommitment
+		}
+	}
+
 	if reason.Block != nil {
-		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "block_hash", reason.Block.String(), "err", reason.Err, "stack", dbg.Stack())
 	} else {
-		s.logger.Debug("UnwindTo", "block", unwindPoint)
+		s.logger.Debug("UnwindTo", "block", unwindPoint, "stack", dbg.Stack())
 	}
 
 	s.unwindPoint = &unwindPoint
 	s.unwindReason = reason
+	return nil
 }
 
 func (s *Sync) IsDone() bool {

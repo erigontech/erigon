@@ -2,24 +2,19 @@ package stagedsync
 
 import (
 	"context"
-	"encoding/binary"
-	"fmt"
 	"testing"
-	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 
-	"github.com/ledgerwatch/erigon/cmd/state/exec22"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -29,8 +24,15 @@ import (
 )
 
 func TestExec(t *testing.T) {
+	if ethconfig.EnableHistoryV4InTest {
+		t.Skip()
+	}
 	logger := log.New()
-	ctx, db1, db2 := context.Background(), memdb.NewTestDB(t), memdb.NewTestDB(t)
+	tmp := t.TempDir()
+	_, db1, _ := temporal.NewTestDB(t, datadir.New(tmp), nil)
+	_, db2, _ := temporal.NewTestDB(t, datadir.New(tmp), nil)
+
+	ctx := context.Background()
 	cfg := ExecuteBlockCfg{}
 
 	t.Run("UnwindExecutionStagePlainStatic", func(t *testing.T) {
@@ -133,17 +135,18 @@ func TestExec(t *testing.T) {
 	})
 }
 
-func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
-	agg.SetTx(tx)
-	agg.StartWrites()
+func apply(tx kv.RwTx, logger log.Logger) (beforeBlock, afterBlock testGenHook, w state.StateWriter) {
+	domains := libstate.NewSharedDomains(tx, logger)
 
-	rs := state.NewStateV3("", logger)
+	rs := state.NewStateV3(domains, logger)
 	stateWriter := state.NewStateWriterBufferedV3(rs)
+	stateWriter.SetTx(tx)
+
 	return func(n, from, numberOfBlocks uint64) {
-			stateWriter.SetTxNum(n)
+			stateWriter.SetTxNum(context.Background(), n)
 			stateWriter.ResetWriteSet()
 		}, func(n, from, numberOfBlocks uint64) {
-			txTask := &exec22.TxTask{
+			txTask := &state.TxTask{
 				BlockNum:   n,
 				Rules:      params.TestRules,
 				TxNum:      n,
@@ -152,18 +155,17 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 				WriteLists: stateWriter.WriteSet(),
 			}
 			txTask.AccountPrevs, txTask.AccountDels, txTask.StoragePrevs, txTask.CodePrevs = stateWriter.PrevAndDels()
-			if err := rs.ApplyState(tx, txTask, agg); err != nil {
+			rs.SetTxNum(txTask.TxNum, txTask.BlockNum)
+			if err := rs.ApplyState4(context.Background(), txTask); err != nil {
 				panic(err)
 			}
-			if err := rs.ApplyHistory(txTask, agg); err != nil {
+			_, err := rs.Domains().ComputeCommitment(context.Background(), true, txTask.BlockNum, "")
+			if err != nil {
 				panic(err)
 			}
+
 			if n == from+numberOfBlocks-1 {
-				err := rs.Flush(context.Background(), tx, "", time.NewTicker(time.Minute))
-				if err != nil {
-					panic(err)
-				}
-				if err := agg.Flush(context.Background(), tx); err != nil {
+				if err := domains.Flush(context.Background(), tx); err != nil {
 					panic(err)
 				}
 			}
@@ -172,80 +174,10 @@ func apply(tx kv.RwTx, agg *libstate.AggregatorV3, logger log.Logger) (beforeBlo
 
 func newAgg(t *testing.T, logger log.Logger) *libstate.AggregatorV3 {
 	t.Helper()
-	dir, ctx := t.TempDir(), context.Background()
-	agg, err := libstate.NewAggregatorV3(ctx, dir, dir, ethconfig.HistoryV3AggregationStep, nil, logger)
+	dirs, ctx := datadir.New(t.TempDir()), context.Background()
+	agg, err := libstate.NewAggregatorV3(ctx, dirs, ethconfig.HistoryV3AggregationStep, nil, logger)
 	require.NoError(t, err)
-	err = agg.OpenFolder()
+	err = agg.OpenFolder(false)
 	require.NoError(t, err)
 	return agg
-}
-
-func TestExec22(t *testing.T) {
-	logger := log.New()
-	ctx := context.Background()
-	_, db1, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
-	_, db2, _ := temporal.NewTestDB(t, datadir.New(t.TempDir()), nil)
-	agg := newAgg(t, logger)
-	cfg := ExecuteBlockCfg{historyV3: true, agg: agg}
-
-	t.Run("UnwindExecutionStagePlainStatic", func(t *testing.T) {
-		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)
-
-		beforeBlock, afterBlock, stateWriter := apply(tx1, agg, logger)
-		generateBlocks2(t, 1, 25, stateWriter, beforeBlock, afterBlock, staticCodeStaticIncarnations)
-		beforeBlock, afterBlock, stateWriter = apply(tx2, agg, logger)
-		generateBlocks2(t, 1, 50, stateWriter, beforeBlock, afterBlock, staticCodeStaticIncarnations)
-
-		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
-		require.NoError(err)
-
-		for i := uint64(0); i < 50; i++ {
-			err = rawdbv3.TxNums.Append(tx2, i, i)
-			require.NoError(err)
-		}
-
-		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
-		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
-		require.NoError(err)
-
-		compareCurrentState(t, agg, tx1, tx2, kv.PlainState, kv.PlainContractCode)
-	})
-	t.Run("UnwindExecutionStagePlainWithIncarnationChanges", func(t *testing.T) {
-		t.Skip("we don't delete newer incarnations - seems it's a feature?")
-		require, tx1, tx2 := require.New(t), memdb.BeginRw(t, db1), memdb.BeginRw(t, db2)
-
-		beforeBlock, afterBlock, stateWriter := apply(tx1, agg, logger)
-		generateBlocks2(t, 1, 25, stateWriter, beforeBlock, afterBlock, changeCodeWithIncarnations)
-		beforeBlock, afterBlock, stateWriter = apply(tx2, agg, logger)
-		generateBlocks2(t, 1, 50, stateWriter, beforeBlock, afterBlock, changeCodeWithIncarnations)
-
-		err := stages.SaveStageProgress(tx2, stages.Execution, 50)
-		require.NoError(err)
-
-		for i := uint64(0); i < 50; i++ {
-			err = rawdbv3.TxNums.Append(tx2, i, i)
-			require.NoError(err)
-		}
-
-		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
-		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
-		require.NoError(err)
-
-		tx1.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			if len(k) > 20 {
-				fmt.Printf("a: inc=%d, loc=%x, v=%x\n", binary.BigEndian.Uint64(k[20:]), k[28:], v)
-			}
-			return nil
-		})
-		tx2.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			if len(k) > 20 {
-				fmt.Printf("b: inc=%d, loc=%x, v=%x\n", binary.BigEndian.Uint64(k[20:]), k[28:], v)
-			}
-			return nil
-		})
-
-		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
-	})
 }

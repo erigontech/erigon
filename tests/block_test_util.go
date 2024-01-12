@@ -23,10 +23,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"reflect"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 
@@ -138,7 +139,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 		return err
 	}
 
-	tx, err := m.DB.BeginRw(m.Ctx)
+	tx, err := m.DB.BeginRo(m.Ctx)
 	if err != nil {
 		return err
 	}
@@ -152,6 +153,7 @@ func (bt *BlockTest) Run(t *testing.T, checkStateRoot bool) error {
 	if err := bt.validatePostState(newDB); err != nil {
 		return fmt.Errorf("post state validation failed: %w", err)
 	}
+
 	return bt.validateImportedHeaders(tx, validBlocks, m)
 }
 
@@ -313,14 +315,14 @@ func (bt *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 		code2 := statedb.GetCode(addr)
 		balance2 := statedb.GetBalance(addr)
 		nonce2 := statedb.GetNonce(addr)
+		if nonce2 != acct.Nonce {
+			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
+		}
 		if !bytes.Equal(code2, acct.Code) {
 			return fmt.Errorf("account code mismatch for addr: %x want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
 		}
 		if balance2.ToBig().Cmp(acct.Balance) != 0 {
 			return fmt.Errorf("account balance mismatch for addr: %x, want: %d, have: %d", addr, acct.Balance, balance2)
-		}
-		if nonce2 != acct.Nonce {
-			return fmt.Errorf("account nonce mismatch for addr: %x want: %d have: %d", addr, acct.Nonce, nonce2)
 		}
 		for loc, val := range acct.Storage {
 			val1 := uint256.NewInt(0).SetBytes(val.Bytes())

@@ -29,6 +29,8 @@ const (
 	//1-file-compression is multi-threaded
 	CompressSnapshot = estimatedRamPerWorker(1 * datasize.GB)
 
+	StateV3Collate = estimatedRamPerWorker(5 * datasize.GB)
+
 	//state-reconstitution is multi-threaded
 	ReconstituteState = estimatedRamPerWorker(512 * datasize.MB)
 )

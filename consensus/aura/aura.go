@@ -359,6 +359,9 @@ func (c *AuRa) Author(header *types.Header) (libcommon.Address, error) {
 // VerifyHeader checks whether a header conforms to the consensus rules.
 func (c *AuRa) VerifyHeader(chain consensus.ChainHeaderReader, header *types.Header, _ bool) error {
 	number := header.Number.Uint64()
+	if number == 0 {
+		return nil
+	}
 	parent := chain.GetHeader(header.ParentHash, number-1)
 	if parent == nil {
 		log.Error("consensus.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())

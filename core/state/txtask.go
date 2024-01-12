@@ -1,4 +1,4 @@
-package exec22
+package state
 
 import (
 	"container/heap"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+
 	"github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -22,6 +23,7 @@ import (
 type TxTask struct {
 	TxNum           uint64
 	BlockNum        uint64
+	BlockRoot       libcommon.Hash
 	Rules           *chain.Rules
 	Header          *types.Header
 	Txs             types.Transactions
@@ -37,6 +39,8 @@ type TxTask struct {
 	GetHashFn       func(n uint64) libcommon.Hash
 	TxAsMessage     types.Message
 	EvmBlockContext evmtypes.BlockContext
+
+	HistoryExecution bool // use history reader for that tx instead of state reader
 
 	BalanceIncreaseSet map[libcommon.Address]uint256.Int
 	ReadLists          map[string]*state.KvList

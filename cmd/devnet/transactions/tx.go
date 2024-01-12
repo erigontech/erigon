@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/blocks"
@@ -434,7 +435,7 @@ func SendManyTransactions(ctx context.Context, signedTransactions []types.Transa
 		hash, err := devnet.SelectNode(ctx).SendTransaction(tx)
 		if err != nil {
 			logger.Error("failed SendTransaction", "error", err)
-			//return nil, err
+			return nil, err
 		}
 		hashes[idx] = hash
 	}

@@ -26,39 +26,51 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-var StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+var (
+	doMemstat        = EnvBool("NO_MEMSTAT", true)
+	writeMap         = EnvBool("WRITE_MAP", false)
+	noSync           = EnvBool("NO_SYNC", false)
+	mdbxReadahead    = EnvBool("MDBX_READAHEAD", false)
+	mdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
+	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
-var doMemstat = true
+	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
+	stopAfterStage  = EnvString("STOP_AFTER_STAGE", "")
 
-func init() {
-	_, ok := os.LookupEnv("NO_MEMSTAT")
-	if ok {
-		doMemstat = false
-	}
-}
+	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
-func DoMemStat() bool { return doMemstat }
+	//state v3
+	noPrune           = EnvBool("NO_PRUNE", false)
+	noMerge           = EnvBool("NO_MERGE", false)
+	discardHistory    = EnvBool("DISCARD_HISTORY", false)
+	discardCommitment = EnvBool("DISCARD_COMMITMENT", false)
+
+	// force skipping of any non-Erigon2 .torrent files
+	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+
+	// allow simultaneous build of multiple snapshot types.
+	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
+
+	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
+
+	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", false)
+)
+
 func ReadMemStats(m *runtime.MemStats) {
 	if doMemstat {
 		runtime.ReadMemStats(m)
 	}
 }
 
-var (
-	writeMap     bool
-	writeMapOnce sync.Once
-)
+func WriteMap() bool      { return writeMap }
+func NoSync() bool        { return noSync }
+func MdbxReadAhead() bool { return mdbxReadahead }
+func MdbxLockInRam() bool { return mdbxLockInRam }
 
-func WriteMap() bool {
-	writeMapOnce.Do(func() {
-		v, _ := os.LookupEnv("WRITE_MAP")
-		if v == "true" {
-			writeMap = true
-			log.Info("[Experiment]", "WRITE_MAP", writeMap)
-		}
-	})
-	return writeMap
-}
+func DiscardHistory() bool    { return discardHistory }
+func DiscardCommitment() bool { return discardCommitment }
+func NoPrune() bool           { return noPrune }
+func NoMerge() bool           { return noMerge }
 
 var (
 	dirtySace     uint64
@@ -73,83 +85,14 @@ func DirtySpace() uint64 {
 			if err != nil {
 				panic(err)
 			}
+			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", i)
 			dirtySace = uint64(i * 1024 * 1024)
-			log.Info("[Experiment]", "MDBX_DIRTY_SPACE_MB", dirtySace)
 		}
 	})
 	return dirtySace
 }
 
-var (
-	noSync     bool
-	noSyncOnce sync.Once
-)
-
-func NoSync() bool {
-	noSyncOnce.Do(func() {
-		v, _ := os.LookupEnv("NO_SYNC")
-		if v == "true" {
-			noSync = true
-			log.Info("[Experiment]", "NO_SYNC", noSync)
-		}
-	})
-	return noSync
-}
-
-var (
-	mergeTr     int
-	mergeTrOnce sync.Once
-)
-
-func MergeTr() int {
-	mergeTrOnce.Do(func() {
-		v, _ := os.LookupEnv("MERGE_THRESHOLD")
-		if v != "" {
-			i, err := strconv.Atoi(v)
-			if err != nil {
-				panic(err)
-			}
-			if i < 0 || i > 4 {
-				panic(i)
-			}
-			mergeTr = i
-			log.Info("[Experiment]", "MERGE_THRESHOLD", mergeTr)
-		}
-	})
-	return mergeTr
-}
-
-var (
-	mdbxReadahead     bool
-	mdbxReadaheadOnce sync.Once
-)
-
-func MdbxReadAhead() bool {
-	mdbxReadaheadOnce.Do(func() {
-		v, _ := os.LookupEnv("MDBX_READAHEAD")
-		if v == "true" {
-			mdbxReadahead = true
-			log.Info("[Experiment]", "MDBX_READAHEAD", mdbxReadahead)
-		}
-	})
-	return mdbxReadahead
-}
-
-var (
-	discardHistory     bool
-	discardHistoryOnce sync.Once
-)
-
-func DiscardHistory() bool {
-	discardHistoryOnce.Do(func() {
-		v, _ := os.LookupEnv("DISCARD_HISTORY")
-		if v == "true" {
-			discardHistory = true
-			log.Info("[Experiment]", "DISCARD_HISTORY", discardHistory)
-		}
-	})
-	return discardHistory
-}
+func MergeTr() int { return mergeTr }
 
 var (
 	bigRoTx    uint
@@ -234,39 +177,12 @@ func SlowTx() time.Duration {
 	return slowTx
 }
 
-var (
-	stopBeforeStage     string
-	stopBeforeStageFlag sync.Once
-	stopAfterStage      string
-	stopAfterStageFlag  sync.Once
-)
-
-func StopBeforeStage() string {
-	f := func() {
-		v, _ := os.LookupEnv("STOP_BEFORE_STAGE") // see names in eth/stagedsync/stages/stages.go
-		if v != "" {
-			stopBeforeStage = v
-			log.Info("[Experiment]", "STOP_BEFORE_STAGE", stopBeforeStage)
-		}
-	}
-	stopBeforeStageFlag.Do(f)
-	return stopBeforeStage
-}
+func StopBeforeStage() string { return stopBeforeStage }
 
 // TODO(allada) We should possibly consider removing `STOP_BEFORE_STAGE`, as `STOP_AFTER_STAGE` can
 // perform all same the functionality, but due to reverse compatibility reasons we are going to
 // leave it.
-func StopAfterStage() string {
-	f := func() {
-		v, _ := os.LookupEnv("STOP_AFTER_STAGE") // see names in eth/stagedsync/stages/stages.go
-		if v != "" {
-			stopAfterStage = v
-			log.Info("[Experiment]", "STOP_AFTER_STAGE", stopAfterStage)
-		}
-	}
-	stopAfterStageFlag.Do(f)
-	return stopAfterStage
-}
+func StopAfterStage() string { return stopAfterStage }
 
 var (
 	stopAfterReconst     bool

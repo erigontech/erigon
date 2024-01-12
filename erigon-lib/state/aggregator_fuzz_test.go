@@ -14,7 +14,7 @@ func Fuzz_BtreeIndex_Allocation(f *testing.F) {
 		if keyCount < M*4 || M < 4 {
 			t.Skip()
 		}
-		bt := newBtAlloc(keyCount, M, false)
+		bt := newBtAlloc(keyCount, M, false, nil, nil)
 		bt.traverseDfs()
 		require.GreaterOrEqual(t, bt.N, keyCount)
 

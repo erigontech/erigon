@@ -5,9 +5,10 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/bits"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -57,6 +58,8 @@ func StageTrieCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, t
 		agg:       agg,
 	}
 }
+
+var ErrInvalidStateRootHash = fmt.Errorf("invalid state root hash")
 
 func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg TrieCfg, ctx context.Context, logger log.Logger) (libcommon.Hash, error) {
 	quit := ctx.Done()
@@ -135,7 +138,9 @@ func SpawnIntermediateHashesStage(s *StageState, u Unwinder, tx kv.RwTx, cfg Tri
 		if to > s.BlockNumber {
 			unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
 			logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-			u.UnwindTo(unwindTo, BadBlock(headerHash, fmt.Errorf("Incorrect root hash")))
+			if err := u.UnwindTo(unwindTo, BadBlock(headerHash, ErrInvalidStateRootHash), tx); err != nil {
+				return trie.EmptyRoot, err
+			}
 		}
 	} else if err = s.Update(tx, to); err != nil {
 		return trie.EmptyRoot, err

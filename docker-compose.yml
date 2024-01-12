@@ -51,7 +51,7 @@ services:
 
   downloader:
     <<: *default-erigon-service
-    entrypoint: downloader 
+    entrypoint: downloader
     command: ${DOWNLOADER_FLAGS-} --downloader.api.addr=0.0.0.0:9093 --datadir=/home/erigon/.local/share/erigon
     ports: [ "42069:42069/tcp", "42069:42069/udp" ]
 
@@ -79,6 +79,35 @@ services:
     volumes:
       - ${ERIGON_PROMETHEUS_CONFIG:-./cmd/prometheus/prometheus.yml}:/etc/prometheus/prometheus.yml
       - ${XDG_DATA_HOME:-~/.local/share}/erigon-prometheus:/prometheus
+    restart: unless-stopped
+
+  vmagent:
+    container_name: vmagent
+    image: victoriametrics/vmagent:v1.89.1
+    depends_on:
+      - "vmetrics"
+    ports:
+      - 8429:8429
+    volumes:
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon-victoriametrics/vmagentdata:/vmagentdata
+      - ${ERIGON_PROMETHEUS_CONFIG:-./cmd/prometheus/vmetrics.yml}:/etc/prometheus/prometheus.yml
+    command:
+      - "--promscrape.config=/etc/prometheus/prometheus.yml"
+      - "--remoteWrite.url=http://victoriametrics:8428/api/v1/write"
+
+  vmetrics:
+    container_name: victoriametrics
+    image: victoriametrics/victoria-metrics:v1.87.3
+    user: ${DOCKER_UID:-1000}:${DOCKER_GID:-1000} # Uses erigon user from Dockerfile
+    ports:
+      - 8428:8428
+      - 8089:8089
+      - 8089:8089/udp
+    command:
+      - "--storageDataPath=/vmstorage"
+      - "--httpListenAddr=:8428"
+    volumes:
+      - ${XDG_DATA_HOME:-~/.local/share}/erigon-victoriametrics:/vmstorage
     restart: unless-stopped
 
   grafana:

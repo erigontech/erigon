@@ -145,7 +145,9 @@ func BorHeimdallForward(
 				PeerID:  cfg.hd.SourcePeerId(hash),
 			}})
 			dataflow.HeaderDownloadStates.AddChange(headNumber, dataflow.HeaderInvalidated)
-			s.state.UnwindTo(unwindPoint, ForkReset(hash))
+			if err := s.state.UnwindTo(unwindPoint, ForkReset(hash), tx); err != nil {
+				return err
+			}
 			var reset uint64 = 0
 			generics.BorMilestoneRewind.Store(&reset)
 			return fmt.Errorf("verification failed for header %d: %x", headNumber, header.Hash())
@@ -217,7 +219,9 @@ func BorHeimdallForward(
 				PeerID:  cfg.hd.SourcePeerId(header.Hash()),
 			}})
 			dataflow.HeaderDownloadStates.AddChange(blockNum, dataflow.HeaderInvalidated)
-			s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()))
+			if err := s.state.UnwindTo(blockNum-1, ForkReset(header.Hash()), tx); err != nil {
+				return err
+			}
 			return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 		}
 
@@ -402,7 +406,9 @@ func persistValidatorSets(
 						break
 					}
 				}
-				u.UnwindTo(snap.Number, BadBlock(badHash, err))
+				if err := u.UnwindTo(snap.Number, BadBlock(badHash, err), tx); err != nil {
+					return err
+				}
 			} else {
 				return fmt.Errorf("snap.Apply %d, headers %d-%d: %w", blockNum, headers[0].Number.Uint64(), headers[len(headers)-1].Number.Uint64(), err)
 			}

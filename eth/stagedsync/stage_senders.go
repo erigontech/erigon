@@ -229,6 +229,17 @@ Loop:
 			continue
 		}
 
+		j := &senderRecoveryJob{
+			body:        body,
+			key:         k,
+			blockNumber: blockNumber,
+			blockTime:   header.Time,
+			blockHash:   blockHash,
+			index:       int(blockNumber) - int(s.BlockNumber) - 1,
+		}
+		if j.index < 0 {
+			panic(j.index) //uint-underflow
+		}
 		select {
 		case recoveryErr := <-errCh:
 			if recoveryErr.err != nil {
@@ -238,13 +249,7 @@ Loop:
 				}
 				break Loop
 			}
-		case jobs <- &senderRecoveryJob{
-			body:        body,
-			key:         k,
-			blockNumber: blockNumber,
-			blockTime:   header.Time,
-			blockHash:   blockHash,
-			index:       int(blockNumber - s.BlockNumber - 1)}:
+		case jobs <- j:
 		}
 	}
 
@@ -270,7 +275,9 @@ Loop:
 		}
 
 		if to > s.BlockNumber {
-			u.UnwindTo(minBlockNum-1, BadBlock(minBlockHash, minBlockErr))
+			if err := u.UnwindTo(minBlockNum-1, BadBlock(minBlockHash, minBlockErr), tx); err != nil {
+				return err
+			}
 		}
 	} else {
 		if err := collectorSenders.Load(tx, kv.Senders, etl.IdentityLoadFunc, etl.TransformArgs{

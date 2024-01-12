@@ -182,7 +182,7 @@ func (d *Dumper) DumpToCollector(c DumpCollector, excludeCode, excludeStorage bo
 				continue
 			}
 
-			if e := acc.DecodeForStorage(v); e != nil {
+			if e := accounts.DeserialiseV3(&acc, v); e != nil {
 				return nil, fmt.Errorf("decoding %x for %x: %w", v, k, e)
 			}
 			account := DumpAccount{

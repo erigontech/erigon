@@ -3,9 +3,10 @@ package graph
 import (
 	"encoding/hex"
 	"fmt"
-	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"reflect"
 	"strconv"
+
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/holiman/uint256"
 

@@ -602,7 +602,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	// Paranoic Mode on: if same file changed infoHash - skip it
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
-	if d.alreadyHaveThisName(name) {
+	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
 	if d.newDownloadsAreProhibited() {

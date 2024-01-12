@@ -405,6 +405,12 @@ const (
 	TblTracesToKeys   = "TracesToKeys"
 	TblTracesToIdx    = "TracesToIdx"
 
+	// Prune progress of execution: tableName -> [8bytes of invStep]latest pruned key
+	// Could use table constants `Tbl{Account,Storage,Code,Commitment}Keys` for domains
+	// corresponding history tables `Tbl{Account,Storage,Code,Commitment}HistoryKeys` for history
+	// and `Tbl{Account,Storage,Code,Commitment}Idx` for inverted indices
+	TblPruningProgress = "PruningProgress"
+
 	Snapshots = "Snapshots" // name -> hash
 
 	//State Reconstitution
@@ -627,6 +633,8 @@ var ChaindataTables = []string{
 	TblTracesToKeys,
 	TblTracesToIdx,
 
+	TblPruningProgress,
+
 	Snapshots,
 	MaxTxNum,
 
@@ -780,6 +788,7 @@ var ChaindataTablesCfg = TableCfg{
 	TblCodeIdx:               {Flags: DupSort},
 	TblCommitmentKeys:        {Flags: DupSort},
 	TblCommitmentHistoryKeys: {Flags: DupSort},
+	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
 	TblLogAddressKeys:        {Flags: DupSort},
 	TblLogAddressIdx:         {Flags: DupSort},
@@ -789,6 +798,7 @@ var ChaindataTablesCfg = TableCfg{
 	TblTracesFromIdx:         {Flags: DupSort},
 	TblTracesToKeys:          {Flags: DupSort},
 	TblTracesToIdx:           {Flags: DupSort},
+	TblPruningProgress:       {Flags: DupSort},
 	RAccountKeys:             {Flags: DupSort},
 	RAccountIdx:              {Flags: DupSort},
 	RStorageKeys:             {Flags: DupSort},
@@ -891,21 +901,24 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain Domain = "AccountsDomain"
-	StorageDomain  Domain = "StorageDomain"
-	CodeDomain     Domain = "CodeDomain"
+	AccountsDomain   Domain = "AccountsDomain"
+	StorageDomain    Domain = "StorageDomain"
+	CodeDomain       Domain = "CodeDomain"
+	CommitmentDomain Domain = "CommitmentDomain"
 )
 
 const (
-	AccountsHistory History = "AccountsHistory"
-	StorageHistory  History = "StorageHistory"
-	CodeHistory     History = "CodeHistory"
+	AccountsHistory   History = "AccountsHistory"
+	StorageHistory    History = "StorageHistory"
+	CodeHistory       History = "CodeHistory"
+	CommitmentHistory History = "CommitmentHistory"
 )
 
 const (
-	AccountsHistoryIdx InvertedIdx = "AccountsHistoryIdx"
-	StorageHistoryIdx  InvertedIdx = "StorageHistoryIdx"
-	CodeHistoryIdx     InvertedIdx = "CodeHistoryIdx"
+	AccountsHistoryIdx   InvertedIdx = "AccountsHistoryIdx"
+	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
+	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
+	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"

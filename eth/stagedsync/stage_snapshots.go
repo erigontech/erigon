@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -240,11 +241,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		cfg.notifier.Events.OnNewSnapshot()
 	}
 
-	cfg.blockReader.Snapshots().LogStat("download")
-	cfg.agg.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-		return histBlockNumProgress
-	})
+	{
+		cfg.blockReader.Snapshots().LogStat("download")
+		ac := cfg.agg.MakeContext()
+		defer ac.Close()
+		ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			return histBlockNumProgress
+		})
+		ac.Close()
+	}
 
 	if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events, &cfg.chainConfig); err != nil {
 		return err
@@ -257,14 +263,19 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	}
 
 	if cfg.historyV3 {
-		cfg.agg.CleanDir()
-
 		indexWorkers := estimate.IndexSnapshot.Workers()
+		if err := cfg.agg.BuildOptionalMissedIndices(ctx, indexWorkers); err != nil {
+			return err
+		}
 		if err := cfg.agg.BuildMissedIndices(ctx, indexWorkers); err != nil {
 			return err
 		}
 		if cfg.notifier.Events != nil {
 			cfg.notifier.Events.OnNewSnapshot()
+		}
+
+		if casted, ok := tx.(*temporal.Tx); ok {
+			casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
 		}
 	}
 
@@ -279,6 +290,13 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if err := FillDBFromSnapshots(s.LogPrefix(), ctx, tx, cfg.dirs, cfg.blockReader, cfg.agg, logger); err != nil {
 		return err
 	}
+	if casted, ok := tx.(*temporal.Tx); ok {
+		casted.ForceReopenAggCtx() // otherwise next stages will not see just-indexed-files
+	}
+	tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+		_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+		return histBlockNumProgress
+	})
 
 	return nil
 }
@@ -324,7 +342,6 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 				if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
 					return err
 				}
-
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -377,6 +394,9 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 						logger.Info(fmt.Sprintf("[%s] MaxTxNums index: %dk/%dk", logPrefix, blockNum/1000, blockReader.FrozenBlocks()/1000))
 					default:
 					}
+					if baseTxNum+txAmount == 0 {
+						panic(baseTxNum + txAmount) //uint-underflow
+					}
 					maxTxNum := baseTxNum + txAmount - 1
 
 					if err := rawdbv3.TxNums.Append(tx, blockNum, maxTxNum); err != nil {
@@ -396,9 +416,12 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 					}
 				}
 			}
-			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
+			ac := agg.MakeContext()
+			defer ac.Close()
+			if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), ac.Files()); err != nil {
 				return err
 			}
+			ac.Close()
 		}
 	}
 	return nil
@@ -418,12 +441,16 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 	}
 
 	freezingCfg := cfg.blockReader.FreezingCfg()
-
 	if freezingCfg.Enabled {
 		if freezingCfg.Produce {
 			//TODO: initialSync maybe save files progress here
 			if cfg.blockRetire.HasNewFrozenFiles() || cfg.agg.HasNewFrozenFiles() {
-				if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), cfg.agg.Files()); err != nil {
+				ac := cfg.agg.MakeContext()
+				defer ac.Close()
+				aggFiles := ac.Files()
+				ac.Close()
+
+				if err := rawdb.WriteSnapshots(tx, cfg.blockReader.FrozenFiles(), aggFiles); err != nil {
 					return err
 				}
 			}
@@ -458,7 +485,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 			//cfg.agg.BuildFilesInBackground()
 		}
 
-		if err := cfg.blockRetire.PruneAncientBlocks(tx, cfg.syncConfig.PruneLimit); err != nil {
+		pruneLimit := 100
+		if initialCycle {
+			pruneLimit = 1_000
+		}
+		if err := cfg.blockRetire.PruneAncientBlocks(tx, pruneLimit); err != nil {
 			return err
 		}
 	}

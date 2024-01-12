@@ -108,7 +108,7 @@ func TryFlock(dirs Dirs) (*flock.Flock, bool, error) {
 }
 
 // ApplyMigrations - if can get flock.
-func ApplyMigrations(dirs Dirs) error {
+func ApplyMigrations(dirs Dirs) error { //nolint
 	need := downloaderV2MigrationNeeded(dirs)
 	if !need {
 		return nil

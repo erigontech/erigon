@@ -5,10 +5,11 @@ import (
 	"crypto/ecdsa"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"math/big"
 	"os"
 	"time"
+
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -103,7 +104,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		MdbxDBSizeLimit: 64 * datasize.MB,
 	}
 
-	stack, err := node.New(context.Background(), nodeCfg, logger)
+	stack, err := node.New(ctx, nodeCfg, logger)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -153,6 +154,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		RPCTxFeeCap:      1, // 1 ether
 		Snapshot:         ethconfig.BlocksFreezing{NoDownloader: true},
 		StateStream:      true,
+		HistoryV3:        ethconfig.EnableHistoryV4InTest,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.DeprecatedTxPool.CommitEvery = 15 * time.Second

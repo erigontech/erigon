@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/semaphore"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
@@ -407,94 +409,21 @@ func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
 func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
 func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
-func (s *RoSnapshots) BlocksAvailable() uint64       { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
+func (s *RoSnapshots) blocksAvailable() uint64       { return s.idxMax.Load() }
 func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Blocks Stat", label),
-		"blocks", fmt.Sprintf("%dk", (s.BlocksAvailable()+1)/1000),
+		"blocks", fmt.Sprintf("%dk", (s.blocksAvailable()+1)/1000),
 		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
 func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
-	if s.BlocksAvailable() < cfg.ExpectBlocks {
-		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
+	if s.blocksAvailable() < cfg.ExpectBlocks {
+		return fmt.Errorf("app must wait until all expected snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.blocksAvailable())
 	}
 	return nil
-}
-
-// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (s *RoSnapshots) DisableReadAhead() {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.seg.DisableReadAhead()
-	}
-	for _, sn := range s.Bodies.segments {
-		sn.seg.DisableReadAhead()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.Seg.DisableReadAhead()
-	}
-}
-func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.seg.EnableReadAhead()
-	}
-	for _, sn := range s.Bodies.segments {
-		sn.seg.EnableReadAhead()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.Seg.EnableReadAhead()
-	}
-	return s
-}
-func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.seg.EnableWillNeed()
-	}
-	for _, sn := range s.Bodies.segments {
-		sn.seg.EnableWillNeed()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.Seg.EnableWillNeed()
-	}
-	return s
-}
-func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.seg.EnableMadvNormal()
-	}
-	for _, sn := range s.Bodies.segments {
-		sn.seg.EnableMadvNormal()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.Seg.EnableMadvNormal()
-	}
-	return s
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
@@ -540,7 +469,7 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Bodies.lock.RUnlock()
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
-	maxBlockNumInFiles := s.BlocksAvailable()
+	maxBlockNumInFiles := s.blocksAvailable()
 	for _, seg := range s.Bodies.segments {
 		if seg.seg == nil {
 			continue
@@ -1071,7 +1000,10 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				ps.Add(p)
 				defer notifySegmentIndexingFinished(sn.Name())
 				defer ps.Delete(p)
-				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
+				if err := buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
+					return fmt.Errorf("%s: %w", sn.Name(), err)
+				}
+				return nil
 			})
 		}
 	}
@@ -1318,6 +1250,9 @@ type BlockRetire struct {
 	working               atomic.Bool
 	needSaveFilesListInDB atomic.Bool
 
+	// shared semaphore with AggregatorV3 to allow only one type of snapshot building at a time
+	snBuildAllowed *semaphore.Weighted
+
 	workers int
 	tmpDir  string
 	db      kv.RoDB
@@ -1330,8 +1265,29 @@ type BlockRetire struct {
 	chainConfig *chain.Config
 }
 
-func NewBlockRetire(compressWorkers int, dirs datadir.Dirs, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, db kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *BlockRetire {
-	return &BlockRetire{workers: compressWorkers, tmpDir: dirs.Tmp, dirs: dirs, blockReader: blockReader, blockWriter: blockWriter, db: db, chainConfig: chainConfig, notifier: notifier, logger: logger}
+func NewBlockRetire(
+	compressWorkers int,
+	dirs datadir.Dirs,
+	blockReader services.FullBlockReader,
+	blockWriter *blockio.BlockWriter,
+	db kv.RoDB,
+	chainConfig *chain.Config,
+	notifier services.DBEventNotifier,
+	snBuildAllowed *semaphore.Weighted,
+	logger log.Logger,
+) *BlockRetire {
+	return &BlockRetire{
+		workers:        compressWorkers,
+		tmpDir:         dirs.Tmp,
+		dirs:           dirs,
+		blockReader:    blockReader,
+		blockWriter:    blockWriter,
+		db:             db,
+		snBuildAllowed: snBuildAllowed,
+		chainConfig:    chainConfig,
+		notifier:       notifier,
+		logger:         logger,
+	}
 }
 
 func (br *BlockRetire) SetWorkers(workers int) {
@@ -1424,7 +1380,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	}
 
 	merger := NewMerger(tmpDir, workers, lvl, db, br.chainConfig, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.blocksAvailable())
 	if len(rangesToMerge) == 0 {
 		return ok, nil
 	}
@@ -1478,7 +1434,9 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	return nil
 }
 
-func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
+const blockRetireAllowedWeight int64 = 1
+
+func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
 	}
@@ -1490,6 +1448,12 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	go func() {
 
 		defer br.working.Store(false)
+		if br.snBuildAllowed != nil {
+			if !br.snBuildAllowed.TryAcquire(blockRetireAllowedWeight) {
+				return
+			}
+			defer br.snBuildAllowed.Release(blockRetireAllowedWeight)
+		}
 
 		for {
 			maxBlockNum := br.maxScheduledBlock.Load()
@@ -2209,9 +2173,6 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, version uin
 	slot := types2.TxSlot{}
 	bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
 
-	defer d.EnableMadvNormal().DisableReadAhead()
-	defer bodiesSegment.EnableMadvNormal().DisableReadAhead()
-
 RETRY:
 	g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 	var i, offset, nextPos uint64
@@ -2395,8 +2356,6 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 		return err
 	}
 	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
 
 RETRY:
 	g := d.MakeGetter()

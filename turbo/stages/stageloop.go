@@ -45,7 +45,8 @@ import (
 )
 
 // StageLoop runs the continuous loop of staged sync
-func StageLoop(ctx context.Context,
+func StageLoop(
+	ctx context.Context,
 	db kv.RwDB,
 	sync *stagedsync.Sync,
 	hd *headerdownload.HeaderDownload,
@@ -54,7 +55,6 @@ func StageLoop(ctx context.Context,
 	logger log.Logger,
 	blockReader services.FullBlockReader,
 	hook *Hook,
-	forcePartialCommit bool,
 ) {
 	defer close(waitForDone)
 	initialCycle := true
@@ -70,7 +70,7 @@ func StageLoop(ctx context.Context,
 		}
 
 		// Estimate the current top height seen from the peer
-		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, logger, blockReader, hook, forcePartialCommit)
+		err := StageLoopIteration(ctx, db, wrap.TxContainer{}, sync, initialCycle, logger, blockReader, hook)
 
 		if err != nil {
 			if errors.Is(err, libcommon.ErrStopped) || errors.Is(err, context.Canceled) {
@@ -101,7 +101,7 @@ func StageLoop(ctx context.Context,
 	}
 }
 
-func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook, forcePartialCommit bool) (err error) {
+func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, sync *stagedsync.Sync, initialCycle bool, logger log.Logger, blockReader services.FullBlockReader, hook *Hook) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -124,9 +124,6 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	if externalTx {
 		canRunCycleInOneTransaction = true
 	}
-	if forcePartialCommit {
-		canRunCycleInOneTransaction = false
-	}
 
 	// Main steps:
 	// - process new blocks
@@ -147,6 +144,7 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 		if err = hook.BeforeRun(txc.Tx, isSynced); err != nil {
 			return err
 		}
+
 	}
 	_, err = sync.Run(db, txc, initialCycle)
 	if err != nil {
@@ -336,21 +334,33 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	return nil
 }
 
-func MiningStep(ctx context.Context, kv kv.RwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
+func MiningStep(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, tmpDir string, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	tx, err := kv.BeginRo(ctx)
+	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	miningBatch := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
-	defer miningBatch.Rollback()
+	//histV3, err := kvcfg.HistoryV3.Enabled(tx)
+	//if err != nil {
+	//	return err
+	//}
+	var miningBatch kv.RwTx
+	//if histV3 {
+	//	sd := state.NewSharedDomains(tx)
+	//	defer sd.Close()
+	//	miningBatch = sd
+	//} else {
+	mb := membatchwithdb.NewMemoryBatch(tx, tmpDir, logger)
+	defer mb.Rollback()
+	miningBatch = mb
+	//}
 	txc := wrap.TxContainer{Tx: miningBatch}
 
 	if _, err = mining.Run(nil, txc, false /* firstCycle */); err != nil {
@@ -414,7 +424,9 @@ func StateStep(ctx context.Context, chainReader consensus.ChainReader, engine co
 	// Construct side fork if we have one
 	if unwindPoint > 0 {
 		// Run it through the unwind
-		stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind)
+		if err := stateSync.UnwindTo(unwindPoint, stagedsync.StagedUnwind, nil); err != nil {
+			return err
+		}
 		if err = stateSync.RunUnwind(nil, txc); err != nil {
 			return err
 		}
@@ -508,7 +520,7 @@ func NewDefaultStages(ctx context.Context,
 
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.HistoryV3, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, silkworm),
-		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator, loopBreakCheck),
+		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, cfg.HistoryV3, notifications, forkValidator, loopBreakCheck),
 		stagedsync.StageBorHeimdallCfg(db, snapDb, stagedsync.MiningState{}, *controlServer.ChainConfig, heimdallClient, blockReader, controlServer.Hd, controlServer.Penalize, loopBreakCheck, recents, signatures),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter, loopBreakCheck),
@@ -619,7 +631,7 @@ func NewPipelineStages(ctx context.Context,
 
 	return stagedsync.UploaderPipelineStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.HistoryV3, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, silkworm),
-		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator, loopBreakCheck),
+		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, cfg.HistoryV3, notifications, forkValidator, loopBreakCheck),
 		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, loopBreakCheck),
 		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter, loopBreakCheck),
@@ -660,7 +672,7 @@ func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config
 	return stagedsync.New(
 		cfg.Sync,
 		stagedsync.StateStages(ctx,
-			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, nil, nil, nil),
+			stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, false, blockReader, blockWriter, dirs.Tmp, cfg.HistoryV3, nil, nil, nil),
 			stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter, nil),
 			stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
 			stagedsync.StageSendersCfg(db, controlServer.ChainConfig, true, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, nil),

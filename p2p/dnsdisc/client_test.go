@@ -20,10 +20,11 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/erigon/common/mclock"

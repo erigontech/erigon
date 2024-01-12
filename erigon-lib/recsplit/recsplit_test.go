@@ -28,10 +28,11 @@ import (
 func TestRecSplit2(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
@@ -62,10 +63,11 @@ func TestRecSplit2(t *testing.T) {
 func TestRecSplitDuplicate(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   8,
@@ -87,10 +89,11 @@ func TestRecSplitDuplicate(t *testing.T) {
 func TestRecSplitLeafSizeTooLarge(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
+	salt := uint32(1)
 	_, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   2,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(tmpDir, "index"),
 		LeafSize:   64,
@@ -104,10 +107,11 @@ func TestIndexLookup(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,
@@ -138,10 +142,11 @@ func TestTwoLayerIndex(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
 		KeyCount:   100,
 		BucketSize: 10,
-		Salt:       0,
+		Salt:       &salt,
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,

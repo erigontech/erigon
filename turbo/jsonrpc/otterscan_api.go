@@ -10,8 +10,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
@@ -28,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // API_LEVEL Must be incremented every time new additions are made
@@ -283,7 +282,7 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		return nil, err
 	}
 	txNums := iter.Union[uint64](itFrom, itTo, order.Desc, kv.Unlim)
-	txNumsIter := MapDescendTxNum2BlockNum(tx, txNums)
+	txNumsIter := rawdbv3.TxNums2BlockNums(tx, txNums, order.Desc)
 
 	exec := txnExecutor(tx, chainConfig, api.engine(), api._blockReader, nil)
 	var blockHash common.Hash

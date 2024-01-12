@@ -1,9 +1,10 @@
 package types
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/big"
 	"sort"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

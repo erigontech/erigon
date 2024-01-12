@@ -9,10 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/backup"
@@ -50,8 +50,7 @@ func ResetState(db kv.RwDB, ctx context.Context, chain string, tmpDir string, lo
 	return nil
 }
 
-func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
-	br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, engine consensus.Engine, logger log.Logger) error {
+func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3, br services.FullBlockReader, bw *blockio.BlockWriter, dirs datadir.Dirs, cc chain.Config, logger log.Logger) error {
 	// keep Genesis
 	if err := rawdb.TruncateBlocks(context.Background(), tx, 1); err != nil {
 		return err
@@ -87,7 +86,8 @@ func ResetBlocks(tx kv.RwTx, db kv.RoDB, agg *state.AggregatorV3,
 	}
 
 	if br.FreezingCfg().Enabled && br.FrozenBlocks() > 0 {
-		if err := stagedsync.FillDBFromSnapshots("fillind_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
+		logger.Info("filling db from snapshots", "blocks", br.FrozenBlocks())
+		if err := stagedsync.FillDBFromSnapshots("filling_db_from_snapshots", context.Background(), tx, dirs, br, agg, logger); err != nil {
 			return err
 		}
 		_ = stages.SaveStageProgress(tx, stages.Snapshots, br.FrozenBlocks())
@@ -132,9 +132,13 @@ func WarmupExec(ctx context.Context, db kv.RwDB) (err error) {
 
 func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, logger log.Logger) (err error) {
 	historyV3 := kvcfg.HistoryV3.FromDB(db)
+
+	cleanupList := make([]string, 0)
 	if historyV3 {
-		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV3Buckets...)
-		stateHistoryBuckets = append(stateHistoryBuckets, stateHistoryV4Buckets...)
+		cleanupList = append(cleanupList, stateBuckets...)
+		cleanupList = append(cleanupList, stateHistoryBuckets...)
+		cleanupList = append(cleanupList, stateHistoryV3Buckets...)
+		cleanupList = append(cleanupList, stateV3Buckets...)
 	}
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -142,23 +146,30 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 			return err
 		}
 
-		if err := backup.ClearTables(ctx, db, tx, stateBuckets...); err != nil {
-			return nil
-		}
-		for _, b := range stateBuckets {
-			if err := tx.ClearBucket(b); err != nil {
-				return err
-			}
-		}
-
-		if err := backup.ClearTables(ctx, db, tx, stateHistoryBuckets...); err != nil {
+		if err := backup.ClearTables(ctx, db, tx, cleanupList...); err != nil {
 			return nil
 		}
 		if !historyV3 {
+			_ = stages.SaveStageProgress(tx, stages.Execution, 0)
 			genesis := core.GenesisBlockByChainName(chain)
 			if _, _, err := core.WriteGenesisState(genesis, tx, tmpDir, logger); err != nil {
 				return err
 			}
+		} else {
+			v3db := db.(*temporal.DB)
+			agg := v3db.Agg()
+			ct := agg.MakeContext()
+			defer ct.Close()
+			doms := state.NewSharedDomains(tx, logger)
+			defer doms.Close()
+			blockNum := doms.BlockNum()
+			if blockNum > 0 {
+				if err := doms.Flush(ctx, tx); err != nil {
+					return err
+				}
+			}
+			_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
+			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum())
 		}
 
 		return nil
@@ -200,20 +211,19 @@ var stateHistoryBuckets = []string{
 	kv.CallTraceSet,
 }
 var stateHistoryV3Buckets = []string{
-	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
-	kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
-	kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
-	kv.TblAccountHistoryKeys, kv.TblAccountIdx, kv.TblAccountHistoryVals,
-	kv.TblStorageHistoryKeys, kv.TblStorageIdx, kv.TblStorageHistoryVals,
-	kv.TblCodeHistoryKeys, kv.TblCodeIdx, kv.TblCodeHistoryVals,
+	kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx,
+	kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx,
+	kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx,
 	kv.TblLogAddressKeys, kv.TblLogAddressIdx,
 	kv.TblLogTopicsKeys, kv.TblLogTopicsIdx,
 	kv.TblTracesFromKeys, kv.TblTracesFromIdx,
 	kv.TblTracesToKeys, kv.TblTracesToIdx,
 }
-var stateHistoryV4Buckets = []string{
-	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys,
-	kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+var stateV3Buckets = []string{
+	kv.TblAccountKeys, kv.TblStorageKeys, kv.TblCodeKeys, kv.TblCommitmentKeys,
+	kv.TblAccountVals, kv.TblStorageVals, kv.TblCodeVals, kv.TblCommitmentVals,
+	kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx,
+	kv.TblPruningProgress,
 }
 
 func clearStageProgress(tx kv.RwTx, stagesList ...stages.SyncStage) error {

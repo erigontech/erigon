@@ -2,6 +2,7 @@ package antiquary
 
 import (
 	"context"
+	"golang.org/x/sync/semaphore"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,7 @@ type Antiquary struct {
 	logger          log.Logger
 	sn              *freezeblocks.CaplinSnapshots
 	snReader        freezeblocks.BeaconSnapshotReader
+	snBuildSema     *semaphore.Weighted // semaphore for building only one type (blocks, caplin, v3) at a time
 	ctx             context.Context
 	beaconDB        persistence.BlockSource
 	backfilled      *atomic.Bool
@@ -43,7 +45,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states, blocks bool, fs afero.Fs) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states, blocks bool, fs afero.Fs, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
@@ -58,6 +60,7 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 		cfg:             cfg,
 		states:          states,
 		snReader:        reader,
+		snBuildSema:     snBuildSema,
 		fs:              fs,
 		validatorsTable: validatorsTable,
 		genesisState:    genesisState,
@@ -217,11 +220,22 @@ func (a *Antiquary) Loop() error {
 	}
 }
 
+// weight for the semaphore to build only one type of snapshots at a time
+// for now all of them have the same weight
+const caplinSnapshotBuildSemaWeight int64 = 1
+
 // Antiquate will antiquate a specific block range (aka. retire snapshots), this should be ran in the background.
 func (a *Antiquary) antiquate(version uint8, from, to uint64) error {
 	if a.downloader == nil {
 		return nil // Just skip if we don't have a downloader
 	}
+	if a.snBuildSema != nil {
+		if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+			return nil
+		}
+		defer a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight)
+	}
+
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, version, from, to, snaptype.Erigon2MergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err

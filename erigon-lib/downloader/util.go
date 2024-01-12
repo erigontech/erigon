@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -41,6 +42,7 @@ import (
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -50,13 +52,10 @@ import (
 // udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 7
 var udpOrHttpTrackers = []string{
 	"udp://tracker.opentrackr.org:1337/announce",
-	"udp://9.rarbg.com:2810/announce",
 	"udp://tracker.openbittorrent.com:6969/announce",
-	"http://tracker.openbittorrent.com:80/announce",
 	"udp://opentracker.i2p.rocks:6969/announce",
-	"https://opentracker.i2p.rocks:443/announce",
 	"udp://tracker.torrent.eu.org:451/announce",
-	"udp://tracker.moeking.me:6969/announce",
+	"udp://open.stealth.si:80/announce",
 }
 
 // nolint
@@ -93,7 +92,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 	return res, nil
 }
 
-var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+var historyFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
 
 func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
@@ -115,15 +114,15 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 
 func e3seedable(name string) bool {
 	subs := historyFileRegex.FindStringSubmatch(name)
-	if len(subs) != 5 {
+	if len(subs) != 6 {
 		return false
 	}
 	// Check that it's seedable
-	from, err := strconv.ParseUint(subs[2], 10, 64)
+	from, err := strconv.ParseUint(subs[3], 10, 64)
 	if err != nil {
 		return false
 	}
-	to, err := strconv.ParseUint(subs[3], 10, 64)
+	to, err := strconv.ParseUint(subs[4], 10, 64)
 	if err != nil {
 		return false
 	}
@@ -189,7 +188,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 16)
 	var i atomic.Int32
 
 	for _, file := range files {
@@ -262,11 +261,22 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	files2, err := dir2.ListFiles(dirs.SnapHistory, ".torrent")
+	if dbg.DownloaderOnlyBlocks {
+		return files, nil
+	}
+	l1, err := dir2.ListFiles(dirs.SnapIdx, ".torrent")
 	if err != nil {
 		return nil, err
 	}
-	files = append(files, files2...)
+	l2, err := dir2.ListFiles(dirs.SnapHistory, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	l3, err := dir2.ListFiles(dirs.SnapDomain, ".torrent")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
 }
 
@@ -286,6 +296,18 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *TorrentFiles) (res []*torr
 		res = append(res, a)
 	}
 	return res, nil
+}
+
+// if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
+func IsSnapNameAllowed(name string) bool {
+	if dbg.DownloaderOnlyBlocks {
+		for _, p := range []string{"domain", "history", "idx"} {
+			if strings.HasPrefix(name, p) {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
@@ -319,7 +341,9 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 		return nil, false, ctx.Err()
 	default:
 	}
-
+	if !IsSnapNameAllowed(ts.DisplayName) {
+		return nil, false, nil
+	}
 	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
 	var have bool
 	t, have = torrentClient.Torrent(ts.InfoHash)
@@ -337,7 +361,7 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	default:
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
-			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+			return t, true, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 	}
 

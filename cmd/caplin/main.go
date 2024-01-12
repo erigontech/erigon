@@ -141,5 +141,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		AllowedOrigins:   cfg.AllowedOrigins,
 		AllowedMethods:   cfg.AllowedMethods,
 		AllowCredentials: cfg.AllowCredentials,
-	}, nil, nil, false, false, historyDB, indiciesDB)
+	}, nil, nil, false, false, historyDB, indiciesDB, nil)
 }

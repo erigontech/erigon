@@ -44,6 +44,7 @@ output=$(find "$projectDir" -type 'd' -maxdepth 1 \
     | grep -v "github.com/ledgerwatch/secp256k1"    `# BSD-3-Clause` \
     | grep -v "github.com/RoaringBitmap/roaring"    `# Apache-2.0` \
     | grep -v "github.com/!roaring!bitmap/roaring"  `# Apache-2.0` \
+    | grep -v "github.com/holiman/bloomfilter/v2"   `# MIT` \
     | grep -v "pedersen_hash"                       `# Apache-2.0` \
     `# approved licenses` \
     | grep -Ev "Apache-2.0$" \

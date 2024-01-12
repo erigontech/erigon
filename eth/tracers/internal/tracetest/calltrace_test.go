@@ -24,12 +24,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -153,7 +154,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			dbTx, err := m.DB.BeginRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+			statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number), m.HistoryV3)
 			if test.Genesis.BaseFee != nil {
 				context.BaseFee, _ = uint256.FromBig(test.Genesis.BaseFee)
 			}
@@ -260,7 +261,7 @@ func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
 	dbTx, err := m.DB.BeginRw(m.Ctx)
 	require.NoError(b, err)
 	defer dbTx.Rollback()
-	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+	statedb, _ := tests.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number), m.HistoryV3)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -337,7 +338,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	require.NoError(t, err)
 	defer dbTx.Rollback()
 
-	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+	statedb, _ := tests.MakePreState(rules, dbTx, alloc, context.BlockNumber, m.HistoryV3)
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("callTracer", nil, nil)
 	if err != nil {

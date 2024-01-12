@@ -17,32 +17,10 @@
 package mdbx
 
 import (
-	"context"
-
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 )
 
 func MustOpen(path string) kv.RwDB {
-	db, err := Open(context.Background(), path, log.New(), false)
-	if err != nil {
-		panic(err)
-	}
-	return db
-}
-
-// Open - main method to open database.
-func Open(ctx context.Context, path string, logger log.Logger, accede bool) (kv.RwDB, error) {
-	var db kv.RwDB
-	var err error
-	opts := NewMDBX(logger).Path(path)
-	if accede {
-		opts = opts.Accede()
-	}
-	db, err = opts.Open(ctx)
-
-	if err != nil {
-		return nil, err
-	}
-	return db, nil
+	return NewMDBX(log.New()).Path(path).MustOpen()
 }

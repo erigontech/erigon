@@ -48,7 +48,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         uses: golangci/golangci-lint-action@v3
         with:
-          version: v1.54
+          version: v1.55
           skip-build-cache: true
 
       - name: Lint source code licenses

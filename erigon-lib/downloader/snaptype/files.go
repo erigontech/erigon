@@ -172,7 +172,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
 }
 
-const Erigon3SeedableSteps = 32
+const Erigon3SeedableSteps = 64
 
 // Use-cases:
 //   - produce and seed snapshots earlier on chain tip. reduce depnedency on "good peers with history" at p2p-network.
@@ -259,9 +259,6 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		res = append(res, meta)
 	}
 	slices.SortFunc(res, func(i, j FileInfo) int {
-		if i.Version != j.Version {
-			return cmp.Compare(i.Version, j.Version)
-		}
 		if i.From != j.From {
 			return cmp.Compare(i.From, j.From)
 		}
@@ -270,6 +267,9 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		}
 		if i.T != j.T {
 			return cmp.Compare(i.T, j.T)
+		}
+		if i.Version != j.Version {
+			return cmp.Compare(i.Version, j.Version)
 		}
 		return cmp.Compare(i.Ext, j.Ext)
 	})

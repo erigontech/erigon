@@ -23,12 +23,14 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type word []byte // plain text word associated with code from dictionary
@@ -112,7 +114,9 @@ type Decompressor struct {
 	wordsCount      uint64
 	emptyWordsCount uint64
 
-	filePath, fileName string
+	filePath, FileName1 string
+
+	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
 // Tables with bitlen greater than threshold will be condensed.
@@ -147,11 +151,10 @@ func SetDecompressionTableCondensity(fromBitSize int) {
 func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	_, fName := filepath.Split(compressedFilePath)
 	d = &Decompressor{
-		filePath: compressedFilePath,
-		fileName: fName,
+		filePath:  compressedFilePath,
+		FileName1: fName,
 	}
 	defer func() {
-
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("decompressing file: %s, %+v, trace: %s", compressedFilePath, rec, dbg.Stack())
 		}
@@ -364,7 +367,7 @@ func (d *Decompressor) Close() {
 }
 
 func (d *Decompressor) FilePath() string { return d.filePath }
-func (d *Decompressor) FileName() string { return d.fileName }
+func (d *Decompressor) FileName() string { return d.FileName1 }
 
 // WithReadAhead - Expect read in sequential order. (Hence, pages in the given range can be aggressively read ahead, and may be freed soon after they are accessed.)
 func (d *Decompressor) WithReadAhead(f func() error) error {
@@ -373,7 +376,7 @@ func (d *Decompressor) WithReadAhead(f func() error) error {
 	}
 	_ = mmap.MadviseSequential(d.mmapHandle1)
 	//_ = mmap.MadviseWillNeed(d.mmapHandle1)
-	defer mmap.MadviseRandom(d.mmapHandle1)
+	defer mmap.MadviseNormal(d.mmapHandle1)
 	return f()
 }
 
@@ -382,26 +385,30 @@ func (d *Decompressor) DisableReadAhead() {
 	if d == nil || d.mmapHandle1 == nil {
 		return
 	}
-	_ = mmap.MadviseRandom(d.mmapHandle1)
+	leftReaders := d.readAheadRefcnt.Add(-1)
+	if leftReaders == 0 {
+		if dbg.SnapshotMadvRnd {
+			_ = mmap.MadviseRandom(d.mmapHandle1)
+		} else {
+			_ = mmap.MadviseNormal(d.mmapHandle1)
+		}
+	} else if leftReaders < 0 {
+		log.Warn("read-ahead negative counter", "file", d.FileName())
+	}
 }
 func (d *Decompressor) EnableReadAhead() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseSequential(d.mmapHandle1)
-	return d
-}
-func (d *Decompressor) EnableMadvNormal() *Decompressor {
-	if d == nil || d.mmapHandle1 == nil {
-		return d
-	}
-	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
 func (d *Decompressor) EnableWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
+	d.readAheadRefcnt.Add(1)
 	_ = mmap.MadviseWillNeed(d.mmapHandle1)
 	return d
 }
@@ -519,7 +526,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		posDict:     d.posDict,
 		data:        d.data[d.wordsStart:],
 		patternDict: d.dict,
-		fName:       d.fileName,
+		fName:       d.FileName1,
 	}
 }
 
@@ -671,9 +678,14 @@ func (g *Getter) SkipUncompressed() (uint64, int) {
 	return g.dataP, int(wordLen)
 }
 
-// Match returns true and next offset if the word at current offset fully matches the buf
-// returns false and current offset otherwise.
-func (g *Getter) Match(buf []byte) (bool, uint64) {
+// Match returns
+//
+//	1 if the word at current offset is greater than the buf
+//
+// -1 if it is less than the buf
+//
+//	0 if they are equal.
+func (g *Getter) Match(buf []byte) int {
 	savePos := g.dataP
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
@@ -683,10 +695,18 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 			g.dataP++
 			g.dataBit = 0
 		}
-		if lenBuf != 0 {
+		if lenBuf != 0 || lenBuf != int(wordLen) {
 			g.dataP, g.dataBit = savePos, 0
 		}
-		return lenBuf == int(wordLen), g.dataP
+		if lenBuf == int(wordLen) {
+			return 0
+		}
+		if lenBuf < int(wordLen) {
+			return -1
+		}
+		if lenBuf > int(wordLen) {
+			return 1
+		}
 	}
 
 	var bufPos int
@@ -694,9 +714,14 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
 		bufPos += int(pos) - 1
 		pattern := g.nextPattern()
-		if lenBuf < bufPos+len(pattern) || !bytes.Equal(buf[bufPos:bufPos+len(pattern)], pattern) {
+		compared := bytes.Compare(buf[bufPos:bufPos+len(pattern)], pattern)
+		if compared != 0 {
 			g.dataP, g.dataBit = savePos, 0
-			return false, savePos
+			return compared
+		}
+		if lenBuf < bufPos+len(pattern) {
+			g.dataP, g.dataBit = savePos, 0
+			return -1
 		}
 	}
 	if g.dataBit > 0 {
@@ -713,9 +738,14 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 		bufPos += int(pos) - 1
 		if bufPos > lastUncovered {
 			dif := uint64(bufPos - lastUncovered)
-			if lenBuf < bufPos || !bytes.Equal(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif]) {
+			compared := bytes.Compare(buf[lastUncovered:bufPos], g.data[postLoopPos:postLoopPos+dif])
+			if compared != 0 {
 				g.dataP, g.dataBit = savePos, 0
-				return false, savePos
+				return compared
+			}
+			if lenBuf < bufPos {
+				g.dataP, g.dataBit = savePos, 0
+				return -1
 			}
 			postLoopPos += dif
 		}
@@ -723,18 +753,28 @@ func (g *Getter) Match(buf []byte) (bool, uint64) {
 	}
 	if int(wordLen) > lastUncovered {
 		dif := wordLen - uint64(lastUncovered)
-		if lenBuf < int(wordLen) || !bytes.Equal(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif]) {
+
+		compared := bytes.Compare(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
+		if compared != 0 {
 			g.dataP, g.dataBit = savePos, 0
-			return false, savePos
+			return compared
+		}
+		if lenBuf < int(wordLen) {
+			g.dataP, g.dataBit = savePos, 0
+			return -1
 		}
 		postLoopPos += dif
 	}
-	if lenBuf != int(wordLen) {
+	if lenBuf < int(wordLen) {
 		g.dataP, g.dataBit = savePos, 0
-		return false, savePos
+		return -1
+	}
+	if lenBuf > int(wordLen) {
+		g.dataP, g.dataBit = savePos, 0
+		return 1
 	}
 	g.dataP, g.dataBit = postLoopPos, 0
-	return true, postLoopPos
+	return 0
 }
 
 // MatchPrefix only checks if the word at the current offset has a buf prefix. Does not move offset to the next word.

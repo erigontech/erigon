@@ -75,7 +75,7 @@ type MdbxOpts struct {
 }
 
 const DefaultMapSize = 2 * datasize.TB
-const DefaultGrowthStep = 2 * datasize.GB
+const DefaultGrowthStep = 1 * datasize.GB
 
 func NewMDBX(log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
@@ -86,7 +86,7 @@ func NewMDBX(log log.Logger) MdbxOpts {
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
-		mergeThreshold:  3 * 8192,
+		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
 		label:           kv.InMem,
 	}
@@ -273,6 +273,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 	if err = env.SetOption(mdbx.OptMaxReaders, kv.ReadersLimit); err != nil {
+		return nil, err
+	}
+	if err = env.SetOption(mdbx.OptRpAugmentLimit, 1_000_000_000); err != nil { //default: 262144
 		return nil, err
 	}
 
@@ -685,6 +688,15 @@ func (tx *MdbxTx) CollectMetrics() {
 
 // ListBuckets - all buckets stored as keys of un-named bucket
 func (tx *MdbxTx) ListBuckets() ([]string, error) { return tx.tx.ListDBI() }
+
+func (tx *MdbxTx) WarmupDB(force bool) error {
+	if force {
+		return tx.tx.EnvWarmup(mdbx.WarmupForce|mdbx.WarmupOomSafe, time.Hour)
+	}
+	return tx.tx.EnvWarmup(mdbx.WarmupDefault, time.Hour)
+}
+func (tx *MdbxTx) LockDBInRam() error     { return tx.tx.EnvWarmup(mdbx.WarmupLock, time.Hour) }
+func (tx *MdbxTx) UnlockDBFromRam() error { return tx.tx.EnvWarmup(mdbx.WarmupRelease, time.Hour) }
 
 func (db *MdbxKV) View(ctx context.Context, f func(tx kv.Tx) error) (err error) {
 	// can't use db.env.View method - because it calls commit for read transactions - it conflicts with write transactions.
@@ -1782,18 +1794,36 @@ func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 		s.nextK, s.nextV, s.err = s.c.Seek(s.fromPrefix)
 		return s, s.err
 	} else {
-		// seek exactly to given key or previous one
-		s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
-		if s.err != nil {
-			return s, s.err
-		}
-		if s.nextK != nil { // go to last value of this key
-			if casted, ok := s.c.(kv.CursorDupSort); ok {
-				s.nextV, s.err = casted.LastDup()
-			}
-		} else { // key not found, go to prev one
+		// to find LAST key with given prefix:
+		nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
+		if ok {
+			s.nextK, s.nextV, s.err = s.c.SeekExact(nextSubtree)
 			s.nextK, s.nextV, s.err = s.c.Prev()
+			if s.nextK != nil { // go to last value of this key
+				if casted, ok := s.c.(kv.CursorDupSort); ok {
+					s.nextV, s.err = casted.LastDup()
+				}
+			}
+		} else {
+			s.nextK, s.nextV, s.err = s.c.Last()
+			if s.nextK != nil { // go to last value of this key
+				if casted, ok := s.c.(kv.CursorDupSort); ok {
+					s.nextV, s.err = casted.LastDup()
+				}
+			}
 		}
+		//// seek exactly to given key or previous one
+		//s.nextK, s.nextV, s.err = s.c.SeekExact(s.fromPrefix)
+		//if s.err != nil {
+		//	return s, s.err
+		//}
+		//if s.nextK != nil { // go to last value of this key
+		//	if casted, ok := s.c.(kv.CursorDupSort); ok {
+		//		s.nextV, s.err = casted.LastDup()
+		//	}
+		//} else { // key not found, go to prev one
+		//	s.nextK, s.nextV, s.err = s.c.Prev()
+		//}
 		return s, s.err
 	}
 }
@@ -1817,8 +1847,8 @@ func (s *cursor2iter) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from > to
-	//Desc: [from, to) AND from < to
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(s.nextK, s.toPrefix)
 	return (bool(s.orderAscend) && cmp < 0) || (!bool(s.orderAscend) && cmp > 0)
 }
@@ -1887,10 +1917,13 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 		s.nextV, s.err = s.c.SeekBothRange(s.key, s.fromPrefix)
 		return s, s.err
 	} else {
-		// seek exactly to given key or previous one
-		_, s.nextV, s.err = s.c.SeekBothExact(s.key, s.fromPrefix)
-		if s.nextV == nil { // no such key
+		// to find LAST key with given prefix:
+		nextSubtree, ok := kv.NextSubtree(s.fromPrefix)
+		if ok {
+			_, s.nextV, s.err = s.c.SeekBothExact(s.key, nextSubtree)
 			_, s.nextV, s.err = s.c.PrevDup()
+		} else {
+			s.nextV, s.err = s.c.LastDup()
 		}
 		return s, s.err
 	}
@@ -1915,8 +1948,8 @@ func (s *cursorDup2iter) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from > to
-	//Desc: [from, to) AND from < to
+	//Asc:  [from, to) AND from < to
+	//Desc: [from, to) AND from > to
 	cmp := bytes.Compare(s.nextV, s.toPrefix)
 	return (s.orderAscend && cmp < 0) || (!s.orderAscend && cmp > 0)
 }
