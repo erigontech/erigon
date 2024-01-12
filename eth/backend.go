@@ -715,8 +715,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			newTxsBroadcaster = casted.NewSlotsStreams
 		}
 		go txpool.MainLoop(backend.sentryCtx,
-			backend.txPoolDB, backend.chainDB,
-			backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
+			backend.txPoolDB, backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
 			func() {
 				select {
 				case backend.notifyMiningAboutNewTxs <- struct{}{}:

@@ -250,7 +250,8 @@ type BlockReader struct {
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*BorRoSnapshots)
-	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSn}
+	sn, _ := snapshots.(*RoSnapshots)
+	return &BlockReader{sn: sn, borSn: borSn}
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
@@ -485,7 +486,7 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
 		if forceCanonical {
 			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 			if err != nil {

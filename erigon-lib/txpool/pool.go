@@ -1701,7 +1701,7 @@ const txMaxBroadcastSize = 4 * 1024
 //
 // promote/demote transactions
 // reorgs
-func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs chan types.Announcements, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
+func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Announcements, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
 	syncToNewPeersEvery := time.NewTicker(p.cfg.SyncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
 	processRemoteTxsEvery := time.NewTicker(p.cfg.ProcessRemoteTxsEvery)
@@ -2077,12 +2077,12 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	var pendingBlobFee uint64 = 1 // MIN_BLOB_GAS_PRICE A/EIP-4844
 	var minBlobGasPrice uint64
 
-	currentBlock, err := (&freezeblocks.BlockReader{}).CurrentBlock(coreTx)
+	currentBlock, err := freezeblocks.NewBlockReader(nil, nil).CurrentBlock(coreTx)
 
 	if err == nil {
-		chainConfig, err := ChainConfig(coreTx)
+		chainConfig, _ := ChainConfig(tx)
 
-		if err == nil {
+		if chainConfig != nil {
 			if currentBlock.BaseFee() != nil {
 				pendingBaseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
 			}

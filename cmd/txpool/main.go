@@ -178,7 +178,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	}
 
 	notifyMiner := func() {}
-	txpool.MainLoop(ctx, txPoolDB, coreDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
+	txpool.MainLoop(ctx, txPoolDB, txPool, newTxs, send, txpoolGrpcServer.NewSlotsStreams, notifyMiner)
 
 	grpcServer.GracefulStop()
 	return nil
