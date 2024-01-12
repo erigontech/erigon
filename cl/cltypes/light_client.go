@@ -16,10 +16,10 @@ const (
 )
 
 type LightClientHeader struct {
-	Beacon *BeaconBlockHeader
+	Beacon *BeaconBlockHeader `json:"beacon"`
 
-	ExecutionPayloadHeader *Eth1Header
-	ExecutionBranch        solid.HashVectorSSZ
+	ExecutionPayloadHeader *Eth1Header         `json:"execution_payload_header,omitempty"`
+	ExecutionBranch        solid.HashVectorSSZ `json:"execution_branch,omitempty"`
 
 	version clparams.StateVersion
 }
@@ -78,13 +78,13 @@ func (l *LightClientHeader) getSchema() []interface{} {
 }
 
 type LightClientUpdate struct {
-	AttestedHeader          *LightClientHeader
-	NextSyncCommittee       *solid.SyncCommittee
-	NextSyncCommitteeBranch solid.HashVectorSSZ
-	FinalizedHeader         *LightClientHeader
-	FinalityBranch          solid.HashVectorSSZ
-	SyncAggregate           *SyncAggregate
-	SignatureSlot           uint64
+	AttestedHeader          *LightClientHeader   `json:"attested_header"`
+	NextSyncCommittee       *solid.SyncCommittee `json:"next_sync_committee"`
+	NextSyncCommitteeBranch solid.HashVectorSSZ  `json:"next_sync_committee_branch"`
+	FinalizedHeader         *LightClientHeader   `json:"finalized_header"`
+	FinalityBranch          solid.HashVectorSSZ  `json:"finality_branch"`
+	SyncAggregate           *SyncAggregate       `json:"sync_aggregate"`
+	SignatureSlot           uint64               `json:"signature_slot,string"`
 }
 
 func NewLightClientUpdate(version clparams.StateVersion) *LightClientUpdate {
@@ -142,9 +142,9 @@ func (l *LightClientUpdate) Clone() clonable.Clonable {
 }
 
 type LightClientBootstrap struct {
-	Header                     *LightClientHeader
-	CurrentSyncCommittee       *solid.SyncCommittee
-	CurrentSyncCommitteeBranch solid.HashVectorSSZ
+	Header                     *LightClientHeader   `json:"header"`
+	CurrentSyncCommittee       *solid.SyncCommittee `json:"current_sync_committee"`
+	CurrentSyncCommitteeBranch solid.HashVectorSSZ  `json:"current_sync_committee_branch"`
 }
 
 func NewLightClientBootstrap(version clparams.StateVersion) *LightClientBootstrap {
@@ -189,11 +189,11 @@ func (l *LightClientBootstrap) Clone() clonable.Clonable {
 }
 
 type LightClientFinalityUpdate struct {
-	AttestedHeader  *LightClientHeader
-	FinalizedHeader *LightClientHeader
-	FinalityBranch  solid.HashVectorSSZ
-	SyncAggregate   *SyncAggregate
-	SignatureSlot   uint64
+	AttestedHeader  *LightClientHeader  `json:"attested_header"`
+	FinalizedHeader *LightClientHeader  `json:"finalized_header"`
+	FinalityBranch  solid.HashVectorSSZ `json:"finality_branch"`
+	SyncAggregate   *SyncAggregate      `json:"sync_aggregate"`
+	SignatureSlot   uint64              `json:"signature_slot,string"`
 }
 
 func NewLightClientFinalityUpdate(version clparams.StateVersion) *LightClientFinalityUpdate {
@@ -245,9 +245,9 @@ func (l *LightClientFinalityUpdate) Clone() clonable.Clonable {
 }
 
 type LightClientOptimisticUpdate struct {
-	AttestedHeader *LightClientHeader
-	SyncAggregate  *SyncAggregate
-	SignatureSlot  uint64
+	AttestedHeader *LightClientHeader `json:"attested_header"`
+	SyncAggregate  *SyncAggregate     `json:"sync_aggregate"`
+	SignatureSlot  uint64             `json:"signature_slot,string"`
 }
 
 func NewLightClientOptimisticUpdate(version clparams.StateVersion) *LightClientOptimisticUpdate {
