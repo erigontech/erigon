@@ -3,7 +3,6 @@ package sync
 import (
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/stretchr/testify/require"
@@ -24,7 +23,7 @@ func (v *testValidatorSetInterface) IncrementProposerPriority(times int) {
 	v.sprintNum = times
 }
 
-func (v *testValidatorSetInterface) Difficulty(signer libcommon.Address) (uint64, error) {
+func (v *testValidatorSetInterface) GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error) {
 	var i int
 	for (i < len(v.signers)) && (v.signers[i] != signer) {
 		i++
@@ -38,6 +37,14 @@ func (v *testValidatorSetInterface) Difficulty(signer libcommon.Address) (uint64
 		delta = i + len(v.signers) - sprintOffset
 	}
 
+	return delta, nil
+}
+
+func (v *testValidatorSetInterface) Difficulty(signer libcommon.Address) (uint64, error) {
+	delta, err := v.GetSignerSuccessionNumber(signer, 0)
+	if err != nil {
+		return 0, nil
+	}
 	return uint64(len(v.signers) - delta), nil
 }
 
@@ -45,15 +52,13 @@ func TestSignerDifficulty(t *testing.T) {
 	borConfig := borcfg.BorConfig{
 		Sprint: map[string]uint64{"0": 16},
 	}
-	span := heimdallspan.HeimdallSpan{}
 	signers := []libcommon.Address{
 		libcommon.HexToAddress("00"),
 		libcommon.HexToAddress("01"),
 		libcommon.HexToAddress("02"),
 	}
 	validatorSetFactory := func() validatorSetInterface { return &testValidatorSetInterface{signers: signers} }
-	logger := log.New()
-	calc := NewDifficultyCalculator(&borConfig, &span, validatorSetFactory, logger).(*difficultyCalculatorImpl)
+	calc := NewDifficultyCalculator(&borConfig, nil, validatorSetFactory, nil).(*difficultyCalculatorImpl)
 
 	var d uint64
 
@@ -119,8 +124,7 @@ func TestSignerDifficulty(t *testing.T) {
 func TestHeaderDifficultyNoSignature(t *testing.T) {
 	borConfig := borcfg.BorConfig{}
 	span := heimdallspan.HeimdallSpan{}
-	logger := log.New()
-	calc := NewDifficultyCalculator(&borConfig, &span, nil, logger)
+	calc := NewDifficultyCalculator(&borConfig, &span, nil, nil)
 
 	_, err := calc.HeaderDifficulty(new(types.Header))
 	require.ErrorContains(t, err, "signature suffix missing")

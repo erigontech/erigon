@@ -3,6 +3,7 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -36,14 +37,19 @@ type canonicalChainBuilderImpl struct {
 	tip  *forkTreeNode
 
 	difficultyCalc DifficultyCalculator
+
+	headerTimeValidator HeaderTimeValidator
 }
 
 func NewCanonicalChainBuilder(
 	root *types.Header,
 	difficultyCalc DifficultyCalculator,
+	headerTimeValidator HeaderTimeValidator,
 ) CanonicalChainBuilder {
 	impl := &canonicalChainBuilderImpl{
 		difficultyCalc: difficultyCalc,
+
+		headerTimeValidator: headerTimeValidator,
 	}
 	impl.Reset(root)
 	return impl
@@ -198,9 +204,10 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 			return errors.New("canonicalChainBuilderImpl.Connect: invalid header.Number")
 		}
 
-		// TODO: validate using CalcProducerDelay
-		if header.Time <= parent.header.Time {
-			return errors.New("canonicalChainBuilderImpl.Connect: invalid header.Time")
+		if impl.headerTimeValidator != nil {
+			if err := impl.headerTimeValidator.ValidateHeaderTime(header, time.Now(), parent.header); err != nil {
+				return fmt.Errorf("canonicalChainBuilderImpl.Connect: invalid header.Time - %w", err)
+			}
 		}
 
 		if err := bor.ValidateHeaderExtraField(header.Extra); err != nil {
