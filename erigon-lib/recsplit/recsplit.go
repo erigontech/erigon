@@ -161,7 +161,10 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.baseDataID = args.BaseDataID
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
-		rs.etlBufLimit = etl.BufferOptimalSize
+		// reduce ram pressure, because:
+		//   - indexing done in background (or in many workers)
+		//   ` `recsplit` has 2 etl collectors
+		rs.etlBufLimit = etl.BufferOptimalSize / 4
 	}
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
