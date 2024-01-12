@@ -38,18 +38,18 @@ type canonicalChainBuilderImpl struct {
 
 	difficultyCalc DifficultyCalculator
 
-	headerTimeValidator HeaderTimeValidator
+	headerValidator HeaderValidator
 }
 
 func NewCanonicalChainBuilder(
 	root *types.Header,
 	difficultyCalc DifficultyCalculator,
-	headerTimeValidator HeaderTimeValidator,
+	headerValidator HeaderValidator,
 ) CanonicalChainBuilder {
 	impl := &canonicalChainBuilderImpl{
 		difficultyCalc: difficultyCalc,
 
-		headerTimeValidator: headerTimeValidator,
+		headerValidator: headerValidator,
 	}
 	impl.Reset(root)
 	return impl
@@ -204,14 +204,10 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 			return errors.New("canonicalChainBuilderImpl.Connect: invalid header.Number")
 		}
 
-		if impl.headerTimeValidator != nil {
-			if err := impl.headerTimeValidator.ValidateHeaderTime(header, time.Now(), parent.header); err != nil {
-				return fmt.Errorf("canonicalChainBuilderImpl.Connect: invalid header.Time - %w", err)
+		if impl.headerValidator != nil {
+			if err := impl.headerValidator.ValidateHeader(header, parent.header, time.Now()); err != nil {
+				return fmt.Errorf("canonicalChainBuilderImpl.Connect: invalid header error %w", err)
 			}
-		}
-
-		if err := bor.ValidateHeaderExtraField(header.Extra); err != nil {
-			return fmt.Errorf("canonicalChainBuilderImpl.Connect: invalid header.Extra %w", err)
 		}
 
 		difficulty, err := impl.difficultyCalc.HeaderDifficulty(header)

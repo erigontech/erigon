@@ -111,9 +111,9 @@ var (
 	// their extra-data fields.
 	errExtraValidators = errors.New("non-sprint-end block contains extra validator list")
 
-	// errInvalidSpanValidators is returned if a block contains an
+	// errInvalidSprintValidators is returned if a block contains an
 	// invalid list of validators (i.e. non divisible by 40 bytes).
-	errInvalidSpanValidators = errors.New("invalid validator list on sprint end block")
+	errInvalidSprintValidators = errors.New("invalid validator list on sprint end block")
 
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
@@ -479,7 +479,6 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	if header.Number == nil {
 		return errUnknownBlock
 	}
-
 	number := header.Number.Uint64()
 
 	// Don't waste time checking blocks from the future
@@ -487,23 +486,58 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return consensus.ErrFutureBlock
 	}
 
-	if err := ValidateHeaderExtraField(header.Extra); err != nil {
+	if err := ValidateHeaderUnusedFields(header); err != nil {
 		return err
 	}
 
-	// check extr adata
-	isSprintEnd := isSprintStart(number+1, c.config.CalculateSprintLength(number))
+	if err := ValidateHeaderExtraLength(header.Extra); err != nil {
+		return err
+	}
+	if err := ValidateHeaderSprintValidators(header, c.config); err != nil {
+		return err
+	}
 
-	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
-	signersBytes := len(GetValidatorBytes(header, c.config))
-	if !isSprintEnd && signersBytes != 0 {
+	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
+	if (number > 0) && (header.Difficulty == nil) {
+		return errInvalidDifficulty
+	}
+
+	// All basic checks passed, verify cascading fields
+	return c.verifyCascadingFields(chain, header, parents)
+}
+
+// ValidateHeaderExtraLength validates that the extra-data contains both the vanity and signature.
+// header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
+func ValidateHeaderExtraLength(extraBytes []byte) error {
+	if len(extraBytes) < types.ExtraVanityLength {
+		return errMissingVanity
+	}
+
+	if len(extraBytes) < types.ExtraVanityLength+types.ExtraSealLength {
+		return errMissingSignature
+	}
+
+	return nil
+}
+
+// ValidateHeaderSprintValidators validates that the extra-data contains a validators list only in the last header of a sprint.
+func ValidateHeaderSprintValidators(header *types.Header, config *borcfg.BorConfig) error {
+	number := header.Number.Uint64()
+	isSprintEnd := isSprintStart(number+1, config.CalculateSprintLength(number))
+	validatorBytes := GetValidatorBytes(header, config)
+	validatorBytesLen := len(validatorBytes)
+
+	if !isSprintEnd && (validatorBytesLen != 0) {
 		return errExtraValidators
 	}
-
-	if isSprintEnd && signersBytes%validatorHeaderBytesLength != 0 {
-		return errInvalidSpanValidators
+	if isSprintEnd && (validatorBytesLen%validatorHeaderBytesLength != 0) {
+		return errInvalidSprintValidators
 	}
+	return nil
+}
 
+// ValidateHeaderUnusedFields validates that unused fields are empty.
+func ValidateHeaderUnusedFields(header *types.Header) error {
 	// Ensure that the mix digest is zero as we don't have fork protection currently
 	if header.MixDigest != (libcommon.Hash{}) {
 		return errInvalidMixDigest
@@ -514,35 +548,8 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return errInvalidUncleHash
 	}
 
-	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
-	if number > 0 {
-		if header.Difficulty == nil {
-			return errInvalidDifficulty
-		}
-	}
-
-	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
-	}
-
 	if header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
-	}
-
-	// All basic checks passed, verify cascading fields
-	return c.verifyCascadingFields(chain, header, parents)
-}
-
-// ValidateHeaderExtraField validates that the extra-data contains both the vanity and signature.
-// header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
-func ValidateHeaderExtraField(extraBytes []byte) error {
-	if len(extraBytes) < types.ExtraVanityLength {
-		return errMissingVanity
-	}
-
-	if len(extraBytes) < types.ExtraVanityLength+types.ExtraSealLength {
-		return errMissingSignature
 	}
 
 	return nil
@@ -573,12 +580,30 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		return consensus.ErrUnknownAncestor
 	}
 
+	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
+		return ErrInvalidTimestamp
+	}
+
+	return ValidateHeaderGas(header, parent, chain.Config())
+}
+
+// ValidateHeaderGas validates GasUsed, GasLimit and BaseFee.
+func ValidateHeaderGas(header *types.Header, parent *types.Header, chainConfig *chain.Config) error {
+	// Verify that the gas limit is <= 2^63-1
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	}
+
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
 		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
 	}
 
-	if !chain.Config().IsLondon(header.Number.Uint64()) {
+	if parent == nil {
+		return nil
+	}
+
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		// Verify BaseFee not present before EIP-1559 fork.
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, want <nil>", header.BaseFee)
@@ -586,14 +611,11 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 			return err
 		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false /*skipGasLimit*/); err != nil {
+	} else if err := misc.VerifyEip1559Header(chainConfig, parent, header, false /*skipGasLimit*/); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
 
-	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
-		return ErrInvalidTimestamp
-	}
 	return nil
 }
 
