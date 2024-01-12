@@ -71,8 +71,7 @@ func (l *LightClientHeader) getSchema() []interface{} {
 		l.Beacon,
 	}
 	if l.version >= clparams.CapellaVersion {
-		schema = append(schema, l.ExecutionPayloadHeader)
-		schema = append(schema, l.ExecutionBranch)
+		schema = append(schema, l.ExecutionPayloadHeader, l.ExecutionBranch)
 	}
 	return schema
 }
