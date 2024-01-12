@@ -162,7 +162,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
 		// reduce ram pressure, because:
-		//   - indexing done in background (or in many workers)
+		//   - indexing done in background or in many workers (building many indices in-parallel)
 		//   - `recsplit` has 2 etl collectors
 		//   - `rescplit` building is cpu-intencive and bottleneck is not in etl loading
 		rs.etlBufLimit = etl.BufferOptimalSize / 8
