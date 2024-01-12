@@ -17,8 +17,7 @@ tests:
       data:
         hello: worlds
     compare:
-      neg: true
-      expr: "actual == expect"
+      expr: "actual != expect"
   - name: "subkey world"
     expect:
       data:
@@ -43,7 +42,7 @@ tests:
       data:
         hello: worlds
     compare:
-      neg: true
+      expr: "actual != expect"
   - name: "key order doesnt matter for non literal"
     expect:
       data:
@@ -60,4 +59,4 @@ tests:
       raw: '{"b":2,"a":1}'
     compare:
       literal: true
-      neg: true
+      expr: "actual != expect"

@@ -187,7 +187,6 @@ func (c *Test) Execute(ctx context.Context, t *testing.T) error {
 }
 
 type Comparison struct {
-	Negate  bool     `json:"neg"`
 	Expr    string   `json:"expr"`
 	Exprs   []string `json:"exprs"`
 	Literal bool     `json:"literal"`
@@ -275,7 +274,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		if !ok {
 			return ErrExpressionMustReturnBool
 		}
-		if !assert.Equal(t, bres, !c.Negate, `expr: %s`, expr) {
+		if !assert.Equal(t, bres, true, `expr: %s`, expr) {
 			if os.Getenv("HIDE_HARNESS_LOG") != "1" {
 				t.Logf(`name: %s
 				expect%d: %v

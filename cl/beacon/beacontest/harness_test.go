@@ -12,5 +12,8 @@ import (
 var testData []byte
 
 func TestSimpleHarness(t *testing.T) {
-	beacontest.ExecuteBytes(t, testData)
+	beacontest.Execute(
+		beacontest.WithTesting(t),
+		beacontest.WithTestFromBytes("test", testData),
+	)
 }
