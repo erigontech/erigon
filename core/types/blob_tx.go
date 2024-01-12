@@ -1,6 +1,7 @@
 package types
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -47,13 +48,48 @@ func (stx BlobTx) GetBlobGas() uint64 {
 }
 
 func (stx BlobTx) AsMessage(s Signer, baseFee *big.Int, rules *chain.Rules) (Message, error) {
-	msg, err := stx.DynamicFeeTransaction.AsMessage(s, baseFee, rules)
-	if err != nil {
-		return Message{}, err
+	msg := Message{
+		nonce:      stx.Nonce,
+		gasLimit:   stx.Gas,
+		gasPrice:   *stx.FeeCap,
+		tip:        *stx.Tip,
+		feeCap:     *stx.FeeCap,
+		to:         stx.To,
+		amount:     *stx.Value,
+		data:       stx.Data,
+		accessList: stx.AccessList,
+		checkNonce: true,
 	}
+	if !rules.IsCancun {
+		return msg, errors.New("BlobTx transactions require Cancun")
+	}
+	if baseFee != nil {
+		overflow := msg.gasPrice.SetFromBig(baseFee)
+		if overflow {
+			return msg, fmt.Errorf("gasPrice higher than 2^256-1")
+		}
+	}
+	msg.gasPrice.Add(&msg.gasPrice, stx.Tip)
+	if msg.gasPrice.Gt(stx.FeeCap) {
+		msg.gasPrice.Set(stx.FeeCap)
+	}
+	var err error
+	msg.from, err = stx.Sender(s)
 	msg.maxFeePerBlobGas = *stx.MaxFeePerBlobGas
 	msg.blobHashes = stx.BlobVersionedHashes
 	return msg, err
+}
+
+func (stx *BlobTx) Sender(signer Signer) (libcommon.Address, error) {
+	if sc := stx.from.Load(); sc != nil {
+		return sc.(libcommon.Address), nil
+	}
+	addr, err := signer.Sender(stx)
+	if err != nil {
+		return libcommon.Address{}, err
+	}
+	stx.from.Store(addr)
+	return addr, nil
 }
 
 func (stx BlobTx) Hash() libcommon.Hash {
