@@ -59,8 +59,10 @@ var (
 	constantinopleInstructionSet   = newConstantinopleInstructionSet()
 	istanbulInstructionSet         = newIstanbulInstructionSet()
 	berlinInstructionSet           = newBerlinInstructionSet()
-	rohanInstructionSet            = newRohanInstructionSet()
-	mordorInstructionSet           = newMordorInstructionSet()
+	londonInstructionSet           = newLondonInstructionSet()
+	shanghaiInstructionSet         = newShanghaiInstructionSet()
+	cancunInstructionSet           = newCancunInstructionSet()
+	pragueInstructionSet           = newPragueInstructionSet()
 )
 
 // JumpTable contains the EVM opcodes supported at a given fork.
@@ -83,38 +85,41 @@ func validateAndFillMaxStack(jt *JumpTable) {
 		op.maxStack = maxStack(op.numPop, op.numPush)
 	}
 }
-func newMordorInstructionSet() JumpTable {
-	instructionSet := newRohanInstructionSet()
 
-	instructionSet[CALLDATACOPY].execute = opCallDataCopyFixed
-	instructionSet[CALLDATALOAD].execute = opCallDataLoadFixed
-	instructionSet[STATICCALL].execute = opStaticCallForkId5
-
-	enable3855(&instructionSet) // EIP-3855: Enable PUSH0 opcode
-
+// newPragueInstructionSet returns the frontier, homestead, byzantium,
+// constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
+// cancun, and prague instructions.
+func newPragueInstructionSet() JumpTable {
+	instructionSet := newCancunInstructionSet()
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }
 
-func newRohanInstructionSet() JumpTable {
+// newCancunInstructionSet returns the frontier, homestead, byzantium,
+// constantinople, istanbul, petersburg, berlin, london, paris, shanghai,
+// and cancun instructions.
+func newCancunInstructionSet() JumpTable {
+	instructionSet := newShanghaiInstructionSet()
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+// newShanghaiInstructionSet returns the frontier, homestead, byzantium,
+// constantinople, istanbul, petersburg, berlin, london, paris, and shanghai instructions.
+func newShanghaiInstructionSet() JumpTable {
+	instructionSet := newLondonInstructionSet()
+	enable3855(&instructionSet) // PUSH0 instruction https://eips.ethereum.org/EIPS/eip-3855
+	enable3860(&instructionSet) // Limit and meter initcode https://eips.ethereum.org/EIPS/eip-3860
+	validateAndFillMaxStack(&instructionSet)
+	return instructionSet
+}
+
+// newLondonInstructionSet returns the frontier, homestead, byzantium,
+// constantinople, istanbul, petersburg, berlin, and london instructions.
+func newLondonInstructionSet() JumpTable {
 	instructionSet := newBerlinInstructionSet()
-
-	instructionSet[NUMBER].execute = opNumberV2
-
-	instructionSet[DIFFICULTY].execute = opDifficultyV2
-
-	instructionSet[BLOCKHASH].execute = opBlockhashV2
-
-	instructionSet[EXTCODEHASH].execute = opExtCodeHashV2
-	instructionSet[SELFDESTRUCT].execute = opSendAll
-
-	instructionSet[SENDALL] = &operation{
-		execute:    opSendAll,
-		dynamicGas: gasSelfdestruct,
-		numPop:     1,
-		numPush:    0,
-	}
-
+	enable3529(&instructionSet) // Reduction in refunds https://eips.ethereum.org/EIPS/eip-3529
+	enable3198(&instructionSet) // Base fee opcode https://eips.ethereum.org/EIPS/eip-3198
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
 }

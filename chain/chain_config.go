@@ -393,6 +393,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
 	IsEip1559FeeCollector, IsAura, IsMordor                 bool
+	IsZkEVMForkID4                                          bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance

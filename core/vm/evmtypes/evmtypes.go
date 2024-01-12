@@ -56,7 +56,6 @@ type (
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
 	CreateAccount(libcommon.Address, bool)
-	GetTxCount() (uint64, error)
 
 	SubBalance(libcommon.Address, *uint256.Int)
 	AddBalance(libcommon.Address, *uint256.Int)

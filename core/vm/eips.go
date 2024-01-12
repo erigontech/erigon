@@ -149,7 +149,6 @@ func enable2929(jt *JumpTable) {
 	// factor here
 	jt[SELFDESTRUCT].constantGas = params.SelfdestructGasEIP150
 	jt[SELFDESTRUCT].dynamicGas = gasSelfdestructEIP2929
-	jt[SENDALL].dynamicGas = gasSelfdestructEIP2929
 }
 
 func enable3529(jt *JumpTable) {

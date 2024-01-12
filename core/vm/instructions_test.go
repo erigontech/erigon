@@ -245,7 +245,7 @@ func TestBlockhashV2(t *testing.T) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{GetHash: gethashFn}, evmtypes.TxContext{}, TestIntraBlockState{}, params.TestChainConfig, Config{})
 		stack          = stack.New()
-		evmInterpreter = NewEVMInterpreter(env, env.Config())
+		evmInterpreter = NewZKEVMInterpreter(env, env.Config())
 		pc             = uint64(0)
 	)
 
@@ -270,7 +270,7 @@ func TestBlockhashV2(t *testing.T) {
 		blockNumberBytes := new(uint256.Int).SetUint64(test.blockNumber)
 		stack.Push(blockNumberBytes)
 
-		opBlockhashV2(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opBlockhash_zkevm(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
 		actual := stack.Pop()
 
 		fmt.Println(actual)
@@ -303,7 +303,7 @@ func TestDifficultyV2(t *testing.T) {
 	for i, test := range tests {
 		expected := new(uint256.Int).SetBytes(test.expected.Bytes())
 
-		opDifficultyV2(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opDifficulty_zkevm(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
 		actual := stack.Pop()
 
 		if actual.Cmp(expected) != 0 {
@@ -334,7 +334,7 @@ func TestExtCodeHashV2(t *testing.T) {
 		address := new(uint256.Int).SetBytes(common.Hex2Bytes(test.address))
 		expected := new(uint256.Int).SetBytes(test.expected.Bytes())
 		stack.Push(address)
-		opExtCodeHashV2(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
+		opExtCodeHash_zkevm(&pc, evmInterpreter, &ScopeContext{nil, stack, nil})
 		actual := stack.Pop()
 		if actual.Cmp(expected) != 0 {
 			t.Errorf("Testcase %d, expected  %x, got %x", i, expected, actual)
