@@ -166,7 +166,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	pks := [][]byte{}
 	inds.Range(func(_ int, v uint64, _ int) bool {
-		if v < uint64(len(c.anchorPublicKeys)) {
+		if v < uint64(len(c.anchorPublicKeys))/length.Bytes48 {
 			pks = append(pks, c.anchorPublicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
 		} else {
 			offset := uint64(len(c.anchorPublicKeys) / length.Bytes48)

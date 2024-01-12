@@ -5,12 +5,12 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/maticnetwork/crand"
+	"github.com/stretchr/testify/require"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/maticnetwork/crand"
-	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -21,7 +21,7 @@ func TestGetSignerSuccessionNumber_ProposerIsSigner(t *testing.T) {
 	t.Parallel()
 
 	validators := buildRandomValidatorSet(numVals)
-	validatorSet := valset.NewValidatorSet(validators, log.New())
+	validatorSet := valset.NewValidatorSet(validators)
 	snap := bor.Snapshot{
 		ValidatorSet: validatorSet,
 	}
@@ -49,7 +49,7 @@ func TestGetSignerSuccessionNumber_SignerIndexIsLarger(t *testing.T) {
 	// give highest ProposerPriority to a particular val, so that they become the proposer
 	validators[proposerIndex].VotingPower = 200
 	snap := bor.Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
 
 	// choose a signer at an index greater than proposer index
@@ -71,7 +71,7 @@ func TestGetSignerSuccessionNumber_SignerIndexIsSmaller(t *testing.T) {
 	// give highest ProposerPriority to a particular val, so that they become the proposer
 	validators[proposerIndex].VotingPower = 200
 	snap := bor.Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
 
 	// choose a signer at an index greater than proposer index
@@ -89,7 +89,7 @@ func TestGetSignerSuccessionNumber_ProposerNotFound(t *testing.T) {
 
 	validators := buildRandomValidatorSet(numVals)
 	snap := bor.Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
 
 	dummyProposerAddress := randomAddress()
@@ -101,7 +101,7 @@ func TestGetSignerSuccessionNumber_ProposerNotFound(t *testing.T) {
 	_, err := snap.GetSignerSuccessionNumber(signer)
 	require.NotNil(t, err)
 
-	e, ok := err.(*bor.UnauthorizedProposerError)
+	e, ok := err.(*valset.UnauthorizedProposerError)
 	require.True(t, ok)
 	require.Equal(t, dummyProposerAddress.Bytes(), e.Proposer)
 }
@@ -111,14 +111,14 @@ func TestGetSignerSuccessionNumber_SignerNotFound(t *testing.T) {
 
 	validators := buildRandomValidatorSet(numVals)
 	snap := bor.Snapshot{
-		ValidatorSet: valset.NewValidatorSet(validators, log.New()),
+		ValidatorSet: valset.NewValidatorSet(validators),
 	}
 
 	dummySignerAddress := randomAddress()
 	_, err := snap.GetSignerSuccessionNumber(dummySignerAddress)
 	require.NotNil(t, err)
 
-	e, ok := err.(*bor.UnauthorizedSignerError)
+	e, ok := err.(*valset.UnauthorizedSignerError)
 	require.True(t, ok)
 	require.Equal(t, dummySignerAddress.Bytes(), e.Signer)
 }

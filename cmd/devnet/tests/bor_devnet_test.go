@@ -1,24 +1,22 @@
 //go:build integration
 
-package bor
+package tests
 
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	accounts_steps "github.com/ledgerwatch/erigon/cmd/devnet/accounts/steps"
 	contracts_steps "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/tests"
-	"github.com/stretchr/testify/require"
 )
 
 func TestStateSync(t *testing.T) {
-	t.Skip("FIXME: hangs in GenerateSyncEvents without any visible progress")
-
-	runCtx, err := tests.ContextStart(t, networkname.BorDevnetChainName)
+	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx
 
@@ -57,7 +55,7 @@ func TestStateSync(t *testing.T) {
 func TestChildChainExit(t *testing.T) {
 	t.Skip("FIXME: step CreateAccountWithFunds fails: Failed to get transfer tx: failed to search reserves for hashes: no block heads subscription")
 
-	runCtx, err := tests.ContextStart(t, networkname.BorDevnetChainName)
+	runCtx, err := ContextStart(t, networkname.BorDevnetChainName)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx
 

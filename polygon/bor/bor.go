@@ -111,9 +111,9 @@ var (
 	// their extra-data fields.
 	errExtraValidators = errors.New("non-sprint-end block contains extra validator list")
 
-	// errInvalidSpanValidators is returned if a block contains an
+	// errInvalidSprintValidators is returned if a block contains an
 	// invalid list of validators (i.e. non divisible by 40 bytes).
-	errInvalidSpanValidators = errors.New("invalid validator list on sprint end block")
+	errInvalidSprintValidators = errors.New("invalid validator list on sprint end block")
 
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
@@ -226,6 +226,48 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	return delay
 }
 
+func MinNextBlockTime(parent *types.Header, succession int, config *borcfg.BorConfig) uint64 {
+	return parent.Time + CalcProducerDelay(parent.Number.Uint64()+1, succession, config)
+}
+
+// ValidateHeaderTimeSignerSuccessionNumber - valset.ValidatorSet abstraction for unit tests
+type ValidateHeaderTimeSignerSuccessionNumber interface {
+	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
+}
+
+func ValidateHeaderTime(
+	header *types.Header,
+	now time.Time,
+	parent *types.Header,
+	validatorSet ValidateHeaderTimeSignerSuccessionNumber,
+	config *borcfg.BorConfig,
+	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
+) error {
+	if header.Time > uint64(now.Unix()) {
+		return consensus.ErrFutureBlock
+	}
+
+	if parent == nil {
+		return nil
+	}
+
+	signer, err := Ecrecover(header, signaturesCache, config)
+	if err != nil {
+		return err
+	}
+
+	succession, err := validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
+	if err != nil {
+		return err
+	}
+
+	if header.Time < MinNextBlockTime(parent, succession, config) {
+		return &BlockTooSoonError{header.Number.Uint64(), succession}
+	}
+
+	return nil
+}
+
 // BorRLP returns the rlp bytes which needs to be signed for the bor
 // sealing. The RLP to sign consists of the entire header apart from the 65 byte signature
 // contained at the end of the extra data.
@@ -316,7 +358,7 @@ func New(
 		libcommon.Address{},
 		func(_ libcommon.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &UnauthorizedSignerError{0, libcommon.Address{}.Bytes()}
+			return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: libcommon.Address{}.Bytes()}
 		},
 	})
 
@@ -437,7 +479,6 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	if header.Number == nil {
 		return errUnknownBlock
 	}
-
 	number := header.Number.Uint64()
 
 	// Don't waste time checking blocks from the future
@@ -445,23 +486,58 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return consensus.ErrFutureBlock
 	}
 
-	if err := ValidateHeaderExtraField(header.Extra); err != nil {
+	if err := ValidateHeaderUnusedFields(header); err != nil {
 		return err
 	}
 
-	// check extr adata
-	isSprintEnd := isSprintStart(number+1, c.config.CalculateSprintLength(number))
+	if err := ValidateHeaderExtraLength(header.Extra); err != nil {
+		return err
+	}
+	if err := ValidateHeaderSprintValidators(header, c.config); err != nil {
+		return err
+	}
 
-	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
-	signersBytes := len(GetValidatorBytes(header, c.config))
-	if !isSprintEnd && signersBytes != 0 {
+	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
+	if (number > 0) && (header.Difficulty == nil) {
+		return errInvalidDifficulty
+	}
+
+	// All basic checks passed, verify cascading fields
+	return c.verifyCascadingFields(chain, header, parents)
+}
+
+// ValidateHeaderExtraLength validates that the extra-data contains both the vanity and signature.
+// header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
+func ValidateHeaderExtraLength(extraBytes []byte) error {
+	if len(extraBytes) < types.ExtraVanityLength {
+		return errMissingVanity
+	}
+
+	if len(extraBytes) < types.ExtraVanityLength+types.ExtraSealLength {
+		return errMissingSignature
+	}
+
+	return nil
+}
+
+// ValidateHeaderSprintValidators validates that the extra-data contains a validators list only in the last header of a sprint.
+func ValidateHeaderSprintValidators(header *types.Header, config *borcfg.BorConfig) error {
+	number := header.Number.Uint64()
+	isSprintEnd := isSprintStart(number+1, config.CalculateSprintLength(number))
+	validatorBytes := GetValidatorBytes(header, config)
+	validatorBytesLen := len(validatorBytes)
+
+	if !isSprintEnd && (validatorBytesLen != 0) {
 		return errExtraValidators
 	}
-
-	if isSprintEnd && signersBytes%validatorHeaderBytesLength != 0 {
-		return errInvalidSpanValidators
+	if isSprintEnd && (validatorBytesLen%validatorHeaderBytesLength != 0) {
+		return errInvalidSprintValidators
 	}
+	return nil
+}
 
+// ValidateHeaderUnusedFields validates that unused fields are empty.
+func ValidateHeaderUnusedFields(header *types.Header) error {
 	// Ensure that the mix digest is zero as we don't have fork protection currently
 	if header.MixDigest != (libcommon.Hash{}) {
 		return errInvalidMixDigest
@@ -472,35 +548,8 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return errInvalidUncleHash
 	}
 
-	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
-	if number > 0 {
-		if header.Difficulty == nil {
-			return errInvalidDifficulty
-		}
-	}
-
-	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
-	}
-
 	if header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
-	}
-
-	// All basic checks passed, verify cascading fields
-	return c.verifyCascadingFields(chain, header, parents)
-}
-
-// ValidateHeaderExtraField validates that the extra-data contains both the vanity and signature.
-// header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
-func ValidateHeaderExtraField(extraBytes []byte) error {
-	if len(extraBytes) < types.ExtraVanityLength {
-		return errMissingVanity
-	}
-
-	if len(extraBytes) < types.ExtraVanityLength+types.ExtraSealLength {
-		return errMissingSignature
 	}
 
 	return nil
@@ -531,12 +580,30 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		return consensus.ErrUnknownAncestor
 	}
 
+	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
+		return ErrInvalidTimestamp
+	}
+
+	return ValidateHeaderGas(header, parent, chain.Config())
+}
+
+// ValidateHeaderGas validates GasUsed, GasLimit and BaseFee.
+func ValidateHeaderGas(header *types.Header, parent *types.Header, chainConfig *chain.Config) error {
+	// Verify that the gas limit is <= 2^63-1
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	}
+
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
 		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
 	}
 
-	if !chain.Config().IsLondon(header.Number.Uint64()) {
+	if parent == nil {
+		return nil
+	}
+
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		// Verify BaseFee not present before EIP-1559 fork.
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, want <nil>", header.BaseFee)
@@ -544,14 +611,11 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 			return err
 		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false /*skipGasLimit*/); err != nil {
+	} else if err := misc.VerifyEip1559Header(chainConfig, parent, header, false /*skipGasLimit*/); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
 
-	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
-		return ErrInvalidTimestamp
-	}
 	return nil
 }
 
@@ -768,21 +832,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	if number == 0 {
 		return errUnknownBlock
 	}
-	// Resolve the authorization key and check against signers
-	signer, err := Ecrecover(header, c.Signatures, c.config)
-	if err != nil {
-		return err
-	}
-
-	if !snap.ValidatorSet.HasAddress(signer) {
-		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
-	}
-
-	succession, err := snap.GetSignerSuccessionNumber(signer)
-	if err != nil {
-		return err
-	}
 
 	var parent *types.Header
 	if len(parents) > 0 { // if parents is nil, len(parents) is zero
@@ -791,12 +840,17 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
 
-	if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, c.config) {
-		return &BlockTooSoonError{number, succession}
+	if err := ValidateHeaderTime(header, time.Now(), parent, snap.ValidatorSet, c.config, c.Signatures); err != nil {
+		return err
 	}
 
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.fakeDiff {
+		signer, err := Ecrecover(header, c.Signatures, c.config)
+		if err != nil {
+			return err
+		}
+
 		difficulty := snap.Difficulty(signer)
 		if header.Difficulty.Uint64() != difficulty {
 			return &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
@@ -804,10 +858,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	}
 
 	return nil
-}
-
-func IsBlockOnTime(parent *types.Header, header *types.Header, number uint64, succession int, cfg *borcfg.BorConfig) bool {
-	return parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, cfg)
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
@@ -901,15 +951,16 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	}
 
 	var succession int
+	signer := c.authorizedSigner.Load().signer
 	// if signer is not empty
-	if signer := c.authorizedSigner.Load().signer; !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
-		succession, err = snap.GetSignerSuccessionNumber(signer)
+	if !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		succession, err = snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 		if err != nil {
 			return err
 		}
 	}
 
-	header.Time = parent.Time + CalcProducerDelay(number, succession, c.config)
+	header.Time = MinNextBlockTime(parent, succession, c.config)
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
@@ -1082,13 +1133,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		return err
 	}
 
-	// Bail out if we're unauthorized to sign a block
-	if !snap.ValidatorSet.HasAddress(signer) {
-		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
-	}
-
-	successionNumber, err := snap.GetSignerSuccessionNumber(signer)
+	successionNumber, err := snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 	if err != nil {
 		return err
 	}
@@ -1112,11 +1157,13 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		select {
 		case <-stop:
 			c.logger.Info("[bor] Stopped sealing operation for block", "number", number)
+			results <- nil
 			return
 		case <-time.After(delay):
 
 			if c.headerProgress != nil && c.headerProgress.Progress() >= number {
 				c.logger.Info("Discarding sealing operation for block", "number", number)
+				results <- nil
 				return
 			}
 
@@ -1174,7 +1221,6 @@ func (c *Bor) IsValidator(header *types.Header) (bool, error) {
 // IsProposer returns true if this instance is the proposer for this block
 func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 	number := header.Number.Uint64()
-
 	if number == 0 {
 		return false, nil
 	}
@@ -1184,14 +1230,8 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 		return false, err
 	}
 
-	currentSigner := c.authorizedSigner.Load()
-
-	if !snap.ValidatorSet.HasAddress(currentSigner.signer) {
-		return false, nil
-	}
-
-	successionNumber, err := snap.GetSignerSuccessionNumber(currentSigner.signer)
-
+	signer := c.authorizedSigner.Load().signer
+	successionNumber, err := snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 	return successionNumber == 0, err
 }
 
@@ -1494,7 +1534,7 @@ func getUpdatedValidatorSet(oldValidatorSet *valset.ValidatorSet, newVals []*val
 		}
 	}
 
-	if err := v.UpdateWithChangeSet(changes, logger); err != nil {
+	if err := v.UpdateWithChangeSet(changes); err != nil {
 		logger.Error("[bor] Error while updating change set", "error", err)
 	}
 

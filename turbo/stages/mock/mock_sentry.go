@@ -608,6 +608,12 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		return nil
 	}
 
+	for i := 0; i < chain.Length(); i++ {
+		if err := chain.Blocks[i].HashCheck(); err != nil {
+			return err
+		}
+	}
+
 	// Send NewBlock message
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: chain.Blocks[n-1],
