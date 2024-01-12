@@ -39,8 +39,6 @@ import (
 	"github.com/google/btree"
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon/consensus/misc"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -227,11 +225,17 @@ type TxPool struct {
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	maxBlobsPerBlock        uint64
+	feeCalculator           FeeCalculator
 	logger                  log.Logger
 }
 
+type FeeCalculator interface {
+	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice uint64, err error)
+}
+
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64, logger log.Logger,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64,
+	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -277,6 +281,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		minedBlobTxsByBlock:     map[uint64][]*metaTx{},
 		minedBlobTxsByHash:      map[string]*metaTx{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
+		feeCalculator:           feeCalculator,
 		logger:                  logger,
 	}
 
@@ -2073,30 +2078,12 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		i++
 	}
 
-	var pendingBaseFee uint64
-	var pendingBlobFee uint64 = 1 // MIN_BLOB_GAS_PRICE A/EIP-4844
-	var minBlobGasPrice uint64
+	var pendingBaseFee, pendingBlobFee, minBlobGasPrice uint64
 
-	currentBlock, err := freezeblocks.NewBlockReader(nil, nil).CurrentBlock(coreTx)
-
-	if err == nil {
-		chainConfig, _ := ChainConfig(tx)
-
-		if chainConfig != nil {
-			if currentBlock.BaseFee() != nil {
-				pendingBaseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
-			}
-
-			if currentBlock.Header().ExcessBlobGas != nil {
-				excessBlobGas := misc.CalcExcessBlobGas(chainConfig, currentBlock.Header())
-				b, err := misc.GetBlobGasPrice(chainConfig, excessBlobGas)
-				if err == nil {
-					pendingBlobFee = b.Uint64()
-				}
-			}
+	if p.feeCalculator != nil {
+		if chainConfig, _ := ChainConfig(tx); chainConfig != nil {
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, _ = p.feeCalculator.CurrentFees(chainConfig, coreTx)
 		}
-
-		minBlobGasPrice = chainConfig.GetMinBlobGasPrice()
 	}
 
 	if pendingBaseFee == 0 {
@@ -2134,6 +2121,9 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.pendingBlobFee.Store(pendingBlobFee)
 	return nil
+}
+
+type header interface {
 }
 
 func getExecutionProgress(db kv.Getter) (uint64, error) {
