@@ -170,12 +170,6 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	fetch.ConnectCore()
 	fetch.ConnectSentries()
 
-	/*
-		var ethashApi *ethash.API
-		sif casted, ok := backend.engine.(*ethash.Ethash); ok {
-			ethashApi = casted.APIs(nil)[1].Service.(*ethash.API)
-		}
-	*/
 	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
 
 	grpcServer, err := txpool.StartGrpc(txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)

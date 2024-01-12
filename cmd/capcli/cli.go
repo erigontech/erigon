@@ -796,7 +796,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		freezeblocks.NewBlockReader(
 			freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root()),
 			freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root())),
-		params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
+		params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer), []string{})
 }
 
 type RetrieveHistoricalState struct {

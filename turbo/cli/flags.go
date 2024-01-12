@@ -156,7 +156,7 @@ var (
 	}
 
 	SyncLoopBreakAfterFlag = cli.StringFlag{
-		Name:  "sync.loop.break",
+		Name:  "sync.loop.break.after",
 		Usage: "Sets the last stage of the sync loop to run",
 		Value: "",
 	}
@@ -478,7 +478,7 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 	}
 
 	if c.Enabled {
-		logger.Info("starting HTTP APIs", "APIs", apis)
+		logger.Info("starting HTTP APIs", "port", c.HttpPort, "APIs", apis)
 	}
 
 	if ctx.IsSet(utils.HttpCompressionFlag.Name) {

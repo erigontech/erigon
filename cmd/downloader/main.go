@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -60,8 +59,10 @@ var (
 	datadirCli, chain              string
 	filePath                       string
 	forceRebuild                   bool
-	forceVerify                    bool
-	forceVerifyFiles               []string
+	verify                         bool
+	verifyFailfast                 bool
+	_verifyFiles                   string
+	verifyFiles                    []string
 	downloaderApiAddr              string
 	natSetting                     string
 	torrentVerbosity               int
@@ -96,8 +97,9 @@ func init() {
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
-	rootCmd.PersistentFlags().BoolVar(&forceVerify, "verify", false, "Verify files. All by default, or passed by --verify.files")
-	rootCmd.PersistentFlags().StringArrayVar(&forceVerifyFiles, "verify.files", nil, "Limit list of files to verify")
+	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
+	rootCmd.PersistentFlags().StringVar(&_verifyFiles, "verify.files", "", "Limit list of files to verify")
+	rootCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
 
 	withDataDir(createTorrent)
 	withFile(createTorrent)
@@ -191,7 +193,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	cfg.ClientConfig.PieceHashersPerTorrent = 32 * runtime.NumCPU()
+	cfg.ClientConfig.PieceHashersPerTorrent = 32
 	cfg.ClientConfig.DisableIPv6 = disableIPV6
 	cfg.ClientConfig.DisableIPv4 = disableIPV4
 
@@ -210,19 +212,11 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	if forceVerify { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, forceVerifyFiles); err != nil {
-			return err
-		}
-		logger.Info("[snapshots] Verify done")
-		return nil
-	}
-
-	d.MainLoopInBackground(false)
-
 	if err := addPreConfiguredHashes(ctx, d); err != nil {
 		return err
 	}
+
+	d.MainLoopInBackground(false)
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
 	if err != nil {
@@ -234,6 +228,15 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 	defer grpcServer.GracefulStop()
+
+	if len(_verifyFiles) > 0 {
+		verifyFiles = strings.Split(_verifyFiles, ",")
+	}
+	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
+		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+			return err
+		}
+	}
 
 	<-ctx.Done()
 	return nil
@@ -277,23 +280,6 @@ var manifestCmd = &cobra.Command{
 	},
 }
 
-var torrentVerify = &cobra.Command{
-	Use:     "torrent_verify",
-	Example: "go run ./cmd/downloader torrent_verify <path_to_torrent_file>",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			return fmt.Errorf("please pass .torrent file path by first argument")
-		}
-		fPath := args[0]
-		mi, err := metainfo.LoadFromFile(fPath)
-		if err != nil {
-			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
-		}
-
-		fmt.Printf("%s\n", mi.HashInfoBytes())
-		return nil
-	},
-}
 var torrentCat = &cobra.Command{
 	Use:     "torrent_cat",
 	Example: "go run ./cmd/downloader torrent_cat <path_to_torrent_file>",
@@ -306,8 +292,13 @@ var torrentCat = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
 		}
-
-		fmt.Printf("%s\n", mi.HashInfoBytes())
+		fmt.Printf("InfoHash = '%x'\n", mi.HashInfoBytes())
+		mi.InfoBytes = nil
+		bytes, err := toml.Marshal(mi)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("%s\n", string(bytes))
 		return nil
 	},
 }
@@ -407,7 +398,10 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 
 	for _, t := range torrents {
 		// we don't release commitment history in this time. let's skip it here.
-		if strings.HasPrefix(t.DisplayName, "history/v1-commitment") || strings.HasPrefix(t.DisplayName, "idx/v1-commitment") {
+		if strings.Contains(t.DisplayName, "history") && strings.Contains(t.DisplayName, "commitment") {
+			continue
+		}
+		if strings.Contains(t.DisplayName, "idx") && strings.Contains(t.DisplayName, "commitment") {
 			continue
 		}
 		res[t.DisplayName] = t.InfoHash.String()

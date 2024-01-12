@@ -33,6 +33,11 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -42,10 +47,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
@@ -487,54 +488,35 @@ func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]
 	return rates, averageRate
 }
 
-func VerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-t.GotInfo():
-	}
-
-	g := &errgroup.Group{}
-	for i := 0; i < t.NumPieces(); i++ {
-		i := i
-		g.Go(func() error {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-			}
-
-			t.Piece(i).VerifyData()
-			completePieces.Add(1)
-			return nil
-		})
-		//<-t.Complete.On()
-	}
-	return g.Wait()
-}
-
-func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
+func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFast bool) error {
 	total := 0
-	_torrents := d.torrentClient.Torrents()
-	torrents := make([]*torrent.Torrent, 0, len(_torrents))
-	for _, t := range torrents {
+	allTorrents := d.torrentClient.Torrents()
+	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
+	for _, t := range allTorrents {
 		select {
 		case <-t.GotInfo():
-			if len(onlyFiles) > 0 && !slices.Contains(onlyFiles, t.Name()) {
-				continue
-			}
-			torrents = append(torrents, t)
-			total += t.NumPieces()
 		case <-ctx.Done():
 			return ctx.Err()
 		}
+
+		if len(whiteList) > 0 {
+			name := t.Name()
+			exactOrPartialMatch := slices.ContainsFunc(whiteList, func(s string) bool {
+				return name == s || strings.HasSuffix(name, s) || strings.HasPrefix(name, s)
+			})
+			if !exactOrPartialMatch {
+				continue
+			}
+		}
+		toVerify = append(toVerify, t)
+		total += t.NumPieces()
 	}
+	d.logger.Info("[snapshots] Verify start")
+	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
 	completedPieces := &atomic.Uint64{}
 
 	{
-		d.logger.Info("[snapshots] Verify start")
-		defer d.logger.Info("[snapshots] Verify done")
 		logEvery := time.NewTicker(20 * time.Second)
 		defer logEvery.Stop()
 		d.wg.Add(1)
@@ -555,11 +537,13 @@ func (d *Downloader) VerifyData(ctx context.Context, onlyFiles []string) error {
 	// torrent lib internally limiting amount of hashers per file
 	// set limit here just to make load predictable, not to control Disk/CPU consumption
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
-
-	for _, t := range torrents {
+	for _, t := range toVerify {
 		t := t
 		g.Go(func() error {
-			return VerifyFile(ctx, t, completedPieces)
+			if failFast {
+				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
+			}
+			return ScheduleVerifyFile(ctx, t, completedPieces)
 		})
 	}
 
@@ -666,15 +650,19 @@ func seedableFiles(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	l, err := seedableSnapshotsBySubDir(dirs.Snap, "history")
+	l1, err := seedableSnapshotsBySubDir(dirs.Snap, "idx")
 	if err != nil {
 		return nil, err
 	}
-	l2, err := seedableSnapshotsBySubDir(dirs.Snap, "warm")
+	l2, err := seedableSnapshotsBySubDir(dirs.Snap, "history")
 	if err != nil {
 		return nil, err
 	}
-	files = append(append(files, l...), l2...)
+	l3, err := seedableSnapshotsBySubDir(dirs.Snap, "domain")
+	if err != nil {
+		return nil, err
+	}
+	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
 }
 func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {

@@ -87,26 +87,38 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
+				&SnapshotVersionFlag,
 			}),
 		},
 		{
 			Name:   "uploader",
 			Action: doUploaderCommand,
 			Usage:  "run erigon in snapshot upload mode (no execution)",
-			Flags: uploaderCommandFlags([]cli.Flag{
-				&SnapshotVersionFlag,
-				&erigoncli.UploadLocationFlag,
-				&erigoncli.UploadFromFlag,
-				&erigoncli.FrozenBlockLimitFlag,
-			}),
-			Before: func(context *cli.Context) error {
-				erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
-				erigoncli.SyncLoopBlockLimitFlag.Value = 100000
-				erigoncli.SyncLoopPruneLimitFlag.Value = 100000
-				erigoncli.FrozenBlockLimitFlag.Value = 1500000
-				utils.NoDownloaderFlag.Value = true
-				utils.HTTPEnabledFlag.Value = false
-				utils.TxPoolDisableFlag.Value = true
+			Flags: joinFlags(erigoncli.DefaultFlags,
+				[]cli.Flag{
+					&SnapshotVersionFlag,
+					&erigoncli.UploadLocationFlag,
+					&erigoncli.UploadFromFlag,
+					&erigoncli.FrozenBlockLimitFlag,
+				}),
+			Before: func(ctx *cli.Context) error {
+				ctx.Set(erigoncli.SyncLoopBreakAfterFlag.Name, "Senders")
+				ctx.Set(utils.NoDownloaderFlag.Name, "true")
+				ctx.Set(utils.HTTPEnabledFlag.Name, "false")
+				ctx.Set(utils.TxPoolDisableFlag.Name, "true")
+
+				if !ctx.IsSet(erigoncli.SyncLoopBlockLimitFlag.Name) {
+					ctx.Set(erigoncli.SyncLoopBlockLimitFlag.Name, "100000")
+				}
+
+				if !ctx.IsSet(erigoncli.FrozenBlockLimitFlag.Name) {
+					ctx.Set(erigoncli.FrozenBlockLimitFlag.Name, "1500000")
+				}
+
+				if !ctx.IsSet(erigoncli.SyncLoopPruneLimitFlag.Name) {
+					ctx.Set(erigoncli.SyncLoopPruneLimitFlag.Name, "100000")
+				}
+
 				return nil
 			},
 		},
@@ -510,6 +522,9 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
 	version := uint8(cliCtx.Int(SnapshotVersionFlag.Name))
+	if version != 0 {
+		snapcfg.SnapshotVersion(version)
+	}
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -639,14 +654,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	return nil
-}
-
-func uploaderCommandFlags(flags []cli.Flag) []cli.Flag {
-	return joinFlags(erigoncli.DefaultFlags, flags, []cli.Flag{
-		&erigoncli.SyncLoopBreakAfterFlag,
-		&erigoncli.SyncLoopBlockLimitFlag,
-		&erigoncli.SyncLoopPruneLimitFlag,
-	})
 }
 
 func doUploaderCommand(cliCtx *cli.Context) error {

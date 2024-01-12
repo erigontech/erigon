@@ -160,7 +160,7 @@ func (f *ForkChoiceStorageMock) Time() uint64 {
 	return f.TimeVal
 }
 
-func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock bool) error {
+func (f *ForkChoiceStorageMock) OnAttestation(attestation *solid.Attestation, fromBlock, insert bool) error {
 	f.Pool.AttestationsPool.Insert(attestation.Signature(), attestation)
 	return nil
 }
@@ -219,4 +219,9 @@ func (f *ForkChoiceStorageMock) OnBlsToExecutionChange(signedChange *cltypes.Sig
 
 func (f *ForkChoiceStorageMock) ForkNodes() []ForkNode {
 	return f.WeightsMock
+}
+
+func (f *ForkChoiceStorageMock) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
+	f.Pool.AttestationsPool.Insert(aggregateAndProof.Message.Aggregate.Signature(), aggregateAndProof.Message.Aggregate)
+	return nil
 }

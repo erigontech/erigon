@@ -11,6 +11,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
+	"github.com/ledgerwatch/erigon-lib/wrap"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
@@ -42,7 +44,7 @@ func TestExec(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode, kv.ContractTEVMCode)
@@ -58,7 +60,7 @@ func TestExec(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
@@ -76,7 +78,7 @@ func TestExec(t *testing.T) {
 		}
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, newAgg(t, logger), tx1, tx2, kv.PlainState, kv.PlainContractCode)
@@ -204,7 +206,7 @@ func TestExec22(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		compareCurrentState(t, agg, tx1, tx2, kv.PlainState, kv.PlainContractCode)
@@ -228,7 +230,7 @@ func TestExec22(t *testing.T) {
 
 		u := &UnwindState{ID: stages.Execution, UnwindPoint: 25}
 		s := &StageState{ID: stages.Execution, BlockNumber: 50}
-		err = UnwindExecutionStage(u, s, tx2, ctx, cfg, false, logger)
+		err = UnwindExecutionStage(u, s, wrap.TxContainer{Tx: tx2}, ctx, cfg, false, logger)
 		require.NoError(err)
 
 		tx1.ForEach(kv.PlainState, nil, func(k, v []byte) error {

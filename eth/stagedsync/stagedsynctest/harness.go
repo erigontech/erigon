@@ -7,28 +7,26 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
 	"math/big"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/golang/mock/gomock"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
+	heimdallmock "github.com/ledgerwatch/erigon/polygon/heimdall/mock"
+	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/clerk"
-	"github.com/ledgerwatch/erigon/consensus/bor/contract"
-	heimdallmock "github.com/ledgerwatch/erigon/consensus/bor/heimdall/mock"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
-	bormock "github.com/ledgerwatch/erigon/consensus/bor/mock"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	consensusmock "github.com/ledgerwatch/erigon/consensus/mock"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -37,6 +35,11 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/clerk"
+	"github.com/ledgerwatch/erigon/polygon/bor/contract"
+	bormock "github.com/ledgerwatch/erigon/polygon/bor/mock"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
@@ -106,7 +109,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	}
 
 	if cfg.ChainConfig.Bor != nil {
-		h.setHeimdallNextMockSpan(logger)
+		h.setHeimdallNextMockSpan()
 		h.mockBorSpanner()
 		h.mockHeimdallClient()
 	}
@@ -216,7 +219,7 @@ func (h *Harness) RunStageForwardWithReturnError(t *testing.T, id stages.SyncSta
 	stageState, err := h.stateSync.StageState(id, nil, h.chainDataDB)
 	require.NoError(t, err)
 
-	return stage.Forward(true, false, stageState, h.stateSync, nil, h.logger)
+	return stage.Forward(true, false, stageState, h.stateSync, wrap.TxContainer{}, h.logger)
 }
 
 func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*span.HeimdallSpan, err error) {
@@ -498,7 +501,7 @@ func (h *Harness) mockChainHeaderReader(ctrl *gomock.Controller) consensus.Chain
 	return mockChainHR
 }
 
-func (h *Harness) setHeimdallNextMockSpan(logger log.Logger) {
+func (h *Harness) setHeimdallNextMockSpan() {
 	validators := []*valset.Validator{
 		{
 			ID:               1,
@@ -508,7 +511,7 @@ func (h *Harness) setHeimdallNextMockSpan(logger log.Logger) {
 		},
 	}
 
-	validatorSet := valset.NewValidatorSet(validators, logger)
+	validatorSet := valset.NewValidatorSet(validators)
 	selectedProducers := make([]valset.Validator, len(validators))
 	for i := range validators {
 		selectedProducers[i] = *validators[i]

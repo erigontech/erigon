@@ -34,7 +34,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentinelClient interface {
-	SubscribeGossip(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error)
+	SubscribeGossip(ctx context.Context, in *SubscriptionData, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error)
 	SendRequest(ctx context.Context, in *RequestData, opts ...grpc.CallOption) (*ResponseData, error)
 	SetStatus(ctx context.Context, in *Status, opts ...grpc.CallOption) (*EmptyMessage, error)
 	GetPeers(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*PeerCount, error)
@@ -53,7 +53,7 @@ func NewSentinelClient(cc grpc.ClientConnInterface) SentinelClient {
 	return &sentinelClient{cc}
 }
 
-func (c *sentinelClient) SubscribeGossip(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error) {
+func (c *sentinelClient) SubscribeGossip(ctx context.Context, in *SubscriptionData, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error) {
 	stream, err := c.cc.NewStream(ctx, &Sentinel_ServiceDesc.Streams[0], Sentinel_SubscribeGossip_FullMethodName, opts...)
 	if err != nil {
 		return nil, err
@@ -161,7 +161,7 @@ func (c *sentinelClient) PublishGossip(ctx context.Context, in *GossipData, opts
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility
 type SentinelServer interface {
-	SubscribeGossip(*EmptyMessage, Sentinel_SubscribeGossipServer) error
+	SubscribeGossip(*SubscriptionData, Sentinel_SubscribeGossipServer) error
 	SendRequest(context.Context, *RequestData) (*ResponseData, error)
 	SetStatus(context.Context, *Status) (*EmptyMessage, error)
 	GetPeers(context.Context, *EmptyMessage) (*PeerCount, error)
@@ -177,7 +177,7 @@ type SentinelServer interface {
 type UnimplementedSentinelServer struct {
 }
 
-func (UnimplementedSentinelServer) SubscribeGossip(*EmptyMessage, Sentinel_SubscribeGossipServer) error {
+func (UnimplementedSentinelServer) SubscribeGossip(*SubscriptionData, Sentinel_SubscribeGossipServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeGossip not implemented")
 }
 func (UnimplementedSentinelServer) SendRequest(context.Context, *RequestData) (*ResponseData, error) {
@@ -218,7 +218,7 @@ func RegisterSentinelServer(s grpc.ServiceRegistrar, srv SentinelServer) {
 }
 
 func _Sentinel_SubscribeGossip_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(EmptyMessage)
+	m := new(SubscriptionData)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}

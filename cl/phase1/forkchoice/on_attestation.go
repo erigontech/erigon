@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/cache"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -13,7 +14,7 @@ import (
 )
 
 // OnAttestation processes incoming attestations.
-func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool) error {
+func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool, insert bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
@@ -61,11 +62,41 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	cache.StoreAttestation(&data, attestation.AggregationBits(), attestationIndicies)
 	// Lastly update latest messages.
 	f.processAttestingIndicies(attestation, attestationIndicies)
+	if !fromBlock && insert {
+		// Add to the pool when verified.
+		f.operationsPool.AttestationsPool.Insert(attestation.Signature(), attestation)
+	}
 	return nil
 }
 
+func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
+	slot := aggregateAndProof.Message.Aggregate.AttestantionData().Slot()
+	selectionProof := aggregateAndProof.Message.SelectionProof
+	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().ValidatorIndex()
+	epoch := state.GetEpochAtSlot(f.beaconCfg, slot)
+
+	target := aggregateAndProof.Message.Aggregate.AttestantionData().Target()
+	targetState, err := f.getCheckpointState(target)
+	if err != nil {
+		return nil
+	}
+
+	activeIndicies := targetState.getActiveIndicies(epoch)
+	activeIndiciesLength := uint64(len(activeIndicies))
+
+	count := targetState.committeeCount(epoch, activeIndiciesLength) * f.beaconCfg.SlotsPerEpoch
+	start := (activeIndiciesLength * committeeIndex) / count
+	end := (activeIndiciesLength * (committeeIndex + 1)) / count
+	committeeLength := end - start
+	if !state.IsAggregator(f.beaconCfg, committeeLength, slot, committeeIndex, selectionProof) {
+		log.Warn("invalid aggregate and proof")
+		return fmt.Errorf("invalid aggregate and proof")
+	}
+	return f.OnAttestation(aggregateAndProof.Message.Aggregate, false, false)
+}
+
 // scheduleAttestationForLaterProcessing scheudules an attestation for later processing
-func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *solid.Attestation, fromBlock bool) {
+func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *solid.Attestation, insert bool) {
 	go func() {
 		logInterval := time.NewTicker(50 * time.Millisecond)
 		for {
@@ -76,8 +107,8 @@ func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *sol
 				if f.Slot() < attestation.AttestantionData().Slot()+1 {
 					continue
 				}
-				if err := f.OnAttestation(attestation, false); err != nil {
-					log.Trace("could not process scheduled attestation", "reason", err)
+				if err := f.OnAttestation(attestation, false, insert); err != nil {
+					log.Debug("could not process scheduled attestation", "reason", err)
 				}
 				return
 			}

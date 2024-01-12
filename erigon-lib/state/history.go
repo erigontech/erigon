@@ -406,13 +406,12 @@ func iterateForVi(historyItem, iiItem *filesItem, p *background.Progress, compre
 
 func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath, tmpdir string, count int, p *background.Progress, compressVals bool, logger log.Logger) error {
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    count,
-		Enums:       false,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpdir,
-		IndexFile:   historyIdxPath,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		KeyCount:   count,
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpdir,
+		IndexFile:  historyIdxPath,
 	}, logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
