@@ -2067,7 +2067,7 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 		return math.MaxUint64
 	}
 	if ps > 0 {
-		fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
+		//fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
 		if prk == nil {
 			// nil key and non-zero step means that this step is pruned.
 			return cmp.Min(ps+1, math.MaxUint64)
