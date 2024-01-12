@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"hash"
 	"math"
 	"os"
@@ -1540,7 +1541,6 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 			return err
 		}
 
-		// TODO -1?
 		ic, err := dc.hc.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
 			return err
@@ -2062,22 +2062,26 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
-	//ps, prk, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
-	//if err != nil {
-	//	return math.MaxUint64
-	//}
-	//if ps > 0 && prk != nil {
-	//	return cmp.Min(ps, math.MaxUint64)
-	//}
-	//
+	ps, prk, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	if err != nil {
+		return math.MaxUint64
+	}
+	if ps > 0 {
+		fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
+		if prk == nil {
+			// nil key and non-zero step means that this step is pruned.
+			return cmp.Min(ps+1, math.MaxUint64)
+		}
+		return cmp.Min(ps, math.MaxUint64)
+	}
 	c, err := tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
+		dc.d.logger.Warn("CanPruneFrom: failed to open cursor", "domain", dc.d.filenameBase, "error", err)
 		return math.MaxUint64
 	}
 	defer c.Close()
 
 	minStep := uint64(math.MaxUint64)
-
 	k, v, err := c.First()
 	if err != nil || k == nil {
 		return math.MaxUint64
@@ -2089,8 +2093,7 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 		return math.MaxUint64
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
-	//fmt.Printf("found CanPrune from %x %d\n", k, minStep)
-
+	//fmt.Printf("found CanPrune from %x first %d  last %d\n", k, ^binary.BigEndian.Uint64(v), ^binary.BigEndian.Uint64(fv))
 	return minStep
 }
 

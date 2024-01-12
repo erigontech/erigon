@@ -51,7 +51,7 @@ import (
 )
 
 type History struct {
-	*InvertedIndex
+	*InvertedIndex // indexKeysTable contains mapping txNum -> key1+key2, while index table `key -> {txnums}` is omitted.
 
 	// Files:
 	//  .v - list of values
@@ -460,8 +460,11 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 		if err := w.historyVals.Collect(historyKey, original); err != nil {
 			return err
 		}
-		if err := w.ii.Add(historyKey[:lk]); err != nil {
-			return err
+
+		if !w.ii.discard {
+			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
+				return err
+			}
 		}
 		return nil
 	}

@@ -101,7 +101,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
 		logger: logger,
 		aggCtx: ac,
 		roTx:   tx,
-		//trace:       true,
+		//trace:            true,
 		accountWriter:    ac.account.NewWriter(),
 		storageWriter:    ac.storage.NewWriter(),
 		codeWriter:       ac.code.NewWriter(),
