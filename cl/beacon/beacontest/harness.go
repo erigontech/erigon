@@ -3,13 +3,21 @@ package beacontest
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"reflect"
+	"strings"
 	"testing"
+	"text/template"
+
+	"github.com/Masterminds/sprig/v3"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
@@ -28,9 +36,9 @@ func WithTesting(t *testing.T) func(*Harness) error {
 	}
 }
 
-func WithTests(xs []Test) func(*Harness) error {
+func WithTests(name string, xs []Test) func(*Harness) error {
 	return func(h *Harness) error {
-		h.tests = append(h.tests, xs...)
+		h.tests[name] = xs
 		return nil
 	}
 }
@@ -50,30 +58,68 @@ func WithFilesystem(name string, handler afero.Fs) func(*Harness) error {
 }
 func WithTestFromFs(fs afero.Fs, name string) func(*Harness) error {
 	return func(h *Harness) error {
-		xs, err := afero.ReadFile(fs, name)
+		filename := name
+		for _, fn := range []string{name, name + ".yaml", name + ".yml", name + ".json"} {
+			// check if file exists
+			_, err := fs.Stat(fn)
+			if err == nil {
+				filename = fn
+				break
+			}
+		}
+		xs, err := afero.ReadFile(fs, filename)
 		if err != nil {
 			return err
 		}
-		return WithTestFromBytes(xs)(h)
+		return WithTestFromBytes(name, xs)(h)
 	}
 }
 
-func WithTestFromBytes(xs []byte) func(*Harness) error {
+type Extra struct {
+	Vars map[string]any `json:"vars"`
+
+	RawBodyZZZZ json.RawMessage `json:"tests"`
+}
+
+func WithTestFromBytes(name string, xs []byte) func(*Harness) error {
 	return func(h *Harness) error {
 		var t struct {
 			T []Test `json:"tests"`
 		}
-		err := yaml.Unmarshal(xs, &t)
+		x := &Extra{}
+		s := md5.New()
+		s.Write(xs)
+		hsh := hex.EncodeToString(s.Sum(nil))
+		// unmarshal just the extra data
+		err := yaml.Unmarshal(xs, &x, yaml.JSONOpt(func(d *json.Decoder) *json.Decoder {
+			return d
+		}))
 		if err != nil {
 			return err
 		}
-		h.tests = append(h.tests, t.T...)
+		tmpl := template.Must(template.New(hsh).Funcs(sprig.FuncMap()).Parse(string(xs)))
+		// execute the template using the extra data as the provided top level object
+		// we can use the original buffer as the output since the original buffer has already been copied when it was passed into template
+		buf := bytes.NewBuffer(xs)
+		buf.Reset()
+		err = tmpl.Execute(buf, x)
+		if err != nil {
+			return err
+		}
+		err = yaml.Unmarshal(buf.Bytes(), &t)
+		if err != nil {
+			return err
+		}
+		if len(t.T) == 0 {
+			return fmt.Errorf("suite with name %s had no tests", name)
+		}
+		h.tests[name] = t.T
 		return nil
 	}
 }
 
 type Harness struct {
-	tests []Test
+	tests map[string][]Test
 	t     *testing.T
 
 	handlers map[string]http.Handler
@@ -83,29 +129,36 @@ type Harness struct {
 func Execute(options ...HarnessOption) {
 	h := &Harness{
 		handlers: map[string]http.Handler{},
+		tests:    map[string][]Test{},
 		fss: map[string]afero.Fs{
 			"": afero.NewOsFs(),
 		},
 	}
 	for _, v := range options {
-		v(h)
+		err := v(h)
+		if err != nil {
+			h.t.Error(err)
+		}
 	}
 	h.Execute()
 }
 
 func (h *Harness) Execute() {
 	ctx := context.Background()
-	for idx, v := range h.tests {
-		v.Actual.h = h
-		v.Expect.h = h
-		name := v.Name
-		if name == "" {
-			name = fmt.Sprintf("test_%d", idx)
+	for suiteName, tests := range h.tests {
+		for idx, v := range tests {
+			v.Actual.h = h
+			v.Expect.h = h
+			name := v.Name
+			if name == "" {
+				name = "test"
+			}
+			fullname := fmt.Sprintf("%s_%s_%d", suiteName, name, idx)
+			h.t.Run(fullname, func(t *testing.T) {
+				err := v.Execute(ctx, t)
+				require.NoError(t, err)
+			})
 		}
-		h.t.Run(name, func(t *testing.T) {
-			err := v.Execute(ctx, t)
-			require.NoError(t, err)
-		})
 	}
 }
 
@@ -146,7 +199,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 	var aType, bType *types.Type
 
 	if !c.Literal {
-		var aMap, bMap map[string]any
+		var aMap, bMap any
 		err = yaml.Unmarshal(aRaw, &aMap)
 		if err != nil {
 			return err
@@ -157,8 +210,26 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		}
 		a = aMap
 		b = bMap
-		aType = cel.MapType(cel.StringType, cel.DynType)
-		bType = cel.MapType(cel.StringType, cel.DynType)
+		if a != nil {
+			switch reflect.TypeOf(a).Kind() {
+			case reflect.Slice:
+				aType = cel.ListType(cel.MapType(cel.StringType, cel.DynType))
+			default:
+				aType = cel.MapType(cel.StringType, cel.DynType)
+			}
+		} else {
+			aType = cel.MapType(cel.StringType, cel.DynType)
+		}
+		if b != nil {
+			switch reflect.TypeOf(b).Kind() {
+			case reflect.Slice:
+				bType = cel.ListType(cel.MapType(cel.StringType, cel.DynType))
+			default:
+				bType = cel.MapType(cel.StringType, cel.DynType)
+			}
+		} else {
+			bType = cel.MapType(cel.StringType, cel.DynType)
+		}
 	} else {
 		a = string(aRaw)
 		b = string(bRaw)
@@ -169,6 +240,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 	exprs := []string{}
 	// if no default expr set and no exprs are set, then add the default expr
 	if len(c.Exprs) == 0 && c.Expr == "" {
+		exprs = append(exprs, "actual_code == 200")
 		exprs = append(exprs, "actual == expect")
 	}
 	env, err := cel.NewEnv(
@@ -204,11 +276,15 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 			return ErrExpressionMustReturnBool
 		}
 		if !assert.Equal(t, bres, !c.Negate, `expr: %s`, expr) {
-			t.Fatalf(`name: %s
-expect%d: %v
-actual%d: %v
-expr: %s
-		`, t.Name(), aCode, a, bCode, b, expr)
+			if os.Getenv("HIDE_HARNESS_LOG") != "1" {
+				t.Logf(`name: %s
+				expect%d: %v
+				actual%d: %v
+				expr: %s
+				`, t.Name(), aCode, a, bCode, b, expr)
+
+			}
+			t.FailNow()
 		}
 	}
 	return nil
@@ -228,7 +304,7 @@ type Source struct {
 	Body    *Source           `json:"body,omitempty"`
 
 	// data type
-	Data map[string]any `json:"data,omitempty"`
+	Data any `json:"data,omitempty"`
 
 	// file type
 	File *string `json:"file,omitempty"`
@@ -258,6 +334,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 	if s.Method != "" {
 		method = s.Method
 	}
+	method = strings.ToUpper(method)
 	var body io.Reader
 	// hydrate the harness
 	if s.Body != nil {
@@ -295,7 +372,7 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 	purl = purl.JoinPath(s.Path)
 	q := purl.Query()
 	for k, v := range s.Query {
-		purl.Query().Add(k, v)
+		q.Add(k, v)
 	}
 	purl.RawQuery = q.Encode()
 	request, err := http.NewRequest(method, purl.String(), body)
@@ -333,7 +410,17 @@ func (s *Source) executeFile(ctx context.Context) (json.RawMessage, int, error) 
 	if !ok {
 		return nil, 404, fmt.Errorf("filesystem %s not defined", s.Fs)
 	}
-	fileBytes, err := afero.ReadFile(afs, *s.File)
+	name := *s.File
+	filename := name
+	for _, fn := range []string{name, name + ".yaml", name + ".yml", name + ".json"} {
+		// check if file exists
+		_, err := afs.Stat(fn)
+		if err == nil {
+			filename = fn
+			break
+		}
+	}
+	fileBytes, err := afero.ReadFile(afs, filename)
 	if err != nil {
 		return nil, 404, err
 	}
