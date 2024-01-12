@@ -239,8 +239,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 	exprs := []string{}
 	// if no default expr set and no exprs are set, then add the default expr
 	if len(c.Exprs) == 0 && c.Expr == "" {
-		exprs = append(exprs, "actual_code == 200")
-		exprs = append(exprs, "actual == expect")
+		exprs = append(exprs, "actual_code == 200", "actual == expect")
 	}
 	env, err := cel.NewEnv(
 		cel.Variable("expect", aType),
@@ -248,6 +247,9 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		cel.Variable("expect_code", cel.IntType),
 		cel.Variable("actual_code", cel.IntType),
 	)
+	if err != nil {
+		return err
+	}
 
 	for _, expr := range append(c.Exprs, exprs...) {
 		ast, issues := env.Compile(expr)
