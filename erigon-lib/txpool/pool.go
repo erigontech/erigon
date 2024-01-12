@@ -2123,9 +2123,6 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 	return nil
 }
 
-type header interface {
-}
-
 func getExecutionProgress(db kv.Getter) (uint64, error) {
 	data, err := db.GetOne(kv.SyncStageProgress, []byte("Execution"))
 	if err != nil {
