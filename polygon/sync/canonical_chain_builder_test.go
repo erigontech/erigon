@@ -34,7 +34,7 @@ func makeRoot() *types.Header {
 
 func makeCCB(root *types.Header) CanonicalChainBuilder {
 	difficultyCalc := testDifficultyCalculator{}
-	builder := NewCanonicalChainBuilder(root, &difficultyCalc)
+	builder := NewCanonicalChainBuilder(root, &difficultyCalc, nil)
 	return builder
 }
 

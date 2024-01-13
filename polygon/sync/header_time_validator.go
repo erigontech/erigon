@@ -1,37 +1,37 @@
 package sync
 
 import (
+	"time"
+
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
-
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 )
 
-type DifficultyCalculator interface {
-	HeaderDifficulty(header *types.Header) (uint64, error)
+type HeaderTimeValidator interface {
+	ValidateHeaderTime(header *types.Header, now time.Time, parent *types.Header) error
 	SetSpan(span *heimdallspan.HeimdallSpan)
 }
 
-type difficultyCalculatorImpl struct {
+type headerTimeValidatorImpl struct {
 	borConfig           *borcfg.BorConfig
 	span                *heimdallspan.HeimdallSpan
 	validatorSetFactory func() validatorSetInterface
 	signaturesCache     *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
 
-func NewDifficultyCalculator(
+func NewHeaderTimeValidator(
 	borConfig *borcfg.BorConfig,
 	span *heimdallspan.HeimdallSpan,
 	validatorSetFactory func() validatorSetInterface,
 	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
-) DifficultyCalculator {
+) HeaderTimeValidator {
 	if signaturesCache == nil {
 		var err error
 		signaturesCache, err = lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
@@ -40,7 +40,7 @@ func NewDifficultyCalculator(
 		}
 	}
 
-	impl := difficultyCalculatorImpl{
+	impl := headerTimeValidatorImpl{
 		borConfig:           borConfig,
 		span:                span,
 		validatorSetFactory: validatorSetFactory,
@@ -54,29 +54,21 @@ func NewDifficultyCalculator(
 	return &impl
 }
 
-func (impl *difficultyCalculatorImpl) makeValidatorSet() validatorSetInterface {
+func (impl *headerTimeValidatorImpl) makeValidatorSet() validatorSetInterface {
 	return valset.NewValidatorSet(impl.span.ValidatorSet.Validators)
 }
 
-func (impl *difficultyCalculatorImpl) SetSpan(span *heimdallspan.HeimdallSpan) {
+func (impl *headerTimeValidatorImpl) SetSpan(span *heimdallspan.HeimdallSpan) {
 	impl.span = span
 }
 
-func (impl *difficultyCalculatorImpl) HeaderDifficulty(header *types.Header) (uint64, error) {
-	signer, err := bor.Ecrecover(header, impl.signaturesCache, impl.borConfig)
-	if err != nil {
-		return 0, err
-	}
-	return impl.signerDifficulty(signer, header.Number.Uint64())
-}
-
-func (impl *difficultyCalculatorImpl) signerDifficulty(signer libcommon.Address, headerNum uint64) (uint64, error) {
+func (impl *headerTimeValidatorImpl) ValidateHeaderTime(header *types.Header, now time.Time, parent *types.Header) error {
 	validatorSet := impl.validatorSetFactory()
 
-	sprintNum := impl.borConfig.CalculateSprintNumber(headerNum)
+	sprintNum := impl.borConfig.CalculateSprintNumber(header.Number.Uint64())
 	if sprintNum > 0 {
 		validatorSet.IncrementProposerPriority(int(sprintNum))
 	}
 
-	return validatorSet.Difficulty(signer)
+	return bor.ValidateHeaderTime(header, now, parent, validatorSet, impl.borConfig, impl.signaturesCache)
 }

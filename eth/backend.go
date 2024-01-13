@@ -126,6 +126,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -910,7 +911,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	chainKv := s.chainDB
 	var err error
 
-	s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+	if config.Genesis.Config.Bor == nil {
+		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+	}
 
 	emptyBadHash := config.BadBlockHash == libcommon.Hash{}
 	if !emptyBadHash {
@@ -962,7 +965,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		}()
 	}
 
-	go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	if config.Genesis.Config.Bor == nil {
+		go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	}
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)
@@ -1081,7 +1086,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 
 			if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
 				borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
-					return nil, &bor.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+					return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
 				})
 			}
 

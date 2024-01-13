@@ -206,7 +206,7 @@ func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
 	require.Equal(t, invalidHeader.Number.Uint64()-1, testHarness.StateSyncUnwindPoint())
 	unwindReason := testHarness.StateSyncUnwindReason()
 	require.Equal(t, invalidHeader.Hash(), *unwindReason.Block)
-	var unauthorizedSignerErr *bor.UnauthorizedSignerError
+	var unauthorizedSignerErr *valset.UnauthorizedSignerError
 	ok := errors.As(unwindReason.Err, &unauthorizedSignerErr)
 	require.True(t, ok)
 	require.Equal(t, invalidHeader.Number.Uint64(), unauthorizedSignerErr.Number)
