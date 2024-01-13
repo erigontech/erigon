@@ -110,7 +110,7 @@ To avoid that, the ETL framework allows storing progress by setting `OnLoadCommi
 
 Then we can use this data to know the progress the ETL transformation made.
 
-You can also specify `ExtractStartKey` and `ExtractEndKey` to limit the nubmer
+You can also specify `ExtractStartKey` and `ExtractEndKey` to limit the number
 of items transformed.
 
 
