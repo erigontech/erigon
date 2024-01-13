@@ -145,12 +145,11 @@ func executeBlock(
 	writeChangesets bool,
 	writeReceipts bool,
 	writeCallTraces bool,
-	initialCycle bool,
 	stateStream bool,
 	logger log.Logger,
 ) error {
 	blockNum := block.NumberU64()
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, cfg.blockReader, initialCycle, stateStream)
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, cfg.blockReader, stateStream)
 	if err != nil {
 		return err
 	}
@@ -211,16 +210,14 @@ func newStateReaderWriter(
 	writeChangesets bool,
 	accumulator *shards.Accumulator,
 	br services.FullBlockReader,
-	initialCycle bool,
 	stateStream bool,
 ) (state.StateReader, state.WriterWithChangeSets, error) {
-
 	var stateReader state.StateReader
 	var stateWriter state.WriterWithChangeSets
 
 	stateReader = state.NewPlainStateReader(batch)
 
-	if !initialCycle && stateStream {
+	if stateStream {
 		txs, err := br.RawTransactions(context.Background(), tx, block.NumberU64(), block.NumberU64())
 		if err != nil {
 			return nil, nil, err
@@ -389,16 +386,20 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	logPrefix := s.LogPrefix()
 	var to = prevStageProgress
+
 	if toBlock > 0 {
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
+
 	if to <= s.BlockNumber {
 		return nil
 	}
+
 	if to > s.BlockNumber+16 {
 		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
-	stateStream := !initialCycle && cfg.stateStream && to-s.BlockNumber < stateStreamLimit
+
+	stateStream := cfg.stateStream && to-s.BlockNumber < stateStreamLimit
 
 	// changes are stored through memory buffer
 	logEvery := time.NewTicker(logInterval)
@@ -468,7 +469,7 @@ Loop:
 		if cfg.silkworm != nil && !isMemoryMutation {
 			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
 		} else {
-			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, logger)
+			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
 
 		if err != nil {
@@ -710,7 +711,7 @@ func unwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	storageKeyLength := length.Addr + length.Incarnation + length.Hash
 
 	var accumulator *shards.Accumulator
-	if !initialCycle && cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
+	if cfg.stateStream && s.BlockNumber-u.UnwindPoint < stateStreamLimit {
 		accumulator = cfg.accumulator
 
 		hash, err := cfg.blockReader.CanonicalHash(ctx, txc.Tx, u.UnwindPoint)

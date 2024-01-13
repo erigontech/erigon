@@ -604,7 +604,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.newTxs = make(chan types2.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpooluitl.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient, logger,
+			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
 		)
 		if err != nil {
 			return nil, err
@@ -708,23 +708,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		baseFee := uint64(0)
-		if currentBlock.BaseFee() != nil {
-			baseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
-		}
-		blobFee := chainConfig.GetMinBlobGasPrice()
-		if currentBlock.Header().ExcessBlobGas != nil {
-			excessBlobGas := misc.CalcExcessBlobGas(chainConfig, currentBlock.Header())
-			b, err := misc.GetBlobGasPrice(chainConfig, excessBlobGas)
-			if err == nil {
-				blobFee = b.Uint64()
-			}
-		}
-		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
-		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, blobFee, currentBlock.GasLimit(), 0)
-	}()
 
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPoolFetch.ConnectCore()
@@ -734,8 +717,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			newTxsBroadcaster = casted.NewSlotsStreams
 		}
 		go txpool.MainLoop(backend.sentryCtx,
-			backend.txPoolDB, backend.chainDB,
-			backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
+			backend.txPoolDB, backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
 			func() {
 				select {
 				case backend.notifyMiningAboutNewTxs <- struct{}{}:
@@ -743,6 +725,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				}
 			})
 	}
+
 	go func() {
 		defer debug.LogPanic()
 		for {
