@@ -69,7 +69,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 	// Add the post-anchor public keys as surplus
 	for i := len(anchorPublicKeys) / length.Bytes48; i < len(validatorSet); i++ {
 		pos := i - len(anchorPublicKeys)/length.Bytes48
-		copy(publicKeys[pos*length.Bytes48:], validatorSet[i].PublicKeyBytes())
+		copy(publicKeys[pos*length.Bytes48:(pos+1)*length.Bytes48], validatorSet[i].PublicKeyBytes())
 	}
 
 	mixes := solid.NewHashVector(randaoMixesLength)
