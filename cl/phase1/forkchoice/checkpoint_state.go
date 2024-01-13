@@ -170,7 +170,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 			pks = append(pks, c.anchorPublicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
 		} else {
 			offset := uint64(len(c.anchorPublicKeys) / length.Bytes48)
-			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:])
+			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:(v-offset+1)*length.Bytes48])
 		}
 		return true
 	})
