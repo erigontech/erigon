@@ -36,20 +36,21 @@ type canonicalChainBuilderImpl struct {
 	root *forkTreeNode
 	tip  *forkTreeNode
 
-	difficultyCalc DifficultyCalculator
-
+	difficultyCalc  DifficultyCalculator
 	headerValidator HeaderValidator
+	spansCache      *SpansCache
 }
 
 func NewCanonicalChainBuilder(
 	root *types.Header,
 	difficultyCalc DifficultyCalculator,
 	headerValidator HeaderValidator,
+	spansCache *SpansCache,
 ) CanonicalChainBuilder {
 	impl := &canonicalChainBuilderImpl{
-		difficultyCalc: difficultyCalc,
-
+		difficultyCalc:  difficultyCalc,
 		headerValidator: headerValidator,
+		spansCache:      spansCache,
 	}
 	impl.Reset(root)
 	return impl
@@ -62,6 +63,9 @@ func (impl *canonicalChainBuilderImpl) Reset(root *types.Header) {
 		headerHash: root.Hash(),
 	}
 	impl.tip = impl.root
+	if impl.spansCache != nil {
+		impl.spansCache.Prune(root.Number.Uint64())
+	}
 }
 
 // depth-first search
@@ -137,8 +141,11 @@ func (impl *canonicalChainBuilderImpl) Prune(newRootNum uint64) error {
 	for newRoot.header.Number.Uint64() > newRootNum {
 		newRoot = newRoot.parent
 	}
-
 	impl.root = newRoot
+
+	if impl.spansCache != nil {
+		impl.spansCache.Prune(newRootNum)
+	}
 	return nil
 }
 
