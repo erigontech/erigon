@@ -2,6 +2,7 @@ package polygon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -10,8 +11,8 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
 	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
 
@@ -55,7 +56,7 @@ const (
 	DefaultCheckpointBufferTime      time.Duration = 1000 * time.Second
 )
 
-const HeimdallGrpcAddressDefault = "localhost:8540"
+const HeimdallURLDefault = "http://localhost:1317"
 
 type CheckpointConfig struct {
 	RootChainTxConfirmations  uint64
@@ -71,7 +72,7 @@ type Heimdall struct {
 	sync.Mutex
 	chainConfig        *chain.Config
 	borConfig          *borcfg.BorConfig
-	grpcAddr           string
+	listenAddr         string
 	validatorSet       *valset.ValidatorSet
 	pendingCheckpoint  *checkpoint.Checkpoint
 	latestCheckpoint   *CheckpointAck
@@ -94,14 +95,14 @@ type Heimdall struct {
 
 func NewHeimdall(
 	chainConfig *chain.Config,
-	grpcAddr string,
+	listenAddr string,
 	checkpointConfig *CheckpointConfig,
 	logger log.Logger,
 ) *Heimdall {
 	heimdall := &Heimdall{
 		chainConfig:        chainConfig,
 		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
-		grpcAddr:           grpcAddr,
+		listenAddr:         listenAddr,
 		checkpointConfig:   *checkpointConfig,
 		spans:              map[uint64]*span.HeimdallSpan{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
@@ -382,7 +383,11 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	// if this is a restart
 	h.unsubscribe()
 
-	return heimdallgrpc.StartHeimdallServer(ctx, h, h.grpcAddr, h.logger)
+	// TODO: start an HTTP REST server at h.listenAddr implemented with IHeimdallClient
+	var client heimdall.IHeimdallClient = h
+	_ = client
+	// return StartHeimdallServer(ctx, client, h.listenAddr, h.logger)
+	return errors.New("local Heimdall is not implemented")
 }
 
 func (h *Heimdall) Stop() {
