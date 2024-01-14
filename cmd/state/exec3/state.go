@@ -199,7 +199,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			rules = &chain.Rules{}
 			break
 		}
-		fmt.Printf("[dbg2] txNum=%d blockNum=%d history=%t\n", txTask.TxIndex, txTask.BlockNum, txTask.HistoryExecution)
+		fmt.Printf("[dbg2] txNum=%d blockNum=%d history=%T\n", txTask.TxIndex, txTask.BlockNum, rw.engine)
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
