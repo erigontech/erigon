@@ -681,7 +681,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
 	}
-	fmt.Printf("[dbg] aura: epoch=%x\n", epoch)
+	fmt.Printf("[dbg] aura: len(epoch)=%d\n", len(epoch))
 	isEpochBegin := epoch != nil
 	if !isEpochBegin {
 		return
