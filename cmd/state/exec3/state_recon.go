@@ -320,6 +320,9 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibState, header, rw.engine, constCall /* constCall */)
 		}
 
+		ibs.SetTrace(true)
+		fmt.Printf("[dbg] txNum=%d, blockNum=%d, block initialisation\n", txTask.TxIndex, txTask.BlockNum)
+
 		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, syscall, rw.logger)
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {

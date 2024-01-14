@@ -318,6 +318,7 @@ func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHead
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)
 	}, logger)
 	noop := state.NewNoopWriter()
+	ibs.SetTrace(true)
 	ibs.FinalizeTx(cc.Rules(header.Number.Uint64(), header.Time), noop)
 	return nil
 }
