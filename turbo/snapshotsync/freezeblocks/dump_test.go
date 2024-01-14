@@ -1,9 +1,10 @@
 package freezeblocks_test
 
 import (
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -242,7 +243,7 @@ func TestDump(t *testing.T) {
 			snConfig := snapcfg.KnownCfg(networkname.MainnetChainName, 0)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 1, 0, uint64(test.chainSize), uint64(test.chainSize), tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), uint64(test.chainSize), tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
 			require.NoError(err)
 		})
 	}

@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
@@ -129,9 +128,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 
-	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), 0).Version
-
-	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, snapshotVersion, beacon_router_configuration.RouterConfiguration{
+	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon_router_configuration.RouterConfiguration{
 		Protocol:         cfg.BeaconProtocol,
 		Address:          cfg.BeaconAddr,
 		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,

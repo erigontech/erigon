@@ -85,7 +85,7 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 	}
 	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
 
-	gg := seg.seg.MakeGetter()
+	gg := seg.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil
@@ -156,7 +156,7 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	}
 	blockOffset := seg.idxSlot.OrdinalLookup(*slot - seg.idxSlot.BaseDataID())
 
-	gg := seg.seg.MakeGetter()
+	gg := seg.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil

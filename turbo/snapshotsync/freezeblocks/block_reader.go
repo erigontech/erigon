@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -331,7 +332,7 @@ func (r *BlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash commo
 
 	buf := make([]byte, 128)
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].idxHeaderHash == nil {
+		if segments[i].Index() == nil {
 			continue
 		}
 
@@ -562,12 +563,14 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	return block, senders, nil
 }
 
-func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *HeaderSegment, buf []byte) (*types.Header, []byte, error) {
-	if sn.idxHeaderHash == nil {
+func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *Segment, buf []byte) (*types.Header, []byte, error) {
+	index := sn.Index()
+
+	if index == nil {
 		return nil, buf, nil
 	}
-	headerOffset := sn.idxHeaderHash.OrdinalLookup(blockHeight - sn.idxHeaderHash.BaseDataID())
-	gg := sn.seg.MakeGetter()
+	headerOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
+	gg := sn.MakeGetter()
 	gg.Reset(headerOffset)
 	if !gg.HasNext() {
 		return nil, buf, nil
@@ -587,20 +590,23 @@ func (r *BlockReader) headerFromSnapshot(blockHeight uint64, sn *HeaderSegment, 
 // because HeaderByHash method will search header in all snapshots - and may request header which doesn't exists
 // but because our indices are based on PerfectHashMap, no way to know is given key exists or not, only way -
 // to make sure is to fetch it and compare hash
-func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *HeaderSegment, buf []byte) (*types.Header, error) {
+func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *Segment, buf []byte) (*types.Header, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.from, sn.to, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	if sn.idxHeaderHash == nil {
+	index := sn.Index()
+
+	if index == nil {
 		return nil, nil
 	}
-	reader := recsplit.NewIndexReader(sn.idxHeaderHash)
+
+	reader := recsplit.NewIndexReader(index)
 	localID := reader.Lookup(hash[:])
-	headerOffset := sn.idxHeaderHash.OrdinalLookup(localID)
-	gg := sn.seg.MakeGetter()
+	headerOffset := index.OrdinalLookup(localID)
+	gg := sn.MakeGetter()
 	gg.Reset(headerOffset)
 	if !gg.HasNext() {
 		return nil, nil
@@ -620,7 +626,7 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *HeaderSegme
 	return h, nil
 }
 
-func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.Body, uint64, uint32, []byte, error) {
+func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *Segment, buf []byte) (*types.Body, uint64, uint32, []byte, error) {
 	b, buf, err := r.bodyForStorageFromSnapshot(blockHeight, sn, buf)
 	if err != nil {
 		return nil, 0, 0, buf, err
@@ -639,19 +645,22 @@ func (r *BlockReader) bodyFromSnapshot(blockHeight uint64, sn *BodySegment, buf 
 	return body, b.BaseTxId + 1, txsAmount, buf, nil // empty txs in the beginning and end of block
 }
 
-func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySegment, buf []byte) (*types.BodyForStorage, []byte, error) {
+func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *Segment, buf []byte) (*types.BodyForStorage, []byte, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, sn.from, sn.to, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	if sn.idxBodyNumber == nil {
+	index := sn.Index()
+
+	if index == nil {
 		return nil, buf, nil
 	}
-	bodyOffset := sn.idxBodyNumber.OrdinalLookup(blockHeight - sn.idxBodyNumber.BaseDataID())
 
-	gg := sn.seg.MakeGetter()
+	bodyOffset := index.OrdinalLookup(blockHeight - index.BaseDataID())
+
+	gg := sn.MakeGetter()
 	gg.Reset(bodyOffset)
 	if !gg.HasNext() {
 		return nil, buf, nil
@@ -669,18 +678,20 @@ func (r *BlockReader) bodyForStorageFromSnapshot(blockHeight uint64, sn *BodySeg
 	return b, buf, nil
 }
 
-func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *TxnSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg *Segment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.from, txsSeg.to, dbg.Stack()))
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	if txsSeg.IdxTxnHash == nil {
+	idxTxnHash := txsSeg.Index(snaptype.Indexes.TxnHash)
+
+	if idxTxnHash == nil {
 		return nil, nil, nil
 	}
-	if baseTxnID < txsSeg.IdxTxnHash.BaseDataID() {
-		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, txsSeg.IdxTxnHash.BaseDataID(), txsSeg.Seg.FilePath())
+	if baseTxnID < idxTxnHash.BaseDataID() {
+		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, idxTxnHash.BaseDataID(), txsSeg.FilePath())
 	}
 
 	txs = make([]types.Transaction, txsAmount)
@@ -688,8 +699,8 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 	if txsAmount == 0 {
 		return txs, senders, nil
 	}
-	txnOffset := txsSeg.IdxTxnHash.OrdinalLookup(baseTxnID - txsSeg.IdxTxnHash.BaseDataID())
-	gg := txsSeg.Seg.MakeGetter()
+	txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
+	gg := txsSeg.MakeGetter()
 	gg.Reset(txnOffset)
 	for i := uint32(0); i < txsAmount; i++ {
 		if !gg.HasNext() {
@@ -697,7 +708,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 		}
 		buf, _ = gg.Next(buf[:0])
 		if len(buf) < 1+20 {
-			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Seg.FilePath(), len(buf))
+			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.FilePath(), len(buf))
 		}
 		senders[i].SetBytes(buf[1 : 1+20])
 		txRlp := buf[1+20:]
@@ -711,9 +722,11 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txsAmount uint32, txsSeg
 	return txs, senders, nil
 }
 
-func (r *BlockReader) txnByID(txnID uint64, sn *TxnSegment, buf []byte) (txn types.Transaction, err error) {
-	offset := sn.IdxTxnHash.OrdinalLookup(txnID - sn.IdxTxnHash.BaseDataID())
-	gg := sn.Seg.MakeGetter()
+func (r *BlockReader) txnByID(txnID uint64, sn *Segment, buf []byte) (txn types.Transaction, err error) {
+	idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
+
+	offset := idxTxnHash.OrdinalLookup(txnID - idxTxnHash.BaseDataID())
+	gg := sn.MakeGetter()
 	gg.Reset(offset)
 	if !gg.HasNext() {
 		return nil, nil
@@ -729,17 +742,21 @@ func (r *BlockReader) txnByID(txnID uint64, sn *TxnSegment, buf []byte) (txn typ
 	return
 }
 
-func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
+
+		idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
+		idxTxnHash2BlockNum := sn.Index(snaptype.Indexes.TxnHash2BlockNum)
+
+		if idxTxnHash == nil || idxTxnHash2BlockNum == nil {
 			continue
 		}
 
-		reader := recsplit.NewIndexReader(sn.IdxTxnHash)
+		reader := recsplit.NewIndexReader(idxTxnHash)
 		txnId := reader.Lookup(txnHash[:])
-		offset := sn.IdxTxnHash.OrdinalLookup(txnId)
-		gg := sn.Seg.MakeGetter()
+		offset := idxTxnHash.OrdinalLookup(txnId)
+		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		// first byte txnHash check - reducing false-positives 256 times. Allows don't store and don't calculate full hash of entity - when checking many snapshots.
 		if !gg.MatchPrefix([]byte{txnHash[0]}) {
@@ -756,7 +773,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf
 
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
-		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
+		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
 		blockNum = reader2.Lookup(txnHash[:])
 
 		// final txnHash check  - completely avoid false-positives
@@ -842,7 +859,7 @@ func (r *BlockReader) FirstTxNumNotInSnapshots() uint64 {
 		return 0
 	}
 
-	lastTxnID := sn.IdxTxnHash.BaseDataID() + uint64(sn.Seg.Count())
+	lastTxnID := sn.Index(snaptype.Indexes.TxnHash).BaseDataID() + uint64(sn.Count())
 	return lastTxnID
 }
 
@@ -852,10 +869,10 @@ func (r *BlockReader) IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount u
 
 	for _, sn := range view.Bodies() {
 		sn := sn
-		defer sn.seg.EnableMadvNormal().DisableReadAhead()
+		defer sn.EnableMadvNormal().DisableReadAhead()
 
 		var buf []byte
-		g := sn.seg.MakeGetter()
+		g := sn.MakeGetter()
 		blockNum := sn.from
 		var b types.BodyForStorage
 		for g.HasNext() {
@@ -879,21 +896,21 @@ func (r *BlockReader) IntegrityTxnID(failFast bool) error {
 
 	var expectedFirstTxnID uint64
 	for _, snb := range view.Bodies() {
-		firstBlockNum := snb.idxBodyNumber.BaseDataID()
+		firstBlockNum := snb.Index().BaseDataID()
 		sn, _ := view.TxsSegment(firstBlockNum)
 		b, _, err := r.bodyForStorageFromSnapshot(firstBlockNum, snb, nil)
 		if err != nil {
 			return err
 		}
 		if b.BaseTxId != expectedFirstTxnID {
-			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxId, sn.Seg.Count(), expectedFirstTxnID)
+			err := fmt.Errorf("[integrity] IntegrityTxnID: bn=%d, baseID=%d, cnt=%d, expectedFirstTxnID=%d", firstBlockNum, b.BaseTxId, sn.Count(), expectedFirstTxnID)
 			if failFast {
 				return err
 			} else {
 				log.Error(err.Error())
 			}
 		}
-		expectedFirstTxnID = b.BaseTxId + uint64(sn.Seg.Count())
+		expectedFirstTxnID = b.BaseTxId + uint64(sn.Count())
 	}
 	return nil
 }
@@ -1022,7 +1039,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(txnHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
-		gg := sn.seg.MakeGetter()
+		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		if !gg.MatchPrefix(txnHash[:]) {
 			continue
@@ -1104,7 +1121,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(borTxHash[:])
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
-		gg := sn.seg.MakeGetter()
+		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
 			buf, _ = gg.Next(buf[:0])
@@ -1137,7 +1154,7 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 		return 0
 	}
 	var lastEventID uint64
-	gg := lastSegment.seg.MakeGetter()
+	gg := lastSegment.MakeGetter()
 	var buf []byte
 	for gg.HasNext() {
 		buf, _ = gg.Next(buf[:0])
@@ -1214,7 +1231,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 			continue
 		}
 		offset := sn.idx.OrdinalLookup(spanId - sn.idx.BaseDataID())
-		gg := sn.seg.MakeGetter()
+		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		result, _ := gg.Next(nil)
 		return common.Copy(result), nil
@@ -1224,7 +1241,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 
 // ---- Data Integrity part ----
 
-func (r *BlockReader) ensureHeaderNumber(n uint64, seg *HeaderSegment) error {
+func (r *BlockReader) ensureHeaderNumber(n uint64, seg *Segment) error {
 	h, _, err := r.headerFromSnapshot(n, seg, nil)
 	if err != nil {
 		return err

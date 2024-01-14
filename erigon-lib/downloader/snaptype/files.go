@@ -32,56 +32,6 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-type Type int
-
-const (
-	Unknown Type = -1
-	Headers Type = iota
-	Bodies
-	Transactions
-	BorEvents
-	BorSpans
-	BeaconBlocks
-)
-
-func (ft Type) String() string {
-	switch ft {
-	case Headers:
-		return "headers"
-	case Bodies:
-		return "bodies"
-	case Transactions:
-		return "transactions"
-	case BorEvents:
-		return "borevents"
-	case BorSpans:
-		return "borspans"
-	case BeaconBlocks:
-		return "beaconblocks"
-	default:
-		panic(fmt.Sprintf("unknown file type: %d", ft))
-	}
-}
-
-func ParseFileType(s string) (Type, bool) {
-	switch s {
-	case "headers":
-		return Headers, true
-	case "bodies":
-		return Bodies, true
-	case "transactions":
-		return Transactions, true
-	case "borevents":
-		return BorEvents, true
-	case "borspans":
-		return BorSpans, true
-	case "beaconblocks":
-		return BeaconBlocks, true
-	default:
-		return Unknown, false
-	}
-}
-
 type IdxType string
 
 const (
@@ -90,25 +40,21 @@ const (
 
 func (it IdxType) String() string { return string(it) }
 
-var BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
-
-var BorSnapshotTypes = []Type{BorEvents, BorSpans}
-
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(version uint8, from, to uint64, fileType string) string {
+func FileName(version Version, from, to uint64, fileType string) string {
 	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
 }
 
-func SegmentFileName(version uint8, from, to uint64, t Type) string {
+func SegmentFileName(version Version, from, to uint64, t Enum) string {
 	return FileName(version, from, to, t.String()) + ".seg"
 }
-func DatFileName(version uint8, from, to uint64, fType string) string {
+func DatFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".dat"
 }
-func IdxFileName(version uint8, from, to uint64, fType string) string {
+func IdxFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
 }
 
@@ -121,8 +67,8 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	}
 	return out
 }
-func FilesWithExt(dir string, version uint8, expectExt string) ([]FileInfo, error) {
-	files, err := ParseDir(dir, version)
+func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
+	files, err := ParseDir(dir)
 	if err != nil {
 		return nil, err
 	}
@@ -147,13 +93,13 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return res, ok
 	}
 
-	var version uint8
+	var version Version
 	if len(parts[0]) > 1 && parts[0][0] == 'v' {
 		v, err := strconv.ParseUint(parts[0][1:], 10, 64)
 		if err != nil {
 			return
 		}
-		version = uint8(v)
+		version = Version(v)
 	}
 
 	from, err := strconv.ParseUint(parts[1], 10, 64)
@@ -169,7 +115,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return res, ok
 	}
 
-	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
+	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), Type: ft, Ext: ext}, ok
 }
 
 const Erigon3SeedableSteps = 32
@@ -188,10 +134,10 @@ var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	Version   uint8
+	Version   Version
 	From, To  uint64
 	Path, Ext string
-	T         Type
+	Type      Type
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
@@ -200,14 +146,15 @@ func (f FileInfo) Seedable() bool {
 }
 func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
 func (f FileInfo) Name() string          { return filepath.Base(f.Path) }
+func (f FileInfo) Dir() string           { return filepath.Dir(f.Path) }
 
-func IdxFiles(dir string, version uint8) (res []FileInfo, err error) {
-	return FilesWithExt(dir, version, ".idx")
+func IdxFiles(dir string) (res []FileInfo, err error) {
+	return FilesWithExt(dir, ".idx")
 }
-func Segments(dir string, version uint8) (res []FileInfo, err error) {
-	return FilesWithExt(dir, version, ".seg")
+func Segments(dir string) (res []FileInfo, err error) {
+	return FilesWithExt(dir, ".seg")
 }
-func TmpFiles(dir string, version uint8) (res []string, err error) {
+func TmpFiles(dir string) (res []string, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -216,10 +163,8 @@ func TmpFiles(dir string, version uint8) (res []string, err error) {
 		return nil, err
 	}
 
-	v := fmt.Sprint("v", version)
-
 	for _, f := range files {
-		if f.IsDir() || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		if f.IsDir() || len(f.Name()) < 3 {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".tmp" {
@@ -232,7 +177,7 @@ func TmpFiles(dir string, version uint8) (res []string, err error) {
 }
 
 // ParseDir - reading dir (
-func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
+func ParseDir(dir string) (res []FileInfo, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -241,14 +186,12 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		return nil, err
 	}
 
-	v := fmt.Sprint("v", version)
-
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
 			return nil, err
 		}
-		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
+		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
 			continue
 		}
 
@@ -268,8 +211,8 @@ func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 		if i.To != j.To {
 			return cmp.Compare(i.To, j.To)
 		}
-		if i.T != j.T {
-			return cmp.Compare(i.T, j.T)
+		if i.Type.Enum() != j.Type.Enum() {
+			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
 		}
 		return cmp.Compare(i.Ext, j.Ext)
 	})

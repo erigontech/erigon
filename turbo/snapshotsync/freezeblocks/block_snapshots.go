@@ -54,73 +54,88 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 )
 
-type HeaderSegment struct {
-	seg           *compress.Decompressor // value: first_byte_of_header_hash + header_rlp
-	idxHeaderHash *recsplit.Index        // header_hash       -> headers_segment_offset
+type Segment struct {
 	Range
-	version uint8
+	*compress.Decompressor
+	indexes []*recsplit.Index
+	segType snaptype.Type
+	version snaptype.Version
 }
 
-type BodySegment struct {
-	seg           *compress.Decompressor // value: rlp(types.BodyForStorage)
-	idxBodyNumber *recsplit.Index        // block_num_u64     -> bodies_segment_offset
-	Range
-	version uint8
+func (s Segment) Type() snaptype.Type {
+	return s.segType
 }
 
-type TxnSegment struct {
-	Seg                 *compress.Decompressor // value: first_byte_of_transaction_hash + sender_address + transaction_rlp
-	IdxTxnHash          *recsplit.Index        // transaction_hash  -> transactions_segment_offset
-	IdxTxnHash2BlockNum *recsplit.Index        // transaction_hash  -> block_number
-	Range
-	version uint8
+func (s Segment) Version() snaptype.Version {
+	return s.version
 }
 
-func (sn *HeaderSegment) closeIdx() {
-	if sn.idxHeaderHash != nil {
-		sn.idxHeaderHash.Close()
-		sn.idxHeaderHash = nil
+func (s Segment) Index(index ...snaptype.Index) *recsplit.Index {
+	if len(index) == 0 {
+		index = []snaptype.Index{0}
+	}
+
+	if len(s.indexes) < index[0].Offset() {
+		return nil
+	}
+
+	return s.indexes[index[0].Offset()]
+}
+
+func (s Segment) FileName() string {
+	return s.Type().FileName(s.version, s.from, s.to)
+}
+
+func (s *Segment) reopenSeg(dir string) (err error) {
+	s.closeSeg()
+	s.Decompressor, err = compress.NewDecompressor(filepath.Join(dir, s.FileName()))
+	if err != nil {
+		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
+	}
+	return nil
+}
+
+func (s *Segment) closeSeg() {
+	if s.Decompressor != nil {
+		s.Close()
+		s.Decompressor = nil
 	}
 }
-func (sn *HeaderSegment) closeSeg() {
-	if sn.seg != nil {
-		sn.seg.Close()
-		sn.seg = nil
+
+func (s *Segment) closeIdx() {
+	for _, index := range s.indexes {
+		index.Close()
 	}
-}
-func (sn *HeaderSegment) close() {
-	sn.closeSeg()
-	sn.closeIdx()
+
+	s.indexes = nil
 }
 
-func (sn *HeaderSegment) openFiles() []string {
+func (s *Segment) close() {
+	s.closeSeg()
+	s.closeIdx()
+}
+
+func (s *Segment) openFiles() []string {
 	var files []string
 
-	if sn.seg.IsOpen() {
-		files = append(files, sn.seg.FilePath())
+	if s.IsOpen() {
+		files = append(files, s.FilePath())
 	}
 
-	if sn.idxHeaderHash != nil {
-		files = append(files, sn.idxHeaderHash.FilePath())
+	for _, index := range s.indexes {
+		files = append(files, index.FilePath())
 	}
 
 	return files
 }
 
-func (sn *HeaderSegment) reopenSeg(dir string) (err error) {
-	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.version, sn.from, sn.to, snaptype.Headers)
-	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
-func (sn *HeaderSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if sn.idxHeaderHash != nil {
+func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
+	if len(s.indexes) == 0 {
 		return nil
 	}
-	err = sn.reopenIdx(dir)
+
+	err = s.reopenIdx(dir)
+
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
@@ -130,235 +145,55 @@ func (sn *HeaderSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error
 			}
 		}
 	}
+
 	return nil
 }
-func (sn *HeaderSegment) reopenIdx(dir string) (err error) {
-	sn.closeIdx()
-	if sn.seg == nil {
+
+func (s *Segment) reopenIdx(dir string) (err error) {
+	s.closeIdx()
+	if s.Decompressor == nil {
 		return nil
 	}
-	fileName := snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.Headers.String())
-	sn.idxHeaderHash, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
 
-	return nil
-}
+	for i := 0; i < s.Type().IndexCount(); i++ {
+		fileName := s.Type().IdxFileName(s.version, s.from, s.to, i)
+		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
 
-func (sn *BodySegment) closeSeg() {
-	if sn.seg != nil {
-		sn.seg.Close()
-		sn.seg = nil
-	}
-}
-func (sn *BodySegment) closeIdx() {
-	if sn.idxBodyNumber != nil {
-		sn.idxBodyNumber.Close()
-		sn.idxBodyNumber = nil
-	}
-}
-func (sn *BodySegment) close() {
-	sn.closeSeg()
-	sn.closeIdx()
-}
-
-func (sn *BodySegment) openFiles() []string {
-	var files []string
-
-	if sn.seg.IsOpen() {
-		files = append(files, sn.seg.FilePath())
-	}
-
-	if sn.idxBodyNumber != nil {
-		files = append(files, sn.idxBodyNumber.FilePath())
-	}
-
-	return files
-}
-
-func (sn *BodySegment) reopenSeg(dir string) (err error) {
-	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.version, sn.from, sn.to, snaptype.Bodies)
-	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
-func (sn *BodySegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if sn.idxBodyNumber != nil {
-		return nil
-	}
-	err = sn.reopenIdx(dir)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			if optimistic {
-				log.Warn("[snapshots] open index", "err", err)
-			} else {
-				return err
-			}
+		if err != nil {
+			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
+
+		s.indexes = append(s.indexes, index)
 	}
+
 	return nil
 }
 
-func (sn *BodySegment) reopenIdx(dir string) (err error) {
-	sn.closeIdx()
-	if sn.seg == nil {
-		return nil
-	}
-	fileName := snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.Bodies.String())
-	sn.idxBodyNumber, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
+// headers
+// value: first_byte_of_header_hash + header_rlp
+// header_hash       -> headers_segment_offset
 
-func (sn *TxnSegment) closeIdx() {
-	if sn.IdxTxnHash != nil {
-		sn.IdxTxnHash.Close()
-		sn.IdxTxnHash = nil
-	}
-	if sn.IdxTxnHash2BlockNum != nil {
-		sn.IdxTxnHash2BlockNum.Close()
-		sn.IdxTxnHash2BlockNum = nil
-	}
-}
-func (sn *TxnSegment) closeSeg() {
-	if sn.Seg != nil {
-		sn.Seg.Close()
-		sn.Seg = nil
-	}
-}
-func (sn *TxnSegment) close() {
-	sn.closeSeg()
-	sn.closeIdx()
-}
+// bodies
+// value: rlp(types.BodyForStorage)
+// block_num_u64     -> bodies_segment_offset
 
-func (sn *TxnSegment) openFiles() []string {
-	var files []string
+// transactions
+// value: first_byte_of_transaction_hash + sender_address + transaction_rlp
+// transaction_hash  -> transactions_segment_offset
+// transaction_hash  -> block_number
 
-	if sn.Seg.IsOpen() {
-		files = append(files, sn.Seg.FilePath())
-	}
-
-	if sn.IdxTxnHash != nil && sn.IdxTxnHash.IsOpen() {
-		files = append(files, sn.IdxTxnHash.FilePath())
-	}
-
-	if sn.IdxTxnHash2BlockNum != nil && sn.IdxTxnHash2BlockNum.IsOpen() {
-		files = append(files, sn.IdxTxnHash2BlockNum.FilePath())
-	}
-
-	return files
-}
-
-func (sn *TxnSegment) reopenSeg(dir string) (err error) {
-	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.version, sn.from, sn.to, snaptype.Transactions)
-	sn.Seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
-func (sn *TxnSegment) reopenIdx(dir string) (err error) {
-	sn.closeIdx()
-	if sn.Seg == nil {
-		return nil
-	}
-	fileName := snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.Transactions.String())
-	sn.IdxTxnHash, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-
-	/*
-		// Historically we had several times when:
-		//  - erigon downloaded new version of .seg file
-		//  - or didn't finish download and start indexing
-		// this was a "quick-fix protection" against this cases
-		// but now we have other protections for this cases
-		// let's try to remove this one - because it's not compatible with "copy datadir" and "restore datadir from backup" scenarios
-		if sn.IdxTxnHash.ModTime().Before(sn.Seg.ModTime()) {
-			log.Trace("[snapshots] skip index because it modify time is ahead before .seg file", "name", sn.IdxTxnHash.FileName())
-			//Index has been created before the segment file, needs to be ignored (and rebuilt) as inconsistent
-			sn.IdxTxnHash.Close()
-			sn.IdxTxnHash = nil
-		}
-	*/
-
-	fileName = snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.Transactions2Block.String())
-	sn.IdxTxnHash2BlockNum, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
-
-func (sn *TxnSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if sn.IdxTxnHash != nil && sn.IdxTxnHash2BlockNum != nil {
-		return nil
-	}
-	err = sn.reopenIdx(dir)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			if optimistic {
-				log.Warn("[snapshots] open index", "err", err)
-			} else {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-type headerSegments struct {
+type segments struct {
 	lock     sync.RWMutex
-	segments []*HeaderSegment
+	segments []*Segment
 }
 
-func (s *headerSegments) View(f func(segments []*HeaderSegment) error) error {
+func (s *segments) View(f func(segments []*Segment) error) error {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	return f(s.segments)
 }
 
-type bodySegments struct {
-	lock     sync.RWMutex
-	segments []*BodySegment
-}
-
-func (s *bodySegments) View(f func([]*BodySegment) error) error {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	return f(s.segments)
-}
-func (s *bodySegments) ViewSegment(blockNum uint64, f func(*BodySegment) error) (found bool, err error) {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	for _, seg := range s.segments {
-		if !(blockNum >= seg.from && blockNum < seg.to) {
-			continue
-		}
-		return true, f(seg)
-	}
-	return false, nil
-}
-
-type txnSegments struct {
-	lock     sync.RWMutex
-	segments []*TxnSegment
-}
-
-func (s *txnSegments) View(f func([]*TxnSegment) error) error {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	return f(s.segments)
-}
-func (s *txnSegments) ViewSegment(blockNum uint64, f func(*TxnSegment) error) (found bool, err error) {
+func (s *segments) Segment(blockNum uint64, f func(*Segment) error) (found bool, err error) {
 	s.lock.RLock()
 	defer s.lock.RUnlock()
 	for _, seg := range s.segments {
@@ -374,15 +209,14 @@ type RoSnapshots struct {
 	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
-	Headers *headerSegments
-	Bodies  *bodySegments
-	Txs     *txnSegments
+	Headers *segments
+	Bodies  *segments
+	Txs     *segments
 
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
-	version     uint8
 	logger      log.Logger
 
 	// allows for pruning segments - this is the min availible segment
@@ -394,11 +228,10 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, version uint8, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{dir: snapDir, cfg: cfg, version: version, Headers: &headerSegments{}, Bodies: &bodySegments{}, Txs: &txnSegments{}, logger: logger}
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
+	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &segments{}, Bodies: &segments{}, Txs: &segments{}, logger: logger}
 }
 
-func (s *RoSnapshots) Version() uint8                { return s.version }
 func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
 func (s *RoSnapshots) Dir() string                   { return s.dir }
 func (s *RoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
@@ -433,13 +266,13 @@ func (s *RoSnapshots) DisableReadAhead() {
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
 	for _, sn := range s.Headers.segments {
-		sn.seg.DisableReadAhead()
+		sn.DisableReadAhead()
 	}
 	for _, sn := range s.Bodies.segments {
-		sn.seg.DisableReadAhead()
+		sn.DisableReadAhead()
 	}
 	for _, sn := range s.Txs.segments {
-		sn.Seg.DisableReadAhead()
+		sn.DisableReadAhead()
 	}
 }
 func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
@@ -450,13 +283,13 @@ func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
 	for _, sn := range s.Headers.segments {
-		sn.seg.EnableReadAhead()
+		sn.EnableReadAhead()
 	}
 	for _, sn := range s.Bodies.segments {
-		sn.seg.EnableReadAhead()
+		sn.EnableReadAhead()
 	}
 	for _, sn := range s.Txs.segments {
-		sn.Seg.EnableReadAhead()
+		sn.EnableReadAhead()
 	}
 	return s
 }
@@ -468,13 +301,13 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
 	for _, sn := range s.Headers.segments {
-		sn.seg.EnableWillNeed()
+		sn.EnableWillNeed()
 	}
 	for _, sn := range s.Bodies.segments {
-		sn.seg.EnableWillNeed()
+		sn.EnableWillNeed()
 	}
 	for _, sn := range s.Txs.segments {
-		sn.Seg.EnableWillNeed()
+		sn.EnableWillNeed()
 	}
 	return s
 }
@@ -486,13 +319,13 @@ func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
 	s.Txs.lock.RLock()
 	defer s.Txs.lock.RUnlock()
 	for _, sn := range s.Headers.segments {
-		sn.seg.EnableMadvNormal()
+		sn.EnableMadvNormal()
 	}
 	for _, sn := range s.Bodies.segments {
-		sn.seg.EnableMadvNormal()
+		sn.EnableMadvNormal()
 	}
 	for _, sn := range s.Txs.segments {
-		sn.Seg.EnableMadvNormal()
+		sn.EnableMadvNormal()
 	}
 	return s
 }
@@ -500,19 +333,19 @@ func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
 func (s *RoSnapshots) idxAvailability() uint64 {
 	var headers, bodies, txs uint64
 	for _, seg := range s.Headers.segments {
-		if seg.idxHeaderHash == nil {
+		if seg.Index() == nil {
 			break
 		}
 		headers = seg.to - 1
 	}
 	for _, seg := range s.Bodies.segments {
-		if seg.idxBodyNumber == nil {
+		if seg.Index() == nil {
 			break
 		}
 		bodies = seg.to - 1
 	}
 	for _, seg := range s.Txs.segments {
-		if seg.IdxTxnHash == nil || seg.IdxTxnHash2BlockNum == nil {
+		if seg.Index(snaptype.Indexes.TxnHash) == nil || seg.Index(snaptype.Indexes.TxnHash2BlockNum) == nil {
 			break
 		}
 		txs = seg.to - 1
@@ -542,34 +375,31 @@ func (s *RoSnapshots) Files() (list []string) {
 	defer s.Txs.lock.RUnlock()
 	maxBlockNumInFiles := s.BlocksAvailable()
 	for _, seg := range s.Bodies.segments {
-		if seg.seg == nil {
+		if seg.Decompressor == nil {
 			continue
 		}
 		if seg.from > maxBlockNumInFiles {
 			continue
 		}
-		_, fName := filepath.Split(seg.seg.FilePath())
-		list = append(list, fName)
+		list = append(list, seg.FileName())
 	}
 	for _, seg := range s.Headers.segments {
-		if seg.seg == nil {
+		if seg.Decompressor == nil {
 			continue
 		}
 		if seg.from > maxBlockNumInFiles {
 			continue
 		}
-		_, fName := filepath.Split(seg.seg.FilePath())
-		list = append(list, fName)
+		list = append(list, seg.FileName())
 	}
 	for _, seg := range s.Txs.segments {
-		if seg.Seg == nil {
+		if seg.Decompressor == nil {
 			continue
 		}
 		if seg.from > maxBlockNumInFiles {
 			continue
 		}
-		_, fName := filepath.Split(seg.Seg.FilePath())
-		list = append(list, fName)
+		list = append(list, seg.FileName())
 	}
 	slices.Sort(list)
 	return list
@@ -626,22 +456,22 @@ Loop:
 		}
 		var processed bool = true
 
-		switch f.T {
-		case snaptype.Headers:
-			var sn *HeaderSegment
+		switch f.Type.Enum() {
+		case snaptype.Enums.Headers:
+			var sn *Segment
 			var exists bool
 			for _, sn2 := range s.Headers.segments {
-				if sn2.seg == nil { // it's ok if some segment was not able to open
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if fName == sn2.seg.FileName() {
+				if fName == sn2.FileName() {
 					sn = sn2
 					exists = true
 					break
 				}
 			}
 			if !exists {
-				sn = &HeaderSegment{version: f.Version, Range: Range{f.From, f.To}}
+				sn = &Segment{segType: snaptype.Headers, version: f.Version, Range: Range{f.From, f.To}}
 			}
 
 			if open {
@@ -673,21 +503,21 @@ Loop:
 					return err
 				}
 			}
-		case snaptype.Bodies:
-			var sn *BodySegment
+		case snaptype.Enums.Bodies:
+			var sn *Segment
 			var exists bool
 			for _, sn2 := range s.Bodies.segments {
-				if sn2.seg == nil { // it's ok if some segment was not able to open
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if fName == sn2.seg.FileName() {
+				if fName == sn2.FileName() {
 					sn = sn2
 					exists = true
 					break
 				}
 			}
 			if !exists {
-				sn = &BodySegment{version: f.Version, Range: Range{f.From, f.To}}
+				sn = &Segment{segType: snaptype.Bodies, version: f.Version, Range: Range{f.From, f.To}}
 			}
 
 			if open {
@@ -716,21 +546,21 @@ Loop:
 					return err
 				}
 			}
-		case snaptype.Transactions:
-			var sn *TxnSegment
+		case snaptype.Enums.Transactions:
+			var sn *Segment
 			var exists bool
 			for _, sn2 := range s.Txs.segments {
-				if sn2.Seg == nil { // it's ok if some segment was not able to open
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if fName == sn2.Seg.FileName() {
+				if fName == sn2.FileName() {
 					sn = sn2
 					exists = true
 					break
 				}
 			}
 			if !exists {
-				sn = &TxnSegment{version: f.Version, Range: Range{f.From, f.To}}
+				sn = &Segment{segType: snaptype.Headers, version: f.Version, Range: Range{f.From, f.To}}
 			}
 
 			if open {
@@ -800,7 +630,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
-	files, _, err := segments(s.dir, s.version, 0, func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
+	files, _, err := filteredSegments(s.dir, 0, func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 		return typeOfSegmentsMustExist(dir, in, types)
 	})
 
@@ -841,10 +671,10 @@ func (s *RoSnapshots) Close() {
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
 Loop1:
 	for i, sn := range s.Headers.segments {
-		if sn.seg == nil {
+		if sn.Decompressor == nil {
 			continue Loop1
 		}
-		_, name := filepath.Split(sn.seg.FilePath())
+		_, name := filepath.Split(sn.FilePath())
 		for _, fName := range l {
 			if fName == name {
 				continue Loop1
@@ -855,10 +685,10 @@ Loop1:
 	}
 Loop2:
 	for i, sn := range s.Bodies.segments {
-		if sn.seg == nil {
+		if sn.Decompressor == nil {
 			continue Loop2
 		}
-		_, name := filepath.Split(sn.seg.FilePath())
+		_, name := filepath.Split(sn.FilePath())
 		for _, fName := range l {
 			if fName == name {
 				continue Loop2
@@ -869,10 +699,10 @@ Loop2:
 	}
 Loop3:
 	for i, sn := range s.Txs.segments {
-		if sn.Seg == nil {
+		if sn.Decompressor == nil {
 			continue Loop3
 		}
-		_, name := filepath.Split(sn.Seg.FilePath())
+		_, name := filepath.Split(sn.FilePath())
 		for _, fName := range l {
 			if fName == name {
 				continue Loop3
@@ -882,7 +712,7 @@ Loop3:
 		s.Txs.segments[i] = nil
 	}
 	var i int
-	for i = 0; i < len(s.Headers.segments) && s.Headers.segments[i] != nil && s.Headers.segments[i].seg != nil; i++ {
+	for i = 0; i < len(s.Headers.segments) && s.Headers.segments[i] != nil && s.Headers.segments[i].Decompressor != nil; i++ {
 	}
 	tail := s.Headers.segments[i:]
 	s.Headers.segments = s.Headers.segments[:i]
@@ -893,7 +723,7 @@ Loop3:
 		}
 	}
 
-	for i = 0; i < len(s.Bodies.segments) && s.Bodies.segments[i] != nil && s.Bodies.segments[i].seg != nil; i++ {
+	for i = 0; i < len(s.Bodies.segments) && s.Bodies.segments[i] != nil && s.Bodies.segments[i].Decompressor != nil; i++ {
 	}
 	tailB := s.Bodies.segments[i:]
 	s.Bodies.segments = s.Bodies.segments[:i]
@@ -904,7 +734,7 @@ Loop3:
 		}
 	}
 
-	for i = 0; i < len(s.Txs.segments) && s.Txs.segments[i] != nil && s.Txs.segments[i].Seg != nil; i++ {
+	for i = 0; i < len(s.Txs.segments) && s.Txs.segments[i] != nil && s.Txs.segments[i].Decompressor != nil; i++ {
 	}
 	tailC := s.Txs.segments[i:]
 	s.Txs.segments = s.Txs.segments[:i]
@@ -925,23 +755,23 @@ func (s *RoSnapshots) PrintDebug() {
 	defer s.Txs.lock.RUnlock()
 	fmt.Println("    == Snapshots, Header")
 	for _, sn := range s.Headers.segments {
-		fmt.Printf("%d,  %t\n", sn.from, sn.idxHeaderHash == nil)
+		fmt.Printf("%d,  %t\n", sn.from, sn.Index() == nil)
 	}
 	fmt.Println("    == Snapshots, Body")
 	for _, sn := range s.Bodies.segments {
-		fmt.Printf("%d,  %t\n", sn.from, sn.idxBodyNumber == nil)
+		fmt.Printf("%d,  %t\n", sn.from, sn.Index() == nil)
 	}
 	fmt.Println("    == Snapshots, Txs")
 	for _, sn := range s.Txs.segments {
-		fmt.Printf("%d,  %t, %t\n", sn.from, sn.IdxTxnHash == nil, sn.IdxTxnHash2BlockNum == nil)
+		fmt.Printf("%d,  %t, %t\n", sn.from, sn.Index(snaptype.Indexes.TxnHash) == nil, sn.Index(snaptype.Indexes.TxnHash2BlockNum) == nil)
 	}
 }
 
 func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm) error {
 	mappedHeaderSnapshots := make([]*silkworm.MappedHeaderSnapshot, 0)
-	err := s.Headers.View(func(segments []*HeaderSegment) error {
+	err := s.Headers.View(func(segments []*Segment) error {
 		for _, headerSegment := range segments {
-			mappedHeaderSnapshots = append(mappedHeaderSnapshots, headerSegment.mappedSnapshot())
+			mappedHeaderSnapshots = append(mappedHeaderSnapshots, headerSegment.mappedHeaderSnapshot())
 		}
 		return nil
 	})
@@ -950,9 +780,9 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	}
 
 	mappedBodySnapshots := make([]*silkworm.MappedBodySnapshot, 0)
-	err = s.Bodies.View(func(segments []*BodySegment) error {
+	err = s.Bodies.View(func(segments []*Segment) error {
 		for _, bodySegment := range segments {
-			mappedBodySnapshots = append(mappedBodySnapshots, bodySegment.mappedSnapshot())
+			mappedBodySnapshots = append(mappedBodySnapshots, bodySegment.mappedBodySnapshot())
 		}
 		return nil
 	})
@@ -961,9 +791,9 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	}
 
 	mappedTxnSnapshots := make([]*silkworm.MappedTxnSnapshot, 0)
-	err = s.Txs.View(func(segments []*TxnSegment) error {
+	err = s.Txs.View(func(segments []*Segment) error {
 		for _, txnSegment := range segments {
-			mappedTxnSnapshots = append(mappedTxnSnapshots, txnSegment.mappedSnapshot())
+			mappedTxnSnapshots = append(mappedTxnSnapshots, txnSegment.mappedTxnSnapshot())
 		}
 		return nil
 	})
@@ -991,30 +821,26 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 }
 
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	//_, fName := filepath.Split(sn.Path)
-	//log.Info("[snapshots] build idx", "file", fName)
-	switch sn.T {
-	case snaptype.Headers:
-		if err := HeadersIdx(ctx, sn.Path, sn.Version, sn.From, tmpDir, p, lvl, logger); err != nil {
+	//log.Info("[snapshots] build idx", "file", sn.Name())
+	switch sn.Type.Enum() {
+	case snaptype.Enums.Headers:
+		if err := HeadersIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
-	case snaptype.Bodies:
-		if err := BodiesIdx(ctx, sn.Path, sn.From, tmpDir, p, lvl, logger); err != nil {
+	case snaptype.Enums.Bodies:
+		if err := BodiesIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
-	case snaptype.Transactions:
-		dir, _ := filepath.Split(sn.Path)
-		if err := TransactionsIdx(ctx, chainConfig, sn.Version, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
+	case snaptype.Enums.Transactions:
+		if err := TransactionsIdx(ctx, chainConfig, sn, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
-	case snaptype.BorEvents:
-		dir, _ := filepath.Split(sn.Path)
-		if err := BorEventsIdx(ctx, sn.Path, sn.Version, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
+	case snaptype.Enums.BorEvents:
+		if err := BorEventsIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
-	case snaptype.BorSpans:
-		dir, _ := filepath.Split(sn.Path)
-		if err := BorSpansIdx(ctx, sn.Path, sn.Version, sn.From, sn.To, dir, tmpDir, p, lvl, logger); err != nil {
+	case snaptype.Enums.BorSpans:
+		if err := BorSpansIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	}
@@ -1022,11 +848,11 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, version uint8, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
-	segments, _, err := Segments(dir, version, minIndex)
+	segments, _, err := Segments(dir, minIndex)
 	if err != nil {
 		return err
 	}
@@ -1059,7 +885,7 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	for _, t := range snaptype.BlockSnapshotTypes {
 		for index := range segments {
 			segment := segments[index]
-			if segment.T != t {
+			if segment.Type.Enum() != t.Enum() {
 				continue
 			}
 			if hasIdxFile(segment, logger) {
@@ -1089,10 +915,10 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 	}
 }
 
-func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, version uint8, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 
-	segments, _, err := BorSegments(dir, version, minIndex)
+	segments, _, err := BorSegments(dir, minIndex)
 	if err != nil {
 		return err
 	}
@@ -1103,7 +929,7 @@ func BuildBorMissedIndices(logPrefix string, ctx context.Context, dirs datadir.D
 	g.SetLimit(workers)
 	for _, t := range snaptype.BorSnapshotTypes {
 		for _, segment := range segments {
-			if segment.T != t {
+			if segment.Type.Enum() != t.Enum() {
 				continue
 			}
 			if hasIdxFile(segment, logger) {
@@ -1189,7 +1015,7 @@ MainLoop:
 			continue
 		}
 		for _, t := range types {
-			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t))
+			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t.Enum()))
 			if !dir2.FileExist(p) {
 				continue MainLoop
 			}
@@ -1199,7 +1025,7 @@ MainLoop:
 	return res
 }
 
-func allTypeOfSegmentsMustExist(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
+func allSegmentTypesMustExist(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 	return typeOfSegmentsMustExist(dir, in, snaptype.BlockSnapshotTypes)
 }
 
@@ -1232,8 +1058,8 @@ func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 	return res
 }
 
-func SegmentsCaplin(dir string, version uint8, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir, version)
+func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
@@ -1242,7 +1068,7 @@ func SegmentsCaplin(dir string, version uint8, minBlock uint64) (res []snaptype.
 		var l []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.T != snaptype.BeaconBlocks {
+			if f.Type.Enum() != snaptype.Enums.BeaconBlocks {
 				continue
 			}
 			l = append(l, f)
@@ -1254,20 +1080,22 @@ func SegmentsCaplin(dir string, version uint8, minBlock uint64) (res []snaptype.
 	return res, missingSnapshots, nil
 }
 
-func Segments(dir string, version uint8, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	return segments(dir, version, minBlock, allTypeOfSegmentsMustExist)
+func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	return filteredSegments(dir, minBlock, allSegmentTypesMustExist)
 }
 
-func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func(dir string, in []snaptype.FileInfo) []snaptype.FileInfo) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir, version)
+func filteredSegments(dir string, minBlock uint64, segmentsTypeCheck func(dir string, in []snaptype.FileInfo) []snaptype.FileInfo) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir)
+
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
+
 	{
 		var l []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.T != snaptype.Headers {
+			if f.Type.Enum() != snaptype.Enums.Headers {
 				continue
 			}
 			l = append(l, f)
@@ -1279,7 +1107,7 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 	{
 		var l []snaptype.FileInfo
 		for _, f := range list {
-			if f.T != snaptype.Bodies {
+			if f.Type.Enum() != snaptype.Enums.Bodies {
 				continue
 			}
 			l = append(l, f)
@@ -1290,7 +1118,7 @@ func segments(dir string, version uint8, minBlock uint64, segmentsTypeCheck func
 	{
 		var l []snaptype.FileInfo
 		for _, f := range list {
-			if f.T != snaptype.Transactions {
+			if f.Type.Enum() != snaptype.Enums.Transactions {
 				continue
 			}
 			l = append(l, f)
@@ -1411,7 +1239,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	if ok {
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, snapshots.version, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
@@ -1584,7 +1412,7 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := BuildMissedIndices(logPrefix, ctx, br.dirs, snapshots.Version(), snapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
+	if err := BuildMissedIndices(logPrefix, ctx, br.dirs, snapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
 		return fmt.Errorf("BuildMissedIndices: %w", err)
 	}
 
@@ -1621,7 +1449,7 @@ func (br *BlockRetire) buildBorMissedIndicesIfNeed(ctx context.Context, logPrefi
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, borSnapshots.Version(), borSnapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
+	if err := BuildBorMissedIndices(logPrefix, ctx, br.dirs, borSnapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
 		return fmt.Errorf("BuildBorMissedIndices: %w", err)
 	}
 
@@ -1635,7 +1463,7 @@ func (br *BlockRetire) buildBorMissedIndicesIfNeed(ctx context.Context, logPrefi
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
@@ -1643,7 +1471,7 @@ func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPe
 
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		lastTxNum, err := dumpBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger)
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger)
 		if err != nil {
 			return err
 		}
@@ -1652,12 +1480,12 @@ func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPe
 	return nil
 }
 
-func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
+func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger) (lastTxNum uint64, err error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	{
-		segName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.Headers)
+		segName := snaptype.Headers.FileName(0, blockFrom, blockTo)
 		f, _ := snaptype.ParseFileName(snapDir, segName)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot Headers", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
@@ -1681,7 +1509,7 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 	}
 
 	{
-		segName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.Bodies)
+		segName := snaptype.Bodies.FileName(0, blockFrom, blockTo)
 		f, _ := snaptype.ParseFileName(snapDir, segName)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot Bodies", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
@@ -1706,7 +1534,7 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 	}
 
 	{
-		segName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.Transactions)
+		segName := snaptype.Transactions.FileName(0, blockFrom, blockTo)
 		f, _ := snaptype.ParseFileName(snapDir, segName)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot Txs", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
@@ -1724,11 +1552,10 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 		if expectedCount != sn.Count() {
 			return lastTxNum, fmt.Errorf("incorrect tx count: %d, expected from db: %d", sn.Count(), expectedCount)
 		}
-		snapDir, fileName := filepath.Split(f.Path)
-		ext := filepath.Ext(fileName)
-		logger.Log(lvl, "[snapshots] Compression start", "file", fileName[:len(fileName)-len(ext)], "workers", sn.Workers())
+		ext := filepath.Ext(f.Name())
+		logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.Workers())
 		t := time.Now()
-		_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(snapDir, version, blockFrom, blockTo)
+		_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(f)
 		if err != nil {
 			return lastTxNum, err
 		}
@@ -1738,7 +1565,7 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 		if err := sn.Compress(); err != nil {
 			return lastTxNum, fmt.Errorf("compress: %w", err)
 		}
-		logger.Log(lvl, "[snapshots] Compression", "took", time.Since(t), "ratio", sn.Ratio.String(), "file", fileName[:len(fileName)-len(ext)])
+		logger.Log(lvl, "[snapshots] Compression", "took", time.Since(t), "ratio", sn.Ratio.String(), "file", f.Name()[:len(f.Name())-len(ext)])
 
 		p := &background.Progress{}
 		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
@@ -1750,17 +1577,17 @@ func dumpBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint
 }
 
 func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
-	dir, _ := filepath.Split(sn.Path)
-	fName := snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.T.String())
+	dir := sn.Dir()
+	fName := snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.Type.String())
 	var result = true
-	switch sn.T {
-	case snaptype.Headers, snaptype.Bodies, snaptype.BorEvents, snaptype.BorSpans, snaptype.BeaconBlocks:
+	switch sn.Type.Enum() {
+	case snaptype.Enums.Headers, snaptype.Enums.Bodies, snaptype.Enums.BorEvents, snaptype.Enums.BorSpans, snaptype.Enums.BeaconBlocks:
 		idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
 			return false
 		}
 		idx.Close()
-	case snaptype.Transactions:
+	case snaptype.Enums.Transactions:
 		idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
 			return false
@@ -2101,9 +1928,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 
 var EmptyTxHash = common2.Hash{}
 
-func txsAmountBasedOnBodiesSnapshots(snapDir string, version uint8, blockFrom, blockTo uint64) (firstTxID uint64, expectedCount int, err error) {
-	bodySegmentPath := filepath.Join(snapDir, snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.Bodies))
-	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
+func txsAmountBasedOnBodiesSnapshots(sn snaptype.FileInfo) (firstTxID uint64, expectedCount int, err error) {
+	bodiesSegment, err := compress.NewDecompressor(sn.Path)
 	if err != nil {
 		return
 	}
@@ -2121,7 +1947,7 @@ func txsAmountBasedOnBodiesSnapshots(snapDir string, version uint8, blockFrom, b
 	i := uint64(0)
 	for gg.HasNext() {
 		i++
-		if i == blockTo-blockFrom-1 {
+		if i == sn.To-sn.From-1 {
 			buf, _ = gg.Next(buf[:0])
 			if err = rlp.DecodeBytes(buf, lastBody); err != nil {
 				return
@@ -2138,33 +1964,33 @@ func txsAmountBasedOnBodiesSnapshots(snapDir string, version uint8, blockFrom, b
 	return
 }
 
-func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, version uint8, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
+			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
 		}
 	}()
-	firstBlockNum := blockFrom
-	firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(snapDir, version, blockFrom, blockTo)
+	firstBlockNum := sn.From
+	firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(sn)
 	if err != nil {
 		return err
 	}
-	bodySegmentPath := filepath.Join(snapDir, snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.Bodies))
-	bodiesSegment, err := compress.NewDecompressor(bodySegmentPath)
+
+	bodiesSegment, err := compress.NewDecompressor(sn.Path)
 	if err != nil {
 		return
 	}
 	defer bodiesSegment.Close()
 
-	segFileName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.Transactions)
-	segmentFilePath := filepath.Join(snapDir, segFileName)
+	segFileName := snaptype.SegmentFileName(sn.Version, sn.From, sn.To, snaptype.Enums.Transactions)
+	segmentFilePath := filepath.Join(sn.Dir(), segFileName)
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 	if d.Count() != expectedCount {
-		return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, d.Count())
+		return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", sn.From, sn.To, expectedCount, d.Count())
 	}
 
 	if p != nil {
@@ -2178,7 +2004,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, version uin
 		BucketSize:  2000,
 		LeafSize:    8,
 		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions.String())),
+		IndexFile:   filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Transactions.String())),
 		BaseDataID:  firstTxID,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}, logger)
@@ -2192,7 +2018,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, version uin
 		BucketSize:  2000,
 		LeafSize:    8,
 		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions2Block.String())),
+		IndexFile:   filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Transactions2Block.String())),
 		BaseDataID:  firstBlockNum,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}, logger)
@@ -2270,7 +2096,7 @@ RETRY:
 	}
 
 	if int(i) != expectedCount {
-		return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", blockFrom, blockTo, expectedCount, i)
+		return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", sn.From, sn.To, expectedCount, i)
 	}
 
 	if err := txnHashIdx.Build(ctx); err != nil {
@@ -2296,22 +2122,21 @@ RETRY:
 }
 
 // HeadersIdx - headerHash -> offset (analog of kv.HeaderNumber)
-func HeadersIdx(ctx context.Context, segmentFilePath string, version uint8, firstBlockNumInSegment uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func HeadersIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			_, fName := filepath.Split(segmentFilePath)
-			err = fmt.Errorf("HeadersIdx: at=%s, %v, %s", fName, rec, dbg.Stack())
+			err = fmt.Errorf("HeadersIdx: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
 		}
 	}()
 
-	d, err := compress.NewDecompressor(segmentFilePath)
+	d, err := compress.NewDecompressor(info.Path)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 
 	if p != nil {
-		_, fname := filepath.Split(segmentFilePath)
+		fname := info.Name()
 		p.Name.Store(&fname)
 		p.Total.Store(uint64(d.Count()))
 	}
@@ -2319,7 +2144,7 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, version uint8, firs
 	hasher := crypto.NewKeccakState()
 	defer cryptopool.ReturnToPoolKeccak256(hasher)
 	var h common2.Hash
-	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(ctx, d, info.From, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if p != nil {
 			p.Processed.Add(1)
 		}
@@ -2338,29 +2163,28 @@ func HeadersIdx(ctx context.Context, segmentFilePath string, version uint8, firs
 	return nil
 }
 
-func BodiesIdx(ctx context.Context, segmentFilePath string, firstBlockNumInSegment uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BodiesIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			_, fName := filepath.Split(segmentFilePath)
-			err = fmt.Errorf("BodiesIdx: at=%s, %v, %s", fName, rec, dbg.Stack())
+			err = fmt.Errorf("BodiesIdx: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
 		}
 	}()
 
 	num := make([]byte, 8)
 
-	d, err := compress.NewDecompressor(segmentFilePath)
+	d, err := compress.NewDecompressor(info.Path)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 
 	if p != nil {
-		_, fname := filepath.Split(segmentFilePath)
+		fname := info.Name()
 		p.Name.Store(&fname)
 		p.Total.Store(uint64(d.Count()))
 	}
 
-	if err := Idx(ctx, d, firstBlockNumInSegment, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+	if err := Idx(ctx, d, info.From, tmpDir, log.LvlDebug, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if p != nil {
 			p.Processed.Add(1)
 		}
@@ -2435,8 +2259,8 @@ func ForEachHeader(ctx context.Context, s *RoSnapshots, walker func(header *type
 	defer view.Close()
 
 	for _, sn := range view.Headers() {
-		if err := sn.seg.WithReadAhead(func() error {
-			g := sn.seg.MakeGetter()
+		if err := sn.WithReadAhead(func() error {
+			g := sn.MakeGetter()
 			for g.HasNext() {
 				word, _ = g.Next(word[:0])
 				var header types.Header
@@ -2533,10 +2357,10 @@ func (v *View) Close() {
 	v.s.Bodies.lock.RUnlock()
 	v.s.Txs.lock.RUnlock()
 }
-func (v *View) Headers() []*HeaderSegment { return v.s.Headers.segments }
-func (v *View) Bodies() []*BodySegment    { return v.s.Bodies.segments }
-func (v *View) Txs() []*TxnSegment        { return v.s.Txs.segments }
-func (v *View) HeadersSegment(blockNum uint64) (*HeaderSegment, bool) {
+func (v *View) Headers() []*Segment { return v.s.Headers.segments }
+func (v *View) Bodies() []*Segment  { return v.s.Bodies.segments }
+func (v *View) Txs() []*Segment     { return v.s.Txs.segments }
+func (v *View) HeadersSegment(blockNum uint64) (*Segment, bool) {
 	for _, seg := range v.Headers() {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
@@ -2545,7 +2369,7 @@ func (v *View) HeadersSegment(blockNum uint64) (*HeaderSegment, bool) {
 	}
 	return nil, false
 }
-func (v *View) BodiesSegment(blockNum uint64) (*BodySegment, bool) {
+func (v *View) BodiesSegment(blockNum uint64) (*Segment, bool) {
 	for _, seg := range v.Bodies() {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
@@ -2554,7 +2378,7 @@ func (v *View) BodiesSegment(blockNum uint64) (*BodySegment, bool) {
 	}
 	return nil, false
 }
-func (v *View) TxsSegment(blockNum uint64) (*TxnSegment, bool) {
+func (v *View) TxsSegment(blockNum uint64) (*Segment, bool) {
 	for _, seg := range v.Txs() {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
 			continue
@@ -2564,8 +2388,8 @@ func (v *View) TxsSegment(blockNum uint64) (*TxnSegment, bool) {
 	return nil, false
 }
 
-func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snaptype.Type][]string, error) {
-	toMerge := map[snaptype.Type][]string{}
+func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snaptype.Enum][]string, error) {
+	toMerge := map[snaptype.Enum][]string{}
 	view := snapshots.View()
 	defer view.Close()
 
@@ -2580,9 +2404,9 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 		if sn.to > to {
 			break
 		}
-		toMerge[snaptype.Headers] = append(toMerge[snaptype.Headers], hSegments[i].seg.FilePath())
-		toMerge[snaptype.Bodies] = append(toMerge[snaptype.Bodies], bSegments[i].seg.FilePath())
-		toMerge[snaptype.Transactions] = append(toMerge[snaptype.Transactions], tSegments[i].Seg.FilePath())
+		toMerge[snaptype.Enums.Headers] = append(toMerge[snaptype.Enums.Headers], hSegments[i].FilePath())
+		toMerge[snaptype.Enums.Bodies] = append(toMerge[snaptype.Enums.Bodies], bSegments[i].FilePath())
+		toMerge[snaptype.Enums.Transactions] = append(toMerge[snaptype.Enums.Transactions], tSegments[i].FilePath())
 	}
 
 	return toMerge, nil
@@ -2602,13 +2426,13 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 
 		for _, t := range snaptype.BlockSnapshotTypes {
-			segName := snaptype.SegmentFileName(snapshots.version, r.from, r.to, t)
+			segName := t.FileName(0, r.from, r.to)
 			f, ok := snaptype.ParseFileName(snapDir, segName)
 			if !ok {
 				continue
 			}
 
-			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
+			if err := m.merge(ctx, toMerge[t.Enum()], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -2631,15 +2455,15 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, mergeRanges 
 		}
 
 		for _, t := range snaptype.BlockSnapshotTypes {
-			if len(toMerge[t]) == 0 {
+			if len(toMerge[t.Enum()]) == 0 {
 				continue
 			}
 			if onDelete != nil {
-				if err := onDelete(toMerge[t]); err != nil {
+				if err := onDelete(toMerge[t.Enum()]); err != nil {
 					return err
 				}
 			}
-			m.removeOldFiles(toMerge[t], snapDir, snapshots.Version())
+			m.removeOldFiles(toMerge[t.Enum()], snapDir)
 		}
 	}
 	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
@@ -2695,7 +2519,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 	return nil
 }
 
-func (m *Merger) removeOldFiles(toDel []string, snapDir string, version uint8) {
+func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		_ = os.Remove(f + ".torrent")
@@ -2707,7 +2531,7 @@ func (m *Merger) removeOldFiles(toDel []string, snapDir string, version uint8) {
 			_ = os.Remove(withoutExt + "-to-block.idx")
 		}
 	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir, version)
+	tmpFiles, err := snaptype.TmpFiles(snapDir)
 	if err != nil {
 		return
 	}
@@ -2716,21 +2540,23 @@ func (m *Merger) removeOldFiles(toDel []string, snapDir string, version uint8) {
 	}
 }
 
-func (sn *HeaderSegment) mappedSnapshot() *silkworm.MappedHeaderSnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.seg.FilePath(), sn.seg.DataHandle(), sn.seg.Size())
-	idxRegion := silkworm.NewMemoryMappedRegion(sn.idxHeaderHash.FilePath(), sn.idxHeaderHash.DataHandle(), sn.idxHeaderHash.Size())
+func (sn *Segment) mappedHeaderSnapshot() *silkworm.MappedHeaderSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
 	return silkworm.NewMappedHeaderSnapshot(segmentRegion, idxRegion)
 }
 
-func (sn *BodySegment) mappedSnapshot() *silkworm.MappedBodySnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.seg.FilePath(), sn.seg.DataHandle(), sn.seg.Size())
-	idxRegion := silkworm.NewMemoryMappedRegion(sn.idxBodyNumber.FilePath(), sn.idxBodyNumber.DataHandle(), sn.idxBodyNumber.Size())
+func (sn *Segment) mappedBodySnapshot() *silkworm.MappedBodySnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
+	idxRegion := silkworm.NewMemoryMappedRegion(sn.Index().FilePath(), sn.Index().DataHandle(), sn.Index().Size())
 	return silkworm.NewMappedBodySnapshot(segmentRegion, idxRegion)
 }
 
-func (sn *TxnSegment) mappedSnapshot() *silkworm.MappedTxnSnapshot {
-	segmentRegion := silkworm.NewMemoryMappedRegion(sn.Seg.FilePath(), sn.Seg.DataHandle(), sn.Seg.Size())
-	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash.FilePath(), sn.IdxTxnHash.DataHandle(), sn.IdxTxnHash.Size())
-	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(sn.IdxTxnHash2BlockNum.FilePath(), sn.IdxTxnHash2BlockNum.DataHandle(), sn.IdxTxnHash2BlockNum.Size())
+func (sn *Segment) mappedTxnSnapshot() *silkworm.MappedTxnSnapshot {
+	segmentRegion := silkworm.NewMemoryMappedRegion(sn.FilePath(), sn.DataHandle(), sn.Size())
+	idxTxnHash := sn.Index(snaptype.Indexes.TxnHash)
+	idxTxnHashRegion := silkworm.NewMemoryMappedRegion(idxTxnHash.FilePath(), idxTxnHash.DataHandle(), idxTxnHash.Size())
+	idxTxnHash2BlockNum := sn.Index(snaptype.Indexes.TxnHash2BlockNum)
+	idxTxnHash2BlockRegion := silkworm.NewMemoryMappedRegion(idxTxnHash2BlockNum.FilePath(), idxTxnHash2BlockNum.DataHandle(), idxTxnHash2BlockNum.Size())
 	return silkworm.NewMappedTxnSnapshot(segmentRegion, idxTxnHashRegion, idxTxnHash2BlockRegion)
 }

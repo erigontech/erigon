@@ -39,10 +39,8 @@ import (
 )
 
 type BorEventSegment struct {
-	seg           *compress.Decompressor // value: event_rlp
-	IdxBorTxnHash *recsplit.Index        // bor_transaction_hash  -> bor_event_segment_offset
-	Range
-	version uint8
+	Segment                       // value: event_rlp
+	IdxBorTxnHash *recsplit.Index // bor_transaction_hash  -> bor_event_segment_offset
 }
 
 func (sn *BorEventSegment) closeIdx() {
@@ -51,28 +49,15 @@ func (sn *BorEventSegment) closeIdx() {
 		sn.IdxBorTxnHash = nil
 	}
 }
-func (sn *BorEventSegment) closeSeg() {
-	if sn.seg != nil {
-		sn.seg.Close()
-		sn.seg = nil
-	}
-}
+
 func (sn *BorEventSegment) close() {
 	sn.closeSeg()
 	sn.closeIdx()
 }
-func (sn *BorEventSegment) reopenSeg(dir string) (err error) {
-	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.version, sn.from, sn.to, snaptype.BorEvents)
-	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
+
 func (sn *BorEventSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
-	if sn.seg == nil {
+	if sn.Decompressor == nil {
 		return nil
 	}
 
@@ -107,10 +92,8 @@ type borEventSegments struct {
 }
 
 type BorSpanSegment struct {
-	seg *compress.Decompressor // value: span_json
-	idx *recsplit.Index        // span_id -> offset
-	Range
-	version uint8
+	Segment                 // value: span_json
+	idx     *recsplit.Index // span_id -> offset
 }
 
 func (sn *BorSpanSegment) closeIdx() {
@@ -119,28 +102,15 @@ func (sn *BorSpanSegment) closeIdx() {
 		sn.idx = nil
 	}
 }
-func (sn *BorSpanSegment) closeSeg() {
-	if sn.seg != nil {
-		sn.seg.Close()
-		sn.seg = nil
-	}
-}
+
 func (sn *BorSpanSegment) close() {
 	sn.closeSeg()
 	sn.closeIdx()
 }
-func (sn *BorSpanSegment) reopenSeg(dir string) (err error) {
-	sn.closeSeg()
-	fileName := snaptype.SegmentFileName(sn.version, sn.from, sn.to, snaptype.BorSpans)
-	sn.seg, err = compress.NewDecompressor(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
+
 func (sn *BorSpanSegment) reopenIdx(dir string) (err error) {
 	sn.closeIdx()
-	if sn.seg == nil {
+	if sn.Decompressor == nil {
 		return nil
 	}
 	fileName := snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.BorSpans.String())
@@ -181,7 +151,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
 	if ok {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-		if err := DumpBorBlocks(ctx, chainConfig, snapshots.version, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBorBlocks(ctx, chainConfig, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBorBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
@@ -195,7 +165,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 
 	merger := NewBorMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
-	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", fmt.Sprintf("%s", Ranges(rangesToMerge)))
+	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
 	if len(rangesToMerge) == 0 {
 		return ok, nil
 	}
@@ -221,25 +191,25 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 	return ok, nil
 }
-func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, version uint8, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
 
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBorBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
+		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func dumpBorBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
 	{
-		segName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.BorEvents)
+		segName := snaptype.SegmentFileName(snaptype.BorEvents.Versions().Current, blockFrom, blockTo, snaptype.BorEvents.Enum())
 		f, _ := snaptype.ParseFileName(snapDir, segName)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot BorEvents", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
@@ -262,7 +232,7 @@ func dumpBorBlocksRange(ctx context.Context, version uint8, blockFrom, blockTo u
 		}
 	}
 	{
-		segName := snaptype.SegmentFileName(version, blockFrom, blockTo, snaptype.BorSpans)
+		segName := snaptype.SegmentFileName(snaptype.BorSpans.Versions().Current, blockFrom, blockTo, snaptype.BorSpans.Enum())
 		f, _ := snaptype.ParseFileName(snapDir, segName)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot BorSpans", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
@@ -408,14 +378,14 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wo
 	return nil
 }
 
-func BorEventsIdx(ctx context.Context, segmentFilePath string, version uint8, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
+			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
 		}
 	}()
 	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(segmentFilePath)
+	d, err := compress.NewDecompressor(sn.Path)
 	if err != nil {
 		return err
 	}
@@ -442,7 +412,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, version uint8, bl
 		default:
 		}
 	}
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.BorEvents.String()))
+	var idxFilePath = filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorEvents.String()))
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   blockCount,
@@ -494,22 +464,22 @@ RETRY:
 	return nil
 }
 
-func BorSpansIdx(ctx context.Context, segmentFilePath string, version uint8, blockFrom, blockTo uint64, snapDir string, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", blockFrom, blockTo, rec, dbg.Stack())
+			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
 		}
 	}()
 	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(segmentFilePath)
+	d, err := compress.NewDecompressor(sn.Path)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
 	g := d.MakeGetter()
-	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.BorSpans.String()))
+	var idxFilePath = filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorSpans.String()))
 
-	baseSpanId := span.IDAt(blockFrom)
+	baseSpanId := span.IDAt(sn.From)
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -568,8 +538,6 @@ type BorRoSnapshots struct {
 	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
 	cfg         ethconfig.BlocksFreezing
 	logger      log.Logger
-	version     uint8
-
 	segmentsMin atomic.Uint64
 }
 
@@ -578,11 +546,10 @@ type BorRoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, version uint8, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{dir: snapDir, version: version, cfg: cfg, Events: &borEventSegments{}, Spans: &borSpanSegments{}, logger: logger}
+func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *BorRoSnapshots {
+	return &BorRoSnapshots{dir: snapDir, cfg: cfg, Events: &borEventSegments{}, Spans: &borSpanSegments{}, logger: logger}
 }
 
-func (s *BorRoSnapshots) Version() uint8                { return s.version }
 func (s *BorRoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
 func (s *BorRoSnapshots) Dir() string                   { return s.dir }
 func (s *BorRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
@@ -603,8 +570,8 @@ func (s *BorRoSnapshots) LogStat(label string) {
 		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 }
 
-func BorSegments(dir string, version uint8, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir, version)
+func BorSegments(dir string, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+	list, err := snaptype.Segments(dir)
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
@@ -612,7 +579,7 @@ func BorSegments(dir string, version uint8, min uint64) (res []snaptype.FileInfo
 		var l []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.T != snaptype.BorEvents {
+			if f.Type.Enum() != snaptype.Enums.BorEvents {
 				continue
 			}
 			l = append(l, f)
@@ -624,7 +591,7 @@ func BorSegments(dir string, version uint8, min uint64) (res []snaptype.FileInfo
 	{
 		var l []snaptype.FileInfo
 		for _, f := range list {
-			if f.T != snaptype.BorSpans {
+			if f.Type.Enum() != snaptype.Enums.BorSpans {
 				continue
 			}
 			l = append(l, f)
@@ -638,8 +605,8 @@ func BorSegments(dir string, version uint8, min uint64) (res []snaptype.FileInfo
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
 // removal of intermediate segments after a merge operation
-func removeBorOverlaps(dir string, version uint8, active []snaptype.FileInfo, max uint64) {
-	list, err := snaptype.Segments(dir, version)
+func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
+	list, err := snaptype.Segments(dir)
 
 	if err != nil {
 		return
@@ -649,7 +616,7 @@ func removeBorOverlaps(dir string, version uint8, active []snaptype.FileInfo, ma
 	l := make([]snaptype.FileInfo, 0, len(list))
 
 	for _, f := range list {
-		if !(f.T == snaptype.BorSpans || f.T == snaptype.BorEvents) {
+		if !(f.Type.Enum() == snaptype.Enums.BorSpans || f.Type.Enum() == snaptype.Enums.BorEvents) {
 			continue
 		}
 		l = append(l, f)
@@ -667,7 +634,7 @@ func removeBorOverlaps(dir string, version uint8, active []snaptype.FileInfo, ma
 		}
 
 		for _, a := range active {
-			if a.T != snaptype.BorSpans {
+			if a.Type.Enum() != snaptype.Enums.BorSpans {
 				continue
 			}
 
@@ -712,10 +679,10 @@ func (s *BorRoSnapshots) DisableReadAhead() {
 	s.Spans.lock.RLock()
 	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
-		sn.seg.DisableReadAhead()
+		sn.DisableReadAhead()
 	}
 	for _, sn := range s.Spans.segments {
-		sn.seg.DisableReadAhead()
+		sn.DisableReadAhead()
 	}
 }
 func (s *BorRoSnapshots) EnableReadAhead() *BorRoSnapshots {
@@ -724,10 +691,10 @@ func (s *BorRoSnapshots) EnableReadAhead() *BorRoSnapshots {
 	s.Spans.lock.RLock()
 	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
-		sn.seg.EnableReadAhead()
+		sn.EnableReadAhead()
 	}
 	for _, sn := range s.Spans.segments {
-		sn.seg.EnableReadAhead()
+		sn.EnableReadAhead()
 	}
 	return s
 }
@@ -737,10 +704,10 @@ func (s *BorRoSnapshots) EnableMadvWillNeed() *BorRoSnapshots {
 	s.Spans.lock.RLock()
 	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
-		sn.seg.EnableWillNeed()
+		sn.EnableWillNeed()
 	}
 	for _, sn := range s.Spans.segments {
-		sn.seg.EnableWillNeed()
+		sn.EnableWillNeed()
 	}
 	return s
 }
@@ -750,10 +717,10 @@ func (s *BorRoSnapshots) EnableMadvNormal() *BorRoSnapshots {
 	s.Spans.lock.RLock()
 	defer s.Spans.lock.RUnlock()
 	for _, sn := range s.Events.segments {
-		sn.seg.EnableMadvNormal()
+		sn.EnableMadvNormal()
 	}
 	for _, sn := range s.Spans.segments {
-		sn.seg.EnableMadvNormal()
+		sn.EnableMadvNormal()
 	}
 	return s
 }
@@ -795,23 +762,23 @@ func (s *BorRoSnapshots) Files() (list []string) {
 	defer s.Spans.lock.RUnlock()
 	max := s.BlocksAvailable()
 	for _, seg := range s.Events.segments {
-		if seg.seg == nil {
+		if seg.Decompressor == nil {
 			continue
 		}
 		if seg.from > max {
 			continue
 		}
-		_, fName := filepath.Split(seg.seg.FilePath())
+		_, fName := filepath.Split(seg.FilePath())
 		list = append(list, fName)
 	}
 	for _, seg := range s.Spans.segments {
-		if seg.seg == nil {
+		if seg.Decompressor == nil {
 			continue
 		}
 		if seg.from > max {
 			continue
 		}
-		_, fName := filepath.Split(seg.seg.FilePath())
+		_, fName := filepath.Split(seg.FilePath())
 		list = append(list, fName)
 	}
 	slices.Sort(list)
@@ -837,22 +804,22 @@ Loop:
 		}
 
 		var processed bool = true
-		switch f.T {
-		case snaptype.BorEvents:
+		switch f.Type.Enum() {
+		case snaptype.Enums.BorEvents:
 			var sn *BorEventSegment
 			var exists bool
 			for _, sn2 := range s.Events.segments {
-				if sn2.seg == nil { // it's ok if some segment was not able to open
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if fName == sn2.seg.FileName() {
+				if fName == sn2.FileName() {
 					sn = sn2
 					exists = true
 					break
 				}
 			}
 			if !exists {
-				sn = &BorEventSegment{version: f.Version, Range: Range{f.From, f.To}}
+				sn = &BorEventSegment{Segment: Segment{segType: snaptype.BorEvents, version: f.Version, Range: Range{f.From, f.To}}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -878,21 +845,21 @@ Loop:
 			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
 				return err
 			}
-		case snaptype.BorSpans:
+		case snaptype.Enums.BorSpans:
 			var sn *BorSpanSegment
 			var exists bool
 			for _, sn2 := range s.Spans.segments {
-				if sn2.seg == nil { // it's ok if some segment was not able to open
+				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
-				if fName == sn2.seg.FileName() {
+				if fName == sn2.FileName() {
 					sn = sn2
 					exists = true
 					break
 				}
 			}
 			if !exists {
-				sn = &BorSpanSegment{version: f.Version, Range: Range{f.From, f.To}}
+				sn = &BorSpanSegment{Segment: Segment{segType: snaptype.BorSpans, version: f.Version, Range: Range{f.From, f.To}}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -954,14 +921,14 @@ func (s *BorRoSnapshots) Ranges() (ranges []Range) {
 func (s *BorRoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *BorRoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := BorSegments(s.dir, s.version, s.segmentsMin.Load())
+	files, _, err := BorSegments(s.dir, s.segmentsMin.Load())
 	if err != nil {
 		return err
 	}
 
 	// this is one off code to fix an issue in 2.49.x->2.52.x which missed
 	// removal of intermediate segments after a merge operation
-	removeBorOverlaps(s.dir, s.version, files, s.BlocksAvailable())
+	removeBorOverlaps(s.dir, files, s.BlocksAvailable())
 
 	list := make([]string, 0, len(files))
 	for _, f := range files {
@@ -994,10 +961,10 @@ func (s *BorRoSnapshots) Close() {
 func (s *BorRoSnapshots) closeWhatNotInList(l []string) {
 Loop1:
 	for i, sn := range s.Events.segments {
-		if sn.seg == nil {
+		if sn.Decompressor == nil {
 			continue Loop1
 		}
-		_, name := filepath.Split(sn.seg.FilePath())
+		_, name := filepath.Split(sn.FilePath())
 		for _, fName := range l {
 			if fName == name {
 				continue Loop1
@@ -1008,10 +975,10 @@ Loop1:
 	}
 Loop2:
 	for i, sn := range s.Spans.segments {
-		if sn.seg == nil {
+		if sn.Decompressor == nil {
 			continue Loop2
 		}
-		_, name := filepath.Split(sn.seg.FilePath())
+		_, name := filepath.Split(sn.FilePath())
 		for _, fName := range l {
 			if fName == name {
 				continue Loop2
@@ -1021,7 +988,7 @@ Loop2:
 		s.Spans.segments[i] = nil
 	}
 	var i int
-	for i = 0; i < len(s.Events.segments) && s.Events.segments[i] != nil && s.Events.segments[i].seg != nil; i++ {
+	for i = 0; i < len(s.Events.segments) && s.Events.segments[i] != nil && s.Events.segments[i].Decompressor != nil; i++ {
 	}
 	tail := s.Events.segments[i:]
 	s.Events.segments = s.Events.segments[:i]
@@ -1031,7 +998,7 @@ Loop2:
 			tail[i] = nil
 		}
 	}
-	for i = 0; i < len(s.Spans.segments) && s.Spans.segments[i] != nil && s.Spans.segments[i].seg != nil; i++ {
+	for i = 0; i < len(s.Spans.segments) && s.Spans.segments[i] != nil && s.Spans.segments[i].Decompressor != nil; i++ {
 	}
 	tailS := s.Spans.segments[i:]
 	s.Spans.segments = s.Spans.segments[:i]
@@ -1139,8 +1106,8 @@ func (m *BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
 	return toMerge
 }
 
-func (m *BorMerger) filesByRange(snapshots *BorRoSnapshots, from, to uint64) (map[snaptype.Type][]string, error) {
-	toMerge := map[snaptype.Type][]string{}
+func (m *BorMerger) filesByRange(snapshots *BorRoSnapshots, from, to uint64) (map[snaptype.Enum][]string, error) {
+	toMerge := map[snaptype.Enum][]string{}
 	view := snapshots.View()
 	defer view.Close()
 
@@ -1154,8 +1121,8 @@ func (m *BorMerger) filesByRange(snapshots *BorRoSnapshots, from, to uint64) (ma
 		if sn.to > to {
 			break
 		}
-		toMerge[snaptype.BorEvents] = append(toMerge[snaptype.BorEvents], eSegments[i].seg.FilePath())
-		toMerge[snaptype.BorSpans] = append(toMerge[snaptype.BorSpans], sSegments[i].seg.FilePath())
+		toMerge[snaptype.Enums.BorEvents] = append(toMerge[snaptype.Enums.BorEvents], eSegments[i].FilePath())
+		toMerge[snaptype.Enums.BorSpans] = append(toMerge[snaptype.Enums.BorSpans], sSegments[i].FilePath())
 	}
 
 	return toMerge, nil
@@ -1175,12 +1142,12 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 		}
 
 		for _, t := range snaptype.BorSnapshotTypes {
-			segName := snaptype.SegmentFileName(snapshots.Version(), r.from, r.to, t)
+			segName := t.FileName(0, r.from, r.to)
 			f, ok := snaptype.ParseFileName(snapDir, segName)
 			if !ok {
 				continue
 			}
-			if err := m.merge(ctx, toMerge[t], f.Path, logEvery); err != nil {
+			if err := m.merge(ctx, toMerge[t.Enum()], f.Path, logEvery); err != nil {
 				return fmt.Errorf("mergeByAppendSegments: %w", err)
 			}
 			if doIndex {
@@ -1199,18 +1166,18 @@ func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeR
 		}
 
 		for _, t := range snaptype.BorSnapshotTypes {
-			if len(toMerge[t]) == 0 {
+			if len(toMerge[t.Enum()]) == 0 {
 				continue
 			}
 
-			if err := onDelete(toMerge[t]); err != nil {
+			if err := onDelete(toMerge[t.Enum()]); err != nil {
 				return err
 			}
 
 		}
 		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
 		for _, t := range snaptype.BorSnapshotTypes {
-			m.removeOldFiles(toMerge[t], snapDir, snapshots.Version())
+			m.removeOldFiles(toMerge[t.Enum()], snapDir)
 		}
 	}
 	m.logger.Log(m.lvl, "[bor snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
@@ -1260,14 +1227,14 @@ func (m *BorMerger) merge(ctx context.Context, toMerge []string, targetFile stri
 	return nil
 }
 
-func (m *BorMerger) removeOldFiles(toDel []string, snapDir string, version uint8) {
+func (m *BorMerger) removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
 		_ = os.Remove(withoutExt + ".idx")
 	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir, version)
+	tmpFiles, err := snaptype.TmpFiles(snapDir)
 	if err != nil {
 		return
 	}

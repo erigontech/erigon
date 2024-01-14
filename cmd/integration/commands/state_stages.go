@@ -65,7 +65,7 @@ Examples:
 		erigoncli.ApplyFlagsForEthConfigCobra(cmd.Flags(), ethConfig)
 		miningConfig := params.MiningConfig{}
 		utils.SetupMinerCobra(cmd, &miningConfig)
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, snapshotVersion, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -95,7 +95,7 @@ var loopIhCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common2.RootContext()
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, snapshotVersion, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -119,7 +119,7 @@ var loopExecCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
 		ctx, _ := common2.RootContext()
-		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, snapshotVersion, logger)
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -149,7 +149,6 @@ func init() {
 	withChain(stateStages)
 	withHeimdall(stateStages)
 	withWorkers(stateStages)
-	withSnapshotVersion(stateStages)
 	rootCmd.AddCommand(stateStages)
 
 	withConfig(loopIhCmd)
@@ -158,7 +157,6 @@ func init() {
 	withUnwind(loopIhCmd)
 	withChain(loopIhCmd)
 	withHeimdall(loopIhCmd)
-	withSnapshotVersion(loopIhCmd)
 	rootCmd.AddCommand(loopIhCmd)
 
 	withConfig(loopExecCmd)
@@ -168,7 +166,6 @@ func init() {
 	withChain(loopExecCmd)
 	withHeimdall(loopExecCmd)
 	withWorkers(loopExecCmd)
-	withSnapshotVersion(loopExecCmd)
 	rootCmd.AddCommand(loopExecCmd)
 }
 
@@ -178,7 +175,7 @@ func syncBySmallSteps(db kv.RwDB, miningConfig params.MiningConfig, ctx context.
 		return err
 	}
 
-	sn, borSn, agg := allSnapshots(ctx, db, snapshotVersion, logger1)
+	sn, borSn, agg := allSnapshots(ctx, db, logger1)
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
@@ -455,7 +452,7 @@ func checkMinedBlock(b1, b2 *types.Block, chainConfig *chain2.Config) {
 }
 
 func loopIh(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
-	sn, borSn, agg := allSnapshots(ctx, db, snapshotVersion, logger)
+	sn, borSn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
@@ -529,7 +526,7 @@ func loopIh(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) e
 func loopExec(db kv.RwDB, ctx context.Context, unwind uint64, logger log.Logger) error {
 	chainConfig := fromdb.ChainConfig(db)
 	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	sn, borSn, agg := allSnapshots(ctx, db, snapshotVersion, logger)
+	sn, borSn, agg := allSnapshots(ctx, db, logger)
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()

@@ -42,7 +42,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -318,11 +317,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
-	snapshotVersion := snapcfg.KnownCfg(chainConfig.ChainName, 0).Version
-
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
-	blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, snapshotVersion, config.Snapshot, config.HistoryV3, chainConfig.Bor != nil, logger)
+	blockReader, blockWriter, allSnapshots, allBorSnapshots, agg, err := setUpBlockReader(ctx, chainKv, config.Dirs, config.Snapshot, config.HistoryV3, chainConfig.Bor != nil, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -877,7 +874,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, snapshotVersion, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive, historyDB, indiciesDB); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, client, engine, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive, historyDB, indiciesDB); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
@@ -1303,12 +1300,12 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 	return err
 }
 
-func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snashotVersion uint8, snConfig ethconfig.BlocksFreezing, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3, error) {
-	allSnapshots := freezeblocks.NewRoSnapshots(snConfig, dirs.Snap, snashotVersion, logger)
+func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig ethconfig.BlocksFreezing, histV3 bool, isBor bool, logger log.Logger) (services.FullBlockReader, *blockio.BlockWriter, *freezeblocks.RoSnapshots, *freezeblocks.BorRoSnapshots, *libstate.AggregatorV3, error) {
+	allSnapshots := freezeblocks.NewRoSnapshots(snConfig, dirs.Snap, logger)
 
 	var allBorSnapshots *freezeblocks.BorRoSnapshots
 	if isBor {
-		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig, dirs.Snap, snashotVersion, logger)
+		allBorSnapshots = freezeblocks.NewBorRoSnapshots(snConfig, dirs.Snap, logger)
 	}
 
 	var err error

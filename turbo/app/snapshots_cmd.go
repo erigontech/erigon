@@ -203,8 +203,8 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer chainDB.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	chainConfig := fromdb.ChainConfig(chainDB)
-	blockSnaps, borSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
+
+	blockSnaps, borSnaps, blockRetire, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
 		return err
 	}
@@ -341,7 +341,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 	chainConfig := fromdb.ChainConfig(chainDB)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, snapcfg.KnownCfg(chainConfig.ChainName, 0).Version, chainDB, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 
 	if err != nil {
 		return err
@@ -360,16 +360,16 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 	return nil
 }
 
-func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, version uint8, chainDB kv.RwDB, logger log.Logger) (
+func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) (
 	blockSnaps *freezeblocks.RoSnapshots, borSnaps *freezeblocks.BorRoSnapshots, br *freezeblocks.BlockRetire, agg *libstate.AggregatorV3, err error,
 ) {
-	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, version, logger)
+	blockSnaps = freezeblocks.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = blockSnaps.ReopenFolder(); err != nil {
 		return
 	}
 	blockSnaps.LogStat("open")
 
-	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, version, logger)
+	borSnaps = freezeblocks.NewBorRoSnapshots(cfg, dirs.Snap, logger)
 	if err = borSnaps.ReopenFolder(); err != nil {
 		return
 	}
@@ -520,7 +520,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	defer db.Close()
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
-	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, version, db, logger)
+	blockSnaps, borSnaps, br, agg, err := openSnaps(ctx, cfg, dirs, db, logger)
 	if err != nil {
 		return err
 	}

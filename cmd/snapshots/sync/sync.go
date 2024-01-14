@@ -44,7 +44,7 @@ type Locator struct {
 	LType   LType
 	Src     string
 	Root    string
-	Version uint8
+	Version snaptype.Version
 	Chain   string
 }
 
@@ -84,7 +84,7 @@ func ParseLocator(value string) (*Locator, error) {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
 
-				loc.Version = uint8(version)
+				loc.Version = snaptype.Version(version)
 			}
 
 		case len(matches[1]) > 0:
@@ -102,7 +102,7 @@ func ParseLocator(value string) (*Locator, error) {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
 
-				loc.Version = uint8(version)
+				loc.Version = snaptype.Version(version)
 			}
 
 		default:
@@ -237,7 +237,7 @@ type torrentInfo struct {
 	hash     string
 }
 
-func (i *torrentInfo) Version() uint8 {
+func (i *torrentInfo) Version() snaptype.Version {
 	if i.snapInfo != nil {
 		return i.snapInfo.Version
 	}
@@ -263,10 +263,10 @@ func (i *torrentInfo) To() uint64 {
 
 func (i *torrentInfo) Type() snaptype.Type {
 	if i.snapInfo != nil {
-		return i.snapInfo.T
+		return i.snapInfo.Type
 	}
 
-	return 0
+	return nil
 }
 
 func (i *torrentInfo) Hash() string {
