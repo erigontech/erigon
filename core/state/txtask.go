@@ -58,7 +58,8 @@ type TxTask struct {
 	UsedGas uint64
 
 	// BlockReceipts is used only by Gnosis:
-	//     but it need only contract logs: len(l.Topics) == 2 && l.Address == s.contractAddress && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
+	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`
+	//  - and later read it by filter: len(l.Topics) == 2 && l.Address == s.contractAddress && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
 	// Need investigate if we can pass here - only limited amount of receipts
 	BlockReceipts types.Receipts
 }
