@@ -40,7 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-const DEBUG_LOG_FROM = 999_999_999
+const DEBUG_LOG_FROM = 1612
 
 /*
 Not implemented features from OS:
@@ -643,8 +643,6 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	//Check block gas limit from smart contract, if applicable
 	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 
-	fmt.Printf("[dbg] aura: len(c.cfg.RewriteBytecode)=%d\n", len(c.cfg.RewriteBytecode))
-
 	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		state.SetCode(address, rewrittenCode)
 	}
@@ -681,7 +679,6 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
 	}
-	fmt.Printf("[dbg] aura: len(epoch)=%d\n", len(epoch))
 	isEpochBegin := epoch != nil
 	if !isEpochBegin {
 		return
@@ -719,11 +716,14 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 
 	// check_and_lock_block -> check_epoch_end_signal (after enact)
 	if header.Number.Uint64() >= DEBUG_LOG_FROM {
-		fmt.Printf("finalize1: %d,%d\n", header.Number.Uint64(), len(receipts))
+		fmt.Printf("finalize1: %d,%d, %T\n", header.Number.Uint64(), len(receipts), c.cfg.Validators)
 	}
 	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, receipts)
 	if err != nil {
 		return nil, nil, err
+	}
+	if header.Number.Uint64() >= DEBUG_LOG_FROM {
+		fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
@@ -731,6 +731,10 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 		}
 		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, nil, err
+		}
+	} else {
+		if header.Number.Uint64() >= DEBUG_LOG_FROM {
+			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
