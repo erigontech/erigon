@@ -61,6 +61,7 @@ type TxTask struct {
 	//  - it does store `proof, err := rlp.EncodeToBytes(ValidatorSetProof{Header: header, Receipts: r})`
 	//  - and later read it by filter: len(l.Topics) == 2 && l.Address == s.contractAddress && l.Topics[0] == EVENT_NAME_HASH && l.Topics[1] == header.ParentHash
 	// Need investigate if we can pass here - only limited amount of receipts
+	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
 }
 
