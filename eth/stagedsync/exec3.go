@@ -789,9 +789,12 @@ Loop:
 						if txTask.TxIndex >= 0 {
 							// by the tx.
 							receipt := &types.Receipt{
+								BlockNumber:       header.Number,
+								TransactionIndex:  uint(txTask.TxIndex),
 								Type:              txTask.Tx.Type(),
 								CumulativeGasUsed: usedGas,
 								TxHash:            txTask.Tx.Hash(),
+								Logs:              txTask.Logs,
 							}
 							if txTask.Failed {
 								receipt.Status = types.ReceiptStatusFailed
@@ -803,14 +806,8 @@ Loop:
 							//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
 							//}
 							// Set the receipt logs and create a bloom for filtering
-							receipt.Logs = txTask.Logs
 							//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-							receipt.BlockNumber = header.Number
-							receipt.TransactionIndex = uint(txTask.TxIndex)
 							receipts = append(receipts, receipt)
-							for _, l := range txTask.Logs {
-								fmt.Printf("[dbg] log: %x\n", l.Address)
-							}
 						}
 					}
 					return nil
