@@ -2,6 +2,7 @@ package aura
 
 import (
 	"context"
+	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -20,22 +21,26 @@ func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
 func (cr *NonTransactionalEpochReader) GetEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
 	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
 		v, err = rawdb.ReadEpoch(tx, number, hash)
+		fmt.Printf("GetEpoch %d->%d\n", number, len(v))
 		return err
 	})
 }
 func (cr *NonTransactionalEpochReader) PutEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
 	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		fmt.Printf("WriteEpoch %d->%d\n", number, len(proof))
 		return rawdb.WriteEpoch(tx, number, hash, proof)
 	})
 }
 func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash libcommon.Hash, number uint64) (v []byte, err error) {
 	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
 		v, err = rawdb.ReadPendingEpoch(tx, number, hash)
+		fmt.Printf("GetPendingEpoch %d->%d\n", number, len(v))
 		return err
 	})
 }
 func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash libcommon.Hash, number uint64, proof []byte) error {
 	return cr.db.UpdateNosync(context.Background(), func(tx kv.RwTx) error {
+		fmt.Printf("PutPendingEpoch %d->%d\n", number, len(proof))
 		return rawdb.WritePendingEpoch(tx, number, hash, proof)
 	})
 }
