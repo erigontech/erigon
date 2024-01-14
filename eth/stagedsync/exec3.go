@@ -724,6 +724,8 @@ Loop:
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+
+				BlockReceipts: receipts,
 			}
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
@@ -748,7 +750,6 @@ Loop:
 					txTask.Sender = &sender
 					logger.Warn("[Execution] expensive lazy sender recovery", "blockNum", txTask.BlockNum, "txIdx", txTask.TxIndex)
 				}
-
 			}
 
 			if parallel {
@@ -783,6 +784,7 @@ Loop:
 							}
 						}
 						usedGas, blobGasUsed = 0, 0
+						receipts = receipts[:0]
 					} else {
 						if txTask.TxIndex >= 0 {
 							// by the tx.
