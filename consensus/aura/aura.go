@@ -685,6 +685,8 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	if !isEpochBegin {
 		return
 	}
+	fmt.Printf("[dbg] aura:  c.cfg.Validators=%T\n", c.cfg.Validators)
+
 	err = c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
 	if err != nil {
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
