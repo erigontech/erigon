@@ -638,7 +638,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 ) {
 	blockNum := header.Number.Uint64()
 	fmt.Printf("[dbg] aura.Initialize: %d\n", blockNum)
-	state.SetTrace(true)
+	//state.SetTrace(true)
 
 	//Check block gas limit from smart contract, if applicable
 	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
