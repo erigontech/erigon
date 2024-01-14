@@ -35,6 +35,7 @@ type TxTask struct {
 	SkipAnalysis    bool
 	TxIndex         int // -1 for block initialisation
 	Final           bool
+	Failed          bool
 	Tx              types.Transaction
 	GetHashFn       func(n uint64) libcommon.Hash
 	TxAsMessage     types.Message

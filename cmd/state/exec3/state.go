@@ -259,7 +259,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		//if ftracer, ok := rw.vmCfg.Tracer.(vm.FlushableTracer); ok {
 		//	ftracer.Flush(txTask.Tx)
 		//}
-
+		txTask.Failed = applyRes.Failed()
 		if err != nil {
 			txTask.Error = err
 		} else {
