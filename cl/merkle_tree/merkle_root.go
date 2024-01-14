@@ -118,6 +118,7 @@ func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) 
 	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, limit)
 }
 
+// Merkle Proof computes the merkle proof for a given schema of objects.
 func MerkleProof(depth, proofIndex int, schema ...interface{}) ([][32]byte, error) {
 	// Calculate the total number of leaves needed based on the schema length
 	maxDepth := GetDepth(uint64(len(schema)))
