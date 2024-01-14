@@ -2,7 +2,6 @@ package exec3
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/log/v3"
@@ -184,7 +183,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	rules := txTask.Rules
 	var err error
 	header := txTask.Header
-	fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxIndex, txTask.BlockNum, txTask.HistoryExecution)
+	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
 	case txTask.TxIndex == -1:
@@ -199,14 +198,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			rules = &chain.Rules{}
 			break
 		}
-		fmt.Printf("[dbg2] txNum=%d blockNum=%d history=%T\n", txTask.TxIndex, txTask.BlockNum, rw.engine)
 
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract libcommon.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, constCall /* constCall */)
 		}
-		//ibs.SetTrace(true)
 		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger)
 		txTask.Error = ibs.FinalizeTx(rules, noop)
 	case txTask.Final:
@@ -255,11 +252,11 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
+		txTask.Failed = applyRes.Failed()
 
 		//if ftracer, ok := rw.vmCfg.Tracer.(vm.FlushableTracer); ok {
 		//	ftracer.Flush(txTask.Tx)
 		//}
-		txTask.Failed = applyRes.Failed()
 		if err != nil {
 			txTask.Error = err
 		} else {

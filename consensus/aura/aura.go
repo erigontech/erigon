@@ -40,7 +40,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 )
 
-const DEBUG_LOG_FROM = 1612
+const DEBUG_LOG_FROM = 999_999_999
 
 /*
 Not implemented features from OS:
@@ -637,8 +637,6 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger,
 ) {
 	blockNum := header.Number.Uint64()
-	fmt.Printf("[dbg] aura.Initialize: %d\n", blockNum)
-	//state.SetTrace(true)
 
 	//Check block gas limit from smart contract, if applicable
 	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
@@ -655,7 +653,6 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
 	}
 	c.certifierLock.Unlock()
-	fmt.Printf("[dbg] aura: c.certifier=%x\n", c.certifier)
 
 	if blockNum == 1 {
 		proof, err := c.GenesisEpochData(header, syscall)
@@ -683,8 +680,6 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	if !isEpochBegin {
 		return
 	}
-	fmt.Printf("[dbg] aura: c.cfg.Validators=%T\n", c.cfg.Validators)
-
 	err = c.cfg.Validators.onEpochBegin(isEpochBegin, header, syscall)
 	if err != nil {
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
@@ -716,14 +711,11 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 
 	// check_and_lock_block -> check_epoch_end_signal (after enact)
 	if header.Number.Uint64() >= DEBUG_LOG_FROM {
-		fmt.Printf("finalize1: %d,%d, %T\n", header.Number.Uint64(), len(receipts), c.cfg.Validators)
+		fmt.Printf("finalize1: %d,%d\n", header.Number.Uint64(), len(receipts))
 	}
 	pendingTransitionProof, err := c.cfg.Validators.signalEpochEnd(header.Number.Uint64() == 0, header, receipts)
 	if err != nil {
 		return nil, nil, err
-	}
-	if header.Number.Uint64() >= DEBUG_LOG_FROM {
-		fmt.Printf("c.cfg.Validators.signalEpochEnd: %d, lenProof=%d\n", header.Number.Uint64(), len(pendingTransitionProof))
 	}
 	if pendingTransitionProof != nil {
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
@@ -731,10 +723,6 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 		}
 		if err = c.e.PutPendingEpoch(header.Hash(), header.Number.Uint64(), pendingTransitionProof); err != nil {
 			return nil, nil, err
-		}
-	} else {
-		if header.Number.Uint64() >= DEBUG_LOG_FROM {
-			fmt.Printf("insert_pending_transition: %d,receipts=%d, lenProof=%d\n", header.Number.Uint64(), len(receipts), len(pendingTransitionProof))
 		}
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
