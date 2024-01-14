@@ -51,7 +51,6 @@ type Merge struct {
 
 // New creates a new instance of the Merge Engine with the given embedded eth1 engine.
 func New(eth1Engine consensus.Engine) *Merge {
-	fmt.Printf("eth1Engine: %T\n", eth1Engine)
 	if _, ok := eth1Engine.(*Merge); ok {
 		panic("nested consensus engine")
 	}

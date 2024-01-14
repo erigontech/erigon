@@ -637,9 +637,12 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 	state *state.IntraBlockState, syscallCustom consensus.SysCallCustom, logger log.Logger,
 ) {
 	blockNum := header.Number.Uint64()
+	fmt.Printf("[dbg] aura.Initialize: %d\n", blockNum)
 
 	//Check block gas limit from smart contract, if applicable
 	c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
+
+	fmt.Printf("[dbg] aura: len(c.cfg.RewriteBytecode)=%d\n", len(c.cfg.RewriteBytecode))
 
 	for address, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		state.SetCode(address, rewrittenCode)
@@ -653,6 +656,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 		c.certifier = getCertifier(*c.cfg.Registrar, syscall)
 	}
 	c.certifierLock.Unlock()
+	fmt.Printf("[dbg] aura: c.certifier=%x\n", c.certifier)
 
 	if blockNum == 1 {
 		proof, err := c.GenesisEpochData(header, syscall)
@@ -676,6 +680,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain consensus.ChainHeaderReade
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return
 	}
+	fmt.Printf("[dbg] aura: epoch=%+v\n", epoch)
 	isEpochBegin := epoch != nil
 	if !isEpochBegin {
 		return
