@@ -292,8 +292,6 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	rules := txTask.Rules
 	var err error
 
-	fmt.Printf("[dbg1] txNum=%d, blockNum=%d, block initialisation\n", txTask.TxIndex, txTask.BlockNum)
-
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
 		//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 		// Genesis block
@@ -321,9 +319,6 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 		syscall := func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibState, header, rw.engine, constCall /* constCall */)
 		}
-
-		ibs.SetTrace(true)
-		fmt.Printf("[dbg] txNum=%d, blockNum=%d, block initialisation\n", txTask.TxIndex, txTask.BlockNum)
 
 		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, syscall, rw.logger)
 		if err = ibs.FinalizeTx(rules, noop); err != nil {

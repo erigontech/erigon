@@ -2,6 +2,7 @@ package exec3
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/log/v3"
@@ -178,12 +179,12 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	//ibs.SetTrace(true)
+	ibs.SetTrace(true)
 
 	rules := txTask.Rules
 	var err error
 	header := txTask.Header
-	//fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
+	fmt.Printf("txNum=%d blockNum=%d history=%t\n", txTask.TxNum, txTask.BlockNum, txTask.HistoryExecution)
 
 	switch {
 	case txTask.TxIndex == -1:
