@@ -171,7 +171,10 @@ func (b *CachingBeaconState) GetAttestationParticipationFlagIndicies(data solid.
 	if inclusionDelay <= utils.IntegerSquareRoot(b.BeaconConfig().SlotsPerEpoch) {
 		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelySourceFlagIndex)
 	}
-	if matchingTarget && inclusionDelay <= b.BeaconConfig().SlotsPerEpoch {
+	if b.Version() < clparams.DenebVersion && matchingTarget && inclusionDelay <= b.BeaconConfig().SlotsPerEpoch {
+		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelyTargetFlagIndex)
+	}
+	if b.Version() >= clparams.DenebVersion && matchingTarget {
 		participationFlagIndicies = append(participationFlagIndicies, b.BeaconConfig().TimelyTargetFlagIndex)
 	}
 	if matchingHead && inclusionDelay == b.BeaconConfig().MinAttestationInclusionDelay {
@@ -294,4 +297,12 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 func (b *CachingBeaconState) GetValidatorChurnLimit() uint64 {
 	activeIndsCount := uint64(len(b.GetActiveValidatorsIndices(Epoch(b))))
 	return utils.Max64(activeIndsCount/b.BeaconConfig().ChurnLimitQuotient, b.BeaconConfig().MinPerEpochChurnLimit)
+}
+
+// https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/beacon-chain.md#new-get_validator_activation_churn_limit
+func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
+	if b.Version() >= clparams.DenebVersion {
+		return utils.Min64(b.BeaconConfig().MaxPerEpochActivationChurnLimit, b.GetValidatorChurnLimit())
+	}
+	return b.GetValidatorChurnLimit()
 }

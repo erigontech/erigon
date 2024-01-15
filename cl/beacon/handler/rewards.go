@@ -23,7 +23,7 @@ type blockRewardsResponse struct {
 	Total             uint64 `json:"total,string"`
 }
 
-func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -31,7 +31,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 	}
 	defer tx.Rollback()
 
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
@@ -61,7 +61,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 			AttesterSlashings: blkRewards.AttesterSlashings,
 			SyncAggregate:     blkRewards.SyncAggregate,
 			Total:             blkRewards.Attestations + blkRewards.ProposerSlashings + blkRewards.AttesterSlashings + blkRewards.SyncAggregate,
-		}).withFinalized(isFinalized), nil
+		}).WithFinalized(isFinalized), nil
 	}
 	slotData, err := state_accessors.ReadSlotData(tx, slot)
 	if err != nil {
@@ -77,7 +77,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 		AttesterSlashings: slotData.AttesterSlashings,
 		SyncAggregate:     slotData.SyncAggregateRewards,
 		Total:             slotData.AttestationsRewards + slotData.ProposerSlashings + slotData.AttesterSlashings + slotData.SyncAggregateRewards,
-	}).withFinalized(isFinalized), nil
+	}).WithFinalized(isFinalized), nil
 }
 
 type syncCommitteeReward struct {
@@ -85,7 +85,7 @@ type syncCommitteeReward struct {
 	Reward         int64  `json:"reward,string"`
 }
 
-func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -111,7 +111,7 @@ func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Req
 		return nil, err
 	}
 
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +220,7 @@ func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Req
 	sort.Slice(rewards, func(i, j int) bool {
 		return rewards[i].ValidatorIndex < rewards[j].ValidatorIndex
 	})
-	return newBeaconResponse(rewards).withFinalized(isFinalized), nil
+	return newBeaconResponse(rewards).WithFinalized(isFinalized), nil
 }
 
 func (a *ApiHandler) syncPartecipantReward(activeBalance uint64) uint64 {

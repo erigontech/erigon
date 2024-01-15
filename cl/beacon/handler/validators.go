@@ -184,7 +184,7 @@ func checkValidValidatorId(s string) (bool, error) {
 	return false, nil
 }
 
-func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -193,7 +193,7 @@ func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*
 	}
 	defer tx.Rollback()
 
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -203,12 +203,12 @@ func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
-	queryFilters, err := stringListFromQueryParams(r, "status")
+	queryFilters, err := beaconhttp.StringListFromQueryParams(r, "status")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
 
-	validatorIds, err := stringListFromQueryParams(r, "id")
+	validatorIds, err := beaconhttp.StringListFromQueryParams(r, "id")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -226,7 +226,7 @@ func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*
 		return nil, err
 	}
 
-	if blockId.head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
+	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		s, cn := a.syncedData.HeadState()
 		defer cn()
 		if s == nil {
@@ -308,7 +308,7 @@ func parseQueryValidatorIndicies(tx kv.Tx, ids []string) ([]uint64, error) {
 	return filterIndicies, nil
 }
 
-func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -317,7 +317,7 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 	}
 	defer tx.Rollback()
 
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -327,7 +327,7 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
-	validatorId, err := stringFromRequest(r, "validator_id")
+	validatorId, err := beaconhttp.StringFromRequest(r, "validator_id")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -337,11 +337,11 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 		return nil, err
 	}
 
-	if blockId.head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
+	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		s, cn := a.syncedData.HeadState()
 		defer cn()
 		if s.ValidatorLength() <= int(validatorIndex) {
-			return newBeaconResponse([]int{}).withFinalized(false), nil
+			return newBeaconResponse([]int{}).WithFinalized(false), nil
 		}
 		if s == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "node is not synced")
@@ -375,7 +375,7 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 	return responseValidator(validatorIndex, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
-func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -384,7 +384,7 @@ func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Req
 	}
 	defer tx.Rollback()
 
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -394,7 +394,7 @@ func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Req
 		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
 	}
 
-	validatorIds, err := stringListFromQueryParams(r, "id")
+	validatorIds, err := beaconhttp.StringListFromQueryParams(r, "id")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -407,7 +407,7 @@ func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Req
 		return nil, err
 	}
 
-	if blockId.head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
+	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		s, cn := a.syncedData.HeadState()
 		defer cn()
 		if s == nil {
@@ -444,7 +444,7 @@ func (d directString) MarshalJSON() ([]byte, error) {
 	return []byte(d), nil
 }
 
-func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconResponse, error) {
+func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconhttp.BeaconResponse, error) {
 	var b strings.Builder
 	b.WriteString("[")
 	first := true
@@ -474,14 +474,14 @@ func responseValidators(filterIndicies []uint64, filterStatuses []validatorStatu
 
 	_, err = b.WriteString("]\n")
 
-	return newBeaconResponse(directString(b.String())).withFinalized(finalized), err
+	return newBeaconResponse(directString(b.String())).WithFinalized(finalized), err
 }
 
-func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconResponse, error) {
+func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool) (*beaconhttp.BeaconResponse, error) {
 	var b strings.Builder
 	var err error
 	if validators.Length() <= int(idx) {
-		return newBeaconResponse([]int{}).withFinalized(finalized), nil
+		return newBeaconResponse([]int{}).WithFinalized(finalized), nil
 	}
 
 	v := validators.Get(int(idx))
@@ -493,10 +493,10 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 
 	_, err = b.WriteString("\n")
 
-	return newBeaconResponse(directString(b.String())).withFinalized(finalized), err
+	return newBeaconResponse(directString(b.String())).WithFinalized(finalized), err
 }
 
-func responseValidatorsBalances(filterIndicies []uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, finalized bool) (*beaconResponse, error) {
+func responseValidatorsBalances(filterIndicies []uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, finalized bool) (*beaconhttp.BeaconResponse, error) {
 	var b strings.Builder
 	b.WriteString("[")
 	jsonTemplate := "{\"index\":\"%d\",\"balance\":\"%d\"}"
@@ -524,7 +524,7 @@ func responseValidatorsBalances(filterIndicies []uint64, stateEpoch uint64, bala
 
 	_, err = b.WriteString("]\n")
 
-	return newBeaconResponse(directString(b.String())).withFinalized(finalized), err
+	return newBeaconResponse(directString(b.String())).WithFinalized(finalized), err
 }
 
 func shouldStatusBeFiltered(status validatorStatus, statuses []validatorStatus) bool {

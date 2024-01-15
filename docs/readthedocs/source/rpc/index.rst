@@ -1842,7 +1842,7 @@ Submit the mining hashrate to the blockchain.
    * - Type
      - Description
    * - ``BOOLEAN``
-     - ``true`` if submitting went through succesfully, ``false`` otherwise
+     - ``true`` if submitting went through successfully, ``false`` otherwise
 
 --------------
 

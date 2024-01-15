@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -407,7 +406,13 @@ func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
 func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
 func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
-func (s *RoSnapshots) BlocksAvailable() uint64       { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
+func (s *RoSnapshots) BlocksAvailable() uint64 {
+	if s == nil {
+		return 0
+	}
+
+	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
+}
 func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -2173,28 +2178,26 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, version uin
 	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    d.Count(),
-		Enums:       true,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions.String())),
-		BaseDataID:  firstTxID,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		KeyCount:   d.Count(),
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions.String())),
+		BaseDataID: firstTxID,
 	}, logger)
 	if err != nil {
 		return err
 	}
 
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    d.Count(),
-		Enums:       false,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions2Block.String())),
-		BaseDataID:  firstBlockNum,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		KeyCount:   d.Count(),
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions2Block.String())),
+		BaseDataID: firstBlockNum,
 	}, logger)
 	if err != nil {
 		return err
@@ -2382,14 +2385,13 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	var idxFilePath = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    d.Count(),
-		Enums:       true,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpDir,
-		IndexFile:   idxFilePath,
-		BaseDataID:  firstDataID,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		KeyCount:   d.Count(),
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  idxFilePath,
+		BaseDataID: firstDataID,
 	}, logger)
 	if err != nil {
 		return err

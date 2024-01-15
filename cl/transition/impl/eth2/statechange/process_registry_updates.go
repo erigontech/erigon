@@ -62,7 +62,7 @@ func ProcessRegistryUpdates(s abstract.BeaconState) error {
 		}
 		return activationQueue[i].validatorIndex < activationQueue[j].validatorIndex
 	})
-	activationQueueLength := s.GetValidatorChurnLimit()
+	activationQueueLength := s.GetValidatorActivationChurnLimit()
 	if len(activationQueue) > int(activationQueueLength) {
 		activationQueue = activationQueue[:activationQueueLength]
 	}

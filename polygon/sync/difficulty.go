@@ -2,7 +2,6 @@ package sync
 
 import (
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 
@@ -27,22 +26,20 @@ type difficultyCalculatorImpl struct {
 	signaturesCache     *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
 
-// valset.ValidatorSet abstraction for unit tests
-type validatorSetInterface interface {
-	IncrementProposerPriority(times int)
-	Difficulty(signer libcommon.Address) (uint64, error)
-}
-
 func NewDifficultyCalculator(
 	borConfig *borcfg.BorConfig,
 	span *heimdallspan.HeimdallSpan,
 	validatorSetFactory func() validatorSetInterface,
-	log log.Logger,
+	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) DifficultyCalculator {
-	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
-	if err != nil {
-		panic(err)
+	if signaturesCache == nil {
+		var err error
+		signaturesCache, err = lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
+		if err != nil {
+			panic(err)
+		}
 	}
+
 	impl := difficultyCalculatorImpl{
 		borConfig:           borConfig,
 		span:                span,
