@@ -228,9 +228,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				return err
 			}
 		}
-		if cfg.notifier.Events != nil { // can notify right here, even that write txn is not commit
-			cfg.notifier.Events.OnNewSnapshot()
-		}
 	} else {
 		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
