@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/url"
@@ -50,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -782,7 +784,7 @@ func isWebsocket(r *http.Request) bool {
 		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
 }
 
-// obtainJWTSecret loads the jwt-secret, either from the provided config,
+// ObtainJWTSecret loads the jwt-secret, either from the provided config,
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
 func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
@@ -874,6 +876,8 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	return engineListener, engineSrv, engineAddr.String(), nil
 }
 
+var remoteConsensusEngineNotReady = errors.New("remote consensus engine not ready")
+
 type remoteConsensusEngine struct {
 	engine consensus.Engine
 }
@@ -884,6 +888,14 @@ func (e *remoteConsensusEngine) HasEngine() bool {
 
 func (e *remoteConsensusEngine) Engine() consensus.EngineReader {
 	return e.engine
+}
+
+func (e *remoteConsensusEngine) validateEngineReady() error {
+	if !e.HasEngine() {
+		return remoteConsensusEngineNotReady
+	}
+
+	return nil
 }
 
 func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
@@ -925,41 +937,89 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 }
 
 func (e *remoteConsensusEngine) Author(header *types.Header) (libcommon.Address, error) {
-	if e.engine != nil {
-		return e.engine.Author(header)
+	if err := e.validateEngineReady(); err != nil {
+		return libcommon.Address{}, err
 	}
 
-	return libcommon.Address{}, fmt.Errorf("remote consensus engine not iinitialized")
+	return e.engine.Author(header)
 }
 
 func (e *remoteConsensusEngine) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
-	if e.engine != nil {
-		return e.engine.IsServiceTransaction(sender, syscall)
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
 	}
 
-	return false
+	return e.engine.IsServiceTransaction(sender, syscall)
 }
 
 func (e *remoteConsensusEngine) Type() chain.ConsensusName {
-	if e.engine != nil {
-		return e.engine.Type()
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
 	}
 
-	return ""
+	return e.engine.Type()
 }
 
 func (e *remoteConsensusEngine) CalculateRewards(config *chain.Config, header *types.Header, uncles []*types.Header, syscall consensus.SystemCall) ([]consensus.Reward, error) {
-	if e.engine != nil {
-		return e.engine.CalculateRewards(config, header, uncles, syscall)
+	if err := e.validateEngineReady(); err != nil {
+		return nil, err
 	}
 
-	return nil, fmt.Errorf("remote consensus engine not iinitialized")
+	return e.engine.CalculateRewards(config, header, uncles, syscall)
 }
 
 func (e *remoteConsensusEngine) Close() error {
-	if e.engine != nil {
-		return e.engine.Close()
+	if err := e.validateEngineReady(); err != nil {
+		return err
 	}
 
-	return nil
+	return e.engine.Close()
+}
+
+func (e *remoteConsensusEngine) Initialize(config *chain.Config, chain consensus.ChainHeaderReader, header *types.Header, state *state.IntraBlockState, syscall consensus.SysCallCustom, logger log.Logger) {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	e.engine.Initialize(config, chain, header, state, syscall, logger)
+}
+
+func (e *remoteConsensusEngine) VerifyHeader(_ consensus.ChainHeaderReader, _ *types.Header, _ bool) error {
+	panic("remoteConsensusEngine.VerifyHeader not supported")
+}
+
+func (e *remoteConsensusEngine) VerifyUncles(_ consensus.ChainReader, _ *types.Header, _ []*types.Header) error {
+	panic("remoteConsensusEngine.VerifyUncles not supported")
+}
+
+func (e *remoteConsensusEngine) Prepare(_ consensus.ChainHeaderReader, _ *types.Header, _ *state.IntraBlockState) error {
+	panic("remoteConsensusEngine.Prepare not supported")
+}
+
+func (e *remoteConsensusEngine) Finalize(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ log.Logger) (types.Transactions, types.Receipts, error) {
+	panic("remoteConsensusEngine.Finalize not supported")
+}
+
+func (e *remoteConsensusEngine) FinalizeAndAssemble(_ *chain.Config, _ *types.Header, _ *state.IntraBlockState, _ types.Transactions, _ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ consensus.ChainReader, _ consensus.SystemCall, _ consensus.Call, _ log.Logger) (*types.Block, types.Transactions, types.Receipts, error) {
+	panic("remoteConsensusEngine.FinalizeAndAssemble not supported")
+}
+
+func (e *remoteConsensusEngine) Seal(_ consensus.ChainHeaderReader, _ *types.Block, _ chan<- *types.Block, _ <-chan struct{}) error {
+	panic("remoteConsensusEngine.Seal not supported")
+}
+
+func (e *remoteConsensusEngine) SealHash(_ *types.Header) libcommon.Hash {
+	panic("remoteConsensusEngine.SealHash not supported")
+}
+
+func (e *remoteConsensusEngine) CalcDifficulty(_ consensus.ChainHeaderReader, _ uint64, _ uint64, _ *big.Int, _ uint64, _ libcommon.Hash, _ libcommon.Hash, _ uint64) *big.Int {
+	panic("remoteConsensusEngine.CalcDifficulty not supported")
+}
+
+func (e *remoteConsensusEngine) GenerateSeal(_ consensus.ChainHeaderReader, _ *types.Header, _ *types.Header, _ consensus.Call) []byte {
+	panic("remoteConsensusEngine.GenerateSeal not supported")
+}
+
+func (e *remoteConsensusEngine) APIs(_ consensus.ChainHeaderReader) []rpc.API {
+	panic("remoteConsensusEngine.APIs not supported")
 }
