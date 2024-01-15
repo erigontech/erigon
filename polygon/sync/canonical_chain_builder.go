@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor"
 )
 
-//go:generate mockgen -destination=./mock/canonical_chain_builder_mock.go -package=mock . CanonicalChainBuilder
+//go:generate mockgen -destination=./canonical_chain_builder_mock.go -package=sync . CanonicalChainBuilder
 type CanonicalChainBuilder interface {
 	Reset(root *types.Header)
 	ContainsHash(hash libcommon.Hash) bool
