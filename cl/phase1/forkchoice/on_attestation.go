@@ -115,6 +115,7 @@ func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *sol
 				return
 			case <-logInterval.C:
 				if time.Since(begin) > maxAttestationJobLifetime {
+					log.Debug("could not process scheduled attestation", "reason", "timeout")
 					return // give up
 				}
 				if f.Slot() < attestation.AttestantionData().Slot()+1 {
