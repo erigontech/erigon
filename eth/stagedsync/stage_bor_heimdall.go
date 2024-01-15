@@ -194,6 +194,7 @@ func BorHeimdallForward(
 	defer logTimer.Stop()
 
 	logger.Info("["+s.LogPrefix()+"] Processing sync events...", "from", lastBlockNum+1, "to", headNumber)
+
 	for blockNum = lastBlockNum + 1; blockNum <= headNumber; blockNum++ {
 		select {
 		default:
@@ -564,7 +565,11 @@ func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Head
 		return err
 	}
 
-	if len(producerSet) != len(headerVals) {
+	// span 0 at least for mumbai has a header mismatch in
+	// its first spam.  Since we control neither the span, not the
+	// the headers (they are external data) - we just don't do the
+	// check as it will hault further processing
+	if len(producerSet) != len(headerVals) && spanID > 0 {
 		return ErrHeaderValidatorsLengthMismatch
 	}
 

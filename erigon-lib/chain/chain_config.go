@@ -233,28 +233,28 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 }
 
 func (c *Config) GetMinBlobGasPrice() uint64 {
-	if c.MinBlobGasPrice != nil {
+	if c != nil && c.MinBlobGasPrice != nil {
 		return *c.MinBlobGasPrice
 	}
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
 func (c *Config) GetMaxBlobGasPerBlock() uint64 {
-	if c.MaxBlobGasPerBlock != nil {
+	if c != nil && c.MaxBlobGasPerBlock != nil {
 		return *c.MaxBlobGasPerBlock
 	}
 	return 786432 // MAX_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
 func (c *Config) GetTargetBlobGasPerBlock() uint64 {
-	if c.TargetBlobGasPerBlock != nil {
+	if c != nil && c.TargetBlobGasPerBlock != nil {
 		return *c.TargetBlobGasPerBlock
 	}
 	return 393216 // TARGET_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {
-	if c.BlobGasPriceUpdateFraction != nil {
+	if c != nil && c.BlobGasPriceUpdateFraction != nil {
 		return *c.BlobGasPriceUpdateFraction
 	}
 	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)

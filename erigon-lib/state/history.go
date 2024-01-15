@@ -374,14 +374,13 @@ func buildVi(ctx context.Context, historyItem, iiItem *filesItem, historyIdxPath
 	}
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    int(count),
-		Enums:       false,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpdir,
-		IndexFile:   historyIdxPath,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
-		Salt:        salt,
+		KeyCount:   int(count),
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpdir,
+		IndexFile:  historyIdxPath,
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
@@ -1747,8 +1746,7 @@ func (hc *HistoryContext) HistoryRange(fromTxNum, toTxNum int, asc order.By, lim
 	if err != nil {
 		return nil, err
 	}
-
-	return iter.UnionKV(itOnFiles, itOnDB, limit), nil
+	return iter.MergeKV(itOnDB, itOnFiles, limit), nil
 }
 
 type HistoryChangesIterFiles struct {
