@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"hash"
 	"math"
 	"os"
@@ -2064,13 +2063,10 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
-	ps, _, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	ps, pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
 	if err != nil {
+		dc.d.logger.Warn("CanPruneFrom: failed to get progress", "domain", dc.d.filenameBase, "error", err)
 		return math.MaxUint64
-	}
-	if ps > 0 {
-		//fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
-		return cmp.Min(ps, math.MaxUint64)
 	}
 
 	c, err := tx.CursorDupSort(dc.d.keysTable)
@@ -2081,17 +2077,30 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	defer c.Close()
 
 	minStep := uint64(math.MaxUint64)
-	k, v, err := c.First()
+	var k, v []byte
+	if pkr != nil {
+		k, v, err = c.Seek(pkr)
+	} else {
+		k, v, err = c.First()
+	}
 	if err != nil || k == nil {
 		return math.MaxUint64
 	}
-	minStep = min(minStep, ^binary.BigEndian.Uint64(v))
+	minStep = min(math.MaxUint64, ^binary.BigEndian.Uint64(v))
 
 	fv, err := c.LastDup()
 	if err != nil {
 		return math.MaxUint64
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
+
+	if ps > 0 {
+		if pkr == nil && ps != math.MaxUint64 {
+			ps++
+		}
+		//fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
+		return min(ps, minStep)
+	}
 	//fmt.Printf("found CanPrune from %x first %d  last %d\n", k, ^binary.BigEndian.Uint64(v), ^binary.BigEndian.Uint64(fv))
 	return minStep
 }
@@ -2214,8 +2223,8 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		stat.Values++
 		stat.MaxStep = max(stat.MaxStep, is)
 		stat.MinStep = min(stat.MinStep, is)
-
 		mxPruneSizeDomain.Inc()
+
 		k, v, err = keysCursor.Prev()
 
 		select {
