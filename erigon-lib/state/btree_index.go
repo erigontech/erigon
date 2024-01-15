@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
-var UseBpsTree bool = true
+var UseBpsTree = true
 
 const BtreeLogPrefix = "btree"
 
@@ -1097,4 +1097,4 @@ func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
 	return b.newCursor(context.Background(), k, v, i, getter)
 }
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
-func (b *BtIndex) Distances() map[int]int          { return b.bplus.Distances() }
+func (b *BtIndex) Distances() (map[int]int, error) { return b.bplus.Distances() }

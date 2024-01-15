@@ -425,7 +425,10 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 		defer bt.Close()
 
-		distances := bt.Distances()
+		distances, err := bt.Distances()
+		if err != nil {
+			return err
+		}
 		for i := range distances {
 			distances[i] /= 100_000
 		}
