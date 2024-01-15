@@ -448,7 +448,7 @@ func doMeta(cliCtx *cli.Context) error {
 			prev = int(j)
 		}
 
-		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
+		log.Info("meta", "distances", fmt.Sprintf("%v", distances))
 	}
 	return nil
 }
