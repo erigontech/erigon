@@ -449,9 +449,14 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 
 		for i := range distances {
-			distances[i] /= 1_000
+			distances[i] /= 10_000
 		}
-		log.Info("meta", "distances_thousands", fmt.Sprintf("%v", distances))
+		for i := range distances {
+			if distances[i] == 0 {
+				delete(distances, i)
+			}
+		}
+		log.Info("meta", "distances(*10K)", fmt.Sprintf("%v", distances))
 	}
 	return nil
 }
