@@ -9,14 +9,14 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 )
 
-func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
-	querySlot, err := uint64FromQueryParams(r, "slot")
+	querySlot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	queryParentHash, err := hashFromQueryParams(r, "parent_root")
+	queryParentHash, err := beaconhttp.HashFromQueryParams(r, "parent_root")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -89,14 +89,14 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 	return newBeaconResponse(headers), nil
 }
 
-func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -125,5 +125,5 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconR
 		Root:      root,
 		Canonical: canonicalRoot == root,
 		Header:    signedHeader,
-	}).withFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).withVersion(version), nil
+	}).WithFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).WithVersion(version), nil
 }
