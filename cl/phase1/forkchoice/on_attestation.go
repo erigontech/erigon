@@ -83,6 +83,10 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().ValidatorIndex()
 	epoch := state.GetEpochAtSlot(f.beaconCfg, slot)
 
+	if err := f.validateOnAttestation(aggregateAndProof.Message.Aggregate, false); err != nil {
+		return err
+	}
+
 	target := aggregateAndProof.Message.Aggregate.AttestantionData().Target()
 	targetState, err := f.getCheckpointState(target)
 	if err != nil {
