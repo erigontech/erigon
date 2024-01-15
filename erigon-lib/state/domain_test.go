@@ -1615,21 +1615,22 @@ func TestPruneProgress(t *testing.T) {
 	defer d.Close()
 
 	latestKey := []byte("682c02b93b63aeb260eccc33705d584ffb5f0d4c")
-	latestStep := uint64(1337)
 
 	t.Run("reset", func(t *testing.T) {
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, latestStep, latestKey)
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, latestKey)
+		require.NoError(t, err)
+		key, err := GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		require.NoError(t, err)
+		require.EqualValuesf(t, latestKey, key, "key %x", key)
+
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, nil)
 		require.NoError(t, err)
 
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, 0, nil)
+		key, err = GetExecV3PruneProgress(tx, kv.TblAccountKeys)
 		require.NoError(t, err)
-
-		step, key, err := GetExecV3PruneProgress(tx, kv.TblAccountKeys)
-		require.NoError(t, err)
-		require.Zero(t, step)
 		require.Nil(t, key)
 	})
 
@@ -1637,20 +1638,18 @@ func TestPruneProgress(t *testing.T) {
 		tx, err := db.BeginRw(context.Background())
 		require.NoError(t, err)
 		defer tx.Rollback()
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, latestStep, latestKey)
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, latestKey)
 		require.NoError(t, err)
 
-		step, key, err := GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		key, err := GetExecV3PruneProgress(tx, kv.TblAccountKeys)
 		require.NoError(t, err)
-		require.EqualValues(t, latestStep, step)
 		require.EqualValues(t, latestKey, key)
 
-		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, 0, nil)
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, nil)
 		require.NoError(t, err)
 
-		step, key, err = GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		key, err = GetExecV3PruneProgress(tx, kv.TblAccountKeys)
 		require.NoError(t, err)
-		require.Zero(t, step)
 		require.Nil(t, key)
 	})
 }
@@ -1728,9 +1727,9 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
-	step, key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	require.NoError(t, err)
-	require.EqualValues(t, ^0, step)
+	require.NotNil(t, key)
 
 	keysCursor, err := rwTx.RwCursorDupSort(dc.d.keysTable)
 	require.NoError(t, err)
@@ -1754,7 +1753,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 		}
 		cancel()
 
-		step, key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+		key, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 		require.NoError(t, err)
 		if step == 0 && key == nil {
 

@@ -2063,7 +2063,7 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
-	_, pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Warn("CanPruneFrom: failed to get progress", "domain", dc.d.filenameBase, "error", err)
 		return math.MaxUint64
@@ -2076,7 +2076,6 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	defer c.Close()
 
-	minStep := uint64(math.MaxUint64)
 	var k, v []byte
 	if pkr != nil {
 		_, _, err = c.Seek(pkr)
@@ -2090,8 +2089,8 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	if err != nil || k == nil {
 		return math.MaxUint64
 	}
-	minStep = min(math.MaxUint64, ^binary.BigEndian.Uint64(v))
 
+	minStep := min(math.MaxUint64, ^binary.BigEndian.Uint64(v))
 	fv, err := c.LastDup()
 	if err != nil {
 		return math.MaxUint64
@@ -2177,7 +2176,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	//		"keys until limit", limit,
 	//		"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
 	//}()
-	_, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
@@ -2204,7 +2203,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			continue
 		}
 		if limit == 0 {
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
 			}
 			return stat, nil
@@ -2242,7 +2241,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		default:
 		}
 	}
-	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, nil); err != nil {
+	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, nil); err != nil {
 		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 	mxPruneTookDomain.ObserveDuration(st)

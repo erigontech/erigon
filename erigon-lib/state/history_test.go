@@ -385,11 +385,11 @@ func TestHistory_PruneProgress(t *testing.T) {
 			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 			cancel()
 
-			prunedTxNum, prunedKey, err := GetExecV3PruneProgress(tx, h.historyValsTable)
+			prunedKey, err := GetExecV3PruneProgress(tx, h.historyValsTable)
 			require.NoError(err)
 			hc.Close()
 
-			iter, err := hc.HistoryRange(int(prunedTxNum), 0, order.Asc, -1, tx)
+			iter, err := hc.HistoryRange(int(hc.ic.CanPruneFrom(tx)), 0, order.Asc, -1, tx)
 			require.NoError(err)
 			for iter.HasNext() {
 				k, _, err := iter.Next()
