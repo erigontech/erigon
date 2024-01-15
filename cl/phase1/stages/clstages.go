@@ -507,6 +507,7 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					cfg.forkChoice.SetSynced(true)
 					if err := cfg.syncedData.OnHeadState(headState); err != nil {
 						return err
 					}
