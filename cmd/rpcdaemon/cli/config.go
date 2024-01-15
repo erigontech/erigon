@@ -876,7 +876,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 	return engineListener, engineSrv, engineAddr.String(), nil
 }
 
-var remoteConsensusEngineNotReady = errors.New("remote consensus engine not ready")
+var remoteConsensusEngineNotReadyErr = errors.New("remote consensus engine not ready")
 
 type remoteConsensusEngine struct {
 	engine consensus.Engine
@@ -892,7 +892,7 @@ func (e *remoteConsensusEngine) Engine() consensus.EngineReader {
 
 func (e *remoteConsensusEngine) validateEngineReady() error {
 	if !e.HasEngine() {
-		return remoteConsensusEngineNotReady
+		return remoteConsensusEngineNotReadyErr
 	}
 
 	return nil
