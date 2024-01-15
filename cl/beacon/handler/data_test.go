@@ -20,12 +20,12 @@ import (
 //go:embed test_data/*
 var testData embed.FS
 
-var TestDatae = afero.NewBasePathFs(afero.FromIOFS{FS: testData}, "test_data")
+var TestDatae = beacontest.NewBasePathFs(afero.FromIOFS{FS: testData}, "test_data")
 
 //go:embed harness/*
 var testHarness embed.FS
 
-var Harnesses = afero.NewBasePathFs(afero.FromIOFS{FS: testHarness}, "harness")
+var Harnesses = beacontest.NewBasePathFs(afero.FromIOFS{FS: testHarness}, "harness")
 
 type harnessConfig struct {
 	t         *testing.T
