@@ -898,6 +898,10 @@ func (e *remoteConsensusEngine) validateEngineReady() error {
 	return nil
 }
 
+// init - reasoning behind init is that we would like to initialise the remote consensus engine either post rpcdaemon
+// service startup or in a background goroutine, so that we do not depend on the liveness of other services when
+// starting up rpcdaemon and do not block startup (avoiding "cascade outage" scaenario). In this case the DB dependency
+// can be a remote DB service running on another machine.
 func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockReader, remoteKV remote.KVClient, logger log.Logger) bool {
 	var cc *chain.Config
 
