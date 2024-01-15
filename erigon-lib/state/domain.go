@@ -2063,7 +2063,7 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
-	ps, pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	_, pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Warn("CanPruneFrom: failed to get progress", "domain", dc.d.filenameBase, "error", err)
 		return math.MaxUint64
@@ -2094,13 +2094,13 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
 
-	if ps > 0 {
-		if pkr == nil && ps != math.MaxUint64 {
-			ps++
-		}
-		//fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
-		return min(ps, minStep)
-	}
+	//if ps > 0 {
+	//	if pkr == nil && ps != math.MaxUint64 {
+	//		ps++
+	//	}
+	//	//fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
+	//	return min(ps, minStep)
+	//}
 	//fmt.Printf("found CanPrune from %x first %d  last %d\n", k, ^binary.BigEndian.Uint64(v), ^binary.BigEndian.Uint64(fv))
 	return minStep
 }
