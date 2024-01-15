@@ -2056,8 +2056,8 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	inFiles := dc.maxTxNumInDomainFiles(false)
 	idxTx := dc.hc.ic.CanPruneFrom(tx)
 	domStep := dc.CanPruneFrom(tx)
-	//fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
-	//	dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
+	fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
+		dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
 	return idxTx < inFiles || domStep < inFiles/dc.d.aggregationStep
 }
 
@@ -2221,7 +2221,8 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 		select {
 		case <-ctx.Done():
-			return stat, ctx.Err() // since we c
+			// consider ctx exiting as incorrect outcome, error is returned
+			return stat, ctx.Err()
 		case <-logEvery.C:
 			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
 				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
