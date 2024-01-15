@@ -992,7 +992,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
-
 	if warmup {
 		return reset2.WarmupExec(ctx, db)
 	}
@@ -1554,7 +1553,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, version uint8, logger log.Log
 
 			_allSnapshotsSingleton.LogStat("all")
 			_allBorSnapshotsSingleton.LogStat("all")
-			db.View(context.Background(), func(tx kv.Tx) error {
+			_ = db.View(context.Background(), func(tx kv.Tx) error {
 				ac := _aggSingleton.MakeContext()
 				defer ac.Close()
 				ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
