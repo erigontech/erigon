@@ -2223,9 +2223,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 			// consider ctx exiting as incorrect outcome, error is returned
 			return stat, ctx.Err()
 		case <-logEvery.C:
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, step, k); err != nil {
-				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			}
 			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase,
 				"pruned keys", stat.Values,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dc.d.aggregationStep), float64(txTo)/float64(dc.d.aggregationStep)))
