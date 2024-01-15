@@ -4,23 +4,23 @@ import (
 	"context"
 	"math/big"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-// Implements consensus.ChainReader
+// ChainReader implements consensus.ChainReader
 type ChainReader struct {
-	Cfg chain.Config
-
+	Cfg         chain.Config
 	Db          kv.Getter
 	BlockReader services.FullBlockReader
+	Logger      log.Logger
 }
 
 // Config retrieves the blockchain's chain configuration.
@@ -71,7 +71,7 @@ func (cr ChainReader) HasBlock(hash libcommon.Hash, number uint64) bool {
 func (cr ChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.Db, hash, number)
 	if err != nil {
-		log.Error("ReadTd failed", "err", err)
+		cr.Logger.Error("ReadTd failed", "err", err)
 		return nil
 	}
 	return td
@@ -81,10 +81,16 @@ func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.BlockReader.FrozenBlocks()
 }
 
-func (cr ChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
-	panic("")
+func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValue {
+	panic("bor events by block not implemented")
 }
 
 func (cr ChainReader) BorSpan(spanId uint64) []byte {
-	panic("")
+	span, err := cr.BlockReader.Span(context.Background(), cr.Db, spanId)
+	if err != nil {
+		cr.Logger.Error("BorSpan failed", "err", err)
+		return nil
+	}
+
+	return span
 }

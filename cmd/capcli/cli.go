@@ -4,15 +4,17 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 
-	lg "github.com/anacrolix/log"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+
+	lg "github.com/anacrolix/log"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -30,6 +32,7 @@ import (
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -76,6 +79,7 @@ var CLI struct {
 	DownloadSnapshots       DownloadSnapshots       `cmd:"" help:"download snapshots from webseed"`
 	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
 	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
+	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
 }
 
 type chainCfg struct {
@@ -396,7 +400,9 @@ func (c *Chain) Run(ctx *Context) error {
 	log.Info("Started chain download", "chain", c.Chain)
 
 	dirs := datadir.New(c.Datadir)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 
 	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
@@ -433,13 +439,133 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, false, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
+}
+
+type ChainEndpoint struct {
+	Endpoint string `help:"endpoint" default:""`
+	chainCfg
+	outputFolder
+}
+
+func (c *ChainEndpoint) Run(ctx *Context) error {
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	dirs := datadir.New(c.Datadir)
+	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
+	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	baseUri, err := url.JoinPath(c.Endpoint, "eth/v2/beacon/blocks")
+	if err != nil {
+		return err
+	}
+	log.Info("Hooked", "uri", baseUri)
+	// Let's fetch the head first
+	currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/head", baseUri), nil)
+	if err != nil {
+		return err
+	}
+	currentRoot, err := currentBlock.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	tx, err := db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
+	currentRoot = currentBlock.Block.ParentRoot
+	if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	previousLogBlock := currentBlock.Block.Slot
+
+	logInterval := time.NewTicker(30 * time.Second)
+	defer logInterval.Stop()
+
+	loopStep := func() (bool, error) {
+		tx, err := db.BeginRw(ctx)
+		if err != nil {
+			return false, err
+		}
+		defer tx.Rollback()
+
+		stringifiedRoot := common.Bytes2Hex(currentRoot[:])
+		// Let's fetch the head first
+		currentBlock, err := core.RetrieveBlock(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/0x%s", baseUri, stringifiedRoot), (*libcommon.Hash)(&currentRoot))
+		if err != nil {
+			return false, err
+		}
+		currentRoot, err = currentBlock.Block.HashSSZ()
+		if err != nil {
+			return false, err
+		}
+		if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+			return false, err
+		}
+		currentRoot = currentBlock.Block.ParentRoot
+		currentSlot := currentBlock.Block.Slot
+		// it will stop if we end finding a gap or if we reach the maxIterations
+		for {
+			// check if the expected root is in db
+			slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot)
+			if err != nil {
+				return false, err
+			}
+			if slot == nil || *slot == 0 {
+				break
+			}
+			if err := beacon_indicies.MarkRootCanonical(ctx, tx, *slot, currentRoot); err != nil {
+				return false, err
+			}
+			currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot)
+			if err != nil {
+				return false, err
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		select {
+		case <-logInterval.C:
+			// up to 2 decimal places
+			rate := float64(previousLogBlock-currentSlot) / 30
+			log.Info("Successfully processed", "slot", currentSlot, "blk/sec", fmt.Sprintf("%.2f", rate))
+			previousLogBlock = currentBlock.Block.Slot
+		case <-ctx.Done():
+		default:
+		}
+		return currentSlot != 0, nil
+	}
+	var keepGoing bool
+	for keepGoing, err = loopStep(); keepGoing && err == nil; keepGoing, err = loopStep() {
+		if !keepGoing {
+			break
+		}
+	}
+
+	return err
 }
 
 type DumpSnapshots struct {
 	chainCfg
 	outputFolder
+
+	To uint64 `name:"to" help:"slot to dump"`
 }
 
 func (c *DumpSnapshots) Run(ctx *Context) error {
@@ -460,11 +586,17 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	}
 	var to uint64
 	db.View(ctx, func(tx kv.Tx) (err error) {
-		to, err = beacon_indicies.ReadHighestFinalized(tx)
+		if c.To == 0 {
+			to, err = beacon_indicies.ReadHighestFinalized(tx)
+			return
+		}
+		to = c.To
 		return
 	})
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2RecentMergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
+
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, snapshotVersion, 0, to, snaptype.Erigon2MergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {
@@ -501,9 +633,10 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -582,9 +715,11 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	to = (to / snaptype.Erigon2RecentMergeLimit) * snaptype.Erigon2RecentMergeLimit
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(c.Chain, 0).Version
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -641,7 +776,6 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	downloaderCfg.DownloadTorrentFilesFromWebseed = true
 	downlo, err := downloader.New(ctx, downloaderCfg, dirs, log.Root(), log.LvlInfo, true)
 	if err != nil {
 		return err
@@ -655,7 +789,14 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return fmt.Errorf("new server: %w", err)
 	}
-	return snapshotsync.WaitForDownloader("CapCliDownloader", ctx, false, snapshotsync.OnlyCaplin, s, tx, freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root()), freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, log.Root())), params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer))
+
+	snapshotVersion := snapcfg.KnownCfg(d.Chain, 0).Version
+
+	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, snapshotsync.OnlyCaplin, s, tx,
+		freezeblocks.NewBlockReader(
+			freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root()),
+			freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, snapshotVersion, log.Root())),
+		params.ChainConfigByChainName(d.Chain), direct.NewDownloaderClient(bittorrentServer), []string{})
 }
 
 type RetrieveHistoricalState struct {
@@ -684,19 +825,20 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	snapshotVersion := snapcfg.KnownCfg(r.Chain, 0).Version
+
+	allSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, snapshotVersion, log.Root())
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return err
 	}
 	if err := state_accessors.ReadValidatorsTable(tx, vt); err != nil {
 		return err
 	}
-	fmt.Println(allSnapshots.BlocksAvailable(), allSnapshots.Dir())
 
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
-	eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, db)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, log.Root())
+	eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconConfig, blockReader, db)
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, snapshotVersion, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -712,6 +854,16 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	endTime := time.Since(start)
+	hRoot, err := haveState.HashSSZ()
+	if err != nil {
+		return err
+	}
+	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
+
+	if err := haveState.InitBeaconState(); err != nil {
+		return err
+	}
 
 	v := haveState.Version()
 	// encode and decode the state
@@ -723,12 +875,10 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
 		return err
 	}
-	endTime := time.Since(start)
-	hRoot, err := haveState.HashSSZ()
+	hRoot, err = haveState.HashSSZ()
 	if err != nil {
 		return err
 	}
-	log.Info("Got state", "slot", haveState.Slot(), "root", libcommon.Hash(hRoot), "elapsed", endTime)
 	if r.CompareFile == "" {
 		return nil
 	}

@@ -6,14 +6,14 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
@@ -35,6 +35,7 @@ type BodiesCfg struct {
 	blockReader     services.FullBlockReader
 	blockWriter     *blockio.BlockWriter
 	historyV3       bool
+	loopBreakCheck  func(int) bool
 }
 
 func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
@@ -43,8 +44,12 @@ func StageBodiesCfg(db kv.RwDB, bd *bodydownload.BodyDownload,
 	chanConfig chain.Config,
 	blockReader services.FullBlockReader,
 	historyV3 bool,
-	blockWriter *blockio.BlockWriter) BodiesCfg {
-	return BodiesCfg{db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator, timeout: timeout, chanConfig: chanConfig, blockReader: blockReader, historyV3: historyV3, blockWriter: blockWriter}
+	blockWriter *blockio.BlockWriter,
+	loopBreakCheck func(int) bool) BodiesCfg {
+	return BodiesCfg{
+		db: db, bd: bd, bodyReqSend: bodyReqSend, penalise: penalise, blockPropagator: blockPropagator,
+		timeout: timeout, chanConfig: chanConfig, blockReader: blockReader,
+		historyV3: historyV3, blockWriter: blockWriter, loopBreakCheck: loopBreakCheck}
 }
 
 // BodiesForward progresses Bodies stage in the forward direction
@@ -59,6 +64,9 @@ func BodiesForward(
 	logger log.Logger,
 ) error {
 	var doUpdate bool
+
+	startTime := time.Now()
+
 	if s.BlockNumber < cfg.blockReader.FrozenBlocks() {
 		s.BlockNumber = cfg.blockReader.FrozenBlocks()
 		doUpdate = true
@@ -126,7 +134,7 @@ func BodiesForward(
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
-	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx, BlockReader: cfg.blockReader}
+	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
 
 	loopBody := func() (bool, error) {
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -221,6 +229,10 @@ func BodiesForward(
 				}
 			}
 			cfg.bd.AdvanceLow()
+
+			if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(i)) {
+				return true, nil
+			}
 		}
 
 		d5 += time.Since(start)
@@ -282,7 +294,10 @@ func BodiesForward(
 		return libcommon.ErrStopped
 	}
 	if bodyProgress > s.BlockNumber+16 {
-		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress)
+		blocks := bodyProgress - s.BlockNumber
+		secs := time.Since(startTime).Seconds()
+		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress,
+			"blocks", blocks, "in", secs, "blk/sec", uint64(float64(blocks)/secs))
 	}
 	return nil
 }
@@ -304,6 +319,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 		"wasted/sec", libcommon.ByteCount(uint64(wastedSpeed)),
 		"remaining", remaining,
 		"delivered", totalDelivered,
+		"blk/sec", totalDelivered/uint64(logInterval/time.Second),
 		"cache", libcommon.ByteCount(uint64(bodyCacheSize)),
 		"alloc", libcommon.ByteCount(m.Alloc),
 		"sys", libcommon.ByteCount(m.Sys),

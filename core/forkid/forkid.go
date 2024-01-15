@@ -245,11 +245,11 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 	}
 
 	if config.Bor != nil {
-		if config.Bor.AgraBlock != nil {
-			heightForks = append(heightForks, config.Bor.AgraBlock.Uint64())
+		if config.Bor.GetAgraBlock() != nil {
+			heightForks = append(heightForks, config.Bor.GetAgraBlock().Uint64())
 		}
-		if config.Bor.NapoliBlock != nil {
-			heightForks = append(heightForks, config.Bor.NapoliBlock.Uint64())
+		if config.Bor.GetNapoliBlock() != nil {
+			heightForks = append(heightForks, config.Bor.GetNapoliBlock().Uint64())
 		}
 	}
 

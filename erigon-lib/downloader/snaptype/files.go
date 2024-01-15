@@ -35,16 +35,14 @@ import (
 type Type int
 
 const (
+	Unknown Type = -1
 	Headers Type = iota
 	Bodies
 	Transactions
 	BorEvents
 	BorSpans
-	NumberOfTypes
 	BeaconBlocks
 )
-
-var BorSnapshotTypes = []Type{BorEvents, BorSpans}
 
 func (ft Type) String() string {
 	switch ft {
@@ -80,7 +78,7 @@ func ParseFileType(s string) (Type, bool) {
 	case "beaconblocks":
 		return BeaconBlocks, true
 	default:
-		return NumberOfTypes, false
+		return Unknown, false
 	}
 }
 
@@ -94,16 +92,25 @@ func (it IdxType) String() string { return string(it) }
 
 var BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
 
+var BorSnapshotTypes = []Type{BorEvents, BorSpans}
+
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(from, to uint64, fileType string) string {
-	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, fileType)
+func FileName(version uint8, from, to uint64, fileType string) string {
+	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
 }
-func SegmentFileName(from, to uint64, t Type) string   { return FileName(from, to, t.String()) + ".seg" }
-func DatFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".dat" }
-func IdxFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".idx" }
+
+func SegmentFileName(version uint8, from, to uint64, t Type) string {
+	return FileName(version, from, to, t.String()) + ".seg"
+}
+func DatFileName(version uint8, from, to uint64, fType string) string {
+	return FileName(version, from, to, fType) + ".dat"
+}
+func IdxFileName(version uint8, from, to uint64, fType string) string {
+	return FileName(version, from, to, fType) + ".idx"
+}
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	for _, f := range in {
@@ -114,8 +121,8 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	}
 	return out
 }
-func FilesWithExt(dir, expectExt string) ([]FileInfo, error) {
-	files, err := ParseDir(dir)
+func FilesWithExt(dir string, version uint8, expectExt string) ([]FileInfo, error) {
+	files, err := ParseDir(dir, version)
 	if err != nil {
 		return nil, err
 	}
@@ -139,8 +146,16 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if len(parts) < 4 {
 		return res, ok
 	}
-	version := parts[0]
-	_ = version
+
+	var version uint8
+	if len(parts[0]) > 1 && parts[0][0] == 'v' {
+		v, err := strconv.ParseUint(parts[0][1:], 10, 64)
+		if err != nil {
+			return
+		}
+		version = uint8(v)
+	}
+
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
 		return
@@ -153,7 +168,8 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if !ok {
 		return res, ok
 	}
-	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
+
+	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
 }
 
 const Erigon3SeedableSteps = 32
@@ -164,9 +180,11 @@ const Erigon3SeedableSteps = 32
 //   - avoiding having too much files:
 //     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
 //     less files - means small files will be removed after merge (no peers for this files).
-const Erigon2RecentMergeLimit = 100_000 //nolint
-const Erigon2MergeLimit = 500_000
+const Erigon2OldMergeLimit = 500_000
+const Erigon2MergeLimit = 100_000
 const Erigon2MinSegmentSize = 1_000
+
+var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
@@ -178,13 +196,18 @@ type FileInfo struct {
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
 func (f FileInfo) Seedable() bool {
-	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2RecentMergeLimit
+	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2OldMergeLimit
 }
 func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
+func (f FileInfo) Name() string          { return filepath.Base(f.Path) }
 
-func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
-func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }
-func TmpFiles(dir string) (res []string, err error) {
+func IdxFiles(dir string, version uint8) (res []FileInfo, err error) {
+	return FilesWithExt(dir, version, ".idx")
+}
+func Segments(dir string, version uint8) (res []FileInfo, err error) {
+	return FilesWithExt(dir, version, ".seg")
+}
+func TmpFiles(dir string, version uint8) (res []string, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -192,20 +215,24 @@ func TmpFiles(dir string) (res []string, err error) {
 		}
 		return nil, err
 	}
+
+	v := fmt.Sprint("v", version)
+
 	for _, f := range files {
-		if f.IsDir() || len(f.Name()) < 3 {
+		if f.IsDir() || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
 			continue
 		}
 		if filepath.Ext(f.Name()) != ".tmp" {
 			continue
 		}
+
 		res = append(res, filepath.Join(dir, f.Name()))
 	}
 	return res, nil
 }
 
 // ParseDir - reading dir (
-func ParseDir(dir string) (res []FileInfo, err error) {
+func ParseDir(dir string, version uint8) (res []FileInfo, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -213,12 +240,15 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		}
 		return nil, err
 	}
+
+	v := fmt.Sprint("v", version)
+
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
 			return nil, err
 		}
-		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 {
+		if f.IsDir() || fileInfo.Size() == 0 || len(f.Name()) < 3 || !strings.HasPrefix(f.Name(), v) {
 			continue
 		}
 

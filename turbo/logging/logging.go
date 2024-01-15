@@ -3,7 +3,6 @@ package logging
 import (
 	"flag"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 
@@ -21,7 +20,8 @@ import (
 // This function which is used in Erigon itself.
 // Note: urfave and cobra are two CLI frameworks/libraries for the same functionalities
 // and it would make sense to choose one over another
-func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.Logger {
+func SetupLoggerCtx(filePrefix string, ctx *cli.Context,
+	consoleDefaultLevel log.Lvl, dirDefaultLevel log.Lvl, rootHandler bool) log.Logger {
 	var consoleJson = ctx.Bool(LogJsonFlag.Name) || ctx.Bool(LogConsoleJsonFlag.Name)
 	var dirJson = ctx.Bool(LogDirJsonFlag.Name)
 
@@ -30,13 +30,13 @@ func SetupLoggerCtx(filePrefix string, ctx *cli.Context, rootHandler bool) log.L
 		// try verbosity flag
 		consoleLevel, lErr = tryGetLogLevel(ctx.String(LogVerbosityFlag.Name))
 		if lErr != nil {
-			consoleLevel = log.LvlInfo
+			consoleLevel = consoleDefaultLevel
 		}
 	}
 
 	dirLevel, dErr := tryGetLogLevel(ctx.String(LogDirVerbosityFlag.Name))
 	if dErr != nil {
-		dirLevel = log.LvlInfo
+		dirLevel = dirDefaultLevel
 	}
 
 	dirPath := ""
@@ -202,7 +202,7 @@ func initSeparatedLogging(
 	}
 
 	lumberjack := &lumberjack.Logger{
-		Filename:   path.Join(dirPath, filePrefix+".log"),
+		Filename:   filepath.Join(dirPath, filePrefix+".log"),
 		MaxSize:    100, // megabytes
 		MaxBackups: 3,
 		MaxAge:     28, //days

@@ -18,7 +18,7 @@ const (
 type DepositData struct {
 	PubKey                libcommon.Bytes48 `json:"pubkey"`
 	WithdrawalCredentials libcommon.Hash    `json:"withdrawal_credentials"`
-	Amount                uint64            `json:"amount"`
+	Amount                uint64            `json:"amount,string"`
 	Signature             libcommon.Bytes96 `json:"signature"`
 }
 
@@ -72,8 +72,8 @@ func (d *Deposit) HashSSZ() ([32]byte, error) {
 }
 
 type VoluntaryExit struct {
-	Epoch          uint64 `json:"epoch"`
-	ValidatorIndex uint64 `json:"validator_index"`
+	Epoch          uint64 `json:"epoch,string"`
+	ValidatorIndex uint64 `json:"validator_index,string"`
 }
 
 func (e *VoluntaryExit) EncodeSSZ(buf []byte) ([]byte, error) {

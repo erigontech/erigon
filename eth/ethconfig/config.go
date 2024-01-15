@@ -27,13 +27,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
@@ -42,6 +42,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/gasprice/gaspricecfg"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc"
 )
 
 // AggregationStep number of transactions in smallest static file
@@ -77,6 +78,7 @@ var Defaults = Config{
 		ReconWorkerCount:           estimate.ReconstituteState.Workers(),
 		BodyCacheLimit:             256 * 1024 * 1024,
 		BodyDownloadTimeoutSeconds: 2,
+		PruneLimit:                 100,
 	},
 	Ethash: ethashcfg.Config{
 		CachesInMem:      2,
@@ -99,7 +101,7 @@ var Defaults = Config{
 
 	ImportMode: false,
 	Snapshot: BlocksFreezing{
-		Enabled:    false,
+		Enabled:    true,
 		KeepBlocks: false,
 		Produce:    true,
 	},
@@ -207,7 +209,6 @@ type Config struct {
 
 	Clique params.ConsensusSnapshotConfig
 	Aura   chain.AuRaConfig
-	Bor    chain.BorConfig
 
 	// Transaction pool options
 	DeprecatedTxPool DeprecatedTxPoolConfig
@@ -269,6 +270,13 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
+	PruneLimit                 int //the maxumum records to delete from the DB during pruning
+	BreakAfterStage            string
+	LoopBlockLimit             uint
+
+	UploadLocation   string
+	UploadFrom       rpc.BlockNumber
+	FrozenBlockLimit uint64
 }
 
 // Chains where snapshots are enabled by default

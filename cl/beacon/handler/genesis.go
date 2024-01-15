@@ -10,12 +10,12 @@ import (
 )
 
 type genesisResponse struct {
-	GenesisTime          uint64           `json:"genesis_time,omitempty"`
-	GenesisValidatorRoot common.Hash      `json:"genesis_validator_root,omitempty"`
-	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version,omitempty"`
+	GenesisTime          uint64           `json:"genesis_time,string"`
+	GenesisValidatorRoot common.Hash      `json:"genesis_validators_root"`
+	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version"`
 }
 
-func (a *ApiHandler) getGenesis(r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getGenesis(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	if a.genesisCfg == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "Genesis Config is missing")
 	}

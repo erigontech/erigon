@@ -148,6 +148,7 @@ var (
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
 		Usage: "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+		Value: false,
 	}
 	TxPoolGossipDisableFlag = cli.BoolFlag{
 		Name:  "txpool.gossip.disable",
@@ -915,6 +916,21 @@ var (
 		Usage: "enables archival node in caplin (Experimental, does not work)",
 		Value: false,
 	}
+	BeaconApiAllowCredentialsFlag = cli.BoolFlag{
+		Name:  "beacon.api.cors.allow-credentials",
+		Usage: "set the cors' allow credentials",
+		Value: false,
+	}
+	BeaconApiAllowMethodsFlag = cli.StringSliceFlag{
+		Name:  "beacon.api.cors.allow-methods",
+		Usage: "set the cors' allow methods",
+		Value: cli.NewStringSlice("GET", "POST", "PUT", "DELETE", "OPTIONS"),
+	}
+	BeaconApiAllowOriginsFlag = cli.StringSliceFlag{
+		Name:  "beacon.api.cors.allow-origins",
+		Usage: "set the cors' allow origins",
+		Value: cli.NewStringSlice(),
+	}
 )
 
 var MetricFlags = []cli.Flag{&MetricsEnabledFlag, &MetricsHTTPFlag, &MetricsPortFlag}
@@ -1335,7 +1351,7 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 
 func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	cfg := &fullCfg.DeprecatedTxPool
-	if ctx.IsSet(TxPoolDisableFlag.Name) {
+	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
@@ -1542,6 +1558,9 @@ func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.BeaconRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
 	cfg.BeaconRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
 	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
+	cfg.BeaconRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
+	cfg.BeaconRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
+	cfg.BeaconRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
 }
 
 func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {

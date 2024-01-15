@@ -24,11 +24,12 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
@@ -83,6 +84,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			return nil, err
 		}
 	}
+
 	return &emptypb.Empty{}, nil
 }
 
@@ -108,13 +110,13 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 
 		fPath := filepath.Join(s.d.SnapDir(), name)
 		_ = os.Remove(fPath)
-		_ = os.Remove(fPath + ".torrent")
+		s.d.torrentFiles.Delete(name)
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
-	err := s.d.VerifyData(ctx, nil)
+	err := s.d.VerifyData(ctx, nil, false)
 	if err != nil {
 		return nil, err
 	}

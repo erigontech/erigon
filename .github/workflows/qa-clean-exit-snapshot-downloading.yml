@@ -1,0 +1,85 @@
+name: QA - Clean exit (snapshot downloading)
+
+on:
+  push:
+    branches:
+      - devel
+      - alpha
+      - 'release/**'
+  pull_request:
+    branches:
+      - devel
+      - alpha
+      - 'release/**'
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+jobs:
+  long-running-test:
+    runs-on: self-hosted
+    env:
+      ERIGON_DATA_DIR: ${{ github.workspace }}/erigon_data
+      WORKING_TIME_SECONDS: 600
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v2
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    #- name: Install dependencies
+    #  run: |
+    #    sudo apt-get update
+    #    sudo apt-get install -y build-essential make gcc
+
+    - name: Clean Erigon Build Directory
+      run: |
+        make clean
+
+    - name: Build Erigon
+      run: |
+        make erigon
+      working-directory: ${{ github.workspace }}
+
+    #- name: Download Python Script for Logs Checking
+    #  run: |
+    #    curl -o check_erigon_exit.py 'https://gist.githubusercontent.com/mriccobene/8db4030a745de34d527f136f2caa104f/raw/3c1a860cb87d61075e78ce399e17f0ab157cacc6/check_erigon_exit.py'
+
+    - name: Run Erigon, send ctrl-c and check for clean exiting
+      run: |
+        # Run Erigon, send ctrl-c and check logs
+        python3 ${{ github.workspace }}/../../../../erigon-qa/test_system/qa-tests/clean-exit/run_and_check_clean_exit.py ${{ github.workspace }}/build/bin $ERIGON_DATA_DIR $WORKING_TIME_SECONDS
+  
+        # Capture monitoring script exit status
+        monitoring_exit_status=$?
+        
+        # Clean up Erigon process if it's still running
+        if kill -0 $ERIGON_PID 2> /dev/null; then
+          echo "Terminating Erigon"
+          kill $ERIGON_PID
+          wait $ERIGON_PID
+        else
+          echo "Erigon has already terminated"
+        fi
+        
+        # Clean up Erigon build and data directories
+        rm -rf $ERIGON_DATA_DIR
+        
+        # Check monitoring script exit status
+        if [ $monitoring_exit_status -eq 0 ]; then
+          echo "Monitoring completed successfully"
+        else
+          echo "Error detected in Erigon logs or monitoring script exited unexpectedly"
+          exit 1
+        fi

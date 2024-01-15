@@ -26,6 +26,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+
 var doMemstat = true
 
 func init() {
@@ -276,8 +278,24 @@ func StopAfterReconst() bool {
 		v, _ := os.LookupEnv("STOP_AFTER_RECONSTITUTE")
 		if v == "true" {
 			stopAfterReconst = true
-			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", writeMap)
+			log.Info("[Experiment]", "STOP_AFTER_RECONSTITUTE", stopAfterReconst)
 		}
 	})
 	return stopAfterReconst
+}
+
+var (
+	snapshotVersion     uint8
+	snapshotVersionOnce sync.Once
+)
+
+func SnapshotVersion() uint8 {
+	snapshotVersionOnce.Do(func() {
+		v, _ := os.LookupEnv("SNAPSHOT_VERSION")
+		if i, _ := strconv.ParseUint(v, 10, 8); i > 0 {
+			snapshotVersion = uint8(i)
+			log.Info("[Experiment]", "SNAPSHOT_VERSION", snapshotVersion)
+		}
+	})
+	return snapshotVersion
 }

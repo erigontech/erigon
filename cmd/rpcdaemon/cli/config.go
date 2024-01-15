@@ -13,7 +13,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -22,19 +25,26 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/consensus"
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/contract"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/span"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/contract"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
+
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"golang.org/x/sync/semaphore"
+	"google.golang.org/grpc"
+	grpcHealth "google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -46,12 +56,6 @@ import (
 	kv2 "github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedb"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"golang.org/x/sync/semaphore"
-	"google.golang.org/grpc"
-	grpcHealth "google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/graphql"
@@ -204,7 +208,7 @@ func subscribeToStateChangesLoop(ctx context.Context, client StateChangesClient,
 					time.Sleep(3 * time.Second)
 					continue
 				}
-				log.Warn("[txpool.handleStateChanges]", "err", err)
+				log.Warn("[rpcdaemon subscribeToStateChanges]", "err", err)
 			}
 		}
 	}()
@@ -372,15 +376,17 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			logger.Info("Use --snapshots=false")
 		}
 
+		snapshotVersion := snapcfg.KnownCfg(cc.ChainName, 0).Version
+
 		// Configure sapshots
-		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
-		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
+		allSnapshots = freezeblocks.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, snapshotVersion, logger)
+		allBorSnapshots = freezeblocks.NewBorRoSnapshots(cfg.Snap, cfg.Dirs.Snap, snapshotVersion, logger)
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
 		// Erigon does store list of snapshots in db: means RPCDaemon can read this list now, but read by `remoteKvClient.Snapshots` after establish grpc connection
 		allSnapshots.OptimisticReopenWithDB(db)
 		allBorSnapshots.OptimisticalyReopenWithDB(db)
-		allSnapshots.LogStat()
-		allBorSnapshots.LogStat()
+		allSnapshots.LogStat("remote")
+		allBorSnapshots.LogStat("remote")
 
 		if agg, err = libstate.NewAggregatorV3(ctx, cfg.Dirs.SnapHistory, cfg.Dirs.Tmp, ethconfig.HistoryV3AggregationStep, db, logger); err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, nil, fmt.Errorf("create aggregator: %w", err)
@@ -404,12 +410,12 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				if err := allSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
-					allSnapshots.LogStat()
+					allSnapshots.LogStat("reopen")
 				}
 				if err := allBorSnapshots.ReopenList(reply.BlocksFiles, true); err != nil {
 					logger.Error("[bor snapshots] reopen", "err", err)
 				} else {
-					allSnapshots.LogStat()
+					allBorSnapshots.LogStat("reopen")
 				}
 
 				_ = reply.HistoryFiles
@@ -499,9 +505,11 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				}
 				// Skip the compatibility check, until we have a schema in erigon-lib
 
+				borConfig := cc.Bor.(*borcfg.BorConfig)
+
 				engine = bor.NewRo(cc, borKv, blockReader,
 					span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-					contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+					contract.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 
 			default:
 				engine = ethash.NewFaker()
@@ -780,7 +788,7 @@ func isWebsocket(r *http.Request) bool {
 // obtainJWTSecret loads the jwt-secret, either from the provided config,
 // or from the default location. If neither of those are present, it generates
 // a new secret and stores to the default location.
-func obtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
+func ObtainJWTSecret(cfg *httpcfg.HttpCfg, logger log.Logger) ([]byte, error) {
 	// try reading from file
 	logger.Info("Reading JWT secret", "path", cfg.JWTSecretPath)
 	// If we run the rpcdaemon and datadir is not specified we just use jwt.hex in current directory.
@@ -840,7 +848,7 @@ func createEngineListener(cfg *httpcfg.HttpCfg, engineApi []rpc.API, logger log.
 		return nil, nil, "", fmt.Errorf("could not start register RPC engine api: %w", err)
 	}
 
-	jwtSecret, err := obtainJWTSecret(cfg, logger)
+	jwtSecret, err := ObtainJWTSecret(cfg, logger)
 	if err != nil {
 		return nil, nil, "", err
 	}
@@ -907,9 +915,11 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 			return false
 		}
 
+		borConfig := cc.Bor.(*borcfg.BorConfig)
+
 		e.engine = bor.NewRo(cc, borKv, blockReader,
 			span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-			contract.NewGenesisContractsClient(cc, cc.Bor.ValidatorContract, cc.Bor.StateReceiverContract, logger), logger)
+			contract.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 	} else {
 		e.engine = ethash.NewFaker()
 	}

@@ -3,6 +3,7 @@ package solid
 import (
 	"encoding/binary"
 	"encoding/json"
+	"strconv"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -154,14 +155,26 @@ func (arr *RawUint64List) Pop() uint64 {
 }
 
 func (arr *RawUint64List) MarshalJSON() ([]byte, error) {
-	return json.Marshal(arr.u)
+	// convert it to a list of strings
+	strs := make([]string, len(arr.u))
+	for i, v := range arr.u {
+		strs[i] = strconv.FormatInt(int64(v), 10)
+	}
+	return json.Marshal(strs)
 }
 
 func (arr *RawUint64List) UnmarshalJSON(data []byte) error {
-	arr.cachedHash = libcommon.Hash{}
-	if err := json.Unmarshal(data, &arr.u); err != nil {
+	var strs []string
+	if err := json.Unmarshal(data, &strs); err != nil {
 		return err
 	}
-	arr.c = len(arr.u)
+	arr.u = make([]uint64, len(strs))
+	for i, s := range strs {
+		v, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return err
+		}
+		arr.u[i] = v
+	}
 	return nil
 }

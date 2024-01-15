@@ -161,7 +161,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	rs.baseDataID = args.BaseDataID
 	rs.etlBufLimit = args.EtlBufLimit
 	if rs.etlBufLimit == 0 {
-		rs.etlBufLimit = etl.BufferOptimalSize
+		// reduce ram pressure, because:
+		//   - indexing done in background or in many workers (building many indices in-parallel)
+		//   - `recsplit` has 2 etl collectors
+		//   - `rescplit` building is cpu-intencive and bottleneck is not in etl loading
+		rs.etlBufLimit = etl.BufferOptimalSize / 8
 	}
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
@@ -556,6 +560,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.indexF, err = os.Create(rs.tmpFilePath); err != nil {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
+
+	rs.logger.Debug("[index] created", "file", rs.tmpFilePath, "fs", rs.indexF)
+
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
 	// Write minimal app-specific dataID in this index file
@@ -680,9 +687,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if err = rs.indexF.Close(); err != nil {
 		return err
 	}
+
 	if err = os.Rename(rs.tmpFilePath, rs.indexFile); err != nil {
+		rs.logger.Warn("[index] rename", "file", rs.tmpFilePath, "err", err)
 		return err
 	}
+
 	return nil
 }
 

@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 )
 
@@ -19,7 +20,7 @@ func TestStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -27,7 +28,7 @@ func TestStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				return nil
 			},
@@ -35,15 +36,15 @@ func TestStagesSuccess(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
 		},
 	}
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -58,7 +59,7 @@ func TestDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -66,7 +67,7 @@ func TestDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				return nil
 			},
@@ -75,15 +76,15 @@ func TestDisabledStages(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
 		},
 	}
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -99,7 +100,7 @@ func TestErroredStage(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -107,7 +108,7 @@ func TestErroredStage(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				return expectedErr
 			},
@@ -115,15 +116,15 @@ func TestErroredStage(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedFlow := []stages.SyncStage{
@@ -139,39 +140,39 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 1000)
+					return s.Update(txc.Tx, 1000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Bodies))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				if s.BlockNumber == 0 {
-					if err := s.Update(tx, 1700); err != nil {
+					if err := s.Update(txc.Tx, 1700); err != nil {
 						return err
 					}
 				}
@@ -183,30 +184,30 @@ func TestUnwindSomeStagesBehindUnwindPoint(t *testing.T) {
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Senders))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:       stages.IntermediateHashes,
 			Disabled: true,
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.IntermediateHashes)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.IntermediateHashes))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -237,69 +238,69 @@ func TestUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Bodies))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
 					u.UnwindTo(500, UnwindReason{})
-					return s.Update(tx, 3000)
+					return s.Update(txc.Tx, 3000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Senders))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:       stages.IntermediateHashes,
 			Disabled: true,
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.IntermediateHashes)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.IntermediateHashes))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[3].ID, s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -326,7 +327,7 @@ func TestUnwind(t *testing.T) {
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[3], s[2], s[1], s[0]}
 	state.UnwindTo(100, UnwindReason{})
-	err = state.Run(db, tx, true /* initialCycle */)
+	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow = []stages.SyncStage{
@@ -345,25 +346,25 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
@@ -371,24 +372,24 @@ func TestUnwindEmptyUnwinder(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
 					u.UnwindTo(500, UnwindReason{})
-					return s.Update(tx, 3000)
+					return s.Update(txc.Tx, 3000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Senders))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -419,36 +420,36 @@ func TestSyncDoTwice(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
-				return s.Update(tx, s.BlockNumber+100)
+				return s.Update(txc.Tx, s.BlockNumber+100)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
-				return s.Update(tx, s.BlockNumber+200)
+				return s.Update(txc.Tx, s.BlockNumber+200)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
-				return s.Update(tx, s.BlockNumber+300)
+				return s.Update(txc.Tx, s.BlockNumber+300)
 			},
 		},
 	}
 
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
-	state = New(s, nil, nil, log.New())
-	err = state.Run(db, tx, true /* initialCycle */)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
+	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -477,7 +478,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				return nil
 			},
@@ -485,7 +486,7 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				return expectedErr
 			},
@@ -493,22 +494,22 @@ func TestStateSyncInterruptRestart(t *testing.T) {
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				return nil
 			},
 		},
 	}
 
-	state := New(s, nil, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.Equal(t, fmt.Errorf("[2/3 Bodies] %w", expectedErr), err)
 
 	expectedErr = nil
 
-	state = New(s, nil, nil, log.New())
-	err = state.Run(db, tx, true /* initialCycle */)
+	state = New(ethconfig.Defaults.Sync, s, nil, nil, log.New())
+	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{
@@ -529,59 +530,59 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 		{
 			ID:          stages.Headers,
 			Description: "Downloading headers",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Headers)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Headers))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:          stages.Bodies,
 			Description: "Downloading block bodiess",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Bodies)
 				if s.BlockNumber == 0 {
-					return s.Update(tx, 2000)
+					return s.Update(txc.Tx, 2000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Bodies))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 		{
 			ID:          stages.Senders,
 			Description: "Recovering senders from tx signatures",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, tx kv.RwTx, logger log.Logger) error {
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, stages.Senders)
 				if !unwound {
 					unwound = true
 					u.UnwindTo(500, UnwindReason{})
-					return s.Update(tx, 3000)
+					return s.Update(txc.Tx, 3000)
 				}
 				return nil
 			},
-			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, tx kv.RwTx, logger log.Logger) error {
+			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
 				flow = append(flow, unwindOf(stages.Senders))
 				if !interrupted {
 					interrupted = true
 					return errInterrupted
 				}
 				assert.Equal(t, 500, int(u.UnwindPoint))
-				return u.Done(tx)
+				return u.Done(txc.Tx)
 			},
 		},
 	}
-	state := New(s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
+	state := New(ethconfig.Defaults.Sync, s, []stages.SyncStage{s[2].ID, s[1].ID, s[0].ID}, nil, log.New())
 	db, tx := memdb.NewTestTx(t)
-	err := state.Run(db, tx, true /* initialCycle */)
+	_, err := state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.Error(t, errInterrupted, err)
 
 	//state = NewState(s)
@@ -589,7 +590,7 @@ func TestSyncInterruptLongUnwind(t *testing.T) {
 	//err = state.LoadUnwindInfo(tx)
 	//assert.NoError(t, err)
 	//state.UnwindTo(500, libcommon.Hash{})
-	err = state.Run(db, tx, true /* initialCycle */)
+	_, err = state.Run(db, wrap.TxContainer{Tx: tx}, true /* initialCycle */)
 	assert.NoError(t, err)
 
 	expectedFlow := []stages.SyncStage{

@@ -40,6 +40,8 @@ type WebSeeds struct {
 
 	logger    log.Logger
 	verbosity log.Lvl
+
+	torrentFiles *TorrentFiles
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, s3tokens []string, urls []*url.URL, files []string, rootDir string) {
@@ -167,7 +169,7 @@ func (d *WebSeeds) callS3Provider(ctx context.Context, token string) (snaptype.W
 	//v1:bucketName:accID:accessKeyID:accessKeySecret
 	l := strings.Split(token, ":")
 	if len(l) != 5 {
-		return nil, fmt.Errorf("token has invalid format, exepcing 'v1:tokenInBase64'")
+		return nil, fmt.Errorf("[snapshots] webseed token has invalid format. expeting 5 parts, found %d", len(l))
 	}
 	version, bucketName, accountId, accessKeyId, accessKeySecret := strings.TrimSpace(l[0]), strings.TrimSpace(l[1]), strings.TrimSpace(l[2]), strings.TrimSpace(l[3]), strings.TrimSpace(l[4])
 	if version != "v1" {
@@ -237,6 +239,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
+	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
 	//TODO:
 	// - what to do if node already synced?
@@ -261,7 +264,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 					continue
 				}
 				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
-				if err := saveTorrent(tPath, res); err != nil {
+				if err := d.torrentFiles.Create(tPath, res); err != nil {
 					d.logger.Debug("[snapshots] saveTorrent", "err", err)
 					continue
 				}
