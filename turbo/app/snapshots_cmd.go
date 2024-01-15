@@ -440,6 +440,7 @@ func doMeta(cliCtx *cli.Context) error {
 			}
 			if prev > 0 {
 				dist := int(j) - prev
+				fmt.Printf("a:%d\n", dist)
 				if _, ok := distances[dist]; !ok {
 					distances[dist] = 0
 				}
