@@ -83,6 +83,7 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
 		historyV3:           historyV3,
+		syncCfg:             syncCfg,
 	}
 }
 
