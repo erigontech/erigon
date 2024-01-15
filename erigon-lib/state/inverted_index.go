@@ -956,7 +956,7 @@ type InvertedIndexPruneStat struct {
 }
 
 func (is *InvertedIndexPruneStat) String() string {
-	return fmt.Sprintf("ii v %d, tx %d in %.2fM-%.2fM", is.PruneCountValues, is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
@@ -1049,6 +1049,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 					return nil, err
 				}
 			}
+			stat.PruneCountValues++
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -1095,7 +1096,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err = idxCForDeletes.DeleteCurrent(); err != nil {
 				return err
 			}
-			stat.PruneCountValues++
 			mxPruneSizeIndex.Inc()
 
 			select {

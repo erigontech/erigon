@@ -2056,24 +2056,20 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	inFiles := dc.maxTxNumInDomainFiles(false)
 	idxTx := dc.hc.ic.CanPruneFrom(tx)
 	domStep := dc.CanPruneFrom(tx)
-	if dc.d.filenameBase == "commitment" {
-		fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
-			dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
-	}
+	//if dc.d.filenameBase == "commitment" {
+	//	fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
+	//		dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
+	//}
 	return idxTx < inFiles || domStep < inFiles/dc.d.aggregationStep
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
-	ps, prk, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	ps, _, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
 	if err != nil {
 		return math.MaxUint64
 	}
 	if ps > 0 {
 		//fmt.Printf("CanPruneFrom %s: %d %x %d\n", dc.d.filenameBase, ps, prk, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
-		if prk == nil {
-			// nil key and non-zero step means that this step is pruned.
-			return cmp.Min(ps+1, math.MaxUint64)
-		}
 		return cmp.Min(ps, math.MaxUint64)
 	}
 
@@ -2168,14 +2164,13 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	//		"keys until limit", limit,
 	//		"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
 	//}()
-	prunedStep, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	_, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 
 	var k, v []byte
 	if prunedKey != nil {
-		step = prunedStep
 		k, v, err = keysCursor.Seek(prunedKey)
 	} else {
 		k, v, err = keysCursor.Last()
