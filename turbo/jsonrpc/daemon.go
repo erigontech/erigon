@@ -1,8 +1,6 @@
 package jsonrpc
 
 import (
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -14,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // APIList describes the list of available RPC apis
@@ -36,9 +35,18 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 
 	var borImpl *BorImpl
 
-	switch engine.(type) {
+	type lazy interface {
+		HasEngine() bool
+		Engine() consensus.EngineReader
+	}
+
+	switch engine := engine.(type) {
 	case *bor.Bor:
 		borImpl = NewBorAPI(base, db)
+	case lazy:
+		if _, ok := engine.Engine().(*bor.Bor); !engine.HasEngine() || ok {
+			borImpl = NewBorAPI(base, db)
+		}
 	}
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
