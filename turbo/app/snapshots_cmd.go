@@ -475,7 +475,7 @@ func doMeta(cliCtx *cli.Context) error {
 				delete(distances, i)
 			}
 		}
-		log.Info("meta", "lengths(*100)", fmt.Sprintf("%v", distances))
+		log.Info("meta", "lengths(*10K)", fmt.Sprintf("%v", distances))
 	}
 	return nil
 }
