@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/integrity"
@@ -404,13 +405,52 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doMeta(cliCtx *cli.Context) error {
-	srcF := cliCtx.String("src")
-	src, err := compress.NewDecompressor(srcF)
-	if err != nil {
-		return err
+	fname := cliCtx.String("src")
+	if strings.HasSuffix(fname, ".seg") {
+		src, err := compress.NewDecompressor(fname)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
+	} else if strings.HasSuffix(fname, ".bt") {
+		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
+		src, err := compress.NewDecompressor(kvFPath)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(kvFPath, libstate.DefaultBtreeM, src, libstate.CompressNone)
+		if err != nil {
+			return err
+		}
+		defer bt.Close()
+
+		offt := bt.Offsets()
+		arr, _ := iter.ToU64Arr(offt.Iterator())
+		for i := 0; i < len(arr)-1; i++ {
+			arr[i] = arr[i+1] - arr[i]
+		}
+		distances := map[int]int{}
+		var prev int = -1
+		it := offt.Iterator()
+		for it.HasNext() {
+			j, err := it.Next()
+			if err != nil {
+				return err
+			}
+			if prev > 0 {
+				dist := int(j) - prev
+				if _, ok := distances[dist]; !ok {
+					distances[dist] = 0
+				}
+				distances[dist]++
+			}
+			prev = int(j)
+		}
+
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
 	}
-	defer src.Close()
-	log.Info("meta", "count", src.Count(), "size", src.Size(), "name", src.FileName())
 	return nil
 }
 

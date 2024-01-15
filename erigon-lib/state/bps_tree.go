@@ -134,6 +134,7 @@ func (b *BpsTree) traverse(g ArchiveGetter, mx [][]Node, n, di, i uint64) {
 	}
 }
 
+func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
 func (b *BpsTree) WarmUp(kv ArchiveGetter) error {
 	k := b.offt.Count()
 	d := logBase(k, b.M)
