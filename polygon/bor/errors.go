@@ -2,9 +2,6 @@ package bor
 
 import (
 	"fmt"
-	"time"
-
-	"github.com/ledgerwatch/erigon/polygon/bor/clerk"
 )
 
 type MaxCheckpointLengthExceededError struct {
@@ -67,22 +64,5 @@ func (e *WrongDifficultyError) Error() string {
 		e.Expected,
 		e.Actual,
 		e.Signer,
-	)
-}
-
-type InvalidStateReceivedError struct {
-	Number      uint64
-	LastStateID uint64
-	To          *time.Time
-	Event       *clerk.EventRecordWithTime
-}
-
-func (e *InvalidStateReceivedError) Error() string {
-	return fmt.Sprintf(
-		"Received invalid event %v at block %d. Requested events until %s. Last state id was %d",
-		e.Event,
-		e.Number,
-		e.To.Format(time.RFC3339),
-		e.LastStateID,
 	)
 }

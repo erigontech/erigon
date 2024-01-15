@@ -9,9 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon/core/types"
+	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 type testDifficultyCalculator struct {

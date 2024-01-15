@@ -22,9 +22,6 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -46,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -297,8 +295,8 @@ type Bor struct {
 	execCtx context.Context // context of caller execution stage
 
 	spanner                Spanner
-	GenesisContractsClient GenesisContract
-	HeimdallClient         heimdall.IHeimdallClient
+	GenesisContractsClient GenesisContracts
+	HeimdallClient         heimdall.HeimdallClient
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -323,8 +321,8 @@ func New(
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient heimdall.IHeimdallClient,
-	genesisContracts GenesisContract,
+	heimdallClient heimdall.HeimdallClient,
+	genesisContracts GenesisContracts,
 	logger log.Logger,
 ) *Bor {
 	// get bor config
@@ -394,7 +392,7 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
-	genesisContracts GenesisContract, logger log.Logger) *Bor {
+	genesisContracts GenesisContracts, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -890,7 +888,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
-		spanID := span.IDAt(number + 1)
+		spanID := SpanIDAt(number + 1)
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
@@ -1338,7 +1336,7 @@ func (c *Bor) fetchAndCommitSpan(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	var heimdallSpan span.HeimdallSpan
+	var heimdallSpan heimdall.HeimdallSpan
 
 	if c.HeimdallClient == nil {
 		// fixme: move to a new mock or fake and remove c.HeimdallClient completely
@@ -1457,7 +1455,7 @@ func (c *Bor) CommitStates(
 	return nil
 }
 
-func (c *Bor) SetHeimdallClient(h heimdall.IHeimdallClient) {
+func (c *Bor) SetHeimdallClient(h heimdall.HeimdallClient) {
 	c.HeimdallClient = h
 }
 
@@ -1471,7 +1469,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) (*span.HeimdallSpan, error) {
+) (*heimdall.HeimdallSpan, error) {
 	headerNumber := header.Number.Uint64()
 
 	spanBor, err := c.spanner.GetCurrentSpan(syscall)
@@ -1500,7 +1498,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 		selectedProducers[i] = *v
 	}
 
-	heimdallSpan := &span.HeimdallSpan{
+	heimdallSpan := &heimdall.HeimdallSpan{
 		Span:              *spanBor,
 		ValidatorSet:      *snap.ValidatorSet,
 		SelectedProducers: selectedProducers,

@@ -11,8 +11,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/mock"
-
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
@@ -29,7 +27,7 @@ func (ebrc emptyBodyReadCloser) Close() error {
 func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	httpClient := mock.NewMockHttpClient(ctrl)
+	httpClient := NewMockHttpClient(ctrl)
 	httpClient.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{
@@ -48,7 +46,7 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBody(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	httpClient := mock.NewMockHttpClient(ctrl)
+	httpClient := NewMockHttpClient(ctrl)
 	httpClient.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{
