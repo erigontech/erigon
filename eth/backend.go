@@ -29,6 +29,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -125,6 +126,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -615,7 +617,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.newTxs = make(chan types2.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpooluitl.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(config.HistoryV3), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, logger,
+			ctx, config.TxPool, kvcache.NewDummy(config.HistoryV3), backend.newTxs, chainKv, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
 		)
 		if err != nil {
 			return nil, err
@@ -629,7 +631,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	miner := stagedsync.NewMiningState(&config.Miner)
 	backend.pendingBlocks = miner.PendingResultCh
-	backend.minedBlocks = miner.MiningResultCh
 
 	var (
 		snapDb     kv.RwDB
@@ -723,23 +724,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// 1) Hive tests requires us to do so and starting it from eth_sendRawTransaction is not viable as we have not enough data
 	// to initialize it properly.
 	// 2) we cannot propose for block 1 regardless.
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		baseFee := uint64(0)
-		if currentBlock.BaseFee() != nil {
-			baseFee = misc.CalcBaseFee(chainConfig, currentBlock.Header()).Uint64()
-		}
-		blobFee := chainConfig.GetMinBlobGasPrice()
-		if currentBlock.Header().ExcessBlobGas != nil {
-			excessBlobGas := misc.CalcExcessBlobGas(chainConfig, currentBlock.Header())
-			b, err := misc.GetBlobGasPrice(chainConfig, excessBlobGas)
-			if err == nil {
-				blobFee = b.Uint64()
-			}
-		}
-		backend.notifications.Accumulator.StartChange(currentBlock.NumberU64(), currentBlock.Hash(), nil, false)
-		backend.notifications.Accumulator.SendAndReset(ctx, backend.notifications.StateChangesConsumer, baseFee, blobFee, currentBlock.GasLimit(), 0)
-	}()
 
 	if !config.DeprecatedTxPool.Disable {
 		backend.txPoolFetch.ConnectCore()
@@ -749,8 +733,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			newTxsBroadcaster = casted.NewSlotsStreams
 		}
 		go txpool.MainLoop(backend.sentryCtx,
-			backend.txPoolDB, chainKv,
-			backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
+			backend.txPoolDB, backend.txPool, backend.newTxs, backend.txPoolSend, newTxsBroadcaster,
 			func() {
 				select {
 				case backend.notifyMiningAboutNewTxs <- struct{}{}:
@@ -758,6 +741,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				}
 			})
 	}
+
 	go func() {
 		defer debug.LogPanic()
 		for {
@@ -796,7 +780,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, mining, backend.config.Miner, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, stateDiffClient, mining, miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
 		return nil, err
 	}
 
@@ -910,7 +894,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	chainKv := s.chainDB
 	var err error
 
-	s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+	if config.Genesis.Config.Bor == nil {
+		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+	}
 
 	emptyBadHash := config.BadBlockHash == libcommon.Hash{}
 	if !emptyBadHash {
@@ -962,7 +948,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		}()
 	}
 
-	go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	if config.Genesis.Config.Bor == nil {
+		go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+	}
 
 	// Register the backend on the node
 	stack.RegisterLifecycle(s)
@@ -1025,7 +1013,8 @@ func (s *Ethereum) shouldPreserve(block *types.Block) bool { //nolint
 // StartMining starts the miner with the given number of CPU threads. If mining
 // is already running, this method adjust the number of threads allowed to use
 // and updates the minimum price required by the transaction pool.
-func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsync.Sync, cfg params.MiningConfig, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
+func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient *direct.StateDiffClientDirect, mining *stagedsync.Sync, miner stagedsync.MiningState, gasPrice *uint256.Int, quitCh chan struct{}, tmpDir string, logger log.Logger) error {
+
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
@@ -1038,7 +1027,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	}
 
 	//if borcfg == nil {
-	if !cfg.Enabled {
+	if !miner.MiningConfig.Enabled {
 		return nil
 	}
 	//}
@@ -1051,14 +1040,14 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 	}
 
 	if borcfg != nil {
-		if cfg.Enabled {
-			if cfg.SigKey == nil {
+		if miner.MiningConfig.Enabled {
+			if miner.MiningConfig.SigKey == nil {
 				s.logger.Error("Etherbase account unavailable locally", "err", err)
 				return fmt.Errorf("signer missing: %w", err)
 			}
 
 			borcfg.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-				return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+				return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 			})
 
 			if !s.config.WithoutHeimdall {
@@ -1080,7 +1069,7 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 
 			if s.chainConfig.ChainName == networkname.BorDevnetChainName && s.config.WithoutHeimdall {
 				borcfg.Authorize(eb, func(addr libcommon.Address, _ string, _ []byte) ([]byte, error) {
-					return nil, &bor.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
+					return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: addr.Bytes()}
 				})
 			}
 
@@ -1097,58 +1086,86 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 		}
 	}
 	if clq != nil {
-		if cfg.SigKey == nil {
+		if miner.MiningConfig.SigKey == nil {
 			s.logger.Error("Etherbase account unavailable locally", "err", err)
 			return fmt.Errorf("signer missing: %w", err)
 		}
 
 		clq.Authorize(eb, func(_ libcommon.Address, mimeType string, message []byte) ([]byte, error) {
-			return crypto.Sign(crypto.Keccak256(message), cfg.SigKey)
+			return crypto.Sign(crypto.Keccak256(message), miner.MiningConfig.SigKey)
 		})
 	}
+
+	streamCtx, streamCancel := context.WithCancel(ctx)
+	stream, err := stateDiffClient.StateChanges(streamCtx, &remote.StateChangeRequest{WithStorage: false, WithTransactions: true}, grpc.WaitForReady(true))
+
+	if err != nil {
+		streamCancel()
+		return err
+	}
+
+	stateChangeCh := make(chan *remote.StateChange)
+
+	go func() {
+		for req, err := stream.Recv(); ; req, err = stream.Recv() {
+			if err == nil {
+				for _, change := range req.ChangeBatch {
+					stateChangeCh <- change
+				}
+			}
+		}
+	}()
 
 	go func() {
 		defer debug.LogPanic()
 		defer close(s.waitForMiningStop)
+		defer streamCancel()
 
-		mineEvery := time.NewTicker(cfg.Recommit)
+		mineEvery := time.NewTicker(miner.MiningConfig.Recommit)
 		defer mineEvery.Stop()
-
-		// Listen on a new head subscription. This allows us to maintain the block time by
-		// triggering mining after the block is passed through all stages.
-		newHeadCh, closeNewHeadCh := s.notifications.Events.AddHeaderSubscription()
-		defer closeNewHeadCh()
 
 		s.logger.Info("Starting to mine", "etherbase", eb)
 
-		var works bool
+		var working bool
+		var waiting atomic.Bool
+
 		hasWork := true // Start mining immediately
 		errc := make(chan error, 1)
+
+		workCtx, workCancel := context.WithCancel(ctx)
+		defer workCancel()
 
 		for {
 			// Only reset if some work was done previously as we'd like to rely
 			// on the `miner.recommit` as backup.
 			if hasWork {
-				mineEvery.Reset(cfg.Recommit)
+				mineEvery.Reset(miner.MiningConfig.Recommit)
 			}
 
-			// Only check for case if you're already mining (i.e. works = true) and
+			// Only check for case if you're already mining (i.e. working = true) and
 			// waiting for error or you don't have any work yet (i.e. hasWork = false).
-			if works || !hasWork {
+			if working || !hasWork {
 				select {
-				case <-newHeadCh:
+				case stateChanges := <-stateChangeCh:
+					block := stateChanges.BlockHeight
+					s.logger.Debug("Start mining based on previous block", "block", block)
+					// TODO - can do mining clean up here as we have previous
+					// block info in the state channel
 					hasWork = true
+
 				case <-s.notifyMiningAboutNewTxs:
 					// Skip mining based on new tx notif for bor consensus
 					hasWork = s.chainConfig.Bor == nil
 					if hasWork {
-						s.logger.Debug("Start mining new block based on txpool notif")
+						s.logger.Debug("Start mining based on txpool notif")
 					}
 				case <-mineEvery.C:
-					s.logger.Debug("Start mining new block based on miner.recommit")
-					hasWork = true
+					if !(working || waiting.Load()) {
+						s.logger.Debug("Start mining based on miner.recommit", "duration", miner.MiningConfig.Recommit)
+					}
+					hasWork = !(working || waiting.Load())
 				case err := <-errc:
-					works = false
+					working = false
 					hasWork = false
 					if errors.Is(err, libcommon.ErrStopped) {
 						return
@@ -1161,11 +1178,36 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, mining *stagedsy
 				}
 			}
 
-			if !works && hasWork {
-				works = true
+			if !working && hasWork {
+				working = true
 				hasWork = false
-				mineEvery.Reset(cfg.Recommit)
-				go func() { errc <- stages2.MiningStep(ctx, db, mining, tmpDir, logger) }()
+				mineEvery.Reset(miner.MiningConfig.Recommit)
+				go func() {
+					err := stages2.MiningStep(ctx, db, mining, tmpDir, logger)
+
+					waiting.Store(true)
+					defer waiting.Store(false)
+
+					errc <- err
+
+					if err != nil {
+						return
+					}
+
+					for {
+						select {
+						case block := <-miner.MiningResultCh:
+							if block != nil {
+								s.logger.Debug("Mined block", "block", block.Number())
+								s.minedBlocks <- block
+							}
+							return
+						case <-workCtx.Done():
+							errc <- workCtx.Err()
+							return
+						}
+					}
+				}()
 			}
 		}
 	}()

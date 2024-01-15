@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -49,10 +50,18 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 	pk := val.PublicKey()
 	f.mu.Unlock()
 
-	domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+	domainType := f.beaconCfg.DomainVoluntaryExit
+	var domain []byte
+
+	if s.Version() < clparams.DenebVersion {
+		domain, err = s.GetDomain(domainType, voluntaryExit.Epoch)
+	} else if s.Version() >= clparams.DenebVersion {
+		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(s.BeaconConfig().CapellaForkVersion), s.GenesisValidatorsRoot())
+	}
 	if err != nil {
 		return err
 	}
+
 	signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
 	if err != nil {
 		return err

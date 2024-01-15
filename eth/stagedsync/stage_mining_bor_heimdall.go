@@ -79,7 +79,7 @@ func MiningBorHeimdallForward(
 	}
 
 	logger.Info(
-		"[%s] Finished processing", logPrefix,
+		fmt.Sprintf("[%s] Finished processing", logPrefix),
 		"progress", headerNum,
 		"lastSpanID", lastSpanID,
 		"lastStateSyncEventID", lastStateSyncEventID,

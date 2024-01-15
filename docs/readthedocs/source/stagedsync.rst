@@ -42,7 +42,7 @@ the process method takes the headers retrieve thanks to the fetcher and does the
 
     * Save block headers in database.
 
-This process repeates until we reach the maximun height. once it is reached the stage finish.
+This process repeats until we reach the maximum height. once it is reached the stage finish.
 
 Changes in DB:
 

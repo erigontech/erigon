@@ -135,6 +135,7 @@ type BlockProducer struct {
 	NodeArgs
 	Mine            bool   `arg:"--mine" flag:"true"`
 	Etherbase       string `arg:"--miner.etherbase"`
+	GasLimit        int    `arg:"--miner.gaslimit"`
 	DevPeriod       int    `arg:"--dev.period"`
 	BorPeriod       int    `arg:"--bor.period"`
 	BorMinBlockSize int    `arg:"--bor.minblocksize"`
