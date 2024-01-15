@@ -419,7 +419,7 @@ func doMeta(cliCtx *cli.Context) error {
 			return err
 		}
 		defer src.Close()
-		bt, err := libstate.OpenBtreeIndexWithDecompressor(kvFPath, libstate.DefaultBtreeM, src, libstate.CompressNone)
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, libstate.CompressNone)
 		if err != nil {
 			return err
 		}
