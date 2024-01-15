@@ -468,7 +468,7 @@ func doMeta(cliCtx *cli.Context) error {
 			distances[len(v)]++
 		}
 		for i := range distances {
-			distances[i] /= 100
+			distances[i] /= 1_000
 		}
 		for i := range distances {
 			if distances[i] == 0 {
