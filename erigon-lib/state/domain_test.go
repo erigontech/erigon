@@ -1652,6 +1652,26 @@ func TestPruneProgress(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, key)
 	})
+
+	t.Run("emptyKey and reset", func(t *testing.T) {
+		tx, err := db.BeginRw(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		expected := []byte{}
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, expected)
+		require.NoError(t, err)
+
+		key, err := GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		require.NoError(t, err)
+		require.EqualValues(t, expected, key)
+
+		err = SaveExecV3PruneProgress(tx, kv.TblAccountKeys, nil)
+		require.NoError(t, err)
+
+		key, err = GetExecV3PruneProgress(tx, kv.TblAccountKeys)
+		require.NoError(t, err)
+		require.Nil(t, key)
+	})
 }
 
 func TestDomain_PruneProgress(t *testing.T) {

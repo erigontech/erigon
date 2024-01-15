@@ -118,7 +118,11 @@ func (c *compWriter) Close() {
 // SaveExecV3PruneProgress saves latest pruned key in given table to the database.
 // nil key also allowed and means that latest pruning run has been finished.
 func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, prunedKey []byte) error {
-	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(make([]byte, 1), prunedKey...))
+	empty := make([]byte, 1)
+	if prunedKey != nil {
+		empty[0] = 1
+	}
+	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(empty, prunedKey...))
 }
 
 // GetExecV3PruneProgress retrieves saved progress of given table pruning from the database.
@@ -128,8 +132,16 @@ func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, 
 	if err != nil {
 		return nil, err
 	}
-	if len(v) <= 1 {
+	switch len(v) {
+	case 0:
 		return nil, nil
+	case 1:
+		if v[0] == 1 {
+			return []byte{}, nil
+		}
+		// nil values returned an empty key which actually is a value
+		return nil, nil
+	default:
+		return v[1:], nil
 	}
-	return v[1:], err
 }
