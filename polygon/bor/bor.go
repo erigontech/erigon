@@ -899,7 +899,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 		// sort validator by address
 		sort.Sort(valset.ValidatorsByAddress(newValidators))
 
-		if c.config.IsParallelUniverse(header.Number.Uint64()) {
+		if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 			var tempValidatorBytes []byte
 
 			for _, validator := range newValidators {
@@ -923,7 +923,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 				header.Extra = append(header.Extra, validator.HeaderBytes()...)
 			}
 		}
-	} else if c.config.IsParallelUniverse(header.Number.Uint64()) {
+	} else if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 		blockExtraData := &BlockExtraData{
 			ValidatorBytes: nil,
 			TxDependency:   nil,
@@ -1578,7 +1578,7 @@ func GetTxDependency(b *types.Block) [][]uint64 {
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
 	tempExtra := h.Extra
 
-	if !config.IsParallelUniverse(h.Number.Uint64()) {
+	if !config.IsNapoli(h.Number.Uint64()) {
 		return tempExtra[types.ExtraVanityLength : len(tempExtra)-types.ExtraSealLength]
 	}
 
