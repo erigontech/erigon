@@ -2056,8 +2056,10 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	inFiles := dc.maxTxNumInDomainFiles(false)
 	idxTx := dc.hc.ic.CanPruneFrom(tx)
 	domStep := dc.CanPruneFrom(tx)
-	//fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
-	//	dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
+	if dc.d.filenameBase == "commitment" {
+		fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
+			dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
+	}
 	return idxTx < inFiles || domStep < inFiles/dc.d.aggregationStep
 }
 
@@ -2115,7 +2117,7 @@ func (dc *DomainPruneStat) String() string {
 	if dc.History == nil {
 		return fmt.Sprintf("%d kv's step %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
 	}
-	return fmt.Sprintf("%d kv's step %d-%d; v, %s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
+	return fmt.Sprintf("%d kv's step %d-%d; v%s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
 }
 
 func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {

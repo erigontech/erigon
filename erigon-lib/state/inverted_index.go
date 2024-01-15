@@ -949,13 +949,14 @@ func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 }
 
 type InvertedIndexPruneStat struct {
-	MinTxNum   uint64
-	MaxTxNum   uint64
-	PruneCount uint64
+	MinTxNum         uint64
+	MaxTxNum         uint64
+	PruneCountTx     uint64
+	PruneCountValues uint64
 }
 
 func (is *InvertedIndexPruneStat) String() string {
-	return fmt.Sprintf("ii %d tx %.2fM-%.2fM", is.PruneCount, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
+	return fmt.Sprintf("ii v %d, tx %d in %.2fM-%.2fM", is.PruneCountValues, is.PruneCountTx, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
 func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
@@ -964,7 +965,8 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	}
 	is.MinTxNum = min(is.MinTxNum, other.MinTxNum)
 	is.MaxTxNum = max(is.MaxTxNum, other.MaxTxNum)
-	is.PruneCount += other.PruneCount
+	is.PruneCountTx += other.PruneCountTx
+	is.PruneCountValues += other.PruneCountValues
 }
 
 // [txFrom; txTo)
@@ -1052,6 +1054,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			return nil, ctx.Err()
 		}
 
+		stat.PruneCountTx++
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
 			return nil, err
@@ -1092,12 +1095,13 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err = idxCForDeletes.DeleteCurrent(); err != nil {
 				return err
 			}
-			stat.PruneCount++
+			stat.PruneCountValues++
 			mxPruneSizeIndex.Inc()
 
 			select {
 			case <-logEvery.C:
-				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned values", stat.PruneCount,
+				ii.logger.Info("[snapshots] prune index", "name", ii.filenameBase, "pruned tx", stat.PruneCountTx,
+					"pruned values", stat.PruneCountValues,
 					"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(ii.aggregationStep), float64(txNum)/float64(ii.aggregationStep)))
 			case <-ctx.Done():
 				return ctx.Err()

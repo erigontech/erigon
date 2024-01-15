@@ -803,14 +803,13 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
 	for {
-		if ac.nothingToPrune(tx) {
-			return nil
-		}
-
 		stat, err := ac.Prune(context.Background(), tx, pruneLimit, aggLogEvery)
 		if err != nil {
 			log.Warn("[snapshots] PruneSmallBatches", "err", err)
 			return err
+		}
+		if stat == nil {
+			return nil
 		}
 		fullStat.Accumulate(stat)
 
@@ -897,7 +896,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 }
 
 func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
-	if dbg.NoPrune() {
+	if ac.nothingToPrune(tx) {
 		return nil, nil
 	}
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
