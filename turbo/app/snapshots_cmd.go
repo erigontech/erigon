@@ -425,29 +425,7 @@ func doMeta(cliCtx *cli.Context) error {
 		}
 		defer bt.Close()
 
-		offt := bt.Offsets()
-		//arr, _ := iter.ToU64Arr(offt.Iterator())
-		//for i := 0; i < len(arr)-1; i++ {
-		//	arr[i] = arr[i+1] - arr[i]
-		//}
-		distances := map[int]int{}
-		var prev int = -1
-		it := offt.Iterator()
-		for it.HasNext() {
-			j, err := it.Next()
-			if err != nil {
-				return err
-			}
-			if prev > 0 {
-				dist := int(j) - prev
-				if _, ok := distances[dist]; !ok {
-					distances[dist] = 0
-				}
-				distances[dist]++
-			}
-			prev = int(j)
-		}
-
+		distances := bt.Distances()
 		for i := range distances {
 			distances[i] /= 100_000
 		}
@@ -457,25 +435,6 @@ func doMeta(cliCtx *cli.Context) error {
 			}
 		}
 		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
-		distances = map[int]int{}
-		gg := src.MakeGetter()
-		for gg.HasNext() {
-			_, _ = gg.NextUncompressed()
-			v, _ := gg.NextUncompressed()
-			if _, ok := distances[len(v)]; !ok {
-				distances[len(v)] = 0
-			}
-			distances[len(v)]++
-		}
-		for i := range distances {
-			distances[i] /= 100_000
-		}
-		for i := range distances {
-			if distances[i] == 0 {
-				delete(distances, i)
-			}
-		}
-		log.Info("meta", "lengths(*100K)", fmt.Sprintf("%v", distances))
 	}
 	return nil
 }

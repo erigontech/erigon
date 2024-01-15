@@ -1097,3 +1097,4 @@ func (b *BtIndex) OrdinalLookup(i uint64) *Cursor {
 	return b.newCursor(context.Background(), k, v, i, getter)
 }
 func (b *BtIndex) Offsets() *eliasfano32.EliasFano { return b.bplus.Offsets() }
+func (b *BtIndex) Distances() map[int]int          { return b.bplus.Distances() }
