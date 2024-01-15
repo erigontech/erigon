@@ -2079,7 +2079,11 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	minStep := uint64(math.MaxUint64)
 	var k, v []byte
 	if pkr != nil {
-		k, v, err = c.Seek(pkr)
+		_, _, err = c.Seek(pkr)
+		if err != nil {
+			return math.MaxUint64
+		}
+		k, v, err = c.PrevNoDup()
 	} else {
 		k, v, err = c.First()
 	}
