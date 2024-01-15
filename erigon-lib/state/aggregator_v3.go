@@ -887,7 +887,7 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 		"last_comitment_tx_num", lastCommitmentTxNum,
 		//"cnt_in_files", strings.Join(str2, ","),
 		//"used_files", strings.Join(ac.Files(), ","),
-		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys), "stack", dbg.Stack())
+		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
 
 }
 

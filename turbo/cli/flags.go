@@ -299,7 +299,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if stage := ctx.String(SyncLoopBreakAfterFlag.Name); len(stage) > 0 {
 		cfg.Sync.BreakAfterStage = stage
 	}
-	log.Info("[dbg] flag", "ctx.Uint(SyncLoopBlockLimitFlag.Name)", ctx.Uint(SyncLoopBlockLimitFlag.Name))
+
 	if limit := ctx.Uint(SyncLoopBlockLimitFlag.Name); limit > 0 {
 		cfg.Sync.LoopBlockLimit = limit
 	}

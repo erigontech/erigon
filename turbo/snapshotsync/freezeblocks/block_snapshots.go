@@ -1535,17 +1535,6 @@ func (br *BlockRetire) BuildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	return nil
 }
 
-func (br *BlockRetire) HaveMissedIndices() bool {
-	snapshots := br.snapshots()
-	if snapshots.IndicesMax() >= snapshots.SegmentsMax() {
-		return false
-	}
-	if !snapshots.Cfg().Produce {
-		return false
-	}
-	return true
-}
-
 func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier services.DBEventNotifier, cc *chain.Config) error {
 	snapshots := br.snapshots()
 	if snapshots.IndicesMax() >= snapshots.SegmentsMax() {
