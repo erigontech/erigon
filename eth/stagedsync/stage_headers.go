@@ -193,6 +193,7 @@ func HeadersPOW(
 		logger:      logger,
 	})
 
+	log.Info("[dbg] h1", "cfg.syncConfig.LoopBlockLimit", cfg.syncConfig.LoopBlockLimit, "dbg", dbg.Stack())
 	stopped := false
 	var noProgressCounter uint = 0
 	prevProgress := startProgress
