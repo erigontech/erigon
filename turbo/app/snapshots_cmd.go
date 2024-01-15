@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/eth/integrity"
@@ -427,10 +426,10 @@ func doMeta(cliCtx *cli.Context) error {
 		defer bt.Close()
 
 		offt := bt.Offsets()
-		arr, _ := iter.ToU64Arr(offt.Iterator())
-		for i := 0; i < len(arr)-1; i++ {
-			arr[i] = arr[i+1] - arr[i]
-		}
+		//arr, _ := iter.ToU64Arr(offt.Iterator())
+		//for i := 0; i < len(arr)-1; i++ {
+		//	arr[i] = arr[i+1] - arr[i]
+		//}
 		distances := map[int]int{}
 		var prev int = -1
 		it := offt.Iterator()
