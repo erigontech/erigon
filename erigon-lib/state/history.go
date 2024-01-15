@@ -1070,8 +1070,8 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 
 	pruneValue := func(k, txnm []byte) error {
 		txNum := binary.BigEndian.Uint64(txnm)
-		if txNum >= txTo { //[txFrom; txTo), but in this case idx record
-			return fmt.Errorf("pruneValue: txNum %d >= txTo %d", txNum, txTo)
+		if txNum >= txTo || txNum < txFrom { //[txFrom; txTo), but in this case idx record
+			return fmt.Errorf("history pruneValue: txNum %d not in pruning range [%d,%d)", txNum, txFrom, txTo)
 		}
 
 		if hc.h.historyLargeValues {
@@ -1085,7 +1085,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 				return err
 			}
 			if binary.BigEndian.Uint64(vv) != txNum {
-				return nil
+				return fmt.Errorf("history invalid txNum: %d != %d", binary.BigEndian.Uint64(vv), txNum)
 			}
 			if err = valsCDup.DeleteCurrent(); err != nil {
 				return err
@@ -1096,11 +1096,7 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		return nil
 	}
 
-	indexStat, err := hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
-	if err != nil {
-		return nil, err
-	}
-	return indexStat, nil
+	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
 }
 
 func (hc *HistoryContext) Close() {

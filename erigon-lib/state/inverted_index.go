@@ -969,15 +969,16 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 
 // [txFrom; txTo)
 func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	if !forced && !ic.CanPrune(rwTx) {
 		return stat, nil
 	}
+
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
-
-	ii := ic.ii
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
+	ii := ic.ii
 	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
@@ -1016,8 +1017,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	defer collector.Close()
 	collector.LogLvl(log.LvlDebug)
 
-	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
-
 	// Invariant: if some `txNum=N` pruned - it's pruned Fully
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
@@ -1029,6 +1028,9 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		if txNum >= txTo || limit == 0 {
 			break
 		}
+		if txNum < txFrom {
+			panic(fmt.Errorf("assert: index pruning txn=%d [%d-%d)", txNum, txFrom, txTo))
+		}
 		limit--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
@@ -1037,15 +1039,13 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err != nil {
 				return nil, err
 			}
-
+			if err := collector.Collect(v, nil); err != nil {
+				return nil, err
+			}
 			if fn != nil {
 				if err := fn(v, k); err != nil {
 					return nil, err
 				}
-			}
-
-			if err := collector.Collect(v, nil); err != nil {
-				return nil, err
 			}
 		}
 		if ctx.Err() != nil {

@@ -2056,8 +2056,8 @@ func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	inFiles := dc.maxTxNumInDomainFiles(false)
 	idxTx := dc.hc.ic.CanPruneFrom(tx)
 	domStep := dc.CanPruneFrom(tx)
-	fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
-		dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
+	//fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
+	//	dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
 	return idxTx < inFiles || domStep < inFiles/dc.d.aggregationStep
 }
 
@@ -2074,6 +2074,7 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 		}
 		return cmp.Min(ps, math.MaxUint64)
 	}
+
 	c, err := tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Warn("CanPruneFrom: failed to open cursor", "domain", dc.d.filenameBase, "error", err)
@@ -2165,13 +2166,14 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	//		"keys until limit", limit,
 	//		"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
 	//}()
-	_, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	prunedStep, prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 
 	var k, v []byte
 	if prunedKey != nil {
+		step = prunedStep
 		k, v, err = keysCursor.Seek(prunedKey)
 	} else {
 		k, v, err = keysCursor.Last()
