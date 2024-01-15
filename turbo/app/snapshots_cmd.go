@@ -457,6 +457,25 @@ func doMeta(cliCtx *cli.Context) error {
 			}
 		}
 		log.Info("meta", "distances(*10K)", fmt.Sprintf("%v", distances))
+		distances = map[int]int{}
+		gg := src.MakeGetter()
+		for gg.HasNext() {
+			_, _ = gg.NextUncompressed()
+			v, _ := gg.NextUncompressed()
+			if _, ok := distances[len(v)]; !ok {
+				distances[len(v)] = 0
+			}
+			distances[len(v)]++
+		}
+		for i := range distances {
+			distances[i] /= 100
+		}
+		for i := range distances {
+			if distances[i] == 0 {
+				delete(distances, i)
+			}
+		}
+		log.Info("meta", "lengths(*100)", fmt.Sprintf("%v", distances))
 	}
 	return nil
 }
