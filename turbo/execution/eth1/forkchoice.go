@@ -153,6 +153,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 
 	tooBigJump := e.syncCfg.LoopBlockLimit > 0 && finishProgressBefore > 0 && fcuHeader.Number.Uint64()-finishProgressBefore > uint64(e.syncCfg.LoopBlockLimit)
 	log.Info("[dbg] forkChoiceUpdate", "isSynced", isSynced, "tooBigJump", tooBigJump, "fcuHeader.Number.Uint64()", fcuHeader.Number.Uint64(), "finishProgressBefore", finishProgressBefore)
+	log.Info("[dbg] forkChoiceUpdate2", "e.syncCfg.LoopBlockLimit", e.syncCfg.LoopBlockLimit)
 
 	if tooBigJump {
 		isSynced = false
