@@ -552,7 +552,7 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	return nil
+	return misc.VerifyAbsenceOfCancunHeaderFields(header)
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
