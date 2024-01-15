@@ -13,6 +13,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
+const maxAttestationJobLifetime = 30 * time.Minute
+
 // OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool, insert bool) error {
 	if !f.synced.Load() {
@@ -103,13 +105,18 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 
 // scheduleAttestationForLaterProcessing scheudules an attestation for later processing
 func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *solid.Attestation, insert bool) {
+
 	go func() {
+		begin := time.Now()
 		logInterval := time.NewTicker(50 * time.Millisecond)
 		for {
 			select {
 			case <-f.ctx.Done():
 				return
 			case <-logInterval.C:
+				if time.Since(begin) > maxAttestationJobLifetime {
+					return // give up
+				}
 				if f.Slot() < attestation.AttestantionData().Slot()+1 {
 					continue
 				}
