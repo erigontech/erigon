@@ -1,4 +1,4 @@
-name: QA - Clean exit on block downloading
+name: QA - Clean exit (block downloading)
 
 on:
   push:
