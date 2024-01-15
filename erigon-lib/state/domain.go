@@ -2170,10 +2170,8 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 
-	//srcStep := step
 	var k, v []byte
 	if prunedKey != nil {
-		//step = pruningStep
 		k, v, err = keysCursor.Seek(prunedKey)
 	} else {
 		k, v, err = keysCursor.Last()

@@ -1044,7 +1044,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 				}
 			}
 
-			if err := collector.Collect(append(v, k...), nil); err != nil {
+			if err := collector.Collect(v, nil); err != nil {
 				return nil, err
 			}
 		}
@@ -1074,7 +1074,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 	binary.BigEndian.PutUint64(txKey[:], stat.MinTxNum)
 	err = collector.Load(rwTx, "", func(key, _ []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		key = key[:len(key)-8]
 		for txnm, err := idxC.SeekBothRange(key, txKey[:]); txnm != nil; _, txnm, err = idxC.NextDup() {
 			if err != nil {
 				return err
