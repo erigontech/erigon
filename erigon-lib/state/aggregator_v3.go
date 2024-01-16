@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -535,9 +536,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			collations = append(collations, collation)
 			collListMu.Unlock()
 
-			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
 			collation.Close()
 			if err != nil {
 				sf.CleanupOnError()
@@ -568,6 +567,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		a.wg.Add(1)
 		g.Go(func() error {
 			defer a.wg.Done()
+
 			var collation map[string]*roaring64.Bitmap
 			err := a.db.View(ctx, func(tx kv.Tx) (err error) {
 				collation, err = d.collate(ctx, step, tx)
@@ -576,9 +576,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			if err != nil {
 				return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
 			}
-			mxRunningFilesBuilding.Inc()
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
-			mxRunningFilesBuilding.Dec()
 			if err != nil {
 				sf.CleanupOnError()
 				return err
@@ -732,7 +730,6 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	//fmt.Printf("can prune: from=%d < current=%d, keep=%d\n", ac.CanPruneFrom(tx)/ac.a.aggregationStep, ac.maxTxNumInDomainFiles(false)/ac.a.aggregationStep, ac.a.keepInDB)
 	return ac.CanPruneFrom(tx) < ac.maxTxNumInDomainFiles(false)
 }
 func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
@@ -778,20 +775,59 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	return blockNumWithCommitment, true, nil
 }
 
-func (ac *AggregatorV3Context) PruneWithTimeout(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
-	cc, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+// returns true if we can prune something already aggregated
+func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx) bool {
+	return dbg.NoPrune() || (!ac.account.CanPrune(tx) &&
+		!ac.storage.CanPrune(tx) &&
+		!ac.code.CanPrune(tx) &&
+		!ac.commitment.CanPrune(tx) &&
+		!ac.logAddrs.CanPrune(tx) &&
+		!ac.logTopics.CanPrune(tx) &&
+		!ac.tracesFrom.CanPrune(tx) &&
+		!ac.tracesTo.CanPrune(tx))
+}
 
-	if err := ac.Prune(cc, tx); err != nil { // prune part of retired data, before commit
-		if errors.Is(err, context.DeadlineExceeded) {
+// PruneSmallBatches is not cancellable, it's over when it's over or failed.
+// It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
+func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
+	started := time.Now()
+	localTimeout := time.NewTicker(timeout)
+	defer localTimeout.Stop()
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
+	defer aggLogEvery.Stop()
+
+	const pruneLimit uint64 = 10000
+
+	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+
+	for {
+		stat, err := ac.Prune(context.Background(), tx, pruneLimit, aggLogEvery)
+		if err != nil {
+			log.Warn("[snapshots] PruneSmallBatches", "err", err)
+			return err
+		}
+		if stat == nil {
 			return nil
 		}
-		return err
+		fullStat.Accumulate(stat)
+
+		select {
+		case <-logEvery.C:
+			ac.a.logger.Info("[agg] pruning",
+				"until timeout", time.Until(started.Add(timeout)).String(),
+				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
+				"pruned", fullStat.String(),
+			)
+		case <-localTimeout.C:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 	}
-	if cc.Err() != nil { //nolint
-		return nil //nolint
-	}
-	return nil
 }
 
 func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
@@ -807,47 +843,123 @@ func (a *AggregatorV3) StepsRangeInDBAsStr(tx kv.Tx) string {
 	}, ", ")
 }
 
-func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx) error {
-	if dbg.NoPrune() {
-		return nil
+type AggregatorPruneStat struct {
+	Domains map[string]*DomainPruneStat
+	Indices map[string]*InvertedIndexPruneStat
+}
+
+func (as *AggregatorPruneStat) String() string {
+	names := make([]string, 0)
+	for k := range as.Domains {
+		names = append(names, k)
+	}
+
+	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+
+	var sb strings.Builder
+	for _, d := range names {
+		v, ok := as.Domains[d]
+		if ok && v != nil {
+			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
+		}
+	}
+	names = names[:0]
+	for k := range as.Indices {
+		names = append(names, k)
+	}
+	sort.Slice(names, func(i, j int) bool { return names[i] < names[j] })
+
+	for _, d := range names {
+		v, ok := as.Indices[d]
+		if ok && v != nil {
+			sb.WriteString(fmt.Sprintf("%s| %s; ", d, v.String()))
+		}
+	}
+	return strings.TrimSuffix(sb.String(), "; ")
+}
+
+func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
+	for k, v := range other.Domains {
+		if _, ok := as.Domains[k]; !ok {
+			as.Domains[k] = v
+		} else {
+			as.Domains[k].Accumulate(v)
+		}
+	}
+	for k, v := range other.Indices {
+		if _, ok := as.Indices[k]; !ok {
+			as.Indices[k] = v
+		} else {
+			as.Indices[k].Accumulate(v)
+		}
+	}
+}
+
+func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
+	if ac.nothingToPrune(tx) {
+		return nil, nil
 	}
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
-	step, limit := ac.a.aggregatedStep.Load(), uint64(math2.MaxUint64)
-	txTo := (step + 1) * ac.a.aggregationStep
-	var txFrom uint64
+	if limit == 0 {
+		limit = uint64(math2.MaxUint64)
+	}
 
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	ac.a.logger.Info("aggregator prune", "step", step,
-		"range", fmt.Sprintf("[%d,%d)", txFrom, txTo), /*"limit", limit,
-		"stepsLimit", limit/ac.a.aggregationStep,*/"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
+	var txFrom, txTo uint64
+	step := ac.a.aggregatedStep.Load()
+	txTo = (step + 1) * ac.a.aggregationStep
 
-	if err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	if logEvery == nil {
+		logEvery = time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
 	}
-	if err := ac.storage.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	//ac.a.logger.Debug("aggregator prune", "step", step,
+	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
+	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
+	//
+	ap, err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.code.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	sp, err := ac.storage.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery); err != nil {
-		return err
+	cp, err := ac.code.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
-		return err
+	comps, err := ac.commitment.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
-		return err
+	lap, err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
-		return err
+	ltp, err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
 	}
-	if err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false); err != nil {
-		return err
+	tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	ttp, err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	if err != nil {
+		return nil, err
+	}
+	aggStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
+	aggStat.Domains[ac.account.d.filenameBase] = ap
+	aggStat.Domains[ac.storage.d.filenameBase] = sp
+	aggStat.Domains[ac.code.d.filenameBase] = cp
+	aggStat.Domains[ac.commitment.d.filenameBase] = comps
+	aggStat.Indices[ac.logAddrs.ii.filenameBase] = lap
+	aggStat.Indices[ac.logTopics.ii.filenameBase] = ltp
+	aggStat.Indices[ac.tracesFrom.ii.filenameBase] = tfp
+	aggStat.Indices[ac.tracesTo.ii.filenameBase] = ttp
+
+	return aggStat, nil
 }
 
 func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax uint64) uint64) {
@@ -1179,21 +1291,16 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		}
 	}()
 
-	//var predicates sync.WaitGroup
 	if r.accounts.any() {
 		log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
-		//predicates.Add(1)
 		g.Go(func() (err error) {
-			//defer predicates.Done()
 			mf.accounts, mf.accountsIdx, mf.accountsHist, err = ac.account.mergeFiles(ctx, files.accounts, files.accountsIdx, files.accountsHist, r.accounts, ac.a.ps)
 			return err
 		})
 	}
 
 	if r.storage.any() {
-		//predicates.Add(1)
 		g.Go(func() (err error) {
-			//defer predicates.Done()
 			mf.storage, mf.storageIdx, mf.storageHist, err = ac.storage.mergeFiles(ctx, files.storage, files.storageIdx, files.storageHist, r.storage, ac.a.ps)
 			return err
 		})
@@ -1205,14 +1312,12 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		})
 	}
 	if r.commitment.any() {
-		//predicates.Wait()
 		//log.Info(fmt.Sprintf("[snapshots] merge commitment: %d-%d", r.accounts.historyStartTxNum/ac.a.aggregationStep, r.accounts.historyEndTxNum/ac.a.aggregationStep))
 		g.Go(func() (err error) {
 			mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.commitment.mergeFiles(ctx, files.commitment, files.commitmentIdx, files.commitmentHist, r.commitment, ac.a.ps)
 			return err
 			//var v4Files SelectedStaticFiles
 			//var v4MergedF MergedFiles
-			//
 			//// THIS merge uses strategy with replacement of hisotry keys in commitment.
 			//mf.commitment, mf.commitmentIdx, mf.commitmentHist, err = ac.a.commitment.mergeFiles(ctx, v4Files.FillV3(&files), v4MergedF.FillV3(&mf), r.commitment, ac.a.ps)
 			//return err

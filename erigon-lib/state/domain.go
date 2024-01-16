@@ -818,6 +818,7 @@ func (w *domainBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.values.Load(tx, w.valsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	w.close()
 	return nil
 }
 
@@ -837,7 +838,7 @@ func (w *domainBufferedWriter) addValue(key1, key2, value []byte) error {
 	}
 
 	//defer func() {
-	//	fmt.Printf("addValue @%w %x->%x buffered %t largeVals %t file %s\n", w.dc.hc.ic.txNum, fullkey, value, w.buffered, w.largeValues, w.dc.w.filenameBase)
+	//	fmt.Printf("addValue     [%p;tx=%d] '%x' -> '%x'\n", w, w.h.ii.txNum, fullkey, value)
 	//}()
 
 	if err := w.keys.Collect(fullkey[:kl], fullkey[kl:]); err != nil {
@@ -1238,6 +1239,8 @@ func (sf StaticFiles) CleanupOnError() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collation, ps *background.ProgressSet) (StaticFiles, error) {
+	mxRunningFilesBuilding.Inc()
+	defer mxRunningFilesBuilding.Dec()
 	if d.filenameBase == traceFileLife {
 		d.logger.Warn("[snapshots] buildFiles", "step", step, "domain", d.filenameBase)
 	}
@@ -1520,10 +1523,10 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
 // context Flush should be managed by caller.
-func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnindTo uint64) error {
+func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwindTo uint64) error {
 	d := dc.d
-	//fmt.Printf("[domain][%s] unwinding to txNum=%d, step %d\n", d.filenameBase, txNumUnindTo, step)
-	histRng, err := dc.hc.HistoryRange(int(txNumUnindTo), -1, order.Asc, -1, rwTx)
+	//fmt.Printf("[domain][%s] unwinding domain to txNum=%d, step %d\n", d.filenameBase, txNumUnwindTo, step)
+	histRng, err := dc.hc.HistoryRange(int(txNumUnwindTo), -1, order.Asc, -1, rwTx)
 	if err != nil {
 		return fmt.Errorf("historyRange %s: %w", dc.hc.h.filenameBase, err)
 	}
@@ -1531,13 +1534,13 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	seen := make(map[string]struct{})
 	restored := dc.NewWriter()
 
-	for histRng.HasNext() && txNumUnindTo > 0 {
+	for histRng.HasNext() && txNumUnwindTo > 0 {
 		k, v, err := histRng.Next()
 		if err != nil {
 			return err
 		}
 
-		ic, err := dc.hc.IdxRange(k, int(txNumUnindTo)-1, 0, order.Desc, -1, rwTx)
+		ic, err := dc.hc.IdxRange(k, int(txNumUnwindTo)-1, 0, order.Desc, -1, rwTx)
 		if err != nil {
 			return err
 		}
@@ -1548,9 +1551,9 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 			}
 			restored.SetTxNum(nextTxn) // todo what if we actually had to decrease current step to provide correct update?
 		} else {
-			restored.SetTxNum(txNumUnindTo - 1)
+			restored.SetTxNum(txNumUnwindTo - 1)
 		}
-		//fmt.Printf("[%s]unwinding %x ->'%x' {%v}\n", dc.d.filenameBase, k, v, dc.TxNum())
+		//fmt.Printf("[%s] unwinding %x ->'%x'\n", dc.d.filenameBase, k, v)
 		if err := restored.addValue(k, nil, v); err != nil {
 			return err
 		}
@@ -1585,7 +1588,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 		if !bytes.Equal(v, stepBytes) {
 			continue
 		}
-		if _, replaced := seen[string(k)]; !replaced && txNumUnindTo > 0 {
+		if _, replaced := seen[string(k)]; !replaced && txNumUnwindTo > 0 {
 			continue
 		}
 
@@ -1611,8 +1614,8 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, true, logEvery); err != nil {
-		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnindTo, step, err)
+	if _, err := dc.hc.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return restored.Flush(ctx, rwTx)
 }
@@ -1809,27 +1812,25 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 		key = append(append(dc.keyBuf[:0], key1...), key2...)
 	}
 
-	var (
-		v   []byte
-		err error
-	)
-
 	keysC, err := dc.keysCursor(roTx)
 	if err != nil {
 		return nil, 0, false, err
 	}
 
-	var foundInvStep []byte
+	var (
+		v, foundInvStep []byte
+	)
 	if traceGetLatest == dc.d.filenameBase {
 		defer func() {
-			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t)\n", dc.d.filenameBase, key, v, foundInvStep != nil)
+			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; is=%x)\n", dc.d.filenameBase, key, v, foundInvStep != nil, foundInvStep)
 		}()
 	}
 
-	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value
+	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value -- biggest available step
 	if err != nil {
 		return nil, 0, false, err
 	}
+
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
 		copy(dc.valKeyBuf[:], key)
@@ -1843,9 +1844,6 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 		if err != nil {
 			return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
 		}
-		//if traceGetLatest == dc.d.filenameBase {
-		//	fmt.Printf("GetLatest(%s, %x) -> found in db\n", dc.d.filenameBase, key)
-		//}
 		//LatestStateReadDB.ObserveDuration(t)
 		return v, foundStep, true, nil
 		//} else {
@@ -2054,14 +2052,98 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
-	return dc.hc.ic.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)
+	inFiles := dc.maxTxNumInDomainFiles(false)
+	idxTx := dc.hc.ic.CanPruneFrom(tx)
+	domStep := dc.CanPruneFrom(tx)
+	//if dc.d.filenameBase == "commitment" {
+	//	fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
+	//		dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
+	//}
+	return idxTx < inFiles || domStep < inFiles/dc.d.aggregationStep
+}
+
+func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
+	pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
+	if err != nil {
+		dc.d.logger.Warn("CanPruneFrom: failed to get progress", "domain", dc.d.filenameBase, "error", err)
+		return math.MaxUint64
+	}
+
+	c, err := tx.CursorDupSort(dc.d.keysTable)
+	if err != nil {
+		dc.d.logger.Warn("CanPruneFrom: failed to open cursor", "domain", dc.d.filenameBase, "error", err)
+		return math.MaxUint64
+	}
+	defer c.Close()
+
+	var k, v []byte
+	if pkr != nil {
+		_, _, err = c.Seek(pkr)
+		if err != nil {
+			return math.MaxUint64
+		}
+		k, v, err = c.PrevNoDup()
+	} else {
+		k, v, err = c.First()
+	}
+	if err != nil || k == nil {
+		return math.MaxUint64
+	}
+
+	minStep := min(math.MaxUint64, ^binary.BigEndian.Uint64(v))
+	fv, err := c.LastDup()
+	if err != nil {
+		return math.MaxUint64
+	}
+	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
+
+	//fmt.Printf("found CanPrune from %x first %d  last %d\n", k, ^binary.BigEndian.Uint64(v), ^binary.BigEndian.Uint64(fv))
+	return minStep
+}
+
+type DomainPruneStat struct {
+	MinStep uint64
+	MaxStep uint64
+	Values  uint64
+	History *InvertedIndexPruneStat
+}
+
+func (dc *DomainPruneStat) String() string {
+	if dc.MinStep == math.MaxUint64 && dc.Values == 0 {
+		if dc.History == nil {
+			return ""
+		}
+		return dc.History.String()
+	}
+	if dc.History == nil {
+		return fmt.Sprintf("%d kv's step %d-%d", dc.Values, dc.MinStep, dc.MaxStep)
+	}
+	return fmt.Sprintf("%d kv's step %d-%d; v%s", dc.Values, dc.MinStep, dc.MaxStep, dc.History)
+}
+
+func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
+	if other == nil {
+		return
+	}
+	dc.MinStep = min(dc.MinStep, other.MinStep)
+	dc.MaxStep = max(dc.MaxStep, other.MaxStep)
+	dc.Values += other.Values
+	if dc.History == nil {
+		dc.History = other.History
+	} else {
+		dc.History.Accumulate(other.History)
+	}
 }
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
-func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) error {
+func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+	stat = &DomainPruneStat{MinStep: math.MaxUint64}
+	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	}
 	if !dc.CanPrune(rwTx) {
-		return nil
+		return stat, nil
 	}
 
 	st := time.Now()
@@ -2070,103 +2152,93 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dc.d.keysTable)
 	if err != nil {
-		return fmt.Errorf("create %s domain cursor: %w", dc.d.filenameBase, err)
+		return stat, fmt.Errorf("create %s domain cursor: %w", dc.d.filenameBase, err)
 	}
 	defer keysCursorForDeletes.Close()
 	keysCursor, err := rwTx.RwCursorDupSort(dc.d.keysTable)
 	if err != nil {
-		return fmt.Errorf("create %s domain cursor: %w", dc.d.filenameBase, err)
+		return stat, fmt.Errorf("create %s domain cursor: %w", dc.d.filenameBase, err)
 	}
 	defer keysCursor.Close()
 
-	var (
-		prunedKeys    uint64
-		prunedMaxStep uint64
-		prunedMinStep = uint64(math.MaxUint64)
-		seek          = make([]byte, 0, 256)
-	)
-
-	prunedStep, _, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
+	//fmt.Printf("prune domain %s from %d to %d step %d limit %d\n", dc.d.filenameBase, txFrom, txTo, step, limit)
+	//defer func() {
+	//	dc.d.logger.Info("[snapshots] prune domain",
+	//		"name", dc.d.filenameBase,
+	//		"pruned keys", prunedKeys,
+	//		"keys until limit", limit,
+	//		"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
+	//}()
+	prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Error("get domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 
-	if prunedStep != 0 {
-		step = ^prunedStep
+	var k, v []byte
+	if prunedKey != nil {
+		k, v, err = keysCursor.Seek(prunedKey)
+	} else {
+		k, v, err = keysCursor.Last()
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	k, v, err := keysCursor.Last()
-	//fmt.Printf("prune domain %s from %x|%x step %d\n", dc.d.filenameBase, k, v, step)
-
-	for ; k != nil; k, v, err = keysCursor.Prev() {
+	seek := make([]byte, 0, 256)
+	for k != nil {
 		if err != nil {
-			return fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
+			return stat, fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
+
 		is := ^binary.BigEndian.Uint64(v)
 		if is > step {
+			k, v, err = keysCursor.PrevNoDup()
 			continue
 		}
 		if limit == 0 {
-			return nil
+			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, k); err != nil {
+				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
+			}
+			return stat, nil
 		}
 		limit--
 
 		seek = append(append(seek[:0], k...), v...)
-		//fmt.Printf("prune key: %x->%x [%x] step %d dom %s\n", k, v, seek, ^binary.BigEndian.Uint64(v), dc.d.filenameBase)
-
-		mxPruneSizeDomain.Inc()
-		prunedKeys++
-
 		err = rwTx.Delete(dc.d.valsTable, seek)
 		if err != nil {
-			return fmt.Errorf("prune domain value: %w", err)
+			return stat, fmt.Errorf("prune domain value: %w", err)
 		}
 
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if _, _, err = keysCursorForDeletes.SeekBothExact(k, v); err != nil {
-			return err
+			return stat, err
 		}
 		if err = keysCursorForDeletes.DeleteCurrent(); err != nil {
-			return err
+			return stat, err
 		}
+		stat.Values++
+		stat.MaxStep = max(stat.MaxStep, is)
+		stat.MinStep = min(stat.MinStep, is)
+		mxPruneSizeDomain.Inc()
 
-		if is < prunedMinStep {
-			prunedMinStep = is
-		}
-		if is > prunedMaxStep {
-			prunedMaxStep = is
-		}
+		k, v, err = keysCursor.Prev()
 
 		select {
 		case <-ctx.Done():
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
-				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			}
-			return ctx.Err()
+			// consider ctx exiting as incorrect outcome, error is returned
+			return stat, ctx.Err()
 		case <-logEvery.C:
-			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, ^step, nil); err != nil {
-				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
-			}
-			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step", step,
+			dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase,
+				"pruned keys", stat.Values,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(dc.d.aggregationStep), float64(txTo)/float64(dc.d.aggregationStep)))
 		default:
 		}
 	}
-	if prunedMinStep == math.MaxUint64 {
-		prunedMinStep = 0
-	} // minMax pruned step doesn't mean that we pruned all kv pairs for those step - we just pruned some keys of those steps.
-
-	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, 0, nil); err != nil {
+	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, nil); err != nil {
 		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
-
-	dc.d.logger.Info("[snapshots] prune domain", "name", dc.d.filenameBase, "step range", fmt.Sprintf("[%d, %d] requested %d", prunedMinStep, prunedMaxStep, step), "pruned keys", prunedKeys)
 	mxPruneTookDomain.ObserveDuration(st)
-
-	if err := dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, false, logEvery); err != nil {
-		return fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	}
-	return nil
+	return stat, nil
 }
 
 type DomainLatestIterFile struct {
@@ -2322,6 +2394,7 @@ func (d *Domain) stepsRangeInDB(tx kv.Tx) (from, to float64) {
 	if len(lst) > 0 {
 		from = float64(^binary.BigEndian.Uint64(lst[len(lst)-8:]))
 	}
+	//fmt.Printf("first %x (to %f) - %x (from %f)\n", fst, to, lst, from)
 	if to == 0 {
 		to = from
 	}

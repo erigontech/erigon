@@ -247,7 +247,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		hc.Close()
 
 		hc = h.MakeContext()
-		err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, false, logEvery)
+		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, logEvery)
 		hc.Close()
 
 		require.NoError(err)
@@ -260,7 +260,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 			var k []byte
 			k, _, err = cur.First()
 			require.NoError(err)
-			require.Nil(k, table)
+			require.Nilf(k, "table=%s", table)
 		}
 	}
 	t.Run("large_values", func(t *testing.T) {
@@ -382,14 +382,14 @@ func TestHistory_PruneProgress(t *testing.T) {
 
 			step := uint64(0)
 			hc := h.MakeContext()
-			err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 			cancel()
 
-			prunedTxNum, prunedKey, err := GetExecV3PruneProgress(tx, h.historyValsTable)
+			prunedKey, err := GetExecV3PruneProgress(tx, h.historyValsTable)
 			require.NoError(err)
 			hc.Close()
 
-			iter, err := hc.HistoryRange(int(prunedTxNum), 0, order.Asc, -1, tx)
+			iter, err := hc.HistoryRange(int(hc.ic.CanPruneFrom(tx)), 0, order.Asc, -1, tx)
 			require.NoError(err)
 			for iter.HasNext() {
 				k, _, err := iter.Next()
@@ -435,7 +435,7 @@ func TestHistoryHistory(t *testing.T) {
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 				hc := h.MakeContext()
-				err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 				hc.Close()
 				require.NoError(err)
 			}()
@@ -473,7 +473,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 		hc := h.MakeContext()
-		err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
+		_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
 		hc.Close()
 		require.NoError(err)
 	}
