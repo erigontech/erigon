@@ -178,9 +178,8 @@ Loop:
 					TorrentMetadataReady: stats.MetadataReady,
 				})
 
-				if stats.MetadataReady < stats.FilesTotal {
+				if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
 					log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))
-					continue
 				}
 
 				dbg.ReadMemStats(&m)
@@ -198,6 +197,7 @@ Loop:
 					"upload", common.ByteCount(stats.UploadRate)+"/s",
 					"peers", stats.PeersUnique,
 					"files", stats.FilesTotal,
+					"metadata", fmt.Sprintf("%d/%d", stats.MetadataReady, stats.FilesTotal),
 					"connections", stats.ConnectionsTotal,
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 				)

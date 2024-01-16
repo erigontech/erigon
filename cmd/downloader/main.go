@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
@@ -212,10 +211,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
-	if err := addPreConfiguredHashes(ctx, d); err != nil {
-		return err
-	}
-
 	d.MainLoopInBackground(false)
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
@@ -248,7 +243,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap))
+		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), nil)
 		if err != nil {
 			return err
 		}
@@ -385,7 +380,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf); err != nil {
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, nil); err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
 	}
@@ -487,16 +482,6 @@ func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.
 	}()
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
-}
-
-// Add pre-configured
-func addPreConfiguredHashes(ctx context.Context, d *downloader.Downloader) error {
-	for _, it := range snapcfg.KnownCfg(chain).Preverified {
-		if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) error {

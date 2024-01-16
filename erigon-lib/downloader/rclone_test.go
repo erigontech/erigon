@@ -14,12 +14,7 @@ import (
 
 func hasRClone() bool {
 	rclone, _ := exec.LookPath("rclone")
-
-	if len(rclone) == 0 {
-		return false
-	}
-
-	return true
+	return len(rclone) != 0
 }
 
 func TestDownload(t *testing.T) {

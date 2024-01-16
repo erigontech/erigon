@@ -52,7 +52,7 @@ type Cfg struct {
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
 	WebSeedS3Tokens                 []string
-	ExpectedTorrentFilesHashes      snapcfg.Preverified
+	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
 	AddTorrentsFromDisk             bool
 	ChainName                       string
@@ -188,12 +188,11 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	if dir.FileExist(localCfgFile) {
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
-	//TODO: if don't pass "downloaded files list here" (which we store in db) - synced erigon will download new .torrent files. And erigon can't work with "unfinished" files.
-	snapCfg := snapcfg.KnownCfg(chainName)
+
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
-		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, ExpectedTorrentFilesHashes: snapCfg.Preverified,
+		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotConfig: snapcfg.KnownCfg(chainName),
 	}, nil
 }
 

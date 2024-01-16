@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
@@ -179,7 +180,7 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *T
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *TorrentFiles) error {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *TorrentFiles, ignore snapcfg.Preverified) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -194,6 +195,12 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 
 	for _, file := range files {
 		file := file
+
+		if ignore.Contains(file) {
+			i.Add(1)
+			continue
+		}
+
 		g.Go(func() error {
 			defer i.Add(1)
 			if err := BuildTorrentIfNeed(ctx, file, dirs.Snap, torrentFiles); err != nil {

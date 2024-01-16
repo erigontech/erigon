@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -33,6 +34,11 @@ type PreverifiedItem struct {
 	Hash string
 }
 type Preverified []PreverifiedItem
+
+func (p Preverified) Contains(name string) bool {
+	i := sort.Search(len(p), func(i int) bool { return p[i].Name >= name })
+	return i < len(p) && p[i].Name == name
+}
 
 func (p Preverified) Versioned(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
@@ -147,7 +153,7 @@ func (p Preverified) MarshalJSON() ([]byte, error) {
 func (p *Preverified) UnmarshalJSON(data []byte) error {
 	var outMap map[string]string
 
-	if err := toml.Unmarshal(data, &outMap); err != nil {
+	if err := json.Unmarshal(data, &outMap); err != nil {
 		return err
 	}
 
