@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -87,7 +86,6 @@ var snapshotCommand = cli.Command{
 				&SnapshotFromFlag,
 				&SnapshotToFlag,
 				&SnapshotEveryFlag,
-				&SnapshotVersionFlag,
 			}),
 		},
 		{
@@ -96,7 +94,6 @@ var snapshotCommand = cli.Command{
 			Usage:  "run erigon in snapshot upload mode (no execution)",
 			Flags: joinFlags(erigoncli.DefaultFlags,
 				[]cli.Flag{
-					&SnapshotVersionFlag,
 					&erigoncli.UploadLocationFlag,
 					&erigoncli.UploadFromFlag,
 					&erigoncli.FrozenBlockLimitFlag,
@@ -179,11 +176,6 @@ var (
 		Name:  "every",
 		Usage: "Do operation every N blocks",
 		Value: 1_000,
-	}
-	SnapshotVersionFlag = cli.IntFlag{
-		Name:  "snapshot.version",
-		Usage: "Snapshot files version.",
-		Value: 1,
 	}
 	SnapshotRebuildFlag = cli.BoolFlag{
 		Name:  "rebuild",
@@ -511,10 +503,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	from := cliCtx.Uint64(SnapshotFromFlag.Name)
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 	every := cliCtx.Uint64(SnapshotEveryFlag.Name)
-	version := uint8(cliCtx.Int(SnapshotVersionFlag.Name))
-	if version != 0 {
-		snapcfg.SnapshotVersion(version)
-	}
 
 	db := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -660,10 +648,6 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	logger.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
 	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, params.Version, params.GitCommit))
 	erigonInfoGauge.Set(1)
-
-	if version := uint8(cliCtx.Int(SnapshotVersionFlag.Name)); version != 0 {
-		snapcfg.SnapshotVersion(version)
-	}
 
 	nodeCfg := node.NewNodConfigUrfave(cliCtx, logger)
 	if err := datadir.ApplyMigrations(nodeCfg.Dirs); err != nil {

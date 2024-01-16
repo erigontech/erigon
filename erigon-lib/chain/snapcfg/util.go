@@ -2,14 +2,17 @@ package snapcfg
 
 import (
 	_ "embed"
+	"encoding/json"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
 	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
 )
 
@@ -30,16 +33,137 @@ type PreverifiedItem struct {
 	Hash string
 }
 type Preverified []PreverifiedItem
-type preverified map[string]string
+
+func (p Preverified) Versioned(types []snaptype.Type) Preverified {
+	var bestVersions btree.Map[string, PreverifiedItem]
+
+	for _, p := range p {
+		v, name, ok := strings.Cut(p.Name, "-")
+
+		if !ok {
+			continue
+		}
+
+		var preferredVersion, minVersion snaptype.Version
+
+		parts := strings.Split(name, "-")
+		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+		include := false
+
+		for _, typ := range types {
+			if typeName == typ.String() {
+				preferredVersion = typ.Versions().Current
+				minVersion = typ.Versions().MinSupported
+				include = true
+				break
+			}
+		}
+
+		if !include {
+			continue
+		}
+
+		version, err := snaptype.ParseVersion(v)
+
+		if err != nil {
+			continue
+		}
+
+		if version < minVersion {
+			continue
+		}
+
+		if version > preferredVersion {
+			continue
+		}
+
+		if current, ok := bestVersions.Get(name); ok {
+			v, _, _ := strings.Cut(current.Name, "-")
+			cv, _ := snaptype.ParseVersion(v)
+
+			if version > cv {
+				bestVersions.Set(name, p)
+			}
+		} else {
+			bestVersions.Set(name, p)
+		}
+	}
+
+	var versioned Preverified
+
+	bestVersions.Scan(func(key string, value PreverifiedItem) bool {
+		versioned = append(versioned, value)
+		return true
+	})
+
+	return versioned
+}
+
+func (p Preverified) MaxBlock(version snaptype.Version) (uint64, error) {
+	max := uint64(0)
+
+	for _, p := range p {
+		_, fileName := filepath.Split(p.Name)
+		ext := filepath.Ext(fileName)
+		if ext != ".seg" {
+			continue
+		}
+		onlyName := fileName[:len(fileName)-len(ext)]
+		parts := strings.Split(onlyName, "-")
+
+		to, err := strconv.ParseUint(parts[2], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+
+		if version != 0 {
+			if v, err := snaptype.ParseVersion(parts[0]); err != nil || v != version {
+				continue
+			}
+		}
+
+		if max < to {
+			max = to
+		}
+
+	}
+	if max == 0 { // to prevent underflow
+		return 0, nil
+	}
+
+	return max*1_000 - 1, nil
+}
+
+func (p Preverified) MarshalJSON() ([]byte, error) {
+	out := map[string]string{}
+
+	for _, i := range p {
+		out[i.Name] = i.Hash
+	}
+
+	return json.Marshal(out)
+}
+
+func (p *Preverified) UnmarshalJSON(data []byte) error {
+	var outMap map[string]string
+
+	if err := toml.Unmarshal(data, &outMap); err != nil {
+		return err
+	}
+
+	*p = doSort(outMap)
+	return nil
+}
 
 func fromToml(in []byte) (out Preverified) {
-	var outMap preverified
+	var outMap map[string]string
 	if err := toml.Unmarshal(in, &outMap); err != nil {
 		panic(err)
 	}
 	return doSort(outMap)
 }
-func doSort(in preverified) Preverified {
+
+func doSort(in map[string]string) Preverified {
 	out := make(Preverified, 0, len(in))
 	for k, v := range in {
 		out = append(out, PreverifiedItem{k, v})
@@ -48,89 +172,13 @@ func doSort(in preverified) Preverified {
 	return out
 }
 
-var (
-	isDefaultVersion bool  = true
-	snapshotVersion  uint8 = 1
-)
-
-func SnapshotVersion(version uint8) {
-	snapshotVersion = version
-	isDefaultVersion = false
-}
-
-func newCfg(preverified Preverified, version uint8) *Cfg {
-
-	if version == 0 {
-		version = snapshotVersion
-
-		var pv Preverified
-
-		for _, p := range preverified {
-			if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
-				if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
-					pv = append(pv, p)
-				}
-			}
-		}
-
-		// don't do this check if the SnapshotVersion has been explicitly set
-		if len(pv) == 0 && isDefaultVersion {
-			version = maxVersion(preverified)
-
-			for _, p := range preverified {
-				if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
-					if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil && uint64(version) == v {
-						pv = append(pv, p)
-					}
-				}
-			}
-		}
-
-		preverified = pv
-	}
-
-	maxBlockNum, version := cfgInfo(preverified, version)
-	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, Version: version}
-}
-
-func cfgInfo(preverified Preverified, defaultVersion uint8) (uint64, uint8) {
-	max := uint64(0)
-	version := defaultVersion
-
-	for _, p := range preverified {
-		_, fileName := filepath.Split(p.Name)
-		ext := filepath.Ext(fileName)
-		if ext != ".seg" {
-			continue
-		}
-		onlyName := fileName[:len(fileName)-len(ext)]
-		parts := strings.Split(onlyName, "-")
-		if parts[3] != "headers" {
-			continue
-		}
-		to, err := strconv.ParseUint(parts[2], 10, 64)
-		if err != nil {
-			panic(err)
-		}
-		if max < to {
-			max = to
-		}
-
-		if vp := parts[0]; strings.HasPrefix(vp, "v") {
-			if v, err := strconv.ParseUint(vp[1:], 10, 8); err == nil {
-				version = uint8(v)
-			}
-		}
-	}
-	if max == 0 { // to prevent underflow
-		return 0, version
-	}
-	return max*1_000 - 1, version
+func newCfg(preverified Preverified) *Cfg {
+	maxBlockNum, _ := preverified.MaxBlock(0)
+	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified}
 }
 
 type Cfg struct {
 	ExpectBlocks uint64
-	Version      uint8
 	Preverified  Preverified
 }
 
@@ -146,30 +194,30 @@ var knownPreverified = map[string]Preverified{
 	networkname.ChiadoChainName:     Chiado,
 }
 
-// KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
-func KnownCfg(networkName string, version uint8) *Cfg {
-	c, ok := knownPreverified[networkName]
-	if !ok {
-		return newCfg(Preverified{}, version)
-	}
-	return newCfg(c, version)
+var ethereumTypes = append(snaptype.BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
+var borTypes = append(snaptype.BlockSnapshotTypes, snaptype.BorSnapshotTypes...)
+
+var knownTypes = map[string][]snaptype.Type{
+	networkname.MainnetChainName: ethereumTypes,
+	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
+	networkname.SepoliaChainName:    ethereumTypes,
+	networkname.GoerliChainName:     ethereumTypes,
+	networkname.MumbaiChainName:     borTypes,
+	networkname.AmoyChainName:       borTypes,
+	networkname.BorMainnetChainName: borTypes,
+	networkname.GnosisChainName:     ethereumTypes,
+	networkname.ChiadoChainName:     ethereumTypes,
 }
 
-func maxVersion(pv Preverified) uint8 {
-	var max uint8
+// KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
+func KnownCfg(networkName string) *Cfg {
+	c, ok := knownPreverified[networkName]
 
-	for _, p := range pv {
-		if v, _, ok := strings.Cut(p.Name, "-"); ok && strings.HasPrefix(v, "v") {
-			if v, err := strconv.ParseUint(v[1:], 10, 8); err == nil {
-				version := uint8(v)
-				if max < version {
-					max = version
-				}
-			}
-		}
+	if !ok {
+		return newCfg(Preverified{})
 	}
 
-	return max
+	return newCfg(c.Versioned(knownTypes[networkName]))
 }
 
 var KnownWebseeds = map[string][]string{

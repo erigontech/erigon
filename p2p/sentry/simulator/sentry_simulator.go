@@ -59,7 +59,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		peers[peer.Pubkey()] = peer
 	}
 
-	cfg := snapcfg.KnownCfg(chain, 0)
+	cfg := snapcfg.KnownCfg(chain)
 
 	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,

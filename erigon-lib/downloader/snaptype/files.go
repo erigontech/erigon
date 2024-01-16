@@ -32,14 +32,6 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-type IdxType string
-
-const (
-	Transactions2Block IdxType = "transactions-to-block"
-)
-
-func (it IdxType) String() string { return string(it) }
-
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )
@@ -93,13 +85,9 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return res, ok
 	}
 
-	var version Version
-	if len(parts[0]) > 1 && parts[0][0] == 'v' {
-		v, err := strconv.ParseUint(parts[0][1:], 10, 64)
-		if err != nil {
-			return
-		}
-		version = Version(v)
+	version, err := ParseVersion(parts[0])
+	if err != nil {
+		return
 	}
 
 	from, err := strconv.ParseUint(parts[1], 10, 64)

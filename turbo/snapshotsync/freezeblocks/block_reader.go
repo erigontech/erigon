@@ -1027,18 +1027,20 @@ func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash com
 	return blockNum, true, nil
 }
 
-func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEventSegment, buf []byte) (blockNum uint64, ok bool, err error) {
+func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segment, buf []byte) (blockNum uint64, ok bool, err error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		if sn.IdxBorTxnHash == nil {
+		idxBorTxnHash := sn.Index()
+
+		if idxBorTxnHash == nil {
 			continue
 		}
-		if sn.IdxBorTxnHash.KeyCount() == 0 {
+		if idxBorTxnHash.KeyCount() == 0 {
 			continue
 		}
-		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
+		reader := recsplit.NewIndexReader(idxBorTxnHash)
 		blockEventId := reader.Lookup(txnHash[:])
-		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
+		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		if !gg.MatchPrefix(txnHash[:]) {
@@ -1112,15 +1114,18 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		if sn.to <= blockHeight {
 			continue
 		}
-		if sn.IdxBorTxnHash == nil {
+
+		idxBorTxnHash := sn.Index()
+
+		if idxBorTxnHash == nil {
 			continue
 		}
-		if sn.IdxBorTxnHash.KeyCount() == 0 {
+		if idxBorTxnHash.KeyCount() == 0 {
 			continue
 		}
-		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
+		reader := recsplit.NewIndexReader(idxBorTxnHash)
 		blockEventId := reader.Lookup(borTxHash[:])
-		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
+		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
@@ -1143,9 +1148,9 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 		return 0
 	}
 	// find the last segment which has a built index
-	var lastSegment *BorEventSegment
+	var lastSegment *Segment
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].IdxBorTxnHash != nil {
+		if segments[i].Index() != nil {
 			lastSegment = segments[i]
 			break
 		}
@@ -1175,9 +1180,9 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 		return 0
 	}
 	// find the last segment which has a built index
-	var lastSegment *BorSpanSegment
+	var lastSegment *Segment
 	for i := len(segments) - 1; i >= 0; i-- {
-		if segments[i].idx != nil {
+		if segments[i].Index() != nil {
 			lastSegment = segments[i]
 			break
 		}
@@ -1216,7 +1221,9 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	segments := view.Spans()
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
-		if sn.idx == nil {
+		idx := sn.Index()
+
+		if idx == nil {
 			continue
 		}
 		spanFrom := span.IDAt(sn.from)
@@ -1227,10 +1234,10 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if spanId >= spanTo {
 			continue
 		}
-		if sn.idx.KeyCount() == 0 {
+		if idx.KeyCount() == 0 {
 			continue
 		}
-		offset := sn.idx.OrdinalLookup(spanId - sn.idx.BaseDataID())
+		offset := idx.OrdinalLookup(spanId - idx.BaseDataID())
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
 		result, _ := gg.Next(nil)

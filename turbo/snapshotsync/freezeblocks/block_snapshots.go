@@ -75,7 +75,7 @@ func (s Segment) Index(index ...snaptype.Index) *recsplit.Index {
 		index = []snaptype.Index{0}
 	}
 
-	if len(s.indexes) < index[0].Offset() {
+	if len(s.indexes) <= index[0].Offset() {
 		return nil
 	}
 
@@ -155,8 +155,7 @@ func (s *Segment) reopenIdx(dir string) (err error) {
 		return nil
 	}
 
-	for i := 0; i < s.Type().IndexCount(); i++ {
-		fileName := s.Type().IdxFileName(s.version, s.from, s.to, i)
+	for _, fileName := range s.Type().IdxFileNames(s.version, s.from, s.to) {
 		index, err := recsplit.OpenIndex(filepath.Join(dir, fileName))
 
 		if err != nil {
@@ -1594,7 +1593,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 		}
 		idx.Close()
 
-		fName = snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Transactions2Block.String())
+		fName = snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum.String())
 		idx, err = recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
 			return false
@@ -1606,7 +1605,8 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 
 var bufPool = sync.Pool{
 	New: func() any {
-		return make([]byte, 16*4096)
+		bytes := [16 * 4096]byte{}
+		return &bytes
 	},
 }
 
@@ -1655,14 +1655,14 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 
 		ctx.WithSender(false)
 
-		valueBuf := bufPool.Get().([]byte)
-		defer bufPool.Put(valueBuf) //nolint
+		valueBuf := bufPool.Get().(*[16 * 4096]byte)
+		defer bufPool.Put(valueBuf)
 
-		valueBuf, err = parse(ctx, tv, valueBuf, nil, 0)
+		parsed, err := parse(ctx, tv, valueBuf[:], nil, 0)
 		if err != nil {
 			return err
 		}
-		if err := collect(valueBuf); err != nil {
+		if err := collect(parsed); err != nil {
 			return err
 		}
 		return nil
@@ -1724,9 +1724,9 @@ func DumpTxs(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, chainCo
 		parseCtxs := make([]*types2.TxParseContext, workers)
 
 		for i := 0; i < workers; i++ {
-			valueBuf := bufPool.Get().([]byte)
-			defer bufPool.Put(valueBuf) //nolint
-			valueBufs[i] = valueBuf
+			valueBuf := bufPool.Get().(*[16 * 4096]byte)
+			defer bufPool.Put(valueBuf)
+			valueBufs[i] = valueBuf[:]
 			parseCtxs[i] = types2.NewTxParseContext(*chainID)
 		}
 
@@ -2004,7 +2004,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 		BucketSize:  2000,
 		LeafSize:    8,
 		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Transactions.String())),
+		IndexFile:   filepath.Join(sn.Dir(), snaptype.Transactions.IdxFileName(sn.Version, sn.From, sn.To)),
 		BaseDataID:  firstTxID,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}, logger)
@@ -2018,7 +2018,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 		BucketSize:  2000,
 		LeafSize:    8,
 		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Transactions2Block.String())),
+		IndexFile:   filepath.Join(sn.Dir(), sn.Type.IdxFileName(0, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum)),
 		BaseDataID:  firstBlockNum,
 		EtlBufLimit: etl.BufferOptimalSize / 2,
 	}, logger)

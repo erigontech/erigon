@@ -3,24 +3,36 @@ package snaptype
 import (
 	"fmt"
 	"strconv"
-
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	"strings"
 )
 
 type Version uint8
+
+func ParseVersion(v string) (Version, error) {
+	if strings.HasPrefix(v, "v") {
+		v, err := strconv.ParseUint(v[1:], 10, 8)
+
+		if err != nil {
+			return 0, fmt.Errorf("invalid version: %w", err)
+		}
+
+		return Version(v), nil
+	}
+
+	if len(v) == 0 {
+		return 0, fmt.Errorf("invalid version: no prefix")
+	}
+
+	return 0, fmt.Errorf("invalid version prefix: %s", v[0:1])
+}
 
 func (v Version) String() string {
 	return "v" + strconv.Itoa(int(v))
 }
 
-type SupportedVersions struct {
-	Min Version
-	Max Version
-}
-
 type Versions struct {
-	Current   Version
-	Supported SupportedVersions
+	Current      Version
+	MinSupported Version
 }
 
 type Index int
@@ -28,13 +40,21 @@ type Index int
 var Indexes = struct {
 	Unknown,
 	HeaderHash,
+	BodyHash,
 	TxnHash,
-	TxnHash2BlockNum Index
+	TxnHash2BlockNum,
+	BorTxnHash,
+	BorSpanId,
+	BeaconBlockSlot Index
 }{
 	Unknown:          -1,
 	HeaderHash:       0,
-	TxnHash:          1,
-	TxnHash2BlockNum: 2,
+	BodyHash:         1,
+	TxnHash:          2,
+	TxnHash2BlockNum: 3,
+	BorTxnHash:       4,
+	BorSpanId:        5,
+	BeaconBlockSlot:  6,
 }
 
 func (i Index) Offset() int {
@@ -49,8 +69,19 @@ func (i Index) Offset() int {
 func (i Index) String() string {
 	switch i {
 	case Indexes.HeaderHash:
-		return "headers"
-
+		return Enums.Headers.String()
+	case Indexes.BodyHash:
+		return Enums.Bodies.String()
+	case Indexes.TxnHash:
+		return Enums.Transactions.String()
+	case Indexes.TxnHash2BlockNum:
+		return "transactions-to-block"
+	case Indexes.BorTxnHash:
+		return Enums.BorEvents.String()
+	case Indexes.BorSpanId:
+		return Enums.BorSpans.String()
+	case Indexes.BeaconBlockSlot:
+		return Enums.BeaconBlocks.String()
 	default:
 		panic(fmt.Sprintf("unknown index: %d", i))
 	}
@@ -61,9 +92,8 @@ type Type interface {
 	Versions() Versions
 	String() string
 	FileName(version Version, from uint64, to uint64) string
-	IdxFileName(version Version, from uint64, to uint64, indexNumber ...int) string
-	KnownCfg(networkName string, version uint8) *snapcfg.Cfg
-	IndexCount() int
+	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
+	IdxFileNames(version Version, from uint64, to uint64) []string
 }
 
 type snapType struct {
@@ -74,10 +104,6 @@ type snapType struct {
 
 func (s snapType) Enum() Enum {
 	return s.enum
-}
-
-func (s snapType) IndexCount() int {
-	return len(s.indexes)
 }
 
 func (s snapType) Versions() Versions {
@@ -96,21 +122,40 @@ func (s snapType) FileName(version Version, from uint64, to uint64) string {
 	return SegmentFileName(version, from, to, s.enum)
 }
 
-func (s snapType) IdxFileName(version Version, from uint64, to uint64, indexNumber ...int) string {
-
-	if len(indexNumber) == 0 {
-		indexNumber = []int{0}
+func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {
+	fileNames := make([]string, len(s.indexes))
+	for i, index := range s.indexes {
+		fileNames[i] = IdxFileName(version, from, to, index.String())
 	}
 
-	if indexNumber[0] > len(s.indexes) {
-		return ""
-	}
-
-	return IdxFileName(version, from, to, s.indexes[indexNumber[0]].String())
+	return fileNames
 }
 
-func (s snapType) KnownCfg(networkName string, version uint8) *snapcfg.Cfg {
-	return nil
+func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...Index) string {
+
+	if len(index) == 0 {
+		if len(s.indexes) == 0 {
+			return ""
+		}
+
+		index = []Index{s.indexes[0]}
+	} else {
+		i := index[0]
+		found := false
+
+		for _, index := range s.indexes {
+			if i == index {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			return ""
+		}
+	}
+
+	return IdxFileName(version, from, to, index[0].String())
 }
 
 func ParseFileType(s string) (Type, bool) {
@@ -204,70 +249,60 @@ var (
 	Headers = snapType{
 		enum: Enums.Headers,
 		versions: Versions{
-			Current: 2,
-			Supported: SupportedVersions{
-				Max: 2,
-				Min: 1,
-			},
+			Current:      2,
+			MinSupported: 1,
 		},
+		indexes: []Index{Indexes.HeaderHash},
 	}
 
 	Bodies = snapType{
 		enum: Enums.Bodies,
 		versions: Versions{
-			Current: 2,
-			Supported: SupportedVersions{
-				Max: 2,
-				Min: 1,
-			},
+			Current:      2,
+			MinSupported: 1,
 		},
+		indexes: []Index{Indexes.BodyHash},
 	}
 
 	Transactions = snapType{
 		enum: Enums.Transactions,
 		versions: Versions{
-			Current: 2,
-			Supported: SupportedVersions{
-				Max: 2,
-				Min: 1,
-			},
+			Current:      2,
+			MinSupported: 1,
 		},
+		indexes: []Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
 	}
 
 	BorEvents = snapType{
 		enum: Enums.BorEvents,
 		versions: Versions{
-			Current: 2,
-			Supported: SupportedVersions{
-				Max: 2,
-				Min: 1,
-			},
+			Current:      2,
+			MinSupported: 1,
 		},
+		indexes: []Index{Indexes.BorTxnHash},
 	}
 
 	BorSpans = snapType{
 		enum: Enums.BorSpans,
 		versions: Versions{
-			Current: 2,
-			Supported: SupportedVersions{
-				Max: 2,
-				Min: 1,
-			},
+			Current:      2,
+			MinSupported: 1,
 		},
+		indexes: []Index{Indexes.BorSpanId},
 	}
 
 	BeaconBlocks = snapType{
 		enum: Enums.BeaconBlocks,
 		versions: Versions{
-			Current: 1,
-			Supported: SupportedVersions{
-				Max: 1,
-				Min: 1,
-			},
+			Current:      1,
+			MinSupported: 1,
 		},
+		indexes: []Index{Indexes.BeaconBlockSlot},
 	}
 
 	BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
 
 	BorSnapshotTypes = []Type{BorEvents, BorSpans}
+
+	CaplinSnapshotTypes = []Type{BeaconBlocks}
 )

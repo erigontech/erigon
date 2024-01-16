@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
@@ -27,64 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 )
-
-type BeaconBlockSegment struct {
-	Segment                 // value: chunked(ssz(SignedBeaconBlocks))
-	idxSlot *recsplit.Index // slot       -> beacon_slot_segment_offset
-}
-
-func (sn *BeaconBlockSegment) closeIdx() {
-	if sn.idxSlot != nil {
-		sn.idxSlot.Close()
-		sn.idxSlot = nil
-	}
-}
-
-func (sn *BeaconBlockSegment) close() {
-	sn.closeSeg()
-	sn.closeIdx()
-}
-
-func (sn *BeaconBlockSegment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if sn.idxSlot != nil {
-		return nil
-	}
-	err = sn.reopenIdx(dir)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			if optimistic {
-				log.Warn("[snapshots] open index", "err", err)
-			} else {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-func (sn *BeaconBlockSegment) reopenIdx(dir string) (err error) {
-	sn.closeIdx()
-	if sn.Decompressor == nil {
-		return nil
-	}
-	fileName := snaptype.IdxFileName(sn.version, sn.from, sn.to, snaptype.BeaconBlocks.String())
-	sn.idxSlot, err = recsplit.OpenIndex(filepath.Join(dir, fileName))
-	if err != nil {
-		return fmt.Errorf("%w, fileName: %s", err, fileName)
-	}
-	return nil
-}
-
-type beaconBlockSegments struct {
-	lock     sync.RWMutex
-	segments []*BeaconBlockSegment
-}
-
-func (s *beaconBlockSegments) View(f func(segments []*BeaconBlockSegment) error) error {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-	return f(s.segments)
-}
 
 func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath string, blockFrom, blockTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
@@ -120,11 +61,14 @@ func BeaconBlocksIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath 
 	return nil
 }
 
+// value: chunked(ssz(SignedBeaconBlocks))
+// slot       -> beacon_slot_segment_offset
+
 type CaplinSnapshots struct {
 	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
-	BeaconBlocks *beaconBlockSegments
+	BeaconBlocks *segments
 
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
@@ -143,7 +87,7 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, snapDir string, logger log.Logger) *CaplinSnapshots {
-	return &CaplinSnapshots{dir: snapDir, cfg: cfg, BeaconBlocks: &beaconBlockSegments{}, logger: logger, beaconCfg: beaconCfg}
+	return &CaplinSnapshots{dir: snapDir, cfg: cfg, BeaconBlocks: &segments{}, logger: logger, beaconCfg: beaconCfg}
 }
 
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
@@ -181,7 +125,7 @@ Loop:
 
 		switch f.Type.Enum() {
 		case snaptype.Enums.BeaconBlocks:
-			var sn *BeaconBlockSegment
+			var sn *Segment
 			var exists bool
 			for _, sn2 := range s.BeaconBlocks.segments {
 				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
@@ -194,7 +138,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &BeaconBlockSegment{Segment: Segment{segType: snaptype.Headers, version: f.Version, Range: Range{f.From, f.To}}}
+				sn = &Segment{segType: snaptype.Headers, version: f.Version, Range: Range{f.From, f.To}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
@@ -244,7 +188,7 @@ Loop:
 func (s *CaplinSnapshots) idxAvailability() uint64 {
 	var beaconBlocks uint64
 	for _, seg := range s.BeaconBlocks.segments {
-		if seg.idxSlot == nil {
+		if seg.Index() == nil {
 			break
 		}
 		beaconBlocks = seg.to - 1
@@ -313,9 +257,9 @@ func (v *CaplinView) Close() {
 
 }
 
-func (v *CaplinView) BeaconBlocks() []*BeaconBlockSegment { return v.s.BeaconBlocks.segments }
+func (v *CaplinView) BeaconBlocks() []*Segment { return v.s.BeaconBlocks.segments }
 
-func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*BeaconBlockSegment, bool) {
+func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*Segment, bool) {
 	for _, seg := range v.BeaconBlocks() {
 		if !(slot >= seg.from && slot < seg.to) {
 			continue
@@ -444,10 +388,12 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 		return nil, 0, libcommon.Hash{}, nil
 	}
 
-	if seg.idxSlot == nil {
+	idxSlot := seg.Index()
+
+	if idxSlot == nil {
 		return nil, 0, libcommon.Hash{}, nil
 	}
-	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
+	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
 	gg := seg.MakeGetter()
 	gg.Reset(blockOffset)

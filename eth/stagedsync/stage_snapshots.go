@@ -603,7 +603,7 @@ func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
 	}
 
 	if checkKnownSizes {
-		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, 1).Preverified {
+		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName).Preverified {
 			info, _ := snaptype.ParseFileName("", it.Name)
 
 			if fi.From == info.From {

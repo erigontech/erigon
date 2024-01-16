@@ -88,7 +88,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 	// - After "download once" - Erigon will produce and seed new files
 
 	// send all hashes to the Downloader service
-	snapCfg := snapcfg.KnownCfg(cc.ChainName, 0)
+	snapCfg := snapcfg.KnownCfg(cc.ChainName)
 	preverifiedBlockSnapshots := snapCfg.Preverified
 	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 

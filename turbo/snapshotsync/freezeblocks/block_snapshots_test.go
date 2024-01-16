@@ -47,7 +47,7 @@ func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, di
 			KeyCount:   1,
 			BucketSize: 10,
 			TmpDir:     dir,
-			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, snaptype.Transactions2Block.String())),
+			IndexFile:  filepath.Join(dir, snaptype.IdxFileName(1, from, to, snaptype.Indexes.TxnHash2BlockNum.String())),
 			LeafSize:   8,
 		}, logger)
 		require.NoError(t, err)
@@ -159,75 +159,79 @@ func TestCanRetire(t *testing.T) {
 }
 func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
-	dir, require := t.TempDir(), require.New(t)
-	chainSnapshotCfg := snapcfg.KnownCfg(networkname.MainnetChainName, 0)
-	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-	cfg := ethconfig.BlocksFreezing{Enabled: true}
-	createFile := func(from, to uint64, name snaptype.Type) {
-		createTestSegmentFile(t, from, to, name.Enum(), dir, 1, logger)
+	baseDir, require := t.TempDir(), require.New(t)
+
+	for _, chain := range []string{networkname.MainnetChainName, networkname.MumbaiChainName} {
+		dir := filepath.Join(baseDir, chain)
+		chainSnapshotCfg := snapcfg.KnownCfg(chain)
+		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
+		cfg := ethconfig.BlocksFreezing{Enabled: true}
+		createFile := func(from, to uint64, name snaptype.Type) {
+			createTestSegmentFile(t, from, to, name.Enum(), dir, 1, logger)
+		}
+		s := NewRoSnapshots(cfg, dir, logger)
+		defer s.Close()
+		err := s.ReopenFolder()
+		require.NoError(err)
+		require.Equal(0, len(s.Headers.segments))
+		s.Close()
+
+		createFile(500_000, 1_000_000, snaptype.Bodies)
+		s = NewRoSnapshots(cfg, dir, logger)
+		defer s.Close()
+		require.Equal(0, len(s.Bodies.segments)) //because, no headers and transactions snapshot files are created
+		s.Close()
+
+		createFile(500_000, 1_000_000, snaptype.Headers)
+		createFile(500_000, 1_000_000, snaptype.Transactions)
+		s = NewRoSnapshots(cfg, dir, logger)
+		err = s.ReopenFolder()
+		require.NoError(err)
+		require.Equal(0, len(s.Headers.segments))
+		s.Close()
+
+		createFile(0, 500_000, snaptype.Bodies)
+		createFile(0, 500_000, snaptype.Headers)
+		createFile(0, 500_000, snaptype.Transactions)
+		s = NewRoSnapshots(cfg, dir, logger)
+		defer s.Close()
+
+		err = s.ReopenFolder()
+		require.NoError(err)
+		require.Equal(2, len(s.Headers.segments))
+
+		view := s.View()
+		defer view.Close()
+
+		seg, ok := view.TxsSegment(10)
+		require.True(ok)
+		require.Equal(int(seg.to), 500_000)
+
+		seg, ok = view.TxsSegment(500_000)
+		require.True(ok)
+		require.Equal(int(seg.to), 1_000_000)
+
+		_, ok = view.TxsSegment(1_000_000)
+		require.False(ok)
+
+		// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
+		// ExpectedBlocks - says only how much block must come from Torrent
+		chainSnapshotCfg.ExpectBlocks = 500_000 - 1
+		s = NewRoSnapshots(cfg, dir, logger)
+		err = s.ReopenFolder()
+		require.NoError(err)
+		defer s.Close()
+		require.Equal(2, len(s.Headers.segments))
+
+		createFile(500_000, 900_000, snaptype.Headers)
+		createFile(500_000, 900_000, snaptype.Bodies)
+		createFile(500_000, 900_000, snaptype.Transactions)
+		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
+		s = NewRoSnapshots(cfg, dir, logger)
+		defer s.Close()
+		err = s.ReopenFolder()
+		require.NoError(err)
 	}
-	s := NewRoSnapshots(cfg, dir, logger)
-	defer s.Close()
-	err := s.ReopenFolder()
-	require.NoError(err)
-	require.Equal(0, len(s.Headers.segments))
-	s.Close()
-
-	createFile(500_000, 1_000_000, snaptype.Bodies)
-	s = NewRoSnapshots(cfg, dir, logger)
-	defer s.Close()
-	require.Equal(0, len(s.Bodies.segments)) //because, no headers and transactions snapshot files are created
-	s.Close()
-
-	createFile(500_000, 1_000_000, snaptype.Headers)
-	createFile(500_000, 1_000_000, snaptype.Transactions)
-	s = NewRoSnapshots(cfg, dir, logger)
-	err = s.ReopenFolder()
-	require.NoError(err)
-	require.Equal(0, len(s.Headers.segments))
-	s.Close()
-
-	createFile(0, 500_000, snaptype.Bodies)
-	createFile(0, 500_000, snaptype.Headers)
-	createFile(0, 500_000, snaptype.Transactions)
-	s = NewRoSnapshots(cfg, dir, logger)
-	defer s.Close()
-
-	err = s.ReopenFolder()
-	require.NoError(err)
-	require.Equal(2, len(s.Headers.segments))
-
-	view := s.View()
-	defer view.Close()
-
-	seg, ok := view.TxsSegment(10)
-	require.True(ok)
-	require.Equal(int(seg.to), 500_000)
-
-	seg, ok = view.TxsSegment(500_000)
-	require.True(ok)
-	require.Equal(int(seg.to), 1_000_000)
-
-	_, ok = view.TxsSegment(1_000_000)
-	require.False(ok)
-
-	// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
-	// ExpectedBlocks - says only how much block must come from Torrent
-	chainSnapshotCfg.ExpectBlocks = 500_000 - 1
-	s = NewRoSnapshots(cfg, dir, logger)
-	err = s.ReopenFolder()
-	require.NoError(err)
-	defer s.Close()
-	require.Equal(2, len(s.Headers.segments))
-
-	createFile(500_000, 900_000, snaptype.Headers)
-	createFile(500_000, 900_000, snaptype.Bodies)
-	createFile(500_000, 900_000, snaptype.Transactions)
-	chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-	s = NewRoSnapshots(cfg, dir, logger)
-	defer s.Close()
-	err = s.ReopenFolder()
-	require.NoError(err)
 }
 
 func TestParseCompressedFileName(t *testing.T) {
