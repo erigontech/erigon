@@ -76,10 +76,10 @@ var (
 		Usage: "Run with a devnet local Heimdall service",
 	}
 
-	HeimdallGrpcAddressFlag = cli.StringFlag{
-		Name:  "bor.heimdallgRPC",
-		Usage: "Address of Heimdall gRPC service",
-		Value: polygon.HeimdallGrpcAddressDefault,
+	HeimdallURLFlag = cli.StringFlag{
+		Name:  "bor.heimdall",
+		Usage: "URL of Heimdall service",
+		Value: polygon.HeimdallURLDefault,
 	}
 
 	BorSprintSizeFlag = cli.IntFlag{
@@ -165,7 +165,7 @@ func main() {
 		&BaseRpcPortFlag,
 		&WithoutHeimdallFlag,
 		&LocalHeimdallFlag,
-		&HeimdallGrpcAddressFlag,
+		&HeimdallURLFlag,
 		&BorSprintSizeFlag,
 		&MetricsEnabledFlag,
 		&MetricsNodeFlag,
@@ -408,9 +408,9 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
 			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		} else if ctx.Bool(LocalHeimdallFlag.Name) {
-			heimdallGrpcAddr := ctx.String(HeimdallGrpcAddressFlag.Name)
+			heimdallURL := ctx.String(HeimdallURLFlag.Name)
 			sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name))
-			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
+			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallURL, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		} else {
 			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		}

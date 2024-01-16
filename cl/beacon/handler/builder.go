@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -19,7 +19,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r 
 	}
 	defer tx.Rollback()
 
-	blockId, err := stateIdFromRequest(r)
+	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -44,7 +44,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r 
 	if root == headRoot {
 		s, cn := a.syncedData.HeadState()
 		defer cn()
-		return newBeaconResponse(state.ExpectedWithdrawals(s)).withFinalized(false), nil
+		return newBeaconResponse(state.ExpectedWithdrawals(s)).WithFinalized(false), nil
 	}
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
@@ -62,7 +62,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r 
 		if err != nil {
 			return nil, err
 		}
-		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).withFinalized(false), nil
+		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).WithFinalized(false), nil
 	}
 
 	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")

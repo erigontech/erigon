@@ -17,7 +17,7 @@ import (
 )
 
 type config struct {
-	heimdall    heimdall.IHeimdallClient
+	heimdall    heimdall.HeimdallClient
 	borDB       kv.RwDB
 	chainDB     kv.RwDB
 	blockReader services.BlockReader
@@ -30,7 +30,7 @@ type BorAPI interface {
 	GetRootHash(start uint64, end uint64) (string, error)
 }
 
-func Whitelist(heimdall heimdall.IHeimdallClient, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
+func Whitelist(heimdall heimdall.HeimdallClient, borDB kv.RwDB, chainDB kv.RwDB, blockReader services.BlockReader, logger log.Logger, borAPI BorAPI, closeCh chan struct{}) {
 	if !flags.Milestone {
 		return
 	}
@@ -96,7 +96,7 @@ func startNoAckMilestoneByIDService(config *config) {
 	RetryHeimdallHandler(handleNoAckMilestoneByID, config, tickerDuration, noAckMilestoneTimeout, fnName)
 }
 
-type heimdallHandler func(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error
+type heimdallHandler func(ctx context.Context, heimdallClient heimdall.HeimdallClient, config *config) error
 
 func RetryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration time.Duration, timeout time.Duration, fnName string) {
 	retryHeimdallHandler(fn, config, tickerDuration, timeout, fnName)
@@ -159,7 +159,7 @@ func retryHeimdallHandler(fn heimdallHandler, config *config, tickerDuration tim
 }
 
 // handleWhitelistCheckpoint handles the checkpoint whitelist mechanism.
-func handleWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
+func handleWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.HeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
@@ -179,7 +179,7 @@ func handleWhitelistCheckpoint(ctx context.Context, heimdallClient heimdall.IHei
 }
 
 // handleMilestone handles the milestone mechanism.
-func handleMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
+func handleMilestone(ctx context.Context, heimdallClient heimdall.HeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 
 	// Create a new bor verifier, which will be used to verify checkpoints and milestones
@@ -207,7 +207,7 @@ func handleMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallClien
 	return nil
 }
 
-func handleNoAckMilestone(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
+func handleNoAckMilestone(ctx context.Context, heimdallClient heimdall.HeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 	milestoneID, err := fetchNoAckMilestone(ctx, heimdallClient, config.logger)
 
@@ -224,7 +224,7 @@ func handleNoAckMilestone(ctx context.Context, heimdallClient heimdall.IHeimdall
 	return nil
 }
 
-func handleNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.IHeimdallClient, config *config) error {
+func handleNoAckMilestoneByID(ctx context.Context, heimdallClient heimdall.HeimdallClient, config *config) error {
 	service := whitelist.GetWhitelistingService()
 	milestoneIDs := service.GetMilestoneIDsList()
 

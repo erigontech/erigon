@@ -10,8 +10,6 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -22,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -250,7 +249,8 @@ type BlockReader struct {
 
 func NewBlockReader(snapshots services.BlockSnapshots, borSnapshots services.BlockSnapshots) *BlockReader {
 	borSn, _ := borSnapshots.(*BorRoSnapshots)
-	return &BlockReader{sn: snapshots.(*RoSnapshots), borSn: borSn}
+	sn, _ := snapshots.(*RoSnapshots)
+	return &BlockReader{sn: sn, borSn: borSn}
 }
 
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
@@ -485,7 +485,7 @@ func (r *BlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash c
 }
 func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64, forceCanonical bool) (block *types.Block, senders []common.Address, err error) {
 	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	if tx != nil && (maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles) {
 		if forceCanonical {
 			canonicalHash, err := rawdb.ReadCanonicalHash(tx, blockHeight)
 			if err != nil {
@@ -501,6 +501,10 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			return nil, nil, err
 		}
 		return block, senders, nil
+	}
+
+	if r.sn == nil {
+		return
 	}
 
 	view := r.sn.View()
@@ -1169,7 +1173,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 		return 0
 	}
 
-	lastSpanID := span.IDAt(lastSegment.to)
+	lastSpanID := bor.SpanIDAt(lastSegment.to)
 	if lastSpanID > 0 {
 		lastSpanID--
 	}
@@ -1179,7 +1183,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	var endBlock uint64
 	if spanId > 0 {
-		endBlock = span.EndBlockNum(spanId)
+		endBlock = bor.SpanEndBlockNum(spanId)
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1202,11 +1206,11 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx == nil {
 			continue
 		}
-		spanFrom := span.IDAt(sn.from)
+		spanFrom := bor.SpanIDAt(sn.from)
 		if spanId < spanFrom {
 			continue
 		}
-		spanTo := span.IDAt(sn.to)
+		spanTo := bor.SpanIDAt(sn.to)
 		if spanId >= spanTo {
 			continue
 		}

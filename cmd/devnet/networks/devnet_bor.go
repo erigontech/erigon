@@ -74,7 +74,7 @@ func NewBorDevnetWithHeimdall(
 	baseRpcHost string,
 	baseRpcPort int,
 	heimdall *polygon.Heimdall,
-	heimdallGrpcAddr string,
+	heimdallURL string,
 	checkpointOwner *accounts.Account,
 	producerCount int,
 	gasLimit uint64,
@@ -106,7 +106,7 @@ func NewBorDevnetWithHeimdall(
 			NodeArgs: args.NodeArgs{
 				ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
 				DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
-				HeimdallGrpcAddr: heimdallGrpcAddr,
+				HeimdallURL:      heimdallURL,
 			},
 			AccountSlots: 20000,
 		})
@@ -133,7 +133,7 @@ func NewBorDevnetWithHeimdall(
 			NodeArgs: args.NodeArgs{
 				ConsoleVerbosity: strconv.Itoa(int(consoleLogLevel)),
 				DirVerbosity:     strconv.Itoa(int(dirLogLevel)),
-				HeimdallGrpcAddr: heimdallGrpcAddr,
+				HeimdallURL:      heimdallURL,
 			},
 		}),
 	}
@@ -189,7 +189,7 @@ func NewBorDevnetWithRemoteHeimdall(
 	consoleLogLevel log.Lvl,
 	dirLogLevel log.Lvl,
 ) devnet.Devnet {
-	heimdallGrpcAddr := ""
+	heimdallURL := ""
 	checkpointOwner := accounts.NewAccount("checkpoint-owner")
 	withMilestones := utils.WithHeimdallMilestones.Value
 	return NewBorDevnetWithHeimdall(
@@ -197,7 +197,7 @@ func NewBorDevnetWithRemoteHeimdall(
 		baseRpcHost,
 		baseRpcPort,
 		nil,
-		heimdallGrpcAddr,
+		heimdallURL,
 		checkpointOwner,
 		producerCount,
 		gasLimit,
@@ -212,7 +212,7 @@ func NewBorDevnetWithLocalHeimdall(
 	dataDir string,
 	baseRpcHost string,
 	baseRpcPort int,
-	heimdallGrpcAddr string,
+	heimdallURL string,
 	sprintSize uint64,
 	producerCount int,
 	gasLimit uint64,
@@ -230,7 +230,7 @@ func NewBorDevnetWithLocalHeimdall(
 
 	heimdall := polygon.NewHeimdall(
 		&config,
-		heimdallGrpcAddr,
+		heimdallURL,
 		&polygon.CheckpointConfig{
 			CheckpointBufferTime: 60 * time.Second,
 			CheckpointAccount:    checkpointOwner,
@@ -243,7 +243,7 @@ func NewBorDevnetWithLocalHeimdall(
 		baseRpcHost,
 		baseRpcPort,
 		heimdall,
-		heimdallGrpcAddr,
+		heimdallURL,
 		checkpointOwner,
 		producerCount,
 		gasLimit,

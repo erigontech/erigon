@@ -22,7 +22,6 @@ var (
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
-	HeimdallgRPCAddress            string
 	HeimdallURL                    string
 	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                      string

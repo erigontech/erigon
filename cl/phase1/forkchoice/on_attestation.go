@@ -15,6 +15,9 @@ import (
 
 // OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool, insert bool) error {
+	if !f.synced.Load() {
+		return nil
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
@@ -70,6 +73,9 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 }
 
 func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
+	if !f.synced.Load() {
+		return nil
+	}
 	slot := aggregateAndProof.Message.Aggregate.AttestantionData().Slot()
 	selectionProof := aggregateAndProof.Message.SelectionProof
 	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().ValidatorIndex()
