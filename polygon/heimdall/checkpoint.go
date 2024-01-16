@@ -1,4 +1,4 @@
-package checkpoint
+package heimdall
 
 import (
 	"fmt"

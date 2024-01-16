@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/core/rawdb"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/generics"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 )
 
@@ -161,5 +160,5 @@ func rewindBack(head uint64, rewindTo uint64) {
 
 	// Chain cannot be rewinded from this routine
 	// hence we are using a shared variable
-	generics.BorMilestoneRewind.Store(&rewindTo)
+	BorMilestoneRewind.Store(&rewindTo)
 }

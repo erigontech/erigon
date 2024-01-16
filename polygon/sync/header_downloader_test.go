@@ -14,8 +14,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
@@ -80,11 +79,11 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) Peer
 	return peers
 }
 
-func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*checkpoint.Checkpoint {
-	checkpoints := make([]*checkpoint.Checkpoint, count)
+func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoint {
+	checkpoints := make([]*heimdall.Checkpoint, count)
 	for i := range checkpoints {
 		num := i + 1
-		checkpoints[i] = &checkpoint.Checkpoint{
+		checkpoints[i] = &heimdall.Checkpoint{
 			StartBlock: big.NewInt(int64(num)),
 			EndBlock:   big.NewInt(int64(num)),
 			RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
@@ -94,11 +93,11 @@ func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*checkpoint.Checkpo
 	return checkpoints
 }
 
-func (hdt headerDownloaderTest) fakeMilestones(count int) []*milestone.Milestone {
-	milestones := make([]*milestone.Milestone, count)
+func (hdt headerDownloaderTest) fakeMilestones(count int) []*heimdall.Milestone {
+	milestones := make([]*heimdall.Milestone, count)
 	for i := range milestones {
 		num := i + 1
-		milestones[i] = &milestone.Milestone{
+		milestones[i] = &heimdall.Milestone{
 			StartBlock: big.NewInt(int64(num)),
 			EndBlock:   big.NewInt(int64(num)),
 			Hash:       common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),

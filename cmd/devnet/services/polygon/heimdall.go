@@ -16,11 +16,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	ethereum "github.com/ledgerwatch/erigon"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -31,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 type BridgeEvent string
@@ -79,11 +75,11 @@ type Heimdall struct {
 	borConfig          *borcfg.BorConfig
 	listenAddr         string
 	validatorSet       *valset.ValidatorSet
-	pendingCheckpoint  *checkpoint.Checkpoint
+	pendingCheckpoint  *heimdall.Checkpoint
 	latestCheckpoint   *CheckpointAck
 	ackWaiter          *sync.Cond
-	currentSpan        *span.HeimdallSpan
-	spans              map[uint64]*span.HeimdallSpan
+	currentSpan        *heimdall.HeimdallSpan
+	spans              map[uint64]*heimdall.HeimdallSpan
 	logger             log.Logger
 	cancelFunc         context.CancelFunc
 	syncSenderAddress  libcommon.Address
@@ -109,7 +105,7 @@ func NewHeimdall(
 		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
 		listenAddr:         serverURL[7:],
 		checkpointConfig:   *checkpointConfig,
-		spans:              map[uint64]*span.HeimdallSpan{},
+		spans:              map[uint64]*heimdall.HeimdallSpan{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
 		logger:             logger}
 
@@ -146,7 +142,7 @@ func NewHeimdall(
 	return heimdall
 }
 
-func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
+func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.HeimdallSpan, error) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -155,7 +151,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 		return span, nil
 	}
 
-	var nextSpan = span.Span{
+	var nextSpan = heimdall.Span{
 		ID: spanID,
 	}
 
@@ -179,7 +175,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*span.HeimdallSpan,
 		selectedProducers[i] = *v
 	}
 
-	h.currentSpan = &span.HeimdallSpan{
+	h.currentSpan = &heimdall.HeimdallSpan{
 		Span:              nextSpan,
 		ValidatorSet:      *h.validatorSet,
 		SelectedProducers: selectedProducers,
@@ -205,7 +201,7 @@ func (h *Heimdall) getSpanOverrideHeight() uint64 {
 	//MumbaiChain: 10205000
 }
 
-func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*checkpoint.Checkpoint, error) {
+func (h *Heimdall) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -213,7 +209,7 @@ func (h *Heimdall) FetchCheckpointCount(ctx context.Context) (int64, error) {
 	return 0, fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*milestone.Milestone, error) {
+func (h *Heimdall) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -392,7 +388,7 @@ func (h *Heimdall) Start(ctx context.Context) error {
 	return startHTTPServer(ctx, server, "devnet Heimdall service", h.logger)
 }
 
-func makeHeimdallRouter(ctx context.Context, client heimdall.IHeimdallClient) *chi.Mux {
+func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *chi.Mux {
 	router := chi.NewRouter()
 
 	writeResponse := func(w http.ResponseWriter, result any, err error) {
@@ -492,7 +488,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.IHeimdallClient) *c
 
 	router.Get("/milestone/count", func(w http.ResponseWriter, r *http.Request) {
 		result, err := client.FetchMilestoneCount(ctx)
-		writeResponse(w, milestone.MilestoneCount{Count: result}, err)
+		writeResponse(w, heimdall.MilestoneCount{Count: result}, err)
 	})
 
 	router.Get("/milestone/noAck/{id}", func(w http.ResponseWriter, r *http.Request) {
