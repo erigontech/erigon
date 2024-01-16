@@ -691,7 +691,8 @@ Loop:
 		}
 
 		rules := chainConfig.Rules(blockNum, b.Time())
-		var gasUsed, blobGasUsed uint64
+		var receipts types.Receipts
+		var usedGas, blobGasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
 
 			// Do not oversend, wait for the result heap to go under certain size
@@ -714,6 +715,8 @@ Loop:
 
 				// use history reader instead of state reader to catch up to the tx where we left off
 				HistoryExecution: offsetFromBlockBeginning > 0 && txIndex < int(offsetFromBlockBeginning),
+
+				BlockReceipts: receipts,
 			}
 			doms.SetTxNum(txTask.TxNum)
 			doms.SetBlockNum(txTask.BlockNum)
@@ -761,17 +764,42 @@ Loop:
 					if txTask.Error != nil {
 						return fmt.Errorf("%w: %v", consensus.ErrInvalidBlock, txTask.Error) //same as in stage_exec.go
 					}
-					gasUsed += txTask.UsedGas
+					usedGas += txTask.UsedGas
 					if txTask.Tx != nil {
 						blobGasUsed += txTask.Tx.GetBlobGas()
 					}
 					if txTask.Final {
 						if txTask.BlockNum > 0 { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
-							if err := core.BlockPostValidation(gasUsed, blobGasUsed, txTask.Header); err != nil {
+							if err := core.BlockPostValidation(usedGas, blobGasUsed, txTask.Header); err != nil {
 								return fmt.Errorf("%w, %s", consensus.ErrInvalidBlock, err)
 							}
 						}
-						gasUsed, blobGasUsed = 0, 0
+						usedGas, blobGasUsed = 0, 0
+						receipts = receipts[:0]
+					} else {
+						if txTask.TxIndex >= 0 {
+							// by the tx.
+							receipt := &types.Receipt{
+								BlockNumber:       header.Number,
+								TransactionIndex:  uint(txTask.TxIndex),
+								Type:              txTask.Tx.Type(),
+								CumulativeGasUsed: usedGas,
+								TxHash:            txTask.Tx.Hash(),
+								Logs:              txTask.Logs,
+							}
+							if txTask.Failed {
+								receipt.Status = types.ReceiptStatusFailed
+							} else {
+								receipt.Status = types.ReceiptStatusSuccessful
+							}
+							// if the transaction created a contract, store the creation address in the receipt.
+							//if msg.To() == nil {
+							//	receipt.ContractAddress = crypto.CreateAddress(evm.Origin, tx.GetNonce())
+							//}
+							// Set the receipt logs and create a bloom for filtering
+							//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+							receipts = append(receipts, receipt)
+						}
 					}
 					return nil
 				}(); err != nil {
