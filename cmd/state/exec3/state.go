@@ -239,30 +239,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		//logconfig := &logger.LogConfig{
-		//	DisableMemory:     true,
-		//	DisableStack:      true,
-		//	DisableStorage:    false,
-		//	DisableReturnData: false,
-		//	Debug:             true,
-		//}
-		//rw.vmCfg.Tracer = logger.NewStructLogger(logconfig)
-
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
-		txTask.Failed = applyRes.Failed()
-
-		//if ftracer, ok := rw.vmCfg.Tracer.(vm.FlushableTracer); ok {
-		//	ftracer.Flush(txTask.Tx)
-		//}
 		if err != nil {
 			txTask.Error = err
 		} else {
-			//fmt.Printf("sender %v spent gas %d\n", txTask.TxAsMessage.From(), applyRes.UsedGas)
+			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
-			//fmt.Printf("txn %d usedGas=%d\n", txTask.TxNum, txTask.UsedGas)
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
