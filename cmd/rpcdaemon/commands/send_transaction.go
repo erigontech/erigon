@@ -5,13 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
-	"strings"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	txPoolProto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/log/v3"
+	"math/big"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -19,8 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/zk/zkchainconfig"
-	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates new message call transaction or a contract creation for previously-signed transactions.
@@ -36,8 +32,8 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	}
 	chainId := cc.ChainID
 
-	// [zkevm] - proxy the request if the chainID is ZK
-	if zkchainconfig.IsZk(chainId.Uint64()) {
+	// [zkevm] - proxy the request if the chainID is ZK and not a sequencer
+	if api.isZkNonSequencer(chainId) {
 		return api.sendTxZk(api.L2RpcUrl, encodedTx, chainId.Uint64())
 	}
 
@@ -90,24 +86,6 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 	}
 
 	return txn.Hash(), nil
-}
-
-func (api *APIImpl) sendTxZk(rpcUrl string, encodedTx hexutility.Bytes, chainId uint64) (common.Hash, error) {
-
-	res, err := client.JSONRPCCall(rpcUrl, "eth_sendRawTransaction", encodedTx)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
-	if res.Error != nil {
-		return common.Hash{}, fmt.Errorf("RPC error response: %s", res.Error.Message)
-	}
-
-	//hash comes in escaped quotes, so we trim them here
-	// \"0x1234\" -> 0x1234
-	hashHex := strings.Trim(string(res.Result), "\"")
-
-	return common.HexToHash(hashHex), nil
 }
 
 // SendTransaction implements eth_sendTransaction. Creates new message call transaction or a contract creation if the data field contains code.

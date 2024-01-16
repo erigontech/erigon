@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
+	"github.com/ledgerwatch/erigon/zk/txpool"
 )
 
 // NewDefaultZkStages creates stages for zk syncer (RPC mode)
@@ -92,6 +93,8 @@ func NewSequencerZkStages(ctx context.Context,
 	forkValidator *engineapi.ForkValidator,
 	engine consensus.Engine,
 	datastreamServer *datastreamer.StreamServer,
+	txPool *txpool.TxPool,
+	txPoolDb kv.RwDB,
 ) []*stagedsync.Stage {
 	dirs := cfg.Dirs
 	blockReader := snapshotsync.NewBlockReaderWithSnapshots(snapshots, cfg.TransactionsV3)
@@ -103,6 +106,7 @@ func NewSequencerZkStages(ctx context.Context,
 	return zkStages.SequencerZkStages(ctx,
 		stagedsync.StageCumulativeIndexCfg(db),
 		zkStages.StageDataStreamCatchupCfg(datastreamServer, db),
+		zkStages.StageSequencerInterhashesCfg(db),
 		zkStages.StageSequenceBlocksCfg(
 			db,
 			cfg.Prune,
@@ -117,11 +121,12 @@ func NewSequencerZkStages(ctx context.Context,
 			cfg.HistoryV3,
 			dirs,
 			blockReader,
-			controlServer.Hd,
 			cfg.Genesis,
 			cfg.Sync,
 			agg,
 			cfg.Zk,
+			txPool,
+			txPoolDb,
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3, agg),
 		zkStages.StageZkInterHashesCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg, cfg.Zk),

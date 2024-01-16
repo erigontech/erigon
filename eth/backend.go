@@ -58,9 +58,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	txpool2 "github.com/ledgerwatch/erigon-lib/txpool"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/zk/txpool/txpooluitl"
 
 	"github.com/ledgerwatch/erigon/chain"
 
@@ -115,6 +114,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
+	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
 )
 
@@ -733,6 +733,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.forkValidator,
 				backend.engine,
 				backend.dataStream,
+				backend.txPool2,
+				backend.txPool2DB,
 			)
 
 			backend.syncUnwindOrder = zkStages.ZkSequencerUnwindOrder
