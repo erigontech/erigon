@@ -217,7 +217,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 		}
 
-		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, rw.logger)
+		_, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, txTask.BlockReceipts, txTask.Withdrawals, rw.chain, syscall, rw.logger)
 		if err != nil {
 			txTask.Error = err
 		} else {
@@ -239,30 +239,15 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 		ibs.SetTxContext(txHash, txTask.BlockHash, txTask.TxIndex)
 		msg := txTask.TxAsMessage
 
-		//logconfig := &logger.LogConfig{
-		//	DisableMemory:     true,
-		//	DisableStack:      true,
-		//	DisableStorage:    false,
-		//	DisableReturnData: false,
-		//	Debug:             true,
-		//}
-		//rw.vmCfg.Tracer = logger.NewStructLogger(logconfig)
-
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
-
-		//if ftracer, ok := rw.vmCfg.Tracer.(vm.FlushableTracer); ok {
-		//	ftracer.Flush(txTask.Tx)
-		//}
-
 		if err != nil {
 			txTask.Error = err
 		} else {
-			//fmt.Printf("sender %v spent gas %d\n", txTask.TxAsMessage.From(), applyRes.UsedGas)
+			txTask.Failed = applyRes.Failed()
 			txTask.UsedGas = applyRes.UsedGas
-			//fmt.Printf("txn %d usedGas=%d\n", txTask.TxNum, txTask.UsedGas)
 			// Update the state with pending changes
 			ibs.SoftFinalise()
 			//txTask.Error = ibs.FinalizeTx(rules, noop)
