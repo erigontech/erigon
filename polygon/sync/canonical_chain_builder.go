@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"time"
@@ -10,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor"
 )
 
-//go:generate mockgen -destination=./mock/canonical_chain_builder_mock.go -package=mock . CanonicalChainBuilder
+//go:generate mockgen -destination=./canonical_chain_builder_mock.go -package=sync . CanonicalChainBuilder
 type CanonicalChainBuilder interface {
 	Reset(root *types.Header)
 	ContainsHash(hash libcommon.Hash) bool
@@ -36,20 +37,21 @@ type canonicalChainBuilderImpl struct {
 	root *forkTreeNode
 	tip  *forkTreeNode
 
-	difficultyCalc DifficultyCalculator
-
+	difficultyCalc  DifficultyCalculator
 	headerValidator HeaderValidator
+	spansCache      *SpansCache
 }
 
 func NewCanonicalChainBuilder(
 	root *types.Header,
 	difficultyCalc DifficultyCalculator,
 	headerValidator HeaderValidator,
+	spansCache *SpansCache,
 ) CanonicalChainBuilder {
 	impl := &canonicalChainBuilderImpl{
-		difficultyCalc: difficultyCalc,
-
+		difficultyCalc:  difficultyCalc,
 		headerValidator: headerValidator,
+		spansCache:      spansCache,
 	}
 	impl.Reset(root)
 	return impl
@@ -62,6 +64,9 @@ func (impl *canonicalChainBuilderImpl) Reset(root *types.Header) {
 		headerHash: root.Hash(),
 	}
 	impl.tip = impl.root
+	if impl.spansCache != nil {
+		impl.spansCache.Prune(root.Number.Uint64())
+	}
 }
 
 // depth-first search
@@ -137,18 +142,37 @@ func (impl *canonicalChainBuilderImpl) Prune(newRootNum uint64) error {
 	for newRoot.header.Number.Uint64() > newRootNum {
 		newRoot = newRoot.parent
 	}
-
 	impl.root = newRoot
+
+	if impl.spansCache != nil {
+		impl.spansCache.Prune(newRootNum)
+	}
 	return nil
 }
 
+// compareForkTreeNodes compares 2 fork tree nodes.
+// It returns a positive number if the chain ending at node1 is "better" than the chain ending at node2.
+// The better node belongs to the canonical chain, and it has:
+// * a greater total difficulty,
+// * or a smaller block number,
+// * or a lexicographically greater hash.
+// See: https://github.com/maticnetwork/bor/blob/master/core/forkchoice.go#L82
+func compareForkTreeNodes(node1 *forkTreeNode, node2 *forkTreeNode) int {
+	difficultyDiff := int64(node1.totalDifficulty) - int64(node2.totalDifficulty)
+	if difficultyDiff != 0 {
+		return int(difficultyDiff)
+	}
+	blockNumDiff := node1.header.Number.Cmp(node2.header.Number)
+	if blockNumDiff != 0 {
+		return -blockNumDiff
+	}
+	return bytes.Compare(node1.headerHash.Bytes(), node2.headerHash.Bytes())
+}
+
 func (impl *canonicalChainBuilderImpl) updateTipIfNeeded(tipCandidate *forkTreeNode) {
-	if tipCandidate.totalDifficulty > impl.tip.totalDifficulty {
+	if compareForkTreeNodes(tipCandidate, impl.tip) > 0 {
 		impl.tip = tipCandidate
 	}
-	// else if tipCandidate.totalDifficulty == impl.tip.totalDifficulty {
-	// TODO: is it possible? which one is selected?
-	// }
 }
 
 func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
@@ -200,7 +224,7 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 
 	// attach nodes for the new headers
 	for i, header := range headers {
-		if (header.Number == nil) && (header.Number.Uint64() != parent.header.Number.Uint64()+1) {
+		if (header.Number == nil) || (header.Number.Uint64() != parent.header.Number.Uint64()+1) {
 			return errors.New("canonicalChainBuilderImpl.Connect: invalid header.Number")
 		}
 

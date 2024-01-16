@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"fmt"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -11,25 +12,23 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 )
 
 type HeaderTimeValidator interface {
 	ValidateHeaderTime(header *types.Header, now time.Time, parent *types.Header) error
-	SetSpan(span *heimdallspan.HeimdallSpan)
 }
 
 type headerTimeValidatorImpl struct {
 	borConfig           *borcfg.BorConfig
-	span                *heimdallspan.HeimdallSpan
-	validatorSetFactory func() validatorSetInterface
+	spans               *SpansCache
+	validatorSetFactory func(headerNum uint64) validatorSetInterface
 	signaturesCache     *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
 
 func NewHeaderTimeValidator(
 	borConfig *borcfg.BorConfig,
-	span *heimdallspan.HeimdallSpan,
-	validatorSetFactory func() validatorSetInterface,
+	spans *SpansCache,
+	validatorSetFactory func(headerNum uint64) validatorSetInterface,
 	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) HeaderTimeValidator {
 	if signaturesCache == nil {
@@ -42,7 +41,7 @@ func NewHeaderTimeValidator(
 
 	impl := headerTimeValidatorImpl{
 		borConfig:           borConfig,
-		span:                span,
+		spans:               spans,
 		validatorSetFactory: validatorSetFactory,
 		signaturesCache:     signaturesCache,
 	}
@@ -54,18 +53,22 @@ func NewHeaderTimeValidator(
 	return &impl
 }
 
-func (impl *headerTimeValidatorImpl) makeValidatorSet() validatorSetInterface {
-	return valset.NewValidatorSet(impl.span.ValidatorSet.Validators)
-}
-
-func (impl *headerTimeValidatorImpl) SetSpan(span *heimdallspan.HeimdallSpan) {
-	impl.span = span
+func (impl *headerTimeValidatorImpl) makeValidatorSet(headerNum uint64) validatorSetInterface {
+	span := impl.spans.SpanAt(headerNum)
+	if span == nil {
+		return nil
+	}
+	return valset.NewValidatorSet(span.ValidatorSet.Validators)
 }
 
 func (impl *headerTimeValidatorImpl) ValidateHeaderTime(header *types.Header, now time.Time, parent *types.Header) error {
-	validatorSet := impl.validatorSetFactory()
+	headerNum := header.Number.Uint64()
+	validatorSet := impl.validatorSetFactory(headerNum)
+	if validatorSet == nil {
+		return fmt.Errorf("headerTimeValidatorImpl.ValidateHeaderTime: no span at %d", headerNum)
+	}
 
-	sprintNum := impl.borConfig.CalculateSprintNumber(header.Number.Uint64())
+	sprintNum := impl.borConfig.CalculateSprintNumber(headerNum)
 	if sprintNum > 0 {
 		validatorSet.IncrementProposerPriority(int(sprintNum))
 	}

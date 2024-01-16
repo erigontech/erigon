@@ -293,3 +293,7 @@ func (*BeaconBody) Static() bool {
 func (*BeaconBlock) Static() bool {
 	return false
 }
+
+func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
+	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
+}

@@ -7,8 +7,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
@@ -57,7 +55,7 @@ func TestSignerDifficulty(t *testing.T) {
 		libcommon.HexToAddress("01"),
 		libcommon.HexToAddress("02"),
 	}
-	validatorSetFactory := func() validatorSetInterface { return &testValidatorSetInterface{signers: signers} }
+	validatorSetFactory := func(uint64) validatorSetInterface { return &testValidatorSetInterface{signers: signers} }
 	calc := NewDifficultyCalculator(&borConfig, nil, validatorSetFactory, nil).(*difficultyCalculatorImpl)
 
 	var d uint64
@@ -123,9 +121,18 @@ func TestSignerDifficulty(t *testing.T) {
 
 func TestHeaderDifficultyNoSignature(t *testing.T) {
 	borConfig := borcfg.BorConfig{}
-	span := heimdallspan.HeimdallSpan{}
-	calc := NewDifficultyCalculator(&borConfig, &span, nil, nil)
+	spans := NewSpansCache()
+	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil)
 
 	_, err := calc.HeaderDifficulty(new(types.Header))
 	require.ErrorContains(t, err, "signature suffix missing")
+}
+
+func TestSignerDifficultyNoSpan(t *testing.T) {
+	borConfig := borcfg.BorConfig{}
+	spans := NewSpansCache()
+	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil).(*difficultyCalculatorImpl)
+
+	_, err := calc.signerDifficulty(libcommon.HexToAddress("00"), 0)
+	require.ErrorContains(t, err, "no span")
 }

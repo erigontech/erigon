@@ -1392,12 +1392,23 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 	if start > end || end > currentHeaderNumber {
 		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
-	blockHeaders := make([]*types.Header, end-start+1)
+	blockHeaders := make([]*types.Header, length)
 	for number := start; number <= end; number++ {
 		blockHeaders[number-start], _ = c.getHeaderByNumber(ctx, tx, number)
 	}
 
-	headers := make([][32]byte, NextPowerOfTwo(length))
+	hash, err := ComputeHeadersRootHash(blockHeaders)
+	if err != nil {
+		return "", err
+	}
+
+	hashStr := hex.EncodeToString(hash)
+	c.rootHashCache.Add(cacheKey, hashStr)
+	return hashStr, nil
+}
+
+func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
+	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
 	for i := 0; i < len(blockHeaders); i++ {
 		blockHeader := blockHeaders[i]
 		header := crypto.Keccak256(AppendBytes32(
@@ -1413,13 +1424,10 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
 	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
-		return "", err
+		return nil, err
 	}
-	root := hex.EncodeToString(tree.Root().Hash)
 
-	c.rootHashCache.Add(cacheKey, root)
-
-	return root, nil
+	return tree.Root().Hash, nil
 }
 
 func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Header, error) {
