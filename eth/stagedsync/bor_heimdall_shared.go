@@ -15,8 +15,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -92,7 +92,7 @@ func FetchSpanZeroForMiningIfNeeded(
 	ctx context.Context,
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
-	heimdallClient heimdall.IHeimdallClient,
+	heimdallClient heimdall.HeimdallClient,
 	logger log.Logger,
 ) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
@@ -120,8 +120,8 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	requiredSpanID := span.IDAt(toBlockNum)
-	if span.BlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+	requiredSpanID := bor.SpanIDAt(toBlockNum)
+	if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
 		requiredSpanID++
 	}
 
@@ -153,7 +153,7 @@ func fetchAndWriteHeimdallSpan(
 	ctx context.Context,
 	spanID uint64,
 	tx kv.RwTx,
-	heimdallClient heimdall.IHeimdallClient,
+	heimdallClient heimdall.HeimdallClient,
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {

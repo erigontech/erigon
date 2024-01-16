@@ -69,7 +69,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 	// Add the post-anchor public keys as surplus
 	for i := len(anchorPublicKeys) / length.Bytes48; i < len(validatorSet); i++ {
 		pos := i - len(anchorPublicKeys)/length.Bytes48
-		copy(publicKeys[pos*length.Bytes48:], validatorSet[i].PublicKeyBytes())
+		copy(publicKeys[pos*length.Bytes48:(pos+1)*length.Bytes48], validatorSet[i].PublicKeyBytes())
 	}
 
 	mixes := solid.NewHashVector(randaoMixesLength)
@@ -170,7 +170,7 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 			pks = append(pks, c.anchorPublicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
 		} else {
 			offset := uint64(len(c.anchorPublicKeys) / length.Bytes48)
-			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:])
+			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:(v-offset+1)*length.Bytes48])
 		}
 		return true
 	})

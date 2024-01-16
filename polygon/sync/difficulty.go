@@ -1,11 +1,11 @@
 package sync
 
 import (
+	"fmt"
+
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
-
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -16,20 +16,19 @@ import (
 
 type DifficultyCalculator interface {
 	HeaderDifficulty(header *types.Header) (uint64, error)
-	SetSpan(span *heimdallspan.HeimdallSpan)
 }
 
 type difficultyCalculatorImpl struct {
 	borConfig           *borcfg.BorConfig
-	span                *heimdallspan.HeimdallSpan
-	validatorSetFactory func() validatorSetInterface
+	spans               *SpansCache
+	validatorSetFactory func(headerNum uint64) validatorSetInterface
 	signaturesCache     *lru.ARCCache[libcommon.Hash, libcommon.Address]
 }
 
 func NewDifficultyCalculator(
 	borConfig *borcfg.BorConfig,
-	span *heimdallspan.HeimdallSpan,
-	validatorSetFactory func() validatorSetInterface,
+	spans *SpansCache,
+	validatorSetFactory func(headerNum uint64) validatorSetInterface,
 	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
 ) DifficultyCalculator {
 	if signaturesCache == nil {
@@ -42,7 +41,7 @@ func NewDifficultyCalculator(
 
 	impl := difficultyCalculatorImpl{
 		borConfig:           borConfig,
-		span:                span,
+		spans:               spans,
 		validatorSetFactory: validatorSetFactory,
 		signaturesCache:     signaturesCache,
 	}
@@ -54,12 +53,12 @@ func NewDifficultyCalculator(
 	return &impl
 }
 
-func (impl *difficultyCalculatorImpl) makeValidatorSet() validatorSetInterface {
-	return valset.NewValidatorSet(impl.span.ValidatorSet.Validators)
-}
-
-func (impl *difficultyCalculatorImpl) SetSpan(span *heimdallspan.HeimdallSpan) {
-	impl.span = span
+func (impl *difficultyCalculatorImpl) makeValidatorSet(headerNum uint64) validatorSetInterface {
+	span := impl.spans.SpanAt(headerNum)
+	if span == nil {
+		return nil
+	}
+	return valset.NewValidatorSet(span.ValidatorSet.Validators)
 }
 
 func (impl *difficultyCalculatorImpl) HeaderDifficulty(header *types.Header) (uint64, error) {
@@ -71,7 +70,10 @@ func (impl *difficultyCalculatorImpl) HeaderDifficulty(header *types.Header) (ui
 }
 
 func (impl *difficultyCalculatorImpl) signerDifficulty(signer libcommon.Address, headerNum uint64) (uint64, error) {
-	validatorSet := impl.validatorSetFactory()
+	validatorSet := impl.validatorSetFactory(headerNum)
+	if validatorSet == nil {
+		return 0, fmt.Errorf("difficultyCalculatorImpl.signerDifficulty: no span at %d", headerNum)
+	}
 
 	sprintNum := impl.borConfig.CalculateSprintNumber(headerNum)
 	if sprintNum > 0 {

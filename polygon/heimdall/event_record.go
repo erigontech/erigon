@@ -1,4 +1,4 @@
-package clerk
+package heimdall
 
 import (
 	"fmt"
@@ -46,4 +46,9 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 		LogIndex: e.LogIndex,
 		ChainID:  e.ChainID,
 	}
+}
+
+type StateSyncEventsResponse struct {
+	Height string                 `json:"height"`
+	Result []*EventRecordWithTime `json:"result"`
 }

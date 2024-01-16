@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality"
 
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 
@@ -471,7 +472,7 @@ func NewDefaultStages(ctx context.Context,
 	agg *state.AggregatorV3,
 	silkworm *silkworm.Silkworm,
 	forkValidator *engine_helpers.ForkValidator,
-	heimdallClient heimdall.IHeimdallClient,
+	heimdallClient heimdall.HeimdallClient,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	logger log.Logger,
@@ -487,7 +488,7 @@ func NewDefaultStages(ctx context.Context,
 
 	if heimdallClient != nil && flags.Milestone {
 		loopBreakCheck = func(int) bool {
-			return heimdall.MilestoneRewindPending()
+			return finality.IsMilestoneRewindPending()
 		}
 	}
 
