@@ -1,0 +1,32 @@
+tests:
+  - name: spec
+    actual:
+      handler: i
+      path: /eth/v1/config/spec
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.SlotsPerEpoch == 32
+       - actual.data.SlotsPerHistoricalRoot == 8192
+  - name: fork schedule
+    actual:
+      handler: i
+      path: /eth/v1/config/fork_schedule
+    compare:
+      exprs:
+       - actual_code == 200
+       - has(actual.data[0].current_version)
+       - has(actual.data[0].previous_version)
+       - has(actual.data[0].epoch)
+       - has(actual.data[1].current_version)
+       - has(actual.data[1].previous_version)
+       - has(actual.data[1].epoch)
+  - name: deposit contract
+    actual:
+      handler: i
+      path: /eth/v1/config/deposit_contract
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.address == "0x00000000219ab540356cBB839Cbe05303d7705Fa"
+       - actual.data.chain_id == "1"

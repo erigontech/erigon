@@ -22,8 +22,8 @@ type attesterDutyResponse struct {
 	Slot                    uint64            `json:"slot,string"`
 }
 
-func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
-	epoch, err := epochFromRequest(r)
+func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +33,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required", err).Error())
 	}
 	if len(idxsStr) == 0 {
-		return newBeaconResponse([]string{}).withOptimistic(false), nil
+		return newBeaconResponse([]string{}).WithOptimistic(false), nil
 	}
 	idxSet := map[int]struct{}{}
 	// convert the request to uint64
@@ -100,7 +100,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 				}
 			}
 		}
-		return newBeaconResponse(resp).withOptimistic(false), nil
+		return newBeaconResponse(resp).WithOptimistic(false), nil
 	}
 
 	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
@@ -159,5 +159,5 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			}
 		}
 	}
-	return newBeaconResponse(resp).withOptimistic(false), nil
+	return newBeaconResponse(resp).WithOptimistic(false), nil
 }

@@ -44,6 +44,11 @@ func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clp
 	}}, sentinel: sentinel, version: version}
 }
 
+func (a *ApiHandler) Init() {
+	a.o.Do(func() {
+		a.init()
+	})
+}
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r

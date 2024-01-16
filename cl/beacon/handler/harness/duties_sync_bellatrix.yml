@@ -1,0 +1,43 @@
+vars:
+  finalized_epoch: 99999999
+  head_slot: 160
+  head_epoch: 4
+tests:
+  - name: non empty indices
+    expect:
+      file: "duties_sync_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/sync/{{.Vars.head_epoch}}
+      method: post
+      body:
+       data: ["0","1","2","3","4","5","6","7","8","9"]
+    compare:
+      exprs:
+       - "actual_code == 200"
+       - "expect[0] == actual"
+  - name: empty index
+    expect:
+      file: "duties_sync_1"
+      fs: td
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/sync/{{.Vars.head_epoch}}
+      method: post
+      body:
+       data: []
+    compare:
+      exprs:
+       - "actual_code == 200"
+       - "expect[1] == actual"
+  - name: "404 giant epoch"
+    actual:
+      handler: i
+      path: /eth/v1/validator/duties/sync/999999999
+      method: post
+      body:
+       data: ["0","1","2","3","4","5","6","7","8","9"]
+    compare:
+      exprs:
+       - "actual_code == 404"
