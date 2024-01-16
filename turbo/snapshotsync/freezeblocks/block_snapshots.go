@@ -1540,7 +1540,6 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	if snapshots.IndicesMax() >= snapshots.SegmentsMax() {
 		return nil
 	}
-	snapshots.LogStat("missed-idx")
 	if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
 		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
@@ -1550,6 +1549,7 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	if !snapshots.SegmentsReady() {
 		return fmt.Errorf("not all snapshot segments are available")
 	}
+	snapshots.LogStat("missed-idx")
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()

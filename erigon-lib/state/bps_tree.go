@@ -312,3 +312,25 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 	}
 	return k, true, l, nil
 }
+
+func (b *BpsTree) Offsets() *eliasfano32.EliasFano { return b.offt }
+func (b *BpsTree) Distances() (map[int]int, error) {
+	distances := map[int]int{}
+	var prev int = -1
+	it := b.Offsets().Iterator()
+	for it.HasNext() {
+		j, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if prev > 0 {
+			dist := int(j) - prev
+			if _, ok := distances[dist]; !ok {
+				distances[dist] = 0
+			}
+			distances[dist]++
+		}
+		prev = int(j)
+	}
+	return distances, nil
+}

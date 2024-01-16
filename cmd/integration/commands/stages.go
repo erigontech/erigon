@@ -21,7 +21,6 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdallgrpc"
 
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
@@ -992,7 +991,6 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	defer sn.Close()
 	defer borSn.Close()
 	defer agg.Close()
-
 	if warmup {
 		return reset2.WarmupExec(ctx, db)
 	}
@@ -1554,7 +1552,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, version uint8, logger log.Log
 
 			_allSnapshotsSingleton.LogStat("all")
 			_allBorSnapshotsSingleton.LogStat("all")
-			db.View(context.Background(), func(tx kv.Tx) error {
+			_ = db.View(context.Background(), func(tx kv.Tx) error {
 				ac := _aggSingleton.MakeContext()
 				defer ac.Close()
 				ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
@@ -1765,11 +1763,7 @@ func initConsensusEngine(ctx context.Context, cc *chain2.Config, dir string, db 
 		consensusConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
-			if config.HeimdallgRPCAddress != "" {
-				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
-			} else {
-				heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
-			}
+			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
 		}
 	} else {
 		consensusConfig = &config.Ethash

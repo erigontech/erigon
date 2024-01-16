@@ -59,7 +59,7 @@ func TestDynamicTxAnyNode(t *testing.T) {
 
 func TestCallContract(t *testing.T) {
 	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("fix me")
+		t.Skip("fix me: timeout")
 	}
 	runCtx, err := ContextStart(t, "")
 	require.Nil(t, err)

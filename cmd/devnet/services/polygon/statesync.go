@@ -42,7 +42,7 @@ func (h *Heimdall) startStateSyncSubscription() {
 	}
 }
 
-func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64, limit int) (uint64, []*clerk.EventRecordWithTime, error) {
+func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*clerk.EventRecordWithTime, error) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -72,19 +72,14 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 	if len(events) == 0 {
 		h.logger.Info("Processed sync request", "from", fromID, "to", time.Unix(to, 0), "min-time", minEventTime,
 			"pending", len(h.pendingSyncRecords), "filtered", len(events))
-		return 0, nil, nil
+		return nil, nil
 	}
 
 	sort.Slice(events, func(i, j int) bool {
 		return events[i].ID < events[j].ID
 	})
 
-	if len(events) > limit {
-		events = events[0 : limit-1]
-	}
-
 	eventsWithTime := make([]*clerk.EventRecordWithTime, len(events))
-
 	for i, event := range events {
 		eventsWithTime[i] = &event.EventRecordWithTime
 	}
@@ -98,7 +93,7 @@ func (h *Heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64,
 		"pending", len(h.pendingSyncRecords), "filtered", len(events),
 		"sent", fmt.Sprintf("%d-%d", events[0].ID, events[len(events)-1].ID))
 
-	return events[len(events)-1].BlockNumber, eventsWithTime, nil
+	return eventsWithTime, nil
 }
 
 // handleStateSyncEvent - handle state sync event from rootchain

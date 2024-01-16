@@ -404,13 +404,42 @@ func doDiff(cliCtx *cli.Context) error {
 }
 
 func doMeta(cliCtx *cli.Context) error {
-	srcF := cliCtx.String("src")
-	src, err := compress.NewDecompressor(srcF)
-	if err != nil {
-		return err
+	fname := cliCtx.String("src")
+	if strings.HasSuffix(fname, ".seg") {
+		src, err := compress.NewDecompressor(fname)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
+	} else if strings.HasSuffix(fname, ".bt") {
+		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
+		src, err := compress.NewDecompressor(kvFPath)
+		if err != nil {
+			return err
+		}
+		defer src.Close()
+		bt, err := libstate.OpenBtreeIndexWithDecompressor(fname, libstate.DefaultBtreeM, src, libstate.CompressNone)
+		if err != nil {
+			return err
+		}
+		defer bt.Close()
+
+		distances, err := bt.Distances()
+		if err != nil {
+			return err
+		}
+		for i := range distances {
+			distances[i] /= 100_000
+		}
+		for i := range distances {
+			if distances[i] == 0 {
+				delete(distances, i)
+			}
+		}
+
+		log.Info("meta", "distances(*100K)", fmt.Sprintf("%v", distances))
 	}
-	defer src.Close()
-	log.Info("meta", "count", src.Count(), "size", src.Size(), "name", src.FileName())
 	return nil
 }
 
