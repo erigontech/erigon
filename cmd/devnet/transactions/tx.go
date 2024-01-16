@@ -141,24 +141,17 @@ func SendTxLoad(ctx context.Context, to, from string, amount uint64, txPerSec ui
 	for {
 		start := time.Now()
 
-		lowtx, hightx, err := CreateManyEIP1559TransactionsRefWithBaseFee2(ctx, to, from, int(batchCount))
+		tx, err := CreateManyEIP1559TransactionsHigherThanBaseFee(ctx, to, from, int(batchCount))
 
 		if err != nil {
 			logger.Error("failed Create Txs", "error", err)
 			return err
 		}
 
-		_, err = SendManyTransactions(ctx, lowtx)
+		_, err = SendManyTransactions(ctx, tx)
 
 		if err != nil {
 			logger.Error("failed SendManyTransactions(higherThanBaseFeeTxs)", "error", err)
-			return err
-		}
-
-		_, err = SendManyTransactions(ctx, hightx)
-
-		if err != nil {
-			logger.Error("failed SendManyTransactions(lowerThanBaseFeeTxs)", "error", err)
 			return err
 		}
 
@@ -248,6 +241,33 @@ func CreateManyEIP1559TransactionsRefWithBaseFee2(ctx context.Context, to, from 
 	}
 
 	return lowerBaseFeeTransactions, higherBaseFeeTransactions, nil
+}
+
+func CreateManyEIP1559TransactionsHigherThanBaseFee(ctx context.Context, to, from string, count int) ([]types.Transaction, error) {
+	toAddress := libcommon.HexToAddress(to)
+	fromAddress := libcommon.HexToAddress(from)
+
+	baseFeePerGas, err := blocks.BaseFeeFromBlock(ctx)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed BaseFeeFromBlock: %v", err)
+	}
+
+	baseFeePerGas = baseFeePerGas * 2
+
+	devnet.Logger(ctx).Info("BaseFeePerGas2", "val", baseFeePerGas)
+
+	node := devnet.SelectNode(ctx)
+
+	res, err := node.GetTransactionCount(fromAddress, rpc.PendingBlock)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get transaction count for address 0x%x: %v", fromAddress, err)
+	}
+
+	nonce := res.Uint64()
+
+	return signEIP1559TxsHigherThanBaseFee(ctx, count, baseFeePerGas, &nonce, toAddress, fromAddress)
 }
 
 // createNonContractTx returns a signed transaction and the recipient address
@@ -345,7 +365,7 @@ func signEIP1559TxsLowerThanBaseFee(ctx context.Context, n int, baseFeePerGas ui
 
 		transaction := types.NewEIP1559Transaction(chainId, *nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
 
-		devnet.Logger(ctx).Info("LOWER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
+		devnet.Logger(ctx).Trace("LOWER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
 
 		signedTransaction, err := types.SignTx(transaction, signer, accounts.SigKey(fromAddress))
 
@@ -386,7 +406,7 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 
 		transaction := types.NewEIP1559Transaction(chainId, *nonce, toAddress, uint256.NewInt(value), uint64(210_000), uint256.NewInt(gasPrice), new(uint256.Int), uint256.NewInt(gasFeeCap), nil)
 
-		devnet.Logger(ctx).Info("HIGHER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
+		devnet.Logger(ctx).Trace("HIGHER", "transaction", i, "nonce", transaction.Nonce, "value", transaction.Value, "feecap", transaction.FeeCap)
 
 		signerKey := accounts.SigKey(fromAddress)
 		if signerKey == nil {
@@ -408,7 +428,7 @@ func signEIP1559TxsHigherThanBaseFee(ctx context.Context, n int, baseFeePerGas u
 func SendManyTransactions(ctx context.Context, signedTransactions []types.Transaction) ([]libcommon.Hash, error) {
 	logger := devnet.Logger(ctx)
 
-	logger.Info("Sending multiple transactions to the txpool...")
+	logger.Info(fmt.Sprintf("Sending %d transactions to the txpool...", len(signedTransactions)))
 	hashes := make([]libcommon.Hash, len(signedTransactions))
 
 	for idx, tx := range signedTransactions {

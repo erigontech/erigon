@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/rawdbhelpers"
 	"github.com/ledgerwatch/erigon/core/state"
-	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -191,14 +190,6 @@ func ExecV3(ctx context.Context,
 					}
 				}
 			}
-		}
-	}
-	if initialCycle {
-		if casted, ok := applyTx.(*temporal.Tx); ok {
-			casted.AggCtx().(*state2.AggregatorV3Context).LogStats(casted, func(endTxNumMinimax uint64) uint64 {
-				_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(casted, endTxNumMinimax)
-				return histBlockNumProgress
-			})
 		}
 	}
 

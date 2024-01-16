@@ -57,7 +57,7 @@ func (e *Eth1Header) Capella() {
 	e.WithdrawalsRoot = libcommon.Hash{}
 }
 
-// Capella converts the header to capella version.
+// Deneb converts the header to deneb version.
 func (e *Eth1Header) Deneb() {
 	e.version = clparams.DenebVersion
 	e.BlobGasUsed = 0

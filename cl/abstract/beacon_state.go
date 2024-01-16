@@ -40,6 +40,7 @@ type BeaconStateExtension interface {
 	ValidatorIndexByPubkey(key [48]byte) (uint64, bool)
 	PreviousStateRoot() common.Hash
 	SetPreviousStateRoot(root common.Hash)
+	GetValidatorActivationChurnLimit() uint64
 }
 
 type BeaconStateBasic interface {

@@ -220,3 +220,16 @@ func (f *ForkChoiceStorageMock) OnBlsToExecutionChange(signedChange *cltypes.Sig
 func (f *ForkChoiceStorageMock) ForkNodes() []ForkNode {
 	return f.WeightsMock
 }
+
+func (f *ForkChoiceStorageMock) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
+	f.Pool.AttestationsPool.Insert(aggregateAndProof.Message.Aggregate.Signature(), aggregateAndProof.Message.Aggregate)
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) Synced() bool {
+	return true
+}
+
+func (f *ForkChoiceStorageMock) SetSynced(synced bool) {
+	panic("implement me")
+}

@@ -20,8 +20,8 @@ type syncDutyResponse struct {
 	ValidatorSyncCommitteeIndicies []string          `json:"validator_sync_committee_indicies"`
 }
 
-func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
-	epoch, err := epochFromRequest(r)
+func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
@@ -34,7 +34,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err).Error())
 	}
 	if len(idxsStr) == 0 {
-		return newBeaconResponse([]string{}).withOptimistic(false), nil
+		return newBeaconResponse([]string{}).WithOptimistic(false), nil
 	}
 	duplicates := map[int]struct{}{}
 	// convert the request to uint64
@@ -142,5 +142,5 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		return duties[i].ValidatorIndex < duties[j].ValidatorIndex
 	})
 
-	return newBeaconResponse(duties).withOptimistic(false), nil
+	return newBeaconResponse(duties).WithOptimistic(false), nil
 }

@@ -6,13 +6,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	dbg "runtime/debug"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
@@ -22,16 +22,16 @@ import (
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
+	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/log/v3"
-
+	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
 	erigon_app "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -76,10 +76,10 @@ var (
 		Usage: "Run with a devnet local Heimdall service",
 	}
 
-	HeimdallGrpcAddressFlag = cli.StringFlag{
-		Name:  "bor.heimdallgRPC",
-		Usage: "Address of Heimdall gRPC service",
-		Value: polygon.HeimdallGrpcAddressDefault,
+	HeimdallURLFlag = cli.StringFlag{
+		Name:  "bor.heimdall",
+		Usage: "URL of Heimdall service",
+		Value: polygon.HeimdallURLDefault,
 	}
 
 	BorSprintSizeFlag = cli.IntFlag{
@@ -131,6 +131,12 @@ var (
 		Value: 1,
 	}
 
+	GasLimitFlag = cli.Uint64Flag{
+		Name:  "gaslimit",
+		Usage: "Target gas limit for mined blocks",
+		Value: 0,
+	}
+
 	WaitFlag = cli.BoolFlag{
 		Name:  "wait",
 		Usage: "Wait until interrupted after all scenarios have run",
@@ -159,7 +165,7 @@ func main() {
 		&BaseRpcPortFlag,
 		&WithoutHeimdallFlag,
 		&LocalHeimdallFlag,
-		&HeimdallGrpcAddressFlag,
+		&HeimdallURLFlag,
 		&BorSprintSizeFlag,
 		&MetricsEnabledFlag,
 		&MetricsNodeFlag,
@@ -173,6 +179,7 @@ func main() {
 		&logging.LogVerbosityFlag,
 		&logging.LogConsoleVerbosityFlag,
 		&logging.LogDirVerbosityFlag,
+		&GasLimitFlag,
 	}
 
 	if err := app.Run(os.Args); err != nil {
@@ -342,21 +349,74 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 	baseRpcHost := ctx.String(BaseRpcHostFlag.Name)
 	baseRpcPort := ctx.Int(BaseRpcPortFlag.Name)
 	producerCount := int(ctx.Uint(BlockProducersFlag.Name))
+	gasLimit := ctx.Uint64(GasLimitFlag.Name)
+
+	var dirLogLevel log.Lvl = log.LvlTrace
+	var consoleLogLevel log.Lvl = log.LvlCrit
+
+	if ctx.IsSet(logging.LogVerbosityFlag.Name) {
+		lvlVal := ctx.String(logging.LogVerbosityFlag.Name)
+
+		i, err := strconv.Atoi(lvlVal)
+
+		lvl := log.Lvl(i)
+
+		if err != nil {
+			lvl, err = log.LvlFromString(lvlVal)
+		}
+
+		if err == nil {
+			consoleLogLevel = lvl
+			dirLogLevel = lvl
+		}
+	} else {
+		if ctx.IsSet(logging.LogConsoleVerbosityFlag.Name) {
+			lvlVal := ctx.String(logging.LogConsoleVerbosityFlag.Name)
+
+			i, err := strconv.Atoi(lvlVal)
+
+			lvl := log.Lvl(i)
+
+			if err != nil {
+				lvl, err = log.LvlFromString(lvlVal)
+			}
+
+			if err == nil {
+				consoleLogLevel = lvl
+			}
+		}
+
+		if ctx.IsSet(logging.LogDirVerbosityFlag.Name) {
+			lvlVal := ctx.String(logging.LogDirVerbosityFlag.Name)
+
+			i, err := strconv.Atoi(lvlVal)
+
+			lvl := log.Lvl(i)
+
+			if err != nil {
+				lvl, err = log.LvlFromString(lvlVal)
+			}
+
+			if err == nil {
+				dirLogLevel = lvl
+			}
+		}
+	}
 
 	switch chainName {
 	case networkname.BorDevnetChainName:
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
-			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, logger), nil
+			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		} else if ctx.Bool(LocalHeimdallFlag.Name) {
-			heimdallGrpcAddr := ctx.String(HeimdallGrpcAddressFlag.Name)
+			heimdallURL := ctx.String(HeimdallURLFlag.Name)
 			sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name))
-			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, logger), nil
+			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallURL, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		} else {
-			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, logger), nil
+			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		}
 
 	case networkname.DevChainName:
-		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, logger), nil
+		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 
 	default:
 		return nil, fmt.Errorf("unknown network: '%s'", chainName)

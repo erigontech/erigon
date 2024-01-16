@@ -44,6 +44,11 @@ func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clp
 	}}, sentinel: sentinel, version: version}
 }
 
+func (a *ApiHandler) Init() {
+	a.o.Do(func() {
+		a.init()
+	})
+}
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
@@ -119,7 +124,7 @@ func (a *ApiHandler) init() {
 				r.Get("/blinded_blocks/{slot}", http.NotFound)
 				r.Get("/attestation_data", http.NotFound)
 				r.Get("/aggregate_attestation", http.NotFound)
-				r.Post("/aggregate_and_proofs", http.NotFound)
+				r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 				r.Post("/beacon_committee_subscriptions", http.NotFound)
 				r.Post("/sync_committee_subscriptions", http.NotFound)
 				r.Get("/sync_committee_contribution", http.NotFound)

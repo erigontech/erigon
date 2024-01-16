@@ -11,29 +11,29 @@ import (
 	"github.com/ledgerwatch/erigon/cl/gossip"
 )
 
-func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	return newBeaconResponse(a.operationsPool.VoluntaryExistsPool.Raw()), nil
 }
 
-func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	fmt.Println("GetEthV1BeaconPoolAttesterSlashings", a.operationsPool.AttesterSlashingsPool.Raw())
 	return newBeaconResponse(a.operationsPool.AttesterSlashingsPool.Raw()), nil
 }
 
-func (a *ApiHandler) GetEthV1BeaconPoolProposerSlashings(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconPoolProposerSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	return newBeaconResponse(a.operationsPool.ProposerSlashingsPool.Raw()), nil
 }
 
-func (a *ApiHandler) GetEthV1BeaconPoolBLSExecutionChanges(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconPoolBLSExecutionChanges(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	return newBeaconResponse(a.operationsPool.BLSToExecutionChangesPool.Raw()), nil
 }
 
-func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
-	slot, err := uint64FromQueryParams(r, "slot")
+func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
-	committeeIndex, err := uint64FromQueryParams(r, "committee_index")
+	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -190,4 +190,36 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 	// Only write 200
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter, r *http.Request) {
+	req := []*cltypes.SignedAggregateAndProof{}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	failures := []poolingFailure{}
+	for _, v := range req {
+		if err := a.forkchoiceStore.OnAggregateAndProof(v, false); err != nil {
+			failures = append(failures, poolingFailure{Index: len(failures), Message: err.Error()})
+			continue
+		}
+		// Broadcast to gossip
+		if a.sentinel != nil {
+			encodedSSZ, err := v.EncodeSSZ(nil)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if _, err := a.sentinel.PublishGossip(r.Context(), &sentinel.GossipData{
+				Data: encodedSSZ,
+				Name: gossip.TopicNameBeaconAggregateAndProof,
+			}); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+	}
 }

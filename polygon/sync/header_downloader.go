@@ -13,12 +13,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/sync/peerinfo"
 )
 
 const headerDownloaderLogPrefix = "HeaderDownloader"
 
-func NewHeaderDownloader(logger log.Logger, sentry Sentry, db DB, heimdall Heimdall, verify HeaderVerifier) *HeaderDownloader {
+func NewHeaderDownloader(logger log.Logger, sentry Sentry, db DB, heimdall Heimdall, verify StatePointHeadersVerifier) *HeaderDownloader {
 	statePointHeadersMemo, err := lru.New[common.Hash, []*types.Header](sentry.MaxPeers())
 	if err != nil {
 		panic(err)
@@ -39,7 +38,7 @@ type HeaderDownloader struct {
 	sentry                Sentry
 	db                    DB
 	heimdall              Heimdall
-	verify                HeaderVerifier
+	verify                StatePointHeadersVerifier
 	statePointHeadersMemo *lru.Cache[common.Hash, []*types.Header] // statePoint.rootHash->[headers part of state point]
 }
 
@@ -194,9 +193,9 @@ func (hd *HeaderDownloader) downloadUsingStatePoints(ctx context.Context, stateP
 }
 
 // choosePeers assumes peers are sorted in ascending order based on block num
-func (hd *HeaderDownloader) choosePeers(peers peerinfo.PeersWithBlockNumInfo, statePoints statePoints) peerinfo.PeersWithBlockNumInfo {
+func (hd *HeaderDownloader) choosePeers(peers PeersWithBlockNumInfo, statePoints statePoints) PeersWithBlockNumInfo {
 	var peersIdx int
-	chosenPeers := make(peerinfo.PeersWithBlockNumInfo, 0, len(peers))
+	chosenPeers := make(PeersWithBlockNumInfo, 0, len(peers))
 	for _, statePoint := range statePoints {
 		if peersIdx >= len(peers) {
 			break
