@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -115,6 +116,8 @@ type ForkChoiceStore struct {
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
+
+	synced atomic.Bool
 }
 
 type LatestMessage struct {
@@ -468,4 +471,16 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 		return forkNodes[i].Slot < forkNodes[j].Slot
 	})
 	return forkNodes
+}
+
+func (f *ForkChoiceStore) Synced() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.synced.Load()
+}
+
+func (f *ForkChoiceStore) SetSynced(s bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.synced.Store(s)
 }

@@ -23,9 +23,9 @@ func initDevnet(chainName string, dataDir string, producerCount int, gasLimit ui
 
 	switch chainName {
 	case networkname.BorDevnetChainName:
-		heimdallGrpcAddr := polygon.HeimdallGrpcAddressDefault
+		heimdallURL := polygon.HeimdallURLDefault
 		const sprintSize uint64 = 0
-		return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
+		return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallURL, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 
 	case networkname.DevChainName:
 		return networks.NewDevDevnet(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil

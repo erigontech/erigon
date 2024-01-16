@@ -12,14 +12,12 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 
 	"github.com/golang/mock/gomock"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
-
-	heimdallmock "github.com/ledgerwatch/erigon/polygon/heimdall/mock"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -36,9 +34,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/clerk"
-	"github.com/ledgerwatch/erigon/polygon/bor/contract"
-	bormock "github.com/ledgerwatch/erigon/polygon/bor/mock"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
@@ -53,7 +48,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	blockReader := m.BlockReader
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
-	heimdallClient := heimdallmock.NewMockIHeimdallClient(ctrl)
+	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
@@ -102,7 +97,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		heimdallClient:            heimdallClient,
 		heimdallProducersOverride: cfg.GetOrCreateDefaultHeimdallProducersOverride(),
 		sealedHeaders:             make(map[uint64]*types.Header),
-		borSpanner:                bormock.NewMockSpanner(ctrl),
+		borSpanner:                bor.NewMockSpanner(ctrl),
 		validatorAddress:          validatorAddress,
 		validatorKey:              validatorKey,
 		genesisInitData:           genesisInit,
@@ -151,13 +146,13 @@ type Harness struct {
 	stateSyncStages            []*stagedsync.Stage
 	stateSync                  *stagedsync.Sync
 	bhCfg                      stagedsync.BorHeimdallCfg
-	heimdallClient             *heimdallmock.MockIHeimdallClient
-	heimdallNextMockSpan       *span.HeimdallSpan
+	heimdallClient             *heimdall.MockHeimdallClient
+	heimdallNextMockSpan       *heimdall.HeimdallSpan
 	heimdallLastEventID        uint64
 	heimdallLastEventHeaderNum uint64
 	heimdallProducersOverride  map[uint64][]valset.Validator // spanID -> selected producers override
 	sealedHeaders              map[uint64]*types.Header
-	borSpanner                 *bormock.MockSpanner
+	borSpanner                 *bor.MockSpanner
 	validatorAddress           libcommon.Address
 	validatorKey               *ecdsa.PrivateKey
 	genesisInitData            *genesisInitData
@@ -222,7 +217,7 @@ func (h *Harness) RunStageForwardWithReturnError(t *testing.T, id stages.SyncSta
 	return stage.Forward(true, false, stageState, h.stateSync, wrap.TxContainer{}, h.logger)
 }
 
-func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*span.HeimdallSpan, err error) {
+func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.HeimdallSpan, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
 		spanIter, err := tx.Range(kv.BorSpans, nil, nil)
 		if err != nil {
@@ -236,7 +231,7 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*span.HeimdallSp
 			}
 
 			spanKey := binary.BigEndian.Uint64(keyBytes)
-			var heimdallSpan span.HeimdallSpan
+			var heimdallSpan heimdall.HeimdallSpan
 			if err = json.Unmarshal(spanBytes, &heimdallSpan); err != nil {
 				return err
 			}
@@ -425,7 +420,7 @@ func (h *Harness) seal(t *testing.T, chr consensus.ChainHeaderReader, eng consen
 
 func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine {
 	if h.chainConfig.Bor != nil {
-		genesisContracts := contract.NewGenesisContractsClient(
+		genesisContracts := bor.NewGenesisContractsClient(
 			h.chainConfig,
 			h.borConfig.ValidatorContract,
 			h.borConfig.StateReceiverContract,
@@ -517,8 +512,8 @@ func (h *Harness) setHeimdallNextMockSpan() {
 		selectedProducers[i] = *validators[i]
 	}
 
-	h.heimdallNextMockSpan = &span.HeimdallSpan{
-		Span: span.Span{
+	h.heimdallNextMockSpan = &heimdall.HeimdallSpan{
+		Span: heimdall.Span{
 			ID:         0,
 			StartBlock: 0,
 			EndBlock:   255,
@@ -553,10 +548,10 @@ func (h *Harness) mockHeimdallClient() {
 	h.heimdallClient.
 		EXPECT().
 		Span(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, spanID uint64) (*span.HeimdallSpan, error) {
+		DoAndReturn(func(ctx context.Context, spanID uint64) (*heimdall.HeimdallSpan, error) {
 			res := h.heimdallNextMockSpan
-			h.heimdallNextMockSpan = &span.HeimdallSpan{
-				Span: span.Span{
+			h.heimdallNextMockSpan = &heimdall.HeimdallSpan{
+				Span: heimdall.Span{
 					ID:         res.ID + 1,
 					StartBlock: res.EndBlock + 1,
 					EndBlock:   res.EndBlock + 6400,
@@ -576,12 +571,12 @@ func (h *Harness) mockHeimdallClient() {
 	h.heimdallClient.
 		EXPECT().
 		StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*clerk.EventRecordWithTime, error) {
+		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*heimdall.EventRecordWithTime, error) {
 			h.heimdallLastEventID++
 			h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
 			stateSyncDelay := h.borConfig.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)
-			newEvent := clerk.EventRecordWithTime{
-				EventRecord: clerk.EventRecord{
+			newEvent := heimdall.EventRecordWithTime{
+				EventRecord: heimdall.EventRecord{
 					ID:      h.heimdallLastEventID,
 					ChainID: h.chainConfig.ChainID.String(),
 				},
@@ -589,7 +584,7 @@ func (h *Harness) mockHeimdallClient() {
 			}
 
 			// 1 per sprint
-			return []*clerk.EventRecordWithTime{&newEvent}, nil
+			return []*heimdall.EventRecordWithTime{&newEvent}, nil
 		}).
 		AnyTimes()
 }

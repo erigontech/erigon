@@ -9,9 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon/core/types"
+	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 type testDifficultyCalculator struct {
@@ -34,7 +33,7 @@ func makeRoot() *types.Header {
 
 func makeCCB(root *types.Header) CanonicalChainBuilder {
 	difficultyCalc := testDifficultyCalculator{}
-	builder := NewCanonicalChainBuilder(root, &difficultyCalc)
+	builder := NewCanonicalChainBuilder(root, &difficultyCalc, nil, nil)
 	return builder
 }
 

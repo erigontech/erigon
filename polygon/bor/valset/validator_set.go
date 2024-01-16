@@ -4,7 +4,6 @@ package valset
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -656,26 +655,36 @@ func (vals *ValidatorSet) UpdateWithChangeSet(changes []*Validator) error {
 
 // Difficulty returns the difficulty for a particular signer at the current snapshot number
 func (vals *ValidatorSet) Difficulty(signer libcommon.Address) (uint64, error) {
+	indexDiff, err := vals.GetSignerSuccessionNumber(signer, 0)
+	if err != nil {
+		return 0, fmt.Errorf("ValidatorSet.Difficulty: %w", err)
+	}
+
+	return uint64(len(vals.Validators) - indexDiff), nil
+}
+
+// GetSignerSuccessionNumber returns the relative position of signer in terms of the in-turn proposer
+func (vals *ValidatorSet) GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error) {
 	proposer := vals.GetProposer()
 	if proposer == nil {
-		return 0, errors.New("ValidatorSet.Difficulty: proposer not found")
+		return -1, &UnauthorizedProposerError{Number: number, Proposer: []byte{}}
 	}
 
 	proposerIndex, _ := vals.GetByAddress(proposer.Address)
 	if proposerIndex < 0 {
-		return 0, errors.New("ValidatorSet.Difficulty: proposer index not found")
+		return -1, &UnauthorizedProposerError{Number: number, Proposer: proposer.Address.Bytes()}
 	}
 
 	signerIndex, _ := vals.GetByAddress(signer)
 	if signerIndex < 0 {
-		return 0, errors.New("ValidatorSet.Difficulty: signer index not found")
+		return -1, &UnauthorizedSignerError{Number: number, Signer: signer.Bytes()}
 	}
 
 	indexDiff := signerIndex - proposerIndex
 	if indexDiff < 0 {
 		indexDiff += len(vals.Validators)
 	}
-	return uint64(len(vals.Validators) - indexDiff), nil
+	return indexDiff, nil
 }
 
 //-----------------

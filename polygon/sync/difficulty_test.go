@@ -3,12 +3,9 @@ package sync
 import (
 	"testing"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/stretchr/testify/require"
-
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -24,7 +21,7 @@ func (v *testValidatorSetInterface) IncrementProposerPriority(times int) {
 	v.sprintNum = times
 }
 
-func (v *testValidatorSetInterface) Difficulty(signer libcommon.Address) (uint64, error) {
+func (v *testValidatorSetInterface) GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error) {
 	var i int
 	for (i < len(v.signers)) && (v.signers[i] != signer) {
 		i++
@@ -38,6 +35,14 @@ func (v *testValidatorSetInterface) Difficulty(signer libcommon.Address) (uint64
 		delta = i + len(v.signers) - sprintOffset
 	}
 
+	return delta, nil
+}
+
+func (v *testValidatorSetInterface) Difficulty(signer libcommon.Address) (uint64, error) {
+	delta, err := v.GetSignerSuccessionNumber(signer, 0)
+	if err != nil {
+		return 0, nil
+	}
 	return uint64(len(v.signers) - delta), nil
 }
 
@@ -45,15 +50,13 @@ func TestSignerDifficulty(t *testing.T) {
 	borConfig := borcfg.BorConfig{
 		Sprint: map[string]uint64{"0": 16},
 	}
-	span := heimdallspan.HeimdallSpan{}
 	signers := []libcommon.Address{
 		libcommon.HexToAddress("00"),
 		libcommon.HexToAddress("01"),
 		libcommon.HexToAddress("02"),
 	}
-	validatorSetFactory := func() validatorSetInterface { return &testValidatorSetInterface{signers: signers} }
-	logger := log.New()
-	calc := NewDifficultyCalculator(&borConfig, &span, validatorSetFactory, logger).(*difficultyCalculatorImpl)
+	validatorSetFactory := func(uint64) validatorSetInterface { return &testValidatorSetInterface{signers: signers} }
+	calc := NewDifficultyCalculator(&borConfig, nil, validatorSetFactory, nil).(*difficultyCalculatorImpl)
 
 	var d uint64
 
@@ -118,10 +121,18 @@ func TestSignerDifficulty(t *testing.T) {
 
 func TestHeaderDifficultyNoSignature(t *testing.T) {
 	borConfig := borcfg.BorConfig{}
-	span := heimdallspan.HeimdallSpan{}
-	logger := log.New()
-	calc := NewDifficultyCalculator(&borConfig, &span, nil, logger)
+	spans := NewSpansCache()
+	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil)
 
 	_, err := calc.HeaderDifficulty(new(types.Header))
 	require.ErrorContains(t, err, "signature suffix missing")
+}
+
+func TestSignerDifficultyNoSpan(t *testing.T) {
+	borConfig := borcfg.BorConfig{}
+	spans := NewSpansCache()
+	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil).(*difficultyCalculatorImpl)
+
+	_, err := calc.signerDifficulty(libcommon.HexToAddress("00"), 0)
+	require.ErrorContains(t, err, "no span")
 }

@@ -114,7 +114,7 @@ func (I *impl) ProcessAttesterSlashing(s abstract.BeaconState, attSlashing *clty
 		if validator.IsSlashable(currentEpoch) {
 			pr, err := s.SlashValidator(ind, nil)
 			if err != nil {
-				return fmt.Errorf("unable to slash validator: %d", ind)
+				return fmt.Errorf("unable to slash validator: %d: %s", ind, err)
 			}
 			if I.BlockRewardsCollector != nil {
 				I.BlockRewardsCollector.AttesterSlashings += pr
@@ -217,7 +217,12 @@ func (I *impl) ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit 
 
 	// We can skip it in some instances if we want to optimistically sync up.
 	if I.FullValidation {
-		domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+		var domain []byte
+		if s.Version() < clparams.DenebVersion {
+			domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+		} else if s.Version() >= clparams.DenebVersion {
+			domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(s.BeaconConfig().CapellaForkVersion), s.GenesisValidatorsRoot())
+		}
 		if err != nil {
 			return err
 		}
@@ -697,7 +702,10 @@ func (I *impl) processAttestation(s abstract.BeaconState, attestation *solid.Att
 	if (data.Target().Epoch() != currentEpoch && data.Target().Epoch() != previousEpoch) || data.Target().Epoch() != state.GetEpochAtSlot(s.BeaconConfig(), data.Slot()) {
 		return nil, errors.New("ProcessAttestation: attestation with invalid epoch")
 	}
-	if data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot || stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch {
+	if s.Version() < clparams.DenebVersion && ((data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot) || (stateSlot > data.Slot()+beaconConfig.SlotsPerEpoch)) {
+		return nil, errors.New("ProcessAttestation: attestation slot not in range")
+	}
+	if s.Version() >= clparams.DenebVersion && data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return nil, errors.New("ProcessAttestation: attestation slot not in range")
 	}
 	if data.ValidatorIndex() >= s.CommitteeCount(data.Target().Epoch()) {
@@ -755,28 +763,26 @@ func batchVerifyAttestations(s abstract.BeaconState, indexedAttestations []*clty
 }
 
 func (I *impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconBlock) error {
-	if I.FullValidation {
-		if block.Slot != s.Slot() {
-			return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), block.Slot)
-		}
-		if block.Slot <= s.LatestBlockHeader().Slot {
-			return fmt.Errorf("slock slot: %d, not greater than latest block slot: %d", block.Slot, s.LatestBlockHeader().Slot)
-		}
-		propInd, err := s.GetBeaconProposerIndex()
-		if err != nil {
-			return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
-		}
-		if block.ProposerIndex != propInd {
-			return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
-		}
-		blockHeader := s.LatestBlockHeader()
-		latestRoot, err := (&blockHeader).HashSSZ()
-		if err != nil {
-			return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
-		}
-		if block.ParentRoot != latestRoot {
-			return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
-		}
+	if block.Slot != s.Slot() {
+		return fmt.Errorf("state slot: %d, not equal to block slot: %d", s.Slot(), block.Slot)
+	}
+	if block.Slot <= s.LatestBlockHeader().Slot {
+		return fmt.Errorf("slock slot: %d, not greater than latest block slot: %d", block.Slot, s.LatestBlockHeader().Slot)
+	}
+	propInd, err := s.GetBeaconProposerIndex()
+	if err != nil {
+		return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
+	}
+	if block.ProposerIndex != propInd {
+		return fmt.Errorf("block proposer index: %d, does not match beacon proposer index: %d", block.ProposerIndex, propInd)
+	}
+	blockHeader := s.LatestBlockHeader()
+	latestRoot, err := (&blockHeader).HashSSZ()
+	if err != nil {
+		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
+	}
+	if block.ParentRoot != latestRoot {
+		return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
 	}
 
 	bodyRoot, err := block.Body.HashSSZ()

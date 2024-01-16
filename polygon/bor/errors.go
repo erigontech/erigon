@@ -2,9 +2,6 @@ package bor
 
 import (
 	"fmt"
-	"time"
-
-	"github.com/ledgerwatch/erigon/polygon/bor/clerk"
 )
 
 type MaxCheckpointLengthExceededError struct {
@@ -51,34 +48,6 @@ func (e *BlockTooSoonError) Error() string {
 	)
 }
 
-// UnauthorizedProposerError is returned if a header is [being] signed by an unauthorized entity.
-type UnauthorizedProposerError struct {
-	Number   uint64
-	Proposer []byte
-}
-
-func (e *UnauthorizedProposerError) Error() string {
-	return fmt.Sprintf(
-		"Proposer 0x%x is not a part of the producer set at block %d",
-		e.Proposer,
-		e.Number,
-	)
-}
-
-// UnauthorizedSignerError is returned if a header is [being] signed by an unauthorized entity.
-type UnauthorizedSignerError struct {
-	Number uint64
-	Signer []byte
-}
-
-func (e *UnauthorizedSignerError) Error() string {
-	return fmt.Sprintf(
-		"Signer 0x%x is not a part of the producer set at block %d",
-		e.Signer,
-		e.Number,
-	)
-}
-
 // WrongDifficultyError is returned if the difficulty of a block doesn't match the
 // turn of the signer.
 type WrongDifficultyError struct {
@@ -95,22 +64,5 @@ func (e *WrongDifficultyError) Error() string {
 		e.Expected,
 		e.Actual,
 		e.Signer,
-	)
-}
-
-type InvalidStateReceivedError struct {
-	Number      uint64
-	LastStateID uint64
-	To          *time.Time
-	Event       *clerk.EventRecordWithTime
-}
-
-func (e *InvalidStateReceivedError) Error() string {
-	return fmt.Sprintf(
-		"Received invalid event %v at block %d. Requested events until %s. Last state id was %d",
-		e.Event,
-		e.Number,
-		e.To.Format(time.RFC3339),
-		e.LastStateID,
 	)
 }

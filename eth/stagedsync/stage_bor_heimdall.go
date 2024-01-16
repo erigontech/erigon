@@ -25,12 +25,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/contract"
-	"github.com/ledgerwatch/erigon/polygon/bor/finality/generics"
+	"github.com/ledgerwatch/erigon/polygon/bor/finality"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
 )
@@ -49,7 +47,7 @@ type BorHeimdallCfg struct {
 	miningState      MiningState
 	chainConfig      chain.Config
 	borConfig        *borcfg.BorConfig
-	heimdallClient   heimdall.IHeimdallClient
+	heimdallClient   heimdall.HeimdallClient
 	blockReader      services.FullBlockReader
 	hd               *headerdownload.HeaderDownload
 	penalize         func(context.Context, []headerdownload.PenaltyItem)
@@ -64,7 +62,7 @@ func StageBorHeimdallCfg(
 	snapDb kv.RwDB,
 	miningState MiningState,
 	chainConfig chain.Config,
-	heimdallClient heimdall.IHeimdallClient,
+	heimdallClient heimdall.HeimdallClient,
 	blockReader services.FullBlockReader,
 	hd *headerdownload.HeaderDownload,
 	penalize func(context.Context, []headerdownload.PenaltyItem),
@@ -87,7 +85,7 @@ func StageBorHeimdallCfg(
 		blockReader:      blockReader,
 		hd:               hd,
 		penalize:         penalize,
-		stateReceiverABI: contract.StateReceiver(),
+		stateReceiverABI: bor.GenesisContractStateReceiverABI(),
 		loopBreakCheck:   loopBreakCheck,
 		recents:          recents,
 		signatures:       signatures,
@@ -126,7 +124,7 @@ func BorHeimdallForward(
 	}
 
 	whitelistService := whitelist.GetWhitelistingService()
-	if unwindPointPtr := generics.BorMilestoneRewind.Load(); unwindPointPtr != nil && *unwindPointPtr != 0 {
+	if unwindPointPtr := finality.BorMilestoneRewind.Load(); unwindPointPtr != nil && *unwindPointPtr != 0 {
 		unwindPoint := *unwindPointPtr
 		if whitelistService != nil && unwindPoint < headNumber {
 			header, err := cfg.blockReader.HeaderByNumber(ctx, tx, headNumber)
@@ -147,7 +145,7 @@ func BorHeimdallForward(
 			dataflow.HeaderDownloadStates.AddChange(headNumber, dataflow.HeaderInvalidated)
 			s.state.UnwindTo(unwindPoint, ForkReset(hash))
 			var reset uint64 = 0
-			generics.BorMilestoneRewind.Store(&reset)
+			finality.BorMilestoneRewind.Store(&reset)
 			return fmt.Errorf("verification failed for header %d: %x", headNumber, header.Hash())
 		}
 	}
@@ -428,7 +426,7 @@ func initValidatorSets(
 	tx kv.RwTx,
 	blockReader services.FullBlockReader,
 	config *borcfg.BorConfig,
-	heimdallClient heimdall.IHeimdallClient,
+	heimdallClient heimdall.HeimdallClient,
 	chain consensus.ChainHeaderReader,
 	blockNum uint64,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
@@ -471,7 +469,7 @@ func initValidatorSets(
 			return nil, fmt.Errorf("zero span not found")
 		}
 
-		var zeroSpan span.HeimdallSpan
+		var zeroSpan heimdall.HeimdallSpan
 		if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
 			return nil, err
 		}
@@ -540,9 +538,9 @@ func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *
 }
 
 func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
-	spanID := span.IDAt(header.Number.Uint64() + 1)
+	spanID := bor.SpanIDAt(header.Number.Uint64() + 1)
 	spanBytes := chr.BorSpan(spanID)
-	var sp span.HeimdallSpan
+	var sp heimdall.HeimdallSpan
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
 		return err
 	}
@@ -559,7 +557,11 @@ func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Head
 		return err
 	}
 
-	if len(producerSet) != len(headerVals) {
+	// span 0 at least for mumbai has a header mismatch in
+	// its first spam.  Since we control neither the span, not the
+	// the headers (they are external data) - we just don't do the
+	// check as it will hault further processing
+	if len(producerSet) != len(headerVals) && spanID > 0 {
 		return ErrHeaderValidatorsLengthMismatch
 	}
 
@@ -625,7 +627,7 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 		return err
 	}
 	defer spanCursor.Close()
-	lastSpanToKeep := span.IDAt(u.UnwindPoint)
+	lastSpanToKeep := bor.SpanIDAt(u.UnwindPoint)
 	var spanIdBytes [8]byte
 	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
 	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
