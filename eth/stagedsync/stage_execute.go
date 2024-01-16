@@ -907,7 +907,7 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.historyV3 {
-		pruneTimeout := 1 * time.Second
+		pruneTimeout := 10 * time.Second
 		if initialCycle {
 			pruneTimeout = 10 * time.Minute
 		}

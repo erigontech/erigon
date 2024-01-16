@@ -998,6 +998,18 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	//		"tx until limit", limit)
 	//}()
 
+	itc, err := rwTx.CursorDupSort(ii.indexTable)
+	if err != nil {
+		return nil, err
+	}
+	idxValuesCount, err := itc.Count()
+	itc.Close()
+	if err != nil {
+		return nil, err
+	}
+	// do not collect and sort keys if it's History index
+	indexWithHistoryValues := idxValuesCount == 0 && fn != nil
+
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	k, v, err := keysCursor.Seek(txKey[:])
 	if err != nil {
@@ -1041,8 +1053,10 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			if err != nil {
 				return nil, err
 			}
-			if err := collector.Collect(v, nil); err != nil {
-				return nil, err
+			if !indexWithHistoryValues {
+				if err := collector.Collect(v, nil); err != nil {
+					return nil, err
+				}
 			}
 			if fn != nil {
 				if err := fn(v, k); err != nil {
@@ -1063,6 +1077,11 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	}
 	if err != nil {
 		return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+	}
+
+	if indexWithHistoryValues {
+		// empty indexTable, no need to collect and prune keys out of there
+		return stat, nil
 	}
 
 	idxCForDeletes, err := rwTx.RwCursorDupSort(ii.indexTable)
