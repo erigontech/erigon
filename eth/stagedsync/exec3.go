@@ -15,6 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -214,13 +215,13 @@ func ExecV3(ctx context.Context,
 					default:
 					}
 					if len(k) == 20 {
-						v, _ := ttx.DomainGet(kv.AccountsDomain, k, nil)
+						v, _, _ := ttx.DomainGet(kv.AccountsDomain, k, nil)
 						if v == nil {
 							continue
 							//fmt.Printf("not found1: %x, %d\n", k, len(k))
 						}
 					} else {
-						v, _ := ttx.DomainGet(kv.StorageDomain, k, nil)
+						v, _, _ := ttx.DomainGet(kv.StorageDomain, k, nil)
 						if v == nil {
 							continue
 							//fmt.Printf("not found2: %x, %d\n", k, len(k))
@@ -316,28 +317,28 @@ func ExecV3(ctx context.Context,
 						//fmt.Printf("not found3.2: %x\n", k[:2])
 						//continue
 						//}
-						v, _ := ttx.DomainGet(kv.CommitmentDomain, k[:3], nil)
+						v, _, _ := ttx.DomainGet(kv.CommitmentDomain, k[:3], nil)
 						if v == nil {
 							//fmt.Printf("not found3.3: %x\n", k[:3])
 							continue
 						}
-						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:4], nil)
+						v, _, _ = ttx.DomainGet(kv.CommitmentDomain, k[:4], nil)
 						if v == nil {
 							continue
 							//fmt.Printf("not found3.4: %x\n", k[:4])
 						}
 					} else if len(k) >= 64 {
-						v, _ := ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
+						v, _, _ := ttx.DomainGet(kv.CommitmentDomain, k[:32], nil)
 						if v == nil {
 							//fmt.Printf("not found4.1: %x\n", k[:32])
 							continue
 						}
-						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+1], nil)
+						v, _, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+1], nil)
 						if v == nil {
 							//fmt.Printf("not found4.2: %x\n", k[:32+1])
 							continue
 						}
-						v, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+2], nil)
+						v, _, _ = ttx.DomainGet(kv.CommitmentDomain, k[:32+2], nil)
 						if v == nil {
 							//fmt.Printf("not found4.3: %x\n", k[:32+2])
 							continue
