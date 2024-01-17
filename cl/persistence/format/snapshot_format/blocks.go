@@ -156,3 +156,32 @@ func ReadBlockHeaderFromSnapshotWithExecutionData(r io.Reader, cfg *clparams.Bea
 	blockHash := blindedBlock.Block.Body.ExecutionPayload.BlockHash
 	return blockHeader, blockNumber, blockHash, nil
 }
+
+func ReadBlindedBlockFromSnapshot(r io.Reader, cfg *clparams.BeaconChainConfig) (*cltypes.SignedBlindedBeaconBlock, error) {
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+
+	blindedBlock := cltypes.NewSignedBlindedBeaconBlock(cfg)
+
+	// Read the metadata
+	metadataSlab := make([]byte, 33)
+	v, _, err := readMetadataForBlock(r, metadataSlab)
+	if err != nil {
+		return nil, err
+	}
+	// Read the length
+	length := make([]byte, 8)
+	if _, err := io.ReadFull(r, length); err != nil {
+		return nil, err
+	}
+	// Read the block
+	if _, err := io.CopyN(buffer, r, int64(binary.BigEndian.Uint64(length))); err != nil {
+		return nil, err
+	}
+	// Decode the block in blinded
+	if err := blindedBlock.DecodeSSZ(buffer.Bytes(), int(v)); err != nil {
+		return nil, err
+	}
+	return blindedBlock, nil
+}
