@@ -1087,6 +1087,7 @@ func (c *AuRa) SealHash(header *types.Header) libcommon.Hash {
 func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
 	c.certifierLock.RLock()
 	defer c.certifierLock.RUnlock()
+	fmt.Printf("a: %t\n", c.certifier == nil)
 	if c.certifier == nil {
 		return false
 	}
@@ -1104,11 +1105,13 @@ func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.
 		return false
 	}
 	if len(res) == 0 {
+		fmt.Printf("a1\n")
 		return false
 	}
 	if certified, ok := res[0].(bool); ok {
 		return certified
 	}
+	fmt.Printf("a2\n")
 	return false
 }
 
