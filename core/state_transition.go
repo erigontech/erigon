@@ -303,7 +303,7 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
-			fmt.Printf("[dbg] %t, %d, %d;\n", st.evm.Config().NoBaseFee, st.gasFeeCap.Uint64(), st.tip.Uint64())
+			fmt.Printf("[dbg] %t, %t, %d, %d, %d;\n", st.msg.IsFree(), st.evm.Config().NoBaseFee, st.gasFeeCap.Uint64(), st.tip.Uint64(), st.evm.Context.BaseFee.Uint64())
 			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
 			}
