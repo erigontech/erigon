@@ -168,6 +168,9 @@ const (
 
 	// EIP-4844: Shard Blob Transactions
 	PointEvaluationGas uint64 = 50000
+
+	// PIP-27: secp256r1 elliptic curve signature verifier gas price
+	P256VerifyGas uint64 = 3450
 )
 
 // EIP-4788: Beacon block root in the EVM
