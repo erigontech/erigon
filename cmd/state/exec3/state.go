@@ -241,6 +241,14 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, rw.vmCfg, rules)
 
+		if msg.FeeCap().IsZero() && rw.engine != nil {
+			// Only zero-gas transactions may be service ones
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
+			}
+			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
+		}
+
 		// MA applytx
 		applyRes, err := core.ApplyMessage(rw.evm, msg, rw.taskGasPool, true /* refunds */, false /* gasBailout */)
 		if err != nil {

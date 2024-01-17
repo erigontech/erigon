@@ -1085,6 +1085,7 @@ func (c *AuRa) SealHash(header *types.Header) libcommon.Hash {
 // See https://openethereum.github.io/Permissioning.html#gas-price
 // This is thread-safe: it only accesses the `certifier` which is used behind a RWLock
 func (c *AuRa) IsServiceTransaction(sender libcommon.Address, syscall consensus.SystemCall) bool {
+	fmt.Printf("IsServiceTransaction\n")
 	c.certifierLock.RLock()
 	defer c.certifierLock.RUnlock()
 	fmt.Printf("a: %t\n", c.certifier == nil)
