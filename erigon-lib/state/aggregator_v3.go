@@ -125,7 +125,6 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		tmpdir:                 tmpdir,
 		aggregationStep:        aggregationStep,
 		db:                     db,
-		keepInDB:               1 * aggregationStep,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		backgroundResult:       &BackgroundResult{},
@@ -187,6 +186,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
+	a.KeepStepsInDB(1)
 	a.recalcMaxTxNum()
 
 	if dbg.NoSync() {
@@ -907,7 +907,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 
 	var txFrom, txTo uint64
 	step := ac.a.aggregatedStep.Load()
-	txTo = (step + 1) * ac.a.aggregationStep
+	txTo = step*ac.a.aggregationStep + 1
 
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)
