@@ -933,6 +933,8 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 }
 
 func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
+	defer h.reCalcRoFiles()
+
 	h.InvertedIndex.integrateFiles(InvertedFiles{
 		decomp:       sf.efHistoryDecomp,
 		index:        sf.efHistoryIdx,
@@ -945,8 +947,6 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.files.Set(fi)
-
-	h.reCalcRoFiles()
 }
 
 func (h *History) isEmpty(tx kv.Tx) (bool, error) {
