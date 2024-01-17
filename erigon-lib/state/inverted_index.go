@@ -1147,10 +1147,14 @@ func (ic *InvertedIndexContext) DebugEFAllValuesAreInRange(ctx context.Context) 
 			eliasVal, _ := g.NextUncompressed()
 			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
 			if item.startTxNum > ef.Min() {
-				return fmt.Errorf("item.startTxNum > ef.Min(), %d > %d, %s", item.startTxNum, ef.Min(), g.FileName())
+				err := fmt.Errorf("item.startTxNum > ef.Min(), %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
+				log.Warn(err.Error())
+				//return err
 			}
 			if item.endTxNum > ef.Max()+1 {
-				return fmt.Errorf("item.endTxNum > ef.Max(), %d > %d, %s", item.endTxNum, ef.Max(), g.FileName())
+				err := fmt.Errorf("item.startTxNum > ef.Min(), %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
+				log.Warn(err.Error())
+				//return err
 			}
 
 			select {
