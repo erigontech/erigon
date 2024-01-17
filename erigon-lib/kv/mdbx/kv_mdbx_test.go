@@ -815,6 +815,7 @@ func testCloseWaitsAfterTxBegin(
 	txBeginFunc func(kv.RwDB) (kv.StatelessReadTx, error),
 	txEndFunc func(kv.StatelessReadTx) error,
 ) {
+	t.Helper()
 	db := NewMDBX(log.New()).InMem(t.TempDir()).MustOpen()
 	var txs []kv.StatelessReadTx
 	for i := 0; i < count; i++ {
