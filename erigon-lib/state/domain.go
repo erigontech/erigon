@@ -2053,13 +2053,11 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	inFiles := dc.maxTxNumInDomainFiles(false)
-	idxTx := dc.hc.ic.CanPruneFrom(tx)
 	domStep := dc.CanPruneFrom(tx)
 	//if dc.d.filenameBase == "commitment" {
-	//	fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
-	//		dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
+	//	fmt.Printf("CanPrune %s domStep=%d < snaps %d\n", dc.d.filenameBase, domStep, inFiles/dc.d.aggregationStep)
 	//}
-	return idxTx < inFiles || domStep < inFiles/dc.d.aggregationStep
+	return domStep < inFiles/dc.d.aggregationStep
 }
 
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {

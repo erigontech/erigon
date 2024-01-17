@@ -1058,7 +1058,7 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
-	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
+	return hc.h.dontProduceFiles || hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
 }
 
 // Prune [txFrom; txTo)
