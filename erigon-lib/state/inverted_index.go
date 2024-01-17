@@ -1155,7 +1155,7 @@ func (ic *InvertedIndexContext) DebugEFAllValuesAreInRange(ctx context.Context) 
 				//return err
 			}
 			if item.endTxNum < ef.Max() {
-				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Min(), g.FileName(), k)
+				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), k)
 				log.Warn(err.Error())
 				//return err
 			}
