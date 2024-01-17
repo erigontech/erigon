@@ -309,6 +309,10 @@ func (b *SignedBlindedBeaconBlock) Clone() clonable.Clonable {
 	return NewSignedBlindedBeaconBlock(b.Block.Body.beaconCfg)
 }
 
+func (b *BlindedBeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
+	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
+}
+
 // make sure that the type implements the interface ssz2.ObjectSSZ
 var _ ssz2.ObjectSSZ = (*BlindedBeaconBody)(nil)
 var _ ssz2.ObjectSSZ = (*BlindedBeaconBlock)(nil)

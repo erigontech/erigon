@@ -1,4 +1,4 @@
-package peerinfo
+package sync
 
 import "math/big"
 
