@@ -1133,6 +1133,56 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	return stat, err
 }
 
+func (ic *InvertedIndexContext) DebugEFAllValuesAreInRange(ctx context.Context) error {
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	iterStep := func(item ctxItem) error {
+		g := item.src.decompressor.MakeGetter()
+		g.Reset(0)
+		defer item.src.decompressor.EnableReadAhead().DisableReadAhead()
+
+		for g.HasNext() {
+			k, _ := g.NextUncompressed()
+			_ = k
+			eliasVal, _ := g.NextUncompressed()
+			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+			if ef.Count() == 0 {
+				continue
+			}
+			if item.startTxNum > ef.Min() {
+				err := fmt.Errorf("DebugEFAllValuesAreInRange1: %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
+				log.Warn(err.Error())
+				//return err
+			}
+			if item.endTxNum < ef.Max() {
+				err := fmt.Errorf("DebugEFAllValuesAreInRange2: %d < %d, %s, %x", item.endTxNum, ef.Max(), g.FileName(), k)
+				log.Warn(err.Error())
+				//return err
+			}
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[integrity] EFAllValuesAreInRange: %s, k=%x", g.FileName(), k))
+			default:
+			}
+		}
+		return nil
+	}
+
+	for _, item := range ic.files {
+		if item.src.decompressor == nil {
+			continue
+		}
+		if err := iterStep(item); err != nil {
+			return err
+		}
+		//log.Warn(fmt.Sprintf("[dbg] see1: %s, min=%d,max=%d, before_max=%d, all: %d\n", item.src.decompressor.FileName(), ef.Min(), ef.Max(), last2, iter.ToArrU64Must(ef.Iterator())))
+	}
+	return nil
+}
+
 // FrozenInvertedIdxIter allows iteration over range of tx numbers
 // Iteration is not implmented via callback function, because there is often
 // a requirement for interators to be composable (for example, to implement AND and OR for indices)
@@ -1224,7 +1274,11 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 		//Desc: [from, to) AND from > to
 		if it.orderAscend {
 			for it.efIt.HasNext() {
-				n, _ := it.efIt.Next()
+				n, err := it.efIt.Next()
+				if err != nil {
+					it.err = err
+					return
+				}
 				isBeforeRange := int(n) < it.startTxNum
 				if isBeforeRange { //skip
 					continue
@@ -1240,7 +1294,11 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			}
 		} else {
 			for it.efIt.HasNext() {
-				n, _ := it.efIt.Next()
+				n, err := it.efIt.Next()
+				if err != nil {
+					it.err = err
+					return
+				}
 				isAfterRange := it.startTxNum >= 0 && int(n) > it.startTxNum
 				if isAfterRange { //skip
 					continue
