@@ -164,7 +164,7 @@ var (
 	SyncLoopBlockLimitFlag = cli.UintFlag{
 		Name:  "sync.loop.block.limit",
 		Usage: "Sets the maximum number of blocks to process per loop iteration",
-		Value: 2_000, // unlimited
+		Value: 1_000, // unlimited
 	}
 
 	UploadLocationFlag = cli.StringFlag{

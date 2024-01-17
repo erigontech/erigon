@@ -365,6 +365,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
+	if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
+		return err
+	}
+
 	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
 		return err
 	}
