@@ -1508,6 +1508,8 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCo
 }
 
 func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
+	defer d.reCalcRoFiles()
+
 	d.History.integrateFiles(sf.HistoryFiles, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, d.aggregationStep)
@@ -1517,8 +1519,6 @@ func (d *Domain) integrateFiles(sf StaticFiles, txNumFrom, txNumTo uint64) {
 	fi.bindex = sf.valuesBt
 	fi.existence = sf.bloom
 	d.files.Set(fi)
-
-	d.reCalcRoFiles()
 }
 
 // unwind is similar to prune but the difference is that it restores domain values from the history as of txFrom
