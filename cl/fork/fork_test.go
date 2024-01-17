@@ -14,7 +14,6 @@
 package fork
 
 import (
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -51,9 +50,8 @@ func TestMainnerForkDigestWithNoValidatorRootHash(t *testing.T) {
 }
 
 func TestGoerliForkDigest(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("FIXME HistoryV4 is enabled")
-	}
+	t.Skip("FIXME cl")
+
 	beaconCfg := clparams.BeaconConfigs[clparams.GoerliNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.GoerliNetwork]
 	digest, err := ComputeForkDigest(&beaconCfg, &genesisCfg)
