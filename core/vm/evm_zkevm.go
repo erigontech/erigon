@@ -72,12 +72,7 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 		}
 		evm.intraBlockState.SetNonce(caller.Address(), nonce+1)
 	}
-	//[zkevm] - moved after err check, because zkevm reverts the address add
-	// We add this to the access list _before_ taking a snapshot. Even if the creation fails,
-	// the access-list change should not be rolled back
-	// if evm.chainRules.IsBerlin {
-	// 	evm.intraBlockState.AddAddressToAccessList(address)
-	// }
+
 	// Ensure there's no existing contract already at the designated address
 	contractHash := evm.intraBlockState.GetCodeHash(address)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
@@ -85,12 +80,13 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 		return nil, libcommon.Address{}, 0, err
 	}
 
+	// Create a new account on the state
+	snapshot := evm.intraBlockState.Snapshot()
+
 	if evm.chainRules.IsBerlin {
 		evm.intraBlockState.AddAddressToAccessList(address)
 	}
 
-	// Create a new account on the state
-	snapshot := evm.intraBlockState.Snapshot()
 	evm.intraBlockState.CreateAccount(address, true)
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
