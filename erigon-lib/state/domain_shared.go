@@ -101,7 +101,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
 		logger: logger,
 		aggCtx: ac,
 		roTx:   tx,
-		//trace:       true,
+		//trace:            true,
 		accountWriter:    ac.account.NewWriter(),
 		storageWriter:    ac.storage.NewWriter(),
 		codeWriter:       ac.code.NewWriter(),
@@ -153,16 +153,16 @@ func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo
 	if err := sd.aggCtx.commitment.Unwind(ctx, rwTx, step, txUnwindTo); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true); err != nil {
+	if _, err := sd.aggCtx.logAddrs.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.logTopics.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true); err != nil {
+	if _, err := sd.aggCtx.logTopics.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true); err != nil {
+	if _, err := sd.aggCtx.tracesFrom.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 		return err
 	}
-	if err := sd.aggCtx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true); err != nil {
+	if _, err := sd.aggCtx.tracesTo.Prune(ctx, rwTx, txUnwindTo, math.MaxUint64, math.MaxUint64, logEvery, true, nil); err != nil {
 		return err
 	}
 
@@ -720,22 +720,20 @@ func (sd *SharedDomains) Close() {
 }
 
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
-	fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
-	if err != nil {
-		return err
-	}
-	if sd.trace {
-		_, f, l, _ := runtime.Caller(1)
-		fmt.Printf("[SD aggCtx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggCtx.id, sd.TxNum(), fh, filepath.Base(f), l)
-	}
-
-	defer mxFlushTook.ObserveDuration(time.Now())
-
 	if sd.noFlush > 0 {
 		sd.noFlush--
 	}
 
 	if sd.noFlush == 0 {
+		defer mxFlushTook.ObserveDuration(time.Now())
+		fh, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "flush-commitment")
+		if err != nil {
+			return err
+		}
+		if sd.trace {
+			_, f, l, _ := runtime.Caller(1)
+			fmt.Printf("[SD aggCtx=%d] FLUSHING at tx %d [%x], caller %s:%d\n", sd.aggCtx.id, sd.TxNum(), fh, filepath.Base(f), l)
+		}
 		if err := sd.accountWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
@@ -760,15 +758,12 @@ func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 		if err := sd.tracesToWriter.Flush(ctx, tx); err != nil {
 			return err
 		}
+		//
+		//err = sd.aggCtx.PruneSmallBatches(ctx, time.Second, tx)
+		//if err != nil {
+		//	return err
+		//}
 
-		sd.accountWriter.close()
-		sd.storageWriter.close()
-		sd.codeWriter.close()
-		sd.commitmentWriter.close()
-		sd.logAddrsWriter.close()
-		sd.logTopicsWriter.close()
-		sd.tracesFromWriter.close()
-		sd.tracesToWriter.close()
 	}
 	return nil
 }

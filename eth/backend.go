@@ -518,7 +518,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	var heimdallClient heimdall.IHeimdallClient
+	var heimdallClient heimdall.HeimdallClient
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
 			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)

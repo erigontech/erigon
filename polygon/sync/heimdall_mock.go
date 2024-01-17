@@ -9,9 +9,8 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
-	checkpoint "github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
-	milestone "github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
-	span "github.com/ledgerwatch/erigon/polygon/heimdall/span"
+
+	checkpoint "github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 // MockHeimdall is a mock of Heimdall interface.
@@ -53,10 +52,10 @@ func (mr *MockHeimdallMockRecorder) FetchCheckpoints(arg0, arg1 interface{}) *go
 }
 
 // FetchMilestones mocks base method.
-func (m *MockHeimdall) FetchMilestones(arg0 context.Context, arg1 uint64) ([]*milestone.Milestone, error) {
+func (m *MockHeimdall) FetchMilestones(arg0 context.Context, arg1 uint64) ([]*checkpoint.Milestone, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchMilestones", arg0, arg1)
-	ret0, _ := ret[0].([]*milestone.Milestone)
+	ret0, _ := ret[0].([]*checkpoint.Milestone)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -68,10 +67,10 @@ func (mr *MockHeimdallMockRecorder) FetchMilestones(arg0, arg1 interface{}) *gom
 }
 
 // FetchSpan mocks base method.
-func (m *MockHeimdall) FetchSpan(arg0 context.Context, arg1 uint64) (*span.HeimdallSpan, error) {
+func (m *MockHeimdall) FetchSpan(arg0 context.Context, arg1 uint64) (*checkpoint.HeimdallSpan, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchSpan", arg0, arg1)
-	ret0, _ := ret[0].(*span.HeimdallSpan)
+	ret0, _ := ret[0].(*checkpoint.HeimdallSpan)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -83,7 +82,7 @@ func (mr *MockHeimdallMockRecorder) FetchSpan(arg0, arg1 interface{}) *gomock.Ca
 }
 
 // OnMilestoneEvent mocks base method.
-func (m *MockHeimdall) OnMilestoneEvent(arg0 context.Context, arg1 func(*milestone.Milestone)) error {
+func (m *MockHeimdall) OnMilestoneEvent(arg0 context.Context, arg1 func(*checkpoint.Milestone)) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "OnMilestoneEvent", arg0, arg1)
 	ret0, _ := ret[0].(error)

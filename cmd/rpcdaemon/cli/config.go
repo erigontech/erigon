@@ -59,8 +59,6 @@ import (
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/bor/contract"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -508,8 +506,8 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				borConfig := cc.Bor.(*borcfg.BorConfig)
 
 				engine = bor.NewRo(cc, borKv, blockReader,
-					span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-					contract.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
+					bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
+					bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 
 			default:
 				engine = ethash.NewFaker()
@@ -932,8 +930,8 @@ func (e *remoteConsensusEngine) init(db kv.RoDB, blockReader services.FullBlockR
 		borConfig := cc.Bor.(*borcfg.BorConfig)
 
 		e.engine = bor.NewRo(cc, borKv, blockReader,
-			span.NewChainSpanner(contract.ValidatorSet(), cc, true, logger),
-			contract.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
+			bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), cc, true, logger),
+			bor.NewGenesisContractsClient(cc, borConfig.ValidatorContract, borConfig.StateReceiverContract, logger), logger)
 	} else {
 		e.engine = ethash.NewFaker()
 	}

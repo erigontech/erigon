@@ -10,10 +10,7 @@ import (
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/clerk"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
-	heimdallmock "github.com/ledgerwatch/erigon/polygon/heimdall/mock"
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall/span"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 func TestHeimdallServer(t *testing.T) {
@@ -21,18 +18,18 @@ func TestHeimdallServer(t *testing.T) {
 
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	client := heimdallmock.NewMockIHeimdallClient(ctrl)
+	client := heimdall.NewMockHeimdallClient(ctrl)
 
-	events := []*clerk.EventRecordWithTime{
+	events := []*heimdall.EventRecordWithTime{
 		{
-			EventRecord: clerk.EventRecord{
+			EventRecord: heimdall.EventRecord{
 				ID:      1,
 				ChainID: "80001",
 			},
 			Time: time.Now(),
 		},
 		{
-			EventRecord: clerk.EventRecord{
+			EventRecord: heimdall.EventRecord{
 				ID:      2,
 				ChainID: "80001",
 			},
@@ -41,8 +38,8 @@ func TestHeimdallServer(t *testing.T) {
 	}
 	client.EXPECT().StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
 
-	span := &heimdallspan.HeimdallSpan{
-		Span: heimdallspan.Span{
+	span := &heimdall.HeimdallSpan{
+		Span: heimdall.Span{
 			ID:         1,
 			StartBlock: 1000,
 			EndBlock:   2000,
@@ -51,7 +48,7 @@ func TestHeimdallServer(t *testing.T) {
 	}
 	client.EXPECT().Span(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
 
-	checkpoint1 := &checkpoint.Checkpoint{
+	checkpoint1 := &heimdall.Checkpoint{
 		StartBlock: big.NewInt(1000),
 		EndBlock:   big.NewInt(1999),
 		BorChainID: "80001",

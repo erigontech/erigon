@@ -23,8 +23,6 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -50,6 +48,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
@@ -1432,7 +1431,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
 		br.logger.Info("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
 
-		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, span.IDAt); err != nil {
+		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, bor.SpanIDAt); err != nil {
 			return err
 		}
 	}

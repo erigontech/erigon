@@ -430,7 +430,7 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac := agg.MakeContext()
-						if err = ac.PruneWithTimeout(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
+						if err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
 							return err
 						}
 						ac.Close()
@@ -903,12 +903,15 @@ Loop:
 
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							if casted, ok := tx.(kv.CanWarmupDB); ok {
-								if err := casted.WarmupDB(false); err != nil {
-									return err
-								}
-							}
-							if err := tx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).Prune(ctx, tx); err != nil {
+							//if casted, ok := tx.(kv.CanWarmupDB); ok {
+							//	if err := casted.WarmupDB(false); err != nil {
+							//		return err
+							//	}
+							//}
+							if err := tx.(state2.HasAggCtx).
+								AggCtx().(*state2.AggregatorV3Context).
+								PruneSmallBatches(ctx, time.Minute*10, tx); err != nil {
+
 								return err
 							}
 							return nil

@@ -1,4 +1,4 @@
-package span
+package bor
 
 import (
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
