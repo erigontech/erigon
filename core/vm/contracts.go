@@ -22,12 +22,11 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
-
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -36,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/crypto/bn256"
 	"github.com/ledgerwatch/erigon/crypto/secp256r1"
-
 	"github.com/ledgerwatch/erigon/params"
 
 	//lint:ignore SA1019 Needed for precompile
@@ -1147,7 +1145,7 @@ func (c *p256Verify) Run(input []byte) ([]byte, error) {
 	// Verify the secp256r1 signature
 	if secp256r1.Verify(hash, r, s, x, y) {
 		// Signature is valid
-		return common.LeftPadBytes(big.NewInt(1).Bytes(), 32), nil
+		return common.LeftPadBytes(big1.Bytes(), 32), nil
 	} else {
 		// Signature is invalid
 		return nil, nil
