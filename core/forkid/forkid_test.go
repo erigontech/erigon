@@ -93,8 +93,8 @@ func TestCreation(t *testing.T) {
 				{5062605, 1625109579, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}},  // First London block
 				{8656122, 1678832724, ID{Hash: checksumToBytes(0xB8C6299D), Next: 1678832736}},  // Last pre-Shanghai block
 				{8656123, 1678832784, ID{Hash: checksumToBytes(0xf9843abf), Next: 1705473120}},  // First Shanghai block
-				{10416288, 1705473108, ID{Hash: checksumToBytes(0xf9843abf), Next: 1705473120}}, // Last Shanghai block (approx)
-				{10416289, 1705473120, ID{Hash: checksumToBytes(0x70cc14e2), Next: 0}},          // First Cancun block  (approx)
+				{10388175, 1705473108, ID{Hash: checksumToBytes(0xf9843abf), Next: 1705473120}}, // Last Shanghai block
+				{10388176, 1705473120, ID{Hash: checksumToBytes(0x70cc14e2), Next: 0}},          // First Cancun block
 				{12000000, 1800000000, ID{Hash: checksumToBytes(0x70cc14e2), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
@@ -130,8 +130,8 @@ func TestCreation(t *testing.T) {
 				{19039999, 1636753575, ID{Hash: checksumToBytes(0x069a83d9), Next: 19040000}},   // Last Berlin block
 				{19040000, 1636753580, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // First London block
 				{21735000, 1650443255, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // First GIP-31 block
-				{29272666, 1690889655, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // Last pre-Shanghai block (approx)
-				{29272667, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 0}},          // First Shanghai block (approx)
+				{29242931, 1690889650, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // Last pre-Shanghai block
+				{29242932, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 0}},          // First Shanghai block
 			},
 		},
 		// Chiado test cases
