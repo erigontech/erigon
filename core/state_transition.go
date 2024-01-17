@@ -153,6 +153,7 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
 	isBor := evm.ChainConfig().Bor != nil
+	fmt.Printf("[dbg] %t, %t, %d, %d, %d;\n", msg.IsFree(), evm.Config().NoBaseFee, msg.FeeCap().Uint64(), msg.Tip().Uint64(), evm.Context.BaseFee.Uint64())
 	return &StateTransition{
 		gp:        gp,
 		evm:       evm,
@@ -303,7 +304,6 @@ func (st *StateTransition) preCheck(gasBailout bool) error {
 	if st.evm.ChainRules().IsLondon {
 		// Skip the checks if gas fields are zero and baseFee was explicitly disabled (eth_call)
 		if !st.evm.Config().NoBaseFee || !st.gasFeeCap.IsZero() || !st.tip.IsZero() {
-			fmt.Printf("[dbg] %t, %t, %d, %d, %d;\n", st.msg.IsFree(), st.evm.Config().NoBaseFee, st.gasFeeCap.Uint64(), st.tip.Uint64(), st.evm.Context.BaseFee.Uint64())
 			if err := CheckEip1559TxGasFeeCap(st.msg.From(), st.gasFeeCap, st.tip, st.evm.Context.BaseFee, st.msg.IsFree()); err != nil {
 				return err
 			}
