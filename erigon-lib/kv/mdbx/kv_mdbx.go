@@ -526,6 +526,10 @@ func (db *MdbxKV) trackTxBegin() bool {
 	return isOpen
 }
 
+func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
+	return (db.txsCount == 0) && db.closed.Load()
+}
+
 func (db *MdbxKV) trackTxEnd() {
 	db.txsCountMutex.Lock()
 	defer db.txsCountMutex.Unlock()
@@ -536,7 +540,7 @@ func (db *MdbxKV) trackTxEnd() {
 		panic("MdbxKV: unmatched trackTxEnd")
 	}
 
-	if (db.txsCount == 0) && db.closed.Load() {
+	if db.hasTxsAllDoneAndClosed() {
 		db.txsAllDoneOnCloseCond.Signal()
 	}
 }
@@ -545,7 +549,7 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 	db.txsCountMutex.Lock()
 	defer db.txsCountMutex.Unlock()
 
-	for (db.txsCount > 0) || !db.closed.Load() {
+	for !db.hasTxsAllDoneAndClosed() {
 		db.txsAllDoneOnCloseCond.Wait()
 	}
 }
