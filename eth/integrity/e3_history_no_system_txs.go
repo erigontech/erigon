@@ -52,7 +52,10 @@ func E3HistoryNoSystemTxs(ctx context.Context, chainDB kv.RwDB, agg *state.Aggre
 						return err
 					}
 					for it.HasNext() {
-						txNum, _ := it.Next()
+						txNum, err := it.Next()
+						if err != nil {
+							return err
+						}
 						ok, blockNum, err := rawdbv3.TxNums.FindBlockNum(tx, txNum)
 						if err != nil {
 							return err

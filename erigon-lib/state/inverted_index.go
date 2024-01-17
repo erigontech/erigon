@@ -1224,7 +1224,11 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 		//Desc: [from, to) AND from > to
 		if it.orderAscend {
 			for it.efIt.HasNext() {
-				n, _ := it.efIt.Next()
+				n, err := it.efIt.Next()
+				if err != nil {
+					it.err = err
+					return
+				}
 				isBeforeRange := int(n) < it.startTxNum
 				if isBeforeRange { //skip
 					continue
@@ -1240,7 +1244,11 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			}
 		} else {
 			for it.efIt.HasNext() {
-				n, _ := it.efIt.Next()
+				n, err := it.efIt.Next()
+				if err != nil {
+					it.err = err
+					return
+				}
 				isAfterRange := it.startTxNum >= 0 && int(n) > it.startTxNum
 				if isAfterRange { //skip
 					continue
