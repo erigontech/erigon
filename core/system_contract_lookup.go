@@ -22,6 +22,7 @@ func init() {
 		// Apply genesis with the block number 0
 		genesisBlock := GenesisBlockByChainName(chainName)
 		allocToCodeRecords(genesisBlock.Alloc, byChain, 0)
+
 		// Process upgrades
 		chainConfig := params.ChainConfigByChainName(chainName)
 		borConfig := chainConfig.Bor.(*borcfg.BorConfig)
@@ -59,7 +60,6 @@ func allocToCodeRecords(alloc types.GenesisAlloc, byChain map[libcommon.Address]
 // and losing the history for it in the DB.  Temporary hack until erigon 3 arrives
 func addGnosisSpecialCase() {
 	byChain := map[libcommon.Address][]libcommon.CodeRecord{}
-	fmt.Printf("sys %s, %x\n", "gnosis", systemcontracts.SystemContractCodeLookup[networkname.GnosisChainName])
 
 	systemcontracts.SystemContractCodeLookup[networkname.GnosisChainName] = byChain
 	address := libcommon.HexToAddress("0xf8d1677c8a0c961938bf2f9adc3f3cfda759a9d9")
