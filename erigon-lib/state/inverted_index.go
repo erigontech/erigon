@@ -1793,6 +1793,8 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 }
 
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
+	defer ii.reCalcRoFiles()
+
 	if asserts && ii.withExistenceIndex && sf.existence == nil {
 		panic(fmt.Errorf("assert: no existence index: %s", sf.decomp.FileName()))
 	}
@@ -1804,8 +1806,6 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi.index = sf.index
 	fi.existence = sf.existence
 	ii.files.Set(fi)
-
-	ii.reCalcRoFiles()
 }
 
 func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint64) {
