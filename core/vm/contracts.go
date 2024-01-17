@@ -20,13 +20,13 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 	"math/big"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/crypto/blake2b"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -34,7 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/crypto/bn256"
-
+	"github.com/ledgerwatch/erigon/crypto/secp256r1"
 	"github.com/ledgerwatch/erigon/params"
 
 	//lint:ignore SA1019 Needed for precompile
@@ -112,6 +112,19 @@ var PrecompiledContractsCancun = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
 }
 
+var PrecompiledContractsNapoli = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{0x01}):       &ecrecover{},
+	libcommon.BytesToAddress([]byte{0x02}):       &sha256hash{},
+	libcommon.BytesToAddress([]byte{0x03}):       &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{0x04}):       &dataCopy{},
+	libcommon.BytesToAddress([]byte{0x05}):       &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{0x06}):       &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{0x07}):       &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{0x08}):       &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{0x09}):       &blake2F{},
+	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
+}
+
 // PrecompiledContractsBLS contains the set of pre-compiled Ethereum
 // contracts specified in EIP-2537. These are exported for testing purposes.
 var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
@@ -127,6 +140,7 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 }
 
 var (
+	PrecompiledAddressesNapoli    []libcommon.Address
 	PrecompiledAddressesCancun    []libcommon.Address
 	PrecompiledAddressesBerlin    []libcommon.Address
 	PrecompiledAddressesIstanbul  []libcommon.Address
@@ -150,11 +164,16 @@ func init() {
 	for k := range PrecompiledContractsCancun {
 		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
 	}
+	for k := range PrecompiledContractsNapoli {
+		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
+	case rules.IsNapoli:
+		return PrecompiledAddressesNapoli
 	case rules.IsCancun:
 		return PrecompiledAddressesCancun
 	case rules.IsBerlin:
@@ -1097,4 +1116,38 @@ func (c *pointEvaluation) RequiredGas(input []byte) uint64 {
 
 func (c *pointEvaluation) Run(input []byte) ([]byte, error) {
 	return libkzg.PointEvaluationPrecompile(input)
+}
+
+// P256VERIFY (secp256r1 signature verification)
+// implemented as a native contract
+type p256Verify struct{}
+
+// RequiredGas returns the gas required to execute the precompiled contract
+func (c *p256Verify) RequiredGas(input []byte) uint64 {
+	return params.P256VerifyGas
+}
+
+// Run executes the precompiled contract with given 160 bytes of param, returning the output and the used gas
+func (c *p256Verify) Run(input []byte) ([]byte, error) {
+	// Required input length is 160 bytes
+	const p256VerifyInputLength = 160
+	// Check the input length
+	if len(input) != p256VerifyInputLength {
+		// Input length is invalid
+		return nil, nil
+	}
+
+	// Extract the hash, r, s, x, y from the input
+	hash := input[0:32]
+	r, s := new(big.Int).SetBytes(input[32:64]), new(big.Int).SetBytes(input[64:96])
+	x, y := new(big.Int).SetBytes(input[96:128]), new(big.Int).SetBytes(input[128:160])
+
+	// Verify the secp256r1 signature
+	if secp256r1.Verify(hash, r, s, x, y) {
+		// Signature is valid
+		return common.LeftPadBytes(big1.Bytes(), 32), nil
+	} else {
+		// Signature is invalid
+		return nil, nil
+	}
 }
