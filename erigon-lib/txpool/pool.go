@@ -945,7 +945,7 @@ func (p *TxPool) isShanghai() bool {
 }
 
 func (p *TxPool) isAgra() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
+	// once this flag has been set for the first time we no longer need to check the block
 	set := p.isPostAgra.Load()
 	if set {
 		return true
