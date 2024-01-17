@@ -1,4 +1,4 @@
-package milestone
+package heimdall
 
 import (
 	"math/big"
