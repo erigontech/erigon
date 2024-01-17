@@ -338,7 +338,7 @@ func (tx *rpcTransaction) Tx() types.Transaction {
 		return &types.AccessListTx{LegacyTx: *legacy}
 	}
 
-	panic(fmt.Sprintf("unknown transaction type: %v", *tx.Type))
+	return nil
 }
 
 // Hex2Int256 converts a hex string to a uint256.Int.
