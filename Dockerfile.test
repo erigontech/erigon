@@ -1,0 +1,16 @@
+FROM golang:1.19 AS base
+
+RUN apt-get update \
+&& apt-get -y install make openssh-client ca-certificates && update-ca-certificates
+
+FROM base AS test
+
+WORKDIR /app
+
+ADD go.mod go.mod
+ADD go.sum go.sum
+
+RUN go mod download
+ADD . .
+
+ENTRYPOINT ["go", "run", "/app/zk/datastream/test/test.go"]

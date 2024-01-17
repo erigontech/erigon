@@ -46,10 +46,12 @@ func GetBlockByHash(blockHash string) (Result, error) {
 		return Result{}, err
 	}
 
-	req, err := http.NewRequest("POST", "https://rpc.internal.zkevm-test.net", bytes.NewBuffer(jsonPayload))
+	req, err := http.NewRequest("POST", "https://zkevm-rpc.com", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		return Result{}, err
 	}
+
+	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -107,7 +109,7 @@ func CompareValuesString(vlockNum, ts string, ger common.Hash) error {
 		return err
 	}
 
-	resp, err := http.Post("https://rpc.internal.zkevm-test.net", "application/json", bytes.NewBuffer(jsonPayload))
+	resp, err := http.Post("https://zkevm-rpc.com", "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return err
