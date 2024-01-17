@@ -107,8 +107,10 @@ func TestCreation(t *testing.T) {
 				{1735370, 1661130096, ID{Hash: checksumToBytes(0xfe3366e7), Next: 1735371}},    // Last pre-MergeNetsplit block
 				{1735371, 1661130108, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // First MergeNetsplit block
 				{2990907, 1677557076, ID{Hash: checksumToBytes(0xb96cbd13), Next: 1677557088}}, // Last pre-Shanghai block
-				{2990908, 1677557088, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 0}},          // First Shanghai block
-				{5000000, 1700000000, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 0}},          // Future Shanghai block (mock)
+				{2990908, 1677557088, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // First Shanghai block
+				{5198775, 1706655060, ID{Hash: checksumToBytes(0xf7f9bc08), Next: 1706655072}}, // Last Shanghai block (approx)
+				{5198776, 1706655072, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // First Cancun block  (approx)
+				{8000000, 1800000000, ID{Hash: checksumToBytes(0x88cf81d9), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
 		// Gnosis test cases
