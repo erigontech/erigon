@@ -727,6 +727,8 @@ Loop:
 			if txIndex >= 0 && txIndex < len(txs) {
 				txTask.Tx = txs[txIndex]
 				txTask.TxAsMessage, err = txTask.Tx.AsMessage(signer, header.BaseFee, txTask.Rules)
+				fmt.Printf("[dbg] %d, %d, %d;\n", txTask.TxAsMessage.FeeCap().Uint64(), txTask.TxAsMessage.Tip().Uint64(), header.BaseFee.Uint64())
+
 				if err != nil {
 					return err
 				}
