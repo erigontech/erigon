@@ -80,6 +80,16 @@ func (l *OperatorUnmarshaller) ReadUInt64() (uint64, error) {
 
 }
 
+func (l *OperatorUnmarshaller) ReadUInt8() (uint8, error) {
+	var value uint8
+	err := l.decoder.Decode(&value)
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
+
+}
+
 // OperatorMarshaller is responsible for encoding operators to a stream
 // and collecting stats
 // IMPORTANT: not thread-safe! use from a single thread only
@@ -116,6 +126,11 @@ func (w *OperatorMarshaller) WriteByteValue(value byte) error {
 }
 
 func (w *OperatorMarshaller) WriteUint64Value(value uint64) error {
+	w.WithColumn(ColumnLeafValues)
+	return w.encoder.Encode(value)
+}
+
+func (w *OperatorMarshaller) WriteUint8Value(value uint8) error {
 	w.WithColumn(ColumnLeafValues)
 	return w.encoder.Encode(value)
 }

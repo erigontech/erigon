@@ -27,6 +27,7 @@ type SmtDbTx interface {
 const TableSmt = "HermezSmt"
 const TableLastRoot = "HermezSmtLastRoot"
 const TableAccountValues = "HermezSmtAccountValues"
+const TableMetadata = "HermezSmtMetadata"
 
 type EriDb struct {
 	kvTx kv.RwTx

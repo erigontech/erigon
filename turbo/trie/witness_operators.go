@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ugorji/go/codec"
 )
 
@@ -34,6 +35,8 @@ const (
 	OpAccountLeaf
 	// OpEmptyRoot places nil onto the node stack, and empty root hash onto the hash stack.
 	OpEmptyRoot
+
+	OpSMTLeaf
 
 	// OpNewTrie stops the processing, because another trie is encoded into the witness.
 	OpNewTrie = OperatorKindCode(0xBB)
@@ -92,6 +95,70 @@ func (o *OperatorLeafValue) LoadFrom(loader *OperatorUnmarshaller) error {
 	}
 
 	o.Key = key
+
+	value, err := loader.ReadByteArray()
+	if err != nil {
+		return err
+	}
+
+	o.Value = value
+	return nil
+}
+
+type OperatorSMTLeafValue struct {
+	NodeType   uint8
+	Address    []byte
+	StorageKey []byte
+	Value      []byte
+}
+
+func (o *OperatorSMTLeafValue) WriteTo(output *OperatorMarshaller) error {
+	if err := output.WriteOpCode(OpSMTLeaf); err != nil {
+		return err
+	}
+
+	if err := output.WriteUint8Value(o.NodeType); err != nil {
+		return err
+	}
+
+	if err := output.WriteByteArrayValue(o.Address); err != nil {
+		return err
+	}
+
+	if o.NodeType == utils.SC_STORAGE {
+		if err := output.WriteByteArrayValue(o.StorageKey); err != nil {
+			return err
+		}
+	}
+
+	return output.WriteByteArrayValue(o.Value)
+}
+
+func (o *OperatorSMTLeafValue) LoadFrom(loader *OperatorUnmarshaller) error {
+	nodeType, err := loader.ReadUInt8()
+	if err != nil {
+		return err
+	}
+
+	o.NodeType = nodeType
+
+	address, err := loader.ReadByteArray()
+
+	if err != nil {
+		return err
+	}
+
+	o.Address = address
+
+	if o.NodeType == utils.SC_STORAGE {
+		storageKey, err := loader.ReadByteArray()
+
+		if err != nil {
+			return err
+		}
+
+		o.StorageKey = storageKey
+	}
 
 	value, err := loader.ReadByteArray()
 	if err != nil {
