@@ -101,7 +101,7 @@ func TestGetSignerSuccessionNumber_ProposerNotFound(t *testing.T) {
 	_, err := snap.GetSignerSuccessionNumber(signer)
 	require.NotNil(t, err)
 
-	e, ok := err.(*bor.UnauthorizedProposerError)
+	e, ok := err.(*valset.UnauthorizedProposerError)
 	require.True(t, ok)
 	require.Equal(t, dummyProposerAddress.Bytes(), e.Proposer)
 }
@@ -118,7 +118,7 @@ func TestGetSignerSuccessionNumber_SignerNotFound(t *testing.T) {
 	_, err := snap.GetSignerSuccessionNumber(dummySignerAddress)
 	require.NotNil(t, err)
 
-	e, ok := err.(*bor.UnauthorizedSignerError)
+	e, ok := err.(*valset.UnauthorizedSignerError)
 	require.True(t, ok)
 	require.Equal(t, dummySignerAddress.Bytes(), e.Signer)
 }

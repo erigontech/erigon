@@ -12,13 +12,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/sync/mock"
-	"github.com/ledgerwatch/erigon/polygon/sync/peerinfo"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
@@ -28,10 +24,10 @@ func newHeaderDownloaderTest(t *testing.T) *headerDownloaderTest {
 
 func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts) *headerDownloaderTest {
 	ctrl := gomock.NewController(t)
-	heimdall := mock.NewMockHeimdall(ctrl)
-	sentry := mock.NewMockSentry(ctrl)
+	heimdall := NewMockHeimdall(ctrl)
+	sentry := NewMockSentry(ctrl)
 	sentry.EXPECT().MaxPeers().Return(100).Times(1)
-	db := mock.NewMockDB(ctrl)
+	db := NewMockDB(ctrl)
 	logger := testlog.Logger(t, log.LvlDebug)
 	headerVerifier := opts.getOrCreateDefaultHeaderVerifier()
 	headerDownloader := NewHeaderDownloader(logger, sentry, db, heimdall, headerVerifier)
@@ -44,10 +40,10 @@ func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts
 }
 
 type headerDownloaderTestOpts struct {
-	headerVerifier HeaderVerifier
+	headerVerifier StatePointHeadersVerifier
 }
 
-func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() HeaderVerifier {
+func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() StatePointHeadersVerifier {
 	if opts.headerVerifier == nil {
 		return func(_ *statePoint, _ []*types.Header) error {
 			return nil
@@ -58,14 +54,14 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() HeaderVe
 }
 
 type headerDownloaderTest struct {
-	heimdall         *mock.MockHeimdall
-	sentry           *mock.MockSentry
-	db               *mock.MockDB
+	heimdall         *MockHeimdall
+	sentry           *MockSentry
+	db               *MockDB
 	headerDownloader *HeaderDownloader
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) peerinfo.PeersWithBlockNumInfo {
-	peers := make(peerinfo.PeersWithBlockNumInfo, count)
+func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) PeersWithBlockNumInfo {
+	peers := make(PeersWithBlockNumInfo, count)
 	for i := range peers {
 		var blockNum *big.Int
 		if i < len(blockNums) {
@@ -74,7 +70,7 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) peer
 			blockNum = new(big.Int).SetUint64(math.MaxUint64)
 		}
 
-		peers[i] = &peerinfo.PeerWithBlockNumInfo{
+		peers[i] = &PeerWithBlockNumInfo{
 			ID:       fmt.Sprintf("peer%d", i+1),
 			BlockNum: blockNum,
 		}
@@ -83,11 +79,11 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) peer
 	return peers
 }
 
-func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*checkpoint.Checkpoint {
-	checkpoints := make([]*checkpoint.Checkpoint, count)
+func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoint {
+	checkpoints := make([]*heimdall.Checkpoint, count)
 	for i := range checkpoints {
 		num := i + 1
-		checkpoints[i] = &checkpoint.Checkpoint{
+		checkpoints[i] = &heimdall.Checkpoint{
 			StartBlock: big.NewInt(int64(num)),
 			EndBlock:   big.NewInt(int64(num)),
 			RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
@@ -97,11 +93,11 @@ func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*checkpoint.Checkpo
 	return checkpoints
 }
 
-func (hdt headerDownloaderTest) fakeMilestones(count int) []*milestone.Milestone {
-	milestones := make([]*milestone.Milestone, count)
+func (hdt headerDownloaderTest) fakeMilestones(count int) []*heimdall.Milestone {
+	milestones := make([]*heimdall.Milestone, count)
 	for i := range milestones {
 		num := i + 1
-		milestones[i] = &milestone.Milestone{
+		milestones[i] = &heimdall.Milestone{
 			StartBlock: big.NewInt(int64(num)),
 			EndBlock:   big.NewInt(int64(num)),
 			Hash:       common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),

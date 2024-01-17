@@ -47,7 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
-// udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 7
+// udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 8
 var udpOrHttpTrackers = []string{
 	"udp://tracker.opentrackr.org:1337/announce",
 	"udp://9.rarbg.com:2810/announce",

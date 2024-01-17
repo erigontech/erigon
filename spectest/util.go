@@ -2,12 +2,13 @@ package spectest
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
+
 	clparams2 "github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"io/fs"
-	"os"
 
 	"gopkg.in/yaml.v3"
 
@@ -80,6 +81,25 @@ func ReadBlock(root fs.FS, version clparams2.StateVersion, index int) (*cltypes.
 
 	return blk, nil
 }
+
+func ReadBlockByPath(root fs.FS, version clparams2.StateVersion, path string) (*cltypes.SignedBeaconBlock, error) {
+	var blockBytes []byte
+	var err error
+	blockBytes, err = fs.ReadFile(root, path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	blk := cltypes.NewSignedBeaconBlock(&clparams2.MainnetBeaconConfig)
+	if err = utils.DecodeSSZSnappy(blk, blockBytes, int(version)); err != nil {
+		return nil, err
+	}
+
+	return blk, nil
+}
+
 func ReadAnchorBlock(root fs.FS, version clparams2.StateVersion, name string) (*cltypes.BeaconBlock, error) {
 	var blockBytes []byte
 	var err error

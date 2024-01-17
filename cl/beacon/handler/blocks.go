@@ -23,18 +23,18 @@ type getHeadersRequest struct {
 	ParentRoot *libcommon.Hash `json:"root,omitempty"`
 }
 
-func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *segmentID) (root libcommon.Hash, err error) {
+func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *beaconhttp.SegmentID) (root libcommon.Hash, err error) {
 	switch {
-	case blockId.head():
+	case blockId.Head():
 		root, _, err = a.forkchoiceStore.GetHead()
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
-	case blockId.finalized():
+	case blockId.Finalized():
 		root = a.forkchoiceStore.FinalizedCheckpoint().BlockRoot()
-	case blockId.justified():
+	case blockId.Justified():
 		root = a.forkchoiceStore.JustifiedCheckpoint().BlockRoot()
-	case blockId.genesis():
+	case blockId.Genesis():
 		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, 0)
 		if err != nil {
 			return libcommon.Hash{}, err
@@ -42,24 +42,24 @@ func (a *ApiHandler) rootFromBlockId(ctx context.Context, tx kv.Tx, blockId *seg
 		if root == (libcommon.Hash{}) {
 			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, "genesis block not found")
 		}
-	case blockId.getSlot() != nil:
-		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.getSlot())
+	case blockId.GetSlot() != nil:
+		root, err = beacon_indicies.ReadCanonicalBlockRoot(tx, *blockId.GetSlot())
 		if err != nil {
 			return libcommon.Hash{}, err
 		}
 		if root == (libcommon.Hash{}) {
-			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("block not found %d", *blockId.getSlot()))
+			return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("block not found %d", *blockId.GetSlot()))
 		}
-	case blockId.getRoot() != nil:
+	case blockId.GetRoot() != nil:
 		// first check if it exists
-		root = *blockId.getRoot()
+		root = *blockId.GetRoot()
 	default:
 		return libcommon.Hash{}, beaconhttp.NewEndpointError(http.StatusInternalServerError, "cannot parse block id")
 	}
 	return
 }
 
-func (a *ApiHandler) getBlock(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -67,7 +67,7 @@ func (a *ApiHandler) getBlock(w http.ResponseWriter, r *http.Request) (*beaconRe
 	}
 	defer tx.Rollback()
 
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
@@ -90,11 +90,11 @@ func (a *ApiHandler) getBlock(w http.ResponseWriter, r *http.Request) (*beaconRe
 		return nil, err
 	}
 	return newBeaconResponse(blk).
-		withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
-		withVersion(blk.Version()), nil
+		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithVersion(blk.Version()), nil
 }
 
-func (a *ApiHandler) getBlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getBlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -102,7 +102,7 @@ func (a *ApiHandler) getBlindedBlock(w http.ResponseWriter, r *http.Request) (*b
 	}
 	defer tx.Rollback()
 
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
@@ -129,18 +129,18 @@ func (a *ApiHandler) getBlindedBlock(w http.ResponseWriter, r *http.Request) (*b
 		return nil, err
 	}
 	return newBeaconResponse(blinded).
-		withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
-		withVersion(blk.Version()), nil
+		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithVersion(blk.Version()), nil
 }
 
-func (a *ApiHandler) getBlockAttestations(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getBlockAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -160,18 +160,19 @@ func (a *ApiHandler) getBlockAttestations(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return nil, err
 	}
-	return newBeaconResponse(blk.Block.Body.Attestations).withFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
-		withVersion(blk.Version()), nil
+	return newBeaconResponse(blk.Block.Body.Attestations).
+		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
+		WithVersion(blk.Version()), nil
 }
 
-func (a *ApiHandler) getBlockRoot(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) getBlockRoot(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockId, err := blockIdFromRequest(r)
+	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
 	}
@@ -195,5 +196,5 @@ func (a *ApiHandler) getBlockRoot(w http.ResponseWriter, r *http.Request) (*beac
 	}
 	return newBeaconResponse(struct {
 		Root libcommon.Hash `json:"root"`
-	}{Root: root}).withFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
+	}{Root: root}).WithFinalized(canonicalRoot == root && *slot <= a.forkchoiceStore.FinalizedSlot()), nil
 }

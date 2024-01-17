@@ -20,13 +20,12 @@ type BorConfig struct {
 	OverrideStateSyncRecords map[string]int         `json:"overrideStateSyncRecords"` // override state records count
 	BlockAlloc               map[string]interface{} `json:"blockAlloc"`
 
-	JaipurBlock                *big.Int          `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on jaipur)
-	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on delhi)
-	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on indore)
-	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already in agra)
+	JaipurBlock                *big.Int          `json:"jaipurBlock"`                // Jaipur switch block (nil = no fork, 0 = already on Jaipur)
+	DelhiBlock                 *big.Int          `json:"delhiBlock"`                 // Delhi switch block (nil = no fork, 0 = already on Delhi)
+	IndoreBlock                *big.Int          `json:"indoreBlock"`                // Indore switch block (nil = no fork, 0 = already on Indore)
+	AgraBlock                  *big.Int          `json:"agraBlock"`                  // Agra switch block (nil = no fork, 0 = already on Agra)
+	NapoliBlock                *big.Int          `json:"napoliBlock"`                // Napoli switch block (nil = no fork, 0 = already on Napoli)
 	StateSyncConfirmationDelay map[string]uint64 `json:"stateSyncConfirmationDelay"` // StateSync Confirmation Delay, in seconds, to calculate `to`
-
-	ParallelUniverseBlock *big.Int `json:"parallelUniverseBlock"` // TODO: update all occurrence, change name and finalize number (hardfork for block-stm related changes)
 
 	sprints sprints
 }
@@ -126,15 +125,13 @@ func (c *BorConfig) GetAgraBlock() *big.Int {
 	return c.AgraBlock
 }
 
-// TODO: modify this function once the block number is finalized
-func (c *BorConfig) IsParallelUniverse(number uint64) bool {
-	if c.ParallelUniverseBlock != nil {
-		if c.ParallelUniverseBlock.Cmp(big.NewInt(0)) == 0 {
-			return false
-		}
-	}
+// Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
+func (c *BorConfig) IsNapoli(num uint64) bool {
+	return isForked(c.NapoliBlock, num)
+}
 
-	return isForked(c.ParallelUniverseBlock, number)
+func (c *BorConfig) GetNapoliBlock() *big.Int {
+	return c.NapoliBlock
 }
 
 func (c *BorConfig) CalculateStateSyncDelay(number uint64) uint64 {

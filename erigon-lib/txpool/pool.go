@@ -85,13 +85,12 @@ type Pool interface {
 	// Handle 3 main events - new remote txs from p2p, new local txs from RPC, new blocks from execution layer
 	AddRemoteTxs(ctx context.Context, newTxs types.TxSlots)
 	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
-	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error
+	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, unwindBlobTxs, minedTxs types.TxSlots, tx kv.Tx) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes types.Hashes) (unknownHashes types.Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error)
 
 	AddNewGoodPeer(peerID types.PeerID)
 }
@@ -225,11 +224,17 @@ type TxPool struct {
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	maxBlobsPerBlock        uint64
+	feeCalculator           FeeCalculator
 	logger                  log.Logger
 }
 
+type FeeCalculator interface {
+	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice uint64, err error)
+}
+
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
-	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64, logger log.Logger,
+	chainID uint256.Int, shanghaiTime, agraBlock, cancunTime *big.Int, maxBlobsPerBlock uint64,
+	feeCalculator FeeCalculator, logger log.Logger,
 ) (*TxPool, error) {
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -275,6 +280,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		minedBlobTxsByBlock:     map[uint64][]*metaTx{},
 		minedBlobTxsByHash:      map[string]*metaTx{},
 		maxBlobsPerBlock:        maxBlobsPerBlock,
+		feeCalculator:           feeCalculator,
 		logger:                  logger,
 	}
 
@@ -330,8 +336,7 @@ func (p *TxPool) Start(ctx context.Context, db kv.RwDB) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
-
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, unwindBlobTxs, minedTxs types.TxSlots, tx kv.Tx) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 	//t := time.Now()
 
@@ -395,6 +400,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	p.blockGasLimit.Store(stateChanges.BlockGasLimit)
 
+	for i, txn := range unwindBlobTxs.Txs {
+		if txn.Type == types.BlobTxType {
+			knownBlobTxn, err := p.getCachedBlobTxnLocked(coreTx, txn.IDHash[:])
+			if err != nil {
+				return err
+			}
+			if knownBlobTxn != nil {
+				unwindTxs.Append(knownBlobTxn.Tx, unwindBlobTxs.Senders.At(i), false)
+			}
+		}
+	}
 	if err = p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs, p.logger); err != nil {
 		return err
 	}
@@ -613,10 +629,8 @@ func (p *TxPool) getUnprocessedTxn(hashS string) (*types.TxSlot, bool) {
 	return nil, false
 }
 
-func (p *TxPool) GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error) {
+func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) {
 	hashS := string(hash)
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	if mt, ok := p.minedBlobTxsByHash[hashS]; ok {
 		return mt, nil
 	}
@@ -939,7 +953,7 @@ func (p *TxPool) isShanghai() bool {
 }
 
 func (p *TxPool) isAgra() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
+	// once this flag has been set for the first time we no longer need to check the block
 	set := p.isPostAgra.Load()
 	if set {
 		return true
@@ -1700,7 +1714,7 @@ const txMaxBroadcastSize = 4 * 1024
 //
 // promote/demote transactions
 // reorgs
-func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs chan types.Announcements, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
+func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Announcements, send *Send, newSlotsStreams *NewSlotsStreams, notifyMiningAboutNewSlots func()) {
 	syncToNewPeersEvery := time.NewTicker(p.cfg.SyncToNewPeersEvery)
 	defer syncToNewPeersEvery.Stop()
 	processRemoteTxsEvery := time.NewTicker(p.cfg.ProcessRemoteTxsEvery)
@@ -2072,8 +2086,15 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		i++
 	}
 
-	var pendingBaseFee uint64
-	{
+	var pendingBaseFee, pendingBlobFee, minBlobGasPrice uint64
+
+	if p.feeCalculator != nil {
+		if chainConfig, _ := ChainConfig(tx); chainConfig != nil {
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, _ = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+		}
+	}
+
+	if pendingBaseFee == 0 {
 		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBaseFeeKey)
 		if err != nil {
 			return err
@@ -2082,8 +2103,8 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 			pendingBaseFee = binary.BigEndian.Uint64(v)
 		}
 	}
-	var pendingBlobFee uint64 = 1 // MIN_BLOB_GAS_PRICE A/EIP-4844
-	{
+
+	if pendingBlobFee == 0 {
 		v, err := tx.GetOne(kv.PoolInfo, PoolPendingBlobFeeKey)
 		if err != nil {
 			return err
@@ -2091,6 +2112,10 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		if len(v) > 0 {
 			pendingBlobFee = binary.BigEndian.Uint64(v)
 		}
+	}
+
+	if pendingBlobFee == 0 {
+		pendingBlobFee = minBlobGasPrice
 	}
 
 	err = p.senders.registerNewSenders(&txs, p.logger)

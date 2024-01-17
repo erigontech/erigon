@@ -20,8 +20,8 @@ type live struct {
 	IsLive bool `json:"is_live"`
 }
 
-func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
-	epoch, err := epochFromRequest(r)
+func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
 		return nil, err
 	}
