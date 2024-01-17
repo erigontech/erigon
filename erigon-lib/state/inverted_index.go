@@ -1164,7 +1164,7 @@ func (ic *InvertedIndexContext) DebugEFAllValuesAreInRange(ctx context.Context) 
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-logEvery.C:
-				log.Info(fmt.Sprintf("[dbg] checking: %s, k=%x", g.FileName(), k))
+				log.Info(fmt.Sprintf("[integrity] EFAllValuesAreInRange: %s, k=%x", g.FileName(), k))
 			default:
 			}
 		}
