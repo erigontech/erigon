@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -304,6 +305,7 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 
 	ttx := tx.(kv.TemporalTx)
 
+	t := time.Now()
 	{
 		iter, err := ttx.HistoryRange(kv.AccountsHistory, int(txUnwindTo), -1, order.Asc, -1)
 		if err != nil {
@@ -319,6 +321,8 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 			}
 		}
 	}
+	log.Info("Account history", "in", time.Since(t))
+	t = time.Now()
 	{
 		iter, err := ttx.HistoryRange(kv.StorageHistory, int(txUnwindTo), -1, order.Asc, -1)
 		if err != nil {
@@ -334,14 +338,17 @@ func (rs *StateV3) Unwind(ctx context.Context, tx kv.RwTx, blockUnwindTo, txUnwi
 			}
 		}
 	}
-
+	log.Info("Storage history", "in", time.Since(t))
+	t = time.Now()
 	if err := stateChanges.Load(tx, "", handle, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	log.Info("Loaded", "in", time.Since(t))
+	t = time.Now()
 	if err := rs.domains.Unwind(ctx, tx, blockUnwindTo, txUnwindTo); err != nil {
 		return err
 	}
-
+	log.Info("Domains unwind", "in", time.Since(t))
 	return nil
 }
 

@@ -1531,6 +1531,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	seen := make(map[string]struct{})
 	restored := dc.NewWriter()
 
+	t := time.Now()
 	for histRng.HasNext() && txNumUnindTo > 0 {
 		k, v, err := histRng.Next()
 		if err != nil {
@@ -1556,6 +1557,8 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 		}
 		seen[string(k)] = struct{}{}
 	}
+	log.Info("Gathered data", "base", dc.d.filenameBase, "in", time.Since(t))
+	t = time.Now()
 
 	keysCursor, err := dc.keysCursor(rwTx)
 	if err != nil {
@@ -1614,7 +1617,11 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 	if err := dc.hc.Prune(ctx, rwTx, txNumUnindTo, math.MaxUint64, math.MaxUint64, true, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnindTo, step, err)
 	}
-	return restored.Flush(ctx, rwTx)
+	if err = restored.Flush(ctx, rwTx); err != nil {
+		return err
+	}
+	log.Info("Pruned and flushed", "base", dc.d.filenameBase, "in", time.Since(t))
+	return nil
 }
 
 func (d *Domain) isEmpty(tx kv.Tx) (bool, error) {
