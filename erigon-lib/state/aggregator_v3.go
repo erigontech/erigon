@@ -777,10 +777,10 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 // returns true if we can prune something already aggregated
 func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx) bool {
-	return dbg.NoPrune() || (!ac.account.CanPrune(tx) &&
-		!ac.storage.CanPrune(tx) &&
-		!ac.code.CanPrune(tx) &&
-		!ac.commitment.CanPrune(tx) &&
+	return dbg.NoPrune() || (!ac.account.CanPrune(tx) && !ac.account.hc.CanPrune(tx) &&
+		!ac.storage.CanPrune(tx) && !ac.storage.hc.CanPrune(tx) &&
+		!ac.code.CanPrune(tx) && !ac.code.hc.CanPrune(tx) &&
+		!ac.commitment.CanPrune(tx) && !ac.commitment.hc.CanPrune(tx) &&
 		!ac.logAddrs.CanPrune(tx) &&
 		!ac.logTopics.CanPrune(tx) &&
 		!ac.tracesFrom.CanPrune(tx) &&

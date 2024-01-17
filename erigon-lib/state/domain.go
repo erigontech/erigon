@@ -2051,6 +2051,8 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 	return fit, nil
 }
 
+// checks if there is anything to prune in DOMAIN tables.
+// history.CanPrune should be called separately because it responsible for different tables
 func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
 	inFiles := dc.maxTxNumInDomainFiles(false)
 	domStep := dc.CanPruneFrom(tx)
