@@ -188,7 +188,6 @@ func (c *Config) IsBerlin(num uint64) bool {
 
 // IsLondon returns whether num is either equal to the London fork block or greater.
 func (c *Config) IsLondon(num uint64) bool {
-	fmt.Printf("[dbg] IsLondon: %t\n", isForked(c.LondonBlock, num))
 	return isForked(c.LondonBlock, num)
 }
 
