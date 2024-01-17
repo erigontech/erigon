@@ -493,7 +493,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
 		txFrom        = a.FirstTxNumOfStep(step)
-		txTo          = a.LastTxNumOfStep(step) + 1
+		txTo          = a.FirstTxNumOfStep(step + 1)
 		stepStartedAt = time.Now()
 
 		static          AggV3StaticFiles
@@ -905,7 +905,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 
 	var txFrom, txTo uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
 	step := ac.a.aggregatedStep.Load()
-	txTo = ac.a.LastTxNumOfStep(step) + 1 // +1 to preserve prune range as [txFrom, txTo)
+	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
 
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)
@@ -1026,14 +1026,11 @@ func (a *AggregatorV3) FilesAmount() []int {
 	}
 }
 
+// FirstTxNumOfStep returns txStepBeginning of given step.
+// Step 0 is a range [0, stepSize).
+// To prune step needed to Prune ragne [txStepBeginning, txNextStepBeginning)
 func (a *AggregatorV3) FirstTxNumOfStep(step uint64) uint64 {
 	return step * a.StepSize()
-}
-
-// step 0 is a range [0, stepSize). So last tx num in step 0 is stepSize-1.
-// We prune by step and range [a,b) so when pruning called need to add +1 to result
-func (a *AggregatorV3) LastTxNumOfStep(step uint64) uint64 {
-	return (step+1)*a.StepSize() - 1
 }
 
 func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
