@@ -1149,7 +1149,7 @@ func (ic *InvertedIndexContext) DebugEFAllValuesAreInRange(ctx context.Context) 
 			if item.startTxNum > ef.Min() {
 				return fmt.Errorf("item.startTxNum > ef.Min(), %d > %d, %s", item.startTxNum, ef.Min(), g.FileName())
 			}
-			if item.endTxNum > ef.Max() {
+			if item.endTxNum > ef.Max()+1 {
 				return fmt.Errorf("item.endTxNum > ef.Max(), %d > %d, %s", item.endTxNum, ef.Max(), g.FileName())
 			}
 
