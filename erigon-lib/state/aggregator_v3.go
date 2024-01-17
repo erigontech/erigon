@@ -492,7 +492,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
-		txFrom        = a.FirstTxNumInStep(step)
+		txFrom        = a.FirstTxNumOfStep(step)
 		txTo          = a.LastTxNumOfStep(step) + 1
 		stepStartedAt = time.Now()
 
@@ -1026,7 +1026,7 @@ func (a *AggregatorV3) FilesAmount() []int {
 	}
 }
 
-func (a *AggregatorV3) FirstTxNumInStep(step uint64) uint64 {
+func (a *AggregatorV3) FirstTxNumOfStep(step uint64) uint64 {
 	return step * a.StepSize()
 }
 
@@ -1406,7 +1406,7 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
-	a.keepInDB = a.FirstTxNumInStep(steps)
+	a.keepInDB = a.FirstTxNumOfStep(steps)
 	return a
 }
 
