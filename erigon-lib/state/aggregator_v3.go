@@ -1722,6 +1722,53 @@ func (ac *AggregatorV3Context) DebugEFKey(domain kv.Domain, k []byte) error {
 	}
 	return nil
 }
+func (ac *AggregatorV3Context) DebugEFAllValuesAreInRange(ctx context.Context, name kv.InvertedIdx) error {
+	switch name {
+	case kv.AccountsHistoryIdx:
+		err := ac.account.hc.ic.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	case kv.StorageHistoryIdx:
+		err := ac.code.hc.ic.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	case kv.CodeHistoryIdx:
+		err := ac.storage.hc.ic.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	case kv.CommitmentHistoryIdx:
+		err := ac.commitment.hc.ic.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	case kv.TracesFromIdx:
+		err := ac.tracesFrom.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	case kv.TracesToIdx:
+		err := ac.tracesTo.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	case kv.LogAddrIdx:
+		err := ac.logAddrs.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	case kv.LogTopicIdx:
+		err := ac.logTopics.DebugEFAllValuesAreInRange(ctx)
+		if err != nil {
+			return err
+		}
+	default:
+		panic(fmt.Sprintf("unexpected: %s", name))
+	}
+	return nil
+}
 
 // --- Domain part END ---
 
