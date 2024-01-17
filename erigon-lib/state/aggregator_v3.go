@@ -125,7 +125,6 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		tmpdir:                 tmpdir,
 		aggregationStep:        aggregationStep,
 		db:                     db,
-		keepInDB:               1 * aggregationStep,
 		leakDetector:           dbg.NewLeakDetector("agg", dbg.SlowTx()),
 		ps:                     background.NewProgressSet(),
 		backgroundResult:       &BackgroundResult{},
@@ -187,6 +186,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, true, nil, logger); err != nil {
 		return nil, err
 	}
+	a.KeepStepsInDB(1)
 	a.recalcMaxTxNum()
 
 	if dbg.NoSync() {
@@ -252,7 +252,7 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	if mx > 0 {
 		mx--
 	}
-	a.aggregatedStep.Store(mx / a.aggregationStep)
+	a.aggregatedStep.Store(mx / a.StepSize())
 	return nil
 }
 
@@ -278,7 +278,7 @@ func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
 	if mx > 0 {
 		mx--
 	}
-	a.aggregatedStep.Store(mx / a.aggregationStep)
+	a.aggregatedStep.Store(mx / a.StepSize())
 	return nil
 }
 
@@ -492,20 +492,19 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 
 	var (
 		logEvery      = time.NewTicker(time.Second * 30)
-		txFrom        = step * a.aggregationStep
-		txTo          = (step + 1) * a.aggregationStep
+		txFrom        = a.FirstTxNumOfStep(step)
+		txTo          = a.FirstTxNumOfStep(step + 1)
 		stepStartedAt = time.Now()
+
+		static          AggV3StaticFiles
+		closeCollations = true
+		collListMu      = sync.Mutex{}
+		collations      = make([]Collation, 0)
 	)
 
 	defer logEvery.Stop()
-
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
-	var static AggV3StaticFiles
-
-	closeCollations := true
-	collListMu := sync.Mutex{}
-	collations := make([]Collation, 0)
 	defer func() {
 		if !closeCollations {
 			return
@@ -648,7 +647,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 	defer mxRunningMerges.Dec()
 
 	closeAll := true
-	maxSpan := a.aggregationStep * StepsInColdFile
+	maxSpan := StepsInColdFile * a.StepSize()
 	r := ac.findMergeRange(a.minimaxTxNumInFiles.Load(), maxSpan)
 	if !r.any() {
 		return false, nil
@@ -826,7 +825,6 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return ctx.Err()
 		default:
 		}
-
 	}
 }
 
@@ -905,9 +903,9 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		limit = uint64(math2.MaxUint64)
 	}
 
-	var txFrom, txTo uint64
+	var txFrom, txTo uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
 	step := ac.a.aggregatedStep.Load()
-	txTo = (step + 1) * ac.a.aggregationStep
+	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
 
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)
@@ -972,7 +970,7 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 	str := make([]string, 0, len(ac.account.files))
 	for _, item := range ac.account.files {
 		bn := tx2block(item.endTxNum)
-		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.aggregationStep, bn/1_000))
+		str = append(str, fmt.Sprintf("%d=%dK", item.endTxNum/ac.a.StepSize(), bn/1_000))
 	}
 	//str2 := make([]string, 0, len(ac.storage.files))
 	//for _, item := range ac.storage.files {
@@ -987,7 +985,7 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 		lastCommitmentTxNum = ac.commitment.files[len(ac.commitment.files)-1].endTxNum
 		lastCommitmentBlockNum = tx2block(lastCommitmentTxNum)
 	}
-	firstHistoryIndexBlockInDB := tx2block(ac.a.accounts.FirstStepInDB(tx) * ac.a.aggregationStep)
+	firstHistoryIndexBlockInDB := tx2block(ac.a.accounts.FirstStepInDB(tx) * ac.a.StepSize())
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	log.Info("[snapshots] History Stat",
@@ -1026,6 +1024,13 @@ func (a *AggregatorV3) FilesAmount() []int {
 		a.logAddrs.files.Len(),
 		a.logTopics.files.Len(),
 	}
+}
+
+// FirstTxNumOfStep returns txStepBeginning of given step.
+// Step 0 is a range [0, stepSize).
+// To prune step needed to Prune ragne [txStepBeginning, txNextStepBeginning)
+func (a *AggregatorV3) FirstTxNumOfStep(step uint64) uint64 {
+	return step * a.StepSize()
 }
 
 func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
@@ -1398,7 +1403,7 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
-	a.keepInDB = steps * a.aggregationStep
+	a.keepInDB = a.FirstTxNumOfStep(steps)
 	return a
 }
 
@@ -1422,7 +1427,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		return fin
 	}
 
-	step := a.minimaxTxNumInFiles.Load() / a.aggregationStep
+	step := a.minimaxTxNumInFiles.Load() / a.StepSize()
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
