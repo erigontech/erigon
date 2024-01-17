@@ -153,7 +153,6 @@ func IntrinsicGas(data []byte, accessList types2.AccessList, isContractCreation 
 // NewStateTransition initialises and returns a new state transition object.
 func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition {
 	isBor := evm.ChainConfig().Bor != nil
-	fmt.Printf("[dbg] %t, %t, %d, %d, %d;\n", msg.IsFree(), evm.Config().NoBaseFee, msg.FeeCap().Uint64(), msg.Tip().Uint64(), evm.Context.BaseFee.Uint64())
 	return &StateTransition{
 		gp:        gp,
 		evm:       evm,
@@ -266,8 +265,6 @@ func CheckEip1559TxGasFeeCap(from libcommon.Address, gasFeeCap, tip, baseFee *ui
 			from.Hex(), tip, gasFeeCap)
 	}
 	if baseFee != nil && gasFeeCap.Lt(baseFee) && !isFree {
-		panic(fmt.Errorf("%w: address %v, gasFeeCap: %s baseFee: %s", ErrFeeCapTooLow,
-			from.Hex(), gasFeeCap, baseFee))
 		return fmt.Errorf("%w: address %v, gasFeeCap: %s baseFee: %s", ErrFeeCapTooLow,
 			from.Hex(), gasFeeCap, baseFee)
 	}

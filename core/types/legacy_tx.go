@@ -350,7 +350,6 @@ func (tx *LegacyTx) DecodeRLP(s *rlp.Stream, encodingSize uint64) error {
 
 // AsMessage returns the transaction as a core.Message.
 func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, error) {
-	fmt.Printf("[dbg] legacy %d, %d\n", tx.Gas, tx.GasPrice.Uint64())
 	msg := Message{
 		nonce:      tx.Nonce,
 		gasLimit:   tx.Gas,
