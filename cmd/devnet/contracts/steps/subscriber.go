@@ -3,9 +3,8 @@ package contracts_steps
 import (
 	"context"
 	"fmt"
-	"math/big"
-
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"math/big"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

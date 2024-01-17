@@ -1,8 +1,6 @@
 package state
 
 import (
-	"encoding/binary"
-	"fmt"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -117,39 +115,33 @@ func (c *compWriter) Close() {
 	}
 }
 
-func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, step uint64, prunedKey []byte) error {
-	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(encodeBigEndian(step), prunedKey...))
+// SaveExecV3PruneProgress saves latest pruned key in given table to the database.
+// nil key also allowed and means that latest pruning run has been finished.
+func SaveExecV3PruneProgress(db kv.Putter, prunedTblName string, prunedKey []byte) error {
+	empty := make([]byte, 1)
+	if prunedKey != nil {
+		empty[0] = 1
+	}
+	return db.Put(kv.TblPruningProgress, []byte(prunedTblName), append(empty, prunedKey...))
 }
 
-// GetExecV3PruneProgress retrieves saved progress of given table pruning from the database
-// ts==0 && prunedKey==nil means that pruning is finished, next prune could start
-// For domains make more sense to store inverted step to have 0 as empty value meaning no progress saved
-func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (ts uint64, pruned []byte, err error) {
+// GetExecV3PruneProgress retrieves saved progress of given table pruning from the database.
+// For now it is latest pruned key in prunedTblName
+func GetExecV3PruneProgress(db kv.Getter, prunedTblName string) (pruned []byte, err error) {
 	v, err := db.GetOne(kv.TblPruningProgress, []byte(prunedTblName))
 	if err != nil {
-		return 0, nil, err
+		return nil, err
 	}
-	return unmarshalData(v)
-}
-
-func unmarshalData(data []byte) (uint64, []byte, error) {
-	switch {
-	case len(data) < 8 && len(data) > 0:
-		return 0, nil, fmt.Errorf("value must be at least 8 bytes, got %d", len(data))
-	case len(data) == 8:
-		// we want to preserve guarantee that if step==0 && prunedKey==nil then pruning is finished
-		// If return data[8:] - result will be empty array which is a valid key to prune and does not
-		// mean that pruning is finished.
-		return binary.BigEndian.Uint64(data[:8]), nil, nil
-	case len(data) > 8:
-		return binary.BigEndian.Uint64(data[:8]), data[8:], nil
+	switch len(v) {
+	case 0:
+		return nil, nil
+	case 1:
+		if v[0] == 1 {
+			return []byte{}, nil
+		}
+		// nil values returned an empty key which actually is a value
+		return nil, nil
 	default:
-		return 0, nil, nil
+		return v[1:], nil
 	}
-}
-
-func encodeBigEndian(n uint64) []byte {
-	var v [8]byte
-	binary.BigEndian.PutUint64(v[:], n)
-	return v[:]
 }

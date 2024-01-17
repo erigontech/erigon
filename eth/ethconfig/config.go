@@ -47,7 +47,7 @@ import (
 
 // AggregationStep number of transactions in smalest static file
 const HistoryV3AggregationStep = 1_562_500 // = 100M / 64. Dividers: 2, 5, 10, 20, 50, 100, 500
-//const HistoryV3AggregationStep = 1_562_500 / 10 // use this to reduce step size for dev/debug
+//const HistoryV3AggregationStep = 1_562_500 / 5 // use this to reduce step size for dev/debug
 
 // FullNodeGPO contains default gasprice oracle settings for full node.
 var FullNodeGPO = gaspricecfg.Config{
@@ -229,9 +229,6 @@ type Config struct {
 
 	//  New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	HistoryV3 bool
-
-	// gRPC Address to connect to Heimdall node
-	HeimdallgRPCAddress string
 
 	// URL to connect to Heimdall node
 	HeimdallURL string

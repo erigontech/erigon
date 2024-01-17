@@ -365,6 +365,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
+	if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
+		return err
+	}
+
 	if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
 		return err
 	}
@@ -782,7 +786,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if ac.CanPrune(tx) {
-				if err = ac.PruneWithTimeout(ctx, time.Hour, tx); err != nil {
+				if err = ac.PruneSmallBatches(ctx, time.Hour, tx); err != nil {
 					return err
 				}
 			}
@@ -826,7 +830,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 			if ac.CanPrune(tx) {
-				if err = ac.PruneWithTimeout(ctx, time.Hour, tx); err != nil {
+				if err = ac.PruneSmallBatches(ctx, time.Hour, tx); err != nil {
 					return err
 				}
 			}

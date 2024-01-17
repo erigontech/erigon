@@ -1,0 +1,38 @@
+vars:
+  head_hash: '0xeffdd8ef40c3c901f0724d48e04ce257967cf1da31929f3b6db614f89ef8d660'
+  post_root: '0x933d6650f2999f17012e781f5012981edb549e5935de1c981fce81cdd241d4e1'
+  bad_hash: '0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef'
+  head_slot: 8322
+  first_slot: 8288
+  head_epoch: "260"
+  body_root_1: "0x8d07005613673b3684b527f9c4dab5191403177e79b0e0bc1d58f15021abab19"
+  body_root_2: "0xa6957819a5055b6d760c1b2ec034522cc033a7dd94c743ed936d8f8d0eb5ccce"
+  block_1_hash: "0x86979f6f6dc7626064ef0d38d4dffb89e91d1d4c18492e3fb7d7ee93cedca3ed"
+tests:
+  - name: not head
+    actual:
+      handler: i
+      path: /eth/v1/beacon/headers/{{.Vars.block_1_hash}}
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.canonical == true
+       - actual.data.header.message.body_root == "{{.Vars.body_root_1}}"
+       - actual.data.header.message.slot == "{{.Vars.first_slot}}"
+  - name: head
+    actual:
+      handler: i
+      path: /eth/v1/beacon/headers/head
+    compare:
+      exprs:
+       - actual_code == 200
+       - actual.data.canonical == true
+       - actual.data.header.message.body_root == "{{.Vars.body_root_2}}"
+       - actual.data.header.message.slot == "{{.Vars.head_slot}}"
+  - name: not head
+    actual:
+      handler: i
+      path: /eth/v1/beacon/headers/{{.Vars.bad_hash}}
+    compare:
+      exprs:
+       - actual_code == 404
