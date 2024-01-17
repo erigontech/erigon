@@ -1146,6 +1146,9 @@ func (ic *InvertedIndexContext) DebugEFAllValuesAreInRange(ctx context.Context) 
 			_ = k
 			eliasVal, _ := g.NextUncompressed()
 			ef, _ := eliasfano32.ReadEliasFano(eliasVal)
+			if ef.Count() == 0 {
+				continue
+			}
 			if item.startTxNum > ef.Min() {
 				err := fmt.Errorf("item.startTxNum > ef.Min(), %d > %d, %s, %x", item.startTxNum, ef.Min(), g.FileName(), k)
 				log.Warn(err.Error())
