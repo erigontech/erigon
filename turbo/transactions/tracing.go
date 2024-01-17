@@ -14,8 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-
-	ethereum "github.com/ledgerwatch/erigon"
+	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
@@ -25,7 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -192,14 +191,7 @@ func TraceTx(
 		stream.WriteArrayStart()
 	}
 
-	var result *core.ExecutionResult
-	if config != nil && config.BorTx != nil && *config.BorTx {
-		callmsg := prepareCallMessage(message)
-		result, err = statefull.ApplyBorMessage(*vmenv, callmsg)
-	} else {
-		result, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas()), refunds, false /* gasBailout */)
-	}
-
+	result, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas()), refunds, false /* gasBailout */)
 	if err != nil {
 		if streaming {
 			stream.WriteArrayEnd()
@@ -239,15 +231,66 @@ func TraceTx(
 	return nil
 }
 
-func prepareCallMessage(msg core.Message) statefull.Callmsg {
-	return statefull.Callmsg{
-		CallMsg: ethereum.CallMsg{
-			From:       msg.From(),
-			To:         msg.To(),
-			Gas:        msg.Gas(),
-			GasPrice:   msg.GasPrice(),
-			Value:      msg.Value(),
-			Data:       msg.Data(),
-			AccessList: msg.AccessList(),
-		}}
+func TraceBorStateSyncTx(
+	ctx context.Context,
+	dbTx kv.Tx,
+	chainConfig *chain.Config,
+	traceConfig *tracers.TraceConfig,
+	ibs *state.IntraBlockState,
+	blockReader services.FullBlockReader,
+	blockHash libcommon.Hash,
+	blockNum uint64,
+	blockTime uint64,
+	blockCtx evmtypes.BlockContext,
+	stream *jsoniter.Stream,
+	callTimeout time.Duration,
+) error {
+	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
+	if err != nil {
+		return err
+	}
+
+	rules := chainConfig.Rules(blockNum, blockTime)
+	stateReceiverContract := libcommon.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContract)
+	stream.WriteArrayStart()
+	for _, eventData := range stateSyncEvents {
+		msg := types.NewMessage(
+			state.SystemAddress, // from
+			&stateReceiverContract,
+			0,         // nonce
+			u256.Num0, // amount
+			core.SysCallGasLimit,
+			u256.Num0, // gasPrice
+			nil,       // feeCap
+			nil,       // tip
+			eventData,
+			nil,   // accessList
+			false, // checkNonce
+			true,  // isFree
+			nil,   // maxFeePerBlobGas
+		)
+
+		txCtx := evmtypes.TxContext{
+			TxHash:   types.ComputeBorTxHash(blockNum, blockHash),
+			Origin:   msg.From(),
+			GasPrice: msg.GasPrice(),
+		}
+
+		err := TraceTx(ctx, msg, blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, callTimeout)
+		if err != nil {
+			stream.WriteArrayEnd()
+			return err
+		}
+
+		err = ibs.FinalizeTx(rules, state.NewNoopWriter())
+		if err != nil {
+			stream.WriteArrayEnd()
+			return err
+		}
+
+		stream.WriteMore()
+	}
+
+	stream.WriteArrayEnd()
+	return nil
 }

@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -21,9 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-
-	jsoniter "github.com/json-iterator/go"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
@@ -103,9 +102,20 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
-	borTx := rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
 	txns := block.Transactions()
-	if borTx != nil && *config.BorTraceEnabled {
+	var borTx types.Transaction
+	if *config.BorTraceEnabled {
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, block.Hash())
+		if err != nil {
+			stream.WriteArrayEnd()
+			return err
+		}
+		if !ok {
+			stream.WriteArrayEnd()
+			return nil
+		}
+
+		borTx = types.NewBorTransaction()
 		txns = append(txns, borTx)
 	}
 
@@ -137,10 +147,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			GasPrice: msg.GasPrice(),
 		}
 
-		if borTx != nil && idx == len(txns)-1 {
-			if *config.BorTraceEnabled {
-				config.BorTx = newBoolPtr(true)
-			}
+		if borTx != nil && idx == len(txns)-1 && *config.BorTraceEnabled {
+			txCtx.TxHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+			config.BorTx = newBoolPtr(true)
 		}
 
 		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
@@ -189,8 +198,27 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if !ok {
-		stream.WriteNil()
-		return nil
+		if chainConfig.Bor == nil {
+			stream.WriteNil()
+			return nil
+		}
+
+		// otherwise this may be a bor state sync transaction - check
+		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+		if !ok {
+			stream.WriteNil()
+			return nil
+		}
+		if *config.BorTraceEnabled != true {
+			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
+			return nil
+		}
+
+		config.BorTx = newBoolPtr(true)
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -200,19 +228,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 
-	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, hash)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		if blockNumPtr == nil {
-			stream.WriteNil()
-			return nil
-		}
-		blockNum = *blockNumPtr
-	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
@@ -224,7 +239,8 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	var txnIndex uint64
 	var txn types.Transaction
-	for i, transaction := range block.Transactions() {
+	for i := 0; i < block.Transactions().Len() && *config.BorTx == false; i++ {
+		transaction := block.Transactions()[i]
 		if transaction.Hash() == hash {
 			txnIndex = uint64(i)
 			txn = transaction
@@ -232,18 +248,13 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 	}
 	if txn == nil {
-		var borTx types.Transaction
-		borTx, err = rawdb.ReadBorTransaction(tx, hash)
-		if err != nil {
-			return err
-		}
-
-		if borTx != nil {
+		if *config.BorTx {
+			// bor state sync tx is appended at the end of the block
+			txnIndex = uint64(block.Transactions().Len())
+		} else {
 			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction %#x not found", hash)
 		}
-		stream.WriteNil()
-		return fmt.Errorf("transaction %#x not found", hash)
 	}
 	engine := api.engine()
 
@@ -251,6 +262,22 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if err != nil {
 		stream.WriteNil()
 		return err
+	}
+	if *config.BorTx {
+		return transactions.TraceBorStateSyncTx(
+			ctx,
+			tx,
+			chainConfig,
+			config,
+			ibs,
+			api._blockReader,
+			block.Hash(),
+			blockNum,
+			block.Time(),
+			blockCtx,
+			stream,
+			api.evmCallTimeout,
+		)
 	}
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
