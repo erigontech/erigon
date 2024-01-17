@@ -362,7 +362,6 @@ func (tx LegacyTx) AsMessage(s Signer, _ *big.Int, _ *chain.Rules) (Message, err
 		data:       tx.Data,
 		accessList: nil,
 		checkNonce: true,
-		isFree:     tx.GasPrice.IsZero(),
 	}
 
 	var err error
