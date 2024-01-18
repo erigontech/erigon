@@ -292,11 +292,17 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	var i atomic.Int32
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
 
 	for _, file := range files {
 		file := file
 
 		g.Go(func() error {
+			i.Add(1)
+
 			if fileInfo, ok := snaptype.ParseFileName(snapDir, file); ok {
 				if fileInfo.From > snapCfg.ExpectBlocks {
 					return nil
@@ -354,6 +360,20 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 		})
 	}
 
+	func() {
+		for int(i.Load()) < len(files) {
+			select {
+			case <-ctx.Done():
+				return // g.Wait() will return right error
+			case <-logEvery.C:
+				if int(i.Load()) == len(files) {
+					return
+				}
+				log.Info("[snapshots] Initiating snapshot-lock", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
+			}
+		}
+	}()
+
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -392,8 +412,26 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 
 	if db != nil {
 		err := db.View(ctx, func(tx kv.Tx) (err error) {
-			hashBytes, err = tx.GetOne(kv.BittorrentInfo, []byte(fileInfo.Name()))
-			return err
+			infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileInfo.Name()))
+
+			if err != nil {
+				return err
+			}
+
+			if len(infoBytes) == 20 {
+				hashBytes = infoBytes
+				return nil
+			}
+
+			var info torrentInfo
+
+			if err = json.Unmarshal(infoBytes, &info); err != nil {
+				return err
+			}
+
+			hashBytes = info.Hash
+
+			return nil
 		})
 
 		if err != nil {
@@ -469,7 +507,8 @@ func (d *Downloader) addPreConfiguredHashes(ctx context.Context, snapshots snapc
 }
 
 func (d *Downloader) newDownloadsAreProhibited() bool {
-	return dir.FileExist(filepath.Join(d.SnapDir(), ProhibitNewDownloadsFileName))
+	return dir.FileExist(filepath.Join(d.SnapDir(), ProhibitNewDownloadsFileName)) ||
+		dir.FileExist(filepath.Join(d.SnapDir(), SnapshotsLockFileName))
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -555,10 +594,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					case <-t.GotInfo():
 					}
 
-					if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-						return tx.Delete(kv.BittorrentInfo, []byte(t.Info().Name))
-					}); err != nil {
-						d.logger.Warn("Failed to delete file info", "file", t.Info().Name, "err", err)
+					if err := d.db.Update(d.ctx,
+						torrentInfoUpdater(t.Info().Name, nil, t.Info(), t.Complete.Bool())); err != nil {
+						d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
 					}
 
 					continue
@@ -677,6 +715,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var noMetadata []string
 
 	for _, t := range torrents {
+		torrentComplete := t.Complete.Bool()
+
 		select {
 		case <-t.GotInfo():
 			stats.MetadataReady++
@@ -724,9 +764,33 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		default:
 			noMetadata = append(noMetadata, t.Name())
+
+			d.db.View(d.ctx, func(tx kv.Tx) (err error) {
+				infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(t.Name()))
+
+				if err != nil {
+					return err
+				}
+
+				var info torrentInfo
+
+				if err = json.Unmarshal(infoBytes, &info); err != nil {
+					return err
+				}
+
+				if info.Completed != nil && info.Completed.Before(time.Now()) {
+					if info.Length != nil {
+						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+							torrentComplete = fi.Size() == *info.Length
+						}
+					}
+				}
+
+				return nil
+			})
 		}
 
-		stats.Completed = stats.Completed && t.Complete.Bool()
+		stats.Completed = stats.Completed && torrentComplete
 	}
 
 	if len(noMetadata) > 0 {

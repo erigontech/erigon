@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -69,6 +70,14 @@ var websocketTrackers = []string{
 var Trackers = [][]string{
 	udpOrHttpTrackers,
 	//websocketTrackers // TODO: Ws protocol producing too many errors and flooding logs. But it's also very fast and reactive.
+}
+
+type torrentInfo struct {
+	Name      string     `json:"name"`
+	Hash      []byte     `json:"hash"`
+	Length    *int64     `json:"length,omitempty"`
+	Created   *time.Time `json:"created,omitempty"`
+	Completed *time.Time `json:"completed,omitempty"`
 }
 
 func seedableSegmentFiles(dir string) ([]string, error) {
@@ -330,15 +339,14 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
 	var have bool
 	t, have = torrentClient.Torrent(ts.InfoHash)
+
 	if !have {
 		t, _, err := torrentClient.AddTorrentSpec(ts)
 		if err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
-		db.Update(context.Background(), func(tx kv.RwTx) error {
-			return tx.Put(kv.BittorrentInfo, []byte(ts.DisplayName), ts.InfoHash.Bytes())
-		})
+		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool()))
 
 		return t, true, nil
 	}
@@ -346,18 +354,56 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	select {
 	case <-t.GotInfo():
 		t.AddWebSeeds(ts.Webseeds)
+		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info(), t.Complete.Bool()))
 	default:
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
-		db.Update(context.Background(), func(tx kv.RwTx) error {
-			return tx.Put(kv.BittorrentInfo, []byte(ts.DisplayName), ts.InfoHash.Bytes())
-		})
+		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool()))
 	}
 
 	return t, true, nil
+}
+
+func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Info, completed bool) func(tx kv.RwTx) error {
+	return func(tx kv.RwTx) error {
+		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileName))
+
+		if err != nil {
+			return err
+		}
+
+		var info torrentInfo
+
+		err = json.Unmarshal(infoBytes, &info)
+
+		if err != nil {
+			now := time.Now()
+			info.Name = fileName
+			info.Hash = infoHash
+			info.Created = &now
+		} else {
+			if fileInfo != nil {
+				len := fileInfo.Length
+				info.Length = &len
+			}
+		}
+
+		if completed && info.Completed == nil {
+			now := time.Now()
+			info.Completed = &now
+		}
+
+		infoBytes, err = json.Marshal(info)
+
+		if err != nil {
+			return err
+		}
+
+		return tx.Put(kv.BittorrentInfo, []byte(fileName), infoBytes)
+	}
 }
 
 func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
