@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gfx-labs/sse"
 	"github.com/go-chi/chi/v5"
@@ -257,6 +258,7 @@ func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *h
 		return nil, fmt.Errorf("failed to upgrade: %s", err)
 	}
 	topics := r.URL.Query()["topics"]
+	var mu sync.Mutex
 	closer, err := v.Emitters.Subscribe(topics, func(topic string, item any) {
 		buf := &bytes.Buffer{}
 		err := json.NewEncoder(buf).Encode(item)
@@ -264,10 +266,12 @@ func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *h
 			// return early
 			return
 		}
+		mu.Lock()
 		err = sink.Encode(&sse.Event{
 			Event: []byte(topic),
 			Data:  buf,
 		})
+		mu.Unlock()
 		if err != nil {
 			log.Error("failed to encode data", "topic", topic, "err", err)
 		}
