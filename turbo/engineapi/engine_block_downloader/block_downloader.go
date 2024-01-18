@@ -101,9 +101,9 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	}
 
 	if heightToDownload == 0 {
-		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "height", "unknown", "hash", hashToDownload, "requestId", requestId)
+		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "hash", hashToDownload, "requestId", requestId)
 	} else {
-		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
+		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "hash", hashToDownload, "requestId", requestId, "height", heightToDownload)
 	}
 
 	e.hd.SetRequestId(requestId)
