@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
 
-func BorStateSyncTx(
+func BorStateSyncTxnTrace(
 	ctx context.Context,
 	dbTx kv.Tx,
 	chainConfig *chain.Config,

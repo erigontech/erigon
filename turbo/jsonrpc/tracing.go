@@ -157,7 +157,20 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTx {
-			err = polygontrace.BorStateSyncTx(ctx, tx, chainConfig, config, ibs, api._blockReader, block.Hash(), block.NumberU64(), block.Time(), blockCtx, stream, api.evmCallTimeout)
+			err = polygontrace.BorStateSyncTxnTrace(
+				ctx,
+				tx,
+				chainConfig,
+				config,
+				ibs,
+				api._blockReader,
+				block.Hash(),
+				block.NumberU64(),
+				block.Time(),
+				blockCtx,
+				stream,
+				api.evmCallTimeout,
+			)
 		} else {
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 		}
@@ -273,7 +286,20 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if isBorStateSyncTx {
-		return polygontrace.BorStateSyncTx(ctx, tx, chainConfig, config, ibs, api._blockReader, block.Hash(), blockNum, block.Time(), blockCtx, stream, api.evmCallTimeout)
+		return polygontrace.BorStateSyncTxnTrace(
+			ctx,
+			tx,
+			chainConfig,
+			config,
+			ibs,
+			api._blockReader,
+			block.Hash(),
+			blockNum,
+			block.Time(),
+			blockCtx,
+			stream,
+			api.evmCallTimeout,
+		)
 	}
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
