@@ -23,7 +23,7 @@ func NewExecutionClientDirect(ctx context.Context, chainRW eth1_chain_reader.Cha
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes *[]libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -39,7 +39,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 		return true, err
 	}
 
-	if err := cc.chainRW.InsertBlockAndWait(types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals), versionedHashes); err != nil {
 		return false, err
 	}
 
@@ -75,7 +75,7 @@ func (cc *ExecutionClientDirect) InsertBlocks(blks []*types.Block) error {
 }
 
 func (cc *ExecutionClientDirect) InsertBlock(blk *types.Block) error {
-	return cc.chainRW.InsertBlockAndWait(blk)
+	return cc.chainRW.InsertBlockAndWait(blk, nil)
 }
 
 func (cc *ExecutionClientDirect) IsCanonicalHash(hash libcommon.Hash) (bool, error) {

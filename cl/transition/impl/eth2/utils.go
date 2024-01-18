@@ -6,22 +6,8 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/abstract"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
-
-const VERSIONED_HASH_VERSION_KZG byte = byte(1)
-
-func kzgCommitmentToVersionedHash(kzgCommitment *cltypes.KZGCommitment) (libcommon.Hash, error) {
-	versionedHash := [32]byte{}
-	kzgCommitmentHash := utils.Sha256(kzgCommitment[:])
-
-	buf := append([]byte{}, VERSIONED_HASH_VERSION_KZG)
-	buf = append(buf, kzgCommitmentHash[1:]...)
-	copy(versionedHash[:], buf)
-
-	return versionedHash, nil
-}
 
 func computeSigningRootEpoch(epoch uint64, domain []byte) (libcommon.Hash, error) {
 	b := make([]byte, 32)

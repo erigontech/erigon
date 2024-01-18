@@ -282,7 +282,40 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error 
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block) error {
+func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block, versionedHashes *[]libcommon.Hash) error {
+	blocks := []*types.Block{block}
+	request := &execution.InsertBlocksRequest{
+		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
+	}
+
+	if versionedHashes != nil {
+		request.Blocks[0].CheckExpectedBlobHashes = true
+		request.Blocks[0].ExpectedBlobHashes = make([]*types2.H256, len(*versionedHashes))
+		for i, h := range *versionedHashes {
+			request.Blocks[0].ExpectedBlobHashes[i] = gointerfaces.ConvertHashToH256(h)
+		}
+	}
+
+	response, err := c.executionModule.InsertBlocks(c.ctx, request)
+	if err != nil {
+		return err
+	}
+	retryInterval := time.NewTicker(retryTimeout)
+	defer retryInterval.Stop()
+	for response.Result == execution.ExecutionStatus_Busy {
+		select {
+		case <-retryInterval.C:
+			response, err = c.executionModule.InsertBlocks(c.ctx, request)
+			if err != nil {
+				return err
+			}
+		case <-c.ctx.Done():
+			return context.Canceled
+		}
+	}
+	if response.Result != execution.ExecutionStatus_Success {
+		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
+	}
 	return c.InsertBlocksAndWait([]*types.Block{block})
 }
 
