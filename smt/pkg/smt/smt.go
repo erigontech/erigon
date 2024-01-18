@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+
 	"github.com/TwiN/gocache/v2"
 	"github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
@@ -22,6 +24,10 @@ type DB interface {
 	Insert(key utils.NodeKey, value utils.NodeValue12) error
 	GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error)
 	InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) error
+	InsertKeySource(key utils.NodeKey, value []byte) error
+	GetKeySource(key utils.NodeKey) ([]byte, error)
+	InsertHashKey(key utils.NodeKey, value utils.NodeKey) error
+	GetHashKey(key utils.NodeKey) (utils.NodeKey, error)
 	Delete(string) error
 
 	SetLastRoot(lr *big.Int) error
@@ -150,6 +156,15 @@ func (s *SMT) InsertStorage(ethAddr string, storage *map[string]string, chm *map
 		if err != nil {
 			return nil, err
 		}
+
+		sp, _ := utils.StrValToBigInt(k)
+
+		ks := utils.EncodeKeySource(utils.SC_STORAGE, utils.ConvertHexToAddress(ethAddr), common.BigToHash(sp))
+		err = s.Db.InsertKeySource(keyStoragePosition, ks)
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if err = s.setLastRoot(*smtr.NewRootScalar); err != nil {
@@ -262,6 +277,7 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 				if err != nil {
 					return nil, err
 				}
+				s.Db.InsertHashKey(newLeafHash, k)
 				if level >= 0 {
 					for j := 0; j < 4; j++ {
 						siblings[level][keys[level]*4+j] = new(big.Int).SetUint64(newLeafHash[j])
@@ -289,6 +305,7 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 
 				oldKey := utils.RemoveKeyBits(*foundKey, level2+1)
 				oldLeafHash, err := s.hashcalcAndSave(utils.ConcatArrays4(oldKey, foundOldValHash), utils.LeafCapacity)
+				s.Db.InsertHashKey(oldLeafHash, *foundKey)
 				if err != nil {
 					return nil, err
 				}
@@ -309,6 +326,8 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 				if err != nil {
 					return nil, err
 				}
+
+				s.Db.InsertHashKey(newLeafHash, k)
 
 				var node [8]uint64
 				for i := 0; i < 8; i++ {
@@ -374,6 +393,8 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 				return nil, err
 			}
 
+			s.Db.InsertHashKey(newLeafHash, k)
+
 			proofHashCounter += 2
 
 			if level >= 0 {
@@ -427,6 +448,7 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 
 					oldKey := utils.RemoveKeyBits(*insKey, level+1)
 					oldLeafHash, err := s.hashcalcAndSave(utils.ConcatArrays4(oldKey, *valH), utils.LeafCapacity)
+					s.Db.InsertHashKey(oldLeafHash, *insKey)
 					if err != nil {
 						return nil, err
 					}
@@ -627,7 +649,7 @@ func (s *SMT) CheckOrphanedNodes(ctx context.Context) int {
 	return len(orphanedNodes)
 }
 
-type TraverseAction func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) bool
+type TraverseAction func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error)
 
 func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction) error {
 	if node == nil || node.Cmp(big.NewInt(0)) == 0 {
@@ -648,7 +670,11 @@ func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction
 		return err
 	}
 
-	shouldContinue := action(nil, ky, nodeValue)
+	shouldContinue, err := action(nil, ky, nodeValue)
+
+	if err != nil {
+		return err
+	}
 
 	if nodeValue.IsFinalNode() || !shouldContinue {
 		return nil
@@ -662,6 +688,7 @@ func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction
 		err := s.Traverse(ctx, child.ToBigInt(), action)
 		if err != nil {
 			fmt.Println(err)
+			return err
 		}
 	}
 
@@ -669,12 +696,12 @@ func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction
 }
 
 func (s *SMT) traverseAndMark(ctx context.Context, node *big.Int, visited VisitedNodesMap) error {
-	return s.Traverse(ctx, node, func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) bool {
+	return s.Traverse(ctx, node, func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error) {
 		if visited[utils.ConvertBigIntToHex(k.ToBigInt())] {
-			return false
+			return false, nil
 		}
 
 		visited[utils.ConvertBigIntToHex(k.ToBigInt())] = true
-		return true
+		return true, nil
 	})
 }

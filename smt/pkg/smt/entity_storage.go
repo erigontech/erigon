@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/dgravesa/go-parallel/parallel"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 )
 
@@ -24,7 +25,23 @@ func (s *SMT) SetAccountState(ethAddr string, balance, nonce *big.Int) (*big.Int
 		return nil, err
 	}
 
+	ks := utils.EncodeKeySource(utils.KEY_BALANCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+	err = s.Db.InsertKeySource(keyBalance, ks)
+	if err != nil {
+		return nil, err
+	}
+
 	auxRes, err := s.InsertKA(keyNonce, nonce)
+
+	if err != nil {
+		return nil, err
+	}
+
+	ks = utils.EncodeKeySource(utils.KEY_NONCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+	err = s.Db.InsertKeySource(keyNonce, ks)
+	if err != nil {
+		return nil, err
+	}
 
 	return auxRes.NewRootScalar.ToBigInt(), err
 }
@@ -70,12 +87,28 @@ func (s *SMT) SetContractBytecode(ethAddr string, bytecode string) error {
 		return err
 	}
 
+	ks := utils.EncodeKeySource(utils.SC_CODE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+
+	err = s.Db.InsertKeySource(keyContractCode, ks)
+
+	if err != nil {
+		return err
+	}
+
 	_, err = s.InsertKA(keyContractLength, big.NewInt(int64(bytecodeLength)))
 	if err != nil {
 		return err
 	}
 
-	return nil
+	ks = utils.EncodeKeySource(utils.SC_LENGTH, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+
+	err = s.Db.InsertKeySource(keyContractLength, ks)
+
+	if err != nil {
+		return err
+	}
+
+	return err
 }
 
 func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string) (*big.Int, error) {

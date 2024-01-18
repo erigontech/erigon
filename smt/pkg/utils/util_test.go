@@ -139,6 +139,16 @@ func TestScalarToArrayBig(t *testing.T) {
 	}
 }
 
+func TestArrayBigToScalar(t *testing.T) {
+	scalar := big.NewInt(0x1234567890ABCDEF)
+
+	result := ArrayBigToScalar(ScalarToArrayBig(scalar))
+
+	if !reflect.DeepEqual(result, scalar) {
+		t.Errorf("ScalarToArray = %v; want %v", result, scalar)
+	}
+}
+
 func TestArrayToScalar(t *testing.T) {
 	array := []uint64{2, 3}
 	want := big.NewInt(0)

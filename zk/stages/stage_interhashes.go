@@ -3,6 +3,7 @@ package stages
 import (
 	"fmt"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -702,11 +703,17 @@ func insertContractBytecodeToKV(db smt.DB, keys []utils.NodeKey, ethAddr string,
 	if !valueContractCode.IsZero() {
 		keys = append(keys, keyContractCode)
 		db.InsertAccountValue(keyContractCode, *valueContractCode)
+
+		ks := utils.EncodeKeySource(utils.SC_CODE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+		db.InsertKeySource(keyContractCode, ks)
 	}
 
 	if !valueContractLength.IsZero() {
 		keys = append(keys, keyContractLength)
 		db.InsertAccountValue(keyContractLength, *valueContractLength)
+
+		ks := utils.EncodeKeySource(utils.SC_LENGTH, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+		db.InsertKeySource(keyContractLength, ks)
 	}
 
 	return keys, nil
@@ -742,6 +749,9 @@ func insertContractStorageToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, 
 		if !parsedValue.IsZero() {
 			keys = append(keys, keyStoragePosition)
 			db.InsertAccountValue(keyStoragePosition, *parsedValue)
+
+			ks := utils.EncodeKeySource(utils.SC_STORAGE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+			db.InsertKeySource(keyStoragePosition, ks)
 		}
 	}
 
@@ -773,10 +783,16 @@ func insertAccountStateToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, bal
 	if !valueBalance.IsZero() {
 		keys = append(keys, keyBalance)
 		db.InsertAccountValue(keyBalance, *valueBalance)
+
+		ks := utils.EncodeKeySource(utils.KEY_BALANCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+		db.InsertKeySource(keyBalance, ks)
 	}
 	if !valueNonce.IsZero() {
 		keys = append(keys, keyNonce)
 		db.InsertAccountValue(keyNonce, *valueNonce)
+
+		ks := utils.EncodeKeySource(utils.KEY_NONCE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+		db.InsertKeySource(keyNonce, ks)
 	}
 	return keys, nil
 }

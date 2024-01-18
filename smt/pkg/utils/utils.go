@@ -11,6 +11,8 @@ import (
 	"sort"
 
 	poseidon "github.com/gateway-fm/vectorized-poseidon-gold/src/vectorizedposeidongold"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
 const (
@@ -128,6 +130,10 @@ func (nv *NodeValue12) Get4to8() *NodeKey {
 	return &NodeKey{nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
 }
 
+func (nv *NodeValue12) GetNodeValue8() *NodeValue8 {
+	return &NodeValue8{nv[0], nv[1], nv[2], nv[3], nv[4], nv[5], nv[6], nv[7]}
+}
+
 func (nv *NodeValue12) Get0to8() [8]uint64 {
 	// slice it from 0-8
 	return [8]uint64{nv[0].Uint64(), nv[1].Uint64(), nv[2].Uint64(), nv[3].Uint64(), nv[4].Uint64(), nv[5].Uint64(), nv[6].Uint64(), nv[7].Uint64()}
@@ -203,6 +209,14 @@ func NodeValue8FromBigIntArray(arr []*big.Int) (*NodeValue8, error) {
 	return &nv, nil
 }
 
+func BigIntArrayFromNodeValue8(nv *NodeValue8) []*big.Int {
+	arr := make([]*big.Int, 8)
+	for i, v := range nv {
+		arr[i] = v
+	}
+	return arr
+}
+
 func (nv *NodeValue12) IsZero() bool {
 	zero := false
 	for _, v := range nv {
@@ -234,6 +248,11 @@ func ConvertHexToBigInt(hex string) *big.Int {
 	return n
 }
 
+func ConvertHexToAddress(hex string) common.Address {
+	bigInt := ConvertHexToBigInt(hex)
+	return common.BigToAddress(bigInt)
+}
+
 func ArrayToScalar(array []uint64) *big.Int {
 	scalar := new(big.Int)
 	for i := len(array) - 1; i >= 0; i-- {
@@ -241,6 +260,25 @@ func ArrayToScalar(array []uint64) *big.Int {
 		scalar.Add(scalar, new(big.Int).SetUint64(array[i]))
 	}
 	return scalar
+}
+
+func ScalarToArray(scalar *big.Int) []uint64 {
+	scalar = new(big.Int).Set(scalar)
+	mask := new(big.Int)
+	mask.SetString("FFFFFFFFFFFFFFFF", 16)
+
+	r0 := new(big.Int).And(scalar, mask)
+
+	r1 := new(big.Int).Rsh(scalar, 64)
+	r1 = new(big.Int).And(r1, mask)
+
+	r2 := new(big.Int).Rsh(scalar, 128)
+	r2 = new(big.Int).And(r2, mask)
+
+	r3 := new(big.Int).Rsh(scalar, 192)
+	r3 = new(big.Int).And(r3, mask)
+
+	return []uint64{r0.Uint64(), r1.Uint64(), r2.Uint64(), r3.Uint64()}
 }
 
 func ArrayToScalarBig(array []*big.Int) *big.Int {
@@ -458,6 +496,15 @@ func ScalarToArrayBig(scalar *big.Int) []*big.Int {
 	return []*big.Int{r0, r1, r2, r3, r4, r5, r6, r7}
 }
 
+func ArrayBigToScalar(arr []*big.Int) *big.Int {
+	scalar := new(big.Int)
+	for i := len(arr) - 1; i >= 0; i-- {
+		scalar.Lsh(scalar, 32)
+		scalar.Add(scalar, arr[i])
+	}
+	return scalar
+}
+
 func JoinKey(usedBits []int, remainingKey NodeKey) *NodeKey {
 	n := make([]uint64, 4)
 	accs := make([]uint64, 4)
@@ -667,4 +714,31 @@ func SortNodeKeysBitwiseAsc(keys []NodeKey) {
 
 		return true
 	})
+}
+
+func EncodeKeySource(t int, accountAddr common.Address, storagePosition common.Hash) []byte {
+	var keySource []byte
+	keySource = append(keySource, byte(t))
+	keySource = append(keySource, accountAddr.Bytes()...)
+	if t == SC_STORAGE {
+		keySource = append(keySource, storagePosition.Bytes()...)
+	}
+	return keySource
+}
+
+func DecodeKeySource(keySource []byte) (int, common.Address, common.Hash, error) {
+	if len(keySource) < 1+length.Addr {
+		return 0, common.Address{}, common.Hash{}, fmt.Errorf("invalid key source length")
+	}
+
+	t := int(keySource[0])
+	accountAddr := common.BytesToAddress(keySource[1 : length.Addr+1])
+	var storagePosition common.Hash
+	if t == SC_STORAGE {
+		if len(keySource) < 1+length.Addr+length.Hash {
+			return 0, common.Address{}, common.Hash{}, fmt.Errorf("invalid key source length")
+		}
+		storagePosition = common.BytesToHash(keySource[length.Addr+1 : length.Addr+length.Hash+1])
+	}
+	return t, accountAddr, storagePosition, nil
 }

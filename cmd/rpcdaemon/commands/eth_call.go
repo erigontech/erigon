@@ -481,6 +481,16 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		return nil, err
 	}
 
+	err = batch.CreateBucket(db2.TableMetadata)
+	if err != nil {
+		return nil, err
+	}
+
+	err = batch.CreateBucket(db2.TableHashKey)
+	if err != nil {
+		return nil, err
+	}
+
 	if blockNr-1 < latestBlock {
 		if latestBlock-blockNr > maxGetProofRewindBlockCount {
 			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)

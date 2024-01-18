@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"math/big"
 	"sync"
 
@@ -8,18 +9,22 @@ import (
 )
 
 type MemDb struct {
-	Db       map[string][]string
-	DbAccVal map[string][]string
-	LastRoot *big.Int
+	Db          map[string][]string
+	DbAccVal    map[string][]string
+	DbKeySource map[string][]byte
+	DbHashKey   map[string][]byte
+	LastRoot    *big.Int
 
 	lock sync.RWMutex
 }
 
 func NewMemDb() *MemDb {
 	return &MemDb{
-		Db:       make(map[string][]string),
-		DbAccVal: make(map[string][]string),
-		LastRoot: big.NewInt(0),
+		Db:          make(map[string][]string),
+		DbAccVal:    make(map[string][]string),
+		DbKeySource: make(map[string][]byte),
+		DbHashKey:   make(map[string][]byte),
+		LastRoot:    big.NewInt(0),
 	}
 }
 
@@ -110,6 +115,65 @@ func (m *MemDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) er
 
 	m.DbAccVal[k] = values
 	return nil
+}
+
+func (m *MemDb) InsertKeySource(key utils.NodeKey, value []byte) error {
+	m.lock.Lock()         // Lock for writing
+	defer m.lock.Unlock() // Make sure to unlock when done
+
+	keyConc := utils.ArrayToScalar(key[:])
+
+	m.DbKeySource[keyConc.String()] = value
+	return nil
+}
+
+func (m *MemDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
+	m.lock.RLock()         // Lock for reading
+	defer m.lock.RUnlock() // Make sure to unlock when done
+
+	keyConc := utils.ArrayToScalar(key[:])
+	k := utils.ConvertBigIntToHex(keyConc)
+
+	s, ok := m.DbKeySource[k]
+
+	if !ok {
+		return nil, fmt.Errorf("key not found")
+	}
+
+	return s, nil
+}
+
+func (m *MemDb) InsertHashKey(key utils.NodeKey, value utils.NodeKey) error {
+	m.lock.Lock()         // Lock for writing
+	defer m.lock.Unlock() // Make sure to unlock when done
+
+	keyConc := utils.ArrayToScalar(key[:])
+	k := utils.ConvertBigIntToHex(keyConc)
+
+	valConc := utils.ArrayToScalar(value[:])
+
+	m.DbHashKey[k] = valConc.Bytes()
+	return nil
+}
+
+func (m *MemDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
+	m.lock.RLock()         // Lock for reading
+	defer m.lock.RUnlock() // Make sure to unlock when done
+
+	keyConc := utils.ArrayToScalar(key[:])
+	k := utils.ConvertBigIntToHex(keyConc)
+
+	s, ok := m.DbHashKey[k]
+
+	if !ok {
+		return utils.NodeKey{}, fmt.Errorf("key not found")
+	}
+
+	nv := big.NewInt(0).SetBytes(s)
+
+	na := utils.ScalarToArray(nv)
+
+	return utils.NodeKey{na[0], na[1], na[2], na[3]}, nil
 }
 
 func (m *MemDb) Delete(key string) error {

@@ -28,6 +28,7 @@ const TableSmt = "HermezSmt"
 const TableLastRoot = "HermezSmtLastRoot"
 const TableAccountValues = "HermezSmtAccountValues"
 const TableMetadata = "HermezSmtMetadata"
+const TableHashKey = "HermezSmtHashKey"
 
 type EriDb struct {
 	kvTx kv.RwTx
@@ -46,6 +47,16 @@ func CreateEriDbBuckets(tx kv.RwTx) error {
 	}
 
 	err = tx.CreateBucket(TableAccountValues)
+	if err != nil {
+		return err
+	}
+
+	err = tx.CreateBucket(TableMetadata)
+	if err != nil {
+		return err
+	}
+
+	err = tx.CreateBucket(TableHashKey)
 	if err != nil {
 		return err
 	}
@@ -174,6 +185,54 @@ func (m *EriDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) er
 	v := utils.ConvertBigIntToHex(vConc)
 
 	return m.tx.Put(TableAccountValues, []byte(k), []byte(v))
+}
+
+func (m *EriDb) InsertKeySource(key utils.NodeKey, value []byte) error {
+	keyConc := utils.ArrayToScalar(key[:])
+
+	return m.tx.Put(TableMetadata, keyConc.Bytes(), value)
+}
+
+func (m *EriDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
+	keyConc := utils.ArrayToScalar(key[:])
+
+	data, err := m.tx.GetOne(TableMetadata, keyConc.Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	if data == nil {
+		return nil, fmt.Errorf("key %x not found", keyConc.Bytes())
+	}
+
+	return data, nil
+}
+
+func (m *EriDb) InsertHashKey(key utils.NodeKey, value utils.NodeKey) error {
+	keyConc := utils.ArrayToScalar(key[:])
+
+	valConc := utils.ArrayToScalar(value[:])
+
+	return m.tx.Put(TableHashKey, keyConc.Bytes(), valConc.Bytes())
+}
+
+func (m *EriDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
+	keyConc := utils.ArrayToScalar(key[:])
+
+	data, err := m.tx.GetOne(TableHashKey, keyConc.Bytes())
+	if err != nil {
+		return utils.NodeKey{}, err
+	}
+
+	if data == nil {
+		return utils.NodeKey{}, fmt.Errorf("hash key %x not found", keyConc.Bytes())
+	}
+
+	nv := big.NewInt(0).SetBytes(data)
+
+	na := utils.ScalarToArray(nv)
+
+	return utils.NodeKey{na[0], na[1], na[2], na[3]}, nil
 }
 
 func (m *EriDb) Delete(key string) error {

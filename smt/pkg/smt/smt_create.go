@@ -378,6 +378,9 @@ func (s *SMT) createNewLeaf(k, rkey utils.NodeKey, v utils.NodeValue8) ([4]uint6
 	}
 
 	newLeafHash, err := s.hashcalcAndSave(utils.ConcatArrays4(rkey, newValH), utils.LeafCapacity)
+
+	s.Db.InsertHashKey(newLeafHash, k)
+
 	if err != nil {
 		return [4]uint64{}, err
 	}
