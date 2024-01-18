@@ -69,9 +69,9 @@ func (e *Emitters) Subscribe(topics []string, cb func(topic string, item any)) (
 		sub.topics[v] = struct{}{}
 	}
 	e.cbs[subid] = sub
-	return sync.OnceFunc(func() {
+	return func() {
 		e.mu.Lock()
 		defer e.mu.Unlock()
 		delete(e.cbs, subid)
-	}), nil
+	}, nil
 }
