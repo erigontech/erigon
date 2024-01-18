@@ -491,8 +491,10 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
-	if err := w.ii.Add(invIdxVal); err != nil {
-		return err
+	if !w.ii.discard {
+		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1057,18 +1059,21 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
-	return hc.h.dontProduceFiles || hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
+func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
+	inFiles := hc.maxTxNumInFiles(false)
+	inIdx := hc.ic.CanPruneFrom(tx)
+	return (hc.h.dontProduceFiles && inIdx < untilTxNum && inIdx != math.MaxUint64) || // if we don't produce files, we can prune only if index has values < untilTxNum
+		inIdx < inFiles // if we produce files, we can prune only if index has values < maxTxNumInFiles
 }
 
 // Prune [txFrom; txTo)
-// `force` flag to prune even if CanPrune returns false (when Unwind is needed, CanPrune always returns false)
+// `force` flag to prune even if CanPruneUntil returns false (when Unwind is needed, CanPruneUntil always returns false)
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
-	if !forced && !hc.CanPrune(rwTx) {
+	if !forced && !hc.CanPruneUntil(rwTx, txTo) {
 		return nil, nil
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
@@ -1113,6 +1118,10 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 
 		mxPruneSizeHistory.Inc()
 		return nil
+	}
+
+	if !forced && hc.h.dontProduceFiles {
+		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
 	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)

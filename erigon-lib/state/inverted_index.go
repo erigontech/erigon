@@ -956,6 +956,9 @@ type InvertedIndexPruneStat struct {
 }
 
 func (is *InvertedIndexPruneStat) String() string {
+	if is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
+		return ""
+	}
 	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 
