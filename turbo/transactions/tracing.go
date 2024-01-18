@@ -254,6 +254,13 @@ func TraceBorStateSyncTx(
 	stateReceiverContract := libcommon.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContract)
 	stream.WriteArrayStart()
 	for _, eventData := range stateSyncEvents {
+		select {
+		case <-ctx.Done():
+			stream.WriteArrayEnd()
+			return ctx.Err()
+		default:
+		}
+
 		msg := types.NewMessage(
 			state.SystemAddress, // from
 			&stateReceiverContract,

@@ -103,7 +103,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
-	var borTx types.Transaction
+	var borStateSyncTx types.Transaction
 	if *config.BorTraceEnabled {
 		_, ok, err := api._blockReader.EventLookup(ctx, tx, block.Hash())
 		if err != nil {
@@ -115,14 +115,22 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			return nil
 		}
 
-		borTx = types.NewBorTransaction()
-		txns = append(txns, borTx)
+		borStateSyncTx = types.NewBorTransaction()
+		txns = append(txns, borStateSyncTx)
 	}
 
 	for idx, txn := range txns {
+		isBorStateSyncTx := borStateSyncTx == txn
+		var txnHash common.Hash
+		if isBorStateSyncTx {
+			txnHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		} else {
+			txnHash = txn.Hash()
+		}
+
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
-		stream.WriteString(txn.Hash().Hex())
+		stream.WriteString(txnHash.Hex())
 		stream.WriteMore()
 		stream.WriteObjectField("result")
 		select {
@@ -147,12 +155,11 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			GasPrice: msg.GasPrice(),
 		}
 
-		if borTx != nil && idx == len(txns)-1 && *config.BorTraceEnabled {
-			txCtx.TxHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
-			config.BorTx = newBoolPtr(true)
+		if isBorStateSyncTx {
+			err = transactions.TraceBorStateSyncTx(ctx, tx, chainConfig, config, ibs, api._blockReader, block.Hash(), block.NumberU64(), block.Time(), blockCtx, stream, api.evmCallTimeout)
+		} else {
+			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 		}
-
-		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
@@ -192,6 +199,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
+	var isBorStateSyncTx bool
 	blockNum, ok, err := api.txnLookup(tx, hash)
 	if err != nil {
 		stream.WriteNil()
@@ -213,12 +221,12 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			stream.WriteNil()
 			return nil
 		}
-		if *config.BorTraceEnabled != true {
+		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}
 
-		config.BorTx = newBoolPtr(true)
+		isBorStateSyncTx = true
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -239,7 +247,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	var txnIndex uint64
 	var txn types.Transaction
-	for i := 0; i < block.Transactions().Len() && *config.BorTx == false; i++ {
+	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTx; i++ {
 		transaction := block.Transactions()[i]
 		if transaction.Hash() == hash {
 			txnIndex = uint64(i)
@@ -248,7 +256,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 	}
 	if txn == nil {
-		if *config.BorTx {
+		if isBorStateSyncTx {
 			// bor state sync tx is appended at the end of the block
 			txnIndex = uint64(block.Transactions().Len())
 		} else {
@@ -263,21 +271,8 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return err
 	}
-	if *config.BorTx {
-		return transactions.TraceBorStateSyncTx(
-			ctx,
-			tx,
-			chainConfig,
-			config,
-			ibs,
-			api._blockReader,
-			block.Hash(),
-			blockNum,
-			block.Time(),
-			blockCtx,
-			stream,
-			api.evmCallTimeout,
-		)
+	if isBorStateSyncTx {
+		return transactions.TraceBorStateSyncTx(ctx, tx, chainConfig, config, ibs, api._blockReader, block.Hash(), blockNum, block.Time(), blockCtx, stream, api.evmCallTimeout)
 	}
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
