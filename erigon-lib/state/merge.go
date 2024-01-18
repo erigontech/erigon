@@ -22,6 +22,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"path"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,9 @@ func (ii *InvertedIndex) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 }
 
 func (h *History) endTxNumMinimax() uint64 {
+	if h.dontProduceFiles {
+		return math.MaxUint64
+	}
 	minimax := h.InvertedIndex.endTxNumMinimax()
 	if max, ok := h.files.Max(); ok {
 		endTxNum := max.endTxNum
@@ -85,6 +89,9 @@ func (h *History) endTxNumMinimax() uint64 {
 }
 func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 	var max uint64
+	if h.dontProduceFiles && h.files.Len() == 0 {
+		max = math.MaxUint64
+	}
 	h.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.index == nil || (needFrozen && !item.frozen) {
