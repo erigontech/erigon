@@ -6,6 +6,7 @@ import (
 
 type notFoundNoWriter struct {
 	rw http.ResponseWriter
+	r  *http.Request
 
 	code    int
 	headers http.Header
@@ -58,9 +59,21 @@ func (f *notFoundNoWriter) WriteHeader(statusCode int) {
 	f.headers = f.rw.Header()
 }
 func (f *notFoundNoWriter) Flush() {
+	defer func() {
+		if err := recover(); err != nil {
+			// a closed http request can cause a panic here
+			// it's not actually a go bug, but this is probably the easiest way to deal with it
+			// https://github.com/golang/go/issues/9657
+		}
+	}()
 	flusher, ok := f.rw.(http.Flusher)
 	if !ok {
 		return
+	}
+	select {
+	case <-f.r.Context().Done():
+		return
+	default:
 	}
 	if flusher != nil {
 		flusher.Flush()
