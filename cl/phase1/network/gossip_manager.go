@@ -163,12 +163,15 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			l["at"] = "decoding lc finality update"
 			return err
 		}
-		g.emitters.Publish("light_client_finality_update", obj)
 	case gossip.TopicNameLightClientOptimisticUpdate:
 		obj := &cltypes.LightClientOptimisticUpdate{}
 		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
 			g.sentinel.BanPeer(ctx, data.Peer)
 			l["at"] = "decoding lc optimistic update"
+			return err
+		}
+	case gossip.TopicNameContributionAndProof:
+		if err := operationsContract[*cltypes.SignedContributionAndProof](ctx, g, l, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof); err != nil {
 			return err
 		}
 	case gossip.TopicNameVoluntaryExit:
