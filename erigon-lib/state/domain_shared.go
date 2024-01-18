@@ -130,7 +130,7 @@ func (sd *SharedDomains) AggCtx() interface{} { return sd.aggCtx }
 
 // aggregator context should call aggCtx.Unwind before this one.
 func (sd *SharedDomains) Unwind(ctx context.Context, rwTx kv.RwTx, blockUnwindTo, txUnwindTo uint64) error {
-	step := txUnwindTo / sd.aggCtx.a.aggregationStep
+	step := txUnwindTo / sd.aggCtx.a.StepSize()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
 	sd.aggCtx.a.logger.Info("aggregator unwind", "step", step,

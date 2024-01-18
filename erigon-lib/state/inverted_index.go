@@ -970,6 +970,7 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 }
 
 // [txFrom; txTo)
+// forced - prune even if CanPrune returns false, so its true only when we do Unwind.
 func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	if !forced && !ic.CanPrune(rwTx) {
@@ -1793,6 +1794,8 @@ func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress
 }
 
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
+	defer ii.reCalcRoFiles()
+
 	if asserts && ii.withExistenceIndex && sf.existence == nil {
 		panic(fmt.Errorf("assert: no existence index: %s", sf.decomp.FileName()))
 	}
@@ -1804,8 +1807,6 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	fi.index = sf.index
 	fi.existence = sf.existence
 	ii.files.Set(fi)
-
-	ii.reCalcRoFiles()
 }
 
 func (ii *InvertedIndex) collectFilesStat() (filesCount, filesSize, idxSize uint64) {

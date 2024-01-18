@@ -35,9 +35,6 @@ func EnvInt(envVarName string, defaultVal int) int {
 		if err != nil {
 			panic(err)
 		}
-		if i < 0 || i > 4 {
-			panic(i)
-		}
 		fmt.Printf("[dbg] env %s=%d\n", envVarName, i)
 		return i
 	}

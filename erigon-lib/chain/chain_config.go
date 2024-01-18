@@ -90,6 +90,8 @@ type BorConfig interface {
 	fmt.Stringer
 	IsAgra(num uint64) bool
 	GetAgraBlock() *big.Int
+	IsNapoli(num uint64) bool
+	GetNapoliBlock() *big.Int
 }
 
 func (c *Config) String() string {
@@ -212,6 +214,11 @@ func (c *Config) IsShanghai(time uint64) bool {
 // Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
 func (c *Config) IsAgra(num uint64) bool {
 	return (c != nil) && (c.Bor != nil) && c.Bor.IsAgra(num)
+}
+
+// Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
+func (c *Config) IsNapoli(num uint64) bool {
+	return (c != nil) && (c.Bor != nil) && c.Bor.IsNapoli(num)
 }
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
@@ -484,11 +491,13 @@ func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, numb
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                 *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
-	IsAura                                                  bool
+	ChainID                                           *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
+	IsByzantium, IsConstantinople, IsPetersburg       bool
+	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
+	IsCancun, IsNapoli                                bool
+	IsPrague                                          bool
+	IsAura                                            bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -511,6 +520,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsLondon:           c.IsLondon(num),
 		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time),
+		IsNapoli:           c.IsNapoli(num),
 		IsPrague:           c.IsPrague(time),
 		IsAura:             c.Aura != nil,
 	}

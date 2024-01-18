@@ -48,26 +48,27 @@ type precompiledFailureTest struct {
 // allPrecompiles does not map to the actual set of precompiles, as it also contains
 // repriced versions of precompiles at certain slots
 var allPrecompiles = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}):    &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}):    &sha256hash{},
-	libcommon.BytesToAddress([]byte{3}):    &ripemd160hash{},
-	libcommon.BytesToAddress([]byte{4}):    &dataCopy{},
-	libcommon.BytesToAddress([]byte{5}):    &bigModExp{eip2565: false},
-	libcommon.BytesToAddress([]byte{0xf5}): &bigModExp{eip2565: true},
-	libcommon.BytesToAddress([]byte{6}):    &bn256AddIstanbul{},
-	libcommon.BytesToAddress([]byte{7}):    &bn256ScalarMulIstanbul{},
-	libcommon.BytesToAddress([]byte{8}):    &bn256PairingIstanbul{},
-	libcommon.BytesToAddress([]byte{9}):    &blake2F{},
-	libcommon.BytesToAddress([]byte{10}):   &bls12381G1Add{},
-	libcommon.BytesToAddress([]byte{11}):   &bls12381G1Mul{},
-	libcommon.BytesToAddress([]byte{12}):   &bls12381G1MultiExp{},
-	libcommon.BytesToAddress([]byte{13}):   &bls12381G2Add{},
-	libcommon.BytesToAddress([]byte{14}):   &bls12381G2Mul{},
-	libcommon.BytesToAddress([]byte{15}):   &bls12381G2MultiExp{},
-	libcommon.BytesToAddress([]byte{16}):   &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{17}):   &bls12381MapG1{},
-	libcommon.BytesToAddress([]byte{18}):   &bls12381MapG2{},
-	libcommon.BytesToAddress([]byte{20}):   &pointEvaluation{},
+	libcommon.BytesToAddress([]byte{1}):          &ecrecover{},
+	libcommon.BytesToAddress([]byte{2}):          &sha256hash{},
+	libcommon.BytesToAddress([]byte{3}):          &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{4}):          &dataCopy{},
+	libcommon.BytesToAddress([]byte{5}):          &bigModExp{eip2565: false},
+	libcommon.BytesToAddress([]byte{0xf5}):       &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{6}):          &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{7}):          &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{8}):          &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{9}):          &blake2F{},
+	libcommon.BytesToAddress([]byte{10}):         &bls12381G1Add{},
+	libcommon.BytesToAddress([]byte{11}):         &bls12381G1Mul{},
+	libcommon.BytesToAddress([]byte{12}):         &bls12381G1MultiExp{},
+	libcommon.BytesToAddress([]byte{13}):         &bls12381G2Add{},
+	libcommon.BytesToAddress([]byte{14}):         &bls12381G2Mul{},
+	libcommon.BytesToAddress([]byte{15}):         &bls12381G2MultiExp{},
+	libcommon.BytesToAddress([]byte{16}):         &bls12381Pairing{},
+	libcommon.BytesToAddress([]byte{17}):         &bls12381MapG1{},
+	libcommon.BytesToAddress([]byte{18}):         &bls12381MapG2{},
+	libcommon.BytesToAddress([]byte{20}):         &pointEvaluation{},
+	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
 // EIP-152 test vectors
@@ -399,4 +400,20 @@ func BenchmarkPrecompiledBLS12381G2MultiExpWorstCase(b *testing.B) {
 		NoBenchmark: false,
 	}
 	benchmarkPrecompiled(b, "0f", testcase)
+}
+
+// Benchmarks the sample inputs from the P256VERIFY precompile.
+func BenchmarkPrecompiledP256Verify(b *testing.B) {
+	testcase := precompiledTest{
+		Input:    "4cee90eb86eaa050036147a12d49004b6b9c72bd725d39d4785011fe190f0b4da73bd4903f0ce3b639bbbf6e8e80d16931ff4bcf5993d58468e8fb19086e8cac36dbcd03009df8c59286b162af3bd7fcc0450c9aa81be5d10d312af6c66b1d604aebd3099c618202fcfe16ae7770b0c49ab5eadf74b754204a3bb6060e44eff37618b065f9832de4ca6ca971a7a1adc826d0f7c00181a5fb2ddf79ae00b4e10e",
+		Expected: "0000000000000000000000000000000000000000000000000000000000000001",
+		Name:     "p256Verify",
+	}
+	benchmarkPrecompiled(b, "100", testcase)
+}
+
+func TestPrecompiledP256Verify(t *testing.T) {
+	t.Parallel()
+
+	testJson("p256Verify", "100", t)
 }
