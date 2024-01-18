@@ -171,7 +171,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			l["at"] = "decoding lc optimistic update"
 			return err
 		}
-		g.emitters.Publish("light_client_optimistic_update", obj)
 	case gossip.TopicNameVoluntaryExit:
 		if err := operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, l, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit); err != nil {
 			return err
