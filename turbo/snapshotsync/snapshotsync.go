@@ -87,42 +87,47 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 	// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
 	// - After "download once" - Erigon will produce and seed new files
 
-	// send all hashes to the Downloader service
-	snapCfg := snapcfg.KnownCfg(cc.ChainName)
-	preverifiedBlockSnapshots := snapCfg.Preverified
-	downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
+	if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{}); err == nil {
+		// send all hashes to the Downloader service
+		snapCfg := snapcfg.KnownCfg(cc.ChainName)
+		preverifiedBlockSnapshots := snapCfg.Preverified
+		downloadRequest := make([]services.DownloadRequest, 0, len(preverifiedBlockSnapshots))
 
-	// build all download requests
-	for _, p := range preverifiedBlockSnapshots {
-		if !histV3 {
-			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+		// build all download requests
+		for _, p := range preverifiedBlockSnapshots {
+			if !histV3 {
+				if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+					continue
+				}
+			}
+			if caplin == NoCaplin && strings.Contains(p.Name, "beaconblocks") {
 				continue
 			}
-		}
-		if caplin == NoCaplin && strings.Contains(p.Name, "beaconblocks") {
-			continue
-		}
-		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") {
-			continue
+			if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") {
+				continue
+			}
+
+			downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 		}
 
-		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
+		log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
+		for {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader); err != nil {
+				log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
+				time.Sleep(10 * time.Second)
+				continue
+			}
+			break
+		}
+	} else {
+		time.Sleep(10 * time.Second)
 	}
 
-	log.Info(fmt.Sprintf("[%s] Fetching torrent files metadata", logPrefix))
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		if err := RequestSnapshotsDownload(ctx, downloadRequest, snapshotDownloader); err != nil {
-			log.Error(fmt.Sprintf("[%s] call downloader", logPrefix), "err", err)
-			time.Sleep(10 * time.Second)
-			continue
-		}
-		break
-	}
 	downloadStartTime := time.Now()
 	const logInterval = 20 * time.Second
 	logEvery := time.NewTicker(logInterval)

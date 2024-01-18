@@ -299,7 +299,7 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *TorrentFiles) (res []*torr
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
 // Don't need call torrent.VerifyData manually
-func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
+func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, db kv.RwDB, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
 	ts.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	ts.DisallowDataDownload = true
 	ts.DisableInitialPieceCheck = true
@@ -308,19 +308,19 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 		rec := recover()
 		if rec != nil {
 			ts.ChunkSize = 0
-			t, ok, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
+			t, ok, err = _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
 		}
 	}()
 
-	t, ok, err = _addTorrentFile(ctx, ts, torrentClient, webseeds)
+	t, ok, err = _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
 	if err != nil {
 		ts.ChunkSize = 0
-		return _addTorrentFile(ctx, ts, torrentClient, webseeds)
+		return _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
 	}
 	return t, ok, err
 }
 
-func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
+func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, db kv.RwDB, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
 	select {
 	case <-ctx.Done():
 		return nil, false, ctx.Err()
@@ -335,6 +335,11 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 		if err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
+
+		db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Put(kv.BittorrentInfo, []byte(ts.DisplayName), ts.InfoHash.Bytes())
+		})
+
 		return t, true, nil
 	}
 
@@ -346,6 +351,10 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 		if err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
+
+		db.Update(context.Background(), func(tx kv.RwTx) error {
+			return tx.Put(kv.BittorrentInfo, []byte(ts.DisplayName), ts.InfoHash.Bytes())
+		})
 	}
 
 	return t, true, nil

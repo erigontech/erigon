@@ -35,12 +35,38 @@ type PreverifiedItem struct {
 }
 type Preverified []PreverifiedItem
 
-func (p Preverified) Contains(name string) bool {
+func Merge(p0 Preverified, p1 []PreverifiedItem) Preverified {
+	merged := append(p0, p1...)
+	slices.SortFunc(merged, func(i, j PreverifiedItem) int { return strings.Compare(i.Name, j.Name) })
+	return merged
+}
+
+func (p Preverified) Get(name string) (PreverifiedItem, bool) {
+	i := sort.Search(len(p), func(i int) bool { return p[i].Name >= name })
+	if i >= len(p) || p[i].Name != name {
+		return PreverifiedItem{}, false
+	}
+
+	return p[i], true
+}
+
+func (p Preverified) Contains(name string, ignoreVersion ...bool) bool {
+	if len(ignoreVersion) > 0 && ignoreVersion[0] {
+		_, name, _ := strings.Cut(name, "-")
+		for _, item := range p {
+			_, noVersion, _ := strings.Cut(item.Name, "-")
+			if noVersion == name {
+				return true
+			}
+		}
+		return false
+	}
+
 	i := sort.Search(len(p), func(i int) bool { return p[i].Name >= name })
 	return i < len(p) && p[i].Name == name
 }
 
-func (p Preverified) Versioned(types []snaptype.Type) Preverified {
+func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 
 	for _, p := range p {
@@ -67,6 +93,69 @@ func (p Preverified) Versioned(types []snaptype.Type) Preverified {
 
 		if !include {
 			continue
+		}
+
+		version, err := snaptype.ParseVersion(v)
+
+		if err != nil {
+			continue
+		}
+
+		if version < minVersion {
+			continue
+		}
+
+		if version > preferredVersion {
+			continue
+		}
+
+		if current, ok := bestVersions.Get(name); ok {
+			v, _, _ := strings.Cut(current.Name, "-")
+			cv, _ := snaptype.ParseVersion(v)
+
+			if version > cv {
+				bestVersions.Set(name, p)
+			}
+		} else {
+			bestVersions.Set(name, p)
+		}
+	}
+
+	var versioned Preverified
+
+	bestVersions.Scan(func(key string, value PreverifiedItem) bool {
+		versioned = append(versioned, value)
+		return true
+	})
+
+	return versioned
+}
+
+func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion snaptype.Version, types ...snaptype.Enum) Preverified {
+	var bestVersions btree.Map[string, PreverifiedItem]
+
+	for _, p := range p {
+		v, name, ok := strings.Cut(p.Name, "-")
+
+		if !ok {
+			continue
+		}
+
+		parts := strings.Split(name, "-")
+		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
+		include := false
+
+		if len(types) > 0 {
+			for _, typ := range types {
+				if typeName == typ.String() {
+					include = true
+					break
+				}
+			}
+
+			if !include {
+				continue
+			}
 		}
 
 		version, err := snaptype.ParseVersion(v)
@@ -223,7 +312,17 @@ func KnownCfg(networkName string) *Cfg {
 		return newCfg(Preverified{})
 	}
 
-	return newCfg(c.Versioned(knownTypes[networkName]))
+	return newCfg(c.Typed(knownTypes[networkName]))
+}
+
+func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.Version) *Cfg {
+	c, ok := knownPreverified[networkName]
+
+	if !ok {
+		return newCfg(Preverified{})
+	}
+
+	return newCfg(c.Versioned(preferred, min))
 }
 
 var KnownWebseeds = map[string][]string{
