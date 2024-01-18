@@ -83,7 +83,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if config.BorTraceEnabled == nil {
-		config.BorTraceEnabled = newBoolPtr(false)
+		var disabled bool
+		config.BorTraceEnabled = &disabled
 	}
 
 	chainConfig, err := api.chainConfig(tx)
@@ -565,9 +566,4 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 	stream.WriteArrayEnd()
 	return nil
-}
-
-func newBoolPtr(bb bool) *bool {
-	b := bb
-	return &b
 }
