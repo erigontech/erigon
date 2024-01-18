@@ -260,12 +260,12 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return nil
 	}
-	var txnIndex uint64
+	var txnIndex int
 	var txn types.Transaction
 	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTx; i++ {
 		transaction := block.Transactions()[i]
 		if transaction.Hash() == hash {
-			txnIndex = uint64(i)
+			txnIndex = i
 			txn = transaction
 			break
 		}
@@ -273,7 +273,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if txn == nil {
 		if isBorStateSyncTx {
 			// bor state sync tx is appended at the end of the block
-			txnIndex = uint64(block.Transactions().Len())
+			txnIndex = block.Transactions().Len()
 		} else {
 			stream.WriteNil()
 			return fmt.Errorf("transaction %#x not found", hash)
@@ -281,7 +281,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txnIndex), api.historyV3(tx))
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txnIndex, api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
