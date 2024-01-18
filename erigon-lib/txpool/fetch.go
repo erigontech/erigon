@@ -476,7 +476,7 @@ func (f *Fetch) handleStateChanges(ctx context.Context, client StateChangesClien
 }
 
 func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.StateChangeBatch) error {
-	var unwindTxs, minedTxs types2.TxSlots
+	var unwindTxs, unwindBlobTxs, minedTxs types2.TxSlots
 	for _, change := range req.ChangeBatch {
 		if change.Direction == remote.Direction_FORWARD {
 			minedTxs.Resize(uint(len(change.Txs)))
@@ -500,18 +500,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 						return err
 					}
 					if utx.Type == types2.BlobTxType {
-						var knownBlobTxn *metaTx
-						//TODO: don't check `KnownBlobTxn()` here - because each call require `txpool.mutex.lock()`. Better add all hashes here and do check inside `OnNewBlock`
-						if err := f.db.View(ctx, func(tx kv.Tx) error {
-							knownBlobTxn, err = f.pool.GetKnownBlobTxn(tx, utx.IDHash[:])
-							return err
-						}); err != nil {
-							return err
-						}
-						// Get the blob tx from cache; ignore altogether if it isn't there
-						if knownBlobTxn != nil {
-							unwindTxs.Append(knownBlobTxn.Tx, sender, false)
-						}
+						unwindBlobTxs.Append(utx, sender, false)
 					} else {
 						unwindTxs.Append(utx, sender, false)
 					}
@@ -525,7 +514,7 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remote.State
 	}
 
 	if err := f.db.View(ctx, func(tx kv.Tx) error {
-		return f.pool.OnNewBlock(ctx, req, unwindTxs, minedTxs, tx)
+		return f.pool.OnNewBlock(ctx, req, unwindTxs, unwindBlobTxs, minedTxs, tx)
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		return err
 	}

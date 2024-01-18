@@ -228,6 +228,8 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
 
+	forkChoice.StartAttestationsRTT()
+
 	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, historyDB, indexDB, csn, dirs.Tmp, dbConfig, backfilling, syncedDataManager)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
