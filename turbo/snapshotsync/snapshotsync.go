@@ -260,7 +260,7 @@ func logStats(ctx context.Context, downloader proto_downloader.DownloaderClient,
 
 		progress := float64(stats.Progress)
 
-		if math.Ceil(progress*1000)/1000 == 99.999 {
+		if math.Ceil(progress*1000)/1000 > 99.995 {
 			progress = 100
 		}
 
