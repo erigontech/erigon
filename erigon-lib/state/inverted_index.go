@@ -944,6 +944,15 @@ func (ic *InvertedIndexContext) CanPruneFrom(tx kv.Tx) uint64 {
 	return math.MaxUint64
 }
 
+func (ic *InvertedIndexContext) highestTxNum(tx kv.Tx) uint64 {
+	lst, _ := kv.LastKey(tx, ic.ii.indexKeysTable)
+	if len(lst) > 0 {
+		lstInDb := binary.BigEndian.Uint64(lst)
+		return cmp.Max(lstInDb, 0)
+	}
+	return 0
+}
+
 func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
 }

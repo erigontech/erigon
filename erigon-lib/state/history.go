@@ -80,7 +80,8 @@ type History struct {
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
-	dontProduceFiles bool //don't produce .v and .ef files. old data will be pruned anyway.
+	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
+	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
 
 type histCfg struct {
@@ -95,7 +96,8 @@ type histCfg struct {
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
 
-	dontProduceFiles bool //don't produce .v and .ef files. old data will be pruned anyway.
+	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
+	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
@@ -1060,10 +1062,24 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
-	inFiles := hc.maxTxNumInFiles(false)
-	inIdx := hc.ic.CanPruneFrom(tx)
-	return (hc.h.dontProduceFiles && inIdx < untilTxNum && inIdx != math.MaxUint64) || // if we don't produce files, we can prune only if index has values < untilTxNum
-		inIdx < inFiles // if we produce files, we can prune only if index has values < maxTxNumInFiles
+	inSnapsTx := hc.maxTxNumInFiles(false)
+	minIdxTx := hc.ic.CanPruneFrom(tx)
+	maxIdxTx := hc.ic.highestTxNum(tx)
+
+	// if we don't produce files, we can prune only if:
+	isNoFilesAndEnoughTxKeptInDB := hc.h.dontProduceFiles && // files are not produced
+		minIdxTx != math.MaxUint64 && // idx has data
+		minIdxTx < untilTxNum && // idx data < untilTxNum
+		minIdxTx < maxIdxTx-hc.h.keepTxInDB // idx data < MaxTx-keepTxInDB
+
+	// if we produce files, we can prune only if index has values < maxTxNumInFiles
+	isAggregated := minIdxTx < min(untilTxNum, inSnapsTx)
+
+	res := isNoFilesAndEnoughTxKeptInDB || isAggregated
+	//defer func() {
+	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t snapTx %d idxTx [%d-%d] keepTxInDB=%d; result %t\n", hc.h.filenameBase, untilTxNum, hc.h.dontProduceFiles, inSnapsTx, minIdxTx, maxIdxTx, hc.h.keepTxInDB, res)
+	//}()
+	return res
 }
 
 // Prune [txFrom; txTo)

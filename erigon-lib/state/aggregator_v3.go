@@ -170,7 +170,6 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	if a.commitment, err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
 	}
-	//a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	idxCfg := iiCfg{salt: salt, dirs: dirs}
 	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, true, nil, logger); err != nil {
 		return nil, err
@@ -1408,6 +1407,15 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
 	a.keepInDB = a.FirstTxNumOfStep(steps)
+	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment} {
+		if d == nil {
+			continue
+		}
+		if d.History.dontProduceFiles {
+			d.History.keepTxInDB = a.keepInDB
+		}
+	}
+
 	return a
 }
 
