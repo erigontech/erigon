@@ -157,7 +157,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			logStats(ctx, snapshotDownloader, stats, downloadStartTime, stagesIdsList, logPrefix, "download")
+			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+				log.Warn("Error while waiting for snapshots progress", "err", err)
+			} else {
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, "download")
+			}
 		}
 	}
 
@@ -165,12 +169,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
 		}
-	}
 
-	stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{})
-
-	if err != nil {
-		return err
+		if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+			log.Warn("Error while waiting for snapshots progress", "err", err)
+		}
 	}
 
 	for !stats.Completed {
@@ -178,7 +180,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logEvery.C:
-			logStats(ctx, snapshotDownloader, stats, downloadStartTime, stagesIdsList, logPrefix, "verify")
+			if stats, err = snapshotDownloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
+				log.Warn("Error while waiting for snapshots progress", "err", err)
+			} else {
+				logStats(ctx, stats, downloadStartTime, stagesIdsList, logPrefix, "download")
+			}
 		}
 	}
 
@@ -213,12 +219,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 	return nil
 }
 
-func logStats(ctx context.Context, downloader proto_downloader.DownloaderClient, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string) {
+func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string) {
 	var m runtime.MemStats
 
-	if stats, err := downloader.Stats(ctx, &proto_downloader.StatsRequest{}); err != nil {
-		log.Warn("Error while waiting for snapshots progress", "err", err)
-	} else if stats.Completed {
+	if stats.Completed {
 		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
 			Downloaded:       stats.BytesCompleted,
 			Total:            stats.BytesTotal,

@@ -765,6 +765,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		default:
 			noMetadata = append(noMetadata, t.Name())
 
+			var info torrentInfo
+
 			d.db.View(d.ctx, func(tx kv.Tx) (err error) {
 				infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(t.Name()))
 
@@ -772,22 +774,22 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 					return err
 				}
 
-				var info torrentInfo
-
 				if err = json.Unmarshal(infoBytes, &info); err != nil {
 					return err
 				}
 
-				if info.Completed != nil && info.Completed.Before(time.Now()) {
-					if info.Length != nil {
-						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
-							torrentComplete = fi.Size() == *info.Length
-						}
-					}
-				}
-
 				return nil
 			})
+
+			if info.Completed != nil && info.Completed.Before(time.Now()) {
+				if info.Length != nil {
+					if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+						torrentComplete = fi.Size() == *info.Length
+						stats.BytesCompleted += uint64(*info.Length)
+						stats.BytesTotal += uint64(*info.Length)
+					}
+				}
+			}
 		}
 
 		stats.Completed = stats.Completed && torrentComplete
