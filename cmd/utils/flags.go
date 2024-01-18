@@ -405,7 +405,7 @@ var (
 	RebuildTreeAfterFlag = cli.Uint64Flag{
 		Name:  "zkevm.rebuild-tree-after",
 		Usage: "Rebuild the state tree after this many blocks behind",
-		Value: 100,
+		Value: 10000,
 	}
 	RpcRateLimitsFlag = cli.IntFlag{
 		Name:  "zkevm.rpc-ratelimit",

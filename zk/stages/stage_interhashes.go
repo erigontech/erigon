@@ -337,11 +337,6 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 	defer sc.Close()
 
 	// progress printer
-	total := to - s.BlockNumber + 1
-
-	progressChan, stopProgressPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress inserting values", logPrefix), total)
-	defer stopProgressPrinter()
-
 	accChanges := make(map[libcommon.Address]*accounts.Account)
 	codeChanges := make(map[libcommon.Address]string)
 	storageChanges := make(map[libcommon.Address]map[string]string)
@@ -408,29 +403,39 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 		if err != nil {
 			return trie.EmptyRoot, err
 		}
-
-		// update the tree
-		for addr, acc := range accChanges {
-			if err := updateAccInTree(dbSmt, addr, acc); err != nil {
-				return trie.EmptyRoot, err
-			}
-		}
-		for addr, code := range codeChanges {
-			if err := dbSmt.SetContractBytecode(addr.String(), code); err != nil {
-				return trie.EmptyRoot, err
-			}
-		}
-
-		for addr, storage := range storageChanges {
-			if _, err := dbSmt.SetContractStorage(addr.String(), storage); err != nil {
-				return trie.EmptyRoot, err
-			}
-		}
-
-		progressChan <- i - s.BlockNumber + 1
 	}
 
-	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes finished", logPrefix))
+	total := len(accChanges) + len(codeChanges) + len(storageChanges)
+
+	progressChan, stopProgressPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress inserting values", logPrefix), uint64(total))
+
+	// update the tree
+	for addr, acc := range accChanges {
+		if err := updateAccInTree(dbSmt, addr, acc); err != nil {
+			stopProgressPrinter()
+			return trie.EmptyRoot, err
+		}
+		progressChan <- 1
+	}
+
+	for addr, code := range codeChanges {
+		if err := dbSmt.SetContractBytecode(addr.String(), code); err != nil {
+			stopProgressPrinter()
+			return trie.EmptyRoot, err
+		}
+		progressChan <- 1
+	}
+
+	for addr, storage := range storageChanges {
+		if _, err := dbSmt.SetContractStorage(addr.String(), storage); err != nil {
+			stopProgressPrinter()
+			return trie.EmptyRoot, err
+		}
+		progressChan <- 1
+	}
+	stopProgressPrinter()
+
+	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes finished. Commiting batch", logPrefix))
 
 	if err := verifyLastHash(dbSmt, expectedRootHash, &cfg, logPrefix); err != nil {
 		eridb.RollbackBatch()
@@ -471,11 +476,6 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, cfg ZkInterHashe
 	}
 	defer sc.Close()
 
-	accChanges := make(map[libcommon.Address]*accounts.Account)
-	accDeletes := make([]libcommon.Address, 0)
-	codeChanges := make(map[libcommon.Address]string)
-	storageChanges := make(map[libcommon.Address]map[string]string)
-
 	currentPsr := state2.NewPlainStateReader(db)
 
 	total := from - to + 1
@@ -485,8 +485,13 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, cfg ZkInterHashe
 	// walk backwards through the blocks, applying state changes, and deletes
 	// PlainState contains data AT the block
 	// History tables contain data BEFORE the block - so need a +1 offset
+	accDeletes := make([]libcommon.Address, 0)
 
 	for i := from; i >= to+1; i-- {
+
+		accChanges := make(map[libcommon.Address]*accounts.Account)
+		codeChanges := make(map[libcommon.Address]string)
+		storageChanges := make(map[libcommon.Address]map[string]string)
 		dupSortKey := dbutils.EncodeBlockNumber(i)
 
 		// collect changes to accounts and code
