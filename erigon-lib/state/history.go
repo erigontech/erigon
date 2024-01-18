@@ -110,6 +110,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		historyLargeValues: cfg.historyLargeValues,
 		indexList:          withHashMap,
 		dontProduceFiles:   cfg.dontProduceFiles,
+		keepTxInDB:         cfg.keepTxInDB,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error

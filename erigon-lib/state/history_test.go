@@ -321,7 +321,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		require.NoError(writer.Flush(ctx, tx))
 		require.NoError(tx.Commit())
 
-		collateAndMergeHistory(db, h, 4*h.aggregationStep, t, false)
+		collateAndMergeHistory(t, db, h, stepsTotal*h.aggregationStep, false)
 		return addr
 	}
 	t.Run("withFiles", func(t *testing.T) {
@@ -519,7 +519,7 @@ func TestHistoryHistory(t *testing.T) {
 
 }
 
-func collateAndMergeHistory(db kv.RwDB, h *History, txs uint64, tb testing.TB, doPrune bool) {
+func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, doPrune bool) {
 	tb.Helper()
 	require := require.New(tb)
 
@@ -583,7 +583,7 @@ func TestHistoryMergeFiles(t *testing.T) {
 	logger := log.New()
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
-		collateAndMergeHistory(db, h, txs, t, true)
+		collateAndMergeHistory(t, db, h, txs, true)
 		checkHistoryHistory(t, h, txs)
 	}
 
@@ -605,7 +605,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		t.Helper()
 		require := require.New(t)
 
-		collateAndMergeHistory(db, h, txs, t, true)
+		collateAndMergeHistory(t, db, h, txs, true)
 		hc := h.MakeContext()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
@@ -636,7 +636,7 @@ func TestIterateChanged(t *testing.T) {
 		t.Helper()
 		require := require.New(t)
 
-		collateAndMergeHistory(db, h, txs, t, true)
+		collateAndMergeHistory(t, db, h, txs, true)
 
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
@@ -925,7 +925,7 @@ func TestIterateChanged2(t *testing.T) {
 			_ = testCases
 		})
 		t.Run("after merge", func(t *testing.T) {
-			collateAndMergeHistory(db, h, txs, t, true)
+			collateAndMergeHistory(t, db, h, txs, true)
 			hc, require := h.MakeContext(), require.New(t)
 			defer hc.Close()
 
@@ -1087,7 +1087,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		t.Helper()
 		require := require.New(t)
 
-		collateAndMergeHistory(db, h, txs, t, true)
+		collateAndMergeHistory(t, db, h, txs, true)
 
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
