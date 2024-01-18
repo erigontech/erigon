@@ -75,6 +75,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 			return errors.New("ProcessVoluntaryExit: BLS verification failed")
 		}
 	}
+	f.emitters.Publish("voluntary_exit", voluntaryExit)
 	f.operationsPool.VoluntaryExistsPool.Insert(voluntaryExit.ValidatorIndex, signedVoluntaryExit)
 	return nil
 }
@@ -221,5 +222,8 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 
 	f.operationsPool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
+
+	// emit bls_to_execution_change
+	f.emitters.Publish("bls_to_execution_change", signedChange)
 	return nil
 }

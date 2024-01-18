@@ -22,9 +22,9 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint = justifiedCheckpoint
 	}
 	if finalizedCheckpoint.Epoch() > f.finalizedCheckpoint.Epoch() {
+		f.emitters.Publish("finalized_checkpoint", finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint = finalizedCheckpoint
-
 	}
 }
 

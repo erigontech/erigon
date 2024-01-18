@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strconv"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clstages"
@@ -47,6 +49,7 @@ type Cfg struct {
 	sn              *freezeblocks.CaplinSnapshots
 	antiquary       *antiquary.Antiquary
 	syncedData      *synced_data.SyncedDataManager
+	emitter         *beaconevents.Emitters
 
 	hasDownloaded, backfilling bool
 }
@@ -76,6 +79,7 @@ func ClStagesCfg(
 	dbConfig db_config.DatabaseConfiguration,
 	backfilling bool,
 	syncedData *synced_data.SyncedDataManager,
+	emitters *beaconevents.Emitters,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -93,6 +97,7 @@ func ClStagesCfg(
 		sn:              sn,
 		backfilling:     backfilling,
 		syncedData:      syncedData,
+		emitter:         emitters,
 	}
 }
 
@@ -404,13 +409,27 @@ func ConsensusClStages(ctx context.Context,
 									cfg.rpc.BanPeer(blocks.Peer)
 									continue MainLoop
 								}
+								// we can ignore this error because the block would not process if the hashssz failed
+								blockRoot, _ := block.HashSSZ()
+								// publish block to event handler
+								cfg.emitter.Publish("block", map[string]any{
+									"slot":                 strconv.Itoa(int(block.Block.Slot)),
+									"block":                common.Hash(blockRoot),
+									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
+								})
 								block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
+									// emit attestation
+									cfg.emitter.Publish("attestation", a)
 									if err = cfg.forkChoice.OnAttestation(a, true, false); err != nil {
 										log.Debug("bad attestation received", "err", err)
 									}
 									return true
 								})
-
+								// emit the other stuff
+								block.Block.Body.VoluntaryExits.Range(func(index int, value *cltypes.SignedVoluntaryExit, length int) bool {
+									cfg.emitter.Publish("voluntary-exit", value)
+									return true
+								})
 								if block.Block.Slot >= args.targetSlot {
 									break MainLoop
 								}
@@ -424,7 +443,7 @@ func ConsensusClStages(ctx context.Context,
 			},
 			ForkChoice: {
 				Description: `fork choice stage. We will send all fork choise things here
-			also, we will wait up to delay seconds to deal with attestations + side forks`,
+				also, we will wait up to delay seconds to deal with attestations + side forks`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if x := MetaCatchingUp(args); x != "" {
 						return x
@@ -526,6 +545,31 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					log.Debug("Incremented state history", "elapsed", time.Since(start), "preverifiedValidators", preverifiedValidators)
+
+					stateRoot, err := headState.HashSSZ()
+					if err != nil {
+						return err
+					}
+
+					headEpoch := cfg.beaconCfg.RoundSlotToEpoch(headSlot)
+					previous_duty_dependent_root, err := headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
+					if err != nil {
+						return err
+					}
+					current_duty_dependent_root, err := headState.GetBlockRootAtSlot(headEpoch*cfg.beaconCfg.SlotsPerEpoch - 1)
+					if err != nil {
+						return err
+					}
+					// emit the head event
+					cfg.emitter.Publish("head", map[string]any{
+						"slot":                         strconv.Itoa(int(headSlot)),
+						"block":                        headRoot,
+						"state":                        common.Hash(stateRoot),
+						"epoch_transition":             true,
+						"previous_duty_dependent_root": previous_duty_dependent_root,
+						"current_duty_dependent_root":  current_duty_dependent_root,
+						"execution_optimistic":         false,
+					})
 
 					var m runtime.MemStats
 					dbg.ReadMemStats(&m)
