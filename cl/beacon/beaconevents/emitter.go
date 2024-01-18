@@ -19,6 +19,7 @@ var validTopics = map[string]struct{}{
 	"light_client_finality_update":   {},
 	"light_client_optimistic_update": {},
 	"payload_attributes":             {},
+	"*":                              {},
 }
 
 type Subscription struct {
@@ -48,8 +49,11 @@ func (e *Emitters) Publish(s string, a any) {
 		values = append(values, v)
 	}
 	e.mu.Unlock()
+
 	for _, v := range values {
-		if _, ok := v.topics[s]; ok {
+		if _, ok := v.topics["*"]; ok {
+			go v.cb(s, a)
+		} else if _, ok := v.topics[s]; ok {
 			go v.cb(s, a)
 		}
 	}

@@ -22,6 +22,7 @@ import (
 func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
 	voluntaryExit := signedVoluntaryExit.VoluntaryExit
 	if f.operationsPool.VoluntaryExistsPool.Has(voluntaryExit.ValidatorIndex) {
+		f.emitters.Publish("voluntary_exit", voluntaryExit)
 		return nil
 	}
 	f.mu.Lock()
@@ -166,6 +167,7 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 
 func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
 	if f.operationsPool.BLSToExecutionChangesPool.Has(signedChange.Signature) {
+		f.emitters.Publish("bls_to_execution_change", signedChange)
 		return nil
 	}
 	change := signedChange.Message
@@ -231,6 +233,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 
 func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.SignedContributionAndProof, test bool) error {
 	if f.operationsPool.SignedContributionAndProofPool.Has(signedChange.Signature) {
+		f.emitters.Publish("contribution_and_proof", signedChange)
 		return nil
 	}
 	// https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/p2p-interface.md#sync_committee_contribution_and_proof
