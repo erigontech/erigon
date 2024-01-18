@@ -1071,6 +1071,7 @@ func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
 	isNoFilesAndEnoughTxKeptInDB := hc.h.dontProduceFiles && // files are not produced
 		minIdxTx != math.MaxUint64 && // idx has data
 		minIdxTx < untilTxNum && // idx data < untilTxNum
+		hc.h.keepTxInDB < maxIdxTx && // sub overflow
 		minIdxTx < maxIdxTx-hc.h.keepTxInDB // idx data < MaxTx-keepTxInDB
 
 	// if we produce files, we can prune only if index has values < maxTxNumInFiles
