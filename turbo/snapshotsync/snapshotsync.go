@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"runtime"
 	"strings"
 	"time"
@@ -256,6 +257,12 @@ func logStats(ctx context.Context, downloader proto_downloader.DownloaderClient,
 
 		dbg.ReadMemStats(&m)
 		downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
+
+		progress := float64(stats.Progress)
+
+		if math.Ceil(progress*1000)/1000 == 99.999 {
+			progress = 100
+		}
 
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
 			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
