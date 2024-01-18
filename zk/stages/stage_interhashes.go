@@ -755,7 +755,9 @@ func insertContractStorageToKV(db smt.DB, keys []utils.NodeKey, ethAddr string, 
 			keys = append(keys, keyStoragePosition)
 			db.InsertAccountValue(keyStoragePosition, *parsedValue)
 
-			ks := utils.EncodeKeySource(utils.SC_STORAGE, utils.ConvertHexToAddress(ethAddr), common.Hash{})
+			sp, _ := utils.StrValToBigInt(k)
+
+			ks := utils.EncodeKeySource(utils.SC_STORAGE, utils.ConvertHexToAddress(ethAddr), common.BigToHash(sp))
 			db.InsertKeySource(keyStoragePosition, ks)
 		}
 	}
