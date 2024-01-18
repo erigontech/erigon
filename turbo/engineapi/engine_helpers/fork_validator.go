@@ -148,11 +148,13 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		status = engine_types.AcceptedStatus
 		return
 	}
+	hash := header.Hash()
+	number := header.Number.Uint64()
 
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(header.Hash()); ok {
+	if _, ok := fv.validHashes.Get(hash); ok {
 		status = engine_types.ValidStatus
-		latestValidHash = header.Hash()
+		latestValidHash = hash
 		return
 	}
 
@@ -175,8 +177,8 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 			Accumulator: shards.NewAccumulator(),
 		}
 		// Update fork head hash.
-		fv.extendingForkHeadHash = header.Hash()
-		fv.extendingForkNumber = header.Number.Uint64()
+		fv.extendingForkHeadHash = hash
+		fv.extendingForkNumber = number
 		status, latestValidHash, validationError, criticalError = fv.validateAndStorePayload(txc, header, body, 0, nil, nil, fv.extendingForkNotifications)
 		if criticalError != nil {
 			return
@@ -199,10 +201,19 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		status = engine_types.AcceptedStatus
 		return
 	}
-	// Let's assemble the side fork backwards
 	var foundCanonical bool
+	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, hash, number)
+	if criticalError != nil {
+		return
+	}
+	if foundCanonical {
+		status = engine_types.ValidStatus
+		latestValidHash = header.Hash()
+		return
+	}
+	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
-	unwindPoint := header.Number.Uint64() - 1
+	unwindPoint := number - 1
 	foundCanonical, criticalError = rawdb.IsCanonicalHash(tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
