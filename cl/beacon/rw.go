@@ -62,5 +62,7 @@ func (f *notFoundNoWriter) Flush() {
 	if !ok {
 		return
 	}
-	flusher.Flush()
+	if flusher != nil {
+		flusher.Flush()
+	}
 }
