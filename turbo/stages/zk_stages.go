@@ -106,7 +106,7 @@ func NewSequencerZkStages(ctx context.Context,
 	return zkStages.SequencerZkStages(ctx,
 		stagedsync.StageCumulativeIndexCfg(db),
 		zkStages.StageDataStreamCatchupCfg(datastreamServer, db),
-		zkStages.StageSequencerInterhashesCfg(db),
+		zkStages.StageSequencerInterhashesCfg(db, notifications.Accumulator),
 		zkStages.StageSequenceBlocksCfg(
 			db,
 			cfg.Prune,

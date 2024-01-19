@@ -14,6 +14,7 @@ import (
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/log/v3"
@@ -21,12 +22,14 @@ import (
 )
 
 type SequencerInterhashesCfg struct {
-	db kv.RwDB
+	db          kv.RwDB
+	accumulator *shards.Accumulator
 }
 
-func StageSequencerInterhashesCfg(db kv.RwDB) SequencerInterhashesCfg {
+func StageSequencerInterhashesCfg(db kv.RwDB, accumulator *shards.Accumulator) SequencerInterhashesCfg {
 	return SequencerInterhashesCfg{
-		db: db,
+		db:          db,
+		accumulator: accumulator,
 	}
 }
 
@@ -63,7 +66,8 @@ func SpawnSequencerInterhashesStage(
 	if to == 1 {
 		newRoot, err = regenerateSequencerIntermediateHashes(s.LogPrefix(), tx, eridb, smt)
 	} else {
-		// incremental change
+		// todo: incremental change here instead
+		newRoot, err = regenerateSequencerIntermediateHashes(s.LogPrefix(), tx, eridb, smt)
 	}
 
 	latest, err := rawdb.ReadBlockByNumber(tx, to)
@@ -86,9 +90,10 @@ func SpawnSequencerInterhashesStage(
 	newHash := header.Hash()
 
 	rawdb.WriteHeader(tx, header)
-
-	err = rawdb.WriteCanonicalHash(tx, newHash, header.Number.Uint64())
-	if err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, newHash); err != nil {
+		return err
+	}
+	if err := rawdb.WriteCanonicalHash(tx, newHash, header.Number.Uint64()); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
 
@@ -101,6 +106,17 @@ func SpawnSequencerInterhashesStage(
 
 	// write the new block lookup entries
 	rawdb.WriteTxLookupEntries(tx, latest)
+
+	// inform the accumulator of this new block to update the txpool and anything else that needs to know
+	// we need to do this here instead of execution as the interhashes stage will have updated the block
+	// hashes
+	if cfg.accumulator != nil {
+		txs, err := rawdb.RawTransactionsRange(tx, header.Number.Uint64(), header.Number.Uint64())
+		if err != nil {
+			return err
+		}
+		cfg.accumulator.StartChange(header.Number.Uint64(), header.Hash(), txs, false)
+	}
 
 	if freshTx {
 		if err = tx.Commit(); err != nil {

@@ -494,10 +494,6 @@ func SpawnSequencingStage(
 		return fmt.Errorf("write block batch error: %v", err)
 	}
 
-	if err = stages.SaveStageProgress(tx, stages.Execution, newNum.Uint64()); err != nil {
-		return err
-	}
-
 	// now process the senders to avoid a stage by itself
 	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64())
 	cryptoContext := secp256k1.ContextForThread(1)
@@ -513,6 +509,14 @@ func SpawnSequencingStage(
 		return err
 	}
 
+	// now update stages that will be used later on in stageloop.go and other stages. As we're the sequencer
+	// we won't have headers stage for example as we're already writing them here
+	if err = stages.SaveStageProgress(tx, stages.Execution, newNum.Uint64()); err != nil {
+		return err
+	}
+	if err = stages.SaveStageProgress(tx, stages.Headers, newNum.Uint64()); err != nil {
+		return err
+	}
 	// todo: hack! for now one block to one batch but this will change shortly
 	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, newNum.Uint64()); err != nil {
 		return err
