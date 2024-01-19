@@ -642,16 +642,18 @@ func TestIterateChanged(t *testing.T) {
 		require.NoError(err)
 		defer tx.Rollback()
 		var keys, vals []string
+		var steps []uint64
 		ic := h.MakeContext()
 		defer ic.Close()
 
 		it, err := ic.HistoryRange(2, 20, order.Asc, -1, tx)
 		require.NoError(err)
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, v, step, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
+			steps = append(steps, step)
 		}
 		require.Equal([]string{
 			"0100000000000001",
@@ -693,14 +695,16 @@ func TestIterateChanged(t *testing.T) {
 			"",
 			"",
 			""}, vals)
+		require.Equal(make([]uint64, 19), steps)
 		it, err = ic.HistoryRange(995, 1000, order.Asc, -1, tx)
 		require.NoError(err)
-		keys, vals = keys[:0], vals[:0]
+		keys, vals, steps = keys[:0], vals[:0], steps[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, v, step, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
+			steps = append(steps, step)
 		}
 		require.Equal([]string{
 			"0100000000000001",
@@ -725,44 +729,52 @@ func TestIterateChanged(t *testing.T) {
 			"ff00000000000052",
 			"ff00000000000024"}, vals)
 
+		require.Equal(make([]uint64, 9), steps)
+
 		// no upper bound
 		it, err = ic.HistoryRange(995, -1, order.Asc, -1, tx)
 		require.NoError(err)
-		keys, vals = keys[:0], vals[:0]
+		keys, vals, steps = keys[:0], vals[:0], steps[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, v, step, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
+			steps = append(steps, step)
 		}
 		require.Equal([]string{"0100000000000001", "0100000000000002", "0100000000000003", "0100000000000004", "0100000000000005", "0100000000000006", "0100000000000008", "0100000000000009", "010000000000000a", "010000000000000c", "0100000000000014", "0100000000000019", "010000000000001b"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1", "ff0000000000014b", "ff000000000000f8", "ff000000000000c6", "ff000000000000a5", "ff0000000000007c", "ff0000000000006e", "ff00000000000063", "ff00000000000052", "ff00000000000031", "ff00000000000027", "ff00000000000024"}, vals)
+		require.Equal(make([]uint64, 13), steps)
 
 		// no upper bound, limit=2
 		it, err = ic.HistoryRange(995, -1, order.Asc, 2, tx)
 		require.NoError(err)
-		keys, vals = keys[:0], vals[:0]
+		keys, vals, steps = keys[:0], vals[:0], steps[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, v, step, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
+			steps = append(steps, step)
 		}
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003e2", "ff000000000001f1"}, vals)
+		require.Equal(make([]uint64, 2), steps)
 
 		// no lower bound, limit=2
 		it, err = ic.HistoryRange(-1, 1000, order.Asc, 2, tx)
 		require.NoError(err)
-		keys, vals = keys[:0], vals[:0]
+		keys, vals, steps = keys[:0], vals[:0], steps[:0]
 		for it.HasNext() {
-			k, v, err := it.Next()
+			k, v, step, err := it.Next()
 			require.NoError(err)
 			keys = append(keys, fmt.Sprintf("%x", k))
 			vals = append(vals, fmt.Sprintf("%x", v))
+			steps = append(steps, step)
 		}
 		require.Equal([]string{"0100000000000001", "0100000000000002"}, keys)
 		require.Equal([]string{"ff000000000003cf", "ff000000000001e7"}, vals)
+		require.Equal(make([]uint64, 2), steps)
 	}
 	t.Run("large_values", func(t *testing.T) {
 		db, h, txs := filledHistory(t, true, logger)
@@ -802,6 +814,7 @@ func TestIterateChanged2(t *testing.T) {
 		firstKey[0] = 1 //mark key to simplify debug
 
 		var keys, vals []string
+		var steps []uint64
 		t.Run("before merge", func(t *testing.T) {
 			hc, require := h.MakeContext(), require.New(t)
 			defer hc.Close()
@@ -825,10 +838,11 @@ func TestIterateChanged2(t *testing.T) {
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, v, err := it.Next()
+				k, v, step, err := it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
+				steps = append(steps, step)
 			}
 			require.NoError(err)
 			require.Equal([]string{
@@ -871,15 +885,17 @@ func TestIterateChanged2(t *testing.T) {
 				"",
 				"",
 				""}, vals)
-			keys, vals = keys[:0], vals[:0]
+			require.Equal(make([]uint64, 19), steps)
+			keys, vals, steps = keys[:0], vals[:0], steps[:0]
 
 			it, err = hc.HistoryRange(995, 1000, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, v, err := it.Next()
+				k, v, step, err := it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 				vals = append(vals, fmt.Sprintf("%x", v))
+				steps = append(steps, step)
 			}
 			require.NoError(err)
 			require.Equal([]string{
@@ -904,6 +920,8 @@ func TestIterateChanged2(t *testing.T) {
 				"ff0000000000006e",
 				"ff00000000000052",
 				"ff00000000000024"}, vals)
+
+			require.Equal(make([]uint64, 9), steps)
 
 			// single Get test-cases
 			tx, err := db.BeginRo(ctx)
@@ -933,7 +951,7 @@ func TestIterateChanged2(t *testing.T) {
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
 			require.NoError(err)
 			for it.HasNext() {
-				k, _, err := it.Next()
+				k, _, _, err := it.Next()
 				require.NoError(err)
 				keys = append(keys, fmt.Sprintf("%x", k))
 			}
@@ -1100,7 +1118,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 
 		keys := make([][]byte, 0)
 		for iter.HasNext() {
-			k, _, err := iter.Next()
+			k, _, _, err := iter.Next()
 			require.NoError(err)
 			keys = append(keys, k)
 			//vals = append(vals, fmt.Sprintf("%x", v))

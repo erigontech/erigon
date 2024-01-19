@@ -1549,15 +1549,27 @@ func (ac *AggregatorV3Context) HistoryGet(name kv.History, key []byte, ts uint64
 }
 
 func (ac *AggregatorV3Context) AccountHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.account.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	hr, err := ac.account.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	if err != nil {
+		return nil, err
+	}
+	return iter.WrapKV(hr), nil
 }
 
 func (ac *AggregatorV3Context) StorageHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.storage.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	hr, err := ac.storage.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	if err != nil {
+		return nil, err
+	}
+	return iter.WrapKV(hr), nil
 }
 
 func (ac *AggregatorV3Context) CodeHistoryRange(startTxNum, endTxNum int, asc order.By, limit int, tx kv.Tx) (iter.KV, error) {
-	return ac.code.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	hr, err := ac.code.hc.HistoryRange(startTxNum, endTxNum, asc, limit, tx)
+	if err != nil {
+		return nil, err
+	}
+	return iter.WrapKV(hr), nil
 }
 
 type FilesStats22 struct{}

@@ -1752,13 +1752,13 @@ func (hc *HistoryContext) iterateChangedFrozen(fromTxNum, toTxNum int, asc order
 	return hi, nil
 }
 
-func (hc *HistoryContext) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KV, error) {
+func (hc *HistoryContext) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KVS, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
 	rangeIsInFiles := toTxNum >= 0 && len(hc.ic.files) > 0 && hc.ic.files[len(hc.ic.files)-1].endTxNum >= uint64(toTxNum)
 	if rangeIsInFiles {
-		return iter.EmptyKV, nil
+		return iter.EmptyKVS, nil
 	}
 	dbi := &HistoryChangesIterDB{
 		endTxNum:    toTxNum,
@@ -1776,7 +1776,7 @@ func (hc *HistoryContext) iterateChangedRecent(fromTxNum, toTxNum int, asc order
 	return dbi, nil
 }
 
-func (hc *HistoryContext) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KV, error) {
+func (hc *HistoryContext) HistoryRange(fromTxNum, toTxNum int, asc order.By, limit int, roTx kv.Tx) (iter.KVS, error) {
 	if asc == order.Desc {
 		panic("not supported yet")
 	}
@@ -1788,7 +1788,7 @@ func (hc *HistoryContext) HistoryRange(fromTxNum, toTxNum int, asc order.By, lim
 	if err != nil {
 		return nil, err
 	}
-	return iter.MergeKV(itOnDB, itOnFiles, limit), nil
+	return iter.MergeKVS(itOnDB, itOnFiles, limit), nil
 }
 
 type HistoryChangesIterFiles struct {
@@ -1897,7 +1897,9 @@ type HistoryChangesIterDB struct {
 	startTxKey      [8]byte
 
 	nextKey, nextVal []byte
+	nextStep         uint64
 	k, v             []byte
+	step             uint64
 	err              error
 }
 
@@ -2043,16 +2045,16 @@ func (hi *HistoryChangesIterDB) HasNext() bool {
 	return true
 }
 
-func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, error) {
+func (hi *HistoryChangesIterDB) Next() ([]byte, []byte, uint64, error) {
 	if hi.err != nil {
-		return nil, nil, hi.err
+		return nil, nil, 0, hi.err
 	}
 	hi.limit--
-	hi.k, hi.v = hi.nextKey, hi.nextVal
+	hi.k, hi.v, hi.step = hi.nextKey, hi.nextVal, hi.nextStep
 	if err := hi.advance(); err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
-	return hi.k, hi.v, nil
+	return hi.k, hi.v, hi.step, nil
 }
 
 // HistoryStep used for incremental state reconsitution, it isolates only one snapshot interval
