@@ -105,7 +105,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
-	var borStateSyncTx types.Transaction
+	var borStateSyncTxn types.Transaction
 	if *config.BorTraceEnabled {
 		borStateSyncTxHash := types.ComputeBorTxHash(block.NumberU64(), block.Hash())
 		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
@@ -114,15 +114,15 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			return err
 		}
 		if ok {
-			borStateSyncTx = types.NewBorTransaction()
-			txns = append(txns, borStateSyncTx)
+			borStateSyncTxn = types.NewBorTransaction()
+			txns = append(txns, borStateSyncTxn)
 		}
 	}
 
 	for idx, txn := range txns {
-		isBorStateSyncTx := borStateSyncTx == txn
+		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
-		if isBorStateSyncTx {
+		if isBorStateSyncTxn {
 			txnHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
 		} else {
 			txnHash = txn.Hash()
@@ -155,7 +155,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			GasPrice: msg.GasPrice(),
 		}
 
-		if isBorStateSyncTx {
+		if isBorStateSyncTxn {
 			err = polygontracer.TraceBorStateSyncTxn(
 				ctx,
 				tx,
@@ -212,7 +212,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	var isBorStateSyncTx bool
+	var isBorStateSyncTxn bool
 	blockNum, ok, err := api.txnLookup(tx, hash)
 	if err != nil {
 		stream.WriteNil()
@@ -239,7 +239,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			return nil
 		}
 
-		isBorStateSyncTx = true
+		isBorStateSyncTxn = true
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -260,7 +260,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	var txnIndex int
 	var txn types.Transaction
-	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTx; i++ {
+	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTxn; i++ {
 		transaction := block.Transactions()[i]
 		if transaction.Hash() == hash {
 			txnIndex = i
@@ -269,7 +269,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 	}
 	if txn == nil {
-		if isBorStateSyncTx {
+		if isBorStateSyncTxn {
 			// bor state sync tx is appended at the end of the block
 			txnIndex = block.Transactions().Len()
 		} else {
@@ -284,7 +284,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return err
 	}
-	if isBorStateSyncTx {
+	if isBorStateSyncTxn {
 		return polygontracer.TraceBorStateSyncTxn(
 			ctx,
 			tx,

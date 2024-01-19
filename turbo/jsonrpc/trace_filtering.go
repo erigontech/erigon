@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	jsoniter "github.com/json-iterator/go"
@@ -12,12 +11,12 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
-
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -48,24 +47,28 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
+	var isBorStateSyncTxn bool
 	blockNumber, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, nil
-	}
-	// Private API returns 0 if transaction is not found.
-	if blockNumber == 0 && chainConfig.Bor != nil {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, txHash)
+		if chainConfig.Bor == nil {
+			return nil, nil
+		}
+
+		// otherwise this may be a bor state sync transaction - check
+		blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
 		if err != nil {
 			return nil, err
 		}
-		if blockNumPtr == nil {
+		if !ok {
 			return nil, nil
 		}
-		blockNumber = *blockNumPtr
+
+		isBorStateSyncTxn = true
 	}
+
 	block, err := api.blockByNumberWithSenders(tx, blockNumber)
 	if err != nil {
 		return nil, err
@@ -75,16 +78,20 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	var txIndex int
-	for idx, txn := range block.Transactions() {
+	for idx := 0; idx < block.Transactions().Len() && !isBorStateSyncTxn; idx++ {
+		txn := block.Transactions()[idx]
 		if txn.Hash() == txHash {
 			txIndex = idx
 			break
 		}
 	}
+
+	if isBorStateSyncTxn {
+		txIndex = block.Transactions().Len()
+	}
+
 	bn := hexutil.Uint64(blockNumber)
-
 	hash := block.Hash()
-
 	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
 	traces, _, err := api.callManyTransactions(ctx, tx, block, []string{TraceTypeTrace}, txIndex, *gasBailOut, signer, chainConfig)
