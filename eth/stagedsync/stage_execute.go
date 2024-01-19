@@ -318,7 +318,6 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	//	return fmt.Errorf("commitment can unwind only to block: %d, requested: %d. UnwindTo was called with wrong value", bn, u.UnwindPoint)
 	//}
 
-	t := time.Now()
 	unwindToLimit, err := txc.Tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindDomainsToBlockNum(txc.Tx)
 	if err != nil {
 		return err
@@ -335,18 +334,14 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 		domains = txc.Doms
 	}
 	rs := state.NewStateV3(domains, logger)
-	log.Info("created SharedDomains and StateV3", "in", time.Since(t))
 	// unwind all txs of u.UnwindPoint block. 1 txn in begin/end of block - system txs
-	t = time.Now()
 	txNum, err := rawdbv3.TxNums.Min(txc.Tx, u.UnwindPoint+1)
 	if err != nil {
 		return err
 	}
-	log.Info("Min", "in", time.Since(t))
 	if err := rs.Unwind(ctx, txc.Tx, u.UnwindPoint, txNum, accumulator); err != nil {
 		return fmt.Errorf("StateV3.Unwind: %w", err)
 	}
-	t = time.Now()
 	if err := rawdb.TruncateReceipts(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("truncate receipts: %w", err)
 	}
@@ -356,13 +351,8 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 	if err := rawdb.DeleteNewerEpochs(txc.Tx, u.UnwindPoint+1); err != nil {
 		return fmt.Errorf("delete newer epochs: %w", err)
 	}
-	log.Info("Pruned", "in", time.Since(t))
-	t = time.Now()
-	if err = domains.Flush(ctx, txc.Tx); err != nil {
-		return err
-	}
-	log.Info("Domains flush", "in", time.Since(t))
-	return nil
+
+	return domains.Flush(ctx, txc.Tx)
 }
 
 func senderStageProgress(tx kv.Tx, db kv.RoDB) (prevStageProgress uint64, err error) {
@@ -737,11 +727,10 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, txc wrap.TxContainer, c
 	}
 	logPrefix := u.LogPrefix()
 	logger.Info(fmt.Sprintf("[%s] Unwind Execution", logPrefix), "from", s.BlockNumber, "to", u.UnwindPoint)
-	t := time.Now()
+
 	if err = unwindExecutionStage(u, s, txc, ctx, cfg, initialCycle, logger); err != nil {
 		return err
 	}
-	log.Info("unwindExecutionStage", "in", time.Since(t))
 	if err = u.Done(txc.Tx); err != nil {
 		return err
 	}
