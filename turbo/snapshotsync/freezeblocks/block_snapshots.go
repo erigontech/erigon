@@ -1971,7 +1971,7 @@ func txsAmountBasedOnBodiesSnapshots(sn snaptype.FileInfo) (firstTxID uint64, ex
 func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("TransactionsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
+			err = fmt.Errorf("index panic: at=%s, %v, %s", sn.Name(), rec, dbg.Stack())
 		}
 	}()
 	firstBlockNum := sn.From
@@ -1982,7 +1982,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 
 	bodiesSegment, err := compress.NewDecompressor(sn.Path)
 	if err != nil {
-		return
+		return fmt.Errorf("can't open %s for indexing: %w", sn.Name(), err)
 	}
 	defer bodiesSegment.Close()
 
@@ -1990,7 +1990,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	segmentFilePath := filepath.Join(sn.Dir(), segFileName)
 	d, err := compress.NewDecompressor(segmentFilePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("can't open %s for indexing: %w", segFileName, err)
 	}
 	defer d.Close()
 	if d.Count() != expectedCount {
@@ -2127,14 +2127,15 @@ RETRY:
 func HeadersIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("HeadersIdx: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
+			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
 		}
 	}()
 
 	d, err := compress.NewDecompressor(info.Path)
 	if err != nil {
-		return err
+		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
 	}
+
 	defer d.Close()
 
 	if p != nil {
@@ -2168,7 +2169,7 @@ func HeadersIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *b
 func BodiesIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BodiesIdx: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
+			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
 		}
 	}()
 
@@ -2176,7 +2177,7 @@ func BodiesIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *ba
 
 	d, err := compress.NewDecompressor(info.Path)
 	if err != nil {
-		return err
+		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
 	}
 	defer d.Close()
 
@@ -2196,7 +2197,7 @@ func BodiesIdx(ctx context.Context, info snaptype.FileInfo, tmpDir string, p *ba
 		}
 		return nil
 	}, logger); err != nil {
-		return fmt.Errorf("BodyNumberIdx: %w", err)
+		return fmt.Errorf("can't index %s: %w", info.Name(), err)
 	}
 	return nil
 }
