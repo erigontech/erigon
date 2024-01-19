@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -166,9 +167,24 @@ var snapshotCommand = cli.Command{
 				if steprm == "" {
 					return errors.New("step to remove is required (eg 0-2)")
 				}
-				steprm = fmt.Sprintf(".%s.", steprm)
 
-				removed := 0
+				parseStep := func(step string) (uint64, uint64, error) {
+					var from, to uint64
+					if _, err := fmt.Sscanf(step, "%d-%d", &from, &to); err != nil {
+						return 0, 0, fmt.Errorf("step expected in format from-to, got %s", step)
+					}
+					return from, to, nil
+				}
+				minS, maxS, err := parseStep(steprm)
+				if err != nil {
+					return err
+				}
+
+				var (
+					fmin, fmax uint64
+					removed    = 0
+				)
+
 				for _, dirPath := range []string{dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors} {
 					filePaths, err := dir.ListFiles(dirPath)
 					if err != nil {
@@ -176,16 +192,30 @@ var snapshotCommand = cli.Command{
 					}
 					for _, filePath := range filePaths {
 						_, fName := filepath.Split(filePath)
-						if !strings.Contains(fName, steprm) {
-							continue
-						}
 
-						if err := os.Remove(filePath); err != nil {
-							return fmt.Errorf("failed to remove %s: %w", fName, err)
+						parts := strings.Split(fName, ".")
+						if len(parts) == 3 {
+							fsteps := strings.Split(parts[1], "-")
+
+							fmin, err = strconv.ParseUint(fsteps[0], 10, 64)
+							if err != nil {
+								return err
+							}
+							fmax, err = strconv.ParseUint(fsteps[1], 10, 64)
+							if err != nil {
+								return err
+							}
+
+							if fmin >= minS && fmax <= maxS {
+								if err := os.Remove(filePath); err != nil {
+									return fmt.Errorf("failed to remove %s: %w", fName, err)
+								}
+								removed++
+							}
 						}
-						removed++
 					}
 				}
+
 				fmt.Printf("removed %d state snapshot files\n", removed)
 				return nil
 			},
