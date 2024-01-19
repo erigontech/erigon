@@ -43,7 +43,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 		return false, err
 	}
 
-	status, _, err := cc.chainRW.ValidateChain(payload.BlockHash, payload.BlockNumber)
+	status, _, _, err := cc.chainRW.ValidateChain(payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return false, err
 	}
