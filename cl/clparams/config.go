@@ -1128,6 +1128,7 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
 		id == 5 ||
+		id == 17000 ||
 		id == 11155111 ||
 		id == 100 // ||
 	//id == 10200
