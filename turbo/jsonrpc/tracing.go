@@ -107,18 +107,16 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	txns := block.Transactions()
 	var borStateSyncTx types.Transaction
 	if *config.BorTraceEnabled {
-		_, ok, err := api._blockReader.EventLookup(ctx, tx, block.Hash())
+		borStateSyncTxHash := types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
 		if err != nil {
 			stream.WriteArrayEnd()
 			return err
 		}
-		if !ok {
-			stream.WriteArrayEnd()
-			return nil
+		if ok {
+			borStateSyncTx = types.NewBorTransaction()
+			txns = append(txns, borStateSyncTx)
 		}
-
-		borStateSyncTx = types.NewBorTransaction()
-		txns = append(txns, borStateSyncTx)
 	}
 
 	for idx, txn := range txns {
