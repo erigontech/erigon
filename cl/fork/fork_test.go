@@ -56,7 +56,7 @@ func TestGoerliForkDigest(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
-	require.Equal(t, [4]uint8{0x62, 0x89, 0x41, 0xef}, digest)
+	require.Equal(t, [4]uint8{0xa7, 0x5d, 0xcc, 0xf2}, digest)
 }
 
 func TestSepoliaForkDigest(t *testing.T) {

@@ -81,7 +81,7 @@ func TestNonceFromAddress(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
 	{
@@ -201,7 +201,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
 	{
@@ -318,7 +318,7 @@ func TestReverseNonces(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 	// 1. Send high fee transaction with nonce gap
 	{
@@ -445,7 +445,7 @@ func TestTxPoke(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
 	var idHash types.Hashes
@@ -759,7 +759,7 @@ func TestBlobTxReplacement(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
 	tip, feeCap, blobFeeCap := uint256.NewInt(100_000), uint256.NewInt(200_000), uint256.NewInt(200_000)
@@ -986,7 +986,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	err = txPool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, tx)
+	err = txPool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 	// 1. Try Local Tx
 	{
