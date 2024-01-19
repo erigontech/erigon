@@ -114,8 +114,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParen
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
 	args := []interface{}{request}
 	if versionedHashes != nil {
-		args = append(args, *versionedHashes)
-		args = append(args, *beaconParentRoot)
+		args = append(args, *versionedHashes, *beaconParentRoot)
 	}
 	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, args...)
 	if err != nil {

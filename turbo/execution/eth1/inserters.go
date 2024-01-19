@@ -61,7 +61,7 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		}
 		// check the blob hashes if we need to.
 		if block.CheckExpectedBlobHashes {
-			if header.BlobGasUsed != nil {
+			if header.BlobGasUsed == nil {
 				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: blob gas used is nil")
 			}
 			versionedHashes := []libcommon.Hash{}
