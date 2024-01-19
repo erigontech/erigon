@@ -47,6 +47,11 @@ type Dual[K, V any] interface {
 	HasNext() bool
 }
 
+type DualS[K, V any] interface {
+	Next() (K, V, uint64, error)
+	HasNext() bool
+}
+
 // Unary - return 1 item. Example:
 //
 //	for s.HasNext() {
@@ -74,6 +79,7 @@ type Unary[V any] interface {
 type (
 	U64 Unary[uint64]
 	KV  Dual[[]byte, []byte]
+	KVS DualS[[]byte, []byte]
 )
 
 func ToU64Arr(s U64) ([]uint64, error)           { return ToArr[uint64](s) }

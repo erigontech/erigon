@@ -1536,7 +1536,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	t := time.Now()
 	for histRng.HasNext() && txNumUnwindTo > 0 {
-		k, v, err := histRng.Next()
+		k, v, _, err := histRng.Next()
 		if err != nil {
 			return err
 		}
