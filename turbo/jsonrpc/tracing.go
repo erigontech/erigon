@@ -19,7 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
-	polygontrace "github.com/ledgerwatch/erigon/polygon/trace"
+	polygontracer "github.com/ledgerwatch/erigon/polygon/tracer"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
@@ -158,7 +158,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTx {
-			err = polygontrace.BorStateSyncTxnTrace(
+			err = polygontracer.BorStateSyncTxnTrace(
 				ctx,
 				tx,
 				chainConfig,
@@ -287,7 +287,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if isBorStateSyncTx {
-		return polygontrace.BorStateSyncTxnTrace(
+		return polygontracer.BorStateSyncTxnTrace(
 			ctx,
 			tx,
 			chainConfig,
