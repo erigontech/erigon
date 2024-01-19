@@ -19,6 +19,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -94,7 +96,6 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	requestId int,
 	hashToDownload libcommon.Hash,
 	heightToDownload uint64,
-	downloaderTip libcommon.Hash,
 ) bool {
 	if e.hd.PosStatus() != headerdownload.Idle {
 		e.logger.Info("[EngineBlockDownloader] Postponing PoS download since another one is in progress", "height", heightToDownload, "hash", hashToDownload)
@@ -102,13 +103,12 @@ func (e *EngineBlockDownloader) scheduleHeadersDownload(
 	}
 
 	if heightToDownload == 0 {
-		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "height", "unknown", "hash", hashToDownload, "requestId", requestId)
+		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "hash", hashToDownload, "requestId", requestId)
 	} else {
-		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "height", heightToDownload, "hash", hashToDownload, "requestId", requestId)
+		e.logger.Info("[EngineBlockDownloader] Downloading PoS headers...", "hash", hashToDownload, "requestId", requestId, "height", heightToDownload)
 	}
 
 	e.hd.SetRequestId(requestId)
-	e.hd.SetPoSDownloaderTip(downloaderTip)
 	e.hd.SetHeaderToDownloadPoS(hashToDownload, heightToDownload)
 	e.hd.SetPOSSync(true) // This needs to be called after SetHeaderToDownloadPOS because SetHeaderToDownloadPOS sets `posAnchor` member field which is used by ProcessHeadersPOS
 
