@@ -345,6 +345,23 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 	if err != nil {
 		return nil, err
 	}
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if chainConfig.Bor != nil {
+		borStateSyncTxHash := types.ComputeBorTxHash(blockNum, blockHash)
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			txAmount++
+		}
+	}
+
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil
@@ -369,6 +386,23 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	if err != nil {
 		return nil, err
 	}
+
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if chainConfig.Bor != nil {
+		borStateSyncTxHash := types.ComputeBorTxHash(blockNum, blockHash)
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			txAmount++
+		}
+	}
+
 	numOfTx := hexutil.Uint(txAmount)
 
 	return &numOfTx, nil
