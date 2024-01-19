@@ -5,8 +5,8 @@ import (
 )
 
 type notFoundNoWriter struct {
-	rw http.ResponseWriter
-	r  *http.Request
+	http.ResponseWriter
+	r *http.Request
 
 	code    int
 	headers http.Header
@@ -35,7 +35,7 @@ func (f *notFoundNoWriter) Write(xs []byte) (int, error) {
 		return 0, nil
 	}
 	// pass on the write
-	return f.rw.Write(xs)
+	return f.ResponseWriter.Write(xs)
 }
 
 func (f *notFoundNoWriter) WriteHeader(statusCode int) {
@@ -47,26 +47,19 @@ func (f *notFoundNoWriter) WriteHeader(statusCode int) {
 		f.headers = nil
 		return
 	}
-	f.rw.WriteHeader(statusCode)
+	f.ResponseWriter.WriteHeader(statusCode)
 	// if we get here, it means it is a successful write.
 	if f.headers != nil {
 		for k, v := range f.headers {
 			for _, x := range v {
-				f.rw.Header().Add(k, x)
+				f.ResponseWriter.Header().Add(k, x)
 			}
 		}
 	}
-	f.headers = f.rw.Header()
+	f.headers = f.ResponseWriter.Header()
 }
 func (f *notFoundNoWriter) Flush() {
-	defer func() {
-		if err := recover(); err != nil {
-			// a closed http request can cause a panic here
-			// it's not actually a go bug, but this is probably the easiest way to deal with it
-			// https://github.com/golang/go/issues/9657
-		}
-	}()
-	flusher, ok := f.rw.(http.Flusher)
+	flusher, ok := f.ResponseWriter.(http.Flusher)
 	if !ok {
 		return
 	}
