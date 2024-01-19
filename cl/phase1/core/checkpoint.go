@@ -12,7 +12,6 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -42,13 +41,14 @@ func RetrieveBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChain
 		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
 	}
 
-	epoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
+	//epoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 
 	beaconState := state.New(beaconConfig)
-	err = beaconState.DecodeSSZ(marshaled, int(beaconConfig.GetCurrentStateVersion(epoch)))
+	err = beaconState.DecodeSSZ(marshaled, int(clparams.CapellaVersion))
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
 	}
+	fmt.Println(beaconState.GenesisTime(), beaconState.GenesisValidatorsRoot())
 	return beaconState, nil
 }
 

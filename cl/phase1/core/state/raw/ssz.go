@@ -70,7 +70,9 @@ func (b *BeaconState) getSchema() []interface{} {
 
 func (b *BeaconState) DecodeSSZ(buf []byte, version int) error {
 	b.version = clparams.StateVersion(version)
+
 	if len(buf) < b.EncodingSizeSSZ() {
+		fmt.Println(len(buf), b.EncodingSizeSSZ())
 		return fmt.Errorf("[BeaconState] err: %s", ssz.ErrLowBufferSize)
 	}
 	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema()...); err != nil {

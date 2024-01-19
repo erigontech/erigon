@@ -40,6 +40,7 @@ type NetworkType int
 const (
 	MainnetNetwork NetworkType = 1
 	GoerliNetwork  NetworkType = 5
+	HoleskyNetwork NetworkType = 17000
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
@@ -104,6 +105,14 @@ var (
 		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+	}...)
+	HoleskyBootstrapNodes = append(MainnetBootstrapNodes, []string{
+		"enr:-Ku4QFo-9q73SspYI8cac_4kTX7yF800VXqJW4Lj3HkIkb5CMqFLxciNHePmMt4XdJzHvhrCC5ADI4D_GkAsxGJRLnQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQORcM6e19T1T9gi7jxEZjk_sjVLGFscUNqAY9obgZaxbIN1ZHCCIyk",
+		"enr:-Ku4QPG7F72mbKx3gEQEx07wpYYusGDh-ni6SNkLvOS-hhN-BxIggN7tKlmalb0L5JPoAfqD-akTZ-gX06hFeBEz4WoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQKLVXFOhp2uX6jeT0DvvDpPcU8FWMjQdR4wMuORMhpX24N1ZHCCIyk",
+		"enr:-LK4QPxe-mDiSOtEB_Y82ozvxn9aQM07Ui8A-vQHNgYGMMthfsfOabaaTHhhJHFCBQQVRjBww_A5bM1rf8MlkJU_l68Eh2F0dG5ldHOIAADAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQJu6T9pclPObAzEVQ53DpVQqjadmVxdTLL-J3h9NFoCeIN0Y3CCIyiDdWRwgiMo",
+		"enr:-Ly4QGbOw4xNel5EhmDsJJ-QhC9XycWtsetnWoZ0uRy381GHdHsNHJiCwDTOkb3S1Ade0SFQkWJX_pgb3g8Jfh93rvMBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQOxKv9sv3zKF8GDewgFGGHKP5HCZZpPpTrwl9eXKAWGxIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-LS4QG0uV4qvcpJ-HFDJRGBmnlD3TJo7yc4jwK8iP7iKaTlfQ5kZvIDspLMJhk7j9KapuL9yyHaZmwTEZqr10k9XumyCEcmHYXR0bmV0c4gAAAAABgAAAIRldGgykGm32XQEAXAAAAEAAAAAAACCaWSCdjSCaXCErK4j-YlzZWNwMjU2azGhAgfWRBEJlb7gAhXIB5ePmjj2b8io0UpEenq1Kl9cxStJg3RjcIIjKIN1ZHCCIyg",
+		"enr:-Le4QLoE1wFHSlGcm48a9ZESb_MRLqPPu6G0vHqu4MaUcQNDHS69tsy-zkN0K6pglyzX8m24mkb-LtBcbjAYdP1uxm4BhGV0aDKQabfZdAQBcAAAAQAAAAAAAIJpZIJ2NIJpcIQ5gR6Wg2lwNpAgAUHQBwEQAAAAAAAAADR-iXNlY3AyNTZrMaEDPMSNdcL92uNIyCsS177Z6KTXlbZakQqxv3aQcWawNXeDdWRwgiMohHVkcDaCI4I",
 	}...)
 )
 
@@ -236,6 +245,26 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		ContractDeploymentBlock:         155530,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
+
+	HoleskyNetwork: {
+		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10485760,
+		MaxChunkSize:                    1 << 20, // 1 MiB
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		MaxRequestBlocks:                1 << 10, // 1024
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
+		MaximumGossipClockDisparity:     500 * time.Millisecond,
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		MinimumPeersInSubnetSearch:      20,
+		ContractDeploymentBlock:         155530,
+		BootNodes:                       HoleskyBootstrapNodes,
+	},
 }
 
 var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
@@ -258,6 +287,10 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 	ChiadoNetwork: {
 		GenesisValidatorRoot: libcommon.HexToHash("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
 		GenesisTime:          1665396300,
+	},
+	HoleskyNetwork: {
+		GenesisValidatorRoot: libcommon.HexToHash("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
+		GenesisTime:          1695902400,
 	},
 }
 
@@ -287,6 +320,12 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 	ChiadoNetwork: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
+	},
+	HoleskyNetwork: {
+		"https://holesky.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -836,6 +875,149 @@ func goerliConfig() BeaconChainConfig {
 	return cfg
 }
 
+/*
+# Genesis delay 5 mins
+GENESIS_DELAY: 300
+
+# Forking
+# ---------------------------------------------------------------
+# Some forks are disabled for now:
+#  - These may be re-assigned to another fork-version later
+#  - Temporarily set to max uint64 value: 2**64 - 1
+
+# Altair
+ALTAIR_FORK_VERSION: 0x02017000
+ALTAIR_FORK_EPOCH: 0
+# Merge
+BELLATRIX_FORK_VERSION: 0x03017000
+BELLATRIX_FORK_EPOCH: 0
+TERMINAL_TOTAL_DIFFICULTY: 0
+TERMINAL_BLOCK_HASH: 0x0000000000000000000000000000000000000000000000000000000000000000
+TERMINAL_BLOCK_HASH_ACTIVATION_EPOCH: 18446744073709551615
+
+# Capella
+CAPELLA_FORK_VERSION: 0x04017000
+CAPELLA_FORK_EPOCH: 256
+
+# Deneb
+DENEB_FORK_VERSION: 0x05017000
+DENEB_FORK_EPOCH: 29696
+
+# Time parameters
+# ---------------------------------------------------------------
+# 12 seconds
+SECONDS_PER_SLOT: 12
+# 14 (estimate from Eth1 mainnet)
+SECONDS_PER_ETH1_BLOCK: 14
+# 2**8 (= 256) epochs ~27 hours
+MIN_VALIDATOR_WITHDRAWABILITY_DELAY: 256
+# 2**8 (= 256) epochs ~27 hours
+SHARD_COMMITTEE_PERIOD: 256
+# 2**11 (= 2,048) Eth1 blocks ~8 hours
+ETH1_FOLLOW_DISTANCE: 2048
+
+# Validator cycle
+# ---------------------------------------------------------------
+# 2**2 (= 4)
+INACTIVITY_SCORE_BIAS: 4
+# 2**4 (= 16)
+INACTIVITY_SCORE_RECOVERY_RATE: 16
+# 28,000,000,000 Gwei to ensure quicker ejection
+EJECTION_BALANCE: 28000000000
+# 2**2 (= 4)
+MIN_PER_EPOCH_CHURN_LIMIT: 4
+# 2**16 (= 65,536)
+CHURN_LIMIT_QUOTIENT: 65536
+
+# Fork choice
+# ---------------------------------------------------------------
+# 40%
+PROPOSER_SCORE_BOOST: 40
+
+# Deposit contract
+# ---------------------------------------------------------------
+DEPOSIT_CHAIN_ID: 17000
+DEPOSIT_NETWORK_ID: 17000
+DEPOSIT_CONTRACT_ADDRESS: 0x4242424242424242424242424242424242424242
+
+# Networking
+# ---------------------------------------------------------------
+# `10 * 2**20` (= 10485760, 10 MiB)
+GOSSIP_MAX_SIZE: 10485760
+# `2**10` (= 1024)
+MAX_REQUEST_BLOCKS: 1024
+# `2**8` (= 256)
+EPOCHS_PER_SUBNET_SUBSCRIPTION: 256
+# `MIN_VALIDATOR_WITHDRAWABILITY_DELAY + CHURN_LIMIT_QUOTIENT // 2` (= 33024, ~5 months)
+MIN_EPOCHS_FOR_BLOCK_REQUESTS: 33024
+# `10 * 2**20` (=10485760, 10 MiB)
+MAX_CHUNK_SIZE: 10485760
+# 5s
+TTFB_TIMEOUT: 5
+# 10s
+RESP_TIMEOUT: 10
+ATTESTATION_PROPAGATION_SLOT_RANGE: 32
+# 500ms
+MAXIMUM_GOSSIP_CLOCK_DISPARITY: 500
+MESSAGE_DOMAIN_INVALID_SNAPPY: 0x00000000
+MESSAGE_DOMAIN_VALID_SNAPPY: 0x01000000
+# 2 subnets per node
+SUBNETS_PER_NODE: 2
+# 2**8 (= 64)
+ATTESTATION_SUBNET_COUNT: 64
+ATTESTATION_SUBNET_EXTRA_BITS: 0
+# ceillog2(ATTESTATION_SUBNET_COUNT) + ATTESTATION_SUBNET_EXTRA_BITS
+ATTESTATION_SUBNET_PREFIX_BITS: 6
+
+# Deneb
+# `2**7` (=128)
+MAX_REQUEST_BLOCKS_DENEB: 128
+# MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK
+MAX_REQUEST_BLOB_SIDECARS: 768
+# `2**12` (= 4096 epochs, ~18 days)
+MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS: 4096
+# `6`
+BLOB_SIDECAR_SUBNET_COUNT: 6
+*/
+func holeskyConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.ConfigName = "holesky"
+	cfg.MinGenesisActiveValidatorCount = 16384
+	cfg.MinGenesisTime = 1695902100
+	cfg.GenesisForkVersion = 0x01017000
+	cfg.GenesisDelay = 300
+	cfg.SecondsPerSlot = 12
+	cfg.Eth1FollowDistance = 2048
+	cfg.DepositChainID = uint64(HoleskyNetwork)
+	cfg.DepositNetworkID = uint64(HoleskyNetwork)
+
+	cfg.AltairForkEpoch = 0
+	cfg.AltairForkVersion = 0x02017000
+	cfg.BellatrixForkEpoch = 0
+	cfg.BellatrixForkVersion = 0x03017000
+	cfg.CapellaForkEpoch = 256
+	cfg.CapellaForkVersion = 0x04017000
+	cfg.DenebForkEpoch = 29696
+	cfg.DenebForkVersion = 0x05017000
+	cfg.TerminalTotalDifficulty = "0"
+	cfg.TerminalBlockHash = [32]byte{}
+	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
+	cfg.DepositContractAddress = "0x4242424242424242424242424242424242424242"
+	cfg.BaseRewardFactor = 64
+	cfg.SlotsPerEpoch = 32
+	cfg.EpochsPerSyncCommitteePeriod = 256
+	cfg.InactivityScoreBias = 4
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.EjectionBalance = 28000000000
+	cfg.MinPerEpochChurnLimit = 4
+	cfg.ChurnLimitQuotient = 1 << 16
+	cfg.ProposerScoreBoost = 40
+
+	cfg.InitializeForkSchedule()
+	return cfg
+
+}
+
 func gnosisConfig() BeaconChainConfig {
 	cfg := MainnetBeaconConfig
 	cfg.MinGenesisTime = 1638968400
@@ -937,6 +1119,7 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
 	GoerliNetwork:  goerliConfig(),
+	HoleskyNetwork: holeskyConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
 }
@@ -1017,6 +1200,9 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *Beaco
 	case networkname.ChiadoChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
 		return genesisCfg, networkCfg, beaconCfg, ChiadoNetwork, nil
+	case networkname.HoleskyChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
+		return genesisCfg, networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
 		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
