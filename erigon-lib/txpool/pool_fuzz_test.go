@@ -485,7 +485,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 		}
 		// go to first fork
 		txs1, txs2, p2pReceived, txs3 := splitDataset(txs)
-		err = pool.OnNewBlock(ctx, change, txs1, types.TxSlots{}, tx)
+		err = pool.OnNewBlock(ctx, change, txs1, types.TxSlots{}, types.TxSlots{}, tx)
 		assert.NoError(err)
 		check(txs1, types.TxSlots{}, "fork1")
 		checkNotify(txs1, types.TxSlots{}, "fork1")
@@ -498,7 +498,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h0},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, txs2, tx)
+		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, txs2, tx)
 		assert.NoError(err)
 		check(types.TxSlots{}, txs2, "fork1 mined")
 		checkNotify(types.TxSlots{}, txs2, "fork1 mined")
@@ -511,7 +511,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 0, BlockHash: h0, Direction: remote.Direction_UNWIND},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, txs2, types.TxSlots{}, tx)
+		err = pool.OnNewBlock(ctx, change, txs2, types.TxSlots{}, types.TxSlots{}, tx)
 		assert.NoError(err)
 		check(txs2, types.TxSlots{}, "fork2")
 		checkNotify(txs2, types.TxSlots{}, "fork2")
@@ -523,7 +523,7 @@ func FuzzOnNewBlocks(f *testing.F) {
 				{BlockHeight: 1, BlockHash: h22},
 			},
 		}
-		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, txs3, tx)
+		err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, txs3, tx)
 		assert.NoError(err)
 		check(types.TxSlots{}, txs3, "fork2 mined")
 		checkNotify(types.TxSlots{}, txs3, "fork2 mined")

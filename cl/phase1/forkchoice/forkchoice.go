@@ -80,6 +80,8 @@ type ForkChoiceStore struct {
 	unrealizedJustifiedCheckpoint solid.Checkpoint
 	unrealizedFinalizedCheckpoint solid.Checkpoint
 	proposerBoostRoot             libcommon.Hash
+	// attestations that are not yet processed
+	attestationSet sync.Map
 	// head data
 	headHash    libcommon.Hash
 	headSlot    uint64

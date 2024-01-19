@@ -13,5 +13,6 @@
   "mergeForkBlock": 0,
   "terminalTotalDifficulty": 0,
   "terminalTotalDifficultyPassed": true,
-  "shanghaiTime": 1696000704
+  "shanghaiTime": 1696000704,
+  "cancunTime": 1707305664
 }
