@@ -425,11 +425,9 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 
 			var info torrentInfo
 
-			if err = json.Unmarshal(infoBytes, &info); err != nil {
-				return err
+			if err = json.Unmarshal(infoBytes, &info); err == nil {
+				hashBytes = info.Hash
 			}
-
-			hashBytes = info.Hash
 
 			return nil
 		})

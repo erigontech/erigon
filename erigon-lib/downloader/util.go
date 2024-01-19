@@ -379,16 +379,17 @@ func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Inf
 
 		err = json.Unmarshal(infoBytes, &info)
 
-		if err != nil {
+		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) {
 			now := time.Now()
 			info.Name = fileName
 			info.Hash = infoHash
 			info.Created = &now
-		} else {
-			if fileInfo != nil {
-				len := fileInfo.Length
-				info.Length = &len
-			}
+			info.Completed = nil
+		}
+
+		if fileInfo != nil {
+			len := fileInfo.Length
+			info.Length = &len
 		}
 
 		if completed && info.Completed == nil {
