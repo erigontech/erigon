@@ -1245,6 +1245,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 			break
 		}
 	}
+	//
+	// TODO need to handle bor state sync tx here in doCallMany and callManyTransactions and check up the stacks for single tx use case
+	//
 	return results, ibs, nil
 }
 
