@@ -158,7 +158,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		if isBorStateSyncTx {
-			err = polygontracer.BorStateSyncTxnTrace(
+			err = polygontracer.TraceBorStateSyncTxn(
 				ctx,
 				tx,
 				chainConfig,
@@ -287,7 +287,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	if isBorStateSyncTx {
-		return polygontracer.BorStateSyncTxnTrace(
+		return polygontracer.TraceBorStateSyncTxn(
 			ctx,
 			tx,
 			chainConfig,
