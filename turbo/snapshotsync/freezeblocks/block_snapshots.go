@@ -128,7 +128,7 @@ func (s *Segment) openFiles() []string {
 }
 
 func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
-	if len(s.indexes) == 0 {
+	if len(s.Type().IdxFileNames(s.version, s.from, s.to)) == 0 {
 		return nil
 	}
 
@@ -563,7 +563,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &Segment{segType: snaptype.Headers, version: f.Version, Range: Range{f.From, f.To}}
+				sn = &Segment{segType: snaptype.Transactions, version: f.Version, Range: Range{f.From, f.To}}
 			}
 
 			if open {
@@ -1022,8 +1022,8 @@ MainLoop:
 			if !dir2.FileExist(p) {
 				continue MainLoop
 			}
+			res = append(res, f)
 		}
-		res = append(res, f)
 	}
 	return res
 }
@@ -1558,10 +1558,18 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 		ext := filepath.Ext(f.Name())
 		logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.Workers())
 		t := time.Now()
-		_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(f)
+
+		bodiesSegment, err := compress.NewDecompressor(f.As(snaptype.Bodies).Path)
+
+		if err == nil {
+			defer bodiesSegment.Close()
+			_, expectedCount, err = txsAmountBasedOnBodiesSnapshots(bodiesSegment, f.Len()-1)
+		}
+
 		if err != nil {
 			return lastTxNum, err
 		}
+
 		if expectedCount != sn.Count() {
 			return lastTxNum, fmt.Errorf("incorrect tx count: %d, expected from snapshots: %d", sn.Count(), expectedCount)
 		}
@@ -1932,13 +1940,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, firs
 
 var EmptyTxHash = common2.Hash{}
 
-func txsAmountBasedOnBodiesSnapshots(sn snaptype.FileInfo) (firstTxID uint64, expectedCount int, err error) {
-	bodiesSegment, err := compress.NewDecompressor(sn.Path)
-	if err != nil {
-		return
-	}
-	defer bodiesSegment.Close()
-
+func txsAmountBasedOnBodiesSnapshots(bodiesSegment *compress.Decompressor, len uint64) (firstTxID uint64, expectedCount int, err error) {
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
 	firstBody := &types.BodyForStorage{}
@@ -1951,7 +1953,7 @@ func txsAmountBasedOnBodiesSnapshots(sn snaptype.FileInfo) (firstTxID uint64, ex
 	i := uint64(0)
 	for gg.HasNext() {
 		i++
-		if i == sn.To-sn.From-1 {
+		if i == len {
 			buf, _ = gg.Next(buf[:0])
 			if err = rlp.DecodeBytes(buf, lastBody); err != nil {
 				return
@@ -1975,22 +1977,21 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 		}
 	}()
 	firstBlockNum := sn.From
-	firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(sn)
-	if err != nil {
-		return err
-	}
 
-	bodiesSegment, err := compress.NewDecompressor(sn.Path)
+	bodiesSegment, err := compress.NewDecompressor(sn.As(snaptype.Bodies).Path)
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", sn.Name(), err)
 	}
 	defer bodiesSegment.Close()
 
-	segFileName := snaptype.SegmentFileName(sn.Version, sn.From, sn.To, snaptype.Enums.Transactions)
-	segmentFilePath := filepath.Join(sn.Dir(), segFileName)
-	d, err := compress.NewDecompressor(segmentFilePath)
+	firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
 	if err != nil {
-		return fmt.Errorf("can't open %s for indexing: %w", segFileName, err)
+		return err
+	}
+
+	d, err := compress.NewDecompressor(sn.Path)
+	if err != nil {
+		return fmt.Errorf("can't open %s for indexing: %w", sn.Path, err)
 	}
 	defer d.Close()
 	if d.Count() != expectedCount {
@@ -1998,7 +1999,8 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}
 
 	if p != nil {
-		p.Name.Store(&segFileName)
+		name := sn.Name()
+		p.Name.Store(&name)
 		p.Total.Store(uint64(d.Count() * 2))
 	}
 
@@ -2021,7 +2023,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(0, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum)),
+		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum)),
 		BaseDataID: firstBlockNum,
 	}, logger)
 	if err != nil {

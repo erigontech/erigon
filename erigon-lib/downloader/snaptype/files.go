@@ -133,8 +133,25 @@ func (f FileInfo) Seedable() bool {
 	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2OldMergeLimit
 }
 func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
-func (f FileInfo) Name() string          { return filepath.Base(f.Path) }
-func (f FileInfo) Dir() string           { return filepath.Dir(f.Path) }
+func (f FileInfo) Name() string {
+	return fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
+}
+func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
+func (f FileInfo) Len() uint64 { return f.To - f.From }
+
+func (f FileInfo) As(t Type) FileInfo {
+	as := FileInfo{
+		Version: f.Version,
+		From:    f.From,
+		To:      f.To,
+		Ext:     f.Ext,
+		Type:    t,
+	}
+
+	as.Path = filepath.Join(f.Dir(), as.Name())
+
+	return as
+}
 
 func IdxFiles(dir string) (res []FileInfo, err error) {
 	return FilesWithExt(dir, ".idx")
