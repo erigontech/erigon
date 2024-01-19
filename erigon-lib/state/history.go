@@ -79,6 +79,9 @@ type History struct {
 	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
 	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
+
+	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
+	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
 
 type histCfg struct {
@@ -92,6 +95,9 @@ type histCfg struct {
 
 	withLocalityIndex  bool
 	withExistenceIndex bool // move to iiCfg
+
+	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
+	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
 
 func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable, historyValsTable string, integrityCheck func(fromStep, toStep uint64) bool, logger log.Logger) (*History, error) {
@@ -103,6 +109,8 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		integrityCheck:     integrityCheck,
 		historyLargeValues: cfg.historyLargeValues,
 		indexList:          withHashMap,
+		dontProduceFiles:   cfg.dontProduceFiles,
+		keepTxInDB:         cfg.keepTxInDB,
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
@@ -486,8 +494,10 @@ func (w *historyBufferedWriter) AddPrevValue(key1, key2, original []byte, origin
 	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
-	if err := w.ii.Add(invIdxVal); err != nil {
-		return err
+	if !w.ii.discard {
+		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -574,6 +584,10 @@ func (c HistoryCollation) Close() {
 
 // [txFrom; txTo)
 func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
+	if h.dontProduceFiles {
+		return HistoryCollation{}, nil
+	}
+
 	var historyComp ArchiveWriter
 	var err error
 	closeComp := true
@@ -737,6 +751,10 @@ func (h *History) reCalcRoFiles() {
 // buildFiles performs potentially resource intensive operations of creating
 // static files and their indices
 func (h *History) buildFiles(ctx context.Context, step uint64, collation HistoryCollation, ps *background.ProgressSet) (HistoryFiles, error) {
+	if h.dontProduceFiles {
+		return HistoryFiles{}, nil
+	}
+
 	historyComp := collation.historyComp
 	if h.noFsync {
 		historyComp.DisableFsync()
@@ -934,6 +952,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 
 func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	defer h.reCalcRoFiles()
+	if h.dontProduceFiles {
+		return
+	}
 
 	h.InvertedIndex.integrateFiles(InvertedFiles{
 		decomp:       sf.efHistoryDecomp,
@@ -1041,18 +1062,36 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (hc *HistoryContext) CanPrune(tx kv.Tx) bool {
-	return hc.ic.CanPruneFrom(tx) < hc.maxTxNumInFiles(false)
+func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
+	inSnapsTx := hc.maxTxNumInFiles(false)
+	minIdxTx := hc.ic.CanPruneFrom(tx)
+	maxIdxTx := hc.ic.highestTxNum(tx)
+
+	// if we don't produce files, we can prune only if:
+	isNoFilesAndEnoughTxKeptInDB := hc.h.dontProduceFiles && // files are not produced
+		minIdxTx != math.MaxUint64 && // idx has data
+		minIdxTx < untilTxNum && // idx data < untilTxNum
+		hc.h.keepTxInDB < maxIdxTx && // sub overflow
+		minIdxTx < maxIdxTx-hc.h.keepTxInDB // idx data < MaxTx-keepTxInDB
+
+	// if we produce files, we can prune only if index has values < maxTxNumInFiles
+	isAggregated := minIdxTx < min(untilTxNum, inSnapsTx)
+
+	res := isNoFilesAndEnoughTxKeptInDB || isAggregated
+	//defer func() {
+	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t snapTx %d idxTx [%d-%d] keepTxInDB=%d; result %t\n", hc.h.filenameBase, untilTxNum, hc.h.dontProduceFiles, inSnapsTx, minIdxTx, maxIdxTx, hc.h.keepTxInDB, res)
+	//}()
+	return res
 }
 
 // Prune [txFrom; txTo)
-// `force` flag to prune even if CanPrune returns false (when Unwind is needed, CanPrune always returns false)
+// `force` flag to prune even if CanPruneUntil returns false (when Unwind is needed, CanPruneUntil always returns false)
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
-	if !forced && !hc.CanPrune(rwTx) {
+	if !forced && !hc.CanPruneUntil(rwTx, txTo) {
 		return nil, nil
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
@@ -1097,6 +1136,10 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 
 		mxPruneSizeHistory.Inc()
 		return nil
+	}
+
+	if !forced && hc.h.dontProduceFiles {
+		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
 	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)

@@ -944,6 +944,15 @@ func (ic *InvertedIndexContext) CanPruneFrom(tx kv.Tx) uint64 {
 	return math.MaxUint64
 }
 
+func (ic *InvertedIndexContext) highestTxNum(tx kv.Tx) uint64 {
+	lst, _ := kv.LastKey(tx, ic.ii.indexKeysTable)
+	if len(lst) > 0 {
+		lstInDb := binary.BigEndian.Uint64(lst)
+		return cmp.Max(lstInDb, 0)
+	}
+	return 0
+}
+
 func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
 }
@@ -956,6 +965,9 @@ type InvertedIndexPruneStat struct {
 }
 
 func (is *InvertedIndexPruneStat) String() string {
+	if is.MinTxNum == math.MaxUint64 && is.PruneCountTx == 0 {
+		return ""
+	}
 	return fmt.Sprintf("ii %d txs and %d vals in %.2fM-%.2fM", is.PruneCountTx, is.PruneCountValues, float64(is.MinTxNum)/1_000_000.0, float64(is.MaxTxNum)/1_000_000.0)
 }
 

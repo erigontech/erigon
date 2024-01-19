@@ -19,7 +19,7 @@ func TestGCReadAfterRemoveFile(t *testing.T) {
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
 		require := require.New(t)
-		collateAndMergeHistory(t, db, h, txs)
+		collateAndMergeHistory(t, db, h, txs, true)
 
 		t.Run("read after: remove when have reader", func(t *testing.T) {
 			tx, err := db.BeginRo(ctx)
