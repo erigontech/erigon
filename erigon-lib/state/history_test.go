@@ -273,6 +273,127 @@ func TestHistoryAfterPrune(t *testing.T) {
 	})
 }
 
+func TestHistoryCanPrune(t *testing.T) {
+	logger := log.New()
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	ctx := context.Background()
+
+	stepsTotal := uint64(4)
+	stepKeepInDB := uint64(1)
+
+	writeKey := func(t *testing.T, h *History, db kv.RwDB) (addr []byte) {
+		t.Helper()
+
+		require := require.New(t)
+		tx, err := db.BeginRw(ctx)
+		require.NoError(err)
+		defer tx.Rollback()
+
+		hc := h.MakeContext()
+		defer hc.Close()
+		writer := hc.NewWriter()
+		defer writer.close()
+
+		addr = common.FromHex("ed7229d50cde8de174cc64a882a0833ca5f11669")
+		prev := make([]byte, 0)
+		prevStep := uint64(0)
+		val := make([]byte, 8)
+
+		for i := uint64(0); i < stepsTotal*h.aggregationStep; i++ {
+			writer.SetTxNum(i)
+			if cap(val) == 0 {
+				val = make([]byte, 8)
+			}
+			if i%5 == 0 && i > 0 {
+				val = nil
+			} else {
+				binary.BigEndian.PutUint64(val, i)
+			}
+
+			err = writer.AddPrevValue(addr[:], val, prev, prevStep)
+			require.NoError(err)
+
+			prevStep = i / h.aggregationStep
+			prev = common.Copy(val)
+		}
+
+		require.NoError(writer.Flush(ctx, tx))
+		require.NoError(tx.Commit())
+
+		collateAndMergeHistory(t, db, h, stepsTotal*h.aggregationStep, false)
+		return addr
+	}
+	t.Run("withFiles", func(t *testing.T) {
+		db, h := testDbAndHistory(t, true, logger)
+		h.dontProduceFiles = false
+
+		defer db.Close()
+		writeKey(t, h, db)
+
+		rwTx, err := db.BeginRw(context.Background())
+		defer rwTx.Rollback()
+		require.NoError(t, err)
+
+		hc := h.MakeContext()
+		defer hc.Close()
+
+		maxTxInSnaps := hc.maxTxNumInFiles(false)
+		require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
+
+		for i := uint64(0); i < stepsTotal; i++ {
+			cp := hc.CanPruneUntil(rwTx, (i+1)*h.aggregationStep)
+			if i >= stepsTotal-stepKeepInDB {
+				require.Falsef(t, cp, "step %d should be NOT prunable", i)
+			} else {
+				require.Truef(t, cp, "step %d should be prunable", i)
+			}
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			require.NoError(t, err)
+			if i >= stepsTotal-stepKeepInDB {
+				require.Falsef(t, cp, "step %d should be NOT prunable", i)
+			} else {
+				require.NotNilf(t, stat, "step %d should be pruned and prune stat available", i)
+				require.Truef(t, cp, "step %d should be pruned", i)
+			}
+		}
+	})
+	t.Run("withoutFiles", func(t *testing.T) {
+		db, h := testDbAndHistory(t, false, logger)
+		h.dontProduceFiles = true
+		h.keepTxInDB = stepKeepInDB * h.aggregationStep
+
+		defer db.Close()
+
+		writeKey(t, h, db)
+
+		rwTx, err := db.BeginRw(context.Background())
+		defer rwTx.Rollback()
+		require.NoError(t, err)
+
+		hc := h.MakeContext()
+		defer hc.Close()
+
+		for i := uint64(0); i < stepsTotal; i++ {
+			t.Logf("step %d, until %d", i, (i+1)*h.aggregationStep)
+			cp := hc.CanPruneUntil(rwTx, (i+1)*h.aggregationStep)
+			if i >= stepsTotal-stepKeepInDB {
+				require.Falsef(t, cp, "step %d should be NOT prunable", i)
+			} else {
+				require.Truef(t, cp, "step %d should be prunable", i)
+			}
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			require.NoError(t, err)
+			if i >= stepsTotal-stepKeepInDB {
+				require.Falsef(t, cp, "step %d should be NOT prunable", i)
+			} else {
+				require.NotNilf(t, stat, "step %d should be pruned and prune stat available", i)
+				require.Truef(t, cp, "step %d should be pruned", i)
+			}
+		}
+	})
+}
+
 func filledHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History, uint64) {
 	tb.Helper()
 	db, h := testDbAndHistory(tb, largeValues, logger)
@@ -358,61 +479,6 @@ func checkHistoryHistory(t *testing.T, h *History, txs uint64) {
 	}
 }
 
-func TestHistory_PruneProgress(t *testing.T) {
-	logger := log.New()
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	ctx := context.Background()
-	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
-		t.Helper()
-		require := require.New(t)
-		tx, err := db.BeginRw(ctx)
-		require.NoError(err)
-		defer tx.Rollback()
-
-		// Leave the last 2 aggregation steps un-collated
-		//for step := uint64(0); step < txs/h.aggregationStep-1; step++ {
-		func() {
-			//c, err := h.collate(ctx, step, step*h.aggregationStep, (step+1)*h.aggregationStep, tx)
-			//require.NoError(err)
-			//sf, err := h.buildFiles(ctx, step, c, background.NewProgressSet())
-			//require.NoError(err)
-			//h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
-			ctx, cancel := context.WithTimeout(ctx, 15*time.Millisecond)
-
-			step := uint64(0)
-			hc := h.MakeContext()
-			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
-			cancel()
-
-			prunedKey, err := GetExecV3PruneProgress(tx, h.historyValsTable)
-			require.NoError(err)
-			hc.Close()
-
-			iter, err := hc.HistoryRange(int(hc.ic.CanPruneFrom(tx)), 0, order.Asc, -1, tx)
-			require.NoError(err)
-			for iter.HasNext() {
-				k, _, err := iter.Next()
-				require.NoError(err)
-				require.GreaterOrEqual(prunedKey, k)
-				break
-			}
-			require.NoError(err)
-		}()
-		//}
-		checkHistoryHistory(t, h, txs)
-	}
-	t.Run("large_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, true, logger)
-		test(t, h, db, txs)
-	})
-	t.Run("small_values", func(t *testing.T) {
-		db, h, txs := filledHistory(t, false, logger)
-		test(t, h, db, txs)
-	})
-
-}
-
 func TestHistoryHistory(t *testing.T) {
 	logger := log.New()
 	logEvery := time.NewTicker(30 * time.Second)
@@ -453,7 +519,7 @@ func TestHistoryHistory(t *testing.T) {
 
 }
 
-func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
+func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, doPrune bool) {
 	tb.Helper()
 	require := require.New(tb)
 
@@ -472,10 +538,12 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64) {
 		require.NoError(err)
 		h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
-		hc := h.MakeContext()
-		_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
-		hc.Close()
-		require.NoError(err)
+		if doPrune {
+			hc := h.MakeContext()
+			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			hc.Close()
+			require.NoError(err)
+		}
 	}
 
 	var r HistoryRanges
@@ -515,7 +583,7 @@ func TestHistoryMergeFiles(t *testing.T) {
 	logger := log.New()
 	test := func(t *testing.T, h *History, db kv.RwDB, txs uint64) {
 		t.Helper()
-		collateAndMergeHistory(t, db, h, txs)
+		collateAndMergeHistory(t, db, h, txs, true)
 		checkHistoryHistory(t, h, txs)
 	}
 
@@ -537,7 +605,7 @@ func TestHistoryScanFiles(t *testing.T) {
 		t.Helper()
 		require := require.New(t)
 
-		collateAndMergeHistory(t, db, h, txs)
+		collateAndMergeHistory(t, db, h, txs, true)
 		hc := h.MakeContext()
 		defer hc.Close()
 		// Recreate domain and re-scan the files
@@ -568,7 +636,7 @@ func TestIterateChanged(t *testing.T) {
 		t.Helper()
 		require := require.New(t)
 
-		collateAndMergeHistory(t, db, h, txs)
+		collateAndMergeHistory(t, db, h, txs, true)
 
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)
@@ -857,7 +925,7 @@ func TestIterateChanged2(t *testing.T) {
 			_ = testCases
 		})
 		t.Run("after merge", func(t *testing.T) {
-			collateAndMergeHistory(t, db, h, txs)
+			collateAndMergeHistory(t, db, h, txs, true)
 			hc, require := h.MakeContext(), require.New(t)
 			defer hc.Close()
 
@@ -1019,7 +1087,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 		t.Helper()
 		require := require.New(t)
 
-		collateAndMergeHistory(t, db, h, txs)
+		collateAndMergeHistory(t, db, h, txs, true)
 
 		tx, err := db.BeginRo(ctx)
 		require.NoError(err)

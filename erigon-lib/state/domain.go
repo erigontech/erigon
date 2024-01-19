@@ -2051,17 +2051,18 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 	return fit, nil
 }
 
-func (dc *DomainContext) CanPrune(tx kv.Tx) bool {
-	inFiles := dc.maxTxNumInDomainFiles(false)
-	idxTx := dc.hc.ic.CanPruneFrom(tx)
-	domStep := dc.CanPruneFrom(tx)
-	//if dc.d.filenameBase == "commitment" {
-	//	fmt.Printf("CanPrune %s: idxTx %v in snaps %v domStep %d in snaps %d\n",
-	//		dc.d.filenameBase, idxTx, inFiles, domStep, inFiles/dc.d.aggregationStep)
-	//}
-	return idxTx < inFiles || domStep < inFiles/dc.d.aggregationStep
+// CanPruneUntil returns true if domain OR history tables can be pruned until txNum
+func (dc *DomainContext) CanPruneUntil(tx kv.Tx, txNum uint64) bool {
+	return dc.canPruneDomainTables(tx) || dc.hc.CanPruneUntil(tx, txNum)
 }
 
+// checks if there is anything to prune in DOMAIN tables.
+// history.CanPrune should be called separately because it responsible for different tables
+func (dc *DomainContext) canPruneDomainTables(tx kv.Tx) bool {
+	return dc.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep
+}
+
+// CanPruneFrom returns step from which domain tables can be pruned
 func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
 	if err != nil {
@@ -2142,7 +2143,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	if !dc.CanPrune(rwTx) {
+	if !dc.canPruneDomainTables(rwTx) {
 		return stat, nil
 	}
 

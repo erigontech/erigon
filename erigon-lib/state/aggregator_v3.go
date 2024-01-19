@@ -163,13 +163,13 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
+			//dontProduceFiles: true,
 		},
 		compress: CompressNone,
 	}
 	if a.commitment, err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
 	}
-	//a.commitment = NewCommittedDomain(commitd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 	idxCfg := iiCfg{salt: salt, dirs: dirs}
 	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, true, nil, logger); err != nil {
 		return nil, err
@@ -775,11 +775,11 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 }
 
 // returns true if we can prune something already aggregated
-func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx) bool {
-	return dbg.NoPrune() || (!ac.account.CanPrune(tx) &&
-		!ac.storage.CanPrune(tx) &&
-		!ac.code.CanPrune(tx) &&
-		!ac.commitment.CanPrune(tx) &&
+func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx, untilTxNum uint64) bool {
+	return dbg.NoPrune() || (!ac.account.CanPruneUntil(tx, untilTxNum) &&
+		!ac.storage.CanPruneUntil(tx, untilTxNum) &&
+		!ac.code.CanPruneUntil(tx, untilTxNum) &&
+		!ac.commitment.CanPruneUntil(tx, untilTxNum) &&
 		!ac.logAddrs.CanPrune(tx) &&
 		!ac.logTopics.CanPrune(tx) &&
 		!ac.tracesFrom.CanPrune(tx) &&
@@ -816,6 +816,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		case <-logEvery.C:
 			ac.a.logger.Info("[agg] pruning",
 				"until timeout", time.Until(started.Add(timeout)).String(),
+				"aggregatedStep", ac.a.aggregatedStep.Load(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
@@ -894,9 +895,6 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 }
 
 func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
-	if ac.nothingToPrune(tx) {
-		return nil, nil
-	}
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {
@@ -906,6 +904,10 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	var txFrom, txTo uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
 	step := ac.a.aggregatedStep.Load()
 	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
+
+	if ac.nothingToPrune(tx, txTo) {
+		return nil, nil
+	}
 
 	if logEvery == nil {
 		logEvery = time.NewTicker(30 * time.Second)
@@ -1054,6 +1056,7 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 		min = txNum
 	}
 	if txNum := a.commitment.endTxNumMinimax(); txNum < min {
+		fmt.Printf("[dbg] commitment min: %d, %d\n", txNum/a.aggregationStep, min/a.aggregationStep)
 		min = txNum
 	}
 	if txNum := a.logAddrs.endTxNumMinimax(); txNum < min {
@@ -1404,6 +1407,15 @@ func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
 	a.keepInDB = a.FirstTxNumOfStep(steps)
+	for _, d := range []*Domain{a.accounts, a.storage, a.code, a.commitment} {
+		if d == nil {
+			continue
+		}
+		if d.History.dontProduceFiles {
+			d.History.keepTxInDB = a.keepInDB
+		}
+	}
+
 	return a
 }
 
