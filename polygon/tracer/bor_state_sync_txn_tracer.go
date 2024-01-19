@@ -10,10 +10,15 @@ import (
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
-func NewBorStateSyncTxnTracer(tracer vm.EVMLogger, stateSyncEventsCount int) tracers.Tracer {
+func NewBorStateSyncTxnTracer(
+	tracer vm.EVMLogger,
+	stateSyncEventsCount int,
+	stateReceiverContractAddress libcommon.Address,
+) tracers.Tracer {
 	return &borStateSyncTxnTracer{
-		EVMLogger:            tracer,
-		stateSyncEventsCount: stateSyncEventsCount,
+		EVMLogger:                    tracer,
+		stateSyncEventsCount:         stateSyncEventsCount,
+		stateReceiverContractAddress: stateReceiverContractAddress,
 	}
 }
 
@@ -28,8 +33,9 @@ func NewBorStateSyncTxnTracer(tracer vm.EVMLogger, stateSyncEventsCount int) tra
 // state sync events bor transaction.
 type borStateSyncTxnTracer struct {
 	vm.EVMLogger
-	captureStartCalledOnce bool
-	stateSyncEventsCount   int
+	captureStartCalledOnce       bool
+	stateSyncEventsCount         int
+	stateReceiverContractAddress libcommon.Address
 }
 
 func (bsstt *borStateSyncTxnTracer) CaptureTxStart(_ uint64) {
@@ -54,8 +60,9 @@ func (bsstt *borStateSyncTxnTracer) CaptureStart(
 	if !bsstt.captureStartCalledOnce {
 		// first event execution started
 		// perform a CaptureStart for the synthetic state sync transaction
-		nilAddr := libcommon.Address{}
-		bsstt.EVMLogger.CaptureStart(env, nilAddr, nilAddr, false, false, nil, 0, uint256.NewInt(0), nil)
+		from := libcommon.Address{}
+		to := bsstt.stateReceiverContractAddress
+		bsstt.EVMLogger.CaptureStart(env, from, to, false, false, nil, 0, uint256.NewInt(0), nil)
 		bsstt.captureStartCalledOnce = true
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -51,8 +52,14 @@ func TraceBorStateSyncTxn(
 	}
 
 	defer cancel()
-	tracer = NewBorStateSyncTxnTracer(tracer, len(stateSyncEvents))
-	txCtx := evmtypes.TxContext{TxHash: borStateSyncTxHash}
+	tracer = NewBorStateSyncTxnTracer(tracer, len(stateSyncEvents), stateReceiverContract)
+
+	txCtx := evmtypes.TxContext{
+		TxHash:   borStateSyncTxHash,
+		Origin:   libcommon.Address{},
+		GasPrice: uint256.NewInt(0),
+	}
+
 	execCb := func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error) {
 		for _, eventData := range stateSyncEvents {
 			select {
