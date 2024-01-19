@@ -183,7 +183,7 @@ func AssembleTracer(
 		deadlineCtx, cancel := context.WithTimeout(ctx, timeout)
 		go func() {
 			<-deadlineCtx.Done()
-			tracer.(tracers.Tracer).Stop(errors.New("execution timeout"))
+			tracer.Stop(errors.New("execution timeout"))
 		}()
 
 		return tracer, false, cancel, nil
