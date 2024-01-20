@@ -297,7 +297,7 @@ func (c ChainReaderWriterEth1) ValidateChain(hash libcommon.Hash, number uint64)
 	return resp.ValidationStatus, &resp.ValidationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, libcommon.Hash, error) {
+func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
 	resp, err := c.executionModule.UpdateForkChoice(c.ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
@@ -305,9 +305,9 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash
 		Timeout:            c.fcuTimoutMillis,
 	})
 	if err != nil {
-		return 0, libcommon.Hash{}, err
+		return 0, nil, libcommon.Hash{}, err
 	}
-	return resp.Status, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	return resp.Status, &resp.ValidationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
 func (c ChainReaderWriterEth1) GetForkchoice() (headHash, finalizedHash, safeHash libcommon.Hash, err error) {

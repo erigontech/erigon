@@ -53,7 +53,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
-	status, _, err := cc.chainRW.UpdateForkChoice(head, head, finalized)
+	status, _, _, err := cc.chainRW.UpdateForkChoice(head, head, finalized)
 	if err != nil {
 		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
