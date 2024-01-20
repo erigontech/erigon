@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -105,6 +106,7 @@ func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 }
 
 type DomainRanges struct {
+	name              kv.Domain
 	valuesStartTxNum  uint64
 	valuesEndTxNum    uint64
 	historyStartTxNum uint64
@@ -149,7 +151,12 @@ func (r DomainRanges) any() bool {
 // As any other methods of DomainContext - it can't see any files overlaps or garbage
 func (dc *DomainContext) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	hr := dc.hc.findMergeRange(maxEndTxNum, maxSpan)
+	domainName, err := kv.String2Domain(dc.d.filenameBase)
+	if err != nil {
+		panic(err)
+	}
 	r := DomainRanges{
+		name:              domainName,
 		historyStartTxNum: hr.historyStartTxNum,
 		historyEndTxNum:   hr.historyEndTxNum,
 		history:           hr.history,

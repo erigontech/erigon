@@ -36,7 +36,6 @@ type Worker struct {
 	stateReader state.ResettableStateReader
 	historyMode bool // if true - stateReader is HistoryReaderV3, otherwise it's state reader
 	chainConfig *chain.Config
-	getHeader   func(hash libcommon.Hash, number uint64) *types.Header
 
 	ctx      context.Context
 	engine   consensus.Engine
@@ -79,18 +78,8 @@ func NewWorker(lock sync.Locker, logger log.Logger, ctx context.Context, backgro
 		dirs: dirs,
 	}
 	w.taskGasPool.AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
-
 	w.vmCfg = vm.Config{Debug: true, Tracer: w.callTracer}
-	w.getHeader = func(hash libcommon.Hash, number uint64) *types.Header {
-		h, err := blockReader.Header(ctx, w.chainTx, hash, number)
-		if err != nil {
-			panic(err)
-		}
-		return h
-	}
-
 	w.ibs = state.New(w.stateReader)
-
 	return w
 }
 
@@ -159,7 +148,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask *state.TxTask) {
 	} else if !txTask.HistoryExecution && rw.historyMode {
 		rw.SetReader(state.NewStateReaderV3(rw.rs.Domains()))
 	}
-
 	if rw.background && rw.chainTx == nil {
 		var err error
 		if rw.chainTx, err = rw.chainDb.BeginRo(rw.ctx); err != nil {

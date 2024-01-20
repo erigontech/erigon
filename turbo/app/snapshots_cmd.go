@@ -693,9 +693,8 @@ func doCompress(cliCtx *cli.Context) error {
 	return nil
 }
 func doRetireCommand(cliCtx *cli.Context) error {
-	var logger log.Logger
-	var err error
-	if logger, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
+	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
+	if err != nil {
 		return err
 	}
 	defer logger.Info("Done")

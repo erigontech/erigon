@@ -80,7 +80,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 			iiCfg:             iiCfg{salt: &salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: true,
 		}}
-	d, err := NewDomain(cfg, aggStep, "base", keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
+	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
 	d.DisableFsync()
 	d.compressWorkers = 1
@@ -168,9 +168,9 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		c, err := d.collate(ctx, 0, 0, 16, tx)
 
 		require.NoError(t, err)
-		require.True(t, strings.HasSuffix(c.valuesPath, "v1-base.0-1.kv"))
+		require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
 		require.Equal(t, 2, c.valuesCount)
-		require.True(t, strings.HasSuffix(c.historyPath, "v1-base.0-1.v"))
+		require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
 		require.Equal(t, 3, c.historyCount)
 		require.Equal(t, 2, len(c.indexBitmaps))
 		require.Equal(t, []uint64{3}, c.indexBitmaps["key2"].ToArray())
@@ -1022,9 +1022,9 @@ func TestDomain_CollationBuildInMem(t *testing.T) {
 	c, err := d.collate(ctx, 0, 0, maxTx, tx)
 
 	require.NoError(t, err)
-	require.True(t, strings.HasSuffix(c.valuesPath, "v1-base.0-1.kv"))
+	require.True(t, strings.HasSuffix(c.valuesPath, "v1-accounts.0-1.kv"))
 	require.Equal(t, 3, c.valuesCount)
-	require.True(t, strings.HasSuffix(c.historyPath, "v1-base.0-1.v"))
+	require.True(t, strings.HasSuffix(c.historyPath, "v1-accounts.0-1.v"))
 	require.EqualValues(t, 3*maxTx, c.historyCount)
 	require.Equal(t, 3, len(c.indexBitmaps))
 	require.Len(t, c.indexBitmaps["key2"].ToArray(), int(maxTx))
