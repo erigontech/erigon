@@ -243,10 +243,14 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	if contribution.SubcommitteeIndex() < f.beaconCfg.SyncCommitteeSubnetCount {
 		return fmt.Errorf("subcommitte index not in allowed range")
 	}
+	found := false
 	for _, v := range contribution.AggregationBits() {
 		if v != 0 {
+			found = true
 			break
 		}
+	}
+	if !found {
 		return fmt.Errorf("contribution has no participants")
 	}
 
@@ -282,10 +286,14 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	f.mu.Unlock()
 
 	if !test {
+		found := false
 		for _, v := range syncSubcommitteePubkeys {
 			if v == declaredValidator.PublicKey() {
+				found = true
 				break
 			}
+		}
+		if !found {
 			return fmt.Errorf("aggregator validator index not in subcommittee")
 		}
 		// validate the contributionAndProof
