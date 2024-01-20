@@ -153,11 +153,10 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// and apply the message.
 	gp := new(core.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 
-	var results []map[string]interface{}
-
 	bundleHash := cryptopool.NewLegacyKeccak256()
 	defer cryptopool.ReturnToPoolKeccak256(bundleHash)
 
+	results := make([]map[string]interface{}, 0, len(txs))
 	for _, txn := range txs {
 		msg, err := txn.AsMessage(*signer, nil, rules)
 		msg.SetCheckNonce(false)
