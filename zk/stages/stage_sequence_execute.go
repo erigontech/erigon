@@ -341,7 +341,7 @@ func SpawnSequencingStage(
 					return err
 				}
 				if count == 0 {
-					time.Sleep(100 * time.Millisecond)
+					time.Sleep(1 * time.Millisecond)
 				} else {
 					slots = append(slots, txSlots)
 
