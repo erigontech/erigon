@@ -27,12 +27,12 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	}
 	maxEpoch := utils.GetCurrentEpoch(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot, a.beaconChainCfg.SlotsPerEpoch)
 	if epoch > maxEpoch {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is in the future, max epoch is %d", epoch, maxEpoch).Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is in the future, max epoch is %d", epoch, maxEpoch))
 	}
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err).Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err))
 	}
 	if len(idxsStr) == 0 {
 		return newBeaconResponse([]string{}), nil
@@ -43,7 +43,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 	for _, idxStr := range idxsStr {
 		idx, err := strconv.ParseUint(idxStr, 10, 64)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not parse validator index: %w", err).Error())
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not parse validator index: %w", err))
 		}
 		if _, ok := idxSet[int(idx)]; ok {
 			continue
@@ -88,7 +88,7 @@ func (a *ApiHandler) liveness(w http.ResponseWriter, r *http.Request) (*beaconht
 		return nil, err
 	}
 	if currentEpochPartecipation == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not find partecipations for epoch %d, if this was an historical query, turn on --caplin.archive", epoch))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find partecipations for epoch %d, if this was an historical query, turn on --caplin.archive", epoch))
 	}
 	for idx, live := range liveSet {
 		if live.IsLive {

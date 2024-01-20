@@ -151,13 +151,13 @@ func parseStatuses(s []string) ([]validatorStatus, error) {
 	statuses := make([]validatorStatus, 0, len(s))
 
 	if len(s) > maxValidatorsLookupFilter {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "too many statuses requested")
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("too many statuses requested"))
 	}
 
 	for _, status := range s {
 		s, err := validatorStatusFromString(status)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		if _, ok := seenAlready[s]; ok {
 			continue
@@ -173,13 +173,13 @@ func checkValidValidatorId(s string) (bool, error) {
 	if len(s) == 98 && s[:2] == "0x" {
 		// check if it is a valid hex string
 		if _, err := hex.DecodeString(s[2:]); err != nil {
-			return false, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+			return false, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		return true, nil
 	}
 	// If it is not 0x prefixed, then it must be a number, check if it is a base-10 number
 	if _, err := strconv.ParseUint(s, 10, 64); err != nil {
-		return false, beaconhttp.NewEndpointError(http.StatusBadRequest, "invalid validator id")
+		return false, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid validator id"))
 	}
 	return false, nil
 }
@@ -195,26 +195,26 @@ func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*
 
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
 	queryFilters, err := beaconhttp.StringListFromQueryParams(r, "status")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	validatorIds, err := beaconhttp.StringListFromQueryParams(r, "id")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	if len(validatorIds) > maxValidatorsLookupFilter {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "too many validators requested")
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("too many validators requested"))
 	}
 	filterIndicies, err := parseQueryValidatorIndicies(tx, validatorIds)
 	if err != nil {
@@ -230,7 +230,7 @@ func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*
 		s, cn := a.syncedData.HeadState()
 		defer cn()
 		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "node is not synced")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("node is not synced"))
 		}
 		return responseValidators(filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false)
 	}
@@ -240,7 +240,7 @@ func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*
 	}
 
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
@@ -269,7 +269,7 @@ func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
 	if isPublicKey {
 		var b48 libcommon.Bytes48
 		if err := b48.UnmarshalText([]byte(id)); err != nil {
-			return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+			return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		has, err := tx.Has(kv.InvertedValidatorPublicKeys, b48[:])
 		if err != nil {
@@ -283,13 +283,13 @@ func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
 			return 0, err
 		}
 		if !ok {
-			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, "validator not found")
+			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found"))
 		}
 		return idx, nil
 	}
 	idx, err := strconv.ParseUint(id, 10, 64)
 	if err != nil {
-		return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return 0, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	return idx, nil
 
@@ -319,17 +319,17 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
 	validatorId, err := beaconhttp.StringFromRequest(r, "validator_id")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	validatorIndex, err := parseQueryValidatorIndex(tx, validatorId)
@@ -344,7 +344,7 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 			return newBeaconResponse([]int{}).WithFinalized(false), nil
 		}
 		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "node is not synced")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("node is not synced"))
 		}
 		return responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false)
 	}
@@ -354,7 +354,7 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
@@ -386,21 +386,21 @@ func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Req
 
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
 	validatorIds, err := beaconhttp.StringListFromQueryParams(r, "id")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	if len(validatorIds) > maxValidatorsLookupFilter {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "too many validators requested")
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("too many validators requested"))
 	}
 	filterIndicies, err := parseQueryValidatorIndicies(tx, validatorIds)
 	if err != nil {
@@ -411,7 +411,7 @@ func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Req
 		s, cn := a.syncedData.HeadState()
 		defer cn()
 		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "node is not synced")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("node is not synced"))
 		}
 		return responseValidatorsBalances(filterIndicies, state.Epoch(s), s.Balances(), false)
 	}
@@ -421,7 +421,7 @@ func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Req
 	}
 
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
 	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)

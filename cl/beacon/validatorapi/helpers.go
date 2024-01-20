@@ -23,7 +23,7 @@ func (v *ValidatorApiHandler) privateGetStateFromStateId(stateId string) (*state
 		return v.FC.GetStateAtBlockRoot(headRoot, true)
 	case stateId == "genesis":
 		// not supported
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "genesis block not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("genesis block not found"))
 	case stateId == "finalized":
 		return v.FC.GetStateAtBlockRoot(v.FC.FinalizedCheckpoint().BlockRoot(), true)
 	case stateId == "justified":
@@ -33,7 +33,7 @@ func (v *ValidatorApiHandler) privateGetStateFromStateId(stateId string) (*state
 		hsh := common.Hash{}
 		err := hsh.UnmarshalText([]byte(stateId))
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("Invalid state ID: %s", stateId))
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("Invalid state ID: %s", stateId))
 		}
 		return v.FC.GetStateAtStateRoot(hsh, true)
 	case isInt(stateId):
@@ -41,7 +41,7 @@ func (v *ValidatorApiHandler) privateGetStateFromStateId(stateId string) (*state
 		val, _ := strconv.ParseUint(stateId, 10, 64)
 		return v.FC.GetStateAtSlot(val, true)
 	default:
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("Invalid state ID: %s", stateId))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("Invalid state ID: %s", stateId))
 	}
 }
 
