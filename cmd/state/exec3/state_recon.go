@@ -289,7 +289,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 	rw.stateWriter.SetTxNum(txTask.TxNum)
 	rw.ibs.Reset()
 	ibs := rw.ibs
-	rules := txTask.Rules
+	rules, header := txTask.Rules, txTask.Header
 	var err error
 
 	if txTask.BlockNum == 0 && txTask.TxIndex == -1 {
@@ -306,9 +306,9 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 			// End of block transaction in a block
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, rw.chainConfig, ibs, txTask.Header, rw.engine, false /* constCall */)
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, false /* constCall */)
 			}
-			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, rw.logger); err != nil {
+			if _, _, err := rw.engine.Finalize(rw.chainConfig, types.CopyHeader(header), ibs, txTask.Txs, txTask.Uncles, nil, txTask.Withdrawals, rw.chain, syscall, rw.logger); err != nil {
 				if _, readError := rw.stateReader.ReadError(); !readError {
 					return fmt.Errorf("finalize of block %d failed: %w", txTask.BlockNum, err)
 				}
@@ -320,7 +320,7 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 			return core.SysCallContract(contract, data, rw.chainConfig, ibState, header, rw.engine, constCall /* constCall */)
 		}
 
-		rw.engine.Initialize(rw.chainConfig, rw.chain, txTask.Header, ibs, syscall, rw.logger)
+		rw.engine.Initialize(rw.chainConfig, rw.chain, header, ibs, syscall, rw.logger)
 		if err = ibs.FinalizeTx(rules, noop); err != nil {
 			if _, readError := rw.stateReader.ReadError(); !readError {
 				return err
@@ -334,6 +334,14 @@ func (rw *ReconWorker) runTxTask(txTask *state.TxTask) error {
 
 		rw.evm.ResetBetweenBlocks(txTask.EvmBlockContext, core.NewEVMTxContext(msg), ibs, vmConfig, txTask.Rules)
 		vmenv := rw.evm
+		if msg.FeeCap().IsZero() && rw.engine != nil {
+			// Only zero-gas transactions may be service ones
+			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, rw.chainConfig, ibs, header, rw.engine, true /* constCall */)
+			}
+			msg.SetIsFree(rw.engine.IsServiceTransaction(msg.From(), syscall))
+		}
+
 		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d\n", txTask.TxNum, txTask.BlockNum, txTask.TxIndex)
 		_, err = core.ApplyMessage(vmenv, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
