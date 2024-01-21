@@ -1423,14 +1423,14 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	}
 	canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks())
 
-	br.logger.Info("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
+	br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 	if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
 		return err
 	}
 	includeBor := br.chainConfig.Bor != nil
 	if includeBor {
 		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
-		br.logger.Info("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
+		br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
 
 		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, span.IDAt); err != nil {
 			return err
