@@ -607,6 +607,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 }
 
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Sprintf("file: %s, %s, %s", g.fName, rec, dbg.Stack()))
+		}
+	}()
 	wordLen := g.nextPos(true)
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator
 	if wordLen == 0 {
