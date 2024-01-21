@@ -552,6 +552,13 @@ func (e *intraBlockExec) execTx(txNum uint64, txIndex int, txn types.Transaction
 		return nil, nil, err
 	}
 	e.evm.ResetBetweenBlocks(*e.blockCtx, core.NewEVMTxContext(msg), e.ibs, *e.vmConfig, e.rules)
+	if msg.FeeCap().IsZero() {
+		// Only zero-gas transactions may be service ones
+		syscall := func(contract common.Address, data []byte) ([]byte, error) {
+			return core.SysCallContract(contract, data, e.chainConfig, e.ibs, e.header, e.engine, true /* constCall */)
+		}
+		msg.SetIsFree(e.engine.IsServiceTransaction(msg.From(), syscall))
+	}
 	res, err := core.ApplyMessage(e.evm, msg, gp, true /* refunds */, false /* gasBailout */)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, e.ibs.Error())
