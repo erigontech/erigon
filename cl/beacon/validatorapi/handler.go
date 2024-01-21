@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/beacon/building"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -16,6 +17,7 @@ type ValidatorApiHandler struct {
 
 	BeaconChainCfg *clparams.BeaconChainConfig
 	GenesisCfg     *clparams.GenesisConfig
+	Emitters       *beaconevents.Emitters
 
 	state *building.State
 
@@ -52,7 +54,7 @@ func (v *ValidatorApiHandler) Route(r chi.Router) {
 			r.Route("/node", func(r chi.Router) {
 				r.Get("/syncing", beaconhttp.HandleEndpointFunc(v.GetEthV1NodeSyncing))
 			})
-			r.Get("/events", v.EventSourceGetV1Events)
+			r.Get("/events", beaconhttp.HandleEndpointFunc(v.EventSourceGetV1Events))
 			r.Route("/validator", func(r chi.Router) {
 				// implemented by archive api (for now)
 				//		r.Route("/duties", func(r chi.Router) {
