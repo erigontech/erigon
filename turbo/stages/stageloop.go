@@ -174,15 +174,15 @@ func StageLoopIteration(ctx context.Context, db kv.RwDB, txc wrap.TxContainer, s
 	if canRunCycleInOneTransaction && !externalTx && commitTime > 500*time.Millisecond {
 		logger.Info("Commit cycle", "in", commitTime)
 	}
-	if len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
-		var m runtime.MemStats
-		dbg.ReadMemStats(&m)
-		logCtx = append(logCtx, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
-		logger.Info("Timings (slower than 50ms)", logCtx...)
-		//if len(tableSizes) > 0 {
-		//	logger.Info("Tables", tableSizes...)
-		//}
-	}
+	//if len(logCtx) > 0 { // No printing of timings or table sizes if there were no progress
+	var m runtime.MemStats
+	dbg.ReadMemStats(&m)
+	logCtx = append(logCtx, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+	logger.Info("Timings (slower than 50ms)", logCtx...)
+	//if len(tableSizes) > 0 {
+	//	logger.Info("Tables", tableSizes...)
+	//}
+	//}
 	// -- send notifications END
 
 	// -- Prune+commit(sync)
