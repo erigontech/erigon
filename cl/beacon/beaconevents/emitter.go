@@ -27,7 +27,7 @@ func NewEmitters() *Emitters {
 	}
 }
 
-// publish to all subscribers
+// publish to all subscribers. each callback is run in a separate goroutine
 func (e *Emitters) Publish(s string, a any) {
 	// forward gossip object
 	e.mu.Lock()
