@@ -47,7 +47,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 	})
 	// layered handling - 404 on first handler falls back to the second
 	mux.HandleFunc("/eth/*", func(w http.ResponseWriter, r *http.Request) {
-		nfw := &notFoundNoWriter{rw: w}
+		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
 		beaconHandler.ValidatorApi.ServeHTTP(nfw, r)
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {

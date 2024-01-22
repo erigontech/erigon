@@ -204,10 +204,14 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
 		validationStatus = execution.ExecutionStatus_BadBlock
 	}
-	return &execution.ValidationReceipt{
+	validationReceipt := &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
-	}, tx.Commit()
+	}
+	if validationError != nil {
+		validationReceipt.ValidationError = validationError.Error()
+	}
+	return validationReceipt, tx.Commit()
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {

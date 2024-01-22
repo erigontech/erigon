@@ -31,7 +31,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err).Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required.", err))
 	}
 	if len(idxsStr) == 0 {
 		return newBeaconResponse([]string{}).WithOptimistic(false), nil
@@ -43,7 +43,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 
 		idx, err := strconv.ParseUint(idxStr, 10, 64)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not parse validator index: %w", err).Error())
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not parse validator index: %w", err))
 		}
 		if _, ok := duplicates[int(idx)]; ok {
 			continue
@@ -80,7 +80,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		case referencePeriod+1 == period:
 			nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(tx, roundedSlotToPeriod)
 		default:
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not find sync committee for epoch %d", epoch))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))
 		}
 		if err != nil {
 			return nil, err
@@ -94,10 +94,10 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	case referencePeriod+1 == period:
 		syncCommittee = nextSyncCommittee
 	default:
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not find sync committee for epoch %d", epoch))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))
 	}
 	if syncCommittee == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not find sync committee for epoch %d", epoch))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))
 	}
 	// Now we have the sync committee, we can initialize our response set
 	dutiesSet := map[uint64]*syncDutyResponse{}
@@ -107,7 +107,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 			return nil, err
 		}
 		if publicKey == (libcommon.Bytes48{}) {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not find validator with index %d", idx))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with index %d", idx))
 		}
 		dutiesSet[idx] = &syncDutyResponse{
 			Pubkey:         publicKey,
@@ -121,7 +121,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 			return nil, err
 		}
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not find validator with public key %x", committeePartecipantPublicKey))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x", committeePartecipantPublicKey))
 		}
 		if _, ok := dutiesSet[committeePartecipantIndex]; !ok {
 			continue
