@@ -23,7 +23,7 @@ func NewExecutionClientDirect(ctx context.Context, chainRW eth1_chain_reader.Cha
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes *[]libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
