@@ -54,7 +54,7 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, p
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes *[]libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -114,7 +114,7 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParen
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
 	args := []interface{}{request}
 	if versionedHashes != nil {
-		args = append(args, *versionedHashes, *beaconParentRoot)
+		args = append(args, versionedHashes, *beaconParentRoot)
 	}
 	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, args...)
 	if err != nil {

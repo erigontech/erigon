@@ -48,15 +48,15 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		return nil
 	}
 	// Now we find the versioned hashes
-	var versionedHashes *[]libcommon.Hash
+	var versionedHashes []libcommon.Hash
 	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
-		versionedHashes = &[]libcommon.Hash{}
+		versionedHashes = []libcommon.Hash{}
 		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
 			versionedHash, err := kzgCommitmentToVersionedHash(k)
 			if err != nil {
 				return err
 			}
-			*versionedHashes = append(*versionedHashes, versionedHash)
+			versionedHashes = append(versionedHashes, versionedHash)
 			return nil
 		})
 	}

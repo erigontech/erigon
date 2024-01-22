@@ -212,7 +212,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
-	payloadStatus, err := s.HandleNewPayload("NewPayload", block, &expectedBlobHashes)
+	payloadStatus, err := s.HandleNewPayload("NewPayload", block, expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, consensus.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -689,7 +689,7 @@ func compareCapabilities(from []string, to []string) []string {
 func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
-	versionedHashes *[]libcommon.Hash,
+	versionedHashes []libcommon.Hash,
 ) (*engine_types.PayloadStatus, error) {
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
