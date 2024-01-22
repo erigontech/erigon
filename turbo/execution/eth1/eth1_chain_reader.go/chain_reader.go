@@ -327,7 +327,11 @@ func (c ChainReaderWriterEth1) ValidateChain(hash libcommon.Hash, number uint64)
 	if err != nil {
 		return 0, nil, libcommon.Hash{}, err
 	}
-	return resp.ValidationStatus, &resp.ValidationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	var validatonError *string
+	if len(resp.ValidationError) > 0 {
+		validatonError = &resp.ValidationError
+	}
+	return resp.ValidationStatus, validatonError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
 func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
@@ -340,7 +344,11 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash
 	if err != nil {
 		return 0, nil, libcommon.Hash{}, err
 	}
-	return resp.Status, &resp.ValidationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	var validatonError *string
+	if len(resp.ValidationError) > 0 {
+		validatonError = &resp.ValidationError
+	}
+	return resp.Status, validatonError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
 func (c ChainReaderWriterEth1) GetForkchoice() (headHash, finalizedHash, safeHash libcommon.Hash, err error) {
