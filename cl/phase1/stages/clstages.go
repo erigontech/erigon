@@ -551,7 +551,7 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 
-					headEpoch := headSlot / 32
+					headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
 					previous_duty_dependent_root, err := headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
 					if err != nil {
 						return err
