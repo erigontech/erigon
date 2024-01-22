@@ -63,12 +63,17 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 
 	var invalidBlock bool
 	if newPayload && f.engine != nil {
+
 		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes); err != nil {
 			if invalidBlock {
 				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			}
 			log.Warn("newPayload failed", "err", err)
 			return err
+		}
+		if invalidBlock {
+			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+			return fmt.Errorf("execution client failed")
 		}
 	}
 
