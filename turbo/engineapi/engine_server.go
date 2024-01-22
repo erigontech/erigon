@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"reflect"
 	"sync"
 	"time"
 
@@ -113,39 +112,6 @@ func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals []*type
 	return nil
 }
 
-func (s *EngineServer) validatePayloadBlobs(req *engine_types.ExecutionPayload,
-	expectedBlobHashes []libcommon.Hash, transactions *[]types.Transaction) (*engine_types.PayloadStatus, error) {
-	if expectedBlobHashes == nil {
-		return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
-	}
-	actualBlobHashes := []libcommon.Hash{}
-	for _, txn := range *transactions {
-		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
-	}
-	if len(actualBlobHashes) > int(s.config.GetMaxBlobsPerBlock()) || req.BlobGasUsed.Uint64() > s.config.GetMaxBlobGasPerBlock() {
-		s.logger.Warn("[NewPayload] blobs/blobGasUsed exceeds max per block",
-			"count", len(actualBlobHashes), "BlobGasUsed", req.BlobGasUsed.Uint64())
-		bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
-		if !bad {
-			latestValidHash = req.ParentHash
-		}
-		return &engine_types.PayloadStatus{
-			Status:          engine_types.InvalidStatus,
-			ValidationError: engine_types.NewStringifiedErrorFromString("blobs/blobgas exceeds max"),
-			LatestValidHash: &latestValidHash,
-		}, nil
-	}
-	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
-		s.logger.Warn("[NewPayload] mismatch in blob hashes",
-			"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
-		return &engine_types.PayloadStatus{
-			Status:          engine_types.InvalidStatus,
-			ValidationError: engine_types.NewStringifiedErrorFromString("mismatch in blob hashes"),
-		}, nil
-	}
-	return nil, nil
-}
-
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []libcommon.Hash, parentBeaconBlockRoot *libcommon.Hash, version clparams.StateVersion,
@@ -231,12 +197,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
 	}
-	if version >= clparams.DenebVersion {
-		status, err := s.validatePayloadBlobs(req, expectedBlobHashes, &transactions)
-		if err != nil || status != nil {
-			return status, err
-		}
-	}
 
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
 	if err != nil {
@@ -252,7 +212,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	block := types.NewBlockFromStorage(blockHash, &header, transactions, nil /* uncles */, withdrawals)
 
-	payloadStatus, err := s.HandleNewPayload("NewPayload", block)
+	payloadStatus, err := s.HandleNewPayload("NewPayload", block, &expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, consensus.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -729,6 +689,7 @@ func compareCapabilities(from []string, to []string) []string {
 func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
+	versionedHashes *[]libcommon.Hash,
 ) (*engine_types.PayloadStatus, error) {
 	header := block.Header()
 	headerNumber := header.Number.Uint64()
@@ -772,7 +733,8 @@ func (e *EngineServer) HandleNewPayload(
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	}
-	if err := e.chainRW.InsertBlockAndWait(block); err != nil {
+
+	if err := e.chainRW.InsertBlockAndWait(block, versionedHashes); err != nil {
 		return nil, err
 	}
 
