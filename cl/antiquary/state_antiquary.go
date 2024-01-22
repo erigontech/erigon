@@ -89,7 +89,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 				s.logger.Error("Failed to read historical processing progress", "err", err)
 				continue
 			}
-			// Stay behind a little bit we rely on forkchoice up until (finalized - 2*slotsPerEpoch)
+			// We wait for updated finality.
 			if finalized == beforeFinalized {
 				continue
 			}
