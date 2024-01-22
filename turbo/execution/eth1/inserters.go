@@ -3,11 +3,35 @@ package eth1
 import (
 	"context"
 	"fmt"
+	"reflect"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
+
+func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libcommon.Hash, transactions []types.Transaction, blobGasUsed uint64) error {
+	if expectedBlobHashes == nil {
+		return &rpc.InvalidParamsError{Message: "nil blob hashes array"}
+	}
+	actualBlobHashes := []libcommon.Hash{}
+	for _, txn := range transactions {
+		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
+	}
+	if len(actualBlobHashes) > int(s.config.GetMaxBlobsPerBlock()) || blobGasUsed > s.config.GetMaxBlobGasPerBlock() {
+		return nil
+	}
+	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
+		s.logger.Warn("[NewPayload] mismatch in blob hashes",
+			"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
+		return nil
+	}
+	return nil
+}
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {
@@ -34,6 +58,27 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		parentTd, err := rawdb.ReadTd(tx, header.ParentHash, height-1)
 		if err != nil || parentTd == nil {
 			return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, header.Number.Uint64()-1, err)
+		}
+		// check the blob hashes if we need to.
+		if block.CheckExpectedBlobHashes {
+			if header.BlobGasUsed == nil {
+				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: blob gas used is nil")
+			}
+			versionedHashes := []libcommon.Hash{}
+			for _, h := range block.ExpectedBlobHashes {
+				versionedHashes = append(versionedHashes, gointerfaces.ConvertH256ToHash(h))
+			}
+			txs := make([]types.Transaction, len(body.Transactions))
+			for i, tx := range body.Transactions {
+				var decodeErr error
+				if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(tx); decodeErr != nil {
+					return nil, decodeErr
+				}
+			}
+			if err := e.validatePayloadBlobs(versionedHashes, txs, *header.BlobGasUsed); err != nil {
+				return nil, err
+			}
+
 		}
 
 		// Sum TDs.

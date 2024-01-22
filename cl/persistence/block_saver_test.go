@@ -37,7 +37,7 @@ func (m *mockEngine) FrozenBlocks() uint64 {
 	panic("unimplemented")
 }
 
-func (m *mockEngine) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (bool, error) {
+func (m *mockEngine) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, expectedBlobsHashes []libcommon.Hash) (bool, error) {
 	panic("unimplemented")
 }
 
