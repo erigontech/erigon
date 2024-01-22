@@ -93,6 +93,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			if finalized == beforeFinalized {
 				continue
 			}
+			beforeFinalized = finalized
 			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
 				slot := uint64(0)
 				if s.currentState != nil {
