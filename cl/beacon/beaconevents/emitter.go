@@ -1,26 +1,11 @@
 package beaconevents
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 )
-
-var validTopics = map[string]struct{}{
-	"head":                           {},
-	"block":                          {},
-	"attestation":                    {},
-	"voluntary_exit":                 {},
-	"bls_to_execution_change":        {},
-	"finalized_checkpoint":           {},
-	"chain_reorg":                    {},
-	"contribution_and_proof":         {},
-	"light_client_finality_update":   {},
-	"light_client_optimistic_update": {},
-	"payload_attributes":             {},
-	"*":                              {},
-}
 
 type Subscription struct {
 	id     string
@@ -30,6 +15,7 @@ type Subscription struct {
 
 type EventName string
 
+// Emitters creates pub/sub connection
 type Emitters struct {
 	cbs map[string]*Subscription
 	mu  sync.RWMutex
@@ -41,6 +27,7 @@ func NewEmitters() *Emitters {
 	}
 }
 
+// publish to all subscribers
 func (e *Emitters) Publish(s string, a any) {
 	// forward gossip object
 	e.mu.Lock()
@@ -50,15 +37,21 @@ func (e *Emitters) Publish(s string, a any) {
 	}
 	e.mu.Unlock()
 
-	for _, v := range values {
+	egg := errgroup.Group{}
+	for idx := range values {
+		v := values[idx]
+		exec := func() error { v.cb(s, a); return nil }
 		if _, ok := v.topics["*"]; ok {
-			go v.cb(s, a)
+			egg.Go(exec)
 		} else if _, ok := v.topics[s]; ok {
-			go v.cb(s, a)
+			egg.Go(exec)
 		}
 	}
+	egg.Wait()
 }
 
+// subscribe with callback. call the returned cancelfunc to unregister the callback
+// publish will block until all callbacks for the message are resolved
 func (e *Emitters) Subscribe(topics []string, cb func(topic string, item any)) (func(), error) {
 	subid := uuid.New().String()
 	sub := &Subscription{
@@ -67,9 +60,6 @@ func (e *Emitters) Subscribe(topics []string, cb func(topic string, item any)) (
 		cb:     cb,
 	}
 	for _, v := range topics {
-		if _, ok := validTopics[v]; !ok {
-			return nil, fmt.Errorf("Invalid Topic: %s", v)
-		}
 		sub.topics[v] = struct{}{}
 	}
 	e.cbs[subid] = sub
