@@ -107,3 +107,7 @@ func (*Eth1Header) Clone() clonable.Clonable {
 func (*Withdrawal) Clone() clonable.Clonable {
 	return &Withdrawal{}
 }
+
+func (s *SignedContributionAndProof) Clone() clonable.Clonable {
+	return &SignedContributionAndProof{}
+}

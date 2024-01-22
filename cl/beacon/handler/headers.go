@@ -14,11 +14,11 @@ func (a *ApiHandler) getHeaders(w http.ResponseWriter, r *http.Request) (*beacon
 
 	querySlot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	queryParentHash, err := beaconhttp.HashFromQueryParams(r, "parent_root")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -98,7 +98,7 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 	defer tx.Rollback()
 	blockId, err := beaconhttp.BlockIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	root, err := a.rootFromBlockId(ctx, tx, blockId)
 	if err != nil {
@@ -111,7 +111,7 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 	}
 
 	if signedHeader == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("block not found %x", root))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
 	var canonicalRoot libcommon.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, signedHeader.Header.Slot)
