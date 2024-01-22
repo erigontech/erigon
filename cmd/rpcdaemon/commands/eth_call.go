@@ -496,7 +496,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
 		}
 
-		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr}
+		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr - 1}
 		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
 
 		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch), api._agg)
