@@ -40,7 +40,7 @@ jobs:
 
     - name: Restore Erigon Testbed Data Directory
       run: |
-        rsync -av --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
 
     - name: Clean Erigon Build Directory
       run: |
