@@ -1317,7 +1317,7 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 
 func (p *TxPool) setBlobFee(blobFee uint64) {
 	if blobFee > 0 {
-		p.pendingBaseFee.Store(blobFee)
+		p.pendingBlobFee.Store(blobFee)
 	}
 }
 
