@@ -320,8 +320,15 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {
-	return dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("v1-%s.%d-%d.li", li.filenameBase, fromStep, toStep))) &&
-		dir.FileExist(filepath.Join(li.dir, fmt.Sprintf("v1-%s.%d-%d.li.lb", li.filenameBase, fromStep, toStep)))
+	return dir.FileExist(li.liFilePath(fromStep, toStep)) && dir.FileExist(li.lbFilePath(fromStep, toStep))
+}
+
+func (li *LocalityIndex) liFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(li.dir, fmt.Sprintf("v1-%s.%d-%d.li", li.filenameBase, fromStep, toStep))
+}
+
+func (li *LocalityIndex) lbFilePath(fromStep, toStep uint64) string {
+	return filepath.Join(li.dir, fmt.Sprintf("v1-%s.%d-%d.lb", li.filenameBase, fromStep, toStep))
 }
 
 func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64, convertStepsToFileNums bool, ps *background.ProgressSet, makeIter func() *LocalityIterator) (files *LocalityIndexFiles, err error) {
@@ -332,11 +339,10 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 		return nil, fmt.Errorf("LocalityIndex.buildFiles: fromStep(%d) < toStep(%d)", fromStep, toStep)
 	}
 
-	fName := fmt.Sprintf("v1-%s.%d-%d.li", li.filenameBase, fromStep, toStep)
-	idxPath := filepath.Join(li.dir, fName)
-	filePath := filepath.Join(li.dir, fmt.Sprintf("v1-%s.%d-%d.l", li.filenameBase, fromStep, toStep))
+	idxPath := li.liFilePath(fromStep, toStep)
+	filePath := li.lbFilePath(fromStep, toStep)
 
-	p := ps.AddNew(fName, uint64(1))
+	p := ps.AddNew(filepath.Base(filePath), uint64(1))
 	defer ps.Delete(p)
 
 	count := 0
