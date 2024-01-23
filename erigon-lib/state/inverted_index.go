@@ -1425,7 +1425,7 @@ func (ii *InvertedIndex) EnableReadAhead() *InvertedIndex {
 func (ii *InvertedIndex) EnableMadvWillNeed() *InvertedIndex {
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			item.decompressor.EnableWillNeed()
+			item.decompressor.EnableMadvWillNeed()
 			if item.index != nil {
 				item.index.EnableWillNeed()
 			}

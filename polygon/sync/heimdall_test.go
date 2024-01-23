@@ -2,39 +2,47 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"math/big"
 	"testing"
 	"time"
 
 	"github.com/golang/mock/gomock"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	heimdallclient "github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
-func makeCheckpoint(start uint64, len uint) *heimdallclient.Checkpoint {
-	c := heimdallclient.Checkpoint{
-		StartBlock: new(big.Int).SetUint64(start),
-		EndBlock:   new(big.Int).SetUint64(start + uint64(len) - 1),
-		Timestamp:  uint64(time.Now().Unix()),
+func makeCheckpoint(start uint64, len uint) *heimdall.Checkpoint {
+	return &heimdall.Checkpoint{
+		Fields: heimdall.HashAccumulatorFields{
+			StartBlock: new(big.Int).SetUint64(start),
+			EndBlock:   new(big.Int).SetUint64(start + uint64(len) - 1),
+			RootHash:   libcommon.BytesToHash(crypto.Keccak256([]byte("ROOT"))),
+			Timestamp:  uint64(time.Now().Unix()),
+		},
 	}
-	return &c
 }
 
-func makeMilestone(start uint64, len uint) *heimdallclient.Milestone {
-	m := heimdallclient.Milestone{
-		StartBlock: new(big.Int).SetUint64(start),
-		EndBlock:   new(big.Int).SetUint64(start + uint64(len) - 1),
-		Timestamp:  uint64(time.Now().Unix()),
+func makeMilestone(start uint64, len uint) *heimdall.Milestone {
+	m := heimdall.Milestone{
+		Fields: heimdall.HashAccumulatorFields{
+			StartBlock: new(big.Int).SetUint64(start),
+			EndBlock:   new(big.Int).SetUint64(start + uint64(len) - 1),
+			RootHash:   libcommon.BytesToHash(crypto.Keccak256([]byte("ROOT"))),
+			Timestamp:  uint64(time.Now().Unix()),
+		},
 	}
 	return &m
 }
 
 type heimdallTest struct {
 	ctx      context.Context
-	client   *heimdallclient.MockHeimdallClient
+	client   *heimdall.MockHeimdallClient
 	heimdall Heimdall
 	logger   log.Logger
 }
@@ -46,7 +54,7 @@ func newHeimdallTest(t *testing.T) heimdallTest {
 	ctrl := gomock.NewController(t)
 	t.Cleanup(ctrl.Finish)
 
-	client := heimdallclient.NewMockHeimdallClient(ctrl)
+	client := heimdall.NewMockHeimdallClient(ctrl)
 	heimdall := NewHeimdall(client, logger)
 
 	return heimdallTest{
@@ -57,8 +65,8 @@ func newHeimdallTest(t *testing.T) heimdallTest {
 	}
 }
 
-func (test heimdallTest) setupCheckpoints(count int) []*heimdallclient.Checkpoint {
-	var expectedCheckpoints []*heimdallclient.Checkpoint
+func (test heimdallTest) setupCheckpoints(count int) []*heimdall.Checkpoint {
+	var expectedCheckpoints []*heimdall.Checkpoint
 	for i := 0; i < count; i++ {
 		c := makeCheckpoint(uint64(i*256), 256)
 		expectedCheckpoints = append(expectedCheckpoints, c)
@@ -66,15 +74,15 @@ func (test heimdallTest) setupCheckpoints(count int) []*heimdallclient.Checkpoin
 
 	client := test.client
 	client.EXPECT().FetchCheckpointCount(gomock.Any()).Return(int64(len(expectedCheckpoints)), nil)
-	client.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*heimdallclient.Checkpoint, error) {
+	client.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
 		return expectedCheckpoints[number-1], nil
 	}).AnyTimes()
 
 	return expectedCheckpoints
 }
 
-func (test heimdallTest) setupMilestones(count int) []*heimdallclient.Milestone {
-	var expectedMilestones []*heimdallclient.Milestone
+func (test heimdallTest) setupMilestones(count int) []*heimdall.Milestone {
+	var expectedMilestones []*heimdall.Milestone
 	for i := 0; i < count; i++ {
 		m := makeMilestone(uint64(i*16), 16)
 		expectedMilestones = append(expectedMilestones, m)
@@ -82,7 +90,7 @@ func (test heimdallTest) setupMilestones(count int) []*heimdallclient.Milestone 
 
 	client := test.client
 	client.EXPECT().FetchMilestoneCount(gomock.Any()).Return(int64(len(expectedMilestones)), nil)
-	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*heimdallclient.Milestone, error) {
+	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*heimdall.Milestone, error) {
 		return expectedMilestones[number-1], nil
 	}).AnyTimes()
 
@@ -97,7 +105,7 @@ func TestFetchCheckpoints1(t *testing.T) {
 	require.Nil(t, err)
 
 	require.Equal(t, 1, len(checkpoints))
-	assert.Equal(t, expectedCheckpoint.Timestamp, checkpoints[0].Timestamp)
+	assert.Equal(t, expectedCheckpoint.Timestamp(), checkpoints[0].Timestamp())
 }
 
 func TestFetchCheckpointsPastLast(t *testing.T) {
@@ -119,7 +127,7 @@ func TestFetchCheckpoints10(t *testing.T) {
 
 	require.Equal(t, len(expectedCheckpoints), len(checkpoints))
 	for i := 0; i < len(checkpoints); i++ {
-		assert.Equal(t, expectedCheckpoints[i].StartBlock.Uint64(), checkpoints[i].StartBlock.Uint64())
+		assert.Equal(t, expectedCheckpoints[i].StartBlock().Uint64(), checkpoints[i].StartBlock().Uint64())
 	}
 }
 
@@ -128,12 +136,12 @@ func TestFetchCheckpointsMiddleStart(t *testing.T) {
 	expectedCheckpoints := test.setupCheckpoints(10)
 	const offset = 6
 
-	checkpoints, err := test.heimdall.FetchCheckpoints(test.ctx, expectedCheckpoints[offset].StartBlock.Uint64())
+	checkpoints, err := test.heimdall.FetchCheckpoints(test.ctx, expectedCheckpoints[offset].StartBlock().Uint64())
 	require.Nil(t, err)
 
 	require.Equal(t, len(expectedCheckpoints)-offset, len(checkpoints))
 	for i := 0; i < len(checkpoints); i++ {
-		assert.Equal(t, expectedCheckpoints[offset+i].StartBlock.Uint64(), checkpoints[i].StartBlock.Uint64())
+		assert.Equal(t, expectedCheckpoints[offset+i].StartBlock().Uint64(), checkpoints[i].StartBlock().Uint64())
 	}
 }
 
@@ -145,7 +153,7 @@ func TestFetchMilestones1(t *testing.T) {
 	require.Nil(t, err)
 
 	require.Equal(t, 1, len(milestones))
-	assert.Equal(t, expectedMilestone.Timestamp, milestones[0].Timestamp)
+	assert.Equal(t, expectedMilestone.Timestamp(), milestones[0].Timestamp())
 }
 
 func TestFetchMilestonesPastLast(t *testing.T) {
@@ -167,7 +175,7 @@ func TestFetchMilestones10(t *testing.T) {
 
 	require.Equal(t, len(expectedMilestones), len(milestones))
 	for i := 0; i < len(milestones); i++ {
-		assert.Equal(t, expectedMilestones[i].StartBlock.Uint64(), milestones[i].StartBlock.Uint64())
+		assert.Equal(t, expectedMilestones[i].StartBlock().Uint64(), milestones[i].StartBlock().Uint64())
 	}
 }
 
@@ -176,19 +184,19 @@ func TestFetchMilestonesMiddleStart(t *testing.T) {
 	expectedMilestones := test.setupMilestones(10)
 	const offset = 6
 
-	milestones, err := test.heimdall.FetchMilestones(test.ctx, expectedMilestones[offset].StartBlock.Uint64())
+	milestones, err := test.heimdall.FetchMilestones(test.ctx, expectedMilestones[offset].StartBlock().Uint64())
 	require.Nil(t, err)
 
 	require.Equal(t, len(expectedMilestones)-offset, len(milestones))
 	for i := 0; i < len(milestones); i++ {
-		assert.Equal(t, expectedMilestones[offset+i].StartBlock.Uint64(), milestones[i].StartBlock.Uint64())
+		assert.Equal(t, expectedMilestones[offset+i].StartBlock().Uint64(), milestones[i].StartBlock().Uint64())
 	}
 }
 
 func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
 	test := newHeimdallTest(t)
 
-	var expectedMilestones []*heimdallclient.Milestone
+	var expectedMilestones []*heimdall.Milestone
 	for i := 0; i < 20; i++ {
 		m := makeMilestone(uint64(i*16), 16)
 		expectedMilestones = append(expectedMilestones, m)
@@ -197,9 +205,9 @@ func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
 
 	client := test.client
 	client.EXPECT().FetchMilestoneCount(gomock.Any()).Return(int64(len(expectedMilestones)), nil)
-	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*heimdallclient.Milestone, error) {
+	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*heimdall.Milestone, error) {
 		if int(number) <= len(expectedMilestones)-keptMilestones {
-			return nil, heimdallclient.ErrNotInMilestoneList
+			return nil, heimdall.ErrNotInMilestoneList
 		}
 		return expectedMilestones[number-1], nil
 	}).AnyTimes()
@@ -210,7 +218,7 @@ func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
 
 	require.Equal(t, keptMilestones, len(milestones))
 	for i := 0; i < len(milestones); i++ {
-		assert.Equal(t, expectedMilestones[len(expectedMilestones)-len(milestones)+i].StartBlock.Uint64(), milestones[i].StartBlock.Uint64())
+		assert.Equal(t, expectedMilestones[len(expectedMilestones)-len(milestones)+i].StartBlock().Uint64(), milestones[i].StartBlock().Uint64())
 	}
 }
 
@@ -236,12 +244,38 @@ func TestOnMilestoneEvent(t *testing.T) {
 	expectedMilestone := makeMilestone(0, 12)
 	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).Return(expectedMilestone, nil)
 
-	eventChan := make(chan *heimdallclient.Milestone)
-	err := test.heimdall.OnMilestoneEvent(test.ctx, func(m *heimdallclient.Milestone) {
+	eventChan := make(chan *heimdall.Milestone)
+	err := test.heimdall.OnMilestoneEvent(test.ctx, func(m *heimdall.Milestone) {
 		eventChan <- m
 	})
 	require.Nil(t, err)
 
 	m := <-eventChan
-	assert.Equal(t, expectedMilestone.Timestamp, m.Timestamp)
+	assert.Equal(t, expectedMilestone.Timestamp(), m.Timestamp())
+}
+
+func TestMarshall(t *testing.T) {
+	m := makeMilestone(10, 100)
+
+	b, err := json.Marshal(m)
+
+	assert.Nil(t, err)
+
+	var m1 heimdall.Milestone
+
+	assert.Nil(t, json.Unmarshal(b, &m1))
+
+	assert.Equal(t, *m, m1)
+
+	c := makeCheckpoint(10, 100)
+
+	b, err = json.Marshal(c)
+
+	assert.Nil(t, err)
+
+	var c1 heimdall.Checkpoint
+
+	assert.Nil(t, json.Unmarshal(b, &c1))
+
+	assert.Equal(t, *c, c1)
 }

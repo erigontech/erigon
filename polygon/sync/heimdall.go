@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"errors"
-	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -17,8 +16,8 @@ import (
 //
 //go:generate mockgen -destination=./heimdall_mock.go -package=sync . Heimdall
 type Heimdall interface {
-	FetchCheckpoints(ctx context.Context, start uint64) ([]*heimdall.Checkpoint, error)
-	FetchMilestones(ctx context.Context, start uint64) ([]*heimdall.Milestone, error)
+	FetchCheckpoints(ctx context.Context, start uint64) (heimdall.HashAccumulators, error)
+	FetchMilestones(ctx context.Context, start uint64) (heimdall.HashAccumulators, error)
 	FetchSpan(ctx context.Context, start uint64) (*heimdall.HeimdallSpan, error)
 	OnMilestoneEvent(ctx context.Context, callback func(*heimdall.Milestone)) error
 }
@@ -41,32 +40,13 @@ func NewHeimdall(client heimdall.HeimdallClient, logger log.Logger) Heimdall {
 	return &impl
 }
 
-func cmpNumToRange(n uint64, min *big.Int, max *big.Int) int {
-	num := new(big.Int).SetUint64(n)
-	if num.Cmp(min) < 0 {
-		return -1
-	}
-	if num.Cmp(max) > 0 {
-		return 1
-	}
-	return 0
-}
-
-func cmpBlockNumToCheckpointRange(n uint64, c *heimdall.Checkpoint) int {
-	return cmpNumToRange(n, c.StartBlock, c.EndBlock)
-}
-
-func cmpBlockNumToMilestoneRange(n uint64, m *heimdall.Milestone) int {
-	return cmpNumToRange(n, m.StartBlock, m.EndBlock)
-}
-
-func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([]*heimdall.Checkpoint, error) {
+func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) (heimdall.HashAccumulators, error) {
 	count, err := impl.client.FetchCheckpointCount(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var checkpoints []*heimdall.Checkpoint
+	var checkpoints []heimdall.HashAccumulator
 
 	for i := count; i >= 1; i-- {
 		c, err := impl.client.FetchCheckpoint(ctx, i)
@@ -74,7 +54,7 @@ func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([
 			return nil, err
 		}
 
-		cmpResult := cmpBlockNumToCheckpointRange(start, c)
+		cmpResult := c.CmpRange(start)
 		// the start block is past the last checkpoint
 		if cmpResult > 0 {
 			return nil, nil
@@ -92,13 +72,13 @@ func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([
 	return checkpoints, nil
 }
 
-func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]*heimdall.Milestone, error) {
+func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) (heimdall.HashAccumulators, error) {
 	count, err := impl.client.FetchMilestoneCount(ctx)
 	if err != nil {
 		return nil, err
 	}
 
-	var milestones []*heimdall.Milestone
+	var milestones heimdall.HashAccumulators
 
 	for i := count; i >= 1; i-- {
 		m, err := impl.client.FetchMilestone(ctx, i)
@@ -110,7 +90,7 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]
 			return nil, err
 		}
 
-		cmpResult := cmpBlockNumToMilestoneRange(start, m)
+		cmpResult := m.CmpRange(start)
 		// the start block is past the last milestone
 		if cmpResult > 0 {
 			return nil, nil

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -78,6 +79,20 @@ func (s Segment) Index(index ...snaptype.Index) *recsplit.Index {
 	}
 
 	return s.indexes[index[0].Offset()]
+}
+
+func (s Segment) IsIndexed() bool {
+	if len(s.indexes) < len(s.Type().Indexes()) {
+		return false
+	}
+
+	for _, i := range s.indexes {
+		if i == nil {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s Segment) FileName() string {
@@ -206,9 +221,7 @@ type RoSnapshots struct {
 	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
-	Headers *segments
-	Bodies  *segments
-	Txs     *segments
+	segments map[snaptype.Enum]*segments
 
 	dir         string
 	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
@@ -226,7 +239,7 @@ type RoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
-	return &RoSnapshots{dir: snapDir, cfg: cfg, Headers: &segments{}, Bodies: &segments{}, Txs: &segments{}, logger: logger}
+	return &RoSnapshots{dir: snapDir, cfg: cfg, segments: map[snaptype.Enum]*segments{}, logger: logger}
 }
 
 func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
@@ -261,99 +274,70 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (s *RoSnapshots) DisableReadAhead() {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.DisableReadAhead()
+func (s *RoSnapshots) DisableReadAhead() *RoSnapshots {
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+		defer segtype.lock.RUnlock()
+		for _, sn := range segtype.segments {
+			sn.DisableReadAhead()
+		}
 	}
-	for _, sn := range s.Bodies.segments {
-		sn.DisableReadAhead()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.DisableReadAhead()
-	}
-}
-func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.EnableReadAhead()
-	}
-	for _, sn := range s.Bodies.segments {
-		sn.EnableReadAhead()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.EnableReadAhead()
-	}
+
 	return s
 }
+
+func (s *RoSnapshots) EnableReadAhead() *RoSnapshots {
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+		defer segtype.lock.RUnlock()
+		for _, sn := range segtype.segments {
+			sn.EnableReadAhead()
+		}
+	}
+
+	return s
+}
+
 func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.EnableWillNeed()
-	}
-	for _, sn := range s.Bodies.segments {
-		sn.EnableWillNeed()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.EnableWillNeed()
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+		defer segtype.lock.RUnlock()
+		for _, sn := range segtype.segments {
+			sn.EnableMadvWillNeed()
+		}
 	}
 	return s
 }
 func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	for _, sn := range s.Headers.segments {
-		sn.EnableMadvNormal()
-	}
-	for _, sn := range s.Bodies.segments {
-		sn.EnableMadvNormal()
-	}
-	for _, sn := range s.Txs.segments {
-		sn.EnableMadvNormal()
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+		defer segtype.lock.RUnlock()
+		for _, sn := range segtype.segments {
+			sn.EnableMadvNormal()
+		}
 	}
 	return s
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
-	var headers, bodies, txs uint64
-	for _, seg := range s.Headers.segments {
-		if seg.Index() == nil {
-			break
+	max := make([]uint64, len(s.segments))
+
+	for i, segtype := range s.segments {
+		for _, seg := range segtype.segments {
+			if !seg.IsIndexed() {
+				break
+			}
+			max[i] = seg.to - 1
 		}
-		headers = seg.to - 1
 	}
-	for _, seg := range s.Bodies.segments {
-		if seg.Index() == nil {
-			break
-		}
-		bodies = seg.to - 1
+
+	var min uint64 = math.MaxUint64
+
+	for _, max := range max {
+		min = cmp.Min(min, max)
 	}
-	for _, seg := range s.Txs.segments {
-		if seg.Index(snaptype.Indexes.TxnHash) == nil || seg.Index(snaptype.Indexes.TxnHash2BlockNum) == nil {
-			break
-		}
-		txs = seg.to - 1
-	}
-	return cmp.Min(headers, cmp.Min(bodies, txs))
+
+	return min
 }
 
 // OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
@@ -370,62 +354,35 @@ func (s *RoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
 }
 
 func (s *RoSnapshots) Files() (list []string) {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
 	maxBlockNumInFiles := s.BlocksAvailable()
-	for _, seg := range s.Bodies.segments {
-		if seg.Decompressor == nil {
-			continue
+
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+		defer segtype.lock.RUnlock()
+
+		for _, seg := range segtype.segments {
+			if seg.Decompressor == nil {
+				continue
+			}
+			if seg.from > maxBlockNumInFiles {
+				continue
+			}
+			list = append(list, seg.FileName())
 		}
-		if seg.from > maxBlockNumInFiles {
-			continue
-		}
-		list = append(list, seg.FileName())
 	}
-	for _, seg := range s.Headers.segments {
-		if seg.Decompressor == nil {
-			continue
-		}
-		if seg.from > maxBlockNumInFiles {
-			continue
-		}
-		list = append(list, seg.FileName())
-	}
-	for _, seg := range s.Txs.segments {
-		if seg.Decompressor == nil {
-			continue
-		}
-		if seg.from > maxBlockNumInFiles {
-			continue
-		}
-		list = append(list, seg.FileName())
-	}
+
 	slices.Sort(list)
 	return list
 }
 
 func (s *RoSnapshots) OpenFiles() (list []string) {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+		defer segtype.lock.RUnlock()
 
-	for _, header := range s.Headers.segments {
-		list = append(list, header.openFiles()...)
-	}
-
-	for _, body := range s.Bodies.segments {
-		list = append(list, body.openFiles()...)
-	}
-
-	for _, txs := range s.Txs.segments {
-		list = append(list, txs.openFiles()...)
+		for _, seg := range segtype.segments {
+			list = append(list, seg.openFiles()...)
+		}
 	}
 
 	return list
@@ -441,29 +398,25 @@ func (s *RoSnapshots) InitSegments(fileNames []string) error {
 }
 
 func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic bool) error {
-	s.Headers.lock.Lock()
-	defer s.Headers.lock.Unlock()
-	s.Bodies.lock.Lock()
-	defer s.Bodies.lock.Unlock()
-	s.Txs.lock.Lock()
-	defer s.Txs.lock.Unlock()
+	for _, segtype := range s.segments {
+		segtype.lock.Lock()
+		defer segtype.lock.Unlock()
+	}
 
 	s.closeWhatNotInList(fileNames)
 	var segmentsMax uint64
 	var segmentsMaxSet bool
-Loop:
+
 	for _, fName := range fileNames {
 		f, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
 			continue
 		}
-		var processed bool = true
 
-		switch f.Type.Enum() {
-		case snaptype.Enums.Headers:
+		if segtype, ok := s.segments[f.Type.Enum()]; ok {
 			var sn *Segment
 			var exists bool
-			for _, sn2 := range s.Headers.segments {
+			for _, sn2 := range segtype.segments {
 				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
 					continue
 				}
@@ -481,14 +434,14 @@ Loop:
 				if err := sn.reopenSeg(s.dir); err != nil {
 					if errors.Is(err, os.ErrNotExist) {
 						if optimistic {
-							continue Loop
+							continue
 						} else {
-							break Loop
+							break
 						}
 					}
 					if optimistic {
 						s.logger.Warn("[snapshots] open segment", "err", err)
-						continue Loop
+						continue
 					} else {
 						return err
 					}
@@ -498,7 +451,7 @@ Loop:
 			if !exists {
 				// it's possible to iterate over .seg file even if you don't have index
 				// then make segment available even if index open may fail
-				s.Headers.segments = append(s.Headers.segments, sn)
+				segtype.segments = append(segtype.segments, sn)
 			}
 
 			if open {
@@ -506,98 +459,7 @@ Loop:
 					return err
 				}
 			}
-		case snaptype.Enums.Bodies:
-			var sn *Segment
-			var exists bool
-			for _, sn2 := range s.Bodies.segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if fName == sn2.FileName() {
-					sn = sn2
-					exists = true
-					break
-				}
-			}
-			if !exists {
-				sn = &Segment{segType: snaptype.Bodies, version: f.Version, Range: Range{f.From, f.To}}
-			}
 
-			if open {
-				if err := sn.reopenSeg(s.dir); err != nil {
-					if errors.Is(err, os.ErrNotExist) {
-						if optimistic {
-							continue Loop
-						} else {
-							break Loop
-						}
-					}
-					if optimistic {
-						s.logger.Warn("[snapshots] open segment", "err", err)
-						continue Loop
-					} else {
-						return err
-					}
-				}
-			}
-			if !exists {
-				s.Bodies.segments = append(s.Bodies.segments, sn)
-			}
-
-			if open {
-				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-					return err
-				}
-			}
-		case snaptype.Enums.Transactions:
-			var sn *Segment
-			var exists bool
-			for _, sn2 := range s.Txs.segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if fName == sn2.FileName() {
-					sn = sn2
-					exists = true
-					break
-				}
-			}
-			if !exists {
-				sn = &Segment{segType: snaptype.Transactions, version: f.Version, Range: Range{f.From, f.To}}
-			}
-
-			if open {
-				if err := sn.reopenSeg(s.dir); err != nil {
-					if errors.Is(err, os.ErrNotExist) {
-						if optimistic {
-							continue Loop
-						} else {
-							break Loop
-						}
-					}
-					if optimistic {
-						s.logger.Warn("[snapshots] open segment", "err", err)
-						continue Loop
-					} else {
-						return err
-					}
-				}
-			}
-
-			if !exists {
-				s.Txs.segments = append(s.Txs.segments, sn)
-			}
-
-			if open {
-				if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-					return err
-				}
-			}
-		default:
-			processed = false
-		}
-
-		if processed {
 			if f.To > 0 {
 				segmentsMax = f.To - 1
 			} else {
@@ -606,6 +468,7 @@ Loop:
 			segmentsMaxSet = true
 		}
 	}
+
 	if segmentsMaxSet {
 		s.segmentsMax.Store(segmentsMax)
 	}
@@ -662,146 +525,103 @@ func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 }
 
 func (s *RoSnapshots) Close() {
-	s.Headers.lock.Lock()
-	defer s.Headers.lock.Unlock()
-	s.Bodies.lock.Lock()
-	defer s.Bodies.lock.Unlock()
-	s.Txs.lock.Lock()
-	defer s.Txs.lock.Unlock()
+	for _, segtype := range s.segments {
+		segtype.lock.Lock()
+		defer segtype.lock.Unlock()
+	}
 	s.closeWhatNotInList(nil)
 }
 
 func (s *RoSnapshots) closeWhatNotInList(l []string) {
-Loop1:
-	for i, sn := range s.Headers.segments {
-		if sn.Decompressor == nil {
-			continue Loop1
-		}
-		_, name := filepath.Split(sn.FilePath())
-		for _, fName := range l {
-			if fName == name {
-				continue Loop1
+	for _, segtype := range s.segments {
+	Segments:
+		for i, sn := range segtype.segments {
+			if sn.Decompressor == nil {
+				continue Segments
 			}
-		}
-		sn.close()
-		s.Headers.segments[i] = nil
-	}
-Loop2:
-	for i, sn := range s.Bodies.segments {
-		if sn.Decompressor == nil {
-			continue Loop2
-		}
-		_, name := filepath.Split(sn.FilePath())
-		for _, fName := range l {
-			if fName == name {
-				continue Loop2
+			_, name := filepath.Split(sn.FilePath())
+			for _, fName := range l {
+				if fName == name {
+					continue Segments
+				}
 			}
-		}
-		sn.close()
-		s.Bodies.segments[i] = nil
-	}
-Loop3:
-	for i, sn := range s.Txs.segments {
-		if sn.Decompressor == nil {
-			continue Loop3
-		}
-		_, name := filepath.Split(sn.FilePath())
-		for _, fName := range l {
-			if fName == name {
-				continue Loop3
-			}
-		}
-		sn.close()
-		s.Txs.segments[i] = nil
-	}
-	var i int
-	for i = 0; i < len(s.Headers.segments) && s.Headers.segments[i] != nil && s.Headers.segments[i].Decompressor != nil; i++ {
-	}
-	tail := s.Headers.segments[i:]
-	s.Headers.segments = s.Headers.segments[:i]
-	for i = 0; i < len(tail); i++ {
-		if tail[i] != nil {
-			tail[i].close()
-			tail[i] = nil
+			sn.close()
+			segtype.segments[i] = nil
 		}
 	}
 
-	for i = 0; i < len(s.Bodies.segments) && s.Bodies.segments[i] != nil && s.Bodies.segments[i].Decompressor != nil; i++ {
-	}
-	tailB := s.Bodies.segments[i:]
-	s.Bodies.segments = s.Bodies.segments[:i]
-	for i = 0; i < len(tailB); i++ {
-		if tailB[i] != nil {
-			tailB[i].close()
-			tailB[i] = nil
+	for _, segtype := range s.segments {
+		var i int
+		for i = 0; i < len(segtype.segments) && segtype.segments[i] != nil && segtype.segments[i].Decompressor != nil; i++ {
 		}
-	}
-
-	for i = 0; i < len(s.Txs.segments) && s.Txs.segments[i] != nil && s.Txs.segments[i].Decompressor != nil; i++ {
-	}
-	tailC := s.Txs.segments[i:]
-	s.Txs.segments = s.Txs.segments[:i]
-	for i = 0; i < len(tailC); i++ {
-		if tailC[i] != nil {
-			tailC[i].close()
-			tailC[i] = nil
+		tail := segtype.segments[i:]
+		segtype.segments = segtype.segments[:i]
+		for i = 0; i < len(tail); i++ {
+			if tail[i] != nil {
+				tail[i].close()
+				tail[i] = nil
+			}
 		}
 	}
 }
 
 func (s *RoSnapshots) PrintDebug() {
-	s.Headers.lock.RLock()
-	defer s.Headers.lock.RUnlock()
-	s.Bodies.lock.RLock()
-	defer s.Bodies.lock.RUnlock()
-	s.Txs.lock.RLock()
-	defer s.Txs.lock.RUnlock()
-	fmt.Println("    == Snapshots, Header")
-	for _, sn := range s.Headers.segments {
-		fmt.Printf("%d,  %t\n", sn.from, sn.Index() == nil)
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+		defer segtype.lock.RUnlock()
 	}
-	fmt.Println("    == Snapshots, Body")
-	for _, sn := range s.Bodies.segments {
-		fmt.Printf("%d,  %t\n", sn.from, sn.Index() == nil)
-	}
-	fmt.Println("    == Snapshots, Txs")
-	for _, sn := range s.Txs.segments {
-		fmt.Printf("%d,  %t, %t\n", sn.from, sn.Index(snaptype.Indexes.TxnHash) == nil, sn.Index(snaptype.Indexes.TxnHash2BlockNum) == nil)
+
+	for t, segtype := range s.segments {
+		fmt.Println("    == Snapshots,", t.String())
+		for _, sn := range segtype.segments {
+			args := make([]any, 0, len(sn.Type().Indexes())+1)
+			args = append(args, sn.from)
+			for _, index := range sn.Type().Indexes() {
+				args = append(args, sn.Index(index) != nil)
+			}
+			fmt.Println(args...)
+		}
 	}
 }
 
 func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm) error {
 	mappedHeaderSnapshots := make([]*silkworm.MappedHeaderSnapshot, 0)
-	err := s.Headers.View(func(segments []*Segment) error {
-		for _, headerSegment := range segments {
-			mappedHeaderSnapshots = append(mappedHeaderSnapshots, headerSegment.mappedHeaderSnapshot())
+	if headers, ok := s.segments[snaptype.Enums.Headers]; ok {
+		err := headers.View(func(segments []*Segment) error {
+			for _, headerSegment := range segments {
+				mappedHeaderSnapshots = append(mappedHeaderSnapshots, headerSegment.mappedHeaderSnapshot())
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
-	if err != nil {
-		return err
 	}
 
 	mappedBodySnapshots := make([]*silkworm.MappedBodySnapshot, 0)
-	err = s.Bodies.View(func(segments []*Segment) error {
-		for _, bodySegment := range segments {
-			mappedBodySnapshots = append(mappedBodySnapshots, bodySegment.mappedBodySnapshot())
+	if bodies, ok := s.segments[snaptype.Enums.Bodies]; ok {
+		err := bodies.View(func(segments []*Segment) error {
+			for _, bodySegment := range segments {
+				mappedBodySnapshots = append(mappedBodySnapshots, bodySegment.mappedBodySnapshot())
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
-	if err != nil {
-		return err
 	}
 
 	mappedTxnSnapshots := make([]*silkworm.MappedTxnSnapshot, 0)
-	err = s.Txs.View(func(segments []*Segment) error {
-		for _, txnSegment := range segments {
-			mappedTxnSnapshots = append(mappedTxnSnapshots, txnSegment.mappedTxnSnapshot())
+	if txs, ok := s.segments[snaptype.Enums.Transactions]; ok {
+		err := txs.View(func(segments []*Segment) error {
+			for _, txnSegment := range segments {
+				mappedTxnSnapshots = append(mappedTxnSnapshots, txnSegment.mappedTxnSnapshot())
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
-		return nil
-	})
-	if err != nil {
-		return err
 	}
 
 	if len(mappedHeaderSnapshots) != len(mappedBodySnapshots) || len(mappedBodySnapshots) != len(mappedTxnSnapshots) {
@@ -2346,9 +2166,9 @@ type View struct {
 
 func (s *RoSnapshots) View() *View {
 	v := &View{s: s}
-	v.s.Headers.lock.RLock()
-	v.s.Bodies.lock.RLock()
-	v.s.Txs.lock.RLock()
+	for _, segtype := range s.segments {
+		segtype.lock.RLock()
+	}
 	return v
 }
 
@@ -2357,13 +2177,21 @@ func (v *View) Close() {
 		return
 	}
 	v.closed = true
-	v.s.Headers.lock.RUnlock()
-	v.s.Bodies.lock.RUnlock()
-	v.s.Txs.lock.RUnlock()
+	for _, segtype := range v.s.segments {
+		segtype.lock.RUnlock()
+	}
 }
-func (v *View) Headers() []*Segment { return v.s.Headers.segments }
-func (v *View) Bodies() []*Segment  { return v.s.Bodies.segments }
-func (v *View) Txs() []*Segment     { return v.s.Txs.segments }
+
+func (v *View) Segments(t snaptype.Type) []*Segment {
+	if s, ok := v.s.segments[t.Enum()]; ok {
+		return s.segments
+	}
+	return nil
+}
+
+func (v *View) Headers() []*Segment { return v.Segments(snaptype.Headers) }
+func (v *View) Bodies() []*Segment  { return v.Segments(snaptype.Bodies) }
+func (v *View) Txs() []*Segment     { return v.Segments(snaptype.Transactions) }
 func (v *View) HeadersSegment(blockNum uint64) (*Segment, bool) {
 	for _, seg := range v.Headers() {
 		if !(blockNum >= seg.from && blockNum < seg.to) {

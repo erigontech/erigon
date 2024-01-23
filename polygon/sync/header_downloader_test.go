@@ -40,12 +40,12 @@ func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts
 }
 
 type headerDownloaderTestOpts struct {
-	headerVerifier StatePointHeadersVerifier
+	headerVerifier AccumulatedHeadersVerifier
 }
 
-func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() StatePointHeadersVerifier {
+func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() AccumulatedHeadersVerifier {
 	if opts.headerVerifier == nil {
-		return func(_ *statePoint, _ []*types.Header) error {
+		return func(_ heimdall.HashAccumulator, _ []*types.Header) error {
 			return nil
 		}
 	}
@@ -84,9 +84,11 @@ func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoin
 	for i := range checkpoints {
 		num := i + 1
 		checkpoints[i] = &heimdall.Checkpoint{
-			StartBlock: big.NewInt(int64(num)),
-			EndBlock:   big.NewInt(int64(num)),
-			RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+			Fields: heimdall.HashAccumulatorFields{
+				StartBlock: big.NewInt(int64(num)),
+				EndBlock:   big.NewInt(int64(num)),
+				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+			},
 		}
 	}
 
@@ -98,9 +100,11 @@ func (hdt headerDownloaderTest) fakeMilestones(count int) []*heimdall.Milestone 
 	for i := range milestones {
 		num := i + 1
 		milestones[i] = &heimdall.Milestone{
-			StartBlock: big.NewInt(int64(num)),
-			EndBlock:   big.NewInt(int64(num)),
-			Hash:       common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+			Fields: heimdall.HashAccumulatorFields{
+				StartBlock: big.NewInt(int64(num)),
+				EndBlock:   big.NewInt(int64(num)),
+				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+			},
 		}
 	}
 
@@ -194,8 +198,8 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
-		headerVerifier: func(statePoint *statePoint, headers []*types.Header) error {
-			if statePoint.startBlock.Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
+		headerVerifier: func(hashAccumulator heimdall.HashAccumulator, headers []*types.Header) error {
+			if hashAccumulator.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid checkpoint")
 			}

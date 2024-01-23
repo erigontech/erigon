@@ -94,6 +94,7 @@ type Type interface {
 	FileName(version Version, from uint64, to uint64) string
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(version Version, from uint64, to uint64) []string
+	Indexes() []Index
 }
 
 type snapType struct {
@@ -120,6 +121,10 @@ func (s snapType) FileName(version Version, from uint64, to uint64) string {
 	}
 
 	return SegmentFileName(version, from, to, s.enum)
+}
+
+func (s snapType) Indexes() []Index {
+	return s.indexes
 }
 
 func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {

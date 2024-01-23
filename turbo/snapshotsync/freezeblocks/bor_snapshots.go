@@ -10,14 +10,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
-	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -428,18 +426,7 @@ RETRY:
 // span_id -> offset
 
 type BorRoSnapshots struct {
-	indicesReady  atomic.Bool
-	segmentsReady atomic.Bool
-
-	Events *segments
-	Spans  *segments
-
-	dir         string
-	segmentsMax atomic.Uint64 // all types of .seg files are available - up to this number
-	idxMax      atomic.Uint64 // all types of .idx files are available - up to this number
-	cfg         ethconfig.BlocksFreezing
-	logger      log.Logger
-	segmentsMin atomic.Uint64
+	RoSnapshots
 }
 
 // NewBorRoSnapshots - opens all bor snapshots. But to simplify everything:
@@ -448,60 +435,11 @@ type BorRoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{dir: snapDir, cfg: cfg, Events: &segments{}, Spans: &segments{}, logger: logger}
-}
-
-func (s *BorRoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
-func (s *BorRoSnapshots) Dir() string                   { return s.dir }
-func (s *BorRoSnapshots) SegmentsReady() bool           { return s.segmentsReady.Load() }
-func (s *BorRoSnapshots) IndicesReady() bool            { return s.indicesReady.Load() }
-func (s *BorRoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
-func (s *BorRoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
-func (s *BorRoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
-func (s *BorRoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
-func (s *BorRoSnapshots) BlocksAvailable() uint64 {
-	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
-}
-func (s *BorRoSnapshots) LogStat(label string) {
-	var m runtime.MemStats
-	dbg.ReadMemStats(&m)
-	s.logger.Info(fmt.Sprintf("[bor snapshots:%s] Blocks Stat", label),
-		"blocks", fmt.Sprintf("%dk", (s.SegmentsMax()+1)/1000),
-		"indices", fmt.Sprintf("%dk", (s.IndicesMax()+1)/1000),
-		"alloc", common2.ByteCount(m.Alloc), "sys", common2.ByteCount(m.Sys))
+	return &BorRoSnapshots{*NewRoSnapshots(cfg, snapDir, logger)}
 }
 
 func BorSegments(dir string, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	list, err := snaptype.Segments(dir)
-	if err != nil {
-		return nil, missingSnapshots, err
-	}
-	{
-		var l []snaptype.FileInfo
-		var m []Range
-		for _, f := range list {
-			if f.Type.Enum() != snaptype.Enums.BorEvents {
-				continue
-			}
-			l = append(l, f)
-		}
-		l, m = noGaps(noOverlaps(borSegmentsMustExist(dir, l)), min)
-		res = append(res, l...)
-		missingSnapshots = append(missingSnapshots, m...)
-	}
-	{
-		var l []snaptype.FileInfo
-		for _, f := range list {
-			if f.Type.Enum() != snaptype.Enums.BorSpans {
-				continue
-			}
-			l = append(l, f)
-		}
-		l, _ = noGaps(noOverlaps(borSegmentsMustExist(dir, l)), min)
-		res = append(res, l...)
-	}
-
-	return res, missingSnapshots, nil
+	return filteredSegments(dir, min, borSegmentsMustExist)
 }
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
@@ -566,261 +504,6 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 	}
 }
 
-func (s *BorRoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
-	if s.BlocksAvailable() < cfg.ExpectBlocks {
-		return fmt.Errorf("app must wait until all expected bor snapshots are available. Expected: %d, Available: %d", cfg.ExpectBlocks, s.BlocksAvailable())
-	}
-	return nil
-}
-
-// DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
-func (s *BorRoSnapshots) DisableReadAhead() {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.DisableReadAhead()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.DisableReadAhead()
-	}
-}
-func (s *BorRoSnapshots) EnableReadAhead() *BorRoSnapshots {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.EnableReadAhead()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.EnableReadAhead()
-	}
-	return s
-}
-func (s *BorRoSnapshots) EnableMadvWillNeed() *BorRoSnapshots {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.EnableWillNeed()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.EnableWillNeed()
-	}
-	return s
-}
-func (s *BorRoSnapshots) EnableMadvNormal() *BorRoSnapshots {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	for _, sn := range s.Events.segments {
-		sn.EnableMadvNormal()
-	}
-	for _, sn := range s.Spans.segments {
-		sn.EnableMadvNormal()
-	}
-	return s
-}
-
-func (s *BorRoSnapshots) idxAvailability() uint64 {
-	var events, spans uint64
-	for _, seg := range s.Events.segments {
-		if seg.Index() == nil {
-			break
-		}
-		events = seg.to - 1
-	}
-	for _, seg := range s.Spans.segments {
-		if seg.Index() == nil {
-			break
-		}
-		spans = seg.to - 1
-	}
-	return cmp.Min(events, spans)
-}
-
-// OptimisticReopenWithDB - optimistically open snapshots (ignoring error), useful at App startup because:
-// - user must be able: delete any snapshot file and Erigon will self-heal by re-downloading
-// - RPC return Nil for historical blocks if snapshots are not open
-func (s *BorRoSnapshots) OptimisticReopenWithDB(db kv.RoDB) {
-	_ = db.View(context.Background(), func(tx kv.Tx) error {
-		snList, _, err := rawdb.ReadSnapshots(tx)
-		if err != nil {
-			return err
-		}
-		return s.ReopenList(snList, true)
-	})
-}
-
-func (s *BorRoSnapshots) Files() (list []string) {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	max := s.BlocksAvailable()
-	for _, seg := range s.Events.segments {
-		if seg.Decompressor == nil {
-			continue
-		}
-		if seg.from > max {
-			continue
-		}
-		_, fName := filepath.Split(seg.FilePath())
-		list = append(list, fName)
-	}
-	for _, seg := range s.Spans.segments {
-		if seg.Decompressor == nil {
-			continue
-		}
-		if seg.from > max {
-			continue
-		}
-		_, fName := filepath.Split(seg.FilePath())
-		list = append(list, fName)
-	}
-	slices.Sort(list)
-	return list
-}
-
-// ReopenList stops on optimistic=false, continue opening files on optimistic=true
-func (s *BorRoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
-	s.Events.lock.Lock()
-	defer s.Events.lock.Unlock()
-	s.Spans.lock.Lock()
-	defer s.Spans.lock.Unlock()
-
-	s.closeWhatNotInList(fileNames)
-	var segmentsMax uint64
-	var segmentsMaxSet bool
-Loop:
-	for _, fName := range fileNames {
-		f, ok := snaptype.ParseFileName(s.dir, fName)
-		if !ok {
-			s.logger.Trace("BorRoSnapshots.ReopenList: skip", "file", fName)
-			continue
-		}
-
-		var processed bool = true
-		switch f.Type.Enum() {
-		case snaptype.Enums.BorEvents:
-			var sn *Segment
-			var exists bool
-			for _, sn2 := range s.Events.segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if fName == sn2.FileName() {
-					sn = sn2
-					exists = true
-					break
-				}
-			}
-			if !exists {
-				sn = &Segment{segType: snaptype.BorEvents, version: f.Version, Range: Range{f.From, f.To}}
-			}
-			if err := sn.reopenSeg(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if optimistic {
-						continue Loop
-					} else {
-						break Loop
-					}
-				}
-				if optimistic {
-					s.logger.Warn("[bor snapshots] open segment", "err", err)
-					continue Loop
-				} else {
-					return err
-				}
-			}
-
-			if !exists {
-				// it's possible to iterate over .seg file even if you don't have index
-				// then make segment availabe even if index open may fail
-				s.Events.segments = append(s.Events.segments, sn)
-			}
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
-			}
-		case snaptype.Enums.BorSpans:
-			var sn *Segment
-			var exists bool
-			for _, sn2 := range s.Spans.segments {
-				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					continue
-				}
-				if fName == sn2.FileName() {
-					sn = sn2
-					exists = true
-					break
-				}
-			}
-			if !exists {
-				sn = &Segment{segType: snaptype.BorSpans, version: f.Version, Range: Range{f.From, f.To}}
-			}
-			if err := sn.reopenSeg(s.dir); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					if optimistic {
-						continue Loop
-					} else {
-						break Loop
-					}
-				}
-				if optimistic {
-					s.logger.Warn("[bor snapshots] open segment", "err", err)
-					continue Loop
-				} else {
-					return err
-				}
-			}
-
-			if !exists {
-				// it's possible to iterate over .seg file even if you don't have index
-				// then make segment availabe even if index open may fail
-				s.Spans.segments = append(s.Spans.segments, sn)
-			}
-			if err := sn.reopenIdxIfNeed(s.dir, optimistic); err != nil {
-				return err
-			}
-		default:
-			processed = false
-		}
-
-		if processed {
-			if f.To > 0 {
-				segmentsMax = f.To - 1
-			} else {
-				segmentsMax = 0
-			}
-			segmentsMaxSet = true
-		}
-	}
-	if segmentsMaxSet {
-		s.segmentsMax.Store(segmentsMax)
-	}
-	s.segmentsReady.Store(true)
-	s.idxMax.Store(s.idxAvailability())
-	s.indicesReady.Store(true)
-
-	return nil
-}
-
-func (s *BorRoSnapshots) Ranges() (ranges []Range) {
-	view := s.View()
-	defer view.Close()
-
-	for _, sn := range view.Events() {
-		ranges = append(ranges, sn.Range)
-	}
-	return ranges
-}
-
-func (s *BorRoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
-func (s *BorRoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *BorRoSnapshots) ReopenFolder() error {
 	files, _, err := BorSegments(s.dir, s.segmentsMin.Load())
 	if err != nil {
@@ -838,116 +521,22 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 	}
 	return s.ReopenList(list, false)
 }
-func (s *BorRoSnapshots) ReopenWithDB(db kv.RoDB) error {
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		snList, _, err := rawdb.ReadSnapshots(tx)
-		if err != nil {
-			return err
-		}
-		return s.ReopenList(snList, true)
-	}); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (s *BorRoSnapshots) Close() {
-	s.Events.lock.Lock()
-	defer s.Events.lock.Unlock()
-	s.Spans.lock.Lock()
-	defer s.Spans.lock.Unlock()
-	s.closeWhatNotInList(nil)
-}
-
-func (s *BorRoSnapshots) closeWhatNotInList(l []string) {
-Loop1:
-	for i, sn := range s.Events.segments {
-		if sn.Decompressor == nil {
-			continue Loop1
-		}
-		_, name := filepath.Split(sn.FilePath())
-		for _, fName := range l {
-			if fName == name {
-				continue Loop1
-			}
-		}
-		sn.close()
-		s.Events.segments[i] = nil
-	}
-Loop2:
-	for i, sn := range s.Spans.segments {
-		if sn.Decompressor == nil {
-			continue Loop2
-		}
-		_, name := filepath.Split(sn.FilePath())
-		for _, fName := range l {
-			if fName == name {
-				continue Loop2
-			}
-		}
-		sn.close()
-		s.Spans.segments[i] = nil
-	}
-	var i int
-	for i = 0; i < len(s.Events.segments) && s.Events.segments[i] != nil && s.Events.segments[i].Decompressor != nil; i++ {
-	}
-	tail := s.Events.segments[i:]
-	s.Events.segments = s.Events.segments[:i]
-	for i = 0; i < len(tail); i++ {
-		if tail[i] != nil {
-			tail[i].close()
-			tail[i] = nil
-		}
-	}
-	for i = 0; i < len(s.Spans.segments) && s.Spans.segments[i] != nil && s.Spans.segments[i].Decompressor != nil; i++ {
-	}
-	tailS := s.Spans.segments[i:]
-	s.Spans.segments = s.Spans.segments[:i]
-	for i = 0; i < len(tailS); i++ {
-		if tailS[i] != nil {
-			tailS[i].close()
-			tailS[i] = nil
-		}
-	}
-}
-
-func (s *BorRoSnapshots) PrintDebug() {
-	s.Events.lock.RLock()
-	defer s.Events.lock.RUnlock()
-	s.Spans.lock.RLock()
-	defer s.Spans.lock.RUnlock()
-	fmt.Println("    == BorSnapshots, Event")
-	for _, sn := range s.Events.segments {
-		fmt.Printf("%d,  %t\n", sn.from, sn.Index() == nil)
-	}
-	fmt.Println("    == BorSnapshots, Span")
-	for _, sn := range s.Spans.segments {
-		fmt.Printf("%d,  %t\n", sn.from, sn.Index() == nil)
-	}
-}
 
 type BorView struct {
-	s      *BorRoSnapshots
-	closed bool
+	base *View
 }
 
 func (s *BorRoSnapshots) View() *BorView {
-	v := &BorView{s: s}
-	v.s.Events.lock.RLock()
-	v.s.Spans.lock.RLock()
-	return v
+	return &BorView{base: s.RoSnapshots.View()}
 }
 
 func (v *BorView) Close() {
-	if v.closed {
-		return
-	}
-	v.closed = true
-	v.s.Events.lock.RUnlock()
-	v.s.Spans.lock.RUnlock()
+	v.base.Close()
 }
-func (v *BorView) Events() []*Segment { return v.s.Events.segments }
-func (v *BorView) Spans() []*Segment  { return v.s.Spans.segments }
+
+func (v *BorView) Events() []*Segment { return v.base.Segments(snaptype.BorEvents) }
+func (v *BorView) Spans() []*Segment  { return v.base.Segments(snaptype.BorSpans) }
+
 func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
 	for _, seg := range v.Events() {
 		if !(blockNum >= seg.from && blockNum < seg.to) {
@@ -957,6 +546,7 @@ func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
 	}
 	return nil, false
 }
+
 func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
 	for _, seg := range v.Spans() {
 		if !(blockNum >= seg.from && blockNum < seg.to) {

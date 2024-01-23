@@ -49,9 +49,11 @@ func TestHeimdallServer(t *testing.T) {
 	client.EXPECT().Span(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
 
 	checkpoint1 := &heimdall.Checkpoint{
-		StartBlock: big.NewInt(1000),
-		EndBlock:   big.NewInt(1999),
-		BorChainID: "80001",
+		Fields: heimdall.HashAccumulatorFields{
+			StartBlock: big.NewInt(1000),
+			EndBlock:   big.NewInt(1999),
+			ChainID:    "80001",
+		},
 	}
 	client.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).AnyTimes().Return(checkpoint1, nil)
 	client.EXPECT().FetchCheckpointCount(gomock.Any()).AnyTimes().Return(int64(1), nil)

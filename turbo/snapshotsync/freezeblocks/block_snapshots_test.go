@@ -173,13 +173,15 @@ func TestOpenAllSnapshot(t *testing.T) {
 		defer s.Close()
 		err := s.ReopenFolder()
 		require.NoError(err)
-		require.Equal(0, len(s.Headers.segments))
+		require.NotNil(s.segments[snaptype.Enums.Headers])
+		require.Equal(0, len(s.segments[snaptype.Enums.Headers].segments))
 		s.Close()
 
 		createFile(500_000, 1_000_000, snaptype.Bodies)
 		s = NewRoSnapshots(cfg, dir, logger)
 		defer s.Close()
-		require.Equal(0, len(s.Bodies.segments)) //because, no headers and transactions snapshot files are created
+		require.NotNil(s.segments[snaptype.Enums.Bodies])
+		require.Equal(0, len(s.segments[snaptype.Enums.Bodies].segments))
 		s.Close()
 
 		createFile(500_000, 1_000_000, snaptype.Headers)
@@ -187,7 +189,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s = NewRoSnapshots(cfg, dir, logger)
 		err = s.ReopenFolder()
 		require.NoError(err)
-		require.Equal(0, len(s.Headers.segments))
+		require.NotNil(s.segments[snaptype.Enums.Headers])
+		require.Equal(0, len(s.segments[snaptype.Enums.Headers].segments))
 		s.Close()
 
 		createFile(0, 500_000, snaptype.Bodies)
@@ -198,7 +201,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		err = s.ReopenFolder()
 		require.NoError(err)
-		require.Equal(2, len(s.Headers.segments))
+		require.NotNil(s.segments[snaptype.Enums.Headers])
+		require.Equal(2, len(s.segments[snaptype.Enums.Headers].segments))
 
 		view := s.View()
 		defer view.Close()
@@ -221,7 +225,8 @@ func TestOpenAllSnapshot(t *testing.T) {
 		err = s.ReopenFolder()
 		require.NoError(err)
 		defer s.Close()
-		require.Equal(2, len(s.Headers.segments))
+		require.NotNil(s.segments[snaptype.Enums.Headers])
+		require.Equal(2, len(s.segments[snaptype.Enums.Headers].segments))
 
 		createFile(500_000, 900_000, snaptype.Headers)
 		createFile(500_000, 900_000, snaptype.Bodies)
