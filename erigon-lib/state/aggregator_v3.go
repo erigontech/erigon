@@ -899,7 +899,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
 
 	if !ac.somethingToPrune(tx, txTo) {
-		ac.a.logger.Debug("[agg] nothing to prune", "step", step, "tx_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit)
+		ac.a.logger.Info("[agg] nothing to prune", "step", step, "tx_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit)
 		return nil, nil
 	}
 
