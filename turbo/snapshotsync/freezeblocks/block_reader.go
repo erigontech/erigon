@@ -733,7 +733,7 @@ func (r *BlockReader) txnByID(txnID uint64, sn *TxnSegment, buf []byte) (txn typ
 	return
 }
 
-func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (txn types.Transaction, blockNum, txnID uint64, err error) {
+func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf []byte) (types.Transaction, uint64, bool, error) {
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.IdxTxnHash == nil || sn.IdxTxnHash2BlockNum == nil {
@@ -753,22 +753,23 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*TxnSegment, buf
 		senderByte, txnRlp := buf[1:1+20], buf[1+20:]
 		sender := *(*common.Address)(senderByte)
 
-		txn, err = types.DecodeTransaction(txnRlp)
+		txn, err := types.DecodeTransaction(txnRlp)
 		if err != nil {
-			return
+			return nil, 0, false, err
 		}
 
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(sn.IdxTxnHash2BlockNum)
-		blockNum = reader2.Lookup(txnHash[:])
+		blockNum := reader2.Lookup(txnHash[:])
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
-			return
+			return txn, blockNum, true, nil
 		}
 	}
-	return
+
+	return nil, 0, false, nil
 }
 
 // TxnByIdxInBlock - doesn't include system-transactions in the begin/end of block
@@ -813,7 +814,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 }
 
 // TxnLookup - find blockNumber and txnID by txnHash
-func (r *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
 	n, err := rawdb.ReadTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
@@ -825,16 +826,12 @@ func (r *BlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash commo
 	view := r.sn.View()
 	defer view.Close()
 
-	var txn types.Transaction
-	var blockNum uint64
-	txn, blockNum, _, err = r.txnByHash(txnHash, view.Txs(), nil)
+	_, blockNum, ok, err := r.txnByHash(txnHash, view.Txs(), nil)
 	if err != nil {
 		return 0, false, err
 	}
-	if txn == nil {
-		return 0, false, nil
-	}
-	return blockNum, true, nil
+
+	return blockNum, ok, nil
 }
 
 func (r *BlockReader) FirstTxNumNotInSnapshots() uint64 {

@@ -54,7 +54,7 @@ func NewExecutionClientRPC(ctx context.Context, jwtSecret []byte, addr string, p
 	}, nil
 }
 
-func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -112,7 +112,11 @@ func (cc *ExecutionClientRpc) NewPayload(payload *cltypes.Eth1Block, beaconParen
 
 	payloadStatus := &engine_types.PayloadStatus{} // As it is done in the rpcdaemon
 	log.Debug("[ExecutionClientRpc] Calling EL", "method", engineMethod)
-	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, request)
+	args := []interface{}{request}
+	if versionedHashes != nil {
+		args = append(args, versionedHashes, *beaconParentRoot)
+	}
+	err = cc.client.CallContext(cc.ctx, &payloadStatus, engineMethod, args...)
 	if err != nil {
 		err = fmt.Errorf("execution Client RPC failed to retrieve the NewPayload status response, err: %w", err)
 		return

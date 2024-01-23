@@ -81,9 +81,9 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, requestI
 		return
 	}
 	// Can fail, not an issue in this case.
-	e.chainRW.InsertBlockAndWait(block)
+	e.chainRW.InsertBlockAndWait(block, nil)
 	// Lastly attempt verification
-	status, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
+	status, _, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
 		e.status.Store(headerdownload.Idle)
