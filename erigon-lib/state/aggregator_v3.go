@@ -801,13 +801,14 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return err
 		}
 		if stat == nil {
+			log.Info("[snapshots] PruneSmallBatches", "took", time.Since(started).Round(time.Second).String(), "stat", fullStat.String())
 			return nil
 		}
 		fullStat.Accumulate(stat)
 
 		select {
 		case <-logEvery.C:
-			ac.a.logger.Info("[agg] pruning",
+			ac.a.logger.Info("[snapshots] pruning",
 				"until timeout", time.Until(started.Add(timeout)).String(),
 				"aggregatedStep", ac.a.aggregatedStep.Load(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
@@ -899,7 +900,6 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
 
 	if !ac.somethingToPrune(tx, txTo) {
-		ac.a.logger.Info("[agg] nothing to prune", "step", step, "tx_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit)
 		return nil, nil
 	}
 

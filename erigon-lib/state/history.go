@@ -1078,9 +1078,9 @@ func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
 	isAggregated := minIdxTx < min(untilTxNum, inSnapsTx)
 
 	res := isNoFilesAndEnoughTxKeptInDB || isAggregated
-	defer func() {
-		fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t snapTx %d idxTx [%d-%d] keepTxInDB=%d; result %t\n", hc.h.filenameBase, untilTxNum, hc.h.dontProduceFiles, inSnapsTx, minIdxTx, maxIdxTx, hc.h.keepTxInDB, res)
-	}()
+	//defer func() {
+	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t snapTx %d idxTx [%d-%d] keepTxInDB=%d; result %t\n", hc.h.filenameBase, untilTxNum, hc.h.dontProduceFiles, inSnapsTx, minIdxTx, maxIdxTx, hc.h.keepTxInDB, res)
+	//}()
 	return res
 }
 
