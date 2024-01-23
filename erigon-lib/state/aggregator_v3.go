@@ -74,7 +74,6 @@ type AggregatorV3 struct {
 	keepInDB         uint64
 
 	minimaxTxNumInFiles atomic.Uint64
-	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
 	snapshotBuildSema *semaphore.Weighted
@@ -248,11 +247,6 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 		return err
 	}
 	a.recalcMaxTxNum()
-	mx := a.minimaxTxNumInFiles.Load()
-	if mx > 0 {
-		mx--
-	}
-	a.aggregatedStep.Store(mx / a.StepSize())
 	return nil
 }
 
@@ -274,11 +268,6 @@ func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
 		return err
 	}
 	a.recalcMaxTxNum()
-	mx := a.minimaxTxNumInFiles.Load()
-	if mx > 0 {
-		mx--
-	}
-	a.aggregatedStep.Store(mx / a.StepSize())
 	return nil
 }
 
@@ -603,9 +592,7 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
-	a.aggregatedStep.Store(step)
-
-	a.logger.Info("[snapshots] aggregation", "step", step, "took", time.Since(stepStartedAt))
+	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
 
 	return nil
 }
@@ -729,9 +716,7 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	step := ac.a.aggregatedStep.Load()
-	txTo := ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
-	return ac.somethingToPrune(tx, txTo)
+	return ac.somethingToPrune(tx, ac.maxTxNumInDomainFiles(false))
 }
 
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
@@ -810,7 +795,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		case <-logEvery.C:
 			ac.a.logger.Info("[snapshots] pruning",
 				"until timeout", time.Until(started.Add(timeout)).String(),
-				"aggregatedStep", ac.a.aggregatedStep.Load(),
+				"aggregatedStep", ac.maxTxNumInDomainFiles(false)/ac.a.StepSize(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
@@ -895,8 +880,8 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		limit = uint64(math2.MaxUint64)
 	}
 
-	var txFrom, txTo uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
-	txTo = ac.maxTxNumInDomainFiles(false)
+	var txFrom uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
+	txTo := ac.maxTxNumInDomainFiles(false)
 	step := txTo / ac.a.StepSize()
 
 	if !ac.somethingToPrune(tx, txTo) {
