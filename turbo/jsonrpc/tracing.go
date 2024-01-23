@@ -7,23 +7,23 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	polygontracer "github.com/ledgerwatch/erigon/polygon/tracer"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/transactions"
-	"github.com/ledgerwatch/log/v3"
-
-	jsoniter "github.com/json-iterator/go"
 )
 
 // TraceBlockByNumber implements debug_traceBlockByNumber. Returns Geth style block traces.
@@ -83,7 +83,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	}
 
 	if config.BorTraceEnabled == nil {
-		config.BorTraceEnabled = newBoolPtr(false)
+		var disabled bool
+		config.BorTraceEnabled = &disabled
 	}
 
 	chainConfig, err := api.chainConfig(tx)
@@ -103,16 +104,33 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
-	borTx := rawdb.ReadBorTransactionForBlock(tx, block.NumberU64())
 	txns := block.Transactions()
-	if borTx != nil && *config.BorTraceEnabled {
-		txns = append(txns, borTx)
+	var borStateSyncTx types.Transaction
+	if *config.BorTraceEnabled {
+		borStateSyncTxHash := types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
+		if err != nil {
+			stream.WriteArrayEnd()
+			return err
+		}
+		if ok {
+			borStateSyncTx = types.NewBorTransaction()
+			txns = append(txns, borStateSyncTx)
+		}
 	}
 
 	for idx, txn := range txns {
+		isBorStateSyncTx := borStateSyncTx == txn
+		var txnHash common.Hash
+		if isBorStateSyncTx {
+			txnHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
+		} else {
+			txnHash = txn.Hash()
+		}
+
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
-		stream.WriteString(txn.Hash().Hex())
+		stream.WriteString(txnHash.Hex())
 		stream.WriteMore()
 		stream.WriteObjectField("result")
 		select {
@@ -137,13 +155,24 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			GasPrice: msg.GasPrice(),
 		}
 
-		if borTx != nil && idx == len(txns)-1 {
-			if *config.BorTraceEnabled {
-				config.BorTx = newBoolPtr(true)
-			}
+		if isBorStateSyncTx {
+			err = polygontracer.TraceBorStateSyncTxn(
+				ctx,
+				tx,
+				chainConfig,
+				config,
+				ibs,
+				api._blockReader,
+				block.Hash(),
+				block.NumberU64(),
+				block.Time(),
+				blockCtx,
+				stream,
+				api.evmCallTimeout,
+			)
+		} else {
+			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 		}
-
-		err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
@@ -183,14 +212,34 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
+	var isBorStateSyncTx bool
 	blockNum, ok, err := api.txnLookup(tx, hash)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	if !ok {
-		stream.WriteNil()
-		return nil
+		if chainConfig.Bor == nil {
+			stream.WriteNil()
+			return nil
+		}
+
+		// otherwise this may be a bor state sync transaction - check
+		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
+		if err != nil {
+			stream.WriteNil()
+			return err
+		}
+		if !ok {
+			stream.WriteNil()
+			return nil
+		}
+		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
+			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
+			return nil
+		}
+
+		isBorStateSyncTx = true
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -200,19 +249,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 
-	// Private API returns 0 if transaction is not found.
-	if blockNum == 0 && chainConfig.Bor != nil {
-		blockNumPtr, err := rawdb.ReadBorTxLookupEntry(tx, hash)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		if blockNumPtr == nil {
-			stream.WriteNil()
-			return nil
-		}
-		blockNum = *blockNumPtr
-	}
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
 	if err != nil {
 		stream.WriteNil()
@@ -222,35 +258,47 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return nil
 	}
-	var txnIndex uint64
+	var txnIndex int
 	var txn types.Transaction
-	for i, transaction := range block.Transactions() {
+	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTx; i++ {
+		transaction := block.Transactions()[i]
 		if transaction.Hash() == hash {
-			txnIndex = uint64(i)
+			txnIndex = i
 			txn = transaction
 			break
 		}
 	}
 	if txn == nil {
-		var borTx types.Transaction
-		borTx, err = rawdb.ReadBorTransaction(tx, hash)
-		if err != nil {
-			return err
-		}
-
-		if borTx != nil {
+		if isBorStateSyncTx {
+			// bor state sync tx is appended at the end of the block
+			txnIndex = block.Transactions().Len()
+		} else {
 			stream.WriteNil()
-			return nil
+			return fmt.Errorf("transaction %#x not found", hash)
 		}
-		stream.WriteNil()
-		return fmt.Errorf("transaction %#x not found", hash)
 	}
 	engine := api.engine()
 
-	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, int(txnIndex), api.historyV3(tx))
+	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txnIndex, api.historyV3(tx))
 	if err != nil {
 		stream.WriteNil()
 		return err
+	}
+	if isBorStateSyncTx {
+		return polygontracer.TraceBorStateSyncTxn(
+			ctx,
+			tx,
+			chainConfig,
+			config,
+			ibs,
+			api._blockReader,
+			block.Hash(),
+			blockNum,
+			block.Time(),
+			blockCtx,
+			stream,
+			api.evmCallTimeout,
+		)
 	}
 	// Trace the transaction and return
 	return transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
@@ -516,9 +564,4 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 	stream.WriteArrayEnd()
 	return nil
-}
-
-func newBoolPtr(bb bool) *bool {
-	b := bb
-	return &b
 }
