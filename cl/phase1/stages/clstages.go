@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"strconv"
 	"time"
@@ -455,7 +456,7 @@ func ConsensusClStages(ctx context.Context,
 					// Now check the head
 					headRoot, headSlot, err := cfg.forkChoice.GetHead()
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to get head: %w", err)
 					}
 
 					// Do forkchoice if possible
@@ -473,7 +474,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to begin transaction: %w", err)
 					}
 					defer tx.Rollback()
 
@@ -486,7 +487,7 @@ func ConsensusClStages(ctx context.Context,
 					currentSlot := headSlot
 					currentCanonical, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to read canonical block root: %w", err)
 					}
 					reconnectionRoots := make([]canonicalEntry, 0, 1)
 
@@ -494,10 +495,10 @@ func ConsensusClStages(ctx context.Context,
 						var newFoundSlot *uint64
 
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
-							return err
+							return fmt.Errorf("failed to read parent block root: %w", err)
 						}
 						if newFoundSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, currentRoot); err != nil {
-							return err
+							return fmt.Errorf("failed to read block slot by block root: %w", err)
 						}
 						if newFoundSlot == nil {
 							break
@@ -505,30 +506,30 @@ func ConsensusClStages(ctx context.Context,
 						currentSlot = *newFoundSlot
 						currentCanonical, err = beacon_indicies.ReadCanonicalBlockRoot(tx, currentSlot)
 						if err != nil {
-							return err
+							return fmt.Errorf("failed to read canonical block root: %w", err)
 						}
 						reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
 					}
 					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
-						return err
+						return fmt.Errorf("failed to truncate canonical chain: %w", err)
 					}
 					for i := len(reconnectionRoots) - 1; i >= 0; i-- {
 						if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoots[i].slot, reconnectionRoots[i].root); err != nil {
-							return err
+							return fmt.Errorf("failed to mark root canonical: %w", err)
 						}
 					}
 					if err := beacon_indicies.MarkRootCanonical(ctx, tx, headSlot, headRoot); err != nil {
-						return err
+						return fmt.Errorf("failed to mark root canonical: %w", err)
 					}
 
 					// Increment validator set
 					headState, err := cfg.forkChoice.GetStateAtBlockRoot(headRoot, false)
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to get state at block root: %w", err)
 					}
 					cfg.forkChoice.SetSynced(true)
 					if err := cfg.syncedData.OnHeadState(headState); err != nil {
-						return err
+						return fmt.Errorf("failed to set head state: %w", err)
 					}
 					start := time.Now()
 					// Incement some stuff here
@@ -536,29 +537,29 @@ func ConsensusClStages(ctx context.Context,
 					preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
 					preverifiedHistoricalRoots := cfg.forkChoice.PreverifiedHistoricalRoots(headState.FinalizedCheckpoint().BlockRoot())
 					if err := state_accessors.IncrementPublicKeyTable(tx, headState, preverifiedValidators); err != nil {
-						return err
+						return fmt.Errorf("failed to increment public key table: %w", err)
 					}
 					if err := state_accessors.IncrementHistoricalSummariesTable(tx, headState, preverifiedHistoricalSummary); err != nil {
-						return err
+						return fmt.Errorf("failed to increment historical summaries table: %w", err)
 					}
 					if err := state_accessors.IncrementHistoricalRootsTable(tx, headState, preverifiedHistoricalRoots); err != nil {
-						return err
+						return fmt.Errorf("failed to increment historical roots table: %w", err)
 					}
 					log.Debug("Incremented state history", "elapsed", time.Since(start), "preverifiedValidators", preverifiedValidators)
 
 					stateRoot, err := headState.HashSSZ()
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to hash ssz: %w", err)
 					}
 
 					headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
 					previous_duty_dependent_root, err := headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to get block root at slot for previous_duty_dependent_root: %w", err)
 					}
 					current_duty_dependent_root, err := headState.GetBlockRootAtSlot(headEpoch*cfg.beaconCfg.SlotsPerEpoch - 1)
 					if err != nil {
-						return err
+						return fmt.Errorf("failed to get block root at slot for current_duty_dependent_root: %w", err)
 					}
 					// emit the head event
 					cfg.emitter.Publish("head", map[string]any{
