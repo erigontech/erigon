@@ -252,12 +252,32 @@ func (v *ValidatorApiHandler) GetEthV3ValidatorBlocksSlot(w http.ResponseWriter,
 	return o, nil
 }
 
+var validTopics = map[string]struct{}{
+	"head":                           {},
+	"block":                          {},
+	"attestation":                    {},
+	"voluntary_exit":                 {},
+	"bls_to_execution_change":        {},
+	"finalized_checkpoint":           {},
+	"chain_reorg":                    {},
+	"contribution_and_proof":         {},
+	"light_client_finality_update":   {},
+	"light_client_optimistic_update": {},
+	"payload_attributes":             {},
+	"*":                              {},
+}
+
 func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) (any, error) {
 	sink, err := sse.DefaultUpgrader.Upgrade(w, r)
 	if err != nil {
 		return nil, fmt.Errorf("failed to upgrade: %s", err)
 	}
 	topics := r.URL.Query()["topics"]
+	for _, v := range topics {
+		if _, ok := validTopics[v]; !ok {
+			return nil, fmt.Errorf("Invalid Topic: %s", v)
+		}
+	}
 	var mu sync.Mutex
 	closer, err := v.Emitters.Subscribe(topics, func(topic string, item any) {
 		buf := &bytes.Buffer{}
