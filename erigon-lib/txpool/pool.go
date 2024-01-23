@@ -2090,7 +2090,10 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 
 	if p.feeCalculator != nil {
 		if chainConfig, _ := ChainConfig(tx); chainConfig != nil {
-			pendingBaseFee, pendingBlobFee, minBlobGasPrice, _ = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, err = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
