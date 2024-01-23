@@ -938,6 +938,7 @@ Loop:
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
 					"block", doms.BlockNum(), "txNum", doms.TxNum(),
+					"step", stepsInDB,
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3, "warmup", t4)
 			default:
 			}
