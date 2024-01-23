@@ -6,6 +6,7 @@ import (
 	"github.com/holiman/uint256"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
@@ -60,7 +61,7 @@ func (bsstt *borStateSyncTxnTracer) CaptureStart(
 	if !bsstt.captureStartCalledOnce {
 		// first event execution started
 		// perform a CaptureStart for the synthetic state sync transaction
-		from := libcommon.Address{}
+		from := state.SystemAddress
 		to := bsstt.stateReceiverContractAddress
 		bsstt.EVMLogger.CaptureStart(env, from, to, false, false, nil, 0, uint256.NewInt(0), nil)
 		bsstt.captureStartCalledOnce = true
