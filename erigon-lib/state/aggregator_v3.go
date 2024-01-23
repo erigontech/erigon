@@ -880,9 +880,12 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		limit = uint64(math2.MaxUint64)
 	}
 
-	var txFrom uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
+	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
 	txTo := ac.maxTxNumInDomainFiles(false)
-	step := txTo / ac.a.StepSize()
+	if txTo > 0 {
+		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
+		step = (txTo - 1) / ac.a.StepSize()
+	}
 
 	if !ac.somethingToPrune(tx, txTo) {
 		return nil, nil
