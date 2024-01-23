@@ -801,7 +801,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return err
 		}
 		if stat == nil {
-			log.Info("[snapshots] PruneSmallBatches", "took", time.Since(started).Round(time.Second).String(), "stat", fullStat.String())
+			log.Info("[snapshots] PruneSmallBatches", "took", time.Since(started).String(), "stat", fullStat.String())
 			return nil
 		}
 		fullStat.Accumulate(stat)
@@ -896,8 +896,8 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	}
 
 	var txFrom, txTo uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
-	step := ac.a.aggregatedStep.Load()
-	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
+	txTo = ac.maxTxNumInDomainFiles(false)
+	step := txTo / ac.a.StepSize()
 
 	if !ac.somethingToPrune(tx, txTo) {
 		return nil, nil

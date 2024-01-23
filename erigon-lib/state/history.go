@@ -1075,7 +1075,7 @@ func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
 		minIdxTx < maxIdxTx-hc.h.keepTxInDB // idx data < MaxTx-keepTxInDB
 
 	// if we produce files, we can prune only if index has values < maxTxNumInFiles
-	isAggregated := minIdxTx < min(untilTxNum, inSnapsTx)
+	isAggregated := minIdxTx < inSnapsTx
 
 	res := isNoFilesAndEnoughTxKeptInDB || isAggregated
 	//defer func() {
