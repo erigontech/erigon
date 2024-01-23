@@ -8,7 +8,7 @@ import (
 )
 
 // checkpoints and milestones are both hash hashAccumulators as defined
-// here https://www.ethportal.net/concepts/hash-hashAccumulators
+// here https://www.ethportal.net/concepts/hash-accumulators
 
 type HashAccumulator interface {
 	fmt.Stringer
