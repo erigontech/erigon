@@ -79,8 +79,8 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) Peer
 	return peers
 }
 
-func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoint {
-	checkpoints := make([]*heimdall.Checkpoint, count)
+func (hdt headerDownloaderTest) fakeCheckpoints(count int) heimdall.HashAccumulators {
+	checkpoints := make(heimdall.HashAccumulators, count)
 	for i := range checkpoints {
 		num := i + 1
 		checkpoints[i] = &heimdall.Checkpoint{
@@ -95,8 +95,8 @@ func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*heimdall.Checkpoin
 	return checkpoints
 }
 
-func (hdt headerDownloaderTest) fakeMilestones(count int) []*heimdall.Milestone {
-	milestones := make([]*heimdall.Milestone, count)
+func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.HashAccumulators {
+	milestones := make(heimdall.HashAccumulators, count)
 	for i := range milestones {
 		num := i + 1
 		milestones[i] = &heimdall.Milestone{
