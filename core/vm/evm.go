@@ -322,11 +322,19 @@ type codeAndHash struct {
 	hash libcommon.Hash
 }
 
+func NewCodeAndHash(code []byte) *codeAndHash {
+	return &codeAndHash{code: code}
+}
+
 func (c *codeAndHash) Hash() libcommon.Hash {
 	if c.hash == (libcommon.Hash{}) {
 		c.hash = crypto.Keccak256Hash(c.code)
 	}
 	return c.hash
+}
+
+func (evm *EVM) OverlayCreate(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
+	return evm.create(caller, codeAndHash, gas, value, address, typ, incrementNonce)
 }
 
 // create creates a new contract using code as deployment code.

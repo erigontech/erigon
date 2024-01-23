@@ -240,6 +240,19 @@ func main() {
 	}
 	with(benchEthGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
 
+	var benchOverlayGetLogsCmd = &cobra.Command{
+		Use:   "benchOverlayGetLogs",
+		Short: "",
+		Long:  ``,
+		Run: func(cmd *cobra.Command, args []string) {
+			err := rpctest.BenchOverlayGetLogs(erigonURL, needCompare, blockFrom, blockTo, recordFile, errorFile)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+		},
+	}
+	with(benchOverlayGetLogsCmd, withErigonUrl, withGethUrl, withNeedCompare, withBlockNum, withRecord, withErrorFile)
+
 	var bench9Cmd = &cobra.Command{
 		Use:   "bench9",
 		Short: "",
@@ -457,6 +470,7 @@ func main() {
 		bench6Cmd,
 		bench7Cmd,
 		benchEthGetLogsCmd,
+		benchOverlayGetLogsCmd,
 		bench9Cmd,
 		benchTraceCallCmd,
 		benchTraceCallManyCmd,
