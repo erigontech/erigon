@@ -54,18 +54,32 @@ func NewWitness(operands []WitnessOperator) *Witness {
 	}
 }
 
-func (w *Witness) WriteInto(out io.Writer) (*BlockWitnessStats, error) {
+func (w *Witness) WriteInto(out io.Writer, consolePrint bool) (*BlockWitnessStats, error) {
+	var lines []string
 	statsCollector := NewOperatorMarshaller(out)
 
 	if err := w.Header.WriteTo(statsCollector); err != nil {
 		return nil, err
+	}
+	if consolePrint {
+		lines = append(lines, "start witness...\n")
+		lines = append(lines, fmt.Sprintf("witness-header: %+v\n", w.Header))
 	}
 
 	for _, op := range w.Operators {
 		if err := op.WriteTo(statsCollector); err != nil {
 			return nil, err
 		}
+		if consolePrint {
+			lines = append(lines, fmt.Sprintf("%+v\n", op))
+		}
 	}
+
+	if consolePrint {
+		lines = append(lines, "witness end...\n")
+		fmt.Print(lines)
+	}
+
 	return statsCollector.GetStats(), nil
 }
 

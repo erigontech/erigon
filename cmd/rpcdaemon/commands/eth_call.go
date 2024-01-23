@@ -406,11 +406,15 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 	return pr.ProofResult()
 }
 
-func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
-	return api.getWitness(ctx, api.db, blockNrOrHash)
+func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error) {
+	dbg := false
+	if debug != nil {
+		dbg = *debug
+	}
+	return api.getWitness(ctx, api.db, blockNrOrHash, dbg)
 }
 
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash) (hexutility.Bytes, error) {
+func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, debug bool) (hexutility.Bytes, error) {
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -431,7 +435,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 		w := trie.NewWitness(make([]trie.WitnessOperator, 0))
 
 		var buf bytes.Buffer
-		_, err = w.WriteInto(&buf)
+		_, err = w.WriteInto(&buf, debug)
 		if err != nil {
 			return nil, err
 		}
@@ -522,7 +526,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rp
 	}
 
 	var buf bytes.Buffer
-	_, err = witness.WriteInto(&buf)
+	_, err = witness.WriteInto(&buf, debug)
 	if err != nil {
 		return nil, err
 	}
