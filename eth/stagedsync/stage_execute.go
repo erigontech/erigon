@@ -473,10 +473,11 @@ Loop:
 			if tx_err != nil {
 				return tx_err
 			}
-			defer tx.Rollback()
+			txc.Tx = tx
+			defer txc.Tx.Rollback()
 			// Recreate memory batch because underlying tx has changed
 			batch.Close()
-			batch = membatch.NewHashBatch(tx, quit, cfg.dirs.Tmp, logger)
+			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
