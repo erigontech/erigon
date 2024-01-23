@@ -1066,7 +1066,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTxNum uint64) (can bool, 
 	minIdxTx := hc.ic.CanPruneFrom(tx)
 	maxIdxTx := hc.ic.highestTxNum(tx)
 	defer func() {
-		fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n", hc.h.filenameBase, untilTxNum, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, can)
+		fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n", hc.h.filenameBase, untilTxNum, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
 	}()
 
 	if hc.h.dontProduceFiles {
@@ -1080,7 +1080,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTxNum uint64) (can bool, 
 	}
 
 	// if we produce files, we can prune only if index has values < maxTxNumInFiles
-	return minIdxTx < txTo, txTo
+	return minIdxTx != math.MaxUint64 && minIdxTx < txTo, txTo
 }
 
 func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
