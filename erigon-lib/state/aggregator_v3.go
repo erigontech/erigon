@@ -729,20 +729,11 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	return ac.CanPruneFrom(tx) < ac.maxTxNumInDomainFiles(false)
+	step := ac.a.aggregatedStep.Load()
+	txTo := ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
+	return ac.somethingToPrune(tx, txTo)
 }
-func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
-	fst, _ := kv.FirstKey(tx, ac.a.tracesTo.indexKeysTable)
-	fst2, _ := kv.FirstKey(tx, ac.a.storage.History.indexKeysTable)
-	fst3, _ := kv.FirstKey(tx, ac.a.commitment.History.indexKeysTable)
-	if len(fst) > 0 && len(fst2) > 0 && len(fst3) > 0 {
-		fstInDb := binary.BigEndian.Uint64(fst)
-		fstInDb2 := binary.BigEndian.Uint64(fst2)
-		fstInDb3 := binary.BigEndian.Uint64(fst3)
-		return cmp.Min(cmp.Min(fstInDb, fstInDb2), fstInDb3)
-	}
-	return math2.MaxUint64
-}
+
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
 	_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
 	return histBlockNumProgress, err
@@ -774,16 +765,18 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	return blockNumWithCommitment, true, nil
 }
 
-// returns true if we can prune something already aggregated
-func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx, untilTxNum uint64) bool {
-	return dbg.NoPrune() || (!ac.account.CanPruneUntil(tx, untilTxNum) &&
-		!ac.storage.CanPruneUntil(tx, untilTxNum) &&
-		!ac.code.CanPruneUntil(tx, untilTxNum) &&
-		!ac.commitment.CanPruneUntil(tx, untilTxNum) &&
-		!ac.logAddrs.CanPrune(tx) &&
-		!ac.logTopics.CanPrune(tx) &&
-		!ac.tracesFrom.CanPrune(tx) &&
-		!ac.tracesTo.CanPrune(tx))
+func (ac *AggregatorV3Context) somethingToPrune(tx kv.Tx, untilTxNum uint64) bool {
+	if dbg.NoPrune() {
+		return false
+	}
+	return ac.commitment.CanPruneUntil(tx, untilTxNum) ||
+		ac.account.CanPruneUntil(tx, untilTxNum) ||
+		ac.code.CanPruneUntil(tx, untilTxNum) ||
+		ac.storage.CanPruneUntil(tx, untilTxNum) ||
+		ac.logAddrs.CanPrune(tx) ||
+		ac.logTopics.CanPrune(tx) ||
+		ac.tracesFrom.CanPrune(tx) ||
+		ac.tracesTo.CanPrune(tx)
 }
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
@@ -905,7 +898,8 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	step := ac.a.aggregatedStep.Load()
 	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
 
-	if ac.nothingToPrune(tx, txTo) {
+	if !ac.somethingToPrune(tx, txTo) {
+		ac.a.logger.Debug("[agg] nothing to prune", "step", step, "tx_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit)
 		return nil, nil
 	}
 
