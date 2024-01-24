@@ -3,8 +3,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
-
+	
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 
@@ -25,16 +24,6 @@ func NewPlainStateReader(db kv.Getter) *PlainStateReader {
 	return &PlainStateReader{
 		db: db,
 	}
-}
-
-func (r *PlainStateReader) ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error {
-	return r.db.ForEach(table, fromPrefix, walker)
-}
-
-func (r *PlainStateReader) GetTxCount() (uint64, error) {
-
-	return 0, fmt.Errorf("not implemented")
-
 }
 
 func (r *PlainStateReader) ReadAccountData(address libcommon.Address) (*accounts.Account, error) {

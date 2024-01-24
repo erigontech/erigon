@@ -27,11 +27,12 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	erigonchain "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -204,8 +205,8 @@ type Config struct {
 	Ethash ethashcfg.Config
 
 	Clique params.ConsensusSnapshotConfig
-	Aura   erigonchain.AuRaConfig
-	Bor    erigonchain.BorConfig
+	Aura   chain.AuRaConfig
+	Bor    chain.BorConfig
 
 	// Transaction pool options
 	DeprecatedTxPool DeprecatedTxPoolConfig
@@ -253,23 +254,6 @@ type Config struct {
 
 	//[zkevm]
 	Zk *Zk
-}
-
-type Zk struct {
-	L2ChainId                   uint64
-	L2RpcUrl                    string
-	L2DataStreamerUrl           string
-	L1ChainId                   uint64
-	L1RpcUrl                    string
-	L1ContractAddress           common.Address
-	L1BlockRange                uint64
-	L1QueryDelay                uint64
-	L1MaticContractAddress      common.Address
-	L1GERManagerContractAddress common.Address
-	L1FirstBlock                uint64
-	RpcRateLimits               int
-
-	RebuildTreeAfter uint64
 }
 
 type Sync struct {

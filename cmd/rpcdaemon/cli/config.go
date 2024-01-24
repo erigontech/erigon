@@ -13,13 +13,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/state/historyv2read"
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
@@ -62,8 +62,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
 
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
-
+	// Force-load native and js packages, to trigger registration
 	_ "github.com/ledgerwatch/erigon/eth/tracers/js"
 	_ "github.com/ledgerwatch/erigon/eth/tracers/native"
 )
@@ -610,21 +609,6 @@ func startRegularRpcServer(ctx context.Context, cfg httpcfg.HttpCfg, rpcAPI []rp
 	}()
 	<-ctx.Done()
 	log.Info("Exiting...")
-	return nil
-}
-
-func StartDataStream(server *datastreamer.StreamServer) error {
-	if server == nil {
-		// no stream server to start, we might not have the right flags set to create one
-		return nil
-	}
-
-	log.Info("Starting data stream server...")
-	err := server.Start()
-	if err != nil {
-		return fmt.Errorf("failed to start data stream server, error: %w", err)
-	}
-
 	return nil
 }
 

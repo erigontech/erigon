@@ -45,11 +45,11 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync"
@@ -334,31 +334,6 @@ func printBucket(chaindata, bucket string) {
 		return nil
 	}); err != nil {
 		panic(err)
-	}
-}
-
-func formatBucketKVPair(k, v []byte, bucket string) string {
-	// switch statement on bucket (found in tables.go)
-	switch bucket {
-	case kv.SyncStageProgress:
-		val := binary.BigEndian.Uint64(v)
-		return fmt.Sprintf("%s %d", string(k), val)
-
-	case kv.Sequence:
-		return fmt.Sprintf("%s %x", k, v)
-
-	default:
-		return fmt.Sprintf("%x %x", k, v)
-	}
-	return ""
-}
-
-func printBuckets(chaindata, buckets string) {
-	if buckets == "" {
-		buckets = kv.EthTx
-	}
-	for _, b := range strings.Split(buckets, ",") {
-		printBucket(chaindata, b)
 	}
 }
 
@@ -1394,34 +1369,6 @@ func rlptest() error {
 	b = make([]byte, librlp.AnnouncementsLen(p.Types, p.Sizes, hashes))
 	l := librlp.EncodeAnnouncements(p.Types, p.Sizes, hashes, b)
 	fmt.Printf("%x\n%d %d\n", b, len(b), l)
-	return nil
-}
-
-func countAccounts(chaindata string) error {
-	db := mdbx.MustOpen(chaindata)
-	defer db.Close()
-
-	var count uint64
-	var keys []string
-
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		return tx.ForEach(kv.PlainState, nil, func(k, v []byte) error {
-			if len(k) == 20 {
-				count++
-				keys = append(keys, common.Bytes2Hex(k))
-			}
-			return nil
-		})
-	}); err != nil {
-		return err
-	}
-
-	fmt.Printf("count=%d\n", count)
-	sort.Strings(keys)
-	for _, k := range keys {
-		fmt.Printf("%s\n", k)
-	}
-
 	return nil
 }
 
