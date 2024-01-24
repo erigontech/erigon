@@ -263,7 +263,7 @@ type Node = HashNode{raw_hash:Hash}
           | ExtensionNode{key:(Byte...) child:Node}
           | BranchNode{child0:nil|Node child1:nil|Node child3:nil|Node ... child15:nil|Node}
           | CodeNode{code:(Byte... )}
-          | SmtLeafNode{nodeType:Byte address:(Byte...), storageKey:(Byte...), value:(Byte...)}
+          | SmtLeafNode{nodeType:Byte address:(Byte...), storageKey:(Byte...), value:(Byte...), code:(Byte...)}
 ```
 
 ## Execution process
@@ -512,7 +512,13 @@ LEAF{key, raw_value} |=> LeafNode{key, ValueNode{raw_value}}
 
 ---
 
+GUARD nodeType != 0x02
 SMT_LEAF{nodeType, address, storageKey, value} |=> SmtLeafNode{nodeType, address, storageKey, value}
+
+---
+
+GUARD nodeType == 0x02
+CodeNode(code) SMT_LEAF{nodeType, address, storageKey, value} |=> SmtLeafNode{nodeType, address, storageKey, value, code}
 
 ---
 
