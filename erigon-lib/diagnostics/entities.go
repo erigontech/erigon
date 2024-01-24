@@ -90,6 +90,19 @@ type SyncStages struct {
 	CurrentStage uint     `json:"currentStage"`
 }
 
+type BlockExecutionStatistics struct {
+	From        uint64  `json:"from"`
+	To          uint64  `json:"to"`
+	BlockNumber uint64  `json:"blockNumber"`
+	BlkPerSec   float64 `json:"blkPerSec"`
+	TxPerSec    float64 `json:"txPerSec"`
+	MgasPerSec  float64 `json:"mgasPerSec"`
+	GasState    float64 `json:"gasState"`
+	Batch       float64 `json:"batch"`
+	Alloc       uint64  `json:"alloc"`
+	Sys         uint64  `json:"sys"`
+}
+
 func (ti SnapshotDownloadStatistics) Type() Type {
 	return TypeOf(ti)
 }
