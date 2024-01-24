@@ -63,17 +63,17 @@ var Eip1559FeeCalculator eip1559Calculator
 
 type eip1559Calculator struct{}
 
-func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice uint64, err error) {
+func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee, blobFee, minBlobGasPrice, blockGasLimit uint64, err error) {
 	hash := rawdb.ReadHeadHeaderHash(db)
 
 	if hash == (libcommon.Hash{}) {
-		return 0, 0, 0, fmt.Errorf("can't get head header hash")
+		return 0, 0, 0, 0, fmt.Errorf("can't get head header hash")
 	}
 
 	currentHeader, err := rawdb.ReadHeaderByHash(db, hash)
 
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
 	if chainConfig != nil {
@@ -92,7 +92,7 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 
 	minBlobGasPrice = chainConfig.GetMinBlobGasPrice()
 
-	return baseFee, blobFee, minBlobGasPrice, nil
+	return baseFee, blobFee, minBlobGasPrice, currentHeader.GasLimit, nil
 }
 
 // CalcBaseFee calculates the basefee of the header.
