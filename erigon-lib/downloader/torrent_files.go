@@ -112,3 +112,28 @@ func (tf *TorrentFiles) load(fPath string) (*torrent.TorrentSpec, error) {
 	mi.AnnounceList = Trackers
 	return torrent.TorrentSpecFromMetaInfoErr(mi)
 }
+
+const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
+
+// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
+// After "download once" - Erigon will produce and seed new files
+// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
+func (tf *TorrentFiles) prohibitNewDownloads() error {
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+	fPath := filepath.Join(tf.dir, ProhibitNewDownloadsFileName)
+	f, err := os.Create(fPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	return nil
+}
+func (tf *TorrentFiles) newDownloadsAreProhibited() bool {
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+	return dir2.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName))
+}
