@@ -150,10 +150,10 @@ func (mr *MockHeimdallClientMockRecorder) FetchNoAckMilestone(arg0, arg1 interfa
 }
 
 // Span mocks base method.
-func (m *MockHeimdallClient) Span(arg0 context.Context, arg1 uint64) (*HeimdallSpan, error) {
+func (m *MockHeimdallClient) Span(arg0 context.Context, arg1 uint64) (*heimdall.Span, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Span", arg0, arg1)
-	ret0, _ := ret[0].(*HeimdallSpan)
+	ret0, _ := ret[0].(*heimdall.Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

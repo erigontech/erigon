@@ -78,8 +78,8 @@ type Heimdall struct {
 	pendingCheckpoint  *heimdall.Checkpoint
 	latestCheckpoint   *CheckpointAck
 	ackWaiter          *sync.Cond
-	currentSpan        *heimdall.HeimdallSpan
-	spans              map[uint64]*heimdall.HeimdallSpan
+	currentSpan        *heimdall.Span
+	spans              map[uint64]*heimdall.Span
 	logger             log.Logger
 	cancelFunc         context.CancelFunc
 	syncSenderAddress  libcommon.Address
@@ -105,7 +105,7 @@ func NewHeimdall(
 		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
 		listenAddr:         serverURL[7:],
 		checkpointConfig:   *checkpointConfig,
-		spans:              map[uint64]*heimdall.HeimdallSpan{},
+		spans:              map[uint64]*heimdall.Span{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
 		logger:             logger}
 
@@ -142,7 +142,7 @@ func NewHeimdall(
 	return heimdall
 }
 
-func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.HeimdallSpan, error) {
+func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -152,7 +152,9 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.HeimdallS
 	}
 
 	var nextSpan = heimdall.Span{
-		ID: spanID,
+		ID:           spanID,
+		ValidatorSet: *h.validatorSet,
+		ChainID:      h.chainConfig.ChainID.String(),
 	}
 
 	if h.currentSpan == nil || spanID == 0 {
@@ -169,18 +171,13 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.HeimdallS
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
-	selectedProducers := make([]valset.Validator, len(h.validatorSet.Validators))
+	nextSpan.SelectedProducers = make([]valset.Validator, len(h.validatorSet.Validators))
 
 	for i, v := range h.validatorSet.Validators {
-		selectedProducers[i] = *v
+		nextSpan.SelectedProducers[i] = *v
 	}
 
-	h.currentSpan = &heimdall.HeimdallSpan{
-		Span:              nextSpan,
-		ValidatorSet:      *h.validatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           h.chainConfig.ChainID.String(),
-	}
+	h.currentSpan = &nextSpan
 
 	h.spans[h.currentSpan.ID] = h.currentSpan
 

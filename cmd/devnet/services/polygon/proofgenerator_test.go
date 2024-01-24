@@ -283,8 +283,8 @@ func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) 
 	return &c.currentSpan, nil
 }
 
-func (c *spanner) CommitSpan(heimdallSpan heimdall.HeimdallSpan, syscall consensus.SystemCall) error {
-	c.currentSpan = heimdallSpan.Span
+func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+	c.currentSpan = heimdallSpan
 	return nil
 }
 

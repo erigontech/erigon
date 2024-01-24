@@ -18,7 +18,10 @@ import (
 type Heimdall interface {
 	FetchCheckpoints(ctx context.Context, start uint64) (heimdall.HashAccumulators, error)
 	FetchMilestones(ctx context.Context, start uint64) (heimdall.HashAccumulators, error)
-	FetchSpan(ctx context.Context, start uint64) (*heimdall.HeimdallSpan, error)
+	FetchSpans(ctx context.Context, start uint64) ([]*heimdall.Span, error)
+
+	OnSpanEvent(ctx context.Context, callback func(*heimdall.Span)) error
+	OnCheckpointEvent(ctx context.Context, callback func(*heimdall.Checkpoint)) error
 	OnMilestoneEvent(ctx context.Context, callback func(*heimdall.Milestone)) error
 }
 
@@ -108,7 +111,7 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) (he
 	return milestones, nil
 }
 
-func (impl *HeimdallImpl) FetchSpan(ctx context.Context, start uint64) (*heimdall.HeimdallSpan, error) {
+func (impl *HeimdallImpl) FetchSpans(ctx context.Context, start uint64) (*heimdall.Span, error) {
 	return impl.client.Span(ctx, bor.SpanIDAt(start))
 }
 

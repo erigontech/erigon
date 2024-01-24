@@ -65,19 +65,33 @@ func (mr *MockHeimdallMockRecorder) FetchMilestones(ctx, start interface{}) *gom
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchMilestones", reflect.TypeOf((*MockHeimdall)(nil).FetchMilestones), ctx, start)
 }
 
-// FetchSpan mocks base method.
-func (m *MockHeimdall) FetchSpan(ctx context.Context, start uint64) (*heimdall.HeimdallSpan, error) {
+// FetchSpans mocks base method.
+func (m *MockHeimdall) FetchSpans(ctx context.Context, start uint64) ([]*heimdall.Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "FetchSpan", ctx, start)
-	ret0, _ := ret[0].(*heimdall.HeimdallSpan)
+	ret := m.ctrl.Call(m, "FetchSpans", ctx, start)
+	ret0, _ := ret[0].([]*heimdall.Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// FetchSpan indicates an expected call of FetchSpan.
-func (mr *MockHeimdallMockRecorder) FetchSpan(ctx, start interface{}) *gomock.Call {
+// FetchSpans indicates an expected call of FetchSpans.
+func (mr *MockHeimdallMockRecorder) FetchSpans(ctx, start interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpan", reflect.TypeOf((*MockHeimdall)(nil).FetchSpan), ctx, start)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpans", reflect.TypeOf((*MockHeimdall)(nil).FetchSpans), ctx, start)
+}
+
+// OnCheckpointEvent mocks base method.
+func (m *MockHeimdall) OnCheckpointEvent(ctx context.Context, callback func(*heimdall.Checkpoint)) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OnCheckpointEvent", ctx, callback)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// OnCheckpointEvent indicates an expected call of OnCheckpointEvent.
+func (mr *MockHeimdallMockRecorder) OnCheckpointEvent(ctx, callback interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnCheckpointEvent", reflect.TypeOf((*MockHeimdall)(nil).OnCheckpointEvent), ctx, callback)
 }
 
 // OnMilestoneEvent mocks base method.
@@ -92,4 +106,18 @@ func (m *MockHeimdall) OnMilestoneEvent(ctx context.Context, callback func(*heim
 func (mr *MockHeimdallMockRecorder) OnMilestoneEvent(ctx, callback interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnMilestoneEvent", reflect.TypeOf((*MockHeimdall)(nil).OnMilestoneEvent), ctx, callback)
+}
+
+// OnSpanEvent mocks base method.
+func (m *MockHeimdall) OnSpanEvent(ctx context.Context, callback func(*heimdall.Span)) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "OnSpanEvent", ctx, callback)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// OnSpanEvent indicates an expected call of OnSpanEvent.
+func (mr *MockHeimdallMockRecorder) OnSpanEvent(ctx, callback interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnSpanEvent", reflect.TypeOf((*MockHeimdall)(nil).OnSpanEvent), ctx, callback)
 }

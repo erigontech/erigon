@@ -21,7 +21,7 @@ type Spanner interface {
 	GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.Span, error)
 	GetCurrentValidators(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)
 	GetCurrentProducers(spanId uint64, signer libcommon.Address, chain consensus.ChainHeaderReader) ([]*valset.Validator, error)
-	CommitSpan(heimdallSpan heimdall.HeimdallSpan, syscall consensus.SystemCall) error
+	CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error
 }
 
 type ABI interface {
@@ -93,7 +93,7 @@ func (c *ChainSpanner) GetCurrentValidators(spanId uint64, signer libcommon.Addr
 	}
 
 	spanBytes := chain.BorSpan(spanId)
-	var span heimdall.HeimdallSpan
+	var span heimdall.Span
 	if err := json.Unmarshal(spanBytes, &span); err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (c *ChainSpanner) GetCurrentProducers(spanId uint64, signer libcommon.Addre
 	}
 
 	spanBytes := chain.BorSpan(spanId)
-	var span heimdall.HeimdallSpan
+	var span heimdall.Span
 	if err := json.Unmarshal(spanBytes, &span); err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func (c *ChainSpanner) GetCurrentProducers(spanId uint64, signer libcommon.Addre
 	return producers, nil
 }
 
-func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.HeimdallSpan, syscall consensus.SystemCall) error {
+func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
 
 	// method
 	const method = "commitSpan"
@@ -146,7 +146,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.HeimdallSpan, syscall co
 		return err
 	}
 
-	c.logger.Debug("[bor] ✅ Committing new span",
+	c.logger.Trace("[bor] ✅ Committing new span",
 		"id", heimdallSpan.ID,
 		"startBlock", heimdallSpan.StartBlock,
 		"endBlock", heimdallSpan.EndBlock,

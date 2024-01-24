@@ -1336,7 +1336,7 @@ func (c *Bor) fetchAndCommitSpan(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	var heimdallSpan heimdall.HeimdallSpan
+	var heimdallSpan heimdall.Span
 
 	if c.HeimdallClient == nil {
 		// fixme: move to a new mock or fake and remove c.HeimdallClient completely
@@ -1469,7 +1469,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) (*heimdall.HeimdallSpan, error) {
+) (*heimdall.Span, error) {
 	headerNumber := header.Number.Uint64()
 
 	spanBor, err := c.spanner.GetCurrentSpan(syscall)
@@ -1498,14 +1498,13 @@ func (c *Bor) getNextHeimdallSpanForTest(
 		selectedProducers[i] = *v
 	}
 
-	heimdallSpan := &heimdall.HeimdallSpan{
-		Span:              *spanBor,
-		ValidatorSet:      *snap.ValidatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           c.chainConfig.ChainID.String(),
-	}
+	heimdallSpan := *spanBor
 
-	return heimdallSpan, nil
+	heimdallSpan.ValidatorSet = *snap.ValidatorSet
+	heimdallSpan.SelectedProducers = selectedProducers
+	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
+
+	return &heimdallSpan, nil
 }
 
 func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
