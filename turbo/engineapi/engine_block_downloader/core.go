@@ -64,7 +64,9 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		return
 	}
 
+	e.logger.Warn("see: ", " e.syncCfg.LoopBlockLimit", e.syncCfg.LoopBlockLimit)
 	if e.syncCfg.LoopBlockLimit > 0 {
+		e.logger.Warn("see: ", "startBlock+uint64(e.syncCfg.LoopBlockLimit)", startBlock+uint64(e.syncCfg.LoopBlockLimit), "endBlock", endBlock)
 		endBlock = cmp.Min(endBlock, startBlock+uint64(e.syncCfg.LoopBlockLimit))
 	}
 
