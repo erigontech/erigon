@@ -2052,8 +2052,8 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
-func (dc *DomainContext) CanPruneUntil(tx kv.Tx, txNum uint64) bool {
-	return dc.canPruneDomainTables(tx) || dc.hc.CanPruneUntil(tx, txNum)
+func (dc *DomainContext) CanPruneUntil(tx kv.Tx) bool {
+	return dc.canPruneDomainTables(tx) || dc.hc.CanPruneUntil(tx)
 }
 
 // checks if there is anything to prune in DOMAIN tables.
@@ -2098,7 +2098,7 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
 
-	//fmt.Printf("found CanPrune from %x first %d  last %d\n", k, ^binary.BigEndian.Uint64(v), ^binary.BigEndian.Uint64(fv))
+	//fmt.Printf("found CanPrune from %x first %d last %d\n", k, ^binary.BigEndian.Uint64(v), ^binary.BigEndian.Uint64(fv))
 	return minStep
 }
 

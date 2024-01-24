@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/rand"
-	"testing"
-	"time"
-
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"math/rand"
+	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types"
@@ -350,7 +349,6 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 	ac = agg.MakeContext()
 	defer ac.Close()
-	//domains.Close()
 
 	rwTx, err = db.BeginRw(ctx)
 	require.NoError(t, err)

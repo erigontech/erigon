@@ -48,6 +48,9 @@ var (
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
+	// run prune on flush with given timeout. If timeout is 0, no prune on flush will be performed
+	PruneOnFlushTimeout = EnvDuration("PRUNE_ON_FLUSH_TIMEOUT", time.Duration(0))
+
 	// allow simultaneous build of multiple snapshot types.
 	// Values from 1 to 4 makes sense since we have only 3 types of snapshots.
 

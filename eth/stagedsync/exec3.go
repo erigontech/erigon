@@ -903,11 +903,6 @@ Loop:
 
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							//if casted, ok := tx.(kv.CanWarmupDB); ok {
-							//	if err := casted.WarmupDB(false); err != nil {
-							//		return err
-							//	}
-							//}
 							if err := tx.(state2.HasAggCtx).
 								AggCtx().(*state2.AggregatorV3Context).
 								PruneSmallBatches(ctx, time.Minute*10, tx); err != nil {
@@ -938,6 +933,7 @@ Loop:
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
 					"block", doms.BlockNum(), "txNum", doms.TxNum(),
+					"step", stepsInDB,
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3, "warmup", t4)
 			default:
 			}

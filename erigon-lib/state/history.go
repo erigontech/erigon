@@ -1062,26 +1062,28 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
-	inSnapsTx := hc.maxTxNumInFiles(false)
+func (hc *HistoryContext) canPruneUntil(tx kv.Tx) (can bool, txTo uint64) {
 	minIdxTx := hc.ic.CanPruneFrom(tx)
 	maxIdxTx := hc.ic.highestTxNum(tx)
-
-	// if we don't produce files, we can prune only if:
-	isNoFilesAndEnoughTxKeptInDB := hc.h.dontProduceFiles && // files are not produced
-		minIdxTx != math.MaxUint64 && // idx has data
-		minIdxTx < untilTxNum && // idx data < untilTxNum
-		hc.h.keepTxInDB < maxIdxTx && // sub overflow
-		minIdxTx < maxIdxTx-hc.h.keepTxInDB // idx data < MaxTx-keepTxInDB
-
-	// if we produce files, we can prune only if index has values < maxTxNumInFiles
-	isAggregated := minIdxTx < min(untilTxNum, inSnapsTx)
-
-	res := isNoFilesAndEnoughTxKeptInDB || isAggregated
 	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t snapTx %d idxTx [%d-%d] keepTxInDB=%d; result %t\n", hc.h.filenameBase, untilTxNum, hc.h.dontProduceFiles, inSnapsTx, minIdxTx, maxIdxTx, hc.h.keepTxInDB, res)
+	//	fmt.Printf("CanPrune[%s]Until noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
+	//		hc.h.filenameBase, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
 	//}()
-	return res
+
+	if hc.h.dontProduceFiles {
+		if hc.h.keepTxInDB >= maxIdxTx {
+			return false, 0
+		}
+		txTo = maxIdxTx - hc.h.keepTxInDB // bound pruning
+	} else {
+		txTo = hc.maxTxNumInFiles(false)
+	}
+	return minIdxTx < txTo, txTo
+}
+
+func (hc *HistoryContext) CanPruneUntil(tx kv.Tx) bool {
+	can, _ := hc.canPruneUntil(tx)
+	return can
 }
 
 // Prune [txFrom; txTo)
@@ -1090,9 +1092,13 @@ func (hc *HistoryContext) CanPruneUntil(tx kv.Tx, untilTxNum uint64) bool {
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
-	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPrune(rwTx), txFrom, txTo)
-	if !forced && !hc.CanPruneUntil(rwTx, txTo) {
-		return nil, nil
+	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPruneUntil(rwTx), txFrom, txTo)
+	if !forced {
+		can, untilTx := hc.canPruneUntil(rwTx)
+		if !can {
+			return nil, nil
+		}
+		txTo = min(untilTx, txTo)
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 

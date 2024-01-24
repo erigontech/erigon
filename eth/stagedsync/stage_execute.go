@@ -907,11 +907,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.historyV3 {
-		pruneTimeout := 10 * time.Second
-		if initialCycle {
-			pruneTimeout = 10 * time.Minute
-		}
-		if err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorV3Context).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
+		//pruneTimeout := 10 * time.Second
+		//if initialCycle {
+		//	pruneTimeout = 10 * time.Minute
+		//}
+		if _, err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorV3Context).Prune(ctx, tx, 0, logEvery); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	} else {
