@@ -96,10 +96,10 @@ func Transform(
 	if err := extractBucketIntoFiles(logPrefix, db, fromBucket, args.ExtractStartKey, args.ExtractEndKey, collector, extractFunc, args.Quit, args.LogDetailsExtract, logger); err != nil {
 		return err
 	}
-	logger.Trace(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
+	logger.Info(fmt.Sprintf("[%s] Extraction finished", logPrefix), "took", time.Since(t))
 
 	defer func(t time.Time) {
-		logger.Trace(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
+		logger.Info(fmt.Sprintf("[%s] Load finished", logPrefix), "took", time.Since(t))
 	}(time.Now())
 	return collector.Load(db, toBucket, loadFunc, args)
 }
