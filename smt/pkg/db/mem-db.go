@@ -176,6 +176,10 @@ func (m *MemDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 	return utils.NodeKey{na[0], na[1], na[2], na[3]}, nil
 }
 
+func (m *MemDb) GetCode(codeHash []byte) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 func (m *MemDb) Delete(key string) error {
 	m.lock.Lock()         // Lock for writing
 	defer m.lock.Unlock() // Make sure to unlock when done

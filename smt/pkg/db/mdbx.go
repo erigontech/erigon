@@ -235,6 +235,19 @@ func (m *EriDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 	return utils.NodeKey{na[0], na[1], na[2], na[3]}, nil
 }
 
+func (m *EriDb) GetCode(codeHash []byte) ([]byte, error) {
+	data, err := m.tx.GetOne(kv.Code, codeHash)
+	if err != nil {
+		return nil, err
+	}
+
+	if data == nil {
+		return nil, fmt.Errorf("code hash %x not found", codeHash)
+	}
+
+	return data, nil
+}
+
 func (m *EriDb) Delete(key string) error {
 	return m.tx.Delete(TableSmt, []byte(key))
 }

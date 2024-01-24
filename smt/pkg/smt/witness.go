@@ -18,11 +18,9 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 
 	action := func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error) {
 		if rd != nil && !rd.Retain(prefix) {
-			if !v.IsFinalNode() {
-				h := libcommon.BigToHash(k.ToBigInt())
-				hNode := trie.OperatorHash{Hash: h}
-				operands = append(operands, &hNode)
-			}
+			h := libcommon.BigToHash(k.ToBigInt())
+			hNode := trie.OperatorHash{Hash: h}
+			operands = append(operands, &hNode)
 			return false, nil
 		}
 
@@ -46,12 +44,22 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 
 			valHash := v.Get4to8()
 
-			value, err := s.Db.Get(*valHash)
+			v, err := s.Db.Get(*valHash)
 
-			value8 := utils.BigIntArrayFromNodeValue8(value.GetNodeValue8())
+			vInBytes := utils.ArrayBigToScalar(utils.BigIntArrayFromNodeValue8(v.GetNodeValue8())).Bytes()
 
 			if err != nil {
 				return false, err
+			}
+
+			if t == utils.SC_CODE {
+				code, err := s.Db.GetCode(vInBytes)
+
+				if err != nil {
+					return false, err
+				} else {
+					operands = append(operands, &trie.OperatorCode{Code: code})
+				}
 			}
 
 			// fmt.Printf("Node hash: %s, Node type: %d, address %x, storage %x, value %x\n", utils.ConvertBigIntToHex(k.ToBigInt()), t, addr, storage, utils.ArrayBigToScalar(value8).Bytes())
@@ -60,7 +68,7 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 				NodeType:   uint8(t),
 				Address:    addr.Bytes(),
 				StorageKey: storage.Bytes(),
-				Value:      utils.ArrayBigToScalar(value8).Bytes(),
+				Value:      vInBytes,
 			})
 			return false, nil
 		}

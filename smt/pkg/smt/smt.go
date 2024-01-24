@@ -29,6 +29,7 @@ type DB interface {
 	InsertHashKey(key utils.NodeKey, value utils.NodeKey) error
 	GetHashKey(key utils.NodeKey) (utils.NodeKey, error)
 	Delete(string) error
+	GetCode(codeHash []byte) ([]byte, error)
 
 	SetLastRoot(lr *big.Int) error
 	GetLastRoot() (*big.Int, error)
