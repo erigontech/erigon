@@ -1233,8 +1233,8 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				ibs,
 				finalizeTxStateWriter,
 				blockCtx,
-				hash,
-				blockNumber,
+				header.Hash(),
+				header.Number.Uint64(),
 				header.Time,
 			)
 		} else {

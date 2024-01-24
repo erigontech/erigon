@@ -940,10 +940,25 @@ func (api *TraceAPIImpl) callManyTransactions(
 	for i, tx := range txs {
 		isBorStateSyncTxn := tx == borStateSyncTxn
 		var txnHash common.Hash
+		var msg types.Message
+		var err error
 		if isBorStateSyncTxn {
 			txnHash = borStateSyncTxnHash
+			// we use an empty message for bor state sync txn since it gets handled differently
 		} else {
 			txnHash = tx.Hash()
+			msg, err = tx.AsMessage(*signer, header.BaseFee, rules)
+			if err != nil {
+				return nil, nil, fmt.Errorf("convert tx into msg: %w", err)
+			}
+
+			// gnosis might have a fee free account here
+			if msg.FeeCap().IsZero() && engine != nil {
+				syscall := func(contract common.Address, data []byte) ([]byte, error) {
+					return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
+				}
+				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+			}
 		}
 
 		callParams = append(callParams, TraceCallParam{
@@ -951,20 +966,6 @@ func (api *TraceAPIImpl) callManyTransactions(
 			traceTypes:        traceTypes,
 			isBorStateSyncTxn: isBorStateSyncTxn,
 		})
-
-		var err error
-		msg, err := tx.AsMessage(*signer, header.BaseFee, rules)
-		if err != nil {
-			return nil, nil, fmt.Errorf("convert tx into msg: %w", err)
-		}
-
-		// gnosis might have a fee free account here
-		if msg.FeeCap().IsZero() && engine != nil {
-			syscall := func(contract common.Address, data []byte) ([]byte, error) {
-				return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
-			}
-			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-		}
 
 		msgs[i] = msg
 	}
