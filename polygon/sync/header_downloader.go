@@ -19,7 +19,7 @@ import (
 
 const headerDownloaderLogPrefix = "HeaderDownloader"
 
-func NewHeaderDownloader(logger log.Logger, sentry Sentry, db DB, heimdall Heimdall, verify AccumulatedHeadersVerifier) *HeaderDownloader {
+func NewHeaderDownloader(logger log.Logger, sentry Sentry, heimdall heimdall.Heimdall, verify AccumulatedHeadersVerifier) *HeaderDownloader {
 	statePointHeadersMemo, err := lru.New[common.Hash, []*types.Header](sentry.MaxPeers())
 	if err != nil {
 		panic(err)
@@ -28,7 +28,6 @@ func NewHeaderDownloader(logger log.Logger, sentry Sentry, db DB, heimdall Heimd
 	return &HeaderDownloader{
 		logger:                logger,
 		sentry:                sentry,
-		db:                    db,
 		heimdall:              heimdall,
 		verify:                verify,
 		statePointHeadersMemo: statePointHeadersMemo,
@@ -38,33 +37,18 @@ func NewHeaderDownloader(logger log.Logger, sentry Sentry, db DB, heimdall Heimd
 type HeaderDownloader struct {
 	logger                log.Logger
 	sentry                Sentry
-	db                    DB
-	heimdall              Heimdall
+	heimdall              heimdall.Heimdall
 	verify                AccumulatedHeadersVerifier
 	statePointHeadersMemo *lru.Cache[common.Hash, []*types.Header] // statePoint.rootHash->[headers part of state point]
 }
 
-func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
-	checkpoints, err := hd.heimdall.FetchCheckpoints(ctx, start)
+func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, io CheckpointIO, start uint64) error {
+	checkpoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, io, start)
 	if err != nil {
 		return err
 	}
 
-	err = hd.downloadUsingHashAccumulators(ctx, checkpoints)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start uint64) error {
-	milestones, err := hd.heimdall.FetchMilestones(ctx, start)
-	if err != nil {
-		return err
-	}
-
-	err = hd.downloadUsingHashAccumulators(ctx, milestones)
+	err = hd.downloadUsingWaypoints(ctx, io, checkpoints)
 	if err != nil {
 		return err
 	}
@@ -72,7 +56,21 @@ func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start u
 	return nil
 }
 
-func (hd *HeaderDownloader) downloadUsingHashAccumulators(ctx context.Context, hashAccumulators heimdall.HashAccumulators) error {
+func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, io MilestoneIO, start uint64) error {
+	milestones, err := hd.heimdall.FetchMilestonesFromBlock(ctx, io, start)
+	if err != nil {
+		return err
+	}
+
+	err = hd.downloadUsingWaypoints(ctx, io, milestones)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, io HeaderIO, hashAccumulators heimdall.Waypoints) error {
 	for len(hashAccumulators) > 0 {
 		allPeers := hd.sentry.PeersWithBlockNumInfo()
 		if len(allPeers) == 0 {
@@ -109,7 +107,7 @@ func (hd *HeaderDownloader) downloadUsingHashAccumulators(ctx context.Context, h
 		for i, point := range statePointsBatch {
 			maxStatePointLength = math.Max(float64(point.Length()), maxStatePointLength)
 			wg.Add(1)
-			go func(i int, statePoint heimdall.HashAccumulator, peerID string) {
+			go func(i int, statePoint heimdall.Waypoint, peerID string) {
 				defer wg.Done()
 
 				if headers, ok := hd.statePointHeadersMemo.Get(statePoint.RootHash()); ok {
@@ -180,7 +178,7 @@ func (hd *HeaderDownloader) downloadUsingHashAccumulators(ctx context.Context, h
 		}
 
 		dbWriteStartTime := time.Now()
-		if err := hd.db.WriteHeaders(headers); err != nil {
+		if err := io.WriteHeaders(headers); err != nil {
 			return err
 		}
 
@@ -195,7 +193,7 @@ func (hd *HeaderDownloader) downloadUsingHashAccumulators(ctx context.Context, h
 }
 
 // choosePeers assumes peers are sorted in ascending order based on block num
-func (hd *HeaderDownloader) choosePeers(peers PeersWithBlockNumInfo, hashAccumulators heimdall.HashAccumulators) PeersWithBlockNumInfo {
+func (hd *HeaderDownloader) choosePeers(peers PeersWithBlockNumInfo, hashAccumulators heimdall.Waypoints) PeersWithBlockNumInfo {
 	var peersIdx int
 	chosenPeers := make(PeersWithBlockNumInfo, 0, len(peers))
 	for _, statePoint := range hashAccumulators {

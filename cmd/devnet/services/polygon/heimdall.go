@@ -79,7 +79,7 @@ type Heimdall struct {
 	latestCheckpoint   *CheckpointAck
 	ackWaiter          *sync.Cond
 	currentSpan        *heimdall.Span
-	spans              map[uint64]*heimdall.Span
+	spans              map[heimdall.SpanId]*heimdall.Span
 	logger             log.Logger
 	cancelFunc         context.CancelFunc
 	syncSenderAddress  libcommon.Address
@@ -105,7 +105,7 @@ func NewHeimdall(
 		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
 		listenAddr:         serverURL[7:],
 		checkpointConfig:   *checkpointConfig,
-		spans:              map[uint64]*heimdall.Span{},
+		spans:              map[heimdall.SpanId]*heimdall.Span{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
 		logger:             logger}
 
@@ -146,13 +146,13 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, err
 	h.Lock()
 	defer h.Unlock()
 
-	if span, ok := h.spans[spanID]; ok {
+	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
 		h.currentSpan = span
 		return span, nil
 	}
 
 	var nextSpan = heimdall.Span{
-		ID:           spanID,
+		Id:           heimdall.SpanId(spanID),
 		ValidatorSet: *h.validatorSet,
 		ChainID:      h.chainConfig.ChainID.String(),
 	}
@@ -160,7 +160,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, err
 	if h.currentSpan == nil || spanID == 0 {
 		nextSpan.StartBlock = 1 //256
 	} else {
-		if spanID != h.currentSpan.ID+1 {
+		if spanID != uint64(h.currentSpan.Id+1) {
 			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
 		}
 
@@ -179,7 +179,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, err
 
 	h.currentSpan = &nextSpan
 
-	h.spans[h.currentSpan.ID] = h.currentSpan
+	h.spans[h.currentSpan.Id] = h.currentSpan
 
 	return h.currentSpan, nil
 }

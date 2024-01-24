@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -35,7 +34,7 @@ type test_heimdall struct {
 	chainConfig  *chain.Config
 	borConfig    *borcfg.BorConfig
 	validatorSet *valset.ValidatorSet
-	spans        map[uint64]*heimdall.Span
+	spans        map[heimdall.SpanId]*heimdall.Span
 }
 
 func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
@@ -44,7 +43,7 @@ func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
 		chainConfig:  chainConfig,
 		borConfig:    chainConfig.Bor.(*borcfg.BorConfig),
 		validatorSet: nil,
-		spans:        map[uint64]*heimdall.Span{},
+		spans:        map[heimdall.SpanId]*heimdall.Span{},
 	}
 }
 
@@ -58,13 +57,13 @@ func (h test_heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to in
 
 func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 
-	if span, ok := h.spans[spanID]; ok {
+	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
 		h.currentSpan = span
 		return span, nil
 	}
 
 	var nextSpan = heimdall.Span{
-		ID:           spanID,
+		Id:           heimdall.SpanId(spanID),
 		ValidatorSet: *h.validatorSet,
 		ChainID:      h.chainConfig.ChainID.String(),
 	}
@@ -72,7 +71,7 @@ func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span
 	if h.currentSpan == nil || spanID == 0 {
 		nextSpan.StartBlock = 1 //256
 	} else {
-		if spanID != h.currentSpan.ID+1 {
+		if spanID != uint64(h.currentSpan.Id+1) {
 			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
 		}
 
@@ -91,7 +90,7 @@ func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span
 
 	h.currentSpan = &nextSpan
 
-	h.spans[h.currentSpan.ID] = h.currentSpan
+	h.spans[h.currentSpan.Id] = h.currentSpan
 
 	return h.currentSpan, nil
 }
@@ -189,7 +188,7 @@ func (r headerReader) BorSpan(spanId uint64) []byte {
 
 type spanner struct {
 	*bor.ChainSpanner
-	validatorAddress common.Address
+	validatorAddress libcommon.Address
 	currentSpan      heimdall.Span
 }
 

@@ -8,11 +8,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-var _ HashAccumulator = Milestone{}
+var _ Waypoint = Milestone{}
+
+type MilestoneId uint64
 
 // milestone defines a response object type of bor milestone
 type Milestone struct {
-	Fields HashAccumulatorFields
+	Fields WaypointFields
 }
 
 func (m Milestone) StartBlock() *big.Int {
@@ -71,7 +73,7 @@ func (m *Milestone) MarshalJSON() ([]byte, error) {
 
 func (m *Milestone) UnmarshalJSON(b []byte) error {
 	dto := struct {
-		HashAccumulatorFields
+		WaypointFields
 		RootHash libcommon.Hash `json:"hash"`
 	}{}
 
@@ -79,7 +81,7 @@ func (m *Milestone) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	m.Fields = dto.HashAccumulatorFields
+	m.Fields = dto.WaypointFields
 	m.Fields.RootHash = dto.RootHash
 
 	return nil

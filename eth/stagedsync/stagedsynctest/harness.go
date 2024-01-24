@@ -230,14 +230,14 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, 
 				return err
 			}
 
-			spanKey := binary.BigEndian.Uint64(keyBytes)
+			spanKey := heimdall.SpanId(binary.BigEndian.Uint64(keyBytes))
 			var heimdallSpan heimdall.Span
 			if err = json.Unmarshal(spanBytes, &heimdallSpan); err != nil {
 				return err
 			}
 
-			if spanKey != heimdallSpan.ID {
-				return fmt.Errorf("span key and id mismatch %d!=%d", spanKey, heimdallSpan.ID)
+			if spanKey != heimdallSpan.Id {
+				return fmt.Errorf("span key and id mismatch %d!=%d", spanKey, heimdallSpan.Id)
 			}
 
 			spans = append(spans, &heimdallSpan)
@@ -513,7 +513,7 @@ func (h *Harness) setHeimdallNextMockSpan() {
 	}
 
 	h.heimdallNextMockSpan = &heimdall.Span{
-		ID:                0,
+		Id:                0,
 		StartBlock:        0,
 		EndBlock:          255,
 		ValidatorSet:      *validatorSet,
@@ -550,14 +550,14 @@ func (h *Harness) mockHeimdallClient() {
 			res := h.heimdallNextMockSpan
 			h.heimdallNextMockSpan = &heimdall.Span{
 
-				ID:                res.ID + 1,
+				Id:                res.Id + 1,
 				StartBlock:        res.EndBlock + 1,
 				EndBlock:          res.EndBlock + 6400,
 				ValidatorSet:      res.ValidatorSet,
 				SelectedProducers: res.SelectedProducers,
 			}
 
-			if selectedProducers, ok := h.heimdallProducersOverride[res.ID]; ok {
+			if selectedProducers, ok := h.heimdallProducersOverride[uint64(res.Id)]; ok {
 				res.SelectedProducers = selectedProducers
 			}
 

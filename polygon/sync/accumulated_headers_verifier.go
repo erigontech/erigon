@@ -9,9 +9,9 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
-type AccumulatedHeadersVerifier func(hashAccumulator heimdall.HashAccumulator, headers []*types.Header) error
+type AccumulatedHeadersVerifier func(hashAccumulator heimdall.Waypoint, headers []*types.Header) error
 
-func VerifyAccumulatedHeaders(accumulator heimdall.HashAccumulator, headers []*types.Header) error {
+func VerifyAccumulatedHeaders(accumulator heimdall.Waypoint, headers []*types.Header) error {
 	rootHash, err := bor.ComputeHeadersRootHash(headers)
 	if err != nil {
 		return fmt.Errorf("VerifyStatePointHeaders: failed to compute headers root hash %w", err)

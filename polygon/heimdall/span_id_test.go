@@ -1,4 +1,4 @@
-package bor
+package heimdall
 
 import (
 	"testing"
@@ -9,18 +9,18 @@ import (
 )
 
 func TestSpanIDAt(t *testing.T) {
-	assert.Equal(t, uint64(0), SpanIDAt(0))
-	assert.Equal(t, uint64(0), SpanIDAt(1))
-	assert.Equal(t, uint64(0), SpanIDAt(2))
-	assert.Equal(t, uint64(0), SpanIDAt(zerothSpanEnd))
-	assert.Equal(t, uint64(1), SpanIDAt(zerothSpanEnd+1))
-	assert.Equal(t, uint64(1), SpanIDAt(zerothSpanEnd+2))
-	assert.Equal(t, uint64(1), SpanIDAt(6655))
-	assert.Equal(t, uint64(2), SpanIDAt(6656))
-	assert.Equal(t, uint64(2), SpanIDAt(6657))
-	assert.Equal(t, uint64(2), SpanIDAt(13055))
-	assert.Equal(t, uint64(3), SpanIDAt(13056))
-	assert.Equal(t, uint64(6839), SpanIDAt(43763456))
+	assert.Equal(t, uint64(0), SpanIdAt(0))
+	assert.Equal(t, uint64(0), SpanIdAt(1))
+	assert.Equal(t, uint64(0), SpanIdAt(2))
+	assert.Equal(t, uint64(0), SpanIdAt(zerothSpanEnd))
+	assert.Equal(t, uint64(1), SpanIdAt(zerothSpanEnd+1))
+	assert.Equal(t, uint64(1), SpanIdAt(zerothSpanEnd+2))
+	assert.Equal(t, uint64(1), SpanIdAt(6655))
+	assert.Equal(t, uint64(2), SpanIdAt(6656))
+	assert.Equal(t, uint64(2), SpanIdAt(6657))
+	assert.Equal(t, uint64(2), SpanIdAt(13055))
+	assert.Equal(t, uint64(3), SpanIdAt(13056))
+	assert.Equal(t, uint64(6839), SpanIdAt(43763456))
 }
 
 func TestSpanEndBlockNum(t *testing.T) {

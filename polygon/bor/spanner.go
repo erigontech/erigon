@@ -78,7 +78,7 @@ func (c *ChainSpanner) GetCurrentSpan(syscall consensus.SystemCall) (*heimdall.S
 
 	// create new span
 	span := heimdall.Span{
-		ID:         ret.Number.Uint64(),
+		Id:         heimdall.SpanId(ret.Number.Uint64()),
 		StartBlock: ret.StartBlock.Uint64(),
 		EndBlock:   ret.EndBlock.Uint64(),
 	}
@@ -147,7 +147,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 	}
 
 	c.logger.Trace("[bor] ✅ Committing new span",
-		"id", heimdallSpan.ID,
+		"id", heimdallSpan.Id,
 		"startBlock", heimdallSpan.StartBlock,
 		"endBlock", heimdallSpan.EndBlock,
 		"validatorBytes", hex.EncodeToString(validatorBytes),
@@ -156,7 +156,7 @@ func (c *ChainSpanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.
 
 	// get packed data
 	data, err := c.validatorSet.Pack(method,
-		big.NewInt(0).SetUint64(heimdallSpan.ID),
+		big.NewInt(0).SetUint64(uint64(heimdallSpan.Id)),
 		big.NewInt(0).SetUint64(heimdallSpan.StartBlock),
 		big.NewInt(0).SetUint64(heimdallSpan.EndBlock),
 		validatorBytes,

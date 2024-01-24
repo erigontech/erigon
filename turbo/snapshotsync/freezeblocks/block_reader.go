@@ -21,7 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -214,6 +214,10 @@ func (r *RemoteBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash comm
 	return bodyRlp, nil
 }
 
+func (r *RemoteBlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
+}
+
 func (r *RemoteBlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
 	reply, err := r.client.BorEvent(ctx, &remote.BorEventRequest{BorTxHash: gointerfaces.ConvertHashToH256(txnHash)})
 	if err != nil {
@@ -236,6 +240,10 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 		result[i] = rlp.RawValue(r)
 	}
 	return result, nil
+}
+
+func (r *RemoteBlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
 }
 
 func (r *RemoteBlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -950,9 +958,11 @@ func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err
 }
+
 func (r *BlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	return rawdb.RawTransactionsRange(tx, fromBlock, toBlock)
 }
+
 func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	if ancestor > number {
 		return common.Hash{}, 0
@@ -1140,7 +1150,37 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	return result, nil
 }
 
-func (r *BlockReader) LastFrozenEventID() uint64 {
+func (r *BlockReader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	var lastEventId uint64
+	var ok bool
+
+	if tx != nil {
+		cursor, err := tx.Cursor(kv.BorEvents)
+		if err != nil {
+			return 0, false, err
+		}
+
+		defer cursor.Close()
+		k, _, err := cursor.Last()
+		if err != nil {
+			return 0, false, err
+		}
+
+		if k != nil {
+			ok = true
+			lastEventId = binary.BigEndian.Uint64(k)
+		}
+	}
+
+	snapshotLastEventId := r.LastFrozenEventId()
+	if snapshotLastEventId > lastEventId {
+		return snapshotLastEventId, true, nil
+	}
+
+	return lastEventId, ok, nil
+}
+
+func (r *BlockReader) LastFrozenEventId() uint64 {
 	if r.borSn == nil {
 		return 0
 	}
@@ -1172,7 +1212,38 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	return lastEventID
 }
 
-func (r *BlockReader) LastFrozenSpanID() uint64 {
+func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	var lastSpanId uint64
+	var ok bool
+
+	if tx != nil {
+		sCursor, err := tx.Cursor(kv.BorSpans)
+		if err != nil {
+			return 0, false, err
+		}
+
+		defer sCursor.Close()
+		k, _, err := sCursor.Last()
+		if err != nil {
+			return 0, false, err
+		}
+
+		if k != nil {
+			ok = true
+			lastSpanId = binary.BigEndian.Uint64(k)
+		}
+	}
+
+	snapshotLastSpanId := r.LastFrozenSpanId()
+
+	if snapshotLastSpanId > lastSpanId {
+		return snapshotLastSpanId, true, nil
+	}
+
+	return lastSpanId, ok, nil
+}
+
+func (r *BlockReader) LastFrozenSpanId() uint64 {
 	if r.borSn == nil {
 		return 0
 	}
@@ -1195,17 +1266,17 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 		return 0
 	}
 
-	lastSpanID := bor.SpanIDAt(lastSegment.to)
+	lastSpanID := heimdall.SpanIdAt(lastSegment.to)
 	if lastSpanID > 0 {
 		lastSpanID--
 	}
-	return lastSpanID
+	return uint64(lastSpanID)
 }
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	var endBlock uint64
 	if spanId > 0 {
-		endBlock = bor.SpanEndBlockNum(spanId)
+		endBlock = heimdall.SpanEndBlockNum(heimdall.SpanId(spanId))
 	}
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
@@ -1230,11 +1301,11 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if idx == nil {
 			continue
 		}
-		spanFrom := bor.SpanIDAt(sn.from)
+		spanFrom := uint64(heimdall.SpanIdAt(sn.from))
 		if spanId < spanFrom {
 			continue
 		}
-		spanTo := bor.SpanIDAt(sn.to)
+		spanTo := uint64(heimdall.SpanIdAt(sn.to))
 		if spanId >= spanTo {
 			continue
 		}

@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
-func TestBlockReaderLastFrozenSpanIDWhenSegmentFilesArePresent(t *testing.T) {
+func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesArePresent(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -31,10 +31,10 @@ func TestBlockReaderLastFrozenSpanIDWhenSegmentFilesArePresent(t *testing.T) {
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(78), blockReader.LastFrozenSpanID())
+	require.Equal(t, uint64(78), blockReader.LastFrozenSpanId())
 }
 
-func TestBlockReaderLastFrozenSpanIDWhenSegmentFilesAreNotPresent(t *testing.T) {
+func TestBlockReaderLastFrozenSpanIdWhenSegmentFilesAreNotPresent(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -45,10 +45,10 @@ func TestBlockReaderLastFrozenSpanIDWhenSegmentFilesAreNotPresent(t *testing.T) 
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(0), blockReader.LastFrozenSpanID())
+	require.Equal(t, uint64(0), blockReader.LastFrozenSpanId())
 }
 
-func TestBlockReaderLastFrozenSpanIDReturnsLastSegWithIdx(t *testing.T) {
+func TestBlockReaderLastFrozenSpanIdReturnsLastSegWithIdx(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -69,10 +69,10 @@ func TestBlockReaderLastFrozenSpanIDReturnsLastSegWithIdx(t *testing.T) {
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(156), blockReader.LastFrozenSpanID())
+	require.Equal(t, uint64(156), blockReader.LastFrozenSpanId())
 }
 
-func TestBlockReaderLastFrozenSpanIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *testing.T) {
+func TestBlockReaderLastFrozenSpanIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -99,10 +99,10 @@ func TestBlockReaderLastFrozenSpanIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *te
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(0), blockReader.LastFrozenSpanID())
+	require.Equal(t, uint64(0), blockReader.LastFrozenSpanId())
 }
 
-func TestBlockReaderLastFrozenEventIDWhenSegmentFilesArePresent(t *testing.T) {
+func TestBlockReaderLastFrozenEventIdWhenSegmentFilesArePresent(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -115,10 +115,10 @@ func TestBlockReaderLastFrozenEventIDWhenSegmentFilesArePresent(t *testing.T) {
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(132), blockReader.LastFrozenEventID())
+	require.Equal(t, uint64(132), blockReader.LastFrozenEventId())
 }
 
-func TestBlockReaderLastFrozenEventIDWhenSegmentFilesAreNotPresent(t *testing.T) {
+func TestBlockReaderLastFrozenEventIdWhenSegmentFilesAreNotPresent(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -129,10 +129,10 @@ func TestBlockReaderLastFrozenEventIDWhenSegmentFilesAreNotPresent(t *testing.T)
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(0), blockReader.LastFrozenEventID())
+	require.Equal(t, uint64(0), blockReader.LastFrozenEventId())
 }
 
-func TestBlockReaderLastFrozenEventIDReturnsLastSegWithIdx(t *testing.T) {
+func TestBlockReaderLastFrozenEventIdReturnsLastSegWithIdx(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -153,10 +153,10 @@ func TestBlockReaderLastFrozenEventIDReturnsLastSegWithIdx(t *testing.T) {
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(264), blockReader.LastFrozenEventID())
+	require.Equal(t, uint64(264), blockReader.LastFrozenEventId())
 }
 
-func TestBlockReaderLastFrozenEventIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *testing.T) {
+func TestBlockReaderLastFrozenEventIdReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *testing.T) {
 	t.Parallel()
 
 	logger := testlog.Logger(t, log.LvlInfo)
@@ -183,7 +183,7 @@ func TestBlockReaderLastFrozenEventIDReturnsZeroWhenAllSegmentsDoNotHaveIdx(t *t
 	require.NoError(t, err)
 
 	blockReader := &BlockReader{borSn: borRoSnapshots}
-	require.Equal(t, uint64(0), blockReader.LastFrozenEventID())
+	require.Equal(t, uint64(0), blockReader.LastFrozenEventId())
 }
 
 func createTestBorEventSegmentFile(t *testing.T, from, to, eventId uint64, dir string, logger log.Logger) {

@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -238,8 +238,8 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	spanFrom := bor.SpanIDAt(blockFrom)
-	spanTo := bor.SpanIDAt(blockTo)
+	spanFrom := uint64(heimdall.SpanIdAt(blockFrom))
+	spanTo := uint64(heimdall.SpanIdAt(blockTo))
 	from := hexutility.EncodeTs(spanFrom)
 	if err := kv.BigChunks(db, kv.BorSpans, from, func(tx kv.Tx, spanIdBytes, spanBytes []byte) (bool, error) {
 		spanId := binary.BigEndian.Uint64(spanIdBytes)
@@ -370,7 +370,7 @@ func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *ba
 	g := d.MakeGetter()
 	var idxFilePath = filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorSpans.String()))
 
-	baseSpanId := bor.SpanIDAt(sn.From)
+	baseSpanId := heimdall.SpanIdAt(sn.From)
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -379,7 +379,7 @@ func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *ba
 		LeafSize:   8,
 		TmpDir:     tmpDir,
 		IndexFile:  idxFilePath,
-		BaseDataID: baseSpanId,
+		BaseDataID: uint64(baseSpanId),
 	}, logger)
 	if err != nil {
 		return err

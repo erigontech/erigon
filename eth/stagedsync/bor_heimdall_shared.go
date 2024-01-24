@@ -15,7 +15,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -27,66 +26,6 @@ var (
 )
 
 // LastSpanID TODO - move to block reader
-func LastSpanID(tx kv.RwTx, blockReader services.FullBlockReader) (uint64, bool, error) {
-	sCursor, err := tx.Cursor(kv.BorSpans)
-	if err != nil {
-		return 0, false, err
-	}
-
-	defer sCursor.Close()
-	k, _, err := sCursor.Last()
-	if err != nil {
-		return 0, false, err
-	}
-
-	var lastSpanId uint64
-	if k != nil {
-		lastSpanId = binary.BigEndian.Uint64(k)
-	}
-
-	// TODO tidy this out when moving to block reader
-	type LastFrozen interface {
-		LastFrozenSpanID() uint64
-	}
-
-	snapshotLastSpanId := blockReader.(LastFrozen).LastFrozenSpanID()
-	if snapshotLastSpanId > lastSpanId {
-		return snapshotLastSpanId, true, nil
-	}
-
-	return lastSpanId, k != nil, nil
-}
-
-// LastStateSyncEventID TODO - move to block reader
-func LastStateSyncEventID(tx kv.RwTx, blockReader services.FullBlockReader) (uint64, error) {
-	cursor, err := tx.Cursor(kv.BorEvents)
-	if err != nil {
-		return 0, err
-	}
-
-	defer cursor.Close()
-	k, _, err := cursor.Last()
-	if err != nil {
-		return 0, err
-	}
-
-	var lastEventId uint64
-	if k != nil {
-		lastEventId = binary.BigEndian.Uint64(k)
-	}
-
-	// TODO tidy this out when moving to block reader
-	type LastFrozen interface {
-		LastFrozenEventID() uint64
-	}
-
-	snapshotLastEventId := blockReader.(LastFrozen).LastFrozenEventID()
-	if snapshotLastEventId > lastEventId {
-		return snapshotLastEventId, nil
-	}
-
-	return lastEventId, nil
-}
 
 func FetchSpanZeroForMiningIfNeeded(
 	ctx context.Context,
@@ -120,33 +59,33 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	requiredSpanID := bor.SpanIDAt(toBlockNum)
-	if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+	requiredSpanID := heimdall.SpanIdAt(toBlockNum)
+	if heimdall.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
 		requiredSpanID++
 	}
 
-	lastSpanID, exists, err := LastSpanID(tx, cfg.blockReader)
+	lastSpanID, exists, err := cfg.blockReader.LastSpanId(ctx, tx)
 	if err != nil {
 		return 0, err
 	}
 
-	if exists && requiredSpanID <= lastSpanID {
+	if exists && requiredSpanID <= heimdall.SpanId(lastSpanID) {
 		return lastSpanID, nil
 	}
 
-	var from uint64
+	var from heimdall.SpanId
 	if lastSpanID > 0 {
-		from = lastSpanID + 1
+		from = heimdall.SpanId(lastSpanID + 1)
 	} // else fetch from span 0
 
 	logger.Info(fmt.Sprintf("[%s] Processing spans...", logPrefix), "from", from, "to", requiredSpanID)
 	for spanID := from; spanID <= requiredSpanID; spanID++ {
-		if _, err = fetchAndWriteHeimdallSpan(ctx, spanID, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+		if _, err = fetchAndWriteHeimdallSpan(ctx, uint64(spanID), tx, cfg.heimdallClient, logPrefix, logger); err != nil {
 			return 0, err
 		}
 	}
 
-	return requiredSpanID, err
+	return uint64(requiredSpanID), err
 }
 
 func fetchAndWriteHeimdallSpan(
@@ -173,7 +112,7 @@ func fetchAndWriteHeimdallSpan(
 		return 0, err
 	}
 
-	logger.Debug(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanID)
+	logger.Trace(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanID)
 	return spanID, nil
 }
 

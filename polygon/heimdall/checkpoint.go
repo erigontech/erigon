@@ -8,11 +8,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-var _ HashAccumulator = Checkpoint{}
+var _ Waypoint = Checkpoint{}
+
+type CheckpointId uint64
 
 // Checkpoint defines a response object type of bor checkpoint
 type Checkpoint struct {
-	Fields HashAccumulatorFields
+	Fields WaypointFields
 }
 
 func (c Checkpoint) StartBlock() *big.Int {

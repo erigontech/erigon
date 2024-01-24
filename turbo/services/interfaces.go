@@ -34,12 +34,22 @@ type HeaderReader interface {
 }
 
 type BorEventReader interface {
+	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
 }
 
 type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Getter, spanNum uint64) ([]byte, error)
+	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
+	Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error)
+}
+
+type BorMilestoneReader interface {
+	Milestone(ctx context.Context, tx kv.Getter, milestoneId uint64) ([]byte, error)
+}
+
+type BorCheckpointReader interface {
+	Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error)
 }
 
 type CanonicalReader interface {

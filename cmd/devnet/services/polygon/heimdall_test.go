@@ -39,7 +39,7 @@ func TestHeimdallServer(t *testing.T) {
 	client.EXPECT().StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
 
 	span := &heimdall.Span{
-		ID:         1,
+		Id:         1,
 		StartBlock: 1000,
 		EndBlock:   2000,
 		ChainID:    "80001",
@@ -47,7 +47,7 @@ func TestHeimdallServer(t *testing.T) {
 	client.EXPECT().Span(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
 
 	checkpoint1 := &heimdall.Checkpoint{
-		Fields: heimdall.HashAccumulatorFields{
+		Fields: heimdall.WaypointFields{
 			StartBlock: big.NewInt(1000),
 			EndBlock:   big.NewInt(1999),
 			ChainID:    "80001",

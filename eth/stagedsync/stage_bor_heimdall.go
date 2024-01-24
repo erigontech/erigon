@@ -181,7 +181,7 @@ func BorHeimdallForward(
 		return err
 	}
 
-	lastStateSyncEventID, err := LastStateSyncEventID(tx, cfg.blockReader)
+	lastStateSyncEventID, _, err := cfg.blockReader.LastEventId(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -538,8 +538,8 @@ func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *
 }
 
 func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
-	spanID := bor.SpanIDAt(header.Number.Uint64() + 1)
-	spanBytes := chr.BorSpan(spanID)
+	spanID := heimdall.SpanIdAt(header.Number.Uint64() + 1)
+	spanBytes := chr.BorSpan(uint64(spanID))
 	var sp heimdall.Span
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
 		return err
@@ -627,9 +627,9 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, s *StageState, tx kv
 		return err
 	}
 	defer spanCursor.Close()
-	lastSpanToKeep := bor.SpanIDAt(u.UnwindPoint)
+	lastSpanToKeep := heimdall.SpanIdAt(u.UnwindPoint)
 	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
 	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
 		if err = spanCursor.DeleteCurrent(); err != nil {
 			return err

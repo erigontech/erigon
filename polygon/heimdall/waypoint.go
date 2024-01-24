@@ -10,7 +10,7 @@ import (
 // checkpoints and milestones are both hash hashAccumulators as defined
 // here https://www.ethportal.net/concepts/hash-accumulators
 
-type HashAccumulator interface {
+type Waypoint interface {
 	fmt.Stringer
 	StartBlock() *big.Int
 	EndBlock() *big.Int
@@ -20,7 +20,7 @@ type HashAccumulator interface {
 	CmpRange(n uint64) int
 }
 
-type HashAccumulatorFields struct {
+type WaypointFields struct {
 	Proposer   libcommon.Address `json:"proposer"`
 	StartBlock *big.Int          `json:"start_block"`
 	EndBlock   *big.Int          `json:"end_block"`
@@ -29,11 +29,11 @@ type HashAccumulatorFields struct {
 	Timestamp  uint64            `json:"timestamp"`
 }
 
-func (a *HashAccumulatorFields) Length() int {
+func (a *WaypointFields) Length() int {
 	return int(new(big.Int).Sub(a.EndBlock, a.StartBlock).Int64() + 1)
 }
 
-func (a *HashAccumulatorFields) CmpRange(n uint64) int {
+func (a *WaypointFields) CmpRange(n uint64) int {
 	num := new(big.Int).SetUint64(n)
 	if num.Cmp(a.StartBlock) < 0 {
 		return -1
@@ -44,4 +44,4 @@ func (a *HashAccumulatorFields) CmpRange(n uint64) int {
 	return 0
 }
 
-type HashAccumulators []HashAccumulator
+type Waypoints []Waypoint
