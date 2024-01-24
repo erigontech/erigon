@@ -106,6 +106,10 @@ func SpawnSequencerInterhashesStage(
 	// write the new block lookup entries
 	rawdb.WriteTxLookupEntries(tx, latest)
 
+	if err := s.Update(tx, to); err != nil {
+		return err
+	}
+
 	// inform the accumulator of this new block to update the txpool and anything else that needs to know
 	// we need to do this here instead of execution as the interhashes stage will have updated the block
 	// hashes
