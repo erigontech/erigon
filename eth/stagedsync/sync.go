@@ -90,7 +90,6 @@ func (s *Sync) NextStage() {
 		return
 	}
 	s.currentStage++
-	fmt.Println("NextStage:", s.stages[s.currentStage-1].ID)
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.CurrentSyncStage{}).Enabled()
 	if isDiagEnabled {
 		diagnostics.Send(diagnostics.CurrentSyncStage{Stage: s.currentStage})
@@ -161,7 +160,6 @@ func (s *Sync) StagesIdsList() []string {
 }
 
 func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
-	fmt.Println("SetCurrentStage:", id)
 	for i, stage := range s.stages {
 		if stage.ID == id {
 			s.currentStage = uint(i)

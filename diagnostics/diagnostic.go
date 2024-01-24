@@ -31,26 +31,6 @@ func (d *DiagnosticClient) Setup() {
 	d.runCurrentSyncStageListener()
 	d.runSyncStagesListListener()
 	d.runBlockExecutionListener()
-
-	/*ticker := time.NewTicker(7 * time.Second)
-	quit := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				// do stuff
-				d.mutex.Lock()
-				ssss, err := json.Marshal(d.syncStats)
-				d.mutex.Unlock()
-				if err == nil {
-					log.Info("SyncStatistics", "stats", string(ssss))
-				}
-			case <-quit:
-				ticker.Stop()
-				return
-			}
-		}
-	}()*/
 }
 
 func (d *DiagnosticClient) runSnapshotListener() {
