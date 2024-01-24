@@ -64,10 +64,9 @@ func SpawnSequencerInterhashesStage(
 	// if we are at block 1 then just regenerate the whole thing otherwise take an incremental approach
 	var newRoot libcommon.Hash
 	if to == 1 {
-		newRoot, err = regenerateSequencerIntermediateHashes(s.LogPrefix(), tx, eridb, smt)
+		newRoot, err = regenerateIntermediateHashes(s.LogPrefix(), tx, eridb, smt)
 	} else {
-		// todo: incremental change here instead
-		newRoot, err = regenerateSequencerIntermediateHashes(s.LogPrefix(), tx, eridb, smt)
+		newRoot, err = zkIncrementIntermediateHashes(s.LogPrefix(), s, tx, eridb, smt, to, false, nil, ctx.Done())
 	}
 
 	latest, err := rawdb.ReadBlockByNumber(tx, to)
