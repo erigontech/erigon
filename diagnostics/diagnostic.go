@@ -3,7 +3,6 @@ package diagnostics
 import (
 	"context"
 	"net/http"
-	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -16,7 +15,6 @@ type DiagnosticClient struct {
 	ctx        *cli.Context
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
-	mutex      sync.RWMutex
 
 	syncStats diaglib.SyncStatistics
 }
@@ -32,6 +30,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runSegmentIndexingFinishedListener()
 	d.runCurrentSyncStageListener()
 	d.runSyncStagesListListener()
+	d.runBlockExecutionListener()
 
 	/*ticker := time.NewTicker(7 * time.Second)
 	quit := make(chan struct{})
@@ -234,6 +233,30 @@ func (d *DiagnosticClient) runCurrentSyncStageListener() {
 				return
 			case info := <-ch:
 				d.syncStats.SyncStages.CurrentStage = info.Stage
+				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runBlockExecutionListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.BlockExecutionStatistics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockExecutionStatistics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.syncStats.BlockExecution = info
+
 				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
 					return
 				}

@@ -33,6 +33,7 @@ type SyncStatistics struct {
 	SyncStages       SyncStages                 `json:"syncStages"`
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
 	SnapshotIndexing SnapshotIndexingStatistics `json:"snapshotIndexing"`
+	BlockExecution   BlockExecutionStatistics   `json:"blockExecution"`
 }
 
 type SnapshotDownloadStatistics struct {
@@ -98,9 +99,14 @@ type BlockExecutionStatistics struct {
 	TxPerSec    float64 `json:"txPerSec"`
 	MgasPerSec  float64 `json:"mgasPerSec"`
 	GasState    float64 `json:"gasState"`
-	Batch       float64 `json:"batch"`
+	Batch       uint64  `json:"batch"`
 	Alloc       uint64  `json:"alloc"`
 	Sys         uint64  `json:"sys"`
+	TimeElapsed float64 `json:"timeElapsed"`
+}
+
+func (ti BlockExecutionStatistics) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti SnapshotDownloadStatistics) Type() Type {
