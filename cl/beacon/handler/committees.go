@@ -42,12 +42,12 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	defer tx.Rollback()
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
 	slotPtr, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
@@ -55,7 +55,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, err
 	}
 	if slotPtr == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read block slot: %x", blockRoot))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 	slot := *slotPtr
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
@@ -64,7 +64,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	}
 	// check if the filter (if any) is in the epoch
 	if slotFilter != nil && !(epoch*a.beaconChainCfg.SlotsPerEpoch <= *slotFilter && *slotFilter < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch) {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("slot %d is not in epoch %d", *slotFilter, epoch))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("slot %d is not in epoch %d", *slotFilter, epoch))
 	}
 	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
@@ -73,10 +73,10 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		s, cn := a.syncedData.HeadState()
 		defer cn()
 		if s == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, "node is syncing")
+			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
 		}
 		if epoch > state.Epoch(s)+1 {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("epoch %d is too far in the future", epoch))
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("epoch %d is too far in the future", epoch))
 		}
 		// get active validator indicies
 		committeeCount := s.CommitteeCount(epoch)
@@ -119,7 +119,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	mixPosition := (epoch + a.beaconChainCfg.EpochsPerHistoricalVector - a.beaconChainCfg.MinSeedLookahead - 1) % a.beaconChainCfg.EpochsPerHistoricalVector
 	mix, err := a.stateReader.ReadRandaoMixBySlotAndIndex(tx, epoch*a.beaconChainCfg.SlotsPerEpoch, mixPosition)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("could not read randao mix: %v", err))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read randao mix: %v", err))
 	}
 
 	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {

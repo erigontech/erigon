@@ -7,6 +7,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -29,16 +31,18 @@ type GossipManager struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
 
+	emitters  *beaconevents.Emitters
 	mu        sync.RWMutex
 	subs      map[int]chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]
 	totalSubs int
 }
 
 func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
-	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, recorder freezer.Freezer) *GossipManager {
+	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, recorder freezer.Freezer, emitters *beaconevents.Emitters) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
 		forkChoice:    forkChoice,
+		emitters:      emitters,
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		recorder:      recorder,
@@ -144,6 +148,32 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		}
 		g.mu.RUnlock()
 
+	case gossip.TopicNameSyncCommitteeContributionAndProof:
+		obj := &solid.SignedContributionAndProof{}
+		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			g.sentinel.BanPeer(ctx, data.Peer)
+			l["at"] = "decoding signed contribution and proof"
+			return err
+		}
+		g.emitters.Publish("contribution_and_proof", obj)
+	case gossip.TopicNameLightClientFinalityUpdate:
+		obj := &cltypes.LightClientFinalityUpdate{}
+		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			g.sentinel.BanPeer(ctx, data.Peer)
+			l["at"] = "decoding lc finality update"
+			return err
+		}
+	case gossip.TopicNameLightClientOptimisticUpdate:
+		obj := &cltypes.LightClientOptimisticUpdate{}
+		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+			g.sentinel.BanPeer(ctx, data.Peer)
+			l["at"] = "decoding lc optimistic update"
+			return err
+		}
+	case gossip.TopicNameContributionAndProof:
+		if err := operationsContract[*cltypes.SignedContributionAndProof](ctx, g, l, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof); err != nil {
+			return err
+		}
 	case gossip.TopicNameVoluntaryExit:
 		if err := operationsContract[*cltypes.SignedVoluntaryExit](ctx, g, l, data, int(version), "voluntary exit", g.forkChoice.OnVoluntaryExit); err != nil {
 			return err

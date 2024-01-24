@@ -77,7 +77,7 @@ func (b *BeaconResponse) MarshalJSON() ([]byte, error) {
 func (b *BeaconResponse) EncodeSSZ(xs []byte) ([]byte, error) {
 	marshaler, ok := b.Data.(ssz.Marshaler)
 	if !ok {
-		return nil, NewEndpointError(http.StatusBadRequest, "This endpoint does not support SSZ response")
+		return nil, NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported)
 	}
 	encoded, err := marshaler.EncodeSSZ(nil)
 	if err != nil {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -44,7 +45,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 		return nil, err
 	}
 	if blk == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "block not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
 	}
 	slot := blk.Header.Slot
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
@@ -52,7 +53,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 		// finalized case
 		blkRewards, ok := a.forkchoiceStore.BlockRewards(root)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "block not found")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
 		}
 		return newBeaconResponse(blockRewardsResponse{
 			ProposerIndex:     blk.Header.ProposerIndex,
@@ -68,7 +69,7 @@ func (a *ApiHandler) getBlockRewards(w http.ResponseWriter, r *http.Request) (*b
 		return nil, err
 	}
 	if slotData == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "could not read historical block rewards, node may not be archive or it still processing historical states")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read historical block rewards, node may not be archive or it still processing historical states"))
 	}
 	return newBeaconResponse(blockRewardsResponse{
 		ProposerIndex:     blk.Header.ProposerIndex,
@@ -98,12 +99,12 @@ func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Req
 	// read the entire body
 	jsonBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	// parse json body request
 	if len(jsonBytes) > 0 {
 		if err := json.Unmarshal(jsonBytes, &req); err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	}
 	filterIndicies, err := parseQueryValidatorIndicies(tx, req)
@@ -124,11 +125,11 @@ func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Req
 		return nil, err
 	}
 	if blk == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "block not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
 	}
 	version := a.beaconChainCfg.GetCurrentStateVersion(blk.Block.Slot / a.beaconChainCfg.SlotsPerEpoch)
 	if version < clparams.AltairVersion {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "sync committee rewards not available before Altair fork")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee rewards not available before Altair fork"))
 	}
 	// retrieve the state we need -----------------------------------------------
 	// We need:
@@ -148,14 +149,14 @@ func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Req
 	)
 	if isFinalized {
 		if !isCanonical {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "non-canonical finalized block not found")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("non-canonical finalized block not found"))
 		}
 		epochData, err := state_accessors.ReadEpochData(tx, blk.Block.Slot)
 		if err != nil {
 			return nil, err
 		}
 		if epochData == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "could not read historical sync committee rewards, node may not be archive or it still processing historical states")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read historical sync committee rewards, node may not be archive or it still processing historical states"))
 		}
 		totalActiveBalance = epochData.TotalActiveBalance
 		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(tx, a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(blk.Block.Slot))
@@ -163,17 +164,17 @@ func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Req
 			return nil, err
 		}
 		if syncCommittee == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "could not read historical sync committee, node may not be archive or it still processing historical states")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read historical sync committee, node may not be archive or it still processing historical states"))
 		}
 	} else {
 		var ok bool
 		syncCommittee, _, ok = a.forkchoiceStore.GetSyncCommittees(root)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "non-finalized sync committee not found")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("non-finalized sync committee not found"))
 		}
 		totalActiveBalance, ok = a.forkchoiceStore.TotalActiveBalance(root)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "non-finalized total active balance not found")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("non-finalized total active balance not found"))
 		}
 	}
 	committee := syncCommittee.GetCommittee()
@@ -198,7 +199,7 @@ func (a *ApiHandler) getSyncCommitteesRewards(w http.ResponseWriter, r *http.Req
 			return nil, err
 		}
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "sync committee public key not found")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee public key not found"))
 		}
 		if len(filterIndiciesSet) > 0 {
 			if _, ok := filterIndiciesSet[idx]; !ok {
