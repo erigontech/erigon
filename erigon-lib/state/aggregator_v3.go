@@ -716,7 +716,7 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	return ac.somethingToPrune(tx, ac.maxTxNumInDomainFiles(false))
+	return ac.somethingToPrune(tx)
 }
 
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
@@ -750,14 +750,14 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	return blockNumWithCommitment, true, nil
 }
 
-func (ac *AggregatorV3Context) somethingToPrune(tx kv.Tx, untilTxNum uint64) bool {
+func (ac *AggregatorV3Context) somethingToPrune(tx kv.Tx) bool {
 	if dbg.NoPrune() {
 		return false
 	}
-	return ac.commitment.CanPruneUntil(tx, untilTxNum) ||
-		ac.account.CanPruneUntil(tx, untilTxNum) ||
-		ac.code.CanPruneUntil(tx, untilTxNum) ||
-		ac.storage.CanPruneUntil(tx, untilTxNum) ||
+	return ac.commitment.CanPruneUntil(tx) ||
+		ac.account.CanPruneUntil(tx) ||
+		ac.code.CanPruneUntil(tx) ||
+		ac.storage.CanPruneUntil(tx) ||
 		ac.logAddrs.CanPrune(tx) ||
 		ac.logTopics.CanPrune(tx) ||
 		ac.tracesFrom.CanPrune(tx) ||
@@ -887,7 +887,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		step = (txTo - 1) / ac.a.StepSize()
 	}
 
-	if !ac.somethingToPrune(tx, txTo) {
+	if !ac.somethingToPrune(tx) {
 		return nil, nil
 	}
 
