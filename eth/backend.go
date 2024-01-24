@@ -273,15 +273,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync.UseSnapshots = useSnapshots
 			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(config.Genesis.Config.ChainName) && useSnapshots
 		}
-		if !config.Sync.UseSnapshots {
-			if err := downloader.CreateProhibitNewDownloadsFile(dirs.Snap); err != nil {
-				return err
-			}
-		}
-
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	if !config.Sync.UseSnapshots {
+		if err := downloader.CreateProhibitNewDownloadsFile(dirs.Snap); err != nil {
+			return nil, err
+		}
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
