@@ -128,7 +128,15 @@ const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 func (tf *TorrentFiles) prohibitNewDownloads() error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	fPath := filepath.Join(tf.dir, ProhibitNewDownloadsFileName)
+	return CreateProhibitNewDownloadsFile(tf.dir)
+}
+func (tf *TorrentFiles) newDownloadsAreProhibited() bool {
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+	return dir2.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName))
+}
+func CreateProhibitNewDownloadsFile(dir string) error {
+	fPath := filepath.Join(dir, ProhibitNewDownloadsFileName)
 	f, err := os.Create(fPath)
 	if err != nil {
 		return err
@@ -138,9 +146,4 @@ func (tf *TorrentFiles) prohibitNewDownloads() error {
 		return err
 	}
 	return nil
-}
-func (tf *TorrentFiles) newDownloadsAreProhibited() bool {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return dir2.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName))
 }
