@@ -608,7 +608,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.newDownloadsAreProhibited() {
 		return nil
 	}
-	log.Warn("[dbg] addMagnetLink", "name", name)
 
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
