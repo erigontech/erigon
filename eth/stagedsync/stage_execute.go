@@ -469,11 +469,11 @@ Loop:
 		if cfg.silkworm != nil && !isMemoryMutation {
 			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
 			// Recreate tx because Silkworm has just done commit or abort on passed one
-			tx, tx_err := cfg.db.BeginRw(context.Background())
+			var tx_err error
+			txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
 			if tx_err != nil {
 				return tx_err
 			}
-			txc.Tx = tx
 			defer txc.Tx.Rollback()
 			// Recreate memory batch because underlying tx has changed
 			batch.Close()
