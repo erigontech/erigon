@@ -41,8 +41,10 @@ func (tf *TorrentFiles) Delete(name string) error {
 }
 
 func (tf *TorrentFiles) delete(name string) error {
-	fPath := filepath.Join(tf.dir, name)
-	return os.Remove(fPath + ".torrent")
+	if !strings.HasSuffix(name, ".torrent") {
+		name += ".torrent"
+	}
+	return os.Remove(filepath.Join(tf.dir, name))
 }
 
 func (tf *TorrentFiles) Create(torrentFilePath string, res []byte) error {
@@ -94,11 +96,10 @@ func (tf *TorrentFiles) createTorrentFromMetaInfo(fPath string, mi *metainfo.Met
 	return nil
 }
 
-func (tf *TorrentFiles) LoadByName(fName string) (*torrent.TorrentSpec, error) {
+func (tf *TorrentFiles) LoadByName(name string) (*torrent.TorrentSpec, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	fPath := filepath.Join(tf.dir, fName+".torrent")
-	return tf.load(fPath)
+	return tf.load(filepath.Join(tf.dir, name))
 }
 
 func (tf *TorrentFiles) LoadByPath(fPath string) (*torrent.TorrentSpec, error) {
@@ -108,6 +109,9 @@ func (tf *TorrentFiles) LoadByPath(fPath string) (*torrent.TorrentSpec, error) {
 }
 
 func (tf *TorrentFiles) load(fPath string) (*torrent.TorrentSpec, error) {
+	if !strings.HasSuffix(fPath, ".torrent") {
+		fPath += ".torrent"
+	}
 	mi, err := metainfo.LoadFromFile(fPath)
 	if err != nil {
 		return nil, fmt.Errorf("LoadFromFile: %w, file=%s", err, fPath)
