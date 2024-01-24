@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/anacrolix/torrent"
@@ -28,8 +29,10 @@ func (tf *TorrentFiles) Exists(name string) bool {
 }
 
 func (tf *TorrentFiles) exists(name string) bool {
-	fPath := filepath.Join(tf.dir, name)
-	return dir2.FileExist(fPath + ".torrent")
+	if !strings.HasSuffix(name, ".torrent") {
+		name += ".torrent"
+	}
+	return dir2.FileExist(filepath.Join(tf.dir, name))
 }
 func (tf *TorrentFiles) Delete(name string) error {
 	tf.lock.Lock()
