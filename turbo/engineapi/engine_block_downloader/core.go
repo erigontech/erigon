@@ -2,7 +2,6 @@ package engine_block_downloader
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
@@ -62,12 +61,6 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 		e.logger.Warn("[EngineBlockDownloader] Could load headers", "err", err)
 		e.status.Store(headerdownload.Idle)
 		return
-	}
-
-	e.logger.Warn("see: ", " e.syncCfg.LoopBlockLimit", e.syncCfg.LoopBlockLimit)
-	if e.syncCfg.LoopBlockLimit > 0 {
-		e.logger.Warn("see: ", "startBlock+uint64(e.syncCfg.LoopBlockLimit)", startBlock+uint64(e.syncCfg.LoopBlockLimit), "endBlock", endBlock)
-		endBlock = cmp.Min(endBlock, startBlock+uint64(e.syncCfg.LoopBlockLimit))
 	}
 
 	// bodiesCollector := etl.NewCollector("EngineBlockDownloader", e.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), e.logger)
