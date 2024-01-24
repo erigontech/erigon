@@ -21,8 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -41,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -145,27 +142,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		}
 	}()
 	return d, nil
-}
-
-const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
-
-// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-// After "download once" - Erigon will produce and seed new files
-// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (d *Downloader) prohibitNewDownloads() error {
-	fPath := filepath.Join(d.SnapDir(), ProhibitNewDownloadsFileName)
-	f, err := os.Create(fPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	return nil
-}
-func (d *Downloader) newDownloadsAreProhibited() bool {
-	return dir.FileExist(filepath.Join(d.SnapDir(), ProhibitNewDownloadsFileName))
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -605,7 +581,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) {
 		return nil
 	}
-	if d.newDownloadsAreProhibited() {
+	if d.torrentFiles.newDownloadsAreProhibited() {
 		return nil
 	}
 
