@@ -10,6 +10,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -17,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -59,6 +61,7 @@ type EngineBlockDownloader struct {
 	tmpdir  string
 	timeout int
 	config  *chain.Config
+	syncCfg ethconfig.Sync
 
 	// lock
 	lock sync.Mutex
@@ -70,7 +73,8 @@ type EngineBlockDownloader struct {
 func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *headerdownload.HeaderDownload, executionClient execution.ExecutionClient,
 	bd *bodydownload.BodyDownload, blockPropagator adapter.BlockPropagator,
 	bodyReqSend RequestBodyFunction, blockReader services.FullBlockReader, db kv.RoDB, config *chain.Config,
-	tmpdir string, timeout int) *EngineBlockDownloader {
+	tmpdir string, syncCfg ethconfig.Sync) *EngineBlockDownloader {
+	timeout := syncCfg.BodyDownloadTimeoutSeconds
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
@@ -80,6 +84,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		db:              db,
 		status:          s,
 		config:          config,
+		syncCfg:         syncCfg,
 		tmpdir:          tmpdir,
 		logger:          logger,
 		blockReader:     blockReader,
