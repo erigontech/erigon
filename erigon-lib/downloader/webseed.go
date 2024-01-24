@@ -237,6 +237,9 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	if len(d.TorrentUrls()) == 0 {
 		return
 	}
+	if d.torrentFiles.newDownloadsAreProhibited() {
+		return
+	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
 	e.SetLimit(1024)
