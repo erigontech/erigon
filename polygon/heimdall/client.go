@@ -23,8 +23,10 @@ var (
 	ErrShutdownDetected      = errors.New("shutdown detected")
 	ErrNoResponse            = errors.New("got a nil response")
 	ErrNotSuccessfulResponse = errors.New("error while fetching data from Heimdall")
-	ErrNotInRejectedList     = errors.New("milestoneID doesn't exist in rejected list")
-	ErrNotInMilestoneList    = errors.New("milestoneID doesn't exist in Heimdall")
+	ErrNotInRejectedList     = errors.New("milestoneId doesn't exist in rejected list")
+	ErrNotInMilestoneList    = errors.New("milestoneId doesn't exist in Heimdall")
+	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
+	ErrNotInSpanList         = errors.New("milestoneId doesn't exist in Heimdall")
 	ErrServiceUnavailable    = errors.New("service unavailable")
 )
 

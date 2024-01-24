@@ -3,7 +3,6 @@ package heimdall
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -35,6 +34,8 @@ type Heimdall interface {
 
 // ErrIncompleteMilestoneRange happens when FetchMilestones is called with an old start block because old milestones are evicted
 var ErrIncompleteMilestoneRange = errors.New("milestone range doesn't contain the start block")
+var ErrIncompleteCheckpointRange = errors.New("checkpoint range doesn't contain the start block")
+var ErrIncompleteSpanRange = errors.New("span range doesn't contain the start block")
 
 type heimdallImpl struct {
 	client          HeimdallClient
@@ -77,6 +78,10 @@ func (h *heimdallImpl) FetchCheckpointsFromBlock(ctx context.Context, io Checkpo
 	for i := count; i >= 1; i-- {
 		c, err := h.FetchCheckpoints(ctx, io, i, i)
 		if err != nil {
+			if errors.Is(err, ErrNotInCheckpointList) {
+				common.SliceReverse(checkpoints)
+				return checkpoints, ErrIncompleteCheckpointRange
+			}
 			return nil, err
 		}
 
@@ -250,7 +255,40 @@ func (h *heimdallImpl) LastSpanId(ctx context.Context, io SpanIO) (SpanId, bool,
 }
 
 func (h *heimdallImpl) FetchSpansFromBlock(ctx context.Context, io SpanIO, startBlock uint64) ([]*Span, error) {
-	return nil, fmt.Errorf("TODO")
+	last, _, err := h.LastSpanId(ctx, io)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var spans []*Span
+
+	for i := last; i >= 1; i-- {
+		m, err := h.FetchSpans(ctx, io, i, i)
+		if err != nil {
+			if errors.Is(err, ErrNotInSpanList) {
+				common.SliceReverse(spans)
+				return spans, ErrIncompleteSpanRange
+			}
+			return nil, err
+		}
+
+		cmpResult := m[0].CmpRange(startBlock)
+		// the start block is past the last span
+		if cmpResult > 0 {
+			return nil, nil
+		}
+
+		spans = append(spans, m...)
+
+		// the checkpoint contains the start block
+		if cmpResult == 0 {
+			break
+		}
+	}
+
+	common.SliceReverse(spans)
+	return spans, nil
 }
 
 func (h *heimdallImpl) FetchSpans(ctx context.Context, io SpanIO, start SpanId, end SpanId) ([]*Span, error) {

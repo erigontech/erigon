@@ -24,6 +24,18 @@ func (hs *Span) Less(other btree.Item) bool {
 	return hs.EndBlock < otherHs.EndBlock
 }
 
+func (s *Span) CmpRange(n uint64) int {
+	if n < s.StartBlock {
+		return -1
+	}
+
+	if n > s.EndBlock {
+		return 1
+	}
+
+	return 0
+}
+
 type SpanResponse struct {
 	Height string `json:"height"`
 	Result Span   `json:"result"`
