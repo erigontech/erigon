@@ -545,7 +545,7 @@ func (h *Harness) mockBorSpanner() {
 func (h *Harness) mockHeimdallClient() {
 	h.heimdallClient.
 		EXPECT().
-		Span(gomock.Any(), gomock.Any()).
+		FetchSpan(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 			res := h.heimdallNextMockSpan
 			h.heimdallNextMockSpan = &heimdall.Span{

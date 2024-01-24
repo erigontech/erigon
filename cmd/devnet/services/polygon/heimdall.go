@@ -142,7 +142,7 @@ func NewHeimdall(
 	return heimdall
 }
 
-func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
+func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -182,6 +182,10 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, err
 	h.spans[h.currentSpan.Id] = h.currentSpan
 
 	return h.currentSpan, nil
+}
+
+func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
 }
 
 func (h *Heimdall) currentSprintLength() int {
@@ -442,7 +446,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *ch
 			http.Error(w, http.StatusText(400), 400)
 			return
 		}
-		result, err := client.Span(ctx, id)
+		result, err := client.FetchSpan(ctx, id)
 		writeResponse(w, result, err)
 	})
 

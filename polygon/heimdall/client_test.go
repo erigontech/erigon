@@ -38,7 +38,7 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, 100*time.Millisecond, 5, logger)
 
-	spanRes, err := heimdallClient.Span(ctx, 1534)
+	spanRes, err := heimdallClient.FetchSpan(ctx, 1534)
 	require.Nil(t, spanRes)
 	require.Error(t, err)
 }

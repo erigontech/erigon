@@ -44,7 +44,7 @@ func TestHeimdallServer(t *testing.T) {
 		EndBlock:   2000,
 		ChainID:    "80001",
 	}
-	client.EXPECT().Span(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
+	client.EXPECT().FetchSpan(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
 
 	checkpoint1 := &heimdall.Checkpoint{
 		Fields: heimdall.WaypointFields{

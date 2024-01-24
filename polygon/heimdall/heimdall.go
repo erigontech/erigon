@@ -99,7 +99,49 @@ func (h *heimdallImpl) FetchCheckpointsFromBlock(ctx context.Context, io Checkpo
 }
 
 func (h *heimdallImpl) FetchCheckpoints(ctx context.Context, io CheckpointIO, start CheckpointId, end CheckpointId) (Waypoints, error) {
-	return nil, fmt.Errorf("TODO")
+	var checkpoints Waypoints
+
+	lastCheckpointId, exists, err := io.LastCheckpointId(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if exists && start <= lastCheckpointId {
+		if end <= lastCheckpointId {
+			lastCheckpointId = end
+		}
+
+		for id := start; id <= lastCheckpointId; id++ {
+			checkpoint, err := io.ReadCheckpoint(ctx, id)
+
+			if err != nil {
+				return nil, err
+			}
+
+			checkpoints = append(checkpoints, checkpoint)
+		}
+
+		start = lastCheckpointId + 1
+	}
+
+	for id := start; id <= end; id++ {
+		checkpoint, err := h.client.FetchCheckpoint(ctx, int64(id))
+
+		if err != nil {
+			return nil, err
+		}
+
+		err = io.WriteCheckpoint(ctx, checkpoint)
+
+		if err != nil {
+			return nil, err
+		}
+
+		checkpoints = append(checkpoints, checkpoint)
+	}
+
+	return checkpoints, nil
 }
 
 func (h *heimdallImpl) LastMilestoneId(ctx context.Context, io MilestoneIO) (MilestoneId, bool, error) {
@@ -124,7 +166,7 @@ func (h *heimdallImpl) FetchMilestonesFromBlock(ctx context.Context, io Mileston
 	var milestones Waypoints
 
 	for i := last; i >= 1; i-- {
-		m, err := h.client.FetchMilestone(ctx, int64(i))
+		m, err := h.FetchMilestones(ctx, io, i, i)
 		if err != nil {
 			if errors.Is(err, ErrNotInMilestoneList) {
 				common.SliceReverse(milestones)
@@ -133,13 +175,13 @@ func (h *heimdallImpl) FetchMilestonesFromBlock(ctx context.Context, io Mileston
 			return nil, err
 		}
 
-		cmpResult := m.CmpRange(startBlock)
+		cmpResult := m[0].CmpRange(startBlock)
 		// the start block is past the last milestone
 		if cmpResult > 0 {
 			return nil, nil
 		}
 
-		milestones = append(milestones, m)
+		milestones = append(milestones, m...)
 
 		// the checkpoint contains the start block
 		if cmpResult == 0 {
@@ -152,11 +194,59 @@ func (h *heimdallImpl) FetchMilestonesFromBlock(ctx context.Context, io Mileston
 }
 
 func (h *heimdallImpl) FetchMilestones(ctx context.Context, io MilestoneIO, start MilestoneId, end MilestoneId) (Waypoints, error) {
-	return nil, fmt.Errorf("TODO")
+	var milestones Waypoints
+
+	lastMilestoneId, exists, err := io.LastMilestoneId(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if exists && start <= lastMilestoneId {
+		if end <= lastMilestoneId {
+			lastMilestoneId = end
+		}
+
+		for id := start; id <= lastMilestoneId; id++ {
+			milestone, err := io.ReadMilestone(ctx, id)
+
+			if err != nil {
+				return nil, err
+			}
+
+			milestones = append(milestones, milestone)
+		}
+
+		start = lastMilestoneId + 1
+	}
+
+	for id := start; id <= end; id++ {
+		milestone, err := h.client.FetchMilestone(ctx, int64(id))
+
+		if err != nil {
+			return nil, err
+		}
+
+		err = io.WriteMilestone(ctx, milestone)
+
+		if err != nil {
+			return nil, err
+		}
+
+		milestones = append(milestones, milestone)
+	}
+
+	return milestones, nil
 }
 
 func (h *heimdallImpl) LastSpanId(ctx context.Context, io SpanIO) (SpanId, bool, error) {
-	return 0, false, fmt.Errorf("TODO")
+	span, err := h.client.FetchLatestSpan(ctx)
+
+	if err != nil {
+		return 0, false, err
+	}
+
+	return span.Id, true, nil
 }
 
 func (h *heimdallImpl) FetchSpansFromBlock(ctx context.Context, io SpanIO, startBlock uint64) ([]*Span, error) {
@@ -191,7 +281,7 @@ func (h *heimdallImpl) FetchSpans(ctx context.Context, io SpanIO, start SpanId, 
 	}
 
 	for id := start; id <= end; id++ {
-		span, err := h.client.Span(ctx, uint64(id))
+		span, err := h.client.FetchSpan(ctx, uint64(id))
 
 		if err != nil {
 			return nil, err
@@ -239,7 +329,44 @@ func (h *heimdallImpl) OnSpanEvent(ctx context.Context, io SpanIO, callback func
 }
 
 func (h *heimdallImpl) OnCheckpointEvent(ctx context.Context, io CheckpointIO, callback func(*Checkpoint)) error {
-	return fmt.Errorf("TODO")
+	currentCount, err := h.client.FetchCheckpointCount(ctx)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		for {
+			count, err := h.client.FetchCheckpointCount(ctx)
+			if err != nil {
+				if !errors.Is(err, context.Canceled) {
+					h.logger.Error("heimdallImpl.OnMilestoneEvent FetchMilestoneCount error", "err", err)
+				}
+				break
+			}
+
+			if count <= currentCount {
+				pollDelayTimer := time.NewTimer(h.pollDelay)
+				select {
+				case <-ctx.Done():
+					return
+				case <-pollDelayTimer.C:
+				}
+			} else {
+				currentCount = count
+				m, err := h.client.FetchCheckpoint(ctx, count)
+				if err != nil {
+					if !errors.Is(err, context.Canceled) {
+						h.logger.Error("heimdallImpl.OnMilestoneEvent FetchMilestone error", "err", err)
+					}
+					break
+				}
+
+				go callback(m)
+			}
+		}
+	}()
+
+	return nil
 }
 
 func (h *heimdallImpl) OnMilestoneEvent(ctx context.Context, io MilestoneIO, callback func(*Milestone)) error {

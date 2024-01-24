@@ -96,7 +96,7 @@ func fetchAndWriteHeimdallSpan(
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	response, err := heimdallClient.Span(ctx, spanID)
+	response, err := heimdallClient.FetchSpan(ctx, spanID)
 	if err != nil {
 		return 0, err
 	}

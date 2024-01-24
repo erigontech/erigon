@@ -6,6 +6,7 @@ package heimdall
 
 import (
 	context "context"
+	http "net/http"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
@@ -91,6 +92,21 @@ func (mr *MockHeimdallClientMockRecorder) FetchLastNoAckMilestone(ctx interface{
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLastNoAckMilestone", reflect.TypeOf((*MockHeimdallClient)(nil).FetchLastNoAckMilestone), ctx)
 }
 
+// FetchLatestSpan mocks base method.
+func (m *MockHeimdallClient) FetchLatestSpan(ctx context.Context) (*Span, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchLatestSpan", ctx)
+	ret0, _ := ret[0].(*Span)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchLatestSpan indicates an expected call of FetchLatestSpan.
+func (mr *MockHeimdallClientMockRecorder) FetchLatestSpan(ctx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpan", reflect.TypeOf((*MockHeimdallClient)(nil).FetchLatestSpan), ctx)
+}
+
 // FetchMilestone mocks base method.
 func (m *MockHeimdallClient) FetchMilestone(ctx context.Context, number int64) (*Milestone, error) {
 	m.ctrl.T.Helper()
@@ -149,19 +165,19 @@ func (mr *MockHeimdallClientMockRecorder) FetchNoAckMilestone(ctx, milestoneID i
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchNoAckMilestone", reflect.TypeOf((*MockHeimdallClient)(nil).FetchNoAckMilestone), ctx, milestoneID)
 }
 
-// Span mocks base method.
-func (m *MockHeimdallClient) Span(ctx context.Context, spanID uint64) (*Span, error) {
+// FetchSpan mocks base method.
+func (m *MockHeimdallClient) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Span", ctx, spanID)
+	ret := m.ctrl.Call(m, "FetchSpan", ctx, spanID)
 	ret0, _ := ret[0].(*Span)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// Span indicates an expected call of Span.
-func (mr *MockHeimdallClientMockRecorder) Span(ctx, spanID interface{}) *gomock.Call {
+// FetchSpan indicates an expected call of FetchSpan.
+func (mr *MockHeimdallClientMockRecorder) FetchSpan(ctx, spanID interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Span", reflect.TypeOf((*MockHeimdallClient)(nil).Span), ctx, spanID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpan", reflect.TypeOf((*MockHeimdallClient)(nil).FetchSpan), ctx, spanID)
 }
 
 // StateSyncEvents mocks base method.
@@ -179,3 +195,52 @@ func (mr *MockHeimdallClientMockRecorder) StateSyncEvents(ctx, fromID, to interf
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateSyncEvents", reflect.TypeOf((*MockHeimdallClient)(nil).StateSyncEvents), ctx, fromID, to)
 }
 
+// MockHttpClient is a mock of HttpClient interface.
+type MockHttpClient struct {
+	ctrl     *gomock.Controller
+	recorder *MockHttpClientMockRecorder
+}
+
+// MockHttpClientMockRecorder is the mock recorder for MockHttpClient.
+type MockHttpClientMockRecorder struct {
+	mock *MockHttpClient
+}
+
+// NewMockHttpClient creates a new mock instance.
+func NewMockHttpClient(ctrl *gomock.Controller) *MockHttpClient {
+	mock := &MockHttpClient{ctrl: ctrl}
+	mock.recorder = &MockHttpClientMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockHttpClient) EXPECT() *MockHttpClientMockRecorder {
+	return m.recorder
+}
+
+// CloseIdleConnections mocks base method.
+func (m *MockHttpClient) CloseIdleConnections() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "CloseIdleConnections")
+}
+
+// CloseIdleConnections indicates an expected call of CloseIdleConnections.
+func (mr *MockHttpClientMockRecorder) CloseIdleConnections() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseIdleConnections", reflect.TypeOf((*MockHttpClient)(nil).CloseIdleConnections))
+}
+
+// Do mocks base method.
+func (m *MockHttpClient) Do(req *http.Request) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "Do", req)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// Do indicates an expected call of Do.
+func (mr *MockHttpClientMockRecorder) Do(req interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Do", reflect.TypeOf((*MockHttpClient)(nil).Do), req)
+}

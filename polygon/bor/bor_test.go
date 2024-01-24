@@ -55,7 +55,7 @@ func (h test_heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to in
 	return nil, nil
 }
 
-func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
+func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 
 	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
 		h.currentSpan = span
@@ -129,6 +129,9 @@ func (h test_heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, err
 
 func (h test_heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
+}
+func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
 }
 
 func (h test_heimdall) Close() {}

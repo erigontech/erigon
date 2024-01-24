@@ -38,7 +38,10 @@ const (
 //go:generate mockgen -destination=./client_mock.go -package=heimdall . HeimdallClient
 type HeimdallClient interface {
 	StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error)
-	Span(ctx context.Context, spanID uint64) (*Span, error)
+
+	FetchLatestSpan(ctx context.Context) (*Span, error)
+	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
+
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
 	FetchMilestone(ctx context.Context, number int64) (*Milestone, error)
@@ -55,6 +58,8 @@ type HeimdallClient interface {
 
 	Close()
 }
+
+var _ HeimdallClient = &Client{}
 
 type Client struct {
 	urlString    string
@@ -110,7 +115,10 @@ const (
 	fetchNoAckMilestone     = "/milestone/noAck/%s"
 	fetchMilestoneID        = "/milestone/ID/%s"
 
-	fetchSpanFormat = "bor/span/%d"
+	fetchSpanFormat     = "bor/span/%d"
+	fetchSpanLatest     = "bor/latest-span"
+	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 20
+	fetchSpanListPath   = "bor/span-list"
 )
 
 func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error) {
@@ -160,7 +168,23 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 	return eventRecords, nil
 }
 
-func (c *Client) Span(ctx context.Context, spanID uint64) (*Span, error) {
+func (c *Client) FetchLatestSpan(ctx context.Context) (*Span, error) {
+	url, err := latestSpanURL(c.urlString)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, spanRequest)
+
+	response, err := FetchWithRetry[SpanResponse](ctx, c, url)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response.Result, nil
+}
+
+func (c *Client) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	url, err := spanURL(c.urlString, spanID)
 	if err != nil {
 		return nil, err
@@ -400,6 +424,10 @@ func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
 
 func spanURL(urlString string, spanID uint64) (*url.URL, error) {
 	return makeURL(urlString, fmt.Sprintf(fetchSpanFormat, spanID), "")
+}
+
+func latestSpanURL(urlString string) (*url.URL, error) {
+	return makeURL(urlString, fetchSpanLatest, "")
 }
 
 func stateSyncURL(urlString string, fromID uint64, to int64) (*url.URL, error) {
