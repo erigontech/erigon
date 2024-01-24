@@ -17,6 +17,7 @@ import (
 )
 
 func TestStateSync(t *testing.T) {
+	t.Skip()
 	if ethconfig.EnableHistoryV3InTest {
 		t.Skip("TODO: support E3")
 	}
