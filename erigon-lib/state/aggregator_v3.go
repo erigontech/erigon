@@ -786,7 +786,9 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return err
 		}
 		if stat == nil {
-			log.Info("[snapshots] PruneSmallBatches", "took", time.Since(started).String(), "stat", fullStat.String())
+			if fstat := fullStat.String(); fstat != "" {
+				log.Info("[snapshots] PruneSmallBatches", "took", time.Since(started).String(), "stat", fstat)
+			}
 			return nil
 		}
 		fullStat.Accumulate(stat)
@@ -795,7 +797,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		case <-logEvery.C:
 			ac.a.logger.Info("[snapshots] pruning",
 				"until timeout", time.Until(started.Add(timeout)).String(),
-				"aggregatedStep", ac.maxTxNumInDomainFiles(false)/ac.a.StepSize(),
+				"aggregatedStep", (ac.maxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
@@ -887,7 +889,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		step = (txTo - 1) / ac.a.StepSize()
 	}
 
-	if !ac.somethingToPrune(tx) {
+	if txFrom == txTo || !ac.somethingToPrune(tx) {
 		return nil, nil
 	}
 
@@ -895,10 +897,10 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		logEvery = time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 	}
-	//ac.a.logger.Debug("aggregator prune", "step", step,
+	//ac.a.logger.Info("aggregator prune", "step", step,
 	//	"txn_range", fmt.Sprintf("[%d,%d)", txFrom, txTo), "limit", limit,
 	//	/*"stepsLimit", limit/ac.a.aggregationStep,*/ "stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx))
-	//
+
 	ap, err := ac.account.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
 	if err != nil {
 		return nil, err

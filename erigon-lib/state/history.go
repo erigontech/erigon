@@ -1081,13 +1081,8 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx) (can bool, txTo uint64) {
 	return minIdxTx < txTo, txTo
 }
 
-func (hc *HistoryContext) CanPruneUntil(tx kv.Tx) bool {
-	can, _ := hc.canPruneUntil(tx)
-	return can
-}
-
 // Prune [txFrom; txTo)
-// `force` flag to prune even if CanPruneUntil returns false (when Unwind is needed, CanPruneUntil always returns false)
+// `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.

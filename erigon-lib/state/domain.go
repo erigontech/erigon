@@ -2053,13 +2053,19 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
 func (dc *DomainContext) CanPruneUntil(tx kv.Tx) bool {
-	return dc.canPruneDomainTables(tx) || dc.hc.CanPruneUntil(tx)
+	canDomain, _ := dc.canPruneDomainTables(tx)
+	canHistory, _ := dc.hc.canPruneUntil(tx)
+	return canHistory || canDomain
 }
 
 // checks if there is anything to prune in DOMAIN tables.
 // history.CanPrune should be called separately because it responsible for different tables
-func (dc *DomainContext) canPruneDomainTables(tx kv.Tx) bool {
-	return dc.CanPruneFrom(tx) < dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep
+func (dc *DomainContext) canPruneDomainTables(tx kv.Tx) (can bool, maxPrunableStep uint64) {
+	maxPrunableStep = dc.maxTxNumInDomainFiles(false) / dc.d.aggregationStep
+	if maxPrunableStep > 0 {
+		maxPrunableStep--
+	}
+	return dc.CanPruneFrom(tx) < maxPrunableStep, maxPrunableStep
 }
 
 // CanPruneFrom returns step from which domain tables can be pruned
@@ -2143,8 +2149,13 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	if !dc.canPruneDomainTables(rwTx) {
+	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx)
+	if !canPrune {
 		return stat, nil
+	}
+	if step > maxPrunableStep {
+		fmt.Printf("prune domain %s: step %d is too big, max is %d\n", dc.d.filenameBase, step, maxPrunableStep)
+		step = maxPrunableStep
 	}
 
 	st := time.Now()
