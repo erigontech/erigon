@@ -210,6 +210,7 @@ var snapshotCommand = cli.Command{
 								if err := os.Remove(filePath); err != nil {
 									return fmt.Errorf("failed to remove %s: %w", fName, err)
 								}
+								_ = os.Remove(filePath + ".torrent")
 								removed++
 							}
 						}
