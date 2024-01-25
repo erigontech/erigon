@@ -1317,7 +1317,7 @@ func (c *Bor) checkAndCommitSpan(
 
 	// check span is not set initially
 	if currentSpan.EndBlock == 0 {
-		return c.fetchAndCommitSpan(currentSpan.ID, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)
 	}
 
 	// if current block is first block of last sprint in current span

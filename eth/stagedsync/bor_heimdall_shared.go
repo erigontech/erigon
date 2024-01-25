@@ -124,6 +124,9 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
 		requiredSpanID++
 	}
+	if bor.IsFirstSprintStart(toBlockNum, cfg.borConfig) {
+		requiredSpanID++
+	}
 
 	lastSpanID, exists, err := LastSpanID(tx, cfg.blockReader)
 	if err != nil {
