@@ -77,7 +77,7 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 			MergeNetsplitBlock:    big.NewInt(0),
 		}
 		genesis.Config = &chainConfig
-		_, _, err := core.CommitGenesisBlock(db.GetChain(), &genesis, "")
+		_, block, err := core.CommitGenesisBlock(db.GetChain(), &genesis, "")
 		if err != nil {
 			return nil, err
 		}
@@ -85,6 +85,28 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 		state.blockNum = big.NewInt(1)
 		state.totalDifficulty = big.NewInt(0)
 		state.chainConfig = &chainConfig
+
+		// cInitialize data needed for state root calculation
+		tx, err := db.GetChain().BeginRw(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		defer tx.Rollback()
+
+		dirs := datadir2.New(db.path)
+		if err = stagedsync.PromoteHashedStateCleanly("logPrefix", tx, stagedsync.StageHashStateCfg(db.chain, dirs, false, nil), context.Background()); err != nil {
+			return nil, fmt.Errorf("error while promoting state: %v", err)
+		}
+		if root, err := trie.CalcRoot("block state root", tx); err != nil {
+			return nil, err
+		} else if root != block.Root() {
+			// This error may happen if we forgot to initialize the data for state root calculation.
+			// Better fail here in this case rather than in the first block
+			return nil, fmt.Errorf("invalid root, have: %s, want: %s", root.String(), block.Root().String())
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
 	} else {
 		state.blockNum = (&big.Int{}).SetUint64(*blockNum + 1)
 
@@ -102,7 +124,9 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 			return nil, err
 		}
 
-		tx.Commit()
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
 	}
 
 	return state, err
