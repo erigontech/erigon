@@ -30,6 +30,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runSegmentIndexingFinishedListener()
 	d.runCurrentSyncStageListener()
 	d.runSyncStagesListListener()
+	d.runBlockExecutionListener()
 }
 
 func (d *DiagnosticClient) runSnapshotListener() {
@@ -212,6 +213,30 @@ func (d *DiagnosticClient) runCurrentSyncStageListener() {
 				return
 			case info := <-ch:
 				d.syncStats.SyncStages.CurrentStage = info.Stage
+				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runBlockExecutionListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.BlockExecutionStatistics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockExecutionStatistics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.syncStats.BlockExecution = info
+
 				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
 					return
 				}

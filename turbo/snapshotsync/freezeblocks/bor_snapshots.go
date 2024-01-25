@@ -17,8 +17,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -35,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
@@ -377,8 +376,8 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	spanFrom := span.IDAt(blockFrom)
-	spanTo := span.IDAt(blockTo)
+	spanFrom := bor.SpanIDAt(blockFrom)
+	spanTo := bor.SpanIDAt(blockTo)
 	from := hexutility.EncodeTs(spanFrom)
 	if err := kv.BigChunks(db, kv.BorSpans, from, func(tx kv.Tx, spanIdBytes, spanBytes []byte) (bool, error) {
 		spanId := binary.BigEndian.Uint64(spanIdBytes)
@@ -508,7 +507,7 @@ func BorSpansIdx(ctx context.Context, segmentFilePath string, version uint8, blo
 	g := d.MakeGetter()
 	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.BorSpans.String()))
 
-	baseSpanId := span.IDAt(blockFrom)
+	baseSpanId := bor.SpanIDAt(blockFrom)
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),

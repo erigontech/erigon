@@ -112,6 +112,12 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer e.semaphore.Release(1)
+	var validationError string
+	type canonicalEntry struct {
+		hash   libcommon.Hash
+		number uint64
+	}
+	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	tx, err := e.db.BeginRwNosync(ctx)
 	if err != nil {
@@ -119,12 +125,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer tx.Rollback()
-
-	type canonicalEntry struct {
-		hash   libcommon.Hash
-		number uint64
-	}
-	defer e.forkValidator.ClearWithUnwind(e.accumulator, e.stateChangeConsumer)
 
 	blockHash := originalBlockHash
 
@@ -382,6 +382,7 @@ TooBigJumpStep:
 	status := execution.ExecutionStatus_Success
 	if headHash != blockHash {
 		status = execution.ExecutionStatus_BadBlock
+		validationError = "headHash and blockHash mismatch"
 		if log {
 			e.logger.Warn("bad forkchoice", "head", headHash, "hash", blockHash)
 		}
@@ -438,5 +439,6 @@ TooBigJumpStep:
 	sendForkchoiceReceiptWithoutWaiting(outcomeCh, &execution.ForkChoiceReceipt{
 		LatestValidHash: gointerfaces.ConvertHashToH256(headHash),
 		Status:          status,
+		ValidationError: validationError,
 	})
 }

@@ -60,6 +60,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const DefaultBlockGasLimit = uint64(30000000)
+
 var (
 	processBatchTxsTimer    = metrics.NewSummary(`pool_process_remote_txs`)
 	addRemoteTxsTimer       = metrics.NewSummary(`pool_add_remote_txs`)
@@ -84,13 +86,12 @@ type Pool interface {
 	// Handle 3 main events - new remote txs from p2p, new local txs from RPC, new blocks from execution layer
 	AddRemoteTxs(ctx context.Context, newTxs types.TxSlots)
 	AddLocalTxs(ctx context.Context, newTxs types.TxSlots, tx kv.Tx) ([]txpoolcfg.DiscardReason, error)
-	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error
+	OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, unwindBlobTxs, minedTxs types.TxSlots, tx kv.Tx) error
 	// IdHashKnown check whether transaction with given Id hash is known to the pool
 	IdHashKnown(tx kv.Tx, hash []byte) (bool, error)
 	FilterKnownIdHashes(tx kv.Tx, hashes types.Hashes) (unknownHashes types.Hashes, err error)
 	Started() bool
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
-	GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error)
 
 	AddNewGoodPeer(peerID types.PeerID)
 }
@@ -229,7 +230,7 @@ type TxPool struct {
 }
 
 type FeeCalculator interface {
-	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice uint64, err error)
+	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice, blockGasLimit uint64, err error)
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
@@ -336,7 +337,7 @@ func (p *TxPool) Start(ctx context.Context, db kv.RwDB) error {
 	})
 }
 
-func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, minedTxs types.TxSlots, tx kv.Tx) error {
+func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChangeBatch, unwindTxs, unwindBlobTxs, minedTxs types.TxSlots, tx kv.Tx) error {
 	defer newBlockTimer.ObserveDuration(time.Now())
 	//t := time.Now()
 
@@ -400,6 +401,17 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 
 	p.blockGasLimit.Store(stateChanges.BlockGasLimit)
 
+	for i, txn := range unwindBlobTxs.Txs {
+		if txn.Type == types.BlobTxType {
+			knownBlobTxn, err := p.getCachedBlobTxnLocked(coreTx, txn.IDHash[:])
+			if err != nil {
+				return err
+			}
+			if knownBlobTxn != nil {
+				unwindTxs.Append(knownBlobTxn.Tx, unwindBlobTxs.Senders.At(i), false)
+			}
+		}
+	}
 	if err = p.senders.onNewBlock(stateChanges, unwindTxs, minedTxs, p.logger); err != nil {
 		return err
 	}
@@ -618,10 +630,8 @@ func (p *TxPool) getUnprocessedTxn(hashS string) (*types.TxSlot, bool) {
 	return nil, false
 }
 
-func (p *TxPool) GetKnownBlobTxn(tx kv.Tx, hash []byte) (*metaTx, error) {
+func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) {
 	hashS := string(hash)
-	p.lock.Lock()
-	defer p.lock.Unlock()
 	if mt, ok := p.minedBlobTxsByHash[hashS]; ok {
 		return mt, nil
 	}
@@ -944,7 +954,7 @@ func (p *TxPool) isShanghai() bool {
 }
 
 func (p *TxPool) isAgra() bool {
-	// once this flag has been set for the first time we no longer need to check the timestamp
+	// once this flag has been set for the first time we no longer need to check the block
 	set := p.isPostAgra.Load()
 	if set {
 		return true
@@ -1308,7 +1318,7 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 
 func (p *TxPool) setBlobFee(blobFee uint64) {
 	if blobFee > 0 {
-		p.pendingBaseFee.Store(blobFee)
+		p.pendingBlobFee.Store(blobFee)
 	}
 }
 
@@ -2077,11 +2087,14 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		i++
 	}
 
-	var pendingBaseFee, pendingBlobFee, minBlobGasPrice uint64
+	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
 
 	if p.feeCalculator != nil {
 		if chainConfig, _ := ChainConfig(tx); chainConfig != nil {
-			pendingBaseFee, pendingBlobFee, minBlobGasPrice, _ = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -2109,16 +2122,21 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		pendingBlobFee = minBlobGasPrice
 	}
 
+	if blockGasLimit == 0 {
+		blockGasLimit = DefaultBlockGasLimit
+	}
+
 	err = p.senders.registerNewSenders(&txs, p.logger)
 	if err != nil {
 		return err
 	}
 	if _, _, err := p.addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, txs,
-		pendingBaseFee, pendingBlobFee, math.MaxUint64 /* blockGasLimit */, false, p.logger); err != nil {
+		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.pendingBlobFee.Store(pendingBlobFee)
+	p.blockGasLimit.Store(blockGasLimit)
 	return nil
 }
 

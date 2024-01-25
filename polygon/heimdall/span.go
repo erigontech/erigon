@@ -1,7 +1,8 @@
-package span
+package heimdall
 
 import (
 	"github.com/google/btree"
+
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 )
 
@@ -27,4 +28,9 @@ func (hs *HeimdallSpan) Less(other btree.Item) bool {
 		return hs.ID < otherHs.ID
 	}
 	return hs.EndBlock < otherHs.EndBlock
+}
+
+type SpanResponse struct {
+	Height string       `json:"height"`
+	Result HeimdallSpan `json:"result"`
 }
