@@ -60,6 +60,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const DefaultBlockGasLimit = uint64(30000000)
+
 var (
 	processBatchTxsTimer    = metrics.NewSummary(`pool_process_remote_txs`)
 	addRemoteTxsTimer       = metrics.NewSummary(`pool_add_remote_txs`)
@@ -228,7 +230,7 @@ type TxPool struct {
 }
 
 type FeeCalculator interface {
-	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice uint64, err error)
+	CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee uint64, blobFee uint64, minBlobGasPrice, blockGasLimit uint64, err error)
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache,
@@ -1316,7 +1318,7 @@ func (p *TxPool) setBaseFee(baseFee uint64) (uint64, bool) {
 
 func (p *TxPool) setBlobFee(blobFee uint64) {
 	if blobFee > 0 {
-		p.pendingBaseFee.Store(blobFee)
+		p.pendingBlobFee.Store(blobFee)
 	}
 }
 
@@ -2085,11 +2087,14 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		i++
 	}
 
-	var pendingBaseFee, pendingBlobFee, minBlobGasPrice uint64
+	var pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit uint64
 
 	if p.feeCalculator != nil {
 		if chainConfig, _ := ChainConfig(tx); chainConfig != nil {
-			pendingBaseFee, pendingBlobFee, minBlobGasPrice, _ = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+			pendingBaseFee, pendingBlobFee, minBlobGasPrice, blockGasLimit, err = p.feeCalculator.CurrentFees(chainConfig, coreTx)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -2117,16 +2122,21 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		pendingBlobFee = minBlobGasPrice
 	}
 
+	if blockGasLimit == 0 {
+		blockGasLimit = DefaultBlockGasLimit
+	}
+
 	err = p.senders.registerNewSenders(&txs, p.logger)
 	if err != nil {
 		return err
 	}
 	if _, _, err := p.addTxs(p.lastSeenBlock.Load(), cacheView, p.senders, txs,
-		pendingBaseFee, pendingBlobFee, math.MaxUint64 /* blockGasLimit */, false, p.logger); err != nil {
+		pendingBaseFee, pendingBlobFee, blockGasLimit, false, p.logger); err != nil {
 		return err
 	}
 	p.pendingBaseFee.Store(pendingBaseFee)
 	p.pendingBlobFee.Store(pendingBlobFee)
+	p.blockGasLimit.Store(blockGasLimit)
 	return nil
 }
 
