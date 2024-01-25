@@ -251,17 +251,17 @@ func (m *MockMilestoneWriter) EXPECT() *MockMilestoneWriterMockRecorder {
 }
 
 // WriteMilestone mocks base method.
-func (m *MockMilestoneWriter) WriteMilestone(ctx context.Context, milestone *Milestone) error {
+func (m *MockMilestoneWriter) WriteMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestone)
+	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestoneId, milestone)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteMilestone indicates an expected call of WriteMilestone.
-func (mr *MockMilestoneWriterMockRecorder) WriteMilestone(ctx, milestone interface{}) *gomock.Call {
+func (mr *MockMilestoneWriterMockRecorder) WriteMilestone(ctx, milestoneId, milestone interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockMilestoneWriter)(nil).WriteMilestone), ctx, milestone)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockMilestoneWriter)(nil).WriteMilestone), ctx, milestoneId, milestone)
 }
 
 // MockMilestoneIO is a mock of MilestoneIO interface.
@@ -319,17 +319,17 @@ func (mr *MockMilestoneIOMockRecorder) ReadMilestone(ctx, milestoneId interface{
 }
 
 // WriteMilestone mocks base method.
-func (m *MockMilestoneIO) WriteMilestone(ctx context.Context, milestone *Milestone) error {
+func (m *MockMilestoneIO) WriteMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestone)
+	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestoneId, milestone)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteMilestone indicates an expected call of WriteMilestone.
-func (mr *MockMilestoneIOMockRecorder) WriteMilestone(ctx, milestone interface{}) *gomock.Call {
+func (mr *MockMilestoneIOMockRecorder) WriteMilestone(ctx, milestoneId, milestone interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockMilestoneIO)(nil).WriteMilestone), ctx, milestone)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockMilestoneIO)(nil).WriteMilestone), ctx, milestoneId, milestone)
 }
 
 // MockCheckpointReader is a mock of CheckpointReader interface.
@@ -410,17 +410,17 @@ func (m *MockCheckpointWriter) EXPECT() *MockCheckpointWriterMockRecorder {
 }
 
 // WriteCheckpoint mocks base method.
-func (m *MockCheckpointWriter) WriteCheckpoint(ctx context.Context, checkpoint *Checkpoint) error {
+func (m *MockCheckpointWriter) WriteCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpoint)
+	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpointId, checkpoint)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteCheckpoint indicates an expected call of WriteCheckpoint.
-func (mr *MockCheckpointWriterMockRecorder) WriteCheckpoint(ctx, checkpoint interface{}) *gomock.Call {
+func (mr *MockCheckpointWriterMockRecorder) WriteCheckpoint(ctx, checkpointId, checkpoint interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockCheckpointWriter)(nil).WriteCheckpoint), ctx, checkpoint)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockCheckpointWriter)(nil).WriteCheckpoint), ctx, checkpointId, checkpoint)
 }
 
 // MockCheckpointIO is a mock of CheckpointIO interface.
@@ -478,17 +478,17 @@ func (mr *MockCheckpointIOMockRecorder) ReadCheckpoint(ctx, checkpointId interfa
 }
 
 // WriteCheckpoint mocks base method.
-func (m *MockCheckpointIO) WriteCheckpoint(ctx context.Context, checkpoint *Checkpoint) error {
+func (m *MockCheckpointIO) WriteCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpoint)
+	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpointId, checkpoint)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteCheckpoint indicates an expected call of WriteCheckpoint.
-func (mr *MockCheckpointIOMockRecorder) WriteCheckpoint(ctx, checkpoint interface{}) *gomock.Call {
+func (mr *MockCheckpointIOMockRecorder) WriteCheckpoint(ctx, checkpointId, checkpoint interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockCheckpointIO)(nil).WriteCheckpoint), ctx, checkpoint)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockCheckpointIO)(nil).WriteCheckpoint), ctx, checkpointId, checkpoint)
 }
 
 // MockIO is a mock of IO interface.
@@ -608,31 +608,31 @@ func (mr *MockIOMockRecorder) ReadSpan(ctx, spanId interface{}) *gomock.Call {
 }
 
 // WriteCheckpoint mocks base method.
-func (m *MockIO) WriteCheckpoint(ctx context.Context, checkpoint *Checkpoint) error {
+func (m *MockIO) WriteCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpoint)
+	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpointId, checkpoint)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteCheckpoint indicates an expected call of WriteCheckpoint.
-func (mr *MockIOMockRecorder) WriteCheckpoint(ctx, checkpoint interface{}) *gomock.Call {
+func (mr *MockIOMockRecorder) WriteCheckpoint(ctx, checkpointId, checkpoint interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockIO)(nil).WriteCheckpoint), ctx, checkpoint)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockIO)(nil).WriteCheckpoint), ctx, checkpointId, checkpoint)
 }
 
 // WriteMilestone mocks base method.
-func (m *MockIO) WriteMilestone(ctx context.Context, milestone *Milestone) error {
+func (m *MockIO) WriteMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestone)
+	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestoneId, milestone)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteMilestone indicates an expected call of WriteMilestone.
-func (mr *MockIOMockRecorder) WriteMilestone(ctx, milestone interface{}) *gomock.Call {
+func (mr *MockIOMockRecorder) WriteMilestone(ctx, milestoneId, milestone interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockIO)(nil).WriteMilestone), ctx, milestone)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockIO)(nil).WriteMilestone), ctx, milestoneId, milestone)
 }
 
 // WriteSpan mocks base method.
@@ -718,6 +718,22 @@ func (mr *MockreaderMockRecorder) EventsByBlock(ctx, tx, hash, blockNum interfac
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "EventsByBlock", reflect.TypeOf((*Mockreader)(nil).EventsByBlock), ctx, tx, hash, blockNum)
 }
 
+// LastCheckpointId mocks base method.
+func (m *Mockreader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LastCheckpointId", ctx, tx)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LastCheckpointId indicates an expected call of LastCheckpointId.
+func (mr *MockreaderMockRecorder) LastCheckpointId(ctx, tx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastCheckpointId", reflect.TypeOf((*Mockreader)(nil).LastCheckpointId), ctx, tx)
+}
+
 // LastEventId mocks base method.
 func (m *Mockreader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	m.ctrl.T.Helper()
@@ -732,6 +748,22 @@ func (m *Mockreader) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, e
 func (mr *MockreaderMockRecorder) LastEventId(ctx, tx interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastEventId", reflect.TypeOf((*Mockreader)(nil).LastEventId), ctx, tx)
+}
+
+// LastMilestoneId mocks base method.
+func (m *Mockreader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "LastMilestoneId", ctx, tx)
+	ret0, _ := ret[0].(uint64)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// LastMilestoneId indicates an expected call of LastMilestoneId.
+func (mr *MockreaderMockRecorder) LastMilestoneId(ctx, tx interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "LastMilestoneId", reflect.TypeOf((*Mockreader)(nil).LastMilestoneId), ctx, tx)
 }
 
 // LastSpanId mocks base method.

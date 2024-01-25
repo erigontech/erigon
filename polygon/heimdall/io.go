@@ -30,7 +30,7 @@ type MilestoneReader interface {
 }
 
 type MilestoneWriter interface {
-	WriteMilestone(ctx context.Context, milestone *Milestone) error
+	WriteMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error
 }
 
 type MilestoneIO interface {
@@ -44,7 +44,7 @@ type CheckpointReader interface {
 }
 
 type CheckpointWriter interface {
-	WriteCheckpoint(ctx context.Context, checkpoint *Checkpoint) error
+	WriteCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error
 }
 
 type CheckpointIO interface {
@@ -111,4 +111,84 @@ func (io blockReaderIO) WriteSpan(ctx context.Context, span *Span) error {
 	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(span.Id))
 
 	return tx.Put(kv.BorSpans, spanIdBytes[:], spanBytes)
+}
+
+func (io blockReaderIO) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
+	id, ok, err := io.reader.LastMilestoneId(ctx, io.tx)
+	return MilestoneId(id), ok, err
+}
+
+func (io blockReaderIO) ReadMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
+	milestoneBytes, err := io.reader.Milestone(ctx, io.tx, uint64(milestoneId))
+
+	if err != nil {
+		return nil, err
+	}
+
+	var milestone Milestone
+
+	if err := json.Unmarshal(milestoneBytes, &milestone); err != nil {
+		return nil, err
+	}
+
+	return &milestone, nil
+}
+
+func (io blockReaderIO) WriteMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
+	tx, ok := io.tx.(kv.RwTx)
+
+	if !ok {
+		return fmt.Errorf("span writer failed: tx is read only")
+	}
+
+	spanBytes, err := json.Marshal(milestone)
+
+	if err != nil {
+		return err
+	}
+
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(milestoneId))
+
+	return tx.Put(kv.BorMilestones, spanIdBytes[:], spanBytes)
+}
+
+func (io blockReaderIO) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
+	id, ok, err := io.reader.LastCheckpointId(ctx, io.tx)
+	return CheckpointId(id), ok, err
+}
+
+func (io blockReaderIO) ReadCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
+	checkpointBytes, err := io.reader.Milestone(ctx, io.tx, uint64(checkpointId))
+
+	if err != nil {
+		return nil, err
+	}
+
+	var checkpoint Checkpoint
+
+	if err := json.Unmarshal(checkpointBytes, &checkpoint); err != nil {
+		return nil, err
+	}
+
+	return &checkpoint, nil
+}
+
+func (io blockReaderIO) WriteCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
+	tx, ok := io.tx.(kv.RwTx)
+
+	if !ok {
+		return fmt.Errorf("span writer failed: tx is read only")
+	}
+
+	spanBytes, err := json.Marshal(checkpoint)
+
+	if err != nil {
+		return err
+	}
+
+	var spanIdBytes [8]byte
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(checkpointId))
+
+	return tx.Put(kv.BorCheckpoints, spanIdBytes[:], spanBytes)
 }

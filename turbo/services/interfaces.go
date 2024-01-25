@@ -45,10 +45,12 @@ type BorSpanReader interface {
 }
 
 type BorMilestoneReader interface {
+	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	Milestone(ctx context.Context, tx kv.Getter, milestoneId uint64) ([]byte, error)
 }
 
 type BorCheckpointReader interface {
+	LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error)
 }
 
@@ -86,6 +88,8 @@ type FullBlockReader interface {
 	HeaderReader
 	BorEventReader
 	BorSpanReader
+	BorMilestoneReader
+	BorCheckpointReader
 	TxnReader
 	CanonicalReader
 

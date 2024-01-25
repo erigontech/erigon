@@ -35,10 +35,10 @@ func (m *MockHeimdall) EXPECT() *MockHeimdallMockRecorder {
 }
 
 // FetchCheckpoints mocks base method.
-func (m *MockHeimdall) FetchCheckpoints(ctx context.Context, io CheckpointIO, start, end CheckpointId) (Waypoints, error) {
+func (m *MockHeimdall) FetchCheckpoints(ctx context.Context, io CheckpointIO, start, end CheckpointId) ([]*Checkpoint, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchCheckpoints", ctx, io, start, end)
-	ret0, _ := ret[0].(Waypoints)
+	ret0, _ := ret[0].([]*Checkpoint)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -65,10 +65,10 @@ func (mr *MockHeimdallMockRecorder) FetchCheckpointsFromBlock(ctx, io, startBloc
 }
 
 // FetchMilestones mocks base method.
-func (m *MockHeimdall) FetchMilestones(ctx context.Context, io MilestoneIO, start, end MilestoneId) (Waypoints, error) {
+func (m *MockHeimdall) FetchMilestones(ctx context.Context, io MilestoneIO, start, end MilestoneId) ([]*Milestone, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchMilestones", ctx, io, start, end)
-	ret0, _ := ret[0].(Waypoints)
+	ret0, _ := ret[0].([]*Milestone)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

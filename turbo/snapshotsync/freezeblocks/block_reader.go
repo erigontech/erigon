@@ -1212,12 +1212,12 @@ func (r *BlockReader) LastFrozenEventId() uint64 {
 	return lastEventID
 }
 
-func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	var lastSpanId uint64
+func lastId(ctx context.Context, tx kv.Tx, db string) (uint64, bool, error) {
+	var last uint64
 	var ok bool
 
 	if tx != nil {
-		sCursor, err := tx.Cursor(kv.BorSpans)
+		sCursor, err := tx.Cursor(db)
 		if err != nil {
 			return 0, false, err
 		}
@@ -1230,8 +1230,18 @@ func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, e
 
 		if k != nil {
 			ok = true
-			lastSpanId = binary.BigEndian.Uint64(k)
+			last = binary.BigEndian.Uint64(k)
 		}
+	}
+
+	return last, ok, nil
+}
+
+func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	lastSpanId, ok, err := lastId(ctx, tx, kv.BorSpans)
+
+	if err != nil {
+		return 0, false, err
 	}
 
 	snapshotLastSpanId := r.LastFrozenSpanId()
@@ -1319,6 +1329,46 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		return common.Copy(result), nil
 	}
 	return nil, fmt.Errorf("span %d not found (snapshots)", spanId)
+}
+
+func (r *BlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return lastId(ctx, tx, kv.BorMilestones)
+}
+
+func (r *BlockReader) Milestone(ctx context.Context, tx kv.Getter, milestoneId uint64) ([]byte, error) {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], milestoneId)
+	v, err := tx.GetOne(kv.BorMilestones, buf[:])
+
+	if err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, fmt.Errorf("milestone %d not found (db)", milestoneId)
+	}
+
+	return common.Copy(v), nil
+}
+
+func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return lastId(ctx, tx, kv.BorCheckpoints)
+}
+
+func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error) {
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], checkpointId)
+	v, err := tx.GetOne(kv.BorCheckpoints, buf[:])
+
+	if err != nil {
+		return nil, err
+	}
+
+	if v == nil {
+		return nil, fmt.Errorf("milestone %d not found (db)", checkpointId)
+	}
+
+	return common.Copy(v), nil
 }
 
 // ---- Data Integrity part ----

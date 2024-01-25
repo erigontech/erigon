@@ -105,17 +105,17 @@ func (mr *MockCheckpointIOMockRecorder) ReadCheckpoint(ctx, checkpointId interfa
 }
 
 // WriteCheckpoint mocks base method.
-func (m *MockCheckpointIO) WriteCheckpoint(ctx context.Context, checkpoint *heimdall.Checkpoint) error {
+func (m *MockCheckpointIO) WriteCheckpoint(ctx context.Context, checkpointId heimdall.CheckpointId, checkpoint *heimdall.Checkpoint) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpoint)
+	ret := m.ctrl.Call(m, "WriteCheckpoint", ctx, checkpointId, checkpoint)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteCheckpoint indicates an expected call of WriteCheckpoint.
-func (mr *MockCheckpointIOMockRecorder) WriteCheckpoint(ctx, checkpoint interface{}) *gomock.Call {
+func (mr *MockCheckpointIOMockRecorder) WriteCheckpoint(ctx, checkpointId, checkpoint interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockCheckpointIO)(nil).WriteCheckpoint), ctx, checkpoint)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteCheckpoint", reflect.TypeOf((*MockCheckpointIO)(nil).WriteCheckpoint), ctx, checkpointId, checkpoint)
 }
 
 // WriteHeaders mocks base method.
@@ -201,15 +201,15 @@ func (mr *MockMilestoneIOMockRecorder) WriteHeaders(headers interface{}) *gomock
 }
 
 // WriteMilestone mocks base method.
-func (m *MockMilestoneIO) WriteMilestone(ctx context.Context, milestone *heimdall.Milestone) error {
+func (m *MockMilestoneIO) WriteMilestone(ctx context.Context, milestoneId heimdall.MilestoneId, milestone *heimdall.Milestone) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestone)
+	ret := m.ctrl.Call(m, "WriteMilestone", ctx, milestoneId, milestone)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // WriteMilestone indicates an expected call of WriteMilestone.
-func (mr *MockMilestoneIOMockRecorder) WriteMilestone(ctx, milestone interface{}) *gomock.Call {
+func (mr *MockMilestoneIOMockRecorder) WriteMilestone(ctx, milestoneId, milestone interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockMilestoneIO)(nil).WriteMilestone), ctx, milestone)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "WriteMilestone", reflect.TypeOf((*MockMilestoneIO)(nil).WriteMilestone), ctx, milestoneId, milestone)
 }
