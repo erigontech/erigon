@@ -92,6 +92,7 @@ type Type interface {
 	Versions() Versions
 	String() string
 	FileName(version Version, from uint64, to uint64) string
+	FileInfo(dir string, version Version, from uint64, to uint64) FileInfo
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(version Version, from uint64, to uint64) []string
 	Indexes() []Index
@@ -121,6 +122,11 @@ func (s snapType) FileName(version Version, from uint64, to uint64) string {
 	}
 
 	return SegmentFileName(version, from, to, s.enum)
+}
+
+func (s snapType) FileInfo(dir string, version Version, from uint64, to uint64) FileInfo {
+	f, _ := ParseFileName(dir, s.FileName(version, from, to))
+	return f
 }
 
 func (s snapType) Indexes() []Index {
@@ -229,6 +235,15 @@ func (ft Enum) Type() Type {
 	default:
 		return nil
 	}
+}
+
+func (e Enum) FileName(from uint64, to uint64) string {
+	return SegmentFileName(e.Type().Versions().Current, from, to, e)
+}
+
+func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
+	f, _ := ParseFileName(dir, e.FileName(from, to))
+	return f
 }
 
 func ParseEnum(s string) (Enum, bool) {

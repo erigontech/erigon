@@ -13,12 +13,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -54,8 +52,8 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 	}
 
-	merger := NewBorMerger(tmpDir, workers, lvl, db, chainConfig, notifier, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges())
+	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
+	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
 	if len(rangesToMerge) == 0 {
 		return ok, nil
@@ -76,7 +74,9 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 		return nil
 	}
-	err := merger.Merge(ctx, snapshots, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
+
+	err := merger.Merge(ctx, &snapshots.RoSnapshots, snaptype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
+
 	if err != nil {
 		return ok, err
 	}
@@ -100,8 +100,7 @@ func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, 
 	defer logEvery.Stop()
 
 	{
-		segName := snaptype.SegmentFileName(snaptype.BorEvents.Versions().Current, blockFrom, blockTo, snaptype.BorEvents.Enum())
-		f, _ := snaptype.ParseFileName(snapDir, segName)
+		f := snaptype.BorEvents.FileInfo(snapDir, 0, blockFrom, blockTo)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot BorEvents", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
 		if err != nil {
@@ -123,8 +122,7 @@ func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, 
 		}
 	}
 	{
-		segName := snaptype.SegmentFileName(snaptype.BorSpans.Versions().Current, blockFrom, blockTo, snaptype.BorSpans.Enum())
-		f, _ := snaptype.ParseFileName(snapDir, segName)
+		f := snaptype.BorSpans.FileInfo(snapDir, 0, blockFrom, blockTo)
 
 		sn, err := compress.NewCompressor(ctx, "Snapshot BorSpans", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
 		if err != nil {
@@ -303,7 +301,6 @@ func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *b
 		default:
 		}
 	}
-	var idxFilePath = filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorEvents.String()))
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   blockCount,
@@ -311,7 +308,7 @@ func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *b
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  idxFilePath,
+		IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorEvents.String())),
 		BaseDataID: baseEventId,
 	}, logger)
 	if err != nil {
@@ -367,8 +364,6 @@ func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *ba
 		return err
 	}
 	defer d.Close()
-	g := d.MakeGetter()
-	var idxFilePath = filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorSpans.String()))
 
 	baseSpanId := heimdall.SpanIdAt(sn.From)
 
@@ -378,7 +373,7 @@ func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *ba
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
-		IndexFile:  idxFilePath,
+		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 		BaseDataID: uint64(baseSpanId),
 	}, logger)
 	if err != nil {
@@ -388,7 +383,7 @@ func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *ba
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 RETRY:
-	g.Reset(0)
+	g := d.MakeGetter()
 	var i, offset, nextPos uint64
 	var key [8]byte
 	for g.HasNext() {
@@ -436,10 +431,6 @@ type BorRoSnapshots struct {
 //   - segment have [from:to) semantic
 func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *BorRoSnapshots {
 	return &BorRoSnapshots{*NewRoSnapshots(cfg, snapDir, logger)}
-}
-
-func BorSegments(dir string, min uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	return filteredSegments(dir, min, borSegmentsMustExist)
 }
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
@@ -505,7 +496,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := BorSegments(s.dir, s.segmentsMin.Load())
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), snaptype.BorSnapshotTypes)
 	if err != nil {
 		return err
 	}
@@ -538,200 +529,9 @@ func (v *BorView) Events() []*Segment { return v.base.Segments(snaptype.BorEvent
 func (v *BorView) Spans() []*Segment  { return v.base.Segments(snaptype.BorSpans) }
 
 func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
-	for _, seg := range v.Events() {
-		if !(blockNum >= seg.from && blockNum < seg.to) {
-			continue
-		}
-		return seg, true
-	}
-	return nil, false
+	return v.base.Segment(snaptype.BorEvents, blockNum)
 }
 
 func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
-	for _, seg := range v.Spans() {
-		if !(blockNum >= seg.from && blockNum < seg.to) {
-			continue
-		}
-		return seg, true
-	}
-	return nil, false
-}
-
-type BorMerger struct {
-	lvl             log.Lvl
-	compressWorkers int
-	tmpDir          string
-	chainConfig     *chain.Config
-	chainDB         kv.RoDB
-	notifier        services.DBEventNotifier
-	logger          log.Logger
-}
-
-func NewBorMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB, chainConfig *chain.Config, notifier services.DBEventNotifier, logger log.Logger) *BorMerger {
-	return &BorMerger{tmpDir: tmpDir, compressWorkers: compressWorkers, lvl: lvl, chainDB: chainDB, chainConfig: chainConfig, notifier: notifier, logger: logger}
-}
-
-func (m *BorMerger) FindMergeRanges(currentRanges []Range) (toMerge []Range) {
-	for i := len(currentRanges) - 1; i > 0; i-- {
-		r := currentRanges[i]
-		mergeLimit := uint64(snaptype.Erigon2MergeLimit)
-		if r.to-r.from >= mergeLimit {
-			continue
-		}
-		for _, span := range snaptype.MergeSteps {
-			if r.to%span != 0 {
-				continue
-			}
-			if r.to-r.from == span {
-				break
-			}
-			aggFrom := r.to - span
-			toMerge = append(toMerge, Range{from: aggFrom, to: r.to})
-			for currentRanges[i].from > aggFrom {
-				i--
-			}
-			break
-		}
-	}
-	slices.SortFunc(toMerge, func(i, j Range) int { return cmp.Compare(i.from, j.from) })
-	return toMerge
-}
-
-func (m *BorMerger) filesByRange(snapshots *BorRoSnapshots, from, to uint64) (map[snaptype.Enum][]string, error) {
-	toMerge := map[snaptype.Enum][]string{}
-	view := snapshots.View()
-	defer view.Close()
-
-	eSegments := view.Events()
-	sSegments := view.Spans()
-
-	for i, sn := range eSegments {
-		if sn.from < from {
-			continue
-		}
-		if sn.to > to {
-			break
-		}
-		toMerge[snaptype.Enums.BorEvents] = append(toMerge[snaptype.Enums.BorEvents], eSegments[i].FilePath())
-		toMerge[snaptype.Enums.BorSpans] = append(toMerge[snaptype.Enums.BorSpans], sSegments[i].FilePath())
-	}
-
-	return toMerge, nil
-}
-
-// Merge does merge segments in given ranges
-func (m *BorMerger) Merge(ctx context.Context, snapshots *BorRoSnapshots, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) error {
-	if len(mergeRanges) == 0 {
-		return nil
-	}
-	logEvery := time.NewTicker(30 * time.Second)
-	defer logEvery.Stop()
-	for _, r := range mergeRanges {
-		toMerge, err := m.filesByRange(snapshots, r.from, r.to)
-		if err != nil {
-			return err
-		}
-
-		for _, t := range snaptype.BorSnapshotTypes {
-			segName := t.FileName(0, r.from, r.to)
-			f, ok := snaptype.ParseFileName(snapDir, segName)
-			if !ok {
-				continue
-			}
-			if err := m.merge(ctx, toMerge[t.Enum()], f.Path, logEvery); err != nil {
-				return fmt.Errorf("mergeByAppendSegments: %w", err)
-			}
-			if doIndex {
-				p := &background.Progress{}
-				if err := buildIdx(ctx, f, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
-					return err
-				}
-			}
-		}
-		if err := snapshots.ReopenFolder(); err != nil {
-			return fmt.Errorf("ReopenSegments: %w", err)
-		}
-		snapshots.LogStat("merge")
-		if err := onMerge(r); err != nil {
-			return err
-		}
-
-		for _, t := range snaptype.BorSnapshotTypes {
-			if len(toMerge[t.Enum()]) == 0 {
-				continue
-			}
-
-			if onDelete != nil {
-				if err := onDelete(toMerge[t.Enum()]); err != nil {
-					return err
-				}
-			}
-
-		}
-		time.Sleep(1 * time.Second) // i working on blocking API - to ensure client does not use old snapsthos - and then delete them
-		for _, t := range snaptype.BorSnapshotTypes {
-			m.removeOldFiles(toMerge[t.Enum()], snapDir)
-		}
-	}
-	m.logger.Log(m.lvl, "[bor snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
-	return nil
-}
-
-func (m *BorMerger) merge(ctx context.Context, toMerge []string, targetFile string, logEvery *time.Ticker) error {
-	var word = make([]byte, 0, 4096)
-	var expectedTotal int
-	cList := make([]*compress.Decompressor, len(toMerge))
-	for i, cFile := range toMerge {
-		d, err := compress.NewDecompressor(cFile)
-		if err != nil {
-			return err
-		}
-		defer d.Close()
-		cList[i] = d
-		expectedTotal += d.Count()
-	}
-
-	f, err := compress.NewCompressor(ctx, "Bor Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.compressWorkers, log.LvlTrace, m.logger)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	for _, d := range cList {
-		if err := d.WithReadAhead(func() error {
-			g := d.MakeGetter()
-			for g.HasNext() {
-				word, _ = g.Next(word[:0])
-				if err := f.AddWord(word); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	if f.Count() != expectedTotal {
-		return fmt.Errorf("unexpected amount after bor segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
-	}
-	if err = f.Compress(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (m *BorMerger) removeOldFiles(toDel []string, snapDir string) {
-	for _, f := range toDel {
-		_ = os.Remove(f)
-		ext := filepath.Ext(f)
-		withoutExt := f[:len(f)-len(ext)]
-		_ = os.Remove(withoutExt + ".idx")
-	}
-	tmpFiles, err := snaptype.TmpFiles(snapDir)
-	if err != nil {
-		return
-	}
-	for _, f := range tmpFiles {
-		_ = os.Remove(f)
-	}
+	return v.base.Segment(snaptype.BorSpans, blockNum)
 }
