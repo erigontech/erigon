@@ -9,9 +9,11 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
 	coreState "github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -19,7 +21,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
+	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/log/v3"
+
+	datadir2 "github.com/ledgerwatch/erigon-lib/common/datadir"
 )
 
 type State struct {
@@ -104,6 +109,8 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 }
 
 func (state *State) ProcessBlock(block types.Block) error {
+	log.Info(fmt.Sprintf("processing block %d", block.NumberU64()))
+
 	tx, err := state.db.GetChain().BeginRw(context.Background())
 	if err != nil {
 		return err
@@ -123,7 +130,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 		Debug:  true,
 	}
 	getHashFn := core.GetHashFn(block.Header(), nil)
-	engine := ethash.NewFaker()
+	engine := newFakeConsensus()
 	execRs, err := core.ExecuteBlockEphemerally(state.chainConfig, &vmConfig, getHashFn, engine, &block,
 		stateReader, stateWriter, stagedsync.NewEpochReader(tx),
 		stagedsync.NewChainReaderImpl(state.chainConfig, tx, nil),
@@ -134,6 +141,17 @@ func (state *State) ProcessBlock(block types.Block) error {
 		state.blockNum.Add(state.blockNum, big.NewInt(1))
 
 		return nil
+	}
+
+	// check state root hash
+	dirs := datadir2.New(state.db.path)
+	if err = stagedsync.PromoteHashedStateIncrementally("hashedstate", block.NumberU64()-1, block.NumberU64(), tx, stagedsync.StageHashStateCfg(nil, dirs, false, nil), context.Background(), false); err != nil {
+		return err
+	}
+	if root, err := trie.CalcRoot("block state root", tx); err != nil {
+		return err
+	} else if root != block.Root() {
+		return fmt.Errorf("invalid root, have: %s, want: %s", root.String(), block.Root().String())
 	}
 
 	stateSyncReceipt := execRs.StateSyncReceipt
@@ -215,10 +233,27 @@ func (state *State) ProcessBlock(block types.Block) error {
 		return err
 	}
 
-	log.Info(fmt.Sprintf("processed block %d", block.NumberU64()))
 	return tx.Commit()
 }
 
 func (state *State) BlockNum() uint64 {
 	return state.blockNum.Uint64()
+}
+
+type FakeConsensus struct {
+	ethash.FakeEthash
+}
+
+func newFakeConsensus() *FakeConsensus {
+	return &FakeConsensus{
+		FakeEthash: *ethash.NewFaker(),
+	}
+}
+
+// Override base method not to accumulate rewards to coinbase
+func (c *FakeConsensus) Finalize(config *chain.Config, header *types.Header, state *state.IntraBlockState,
+	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
+	e consensus.EpochReader, chain consensus.ChainHeaderReader, syscall consensus.SystemCall,
+) (types.Transactions, types.Receipts, error) {
+	return txs, r, nil
 }

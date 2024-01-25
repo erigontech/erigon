@@ -11,10 +11,13 @@ type DB struct {
 	chain     kv.RwDB
 	pool      kv.RwDB
 	consensus kv.RwDB
+	path      string
 }
 
 func NewDB(path string, logger log.Logger) (*DB, error) {
-	db := DB{}
+	db := DB{
+		path: path,
+	}
 	var err error
 
 	db.chain, err = openDatabase(path, logger, kv.ChainDB)

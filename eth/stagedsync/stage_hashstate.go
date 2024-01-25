@@ -81,7 +81,7 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 			return err
 		}
 	} else {
-		if err := promoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx, quiet); err != nil {
+		if err := PromoteHashedStateIncrementally(logPrefix, s.BlockNumber, to, tx, cfg, ctx, quiet); err != nil {
 			return err
 		}
 	}
@@ -861,7 +861,7 @@ func (p *Promoter) Unwind(logPrefix string, s *StageState, u *UnwindState, stora
 	)
 }
 
-func promoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, quiet bool) error {
+func PromoteHashedStateIncrementally(logPrefix string, from, to uint64, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, quiet bool) error {
 	prom := NewPromoter(tx, cfg.dirs, ctx)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
