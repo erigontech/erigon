@@ -110,6 +110,8 @@ func (r *RemoteBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blo
 	return rawdb.ReadCanonicalHash(tx, blockHeight)
 }
 
+var _ services.FullBlockReader = &RemoteBlockReader{}
+
 func NewRemoteBlockReader(client remote.ETHBACKENDClient) *RemoteBlockReader {
 	return &RemoteBlockReader{client}
 }
@@ -247,6 +249,22 @@ func (r *RemoteBlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, b
 }
 
 func (r *RemoteBlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return nil, nil
+}
+
+func (r *RemoteBlockReader) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
+}
+
+func (r *RemoteBlockReader) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return nil, nil
+}
+
+func (r *RemoteBlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
+}
+
+func (r *RemoteBlockReader) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return nil, nil
 }
 

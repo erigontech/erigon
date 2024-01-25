@@ -278,8 +278,25 @@ func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash com
 func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return back.blockReader.LastSpanId(ctx, tx)
 }
+
 func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return back.blockReader.Span(ctx, tx, spanId)
+}
+
+func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
+}
+
+func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return nil, nil
+}
+
+func (r *RemoteBackend) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
+}
+
+func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return nil, nil
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {
