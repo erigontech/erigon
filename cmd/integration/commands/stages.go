@@ -510,6 +510,7 @@ func init() {
 	withConfig(cmdStageBorHeimdall)
 	withDataDir(cmdStageBorHeimdall)
 	withReset(cmdStageBorHeimdall)
+	withUnwind(cmdStageBorHeimdall)
 	withChain(cmdStageBorHeimdall)
 	withHeimdall(cmdStageBorHeimdall)
 	withSnapshotVersion(cmdStageBorHeimdall)
@@ -766,6 +767,9 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 }
 
 func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	_, _, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	chainConfig := fromdb.ChainConfig(db)
+
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
 			if err := reset2.ResetBorHeimdall(ctx, tx); err != nil {
@@ -773,6 +777,27 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 			}
 			return nil
 		}
+		if unwind > 0 {
+			s := stage(sync, tx, nil, stages.BorHeimdall)
+
+			if unwind > s.BlockNumber {
+				return fmt.Errorf("cannot unwind past 0")
+			}
+
+			u := sync.NewUnwindState(stages.BorHeimdall, s.BlockNumber-unwind, s.BlockNumber)
+			cfg := stagedsync.StageBorHeimdallCfg(db, nil, stagedsync.MiningState{}, *chainConfig, nil, nil, nil, nil, nil, nil, nil)
+			if err := stagedsync.BorHeimdallUnwind(u, ctx, s, tx, cfg); err != nil {
+				return err
+			}
+
+			progress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
+			if err != nil {
+				return fmt.Errorf("re-read BorHeimdall progress: %w", err)
+			}
+			logger.Info("Progress", "BorHeimdall", progress)
+			return nil
+		}
+
 		return nil
 	})
 }
