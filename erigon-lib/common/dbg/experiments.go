@@ -56,7 +56,7 @@ var (
 
 	BuildSnapshotAllowance = EnvInt("SNAPSHOT_BUILD_SEMA_SIZE", 1)
 
-	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", false)
+	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 )
 
 func ReadMemStats(m *runtime.MemStats) {
