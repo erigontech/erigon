@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_block_downloader"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -370,13 +369,12 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	}
 	if resp.Busy {
 		s.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
-		return nil, &engine_helpers.UnknownPayloadErr
+		return nil, rpc.MakeError(rpc.UNKNOWN_PAYLOAD, "Unknown Payload")
 	}
 	// If the service is busy or there is no data for the given id then respond accordingly.
 	if resp.Data == nil {
 		s.logger.Warn("Payload not stored", "payloadId", payloadId)
-		return nil, &engine_helpers.UnknownPayloadErr
-
+		return nil, rpc.MakeError(rpc.UNKNOWN_PAYLOAD, "Unknown Payload")
 	}
 	data := resp.Data
 
@@ -426,11 +424,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	if payloadAttributes != nil {
-		if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-			return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
+		if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil { // Unexpected Beacon Root
+			return nil, &rpc.InvalidParamsError{Message: "Unexpected Beacon Root"}
 		}
-		if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-			return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+		if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil { // Beacon Root missing
+			return nil, &rpc.InvalidParamsError{Message: "Beacon Root missing"}
 		}
 
 		timestamp := uint64(payloadAttributes.Timestamp)
@@ -455,7 +453,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	timestamp := uint64(payloadAttributes.Timestamp)
 	if headHeader.Time >= timestamp {
-		return nil, &engine_helpers.InvalidPayloadAttributesErr
+		return nil, &rpc.InvalidParamsError{Message: "headHeader.Time >= timestamp"}
 	}
 
 	req := &execution.AssembleBlockRequest{
@@ -623,7 +621,7 @@ func (e *EngineServer) ExchangeTransitionConfigurationV1(ctx context.Context, be
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#engine_getpayloadbodiesbyhashv1
 func (e *EngineServer) GetPayloadBodiesByHashV1(ctx context.Context, hashes []libcommon.Hash) ([]*engine_types.ExecutionPayloadBodyV1, error) {
 	if len(hashes) > 1024 {
-		return nil, &engine_helpers.TooLargeRequestErr
+		return nil, rpc.MakeError(rpc.TOO_LARGE_REQUEST, "Too large request")
 	}
 
 	return e.getPayloadBodiesByHash(ctx, hashes, clparams.DenebVersion)
@@ -636,7 +634,7 @@ func (e *EngineServer) GetPayloadBodiesByRangeV1(ctx context.Context, start, cou
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
 	if count > 1024 {
-		return nil, &engine_helpers.TooLargeRequestErr
+		return nil, rpc.MakeError(rpc.TOO_LARGE_REQUEST, "Too large request")
 	}
 
 	return e.getPayloadBodiesByRange(ctx, uint64(start), uint64(count), clparams.CapellaVersion)
@@ -819,7 +817,7 @@ func (e *EngineServer) HandlesForkChoice(
 		return nil, err
 	}
 	if status == execution.ExecutionStatus_InvalidForkchoice {
-		return nil, &engine_helpers.InvalidForkchoiceStateErr
+		return nil, rpc.MakeError(rpc.INVALID_FORKCHOICE_STATE, "Invalid forkchoice state")
 	}
 	if status == execution.ExecutionStatus_Busy {
 		return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil

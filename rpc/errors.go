@@ -18,6 +18,22 @@ package rpc
 
 import "fmt"
 
+const (
+	// Engine API errors
+	SERVER_ERROR         = -32000
+	INVALID_REQUEST      = -32600
+	METHOD_NOT_FOUND     = -32601
+	INVALID_PARAMS_ERROR = -32602
+	INTERNAL_ERROR       = -32603
+	INVALID_JSON         = -32700
+
+	UNKNOWN_PAYLOAD            = -38001
+	INVALID_FORKCHOICE_STATE   = -38002
+	INVALID_PAYLOAD_ATTRIBUTES = -38003
+	TOO_LARGE_REQUEST          = -38004
+	UNSUPPORTED_FORK_ERROR     = -38005
+)
+
 var (
 	_ Error = new(methodNotFoundError)
 	_ Error = new(subscriptionNotFoundError)
@@ -89,3 +105,7 @@ type CustomError struct {
 func (e *CustomError) ErrorCode() int { return e.Code }
 
 func (e *CustomError) Error() string { return e.Message }
+
+func MakeError(errCode int, msg string) *CustomError {
+	return &CustomError{Code: errCode, Message: msg}
+}
