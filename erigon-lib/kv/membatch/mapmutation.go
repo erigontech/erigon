@@ -149,7 +149,7 @@ func (m *Mapmutation) Put(table string, k, v []byte) error {
 	stringKey := string(k)
 
 	var ok bool
-	if _, ok = m.puts[table][stringKey]; !ok {
+	if _, ok = m.puts[table][stringKey]; ok {
 		m.size += len(v) - len(m.puts[table][stringKey])
 		m.puts[table][stringKey] = v
 		return nil

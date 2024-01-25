@@ -49,7 +49,7 @@ type NodeArgs struct {
 	MetricsAddr               string `arg:"--metrics.addr" json:"metrics.addr,omitempty"`
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
-	HeimdallGrpcAddr          string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
+	HeimdallURL               string `arg:"--bor.heimdall" json:"bor.heimdall,omitempty"`
 	WithHeimdallMilestones    bool   `arg:"--bor.milestone" json:"bor.milestone"`
 	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
 

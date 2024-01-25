@@ -111,7 +111,6 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/heimdallgrpc"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -267,10 +266,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			config.Sync.UseSnapshots = useSnapshots
 			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(config.Genesis.Config.ChainName) && useSnapshots
 		}
-
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	if !config.Sync.UseSnapshots {
+		if err := downloader.CreateProhibitNewDownloadsFile(dirs.Snap); err != nil {
+			return nil, err
+		}
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -512,14 +515,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	} else {
 		consensusConfig = &config.Ethash
 	}
-	var heimdallClient heimdall.IHeimdallClient
+	var heimdallClient heimdall.HeimdallClient
 	if chainConfig.Bor != nil {
 		if !config.WithoutHeimdall {
-			if config.HeimdallgRPCAddress != "" {
-				heimdallClient = heimdallgrpc.NewHeimdallGRPCClient(config.HeimdallgRPCAddress, logger)
-			} else {
-				heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
-			}
+			heimdallClient = heimdall.NewHeimdallClient(config.HeimdallURL, logger)
 		}
 
 		flags.Milestone = config.WithHeimdallMilestones
@@ -799,7 +798,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var engine execution_client.ExecutionEngine
 
 	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
-	if config.NetworkID == uint64(clparams.GnosisNetwork) {
+	if config.NetworkID == uint64(clparams.GnosisNetwork) || config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork) {
 		// Read the jwt secret
 		jwtSecret, err := cli.ObtainJWTSecret(&stack.Config().Http, logger)
 		if err != nil {

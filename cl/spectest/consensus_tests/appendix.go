@@ -11,6 +11,7 @@ import (
 var TestFormats = spectest.Appendix{}
 
 func init() {
+
 	TestFormats.Add("bls").
 		With("aggregate_verify", &BlsAggregateVerify{}).
 		With("aggregate", spectest.UnimplementedHandler).
@@ -47,7 +48,7 @@ func init() {
 	TestFormats.Add("kzg").
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("light_client").
-		With("", spectest.UnimplementedHandler)
+		WithFn("single_merkle_proof", LightClientBeaconBlockBodyExecutionMerkleProof)
 	TestFormats.Add("operations").
 		WithFn("attestation", operationAttestationHandler).
 		WithFn("attester_slashing", operationAttesterSlashingHandler).

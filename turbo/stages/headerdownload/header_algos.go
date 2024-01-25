@@ -141,17 +141,6 @@ func (hd *HeaderDownload) IsBadHeader(headerHash libcommon.Hash) bool {
 	return ok
 }
 
-// See https://hackmd.io/GDc0maGsQeKfP8o2C7L52w
-func (hd *HeaderDownload) SetPoSDownloaderTip(hash libcommon.Hash) {
-	hd.lock.Lock()
-	defer hd.lock.Unlock()
-	hd.posDownloaderTip = hash
-}
-func (hd *HeaderDownload) PoSDownloaderTip() libcommon.Hash {
-	hd.lock.RLock()
-	defer hd.lock.RUnlock()
-	return hd.posDownloaderTip
-}
 func (hd *HeaderDownload) ReportBadHeaderPoS(badHeader, lastValidAncestor libcommon.Hash) {
 	hd.lock.Lock()
 	defer hd.lock.Unlock()

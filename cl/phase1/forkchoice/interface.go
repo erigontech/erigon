@@ -41,6 +41,7 @@ type ForkChoiceStorageReader interface {
 	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	ForkNodes() []ForkNode
+	Synced() bool
 }
 
 type ForkChoiceStorageWriter interface {
@@ -52,4 +53,5 @@ type ForkChoiceStorageWriter interface {
 	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
 	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error
 	OnTick(time uint64)
+	SetSynced(synced bool)
 }

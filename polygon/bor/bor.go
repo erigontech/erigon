@@ -22,9 +22,6 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -46,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -297,8 +295,8 @@ type Bor struct {
 	execCtx context.Context // context of caller execution stage
 
 	spanner                Spanner
-	GenesisContractsClient GenesisContract
-	HeimdallClient         heimdall.IHeimdallClient
+	GenesisContractsClient GenesisContracts
+	HeimdallClient         heimdall.HeimdallClient
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -323,8 +321,8 @@ func New(
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient heimdall.IHeimdallClient,
-	genesisContracts GenesisContract,
+	heimdallClient heimdall.HeimdallClient,
+	genesisContracts GenesisContracts,
 	logger log.Logger,
 ) *Bor {
 	// get bor config
@@ -394,7 +392,7 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
-	genesisContracts GenesisContract, logger log.Logger) *Bor {
+	genesisContracts GenesisContracts, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -552,7 +550,7 @@ func ValidateHeaderUnusedFields(header *types.Header) error {
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	return nil
+	return misc.VerifyAbsenceOfCancunHeaderFields(header)
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
@@ -890,7 +888,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
-		spanID := span.IDAt(number + 1)
+		spanID := SpanIDAt(number + 1)
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
@@ -899,7 +897,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 		// sort validator by address
 		sort.Sort(valset.ValidatorsByAddress(newValidators))
 
-		if c.config.IsParallelUniverse(header.Number.Uint64()) {
+		if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 			var tempValidatorBytes []byte
 
 			for _, validator := range newValidators {
@@ -923,7 +921,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 				header.Extra = append(header.Extra, validator.HeaderBytes()...)
 			}
 		}
-	} else if c.config.IsParallelUniverse(header.Number.Uint64()) {
+	} else if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 		blockExtraData := &BlockExtraData{
 			ValidatorBytes: nil,
 			TxDependency:   nil,
@@ -1338,7 +1336,7 @@ func (c *Bor) fetchAndCommitSpan(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	var heimdallSpan span.HeimdallSpan
+	var heimdallSpan heimdall.HeimdallSpan
 
 	if c.HeimdallClient == nil {
 		// fixme: move to a new mock or fake and remove c.HeimdallClient completely
@@ -1392,12 +1390,23 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 	if start > end || end > currentHeaderNumber {
 		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
-	blockHeaders := make([]*types.Header, end-start+1)
+	blockHeaders := make([]*types.Header, length)
 	for number := start; number <= end; number++ {
 		blockHeaders[number-start], _ = c.getHeaderByNumber(ctx, tx, number)
 	}
 
-	headers := make([][32]byte, NextPowerOfTwo(length))
+	hash, err := ComputeHeadersRootHash(blockHeaders)
+	if err != nil {
+		return "", err
+	}
+
+	hashStr := hex.EncodeToString(hash)
+	c.rootHashCache.Add(cacheKey, hashStr)
+	return hashStr, nil
+}
+
+func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
+	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
 	for i := 0; i < len(blockHeaders); i++ {
 		blockHeader := blockHeaders[i]
 		header := crypto.Keccak256(AppendBytes32(
@@ -1413,13 +1422,10 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
 	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
-		return "", err
+		return nil, err
 	}
-	root := hex.EncodeToString(tree.Root().Hash)
 
-	c.rootHashCache.Add(cacheKey, root)
-
-	return root, nil
+	return tree.Root().Hash, nil
 }
 
 func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Header, error) {
@@ -1449,7 +1455,7 @@ func (c *Bor) CommitStates(
 	return nil
 }
 
-func (c *Bor) SetHeimdallClient(h heimdall.IHeimdallClient) {
+func (c *Bor) SetHeimdallClient(h heimdall.HeimdallClient) {
 	c.HeimdallClient = h
 }
 
@@ -1463,7 +1469,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) (*span.HeimdallSpan, error) {
+) (*heimdall.HeimdallSpan, error) {
 	headerNumber := header.Number.Uint64()
 
 	spanBor, err := c.spanner.GetCurrentSpan(syscall)
@@ -1492,7 +1498,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 		selectedProducers[i] = *v
 	}
 
-	heimdallSpan := &span.HeimdallSpan{
+	heimdallSpan := &heimdall.HeimdallSpan{
 		Span:              *spanBor,
 		ValidatorSet:      *snap.ValidatorSet,
 		SelectedProducers: selectedProducers,
@@ -1578,7 +1584,7 @@ func GetTxDependency(b *types.Block) [][]uint64 {
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
 	tempExtra := h.Extra
 
-	if !config.IsParallelUniverse(h.Number.Uint64()) {
+	if !config.IsNapoli(h.Number.Uint64()) {
 		return tempExtra[types.ExtraVanityLength : len(tempExtra)-types.ExtraSealLength]
 	}
 
