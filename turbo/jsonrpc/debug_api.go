@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	jsoniter "github.com/json-iterator/go"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -60,7 +61,7 @@ func NewPrivateDebugAPI(base *BaseAPI, db kv.RoDB, gascap uint64) *PrivateDebugA
 	}
 }
 
-// storageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
+// StorageRangeAt implements debug_storageRangeAt. Returns information about a range of storage locations (if any) for the given address.
 func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutility.Bytes, maxResult int) (StorageRangeResult, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
