@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
@@ -408,6 +409,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	logBlock := stageProgress
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
+	startTime := time.Now()
 	var gas uint64             // used for logs
 	var currentStateGas uint64 // used for batch commits of state
 	// Transform batch_size limit into Ggas
@@ -424,7 +426,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	}()
 
 	var readAhead chan uint64
-	if initialCycle {
+	if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -438,7 +440,7 @@ Loop:
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		if initialCycle {
+		if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
 			select {
 			case readAhead <- blockNum:
 			default:
@@ -468,6 +470,16 @@ Loop:
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
 			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			// Recreate tx because Silkworm has just done commit or abort on passed one
+			var tx_err error
+			txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
+			if tx_err != nil {
+				return tx_err
+			}
+			defer txc.Tx.Rollback()
+			// Recreate memory batch because underlying tx has changed
+			batch.Close()
+			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
@@ -507,7 +519,7 @@ Loop:
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum)
 			currentStateGas = 0
 			if err = batch.Flush(ctx, txc.Tx); err != nil {
 				return err
@@ -534,7 +546,7 @@ Loop:
 		select {
 		default:
 		case <-logEvery.C:
-			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, logger)
+			logBlock, logTx, logTime = logProgress(logPrefix, logBlock, logTime, blockNum, logTx, lastLogTx, gas, float64(currentStateGas)/float64(gasState), batch, logger, s.BlockNumber, to, startTime)
 			gas = 0
 			txc.Tx.CollectMetrics()
 			syncMetrics[stages.Execution].SetUint64(blockNum)
@@ -650,7 +662,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, cfg *ExecuteBlockCfg, bl
 }
 
 func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, currentBlock uint64, prevTx, currentTx uint64, gas uint64,
-	gasState float64, batch kv.PendingMutations, logger log.Logger) (uint64, uint64, time.Time) {
+	gasState float64, batch kv.PendingMutations, logger log.Logger, from uint64, to uint64, startTime time.Time) (uint64, uint64, time.Time) {
 	currentTime := time.Now()
 	interval := currentTime.Sub(prevTime)
 	speed := float64(currentBlock-prevBlock) / (float64(interval) / float64(time.Second))
@@ -666,10 +678,29 @@ func logProgress(logPrefix string, prevBlock uint64, prevTime time.Time, current
 		"Mgas/s", fmt.Sprintf("%.1f", speedMgas),
 		"gasState", fmt.Sprintf("%.2f", gasState),
 	}
+
+	batchSize := 0
+
 	if batch != nil {
-		logpairs = append(logpairs, "batch", common.ByteCount(uint64(batch.BatchSize())))
+		batchSize = batch.BatchSize()
+		logpairs = append(logpairs, "batch", common.ByteCount(uint64(batchSize)))
 	}
 	logpairs = append(logpairs, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+	diagnostics.Send(diagnostics.BlockExecutionStatistics{
+		From:        from,
+		To:          to,
+		BlockNumber: currentBlock,
+		BlkPerSec:   speed,
+		TxPerSec:    speedTx,
+		MgasPerSec:  speedMgas,
+		GasState:    gasState,
+		Batch:       uint64(batchSize),
+		Alloc:       m.Alloc,
+		Sys:         m.Sys,
+		TimeElapsed: time.Since(startTime).Round(time.Second).Seconds(),
+	})
+
 	logger.Info(fmt.Sprintf("[%s] Executed blocks", logPrefix), logpairs...)
 
 	return currentBlock, currentTx, currentTime

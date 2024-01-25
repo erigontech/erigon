@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	solid2 "github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -44,7 +45,8 @@ func (r *RegressionTester) Run(name string, fn func(*forkchoice.ForkChoiceStore,
 	if err != nil {
 		return err
 	}
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(state, afero.NewMemMapFs()))
+	emitter := beaconevents.NewEmitters()
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(state, afero.NewMemMapFs()), emitter)
 	if err != nil {
 		return err
 	}

@@ -46,7 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -166,7 +165,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	return d, nil
 }
 
-const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 const SnapshotsLockFileName = "snapshot-lock.json"
 
 type snapshotLock struct {
@@ -502,11 +500,6 @@ func (d *Downloader) addPreConfiguredHashes(ctx context.Context, snapshots snapc
 		}
 	}
 	return nil
-}
-
-func (d *Downloader) newDownloadsAreProhibited() bool {
-	return dir.FileExist(filepath.Join(d.SnapDir(), ProhibitNewDownloadsFileName)) ||
-		dir.FileExist(filepath.Join(d.SnapDir(), SnapshotsLockFileName))
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -991,7 +984,7 @@ func (d *Downloader) addMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return nil
 	}
 
-	if !force && d.newDownloadsAreProhibited() {
+	if !force && d.torrentFiles.newDownloadsAreProhibited() {
 		return nil
 	}
 

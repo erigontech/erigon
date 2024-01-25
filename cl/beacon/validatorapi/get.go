@@ -1,10 +1,13 @@
 package validatorapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/gfx-labs/sse"
 	"github.com/go-chi/chi/v5"
@@ -16,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (v *ValidatorApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request) (any, error) {
@@ -54,18 +58,18 @@ func (v *ValidatorApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http
 
 func (v *ValidatorApiHandler) GetEthV1ConfigSpec(w http.ResponseWriter, r *http.Request) (*clparams.BeaconChainConfig, error) {
 	if v.BeaconChainCfg == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "beacon config not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("beacon config not found"))
 	}
 	return v.BeaconChainCfg, nil
 }
 
 func (v *ValidatorApiHandler) GetEthV1BeaconGenesis(w http.ResponseWriter, r *http.Request) (any, error) {
 	if v.GenesisCfg == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "genesis config not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("genesis config not found"))
 	}
 	digest, err := fork.ComputeForkDigest(v.BeaconChainCfg, v.GenesisCfg)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	return map[string]any{
 		"data": map[string]any{
@@ -112,30 +116,30 @@ func (v *ValidatorApiHandler) GetEthV1BeaconStatesStateIdValidatorsValidatorId(w
 		hsh := common.Bytes48{}
 		err := hsh.UnmarshalText([]byte(stateId))
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("Invalid validator ID: %s", validatorId))
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("Invalid validator ID: %s", validatorId))
 		}
 		val, ok := beaconState.ValidatorIndexByPubkey(hsh)
 		if !ok {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("validator not found: %s", validatorId))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %s", validatorId))
 		}
 		validatorIndex = val
 	case isInt(validatorId):
 		val, err := strconv.ParseUint(validatorId, 10, 64)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("Invalid validator ID: %s", validatorId))
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("Invalid validator ID: %s", validatorId))
 		}
 		validatorIndex = val
 	default:
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Sprintf("Invalid validator ID: %s", validatorId))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("Invalid validator ID: %s", validatorId))
 	}
 	// at this point validatorIndex is neccesarily assigned, so we can trust the zero value
 	validator, err := beaconState.ValidatorForValidatorIndex(int(validatorIndex))
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("validator not found at %s: %s ", stateId, validatorId))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found at %s: %s ", stateId, validatorId))
 	}
 	validatorBalance, err := beaconState.ValidatorBalance(int(validatorIndex))
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Sprintf("balance not found at %s: %s ", stateId, validatorId))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("balance not found at %s: %s ", stateId, validatorId))
 	}
 
 	//pending_initialized - When the first deposit is processed, but not enough funds are available (or not yet the end of the first epoch) to get validator into the activation queue.
@@ -248,18 +252,57 @@ func (v *ValidatorApiHandler) GetEthV3ValidatorBlocksSlot(w http.ResponseWriter,
 	return o, nil
 }
 
-func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
+var validTopics = map[string]struct{}{
+	"head":                           {},
+	"block":                          {},
+	"attestation":                    {},
+	"voluntary_exit":                 {},
+	"bls_to_execution_change":        {},
+	"finalized_checkpoint":           {},
+	"chain_reorg":                    {},
+	"contribution_and_proof":         {},
+	"light_client_finality_update":   {},
+	"light_client_optimistic_update": {},
+	"payload_attributes":             {},
+	"*":                              {},
+}
+
+func (v *ValidatorApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) (any, error) {
 	sink, err := sse.DefaultUpgrader.Upgrade(w, r)
 	if err != nil {
-		// OK to ignore this error.
-		return
+		return nil, fmt.Errorf("failed to upgrade: %s", err)
 	}
 	topics := r.URL.Query()["topics"]
-	for _, topic := range topics {
-		sink.Encode(&sse.Event{
+	for _, v := range topics {
+		if _, ok := validTopics[v]; !ok {
+			return nil, fmt.Errorf("Invalid Topic: %s", v)
+		}
+	}
+	var mu sync.Mutex
+	closer, err := v.Emitters.Subscribe(topics, func(topic string, item any) {
+		buf := &bytes.Buffer{}
+		err := json.NewEncoder(buf).Encode(item)
+		if err != nil {
+			// return early
+			return
+		}
+		mu.Lock()
+		err = sink.Encode(&sse.Event{
 			Event: []byte(topic),
-			Data:  nil,
+			Data:  buf,
 		})
-		// OK to ignore this error. maybe should log it later
+		mu.Unlock()
+		if err != nil {
+			log.Error("failed to encode data", "topic", topic, "err", err)
+		}
+		// OK to ignore this error. maybe should log it later?
+	})
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(400, err)
+	}
+	defer closer()
+	select {
+	case <-r.Context().Done():
+		return nil, nil
 	}
 }
