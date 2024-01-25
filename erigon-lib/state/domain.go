@@ -2065,7 +2065,7 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx) (can bool, maxPrunableSt
 	if maxPrunableStep > 0 {
 		maxPrunableStep--
 	}
-	return dc.CanPruneFrom(tx) < maxPrunableStep, maxPrunableStep
+	return dc.CanPruneFrom(tx) <= maxPrunableStep, maxPrunableStep
 }
 
 // CanPruneFrom returns step from which domain tables can be pruned
@@ -2177,9 +2177,9 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	//defer func() {
 	//	dc.d.logger.Info("[snapshots] prune domain",
 	//		"name", dc.d.filenameBase,
-	//		"pruned keys", prunedKeys,
-	//		"keys until limit", limit,
-	//		"pruned steps", fmt.Sprintf("%d-%d", prunedMinStep, prunedMaxStep))
+	//		"pruned keys", stat.Values,
+	//		"from", txFrom, "to", txTo, "step", step,
+	//		"keys until limit", limit)
 	//}()
 	prunedKey, err := GetExecV3PruneProgress(rwTx, dc.d.keysTable)
 	if err != nil {
