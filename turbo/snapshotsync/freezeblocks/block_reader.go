@@ -908,7 +908,6 @@ func (r *BlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64
 		return nil, fmt.Errorf("failed ReadCanonicalHash: %w", err)
 	}
 	if hash == (common.Hash{}) {
-		log.Warn("[dbg] BlockByNumber", "noCanonicalHash", number)
 		return nil, nil
 	}
 	block, _, err := r.BlockWithSenders(ctx, db, hash, number)
