@@ -27,7 +27,7 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 				if failFast {
 					return err
 				}
-				log.Warn("[integrity] SnapBlocksRead", "err", err)
+				log.Error("[integrity] SnapBlocksRead", "err", err)
 			}
 			return nil
 		}); err != nil {
