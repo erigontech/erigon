@@ -310,13 +310,13 @@ func DefaultZkStages(
 			ID:          stages2.Execution,
 			Description: "Execute blocks w/o hash checks",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnExecuteBlocksStage(s, u, tx, 0, ctx, exec, firstCycle, quiet)
+				return stagedsync.SpawnExecuteBlocksStageZk(s, u, tx, 0, ctx, exec, firstCycle, quiet)
 			},
 			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindExecutionStage(u, s, tx, ctx, exec, firstCycle)
+				return stagedsync.UnwindExecutionStageZk(u, s, tx, ctx, exec, firstCycle)
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneExecutionStage(p, tx, exec, ctx, firstCycle)
+				return stagedsync.PruneExecutionStageZk(p, tx, exec, ctx, firstCycle)
 			},
 		},
 		{
