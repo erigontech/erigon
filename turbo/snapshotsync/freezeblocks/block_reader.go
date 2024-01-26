@@ -1205,6 +1205,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		if sn.idx == nil {
 			continue
 		}
+		fmt.Printf("[dbg] span(%d): %d, %s\n", spanId, sn.idx.BaseDataID(), sn.idx.FileName())
 		spanFrom := bor.SpanIDAt(sn.from)
 		if spanId < spanFrom {
 			continue
