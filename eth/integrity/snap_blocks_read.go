@@ -16,7 +16,7 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 	defer logEvery.Stop()
 
 	maxBlockNum := blockReader.Snapshots().SegmentsMax()
-	for i := uint64(0); i < maxBlockNum; i += 1 {
+	for i := uint64(0); i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			b, err := blockReader.BlockByNumber(ctx, tx, i)
 			if err != nil {
