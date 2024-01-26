@@ -458,7 +458,14 @@ func (s *KvServer) SendStateChanges(_ context.Context, sc *remote.StateChangeBat
 	s.stateChangeStreams.Pub(sc)
 }
 
-func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
+func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (reply *remote.SnapshotsReply, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Warn("[KvServer] Snapshots", "panic", rec)
+			err = fmt.Errorf("%v", rec)
+		}
+
+	}()
 	if s.blockSnapshots == nil || reflect.ValueOf(s.blockSnapshots).IsNil() { // nolint
 		return &remote.SnapshotsReply{BlocksFiles: []string{}, HistoryFiles: []string{}}, nil
 	}
