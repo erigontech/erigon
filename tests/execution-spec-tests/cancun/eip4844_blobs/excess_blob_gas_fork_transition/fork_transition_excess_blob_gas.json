@@ -1,7 +1,8 @@
 {
-    "000-fork=ShanghaiToCancunAtTime15k-max_blobs-correct_initial_blob_gas_calc": {
+    "tests/cancun/eip4844_blobs/test_excess_blob_gas_fork_transition.py::test_fork_transition_excess_blob_gas[fork_ShanghaiToCancunAtTime15k-blockchain_test-max_blobs]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -934,9 +935,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=ShanghaiToCancunAtTime15k-no_blobs-correct_initial_blob_gas_calc": {
+    "tests/cancun/eip4844_blobs/test_excess_blob_gas_fork_transition.py::test_fork_transition_excess_blob_gas[fork_ShanghaiToCancunAtTime15k-blockchain_test-no_blobs]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -1893,9 +1895,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=ShanghaiToCancunAtTime15k-target_blobs-correct_initial_blob_gas_calc": {
+    "tests/cancun/eip4844_blobs/test_excess_blob_gas_fork_transition.py::test_fork_transition_excess_blob_gas[fork_ShanghaiToCancunAtTime15k-blockchain_test-target_blobs]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
