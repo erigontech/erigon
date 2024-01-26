@@ -11,6 +11,7 @@ import (
 )
 
 func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context) error {
+	defer log.Info("[integrity] SnapBlocksRead: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
