@@ -438,7 +438,7 @@ TooBigJumpStep:
 			return
 		}
 		if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-			timings = append(timings, e.executionPipeline.PrintTimings())
+			timings = append(timings, pruneTimings...)
 		}
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
