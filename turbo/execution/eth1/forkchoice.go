@@ -437,7 +437,9 @@ TooBigJumpStep:
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		timings = append(timings, e.executionPipeline.PrintTimings())
+		if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
+			timings = append(timings, e.executionPipeline.PrintTimings())
+		}
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
