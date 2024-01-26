@@ -443,7 +443,6 @@ TooBigJumpStep:
 		}
 		commitTook := time.Since(commitStart)
 		if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-			e.logger.Warn("[dbg]", "pruneLen", len(pruneTimings), "%v", fmt.Sprintf("%+v", pruneTimings))
 			timings = append(timings, pruneTimings...)
 		}
 		timings = append(timings, "commit", commitTook.String())
