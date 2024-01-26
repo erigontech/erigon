@@ -1315,11 +1315,12 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
-	if curBlockNum <= params.FullImmutabilityThreshold {
+	var keep uint64 = params.FullImmutabilityThreshold / 4 //TODO: we will remove `/4` after some db optimizations
+	if curBlockNum <= keep {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
+	return canRetire(blockFrom, curBlockNum-keep)
 }
 
 func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
@@ -1354,11 +1355,12 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
-	if curBlockNum+999 < params.FullImmutabilityThreshold {
+	var keep uint64 = params.FullImmutabilityThreshold / 4 //TODO: we will remove `/4` after some db optimizations
+	if curBlockNum+999 < keep {
 		// To prevent overflow of uint64 below
 		return blocksInSnapshots + 1
 	}
-	hardLimit := (curBlockNum/1_000)*1_000 - params.FullImmutabilityThreshold
+	hardLimit := (curBlockNum/1_000)*1_000 - keep
 	return cmp.Min(hardLimit, blocksInSnapshots+1)
 }
 
