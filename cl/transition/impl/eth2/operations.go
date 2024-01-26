@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
 
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"

@@ -11,6 +11,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -196,6 +197,30 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedError(err),
 		}, nil
+	}
+
+	if version >= clparams.DenebVersion {
+		err := ethutils.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(), s.config.GetMaxBlobsPerBlock(), expectedBlobHashes, &transactions)
+		if errors.Is(err, ethutils.ErrNilBlobHashes) {
+			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
+		}
+		if errors.Is(err, ethutils.ErrMaxBlobGasUsed) {
+			bad, latestValidHash := s.hd.IsBadHeaderPoS(req.ParentHash)
+			if !bad {
+				latestValidHash = req.ParentHash
+			}
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("blobs/blobgas exceeds max"),
+				LatestValidHash: &latestValidHash,
+			}, nil
+		}
+		if errors.Is(err, ethutils.ErrMismatchBlobHashes) {
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("mismatch in blob hashes"),
+			}, nil
+		}
 	}
 
 	possibleStatus, err := s.getQuickPayloadStatusIfPossible(blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
@@ -734,7 +759,7 @@ func (e *EngineServer) HandleNewPayload(
 		}
 	}
 
-	if err := e.chainRW.InsertBlockAndWait(block, versionedHashes); err != nil {
+	if err := e.chainRW.InsertBlockAndWait(block); err != nil {
 		return nil, err
 	}
 

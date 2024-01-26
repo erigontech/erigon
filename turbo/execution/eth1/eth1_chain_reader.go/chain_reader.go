@@ -282,18 +282,10 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error 
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block, versionedHashes []libcommon.Hash) error {
+func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block) error {
 	blocks := []*types.Block{block}
 	request := &execution.InsertBlocksRequest{
 		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
-	}
-
-	if versionedHashes != nil {
-		request.Blocks[0].CheckExpectedBlobHashes = true
-		request.Blocks[0].ExpectedBlobHashes = make([]*types2.H256, len(versionedHashes))
-		for i, h := range versionedHashes {
-			request.Blocks[0].ExpectedBlobHashes[i] = gointerfaces.ConvertHashToH256(h)
-		}
 	}
 
 	response, err := c.executionModule.InsertBlocks(c.ctx, request)
