@@ -3,9 +3,11 @@ package eth1
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -16,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 )
 
 type forkchoiceOutcome struct {
@@ -310,6 +313,7 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 TooBigJumpStep:
+	var timings []interface{}
 	if tx == nil {
 		tx, err = e.db.BeginRwNosync(ctx)
 		if err != nil {
@@ -373,6 +377,8 @@ TooBigJumpStep:
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
+	timings = slices.Clone(e.executionPipeline.PrintTimings())
+
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
 	headNumber := rawdb.ReadHeaderNumber(tx, headHash)
@@ -431,6 +437,11 @@ TooBigJumpStep:
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		timings = append(timings, e.executionPipeline.PrintTimings())
+		var m runtime.MemStats
+		dbg.ReadMemStats(&m)
+		timings = append(timings, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
+		e.logger.Info("Timings (slower than 50ms)", timings...)
 	}
 	if tooBigJump {
 		goto TooBigJumpStep
