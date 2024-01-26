@@ -53,13 +53,16 @@ type SnapshotDownloadStatistics struct {
 }
 
 type SegmentDownloadStatistics struct {
-	Name            string `json:"name"`
-	TotalBytes      uint64 `json:"totalBytes"`
-	DownloadedBytes uint64 `json:"downloadedBytes"`
-	WebseedsCount   int    `json:"webseedsCount"`
-	PeersCount      int    `json:"peersCount"`
-	WebseedsRate    uint64 `json:"webseedsRate"`
-	PeersRate       uint64 `json:"peersRate"`
+	Name            string        `json:"name"`
+	TotalBytes      uint64        `json:"totalBytes"`
+	DownloadedBytes uint64        `json:"downloadedBytes"`
+	Webseeds        []SegmentPeer `json:"webseeds"`
+	Peers           []SegmentPeer `json:"peers"`
+}
+
+type SegmentPeer struct {
+	Url          string `json:"url"`
+	DownloadRate uint64 `json:"downloadRate"`
 }
 
 type SnapshotIndexingStatistics struct {
