@@ -194,7 +194,7 @@ var snapshotCommand = cli.Command{
 						_, fName := filepath.Split(filePath)
 
 						parts := strings.Split(fName, ".")
-						if len(parts) == 3 {
+						if len(parts) == 3 || len(parts) == 4 {
 							fsteps := strings.Split(parts[1], "-")
 
 							fmin, err = strconv.ParseUint(fsteps[0], 10, 64)
