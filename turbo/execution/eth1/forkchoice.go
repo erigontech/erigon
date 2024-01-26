@@ -313,7 +313,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 	}
 
 TooBigJumpStep:
-	var timings []interface{}
 	if tx == nil {
 		tx, err = e.db.BeginRwNosync(ctx)
 		if err != nil {
@@ -377,7 +376,7 @@ TooBigJumpStep:
 		sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 		return
 	}
-	timings = slices.Clone(e.executionPipeline.PrintTimings())
+	timings := slices.Clone(e.executionPipeline.PrintTimings())
 
 	// if head hash was set then success otherwise no
 	headHash := rawdb.ReadHeadBlockHash(tx)
