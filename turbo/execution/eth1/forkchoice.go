@@ -434,6 +434,10 @@ TooBigJumpStep:
 			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
 				return err
 			}
+			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
+				e.logger.Warn("[dbg]", "pruneLen", len(pruneTimings), "%v", fmt.Sprintf("%+v", pruneTimings))
+				timings = append(timings, pruneTimings...)
+			}
 			commitStart = time.Now()
 			return nil
 		}); err != nil {
@@ -441,11 +445,7 @@ TooBigJumpStep:
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
-		commitTook := time.Since(commitStart)
-		if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-			timings = append(timings, pruneTimings...)
-		}
-		timings = append(timings, "commit", commitTook.String())
+		timings = append(timings, "commit", time.Since(commitStart).String())
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
