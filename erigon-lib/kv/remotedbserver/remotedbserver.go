@@ -469,7 +469,7 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (rep
 	}
 
 	blockFiles := s.blockSnapshots.Files()
-	if s.borSnapshots == nil || reflect.ValueOf(s.borSnapshots).IsNil() { // nolint
+	if s.borSnapshots != nil && !reflect.ValueOf(s.borSnapshots).IsNil() { // nolint
 		blockFiles = append(blockFiles, s.borSnapshots.Files()...)
 	}
 
