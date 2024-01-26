@@ -19,8 +19,11 @@ package core
 
 import (
 	"fmt"
+	"math/big"
 	"time"
 
+	"github.com/goccy/go-json"
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -28,10 +31,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
+	"github.com/ledgerwatch/erigon/consensus/misc"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -105,6 +110,7 @@ func ExecuteBlockEphemerally(
 
 	noop := state.NewNoopWriter()
 	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
+	marshalledReceipts := make([]map[string]interface{}, 0, block.Transactions().Len())
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -135,10 +141,19 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
+
+		marshalledReceipts = append(marshalledReceipts, marshalReceipt(receipt, tx, chainConfig, header, tx.Hash(), true))
 	}
 
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
+		json, err := json.MarshalIndent(marshalledReceipts, "", "  ")
+		if err != nil {
+			return nil, err
+		}
+
+		log.Info("receipts", "value", string(json))
+
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
@@ -198,6 +213,71 @@ func ExecuteBlockEphemerally(
 	}
 
 	return execRs, nil
+}
+
+func marshalReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header, txnHash libcommon.Hash, signed bool) map[string]interface{} {
+	var chainId *big.Int
+	switch t := txn.(type) {
+	case *types.LegacyTx:
+		if t.Protected() {
+			chainId = types.DeriveChainId(&t.V).ToBig()
+		}
+	default:
+		chainId = txn.GetChainID().ToBig()
+	}
+
+	var from libcommon.Address
+	if signed {
+		signer := types.LatestSignerForChainID(chainId)
+		from, _ = txn.Sender(*signer)
+	}
+
+	fields := map[string]interface{}{
+		"blockHash":         receipt.BlockHash,
+		"blockNumber":       hexutil.Uint64(receipt.BlockNumber.Uint64()),
+		"transactionHash":   txnHash,
+		"transactionIndex":  hexutil.Uint64(receipt.TransactionIndex),
+		"from":              from,
+		"to":                txn.GetTo(),
+		"type":              hexutil.Uint(txn.Type()),
+		"gasUsed":           hexutil.Uint64(receipt.GasUsed),
+		"cumulativeGasUsed": hexutil.Uint64(receipt.CumulativeGasUsed),
+		"contractAddress":   nil,
+		"logs":              receipt.Logs,
+		"logsBloom":         types.CreateBloom(types.Receipts{receipt}),
+	}
+
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
+		fields["effectiveGasPrice"] = hexutil.Uint64(txn.GetPrice().Uint64())
+	} else {
+		baseFee, _ := uint256.FromBig(header.BaseFee)
+		gasPrice := new(big.Int).Add(header.BaseFee, txn.GetEffectiveGasTip(baseFee).ToBig())
+		fields["effectiveGasPrice"] = hexutil.Uint64(gasPrice.Uint64())
+	}
+	// Assign receipt status.
+	fields["status"] = hexutil.Uint64(receipt.Status)
+	if receipt.Logs == nil {
+		fields["logs"] = [][]*types.Log{}
+	}
+	// If the ContractAddress is 20 0x0 bytes, assume it is not a contract creation
+	if receipt.ContractAddress != (libcommon.Address{}) {
+		fields["contractAddress"] = receipt.ContractAddress
+	}
+	// Set derived blob related fields
+	numBlobs := len(txn.GetBlobHashes())
+	if numBlobs > 0 {
+		if header.ExcessBlobGas == nil {
+			log.Warn("excess blob gas not set when trying to marshal blob tx")
+		} else {
+			blobGasPrice, err := misc.GetBlobGasPrice(chainConfig, *header.ExcessBlobGas)
+			if err != nil {
+				log.Error(err.Error())
+			}
+			fields["blobGasPrice"] = blobGasPrice
+			fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
+		}
+	}
+	return fields
 }
 
 func rlpHash(x interface{}) (h libcommon.Hash) {
