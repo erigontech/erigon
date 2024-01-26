@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context) error {
+func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context, failFast bool) error {
 	defer log.Info("[integrity] SnapBlocksRead: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
@@ -23,7 +23,11 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 				return err
 			}
 			if b == nil {
-				return fmt.Errorf("block not found in snapshots: %d\n", i)
+				err := fmt.Errorf("block not found in snapshots: %d\n", i)
+				if failFast {
+					return err
+				}
+				log.Warn("[integrity] SnapBlocksRead", "err", err)
 			}
 			return nil
 		}); err != nil {
