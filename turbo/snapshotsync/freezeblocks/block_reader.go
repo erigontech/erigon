@@ -504,7 +504,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	}
 
 	if r.sn == nil {
-		log.Warn("[dbg] blockWithSenders1", "blockHeight", blockHeight)
 		return
 	}
 
@@ -512,7 +511,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	defer view.Close()
 	seg, ok := view.HeadersSegment(blockHeight)
 	if !ok {
-		log.Warn("[dbg] blockWithSenders2", "blockHeight", blockHeight)
 		return
 	}
 
@@ -522,7 +520,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return nil, nil, err
 	}
 	if h == nil {
-		log.Warn("[dbg] blockWithSenders3", "blockHeight", blockHeight)
 		return
 	}
 
@@ -531,7 +528,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	var txsAmount uint32
 	bodySeg, ok := view.BodiesSegment(blockHeight)
 	if !ok {
-		log.Warn("[dbg] blockWithSenders4", "blockHeight", blockHeight)
 		return
 	}
 	b, baseTxnId, txsAmount, buf, err = r.bodyFromSnapshot(blockHeight, bodySeg, buf)
@@ -539,7 +535,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		return nil, nil, err
 	}
 	if b == nil {
-		log.Warn("[dbg] blockWithSenders5", "blockHeight", blockHeight)
 		return
 	}
 	if txsAmount == 0 {
@@ -553,17 +548,14 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 
 	txnSeg, ok := view.TxsSegment(blockHeight)
 	if !ok {
-		log.Warn("[dbg] blockWithSenders6", "blockHeight", blockHeight)
 		return
 	}
 	var txs []types.Transaction
 	txs, senders, err = r.txsFromSnapshot(baseTxnId, txsAmount, txnSeg, buf)
 	if err != nil {
-		log.Warn("[dbg] blockWithSenders7", "blockHeight", blockHeight)
 		return nil, nil, err
 	}
 	if !ok {
-		log.Warn("[dbg] blockWithSenders8", "blockHeight", blockHeight)
 		return
 	}
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
