@@ -429,17 +429,24 @@ TooBigJumpStep:
 			e.logger.Info("head updated", "hash", headHash, "number", *headNumber)
 		}
 
+		var commitStart time.Time
 		if err := e.db.Update(ctx, func(tx kv.RwTx) error {
-			return e.executionPipeline.RunPrune(e.db, tx, initialCycle)
+			if err := e.executionPipeline.RunPrune(e.db, tx, initialCycle); err != nil {
+				return err
+			}
+			commitStart = time.Now()
+			return nil
 		}); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 			return
 		}
+		commitTook := time.Since(commitStart)
 		if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
 			e.logger.Warn("[dbg]", "pruneLen", len(pruneTimings), "%v", fmt.Sprintf("%+v", pruneTimings))
 			timings = append(timings, pruneTimings...)
 		}
+		timings = append(timings, "commit", commitTook.String())
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
 		timings = append(timings, "alloc", libcommon.ByteCount(m.Alloc), "sys", libcommon.ByteCount(m.Sys))
