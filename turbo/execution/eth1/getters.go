@@ -176,6 +176,11 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 		if err != nil {
 			return nil, err
 		}
+		if body == nil {
+			// Append nil and no further processing
+			bodies = append(bodies, nil)
+			continue
+		}
 
 		txs, err := types.MarshalTransactionsBinary(body.Transactions)
 		if err != nil {
@@ -185,6 +190,13 @@ func (e *EthereumExecutionModule) GetBodiesByRange(ctx context.Context, req *exe
 			Transactions: txs,
 			Withdrawals:  eth1_utils.ConvertWithdrawalsToRpc(body.Withdrawals),
 		})
+	}
+	// Remove trailing nil values as per spec
+	// See point 4 in https://github.com/ethereum/execution-apis/blob/main/src/engine/shanghai.md#specification-4
+	for i := len(bodies) - 1; i >= 0; i-- {
+		if bodies[i] == nil {
+			bodies = bodies[:i]
+		}
 	}
 
 	return &execution.GetBodiesBatchResponse{

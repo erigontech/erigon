@@ -426,7 +426,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	}()
 
 	var readAhead chan uint64
-	if initialCycle {
+	if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
 		// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 		// can't use OS-level ReadAhead - because Data >> RAM
 		// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -440,7 +440,7 @@ Loop:
 		if stoppedErr = common.Stopped(quit); stoppedErr != nil {
 			break
 		}
-		if initialCycle {
+		if initialCycle && cfg.silkworm == nil { // block read-ahead is not compatible w/ Silkworm one-shot block execution
 			select {
 			case readAhead <- blockNum:
 			default:
@@ -470,6 +470,16 @@ Loop:
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
 			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			// Recreate tx because Silkworm has just done commit or abort on passed one
+			var tx_err error
+			txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
+			if tx_err != nil {
+				return tx_err
+			}
+			defer txc.Tx.Rollback()
+			// Recreate memory batch because underlying tx has changed
+			batch.Close()
+			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
@@ -509,7 +519,7 @@ Loop:
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
+			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum)
 			currentStateGas = 0
 			if err = batch.Flush(ctx, txc.Tx); err != nil {
 				return err
