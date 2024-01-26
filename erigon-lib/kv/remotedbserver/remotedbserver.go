@@ -474,7 +474,7 @@ func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (rep
 	}
 
 	reply = &remote.SnapshotsReply{BlocksFiles: blockFiles}
-	if s.historySnapshots == nil || reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
+	if s.historySnapshots != nil && !reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
 		reply.HistoryFiles = s.historySnapshots.Files()
 	}
 
