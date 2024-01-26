@@ -74,6 +74,7 @@ type AggregatorV3 struct {
 	keepInDB         uint64
 
 	minimaxTxNumInFiles atomic.Uint64
+	aggregatedStep      atomic.Uint64
 
 	filesMutationLock sync.Mutex
 	snapshotBuildSema *semaphore.Weighted
@@ -247,6 +248,11 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 		return err
 	}
 	a.recalcMaxTxNum()
+	mx := a.minimaxTxNumInFiles.Load()
+	if mx > 0 {
+		mx--
+	}
+	a.aggregatedStep.Store(mx / a.StepSize())
 	return nil
 }
 
@@ -268,6 +274,11 @@ func (a *AggregatorV3) OpenList(files []string, readonly bool) error {
 		return err
 	}
 	a.recalcMaxTxNum()
+	mx := a.minimaxTxNumInFiles.Load()
+	if mx > 0 {
+		mx--
+	}
+	a.aggregatedStep.Store(mx / a.StepSize())
 	return nil
 }
 
@@ -592,7 +603,9 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
 	a.integrateFiles(static, txFrom, txTo)
-	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
+	a.aggregatedStep.Store(step)
+
+	a.logger.Info("[snapshots] aggregation", "step", step, "took", time.Since(stepStartedAt))
 
 	return nil
 }
@@ -716,9 +729,20 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	return ac.somethingToPrune(tx)
+	return ac.CanPruneFrom(tx) < ac.maxTxNumInDomainFiles(false)
 }
-
+func (ac *AggregatorV3Context) CanPruneFrom(tx kv.Tx) uint64 {
+	fst, _ := kv.FirstKey(tx, ac.a.tracesTo.indexKeysTable)
+	fst2, _ := kv.FirstKey(tx, ac.a.storage.History.indexKeysTable)
+	fst3, _ := kv.FirstKey(tx, ac.a.commitment.History.indexKeysTable)
+	if len(fst) > 0 && len(fst2) > 0 && len(fst3) > 0 {
+		fstInDb := binary.BigEndian.Uint64(fst)
+		fstInDb2 := binary.BigEndian.Uint64(fst2)
+		fstInDb3 := binary.BigEndian.Uint64(fst3)
+		return cmp.Min(cmp.Min(fstInDb, fstInDb2), fstInDb3)
+	}
+	return math2.MaxUint64
+}
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
 	_, histBlockNumProgress, err := rawdbv3.TxNums.FindBlockNum(tx, ac.CanUnwindDomainsToTxNum())
 	return histBlockNumProgress, err
@@ -750,18 +774,16 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	return blockNumWithCommitment, true, nil
 }
 
-func (ac *AggregatorV3Context) somethingToPrune(tx kv.Tx) bool {
-	if dbg.NoPrune() {
-		return false
-	}
-	return ac.commitment.CanPruneUntil(tx) ||
-		ac.account.CanPruneUntil(tx) ||
-		ac.code.CanPruneUntil(tx) ||
-		ac.storage.CanPruneUntil(tx) ||
-		ac.logAddrs.CanPrune(tx) ||
-		ac.logTopics.CanPrune(tx) ||
-		ac.tracesFrom.CanPrune(tx) ||
-		ac.tracesTo.CanPrune(tx)
+// returns true if we can prune something already aggregated
+func (ac *AggregatorV3Context) nothingToPrune(tx kv.Tx, untilTxNum uint64) bool {
+	return dbg.NoPrune() || (!ac.account.CanPruneUntil(tx, untilTxNum) &&
+		!ac.storage.CanPruneUntil(tx, untilTxNum) &&
+		!ac.code.CanPruneUntil(tx, untilTxNum) &&
+		!ac.commitment.CanPruneUntil(tx, untilTxNum) &&
+		!ac.logAddrs.CanPrune(tx) &&
+		!ac.logTopics.CanPrune(tx) &&
+		!ac.tracesFrom.CanPrune(tx) &&
+		!ac.tracesTo.CanPrune(tx))
 }
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
@@ -786,16 +808,15 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			return err
 		}
 		if stat == nil {
-			log.Info("[snapshots] PruneSmallBatches", "took", time.Since(started).String(), "stat", fullStat.String())
 			return nil
 		}
 		fullStat.Accumulate(stat)
 
 		select {
 		case <-logEvery.C:
-			ac.a.logger.Info("[snapshots] pruning",
+			ac.a.logger.Info("[agg] pruning",
 				"until timeout", time.Until(started.Add(timeout)).String(),
-				"aggregatedStep", ac.maxTxNumInDomainFiles(false)/ac.a.StepSize(),
+				"aggregatedStep", ac.a.aggregatedStep.Load(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
@@ -880,14 +901,11 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		limit = uint64(math2.MaxUint64)
 	}
 
-	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
-	txTo := ac.maxTxNumInDomainFiles(false)
-	if txTo > 0 {
-		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
-		step = (txTo - 1) / ac.a.StepSize()
-	}
+	var txFrom, txTo uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
+	step := ac.a.aggregatedStep.Load()
+	txTo = ac.a.FirstTxNumOfStep(step + 1) // to preserve prune range as [txFrom, firstTxOfNextStep)
 
-	if !ac.somethingToPrune(tx) {
+	if ac.nothingToPrune(tx, txTo) {
 		return nil, nil
 	}
 
