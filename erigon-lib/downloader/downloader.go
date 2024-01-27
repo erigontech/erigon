@@ -360,7 +360,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 
 			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
-			rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName, t.Complete.Bool())
+			rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 			// more detailed statistic: download rate of each peer (for each file)
 			if !t.Complete.Bool() && progress != 0 {
 				d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
