@@ -36,11 +36,11 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.borSnapshots()
-	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
+
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
 	if ok {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-		if err := DumpBorBlocks(ctx, chainConfig, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBorBlocks(ctx, chainConfig, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBorBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
@@ -82,67 +82,31 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 	return ok, nil
 }
-func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	if blocksPerFile == 0 {
 		return nil
 	}
 
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
+		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
-	logEvery := time.NewTicker(20 * time.Second)
-	defer logEvery.Stop()
+func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 
-	{
-		f := snaptype.BorEvents.FileInfo(snapDir, 0, blockFrom, blockTo)
-
-		sn, err := compress.NewCompressor(ctx, "Snapshot BorEvents", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
-		if err != nil {
-			return err
-		}
-		defer sn.Close()
-		if err := DumpBorEvents(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
-			return sn.AddWord(v)
-		}); err != nil {
-			return fmt.Errorf("DumpBorEvents: %w", err)
-		}
-		if err := sn.Compress(); err != nil {
-			return fmt.Errorf("compress: %w", err)
-		}
-
-		p := &background.Progress{}
-		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
-			return err
-		}
+	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, 0, blockFrom, blockTo),
+		DumpBorEvents, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		return err
 	}
-	{
-		f := snaptype.BorSpans.FileInfo(snapDir, 0, blockFrom, blockTo)
 
-		sn, err := compress.NewCompressor(ctx, "Snapshot BorSpans", f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
-		if err != nil {
-			return err
-		}
-		defer sn.Close()
-		if err := DumpBorSpans(ctx, chainDB, blockFrom, blockTo, workers, lvl, logger, func(v []byte) error {
-			return sn.AddWord(v)
-		}); err != nil {
-			return fmt.Errorf("DumpBorSpans: %w", err)
-		}
-		if err := sn.Compress(); err != nil {
-			return fmt.Errorf("compress: %w", err)
-		}
-
-		p := &background.Progress{}
-		if err := buildIdx(ctx, f, &chainConfig, tmpDir, p, lvl, logger); err != nil {
-			return err
-		}
+	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, 0, blockFrom, blockTo),
+		DumpBorSpans, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		return err
 	}
+
 	return nil
 }
 
@@ -170,7 +134,7 @@ func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint6
 }
 
 // DumpBorEvents - [from, to)
-func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -216,7 +180,7 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 		}
 		return true, nil
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	if lastEventId > startEventId {
 		if err := db.View(ctx, func(tx kv.Tx) error {
@@ -226,20 +190,22 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, w
 			}
 			return dumpBorEventRange(startEventId, lastEventId+1, tx, prevBlockNum, blockHash, collect)
 		}); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+
+	return lastEventId, nil
 }
 
 // DumpBorSpans - [from, to)
-func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, workers int, lvl log.Lvl, logger log.Logger, collect func([]byte) error) error {
+func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+
 	spanFrom := uint64(heimdall.SpanIdAt(blockFrom))
 	spanTo := uint64(heimdall.SpanIdAt(blockTo))
-	from := hexutility.EncodeTs(spanFrom)
-	if err := kv.BigChunks(db, kv.BorSpans, from, func(tx kv.Tx, spanIdBytes, spanBytes []byte) (bool, error) {
+
+	if err := kv.BigChunks(db, kv.BorSpans, hexutility.EncodeTs(spanFrom), func(tx kv.Tx, spanIdBytes, spanBytes []byte) (bool, error) {
 		spanId := binary.BigEndian.Uint64(spanIdBytes)
 		if spanId >= spanTo {
 			return false, nil
@@ -262,9 +228,9 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, wo
 		}
 		return true, nil
 	}); err != nil {
-		return err
+		return spanTo, err
 	}
-	return nil
+	return spanTo, nil
 }
 
 func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
