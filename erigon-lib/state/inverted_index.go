@@ -994,14 +994,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
 	ii := ic.ii
-	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursor.Close()
-
-	var txKey [8]byte
-
 	//defer func() {
 	//	ii.logger.Error("[snapshots] prune index",
 	//		"name", ii.filenameBase,
@@ -1011,18 +1003,30 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	//		"tx until limit", limit)
 	//}()
 
-	itc, err := rwTx.CursorDupSort(ii.indexTable)
-	if err != nil {
-		return nil, err
+	var idxValuesCount uint64
+	{
+		itc, err := rwTx.CursorDupSort(ii.indexTable)
+		if err != nil {
+			return nil, err
+		}
+		idxValuesCount, err = itc.Count()
+		itc.Close()
+		if err != nil {
+			return nil, err
+		}
 	}
-	idxValuesCount, err := itc.Count()
-	itc.Close()
-	if err != nil {
-		return nil, err
-	}
+
 	// do not collect and sort keys if it's History index
 	indexWithHistoryValues := idxValuesCount == 0 && fn != nil
 
+	fmt.Printf("[dbg] ii.indexKeysTable: %s, %s\n", ii.indexKeysTable, ii.indexTable)
+	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+	}
+	defer keysCursor.Close()
+
+	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	k, v, err := keysCursor.Seek(txKey[:])
 	if err != nil {
@@ -1061,6 +1065,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		limit--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
+		fmt.Printf("a: %x,%x\n", k, v)
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
@@ -1078,6 +1083,8 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			}
 			stat.PruneCountValues++
 		}
+		fmt.Printf("a: %x,%x\n", k, v)
+
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
