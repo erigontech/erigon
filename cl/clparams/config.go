@@ -1047,6 +1047,16 @@ func (b *BeaconChainConfig) CurrentEpochAttestationsLength() uint64 {
 	return b.SlotsPerEpoch * b.MaxAttestations
 }
 
+// ComputeSubnetForAttestation computes subnet for sync committees
+func (b *BeaconChainConfig) ComputeSubnetForAttestation(committees_per_slot uint64,
+	slot uint64,
+	committee_index uint64) uint64 {
+	slots_since_epoch_start := uint64(slot % b.SlotsPerEpoch)
+	committees_since_epoch_start := committees_per_slot * slots_since_epoch_start
+
+	return (committees_since_epoch_start + committee_index) % b.SyncCommitteeSubnetCount
+}
+
 func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 	switch v {
 	case Phase0Version:

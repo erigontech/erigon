@@ -221,6 +221,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 			BeaconChainCfg: beaconConfig,
 			GenesisCfg:     genesisConfig,
 			Emitters:       emitters,
+			Sentinel:       sentinel,
 		}
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ValidatorApi: headApiHandler,

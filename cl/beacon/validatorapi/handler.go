@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/beacon/building"
@@ -18,6 +19,7 @@ type ValidatorApiHandler struct {
 	BeaconChainCfg *clparams.BeaconChainConfig
 	GenesisCfg     *clparams.GenesisConfig
 	Emitters       *beaconevents.Emitters
+	Sentinel       sentinel.SentinelClient
 
 	state *building.State
 
