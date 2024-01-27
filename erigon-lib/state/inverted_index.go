@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -1052,7 +1053,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
@@ -1065,11 +1066,11 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		limit--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
-		fmt.Printf("a: %x,%x\n", k, v)
+		kCopy := common.Copy(k)
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
 			if !indexWithHistoryValues {
 				if err := collector.Collect(v, nil); err != nil {
@@ -1083,10 +1084,9 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			}
 			stat.PruneCountValues++
 		}
-		fmt.Printf("a: %x,%x\n", k, v)
 
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+		if !bytes.Equal(k, kCopy) {
+			panic(1)
 		}
 
 		stat.PruneCountTx++
@@ -1094,9 +1094,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
 			return nil, err
 		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 	}
 
 	if indexWithHistoryValues {
