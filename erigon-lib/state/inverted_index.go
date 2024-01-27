@@ -32,7 +32,6 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -1066,7 +1065,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		limit--
 		stat.MinTxNum = min(stat.MinTxNum, txNum)
 		stat.MaxTxNum = max(stat.MaxTxNum, txNum)
-		kCopy := common.Copy(k)
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
@@ -1083,10 +1081,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 				}
 			}
 			stat.PruneCountValues++
-		}
-
-		if !bytes.Equal(k, kCopy) {
-			panic(1)
 		}
 
 		stat.PruneCountTx++
