@@ -123,6 +123,8 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 				continue
 			}
 			decimalString := strings.TrimPrefix(split[2], "beacon_attestation_")
+			// TODO: validate subnet topic int so we dont repeat work perhaps? not sure.
+			// possible optimization for cpu usage down the line
 			subnetTopicInt, err := strconv.ParseUint(decimalString, 10, 64)
 			if err != nil {
 				continue
