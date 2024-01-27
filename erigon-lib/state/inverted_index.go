@@ -1003,21 +1003,20 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	//		"tx until limit", limit)
 	//}()
 
-	var idxValuesCount uint64
+	// do not collect and sort keys if it's History index
+	var indexWithHistoryValues bool
 	{
 		itc, err := rwTx.CursorDupSort(ii.indexTable)
 		if err != nil {
 			return nil, err
 		}
-		idxValuesCount, err = itc.Count()
+		idxValuesCount, err := itc.Count()
 		itc.Close()
 		if err != nil {
 			return nil, err
 		}
+		indexWithHistoryValues = idxValuesCount == 0 && fn != nil
 	}
-
-	// do not collect and sort keys if it's History index
-	indexWithHistoryValues := idxValuesCount == 0 && fn != nil
 
 	fmt.Printf("[dbg] ii.indexKeysTable: %s, %s\n", ii.indexKeysTable, ii.indexTable)
 	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
