@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -222,6 +223,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 			GenesisCfg:     genesisConfig,
 			Emitters:       emitters,
 			Sentinel:       sentinel,
+			Machine:        &eth2.Impl{FullValidation: true},
 		}
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ValidatorApi: headApiHandler,

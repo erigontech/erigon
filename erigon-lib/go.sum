@@ -297,6 +297,10 @@ github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240124111320-bec7b2c85274 h1:D
 github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240124111320-bec7b2c85274/go.mod h1:3AuPxZc85jkehh/HA9h8gabv5MSi3kb/ddtzBsTVJFo=
 github.com/ledgerwatch/interfaces v0.0.0-20240126142607-f0583cac5f8d h1:UIu6TfTbp4MlO5/Pnpaf2K5moTkHnUGB0pOu1GXFovw=
 github.com/ledgerwatch/interfaces v0.0.0-20240126142607-f0583cac5f8d/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
+github.com/ledgerwatch/interfaces v0.0.0-20240127222926-45bf6c8afcdc h1:TKD8cUbmIwYviBi4NC+mJd1jgwUbtzGNz5G6Tz7SABA=
+github.com/ledgerwatch/interfaces v0.0.0-20240127222926-45bf6c8afcdc/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
+github.com/ledgerwatch/interfaces v0.0.0-20240127223043-14b9c2d822e1 h1:4UL768LNFjQ0zQqFDDPJBABRnlOfsYj8zPbUPE4EiA0=
+github.com/ledgerwatch/interfaces v0.0.0-20240127223043-14b9c2d822e1/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
 github.com/ledgerwatch/log/v3 v3.9.0 h1:iDwrXe0PVwBC68Dd94YSsHbMgQ3ufsgjzXtFNFVZFRk=
 github.com/ledgerwatch/log/v3 v3.9.0/go.mod h1:EiAY6upmI/6LkNhOVxb4eVsmsP11HZCnZ3PlJMjYiqE=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=

@@ -5,11 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/beacon/building"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/log/v3"
 )
 
 var errNotImplemented = errors.New("not implemented")
@@ -58,13 +64,15 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 		return nil, nil
 	}
 
-	/*
-	   	  After beacon node receives this request,
-	   		search using discv5 for peers related to this subnet and replace current peers with those ones if necessary.
-	   		If validator is_aggregator, beacon node must:
+	l := log.New()
 
-	       1. announce subnet topic subscription on gossipsub
-	       2. aggregate attestations received on that subnet
+	/*
+		After beacon node receives this request,
+		search using discv5 for peers related to this subnet and replace current peers with those ones if necessary.
+		If validator is_aggregator, beacon node must:
+
+		 1. announce subnet topic subscription on gossipsub
+		 2. aggregate attestations received on that subnet
 	*/
 
 	// grab the head state to calculate committee counts with
@@ -73,16 +81,72 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 		return nil, err
 	}
 
-	//calculate gossip_subnets
-	var subnets []uint64
-	for _, x := range req {
-		committees_per_slot := s.CommitteeCount(uint64(x.Slot) / v.BeaconChainCfg.SlotsPerEpoch)
-		subnet := v.BeaconChainCfg.ComputeSubnetForAttestation(committees_per_slot, uint64(x.Slot), uint64(x.CommitteeIndex))
-		subnets = append(subnets, subnet)
+	digest, err := fork.ComputeForkDigest(v.BeaconChainCfg, v.GenesisCfg)
+	if err != nil {
+		l.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
 
-	// beacon_attestation_{compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, attestation.data.index)}
-	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
+	// TODO: this should be done in advance in the sentinel, and recalculated every once in a while
+	// this is for debugging for now.
+	//calculate gossip_subnets
+	var topics []string
+	for _, x := range req {
+		// skip ones we are aggregator for
+		if !x.IsAggregator {
+			continue
+		}
+		committees_per_slot := s.CommitteeCount(uint64(x.Slot) / v.BeaconChainCfg.SlotsPerEpoch)
+		subnet := v.BeaconChainCfg.ComputeSubnetForAttestation(committees_per_slot, uint64(x.Slot), uint64(x.CommitteeIndex))
+		topicString := fmt.Sprintf("/eth2/%x/beacon_attestation_%s/%s", digest, subnet, "ssz_snappy")
+		topics = append(topics, topicString)
+	}
+
+	filterString := "/eth2/*/beacon_attestation_*/ssz_snappy"
+	subscriptionData := &sentinel.SubscriptionData{
+		Filter: &filterString,
+		Topics: topics,
+	}
+	sub, err := v.Sentinel.SubscribeGossip(r.Context(), subscriptionData)
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		l.Info("[beacon api] started aggregating gossip", "subscription", subscriptionData)
+		defer func() {
+			l.Info("[beacon api] aggregation gossip subscriber closed")
+		}()
+		for {
+			dat, err := sub.Recv()
+			if err != nil {
+				return
+			}
+			split := strings.Split(strings.Trim(dat.Name, "/"), "/")
+			if len(split) < 4 {
+				continue
+			}
+			decimalString := strings.TrimPrefix(split[2], "beacon_attestation_")
+			subnetTopicInt, err := strconv.ParseUint(decimalString, 10, 64)
+			if err != nil {
+				continue
+			}
+			l = l.New("subnetTopic", subnetTopicInt)
+			a := &solid.Attestation{}
+			err = a.DecodeSSZ(dat.Data, 0)
+			if err != nil {
+				l.Info("[beacon api] received invalid attestation", "error", err)
+				continue
+			}
+			//
+			err = v.Machine.ProcessAttestations(s, solid.NewDynamicListSSZFromList[*solid.Attestation]([]*solid.Attestation{a}, 1))
+			if err != nil {
+				l.Info("[beacon api] attestation failed validation", "error", err)
+				continue
+			}
+			v.state.AddAttestation(subnetTopicInt, a)
+			l.Info("[beacon api] added attestation", "signature", common.Bytes96(a.Signature()))
+		}
+	}()
+	return nil, nil
 }
 
 func (v *ValidatorApiHandler) PostEthV1ValidatorAggregateAndProofs(w http.ResponseWriter, r *http.Request) (*int, error) {
