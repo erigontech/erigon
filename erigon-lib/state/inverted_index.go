@@ -1018,7 +1018,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		indexWithHistoryValues = idxValuesCount == 0 && fn != nil
 	}
 
-	fmt.Printf("[dbg] ii.indexKeysTable: %s, %s\n", ii.indexKeysTable, ii.indexTable)
 	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
 	if err != nil {
 		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
@@ -1086,6 +1085,10 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
 			return nil, err
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
 		}
 	}
 
