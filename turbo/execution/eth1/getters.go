@@ -132,7 +132,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		number := rawdb.ReadHeaderNumber(tx, h)
 		if number == nil {
 			bodies = append(bodies, nil)
-			break
+			continue
 		}
 		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
@@ -140,7 +140,7 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		}
 		if body == nil {
 			bodies = append(bodies, nil)
-			break
+			continue
 		}
 		txs, err := types.MarshalTransactionsBinary(body.Transactions)
 		if err != nil {
