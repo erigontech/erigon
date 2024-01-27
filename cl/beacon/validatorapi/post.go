@@ -86,8 +86,6 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 		l.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
 
-	// TODO: this should be done in advance in the sentinel, and recalculated every once in a while
-	// this is for debugging for now.
 	//calculate gossip_subnets
 	var topics []string
 	for _, x := range req {
@@ -104,7 +102,7 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 	filterString := "/eth2/*/beacon_attestation_*/ssz_snappy"
 	subscriptionData := &sentinel.SubscriptionData{
 		Filter: &filterString,
-		Topics: topics,
+		Topics: topics, // TODO: this should be done in advance in the sentinel and recalculated every once in a while
 	}
 	sub, err := v.Sentinel.SubscribeGossip(r.Context(), subscriptionData)
 	if err != nil {
