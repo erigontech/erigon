@@ -335,6 +335,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var zeroProgress []string
 	var noMetadata []string
 
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.SnapshoFilesList{}).Enabled()
+	if isDiagEnabled {
+		filesList := make([]string, 0, len(torrents))
+		for _, t := range torrents {
+			filesList = append(filesList, t.Name())
+		}
+		diagnostics.Send(diagnostics.SnapshoFilesList{Files: filesList})
+	}
+
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
