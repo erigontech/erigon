@@ -62,8 +62,6 @@ type EthereumExecutionModule struct {
 	// consensus
 	engine consensus.Engine
 
-	syncCfg ethconfig.Sync
-
 	execution.UnimplementedExecutionServer
 }
 
