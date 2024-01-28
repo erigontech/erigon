@@ -252,9 +252,7 @@ func BorHeimdallForward(
 			cfg,
 			s.LogPrefix(),
 			logger,
-			func() (uint64, error) {
-				return lastStateSyncEventID, nil
-			},
+			lastStateSyncEventID,
 		)
 		if err != nil {
 			return err

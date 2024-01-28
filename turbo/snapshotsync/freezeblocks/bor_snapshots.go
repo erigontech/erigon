@@ -88,21 +88,21 @@ func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, blockFrom, bl
 	}
 
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, *chainConfig, workers, lvl, logger, blockReader); err != nil {
+		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 
-	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, 0, blockFrom, blockTo),
+	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, blockFrom, blockTo),
 		DumpBorEvents, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
 
-	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, 0, blockFrom, blockTo),
+	if _, err := dumpRange(ctx, snaptype.BorSpans.FileInfo(snapDir, blockFrom, blockTo),
 		DumpBorSpans, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
@@ -134,7 +134,7 @@ func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint6
 }
 
 // DumpBorEvents - [from, to)
-func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func DumpBorEvents(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -198,7 +198,7 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, _
 }
 
 // DumpBorSpans - [from, to)
-func DumpBorSpans(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func DumpBorSpans(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -396,7 +396,13 @@ type BorRoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{*NewRoSnapshots(cfg, snapDir, logger)}
+	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, snaptype.BorSnapshotTypes, logger)}
+}
+
+func (s *BorRoSnapshots) Ranges() []Range {
+	view := s.View()
+	defer view.Close()
+	return view.base.Ranges()
 }
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
@@ -484,7 +490,9 @@ type BorView struct {
 }
 
 func (s *BorRoSnapshots) View() *BorView {
-	return &BorView{base: s.RoSnapshots.View()}
+	v := &BorView{base: s.RoSnapshots.View()}
+	v.base.baseSegType = snaptype.BorSpans
+	return v
 }
 
 func (v *BorView) Close() {

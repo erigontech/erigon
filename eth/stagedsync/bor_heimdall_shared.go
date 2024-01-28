@@ -123,12 +123,8 @@ func fetchRequiredHeimdallStateSyncEventsIfNeeded(
 	cfg BorHeimdallCfg,
 	logPrefix string,
 	logger log.Logger,
-	lastStateSyncEventIDGetter func() (uint64, error),
+	lastStateSyncEventID uint64,
 ) (uint64, int, time.Duration, error) {
-	lastStateSyncEventID, err := lastStateSyncEventIDGetter()
-	if err != nil {
-		return 0, 0, 0, err
-	}
 
 	headerNum := header.Number.Uint64()
 	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
@@ -173,6 +169,25 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		to = time.Unix(int64(pHeader.Time), 0)
 	}
 
+	fetchTo := to
+	var fetchLimit []int
+
+	/* TODO
+	// we want to get as many historical events as we can in
+	// each call to heimdall - but we need to make sure we
+	// don't type to get too recent a sync othewise it will
+	// return a nil response
+
+	// to implement this we need to do block processing vs the
+	// local db to set the blocknu index based on iterating
+	// the local DB rather than the data received from the
+	// client
+	if time.Since(fetchTo) > (30 * time.Minute) {
+		fetchTo = time.Now().Add(-30 * time.Minute)
+		fetchLimit = []int{1000}
+	}
+	*/
+
 	from = lastStateSyncEventID + 1
 
 	logger.Debug(
@@ -181,7 +196,8 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		"to", to.Format(time.RFC3339),
 	)
 
-	eventRecords, err := heimdallClient.StateSyncEvents(ctx, from, to.Unix())
+	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, fetchTo, fetchLimit...)
+
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}
@@ -198,7 +214,6 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		binary.BigEndian.PutUint64(val[:], lastStateSyncEventID+1)
 	}
 
-	const method = "commitState"
 	wroteIndex := false
 	for i, eventRecord := range eventRecords {
 		if eventRecord.ID <= lastStateSyncEventID {
@@ -222,7 +237,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
 
-		data, err := stateReceiverABI.Pack(method, big.NewInt(eventRecord.Time.Unix()), recordBytes)
+		data, err := stateReceiverABI.Pack("commitState", big.NewInt(eventRecord.Time.Unix()), recordBytes)
 		if err != nil {
 			logger.Error(fmt.Sprintf("[%s] Unable to pack tx for commitState", logPrefix), "err", err)
 			return lastStateSyncEventID, i, time.Since(fetchStart), err

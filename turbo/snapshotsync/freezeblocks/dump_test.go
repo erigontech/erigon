@@ -109,7 +109,7 @@ func TestDump(t *testing.T) {
 
 			var systemTxs int
 			var nonceList []uint64
-			cnt, err := freezeblocks.DumpTxs(m.Ctx, m.DB, 0, uint64(2*test.chainSize), m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
+			cnt, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
 				if v == nil {
 					systemTxs++
 				} else {
@@ -119,7 +119,7 @@ func TestDump(t *testing.T) {
 					nonceList = append(nonceList, slot.Nonce)
 				}
 				return nil
-			})
+			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(2*(test.chainSize+1), systemTxs)
 			require.Equal(nonceRange(0, test.chainSize-1), nonceList)
@@ -134,7 +134,7 @@ func TestDump(t *testing.T) {
 
 			var systemTxs int
 			var nonceList []uint64
-			cnt, err := freezeblocks.DumpTxs(m.Ctx, m.DB, 2, uint64(test.chainSize), m.ChainConfig, 1, log.LvlInfo, log.New(), func(v []byte) error {
+			cnt, err := freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), nil, func(v []byte) error {
 				if v == nil {
 					systemTxs++
 				} else {
@@ -144,7 +144,7 @@ func TestDump(t *testing.T) {
 					nonceList = append(nonceList, slot.Nonce)
 				}
 				return nil
-			})
+			}, 1, log.LvlInfo, log.New())
 			require.NoError(err)
 			require.Equal(2*(test.chainSize-2), systemTxs)
 			require.Equal(nonceRange(1, test.chainSize-2), nonceList)
@@ -153,7 +153,7 @@ func TestDump(t *testing.T) {
 		t.Run("headers", func(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
-			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
+			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 0, uint64(2*test.chainSize), nil, func(v []byte) error {
 				h := types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
@@ -167,7 +167,7 @@ func TestDump(t *testing.T) {
 		t.Run("headers_not_from_zero", func(t *testing.T) {
 			require := require.New(t)
 			var nonceList []uint64
-			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, 2, uint64(test.chainSize), nil, func(v []byte) error {
+			_, err := freezeblocks.DumpHeaders(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), nil, func(v []byte) error {
 				h := types.Header{}
 				if err := rlp.DecodeBytes(v[1:], &h); err != nil {
 					return err
@@ -184,7 +184,7 @@ func TestDump(t *testing.T) {
 			txsAmount := uint64(0)
 			var baseIdList []uint64
 			firstTxNum := uint64(0)
-			_, err := freezeblocks.DumpBodies(m.Ctx, m.DB, 0, uint64(test.chainSize-3),
+			_, err := freezeblocks.DumpBodies(m.Ctx, m.DB, m.ChainConfig, 0, uint64(test.chainSize-3),
 				func(context.Context) uint64 { return firstTxNum },
 				func(v []byte) error {
 					i++
@@ -202,7 +202,7 @@ func TestDump(t *testing.T) {
 			firstTxNum += txsAmount
 			i = 0
 			baseIdList = baseIdList[:0]
-			_, err = freezeblocks.DumpBodies(m.Ctx, m.DB, 2, uint64(2*test.chainSize), func(context.Context) uint64 { return firstTxNum }, func(v []byte) error {
+			_, err = freezeblocks.DumpBodies(m.Ctx, m.DB, m.ChainConfig, 2, uint64(2*test.chainSize), func(context.Context) uint64 { return firstTxNum }, func(v []byte) error {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))
@@ -220,7 +220,7 @@ func TestDump(t *testing.T) {
 			i := 0
 			var baseIdList []uint64
 			firstTxNum := uint64(1000)
-			lastTxNum, err := freezeblocks.DumpBodies(m.Ctx, m.DB, 2, uint64(test.chainSize), func(context.Context) uint64 { return firstTxNum }, func(v []byte) error {
+			lastTxNum, err := freezeblocks.DumpBodies(m.Ctx, m.DB, m.ChainConfig, 2, uint64(test.chainSize), func(context.Context) uint64 { return firstTxNum }, func(v []byte) error {
 				i++
 				body := &types.BodyForStorage{}
 				require.NoError(rlp.DecodeBytes(v, body))

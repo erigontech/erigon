@@ -39,7 +39,7 @@ const (
 
 //go:generate mockgen -destination=./client_mock.go -package=heimdall . HeimdallClient
 type HeimdallClient interface {
-	StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error)
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit ...int) ([]*EventRecordWithTime, error)
 
 	FetchLatestSpan(ctx context.Context) (*Span, error)
 	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
@@ -123,11 +123,11 @@ const (
 	fetchSpanListPath   = "bor/span-list"
 )
 
-func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error) {
+func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit ...int) ([]*EventRecordWithTime, error) {
 	eventRecords := make([]*EventRecordWithTime, 0)
 
 	for {
-		url, err := stateSyncURL(c.urlString, fromID, to)
+		url, err := stateSyncURL(c.urlString, fromID, to.Unix())
 		if err != nil {
 			return nil, err
 		}
@@ -156,7 +156,7 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 
 		eventRecords = append(eventRecords, response.Result...)
 
-		if len(response.Result) < stateFetchLimit {
+		if len(response.Result) < stateFetchLimit || (len(limit) > 0 && len(eventRecords) >= limit[0]) {
 			break
 		}
 

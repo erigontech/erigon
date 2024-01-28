@@ -92,7 +92,7 @@ type Type interface {
 	Versions() Versions
 	String() string
 	FileName(version Version, from uint64, to uint64) string
-	FileInfo(dir string, version Version, from uint64, to uint64) FileInfo
+	FileInfo(dir string, from uint64, to uint64) FileInfo
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(version Version, from uint64, to uint64) []string
 	Indexes() []Index
@@ -124,8 +124,8 @@ func (s snapType) FileName(version Version, from uint64, to uint64) string {
 	return SegmentFileName(version, from, to, s.enum)
 }
 
-func (s snapType) FileInfo(dir string, version Version, from uint64, to uint64) FileInfo {
-	f, _ := ParseFileName(dir, s.FileName(version, from, to))
+func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
+	f, _ := ParseFileName(dir, s.FileName(s.versions.Current, from, to))
 	return f
 }
 
