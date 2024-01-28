@@ -267,14 +267,37 @@ func doSort(in map[string]string) Preverified {
 	return out
 }
 
-func newCfg(preverified Preverified) *Cfg {
+func newCfg(networkName string, preverified Preverified) *Cfg {
 	maxBlockNum, _ := preverified.MaxBlock(0)
-	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified}
+	return &Cfg{ExpectBlocks: maxBlockNum, Preverified: preverified, networkName: networkName}
 }
 
 type Cfg struct {
 	ExpectBlocks uint64
 	Preverified  Preverified
+	networkName  string
+}
+
+func (c Cfg) Seedable(info snaptype.FileInfo) bool {
+	mergeLimit := c.MergeLimit(info.From)
+	return info.To-info.From == mergeLimit
+}
+
+func (c Cfg) MergeLimit(fromBlock uint64) uint64 {
+	for _, p := range c.Preverified {
+		if info, ok := snaptype.ParseFileName("", p.Name); ok && info.Ext == ".seg" {
+			if fromBlock >= info.From && fromBlock < info.To {
+				if info.Len() == snaptype.Erigon2MergeLimit ||
+					info.Len() == snaptype.Erigon2OldMergeLimit {
+					return info.Len()
+				}
+
+				break
+			}
+		}
+	}
+
+	return snaptype.Erigon2MergeLimit
 }
 
 var knownPreverified = map[string]Preverified{
@@ -304,25 +327,45 @@ var knownTypes = map[string][]snaptype.Type{
 	networkname.ChiadoChainName:     ethereumTypes,
 }
 
+func Seedable(networkName string, info snaptype.FileInfo) bool {
+	return KnownCfg(networkName).Seedable(info)
+}
+
+func MergeLimit(networkName string, fromBlock uint64) uint64 {
+	return KnownCfg(networkName).MergeLimit(fromBlock)
+}
+
+var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
+
+func MergeSteps(networkName string, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimit(networkName, fromBlock)
+
+	if mergeLimit == snaptype.Erigon2OldMergeLimit {
+		return oldMergeSteps
+	}
+
+	return snaptype.MergeSteps
+}
+
 // KnownCfg return list of preverified hashes for given network, but apply whiteList filter if it's not empty
 func KnownCfg(networkName string) *Cfg {
 	c, ok := knownPreverified[networkName]
 
 	if !ok {
-		return newCfg(Preverified{})
+		return newCfg(networkName, Preverified{})
 	}
 
-	return newCfg(c.Typed(knownTypes[networkName]))
+	return newCfg(networkName, c.Typed(knownTypes[networkName]))
 }
 
 func VersionedCfg(networkName string, preferred snaptype.Version, min snaptype.Version) *Cfg {
 	c, ok := knownPreverified[networkName]
 
 	if !ok {
-		return newCfg(Preverified{})
+		return newCfg(networkName, Preverified{})
 	}
 
-	return newCfg(c.Versioned(preferred, min))
+	return newCfg(networkName, c.Versioned(preferred, min))
 }
 
 var KnownWebseeds = map[string][]string{

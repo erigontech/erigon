@@ -246,7 +246,7 @@ func TestDump(t *testing.T) {
 			snConfig := snapcfg.KnownCfg(networkname.MainnetChainName)
 			snConfig.ExpectBlocks = math.MaxUint64
 
-			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), uint64(test.chainSize), tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
+			err := freezeblocks.DumpBlocks(m.Ctx, 0, uint64(test.chainSize), nil, tmpDir, snapDir, m.DB, 1, log.LvlInfo, logger, m.BlockReader)
 			require.NoError(err)
 		})
 	}

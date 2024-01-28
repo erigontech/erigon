@@ -6,8 +6,8 @@ package heimdall
 
 import (
 	context "context"
-	http "net/http"
 	reflect "reflect"
+	time "time"
 
 	gomock "github.com/golang/mock/gomock"
 )
@@ -180,67 +180,22 @@ func (mr *MockHeimdallClientMockRecorder) FetchSpan(ctx, spanID interface{}) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchSpan", reflect.TypeOf((*MockHeimdallClient)(nil).FetchSpan), ctx, spanID)
 }
 
-// StateSyncEvents mocks base method.
-func (m *MockHeimdallClient) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error) {
+// FetchStateSyncEvents mocks base method.
+func (m *MockHeimdallClient) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit ...int) ([]*EventRecordWithTime, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "StateSyncEvents", ctx, fromID, to)
+	varargs := []interface{}{ctx, fromId, to}
+	for _, a := range limit {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "FetchStateSyncEvents", varargs...)
 	ret0, _ := ret[0].([]*EventRecordWithTime)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// StateSyncEvents indicates an expected call of StateSyncEvents.
-func (mr *MockHeimdallClientMockRecorder) StateSyncEvents(ctx, fromID, to interface{}) *gomock.Call {
+// FetchStateSyncEvents indicates an expected call of FetchStateSyncEvents.
+func (mr *MockHeimdallClientMockRecorder) FetchStateSyncEvents(ctx, fromId, to interface{}, limit ...interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "StateSyncEvents", reflect.TypeOf((*MockHeimdallClient)(nil).StateSyncEvents), ctx, fromID, to)
-}
-
-// MockHttpClient is a mock of HttpClient interface.
-type MockHttpClient struct {
-	ctrl     *gomock.Controller
-	recorder *MockHttpClientMockRecorder
-}
-
-// MockHttpClientMockRecorder is the mock recorder for MockHttpClient.
-type MockHttpClientMockRecorder struct {
-	mock *MockHttpClient
-}
-
-// NewMockHttpClient creates a new mock instance.
-func NewMockHttpClient(ctrl *gomock.Controller) *MockHttpClient {
-	mock := &MockHttpClient{ctrl: ctrl}
-	mock.recorder = &MockHttpClientMockRecorder{mock}
-	return mock
-}
-
-// EXPECT returns an object that allows the caller to indicate expected use.
-func (m *MockHttpClient) EXPECT() *MockHttpClientMockRecorder {
-	return m.recorder
-}
-
-// CloseIdleConnections mocks base method.
-func (m *MockHttpClient) CloseIdleConnections() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "CloseIdleConnections")
-}
-
-// CloseIdleConnections indicates an expected call of CloseIdleConnections.
-func (mr *MockHttpClientMockRecorder) CloseIdleConnections() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CloseIdleConnections", reflect.TypeOf((*MockHttpClient)(nil).CloseIdleConnections))
-}
-
-// Do mocks base method.
-func (m *MockHttpClient) Do(req *http.Request) (*http.Response, error) {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Do", req)
-	ret0, _ := ret[0].(*http.Response)
-	ret1, _ := ret[1].(error)
-	return ret0, ret1
-}
-
-// Do indicates an expected call of Do.
-func (mr *MockHttpClientMockRecorder) Do(req interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Do", reflect.TypeOf((*MockHttpClient)(nil).Do), req)
+	varargs := append([]interface{}{ctx, fromId, to}, limit...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchStateSyncEvents", reflect.TypeOf((*MockHeimdallClient)(nil).FetchStateSyncEvents), varargs...)
 }

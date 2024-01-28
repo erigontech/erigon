@@ -598,7 +598,7 @@ func (e dirEntry) Info() (fs.FileInfo, error) {
 var checkKnownSizes = false
 
 func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
-	if !fi.Seedable() {
+	if !snapcfg.Seedable(u.cfg.chainConfig.ChainName, fi) {
 		return false
 	}
 

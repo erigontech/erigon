@@ -201,7 +201,7 @@ func TestCanRetire(t *testing.T) {
 		{1_001_000, 2_000_000, 1_001_000, 1_002_000, true},
 	}
 	for i, tc := range cases {
-		from, to, can := canRetire(tc.inFrom, tc.inTo)
+		from, to, can := canRetire(tc.inFrom, tc.inTo, nil)
 		require.Equal(int(tc.outFrom), int(from), i)
 		require.Equal(int(tc.outTo), int(to), i)
 		require.Equal(tc.can, can, tc.inFrom, tc.inTo, i)

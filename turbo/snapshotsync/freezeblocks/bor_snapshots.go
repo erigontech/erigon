@@ -37,10 +37,10 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.borSnapshots()
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
+	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, br.chainConfig)
 	if ok {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-		if err := DumpBorBlocks(ctx, chainConfig, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBorBlocks(ctx, blockFrom, blockTo, chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBorBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
@@ -83,16 +83,13 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	return ok, nil
 }
 
-func DumpBorBlocks(ctx context.Context, chainConfig *chain.Config, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
-	if blocksPerFile == 0 {
-		return nil
-	}
-
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
+func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, chainConfig) {
+		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), tmpDir, snapDir, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
+
 	return nil
 }
 

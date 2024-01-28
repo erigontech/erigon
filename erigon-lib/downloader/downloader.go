@@ -138,7 +138,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 			return nil, err
 		}
 
-		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Downloads); err != nil {
+		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
 			return nil, err
 		}
 
@@ -247,7 +247,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 		Chain: cfg.ChainName,
 	}
 
-	files, err := seedableFiles(cfg.Dirs)
+	files, err := seedableFiles(cfg.Dirs, cfg.ChainName)
 
 	if err != nil {
 		return nil, err
@@ -466,30 +466,6 @@ func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB,
 	}
 
 	return spec.InfoHash.Bytes(), nil
-}
-
-// Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
-// After "download once" - Erigon will produce and seed new files
-// Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (d *Downloader) prohibitNewDownloads() error {
-	lockPath := filepath.Join(d.SnapDir(), SnapshotsLockFileName)
-	l, err := os.Open(lockPath)
-
-	if err == nil {
-		l.Close()
-		return fmt.Errorf("lockfile exists")
-	}
-
-	fPath := filepath.Join(d.SnapDir(), ProhibitNewDownloadsFileName)
-
-	l, err = os.Open(fPath)
-
-	if err == nil {
-		l.Close()
-		return fmt.Errorf("prohibit lock exists")
-	}
-
-	return nil
 }
 
 // Add pre-configured
@@ -934,7 +910,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
 	ff, ok := snaptype.ParseFileName("", name)
 	if ok {
-		if !ff.Seedable() {
+		if !d.cfg.SnapshotConfig.Seedable(ff) {
 			return nil
 		}
 	} else {
@@ -1027,8 +1003,8 @@ func (d *Downloader) addMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	return nil
 }
 
-func seedableFiles(dirs datadir.Dirs) ([]string, error) {
-	files, err := seedableSegmentFiles(dirs.Snap)
+func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
+	files, err := seedableSegmentFiles(dirs.Snap, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
@@ -1070,8 +1046,8 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	}
 	return nil
 }
-func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, ignore snapcfg.Preverified) error {
-	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, ignore)
+func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
+	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, chain, ignore)
 }
 func (d *Downloader) Stats() AggStats {
 	d.statsLock.RLock()

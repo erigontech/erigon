@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -51,7 +52,7 @@ func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
 }
 
-func (h test_heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*heimdall.EventRecordWithTime, error) {
+func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit ...int) ([]*heimdall.EventRecordWithTime, error) {
 	return nil, nil
 }
 

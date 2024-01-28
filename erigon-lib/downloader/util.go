@@ -80,7 +80,7 @@ type torrentInfo struct {
 	Completed *time.Time `json:"completed,omitempty"`
 }
 
-func seedableSegmentFiles(dir string) ([]string, error) {
+func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 	files, err := dir2.ListFiles(dir, ".seg")
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func seedableSegmentFiles(dir string) ([]string, error) {
 		if !ok {
 			continue
 		}
-		if !ff.Seedable() {
+		if !snapcfg.Seedable(chainName, ff) {
 			continue
 		}
 		res = append(res, name)
@@ -189,11 +189,11 @@ func BuildTorrentIfNeed(ctx context.Context, fName, root string, torrentFiles *T
 }
 
 // BuildTorrentFilesIfNeed - create .torrent files from .seg files (big IO) - if .seg files were added manually
-func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *TorrentFiles, ignore snapcfg.Preverified) error {
+func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFiles *TorrentFiles, chain string, ignore snapcfg.Preverified) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := seedableFiles(dirs)
+	files, err := seedableFiles(dirs, chain)
 	if err != nil {
 		return err
 	}

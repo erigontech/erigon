@@ -36,7 +36,7 @@ func TestHeimdallServer(t *testing.T) {
 			Time: time.Now(),
 		},
 	}
-	client.EXPECT().StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
+	client.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
 
 	span := &heimdall.Span{
 		Id:         1,

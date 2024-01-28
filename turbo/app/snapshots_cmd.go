@@ -540,7 +540,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			return err
 		})
 		blockReader, _ := br.IO()
-		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks())
+		from2, to2, ok := freezeblocks.CanRetire(forwardProgress, blockReader.FrozenBlocks(), nil)
 		if ok {
 			from, to, every = from2, to2, to2-from2
 		}

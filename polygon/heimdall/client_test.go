@@ -57,7 +57,7 @@ func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBo
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, time.Millisecond, 2, logger)
 
-	spanRes, err := heimdallClient.StateSyncEvents(ctx, 100, time.Now().Unix())
+	spanRes, err := heimdallClient.FetchStateSyncEvents(ctx, 100, time.Now())
 	require.Nil(t, spanRes)
 	require.ErrorIs(t, err, ErrNoResponse)
 }

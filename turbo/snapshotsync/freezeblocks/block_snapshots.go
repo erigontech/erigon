@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -1024,7 +1023,9 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 	return res, missingSnapshots, nil
 }
 
-func chooseSegmentEnd(from, to, blocksPerFile uint64) uint64 {
+func chooseSegmentEnd(from, to uint64, chainConfig *chain.Config) uint64 {
+	blocksPerFile := snapcfg.MergeLimit(chainConfig.ChainName, from)
+
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = cmp.Min(next, to)
 
@@ -1076,23 +1077,26 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 	return br.needSaveFilesListInDB.CompareAndSwap(true, false)
 }
 
-func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
+func CanRetire(curBlockNum uint64, blocksInSnapshots uint64, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
 	if curBlockNum <= params.FullImmutabilityThreshold {
 		return
 	}
 	blockFrom = blocksInSnapshots + 1
-	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold)
+	return canRetire(blockFrom, curBlockNum-params.FullImmutabilityThreshold, chainConfig)
 }
 
-func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
+func canRetire(from, to uint64, chainConfig *chain.Config) (blockFrom, blockTo uint64, can bool) {
 	if to <= from {
 		return
 	}
 	blockFrom = (from / 1_000) * 1_000
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
-	if blockFrom%snaptype.Erigon2MergeLimit == 0 {
-		maxJump = snaptype.Erigon2MergeLimit
+
+	mergeLimit := snapcfg.MergeLimit(chainConfig.ChainName, blockFrom)
+
+	if blockFrom%mergeLimit == 0 {
+		maxJump = mergeLimit
 	} else if blockFrom%100_000 == 0 {
 		maxJump = 100_000
 	} else if blockFrom%10_000 == 0 {
@@ -1101,8 +1105,8 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 	//roundedTo1K := (to / 1_000) * 1_000
 	jump := cmp.Min(maxJump, roundedTo1K-blockFrom)
 	switch { // only next segment sizes are allowed
-	case jump >= snaptype.Erigon2MergeLimit:
-		blockTo = blockFrom + snaptype.Erigon2MergeLimit
+	case jump >= mergeLimit:
+		blockTo = blockFrom + mergeLimit
 	case jump >= 100_000:
 		blockTo = blockFrom + 100_000
 	case jump >= 10_000:
@@ -1132,12 +1136,12 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.snapshots()
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
+	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, br.chainConfig)
 
 	if ok {
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 		// in future we will do it in background
-		if err := DumpBlocks(ctx, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
@@ -1331,15 +1335,11 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	return nil
 }
 
-func DumpBlocks(ctx context.Context, blockFrom, blockTo, blocksPerFile uint64, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
-	if blocksPerFile == 0 {
-		return nil
-	}
-	chainConfig := fromdb.ChainConfig(chainDB)
+func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
-		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
+	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, chainConfig) {
+		lastTxNum, err := dumpBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), tmpDir, snapDir, firstTxNum, chainDB, chainConfig, workers, lvl, logger)
 		if err != nil {
 			return err
 		}
@@ -2104,11 +2104,11 @@ func (m *Merger) DisableFsync() { m.noFsync = true }
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := uint64(snaptype.Erigon2MergeLimit)
+		mergeLimit := snapcfg.MergeLimit(m.chainConfig.ChainName, r.from)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}
-		for _, span := range snaptype.MergeSteps {
+		for _, span := range snapcfg.MergeSteps(m.chainConfig.ChainName, r.from) {
 			if r.to%span != 0 {
 				continue
 			}

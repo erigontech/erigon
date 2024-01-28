@@ -243,7 +243,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), nil)
+		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), "", nil)
 		if err != nil {
 			return err
 		}
@@ -380,7 +380,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, nil); err != nil {
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, "", nil); err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
 	}

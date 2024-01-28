@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -316,16 +317,15 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	return BeaconBlocksIdx(ctx, f, filepath.Join(snapDir, segName), fromSlot, toSlot, tmpDir, p, lvl, logger)
 }
 
-func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot, toSlot, blocksPerFile uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
-	if blocksPerFile == 0 {
-		return nil
-	}
+func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, blocksPerFile) {
+	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
+		blocksPerFile := snapcfg.MergeLimit("", i)
+
 		if toSlot-i < blocksPerFile {
 			break
 		}
-		to := chooseSegmentEnd(i, toSlot, blocksPerFile)
+		to := chooseSegmentEnd(i, toSlot, nil)
 		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
 		if err := dumpBeaconBlocksRange(ctx, db, b, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err

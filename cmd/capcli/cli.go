@@ -593,7 +593,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, snaptype.Erigon2MergeLimit, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {

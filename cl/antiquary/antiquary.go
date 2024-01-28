@@ -223,7 +223,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		return nil // Just skip if we don't have a downloader
 	}
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
-	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, snaptype.Erigon2MergeLimit, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
+	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 

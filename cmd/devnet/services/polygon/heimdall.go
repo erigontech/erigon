@@ -230,6 +230,10 @@ func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) err
 	return fmt.Errorf("TODO")
 }
 
+func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit ...int) ([]*heimdall.EventRecordWithTime, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
 func (h *Heimdall) Close() {
 	h.unsubscribe()
 }
@@ -435,7 +439,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *ch
 			return
 		}
 
-		result, err := client.StateSyncEvents(ctx, fromId, toTime)
+		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0))
 		writeResponse(w, result, err)
 	})
 

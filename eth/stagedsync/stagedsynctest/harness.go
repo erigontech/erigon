@@ -567,7 +567,7 @@ func (h *Harness) mockHeimdallClient() {
 
 	h.heimdallClient.
 		EXPECT().
-		StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
+		FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*heimdall.EventRecordWithTime, error) {
 			h.heimdallLastEventID++
 			h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
