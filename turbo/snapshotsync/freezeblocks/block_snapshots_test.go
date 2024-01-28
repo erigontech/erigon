@@ -138,6 +138,56 @@ func TestMergeSnapshots(t *testing.T) {
 	require.Equal(10, a)
 }
 
+func TestRemoveOverlaps(t *testing.T) {
+	logger := log.New()
+	dir, require := t.TempDir(), require.New(t)
+	createFile := func(from, to uint64) {
+		for _, snT := range snaptype.BlockSnapshotTypes {
+			createTestSegmentFile(t, from, to, snT.Enum(), dir, 1, logger)
+		}
+	}
+
+	for i := uint64(0); i < 5; i++ {
+		createFile(i*10_000, (i+1)*10_000)
+	}
+
+	createFile(0, 100_000)
+
+	for i := uint64(3); i < 8; i++ {
+		createFile(100_000+i*10_000, 100_000+(i+1)*10_000)
+	}
+
+	createFile(100_000, 200_000)
+
+	for i := uint64(0); i < 3; i++ {
+		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
+	}
+
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+
+	defer s.Close()
+	require.NoError(s.ReopenFolder())
+
+	list, err := snaptype.Segments(s.dir)
+	require.NoError(err)
+	require.Equal(45, len(list))
+
+	s.removeOverlaps()
+
+	list, err = snaptype.Segments(s.dir)
+	require.NoError(err)
+
+	require.Equal(15, len(list))
+
+	for i, info := range list {
+		if i%5 < 2 {
+			require.Equal(100_000, int(info.Len()))
+		} else {
+			require.Equal(10_000, int(info.Len()))
+		}
+	}
+}
+
 func TestCanRetire(t *testing.T) {
 	require := require.New(t)
 	cases := []struct {

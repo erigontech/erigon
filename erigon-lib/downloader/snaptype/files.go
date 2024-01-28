@@ -57,6 +57,29 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 		}
 		out = append(out, f)
 	}
+
+	slices.SortFunc(out, func(a, b FileInfo) int {
+		if cmp := strings.Compare(a.Type.String(), b.Type.String()); cmp != 0 {
+			return cmp
+		}
+
+		switch {
+		case a.From > b.From:
+			return +1
+		case b.From > a.From:
+			return -1
+		}
+
+		switch {
+		case a.To > b.To:
+			return +1
+		case b.To > a.To:
+			return -1
+		}
+
+		return int(a.Version) - int(b.Version)
+	})
+
 	return out
 }
 func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {

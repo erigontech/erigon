@@ -54,6 +54,19 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
 )
 
+type Range struct {
+	from, to uint64
+}
+
+func (r Range) From() uint64 { return r.from }
+func (r Range) To() uint64   { return r.to }
+
+type Ranges []Range
+
+func (r Ranges) String() string {
+	return fmt.Sprintf("%d", r)
+}
+
 type Segment struct {
 	Range
 	*compress.Decompressor
@@ -354,6 +367,7 @@ func (s *RoSnapshots) EnableMadvWillNeed() *RoSnapshots {
 	})
 	return s
 }
+
 func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		value.lock.RLock()
@@ -387,10 +401,6 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 
 	for _, max := range max {
 		min = cmp.Min(min, max)
-	}
-
-	if min == 0 {
-		fmt.Println(min)
 	}
 
 	return min
@@ -637,18 +647,24 @@ func (s *RoSnapshots) closeWhatNotInList(l []string) {
 	})
 }
 
-func (s *RoSnapshots) removeOverlaps(dir string) error {
+func (s *RoSnapshots) removeOverlaps() error {
 	s.lockSegments()
 	defer s.unlockSegments()
 
-	list, err := snaptype.Segments(dir)
+	list, err := snaptype.Segments(s.dir)
 
 	if err != nil {
 		return err
 	}
 
 	if _, toRemove := findOverlaps(list); len(toRemove) > 0 {
-		fmt.Println(toRemove)
+		filesToRemove := make([]string, 0, len(toRemove))
+
+		for _, info := range toRemove {
+			filesToRemove = append(filesToRemove, info.Path)
+		}
+
+		removeOldFiles(filesToRemove, s.dir)
 	}
 
 	return nil
@@ -910,7 +926,7 @@ func noOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 }
 
 func findOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo, overlapped []snaptype.FileInfo) {
-	for i := range in {
+	for i := 0; i < len(in); i++ {
 		f := in[i]
 
 		if f.From == f.To {
@@ -918,16 +934,25 @@ func findOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo, overlapped [
 			continue
 		}
 
-		for j := i + 1; j < len(in); j++ { // if there is file with larger range - use it instead
+		for j := i + 1; j < len(in); i, j = i+1, j+1 { // if there is file with larger range - use it instead
 			f2 := in[j]
+
+			if f.Type.Enum() != f2.Type.Enum() {
+				break
+			}
 
 			if f2.From == f2.To {
 				overlapped = append(overlapped, f2)
 				continue
 			}
 
-			if f2.From > f.From {
+			if f2.From > f.From && f2.To > f.To {
 				break
+			}
+
+			if f.To >= f2.To && f.From <= f2.From {
+				overlapped = append(overlapped, f2)
+				continue
 			}
 
 			if i < len(in)-1 && (f2.To >= f.To && f2.From <= f.From) {
@@ -935,7 +960,6 @@ func findOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo, overlapped [
 			}
 
 			f = f2
-			i++
 		}
 
 		res = append(res, f)
@@ -1117,7 +1141,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 			return ok, fmt.Errorf("DumpBlocks: %w", err)
 		}
 
-		snapshots.removeOverlaps(snapshots.Dir())
+		snapshots.removeOverlaps()
 
 		if err := snapshots.ReopenFolder(); err != nil {
 			return ok, fmt.Errorf("reopen: %w", err)
@@ -2077,19 +2101,6 @@ func NewMerger(tmpDir string, compressWorkers int, lvl log.Lvl, chainDB kv.RoDB,
 }
 func (m *Merger) DisableFsync() { m.noFsync = true }
 
-type Range struct {
-	from, to uint64
-}
-
-func (r Range) From() uint64 { return r.from }
-func (r Range) To() uint64   { return r.to }
-
-type Ranges []Range
-
-func (r Ranges) String() string {
-	return fmt.Sprintf("%d", r)
-}
-
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
@@ -2101,8 +2112,7 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 			if r.to%span != 0 {
 				continue
 			}
-			s := r.to - r.from
-			if /*r.to-r.from*/ s == span {
+			if r.to-r.from == span {
 				break
 			}
 			aggFrom := r.to - span
@@ -2188,7 +2198,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 					return err
 				}
 			}
-			m.removeOldFiles(toMerge[t.Enum()], snapDir)
+			removeOldFiles(toMerge[t.Enum()], snapDir)
 		}
 	}
 	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
@@ -2244,7 +2254,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 	return nil
 }
 
-func (m *Merger) removeOldFiles(toDel []string, snapDir string) {
+func removeOldFiles(toDel []string, snapDir string) {
 	for _, f := range toDel {
 		_ = os.Remove(f)
 		_ = os.Remove(f + ".torrent")
