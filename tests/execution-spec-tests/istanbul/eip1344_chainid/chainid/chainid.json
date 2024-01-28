@@ -1,7 +1,8 @@
 {
-    "000-fork=Istanbul": {
+    "tests/istanbul/eip1344_chainid/test_chainid.py::test_chainid[fork_Istanbul-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -46,6 +47,7 @@
                     "nonce": "0x0000000000000000",
                     "hash": "0xeda3b907cdac56ae8b57fe1ebd9166daa593ad93c59b627ebf11ac3b0a2d9660"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -104,9 +106,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Berlin": {
+    "tests/istanbul/eip1344_chainid/test_chainid.py::test_chainid[fork_Berlin-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -151,6 +154,7 @@
                     "nonce": "0x0000000000000000",
                     "hash": "0xee6d84161e5f53b678ba48c065ec68501b3e46f32d95605ddd470b369643f8da"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -209,9 +213,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=London": {
+    "tests/istanbul/eip1344_chainid/test_chainid.py::test_chainid[fork_London-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -258,6 +263,7 @@
                     "baseFeePerGas": "0x07",
                     "hash": "0x9fa6fb4bb56b29579f08aa0678b3bb00694b35109cb928a6fa2ab7d93f5334d0"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -316,9 +322,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Merge": {
+    "tests/istanbul/eip1344_chainid/test_chainid.py::test_chainid[fork_Paris-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -365,6 +372,7 @@
                     "baseFeePerGas": "0x07",
                     "hash": "0x594dc498ca7c57353cd5b9dc5996000c188e2a235d31c4da3a6a2c6df5bf6a86"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -423,9 +431,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Shanghai": {
+    "tests/istanbul/eip1344_chainid/test_chainid.py::test_chainid[fork_Shanghai-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -474,6 +483,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x001d4e7c1312e954e014b58b04aa3b7bd13e2ec02f4f4bd98733fa56b8030196"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -533,9 +543,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Cancun": {
+    "tests/istanbul/eip1344_chainid/test_chainid.py::test_chainid[fork_Cancun-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1344.md",
             "reference-spec-version": "02e46aebc80e6e5006ab4d2daa41876139f9a9e2"
         },
@@ -590,6 +601,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x5ad232bab51709903d2cfa8c29bf0c6daade352f77de51860faa61a4bd0a4eff"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

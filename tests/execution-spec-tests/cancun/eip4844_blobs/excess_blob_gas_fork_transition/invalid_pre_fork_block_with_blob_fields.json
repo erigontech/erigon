@@ -1,7 +1,8 @@
 {
-    "000-fork=ShanghaiToCancunAtTime15k-excess_blob_gas_present=True-blob_gas_used_present=False-invalid_pre_fork_blob_fields": {
+    "tests/cancun/eip4844_blobs/test_excess_blob_gas_fork_transition.py::test_invalid_pre_fork_block_with_blob_fields[fork_ShanghaiToCancunAtTime15k-blockchain_test-excess_blob_gas_present_True-blob_gas_used_present_False]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -408,7 +409,7 @@
             },
             {
                 "rlp": "0xf90220f9021aa07ae2e4b82775c956911581694c6ba462b6a04380af8a34cb56708ab2cb650c8ea01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0948622f2177f30e161126ff783f720dced1aa9aaf394c0784c9867b59cf36df9a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800f88016345785d8a000080823a9780a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42180c0c0c0",
-                "expectException": "invalid pre fork blob fields",
+                "expectException": "BlockException.INCORRECT_BLOCK_FORMAT",
                 "rlp_decoded": {
                     "blockHeader": {
                         "parentHash": "0x7ae2e4b82775c956911581694c6ba462b6a04380af8a34cb56708ab2cb650c8e",
@@ -431,6 +432,7 @@
                         "excessBlobGas": "0x00",
                         "hash": "0x1c1e9818fb8c040850c98909c62ec5dae58dedcefcf7e7c5c2055dd2868168f1"
                     },
+                    "blocknumber": "15",
                     "transactions": [],
                     "uncleHeaders": [],
                     "withdrawals": []
@@ -468,9 +470,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=ShanghaiToCancunAtTime15k-excess_blob_gas_present=False-blob_gas_used_present=True-invalid_pre_fork_blob_fields": {
+    "tests/cancun/eip4844_blobs/test_excess_blob_gas_fork_transition.py::test_invalid_pre_fork_block_with_blob_fields[fork_ShanghaiToCancunAtTime15k-blockchain_test-excess_blob_gas_present_False-blob_gas_used_present_True]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -877,7 +880,7 @@
             },
             {
                 "rlp": "0xf90220f9021aa07ae2e4b82775c956911581694c6ba462b6a04380af8a34cb56708ab2cb650c8ea01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0948622f2177f30e161126ff783f720dced1aa9aaf394c0784c9867b59cf36df9a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800f88016345785d8a000080823a9780a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42180c0c0c0",
-                "expectException": "invalid pre fork blob fields",
+                "expectException": "BlockException.INCORRECT_BLOCK_FORMAT",
                 "rlp_decoded": {
                     "blockHeader": {
                         "parentHash": "0x7ae2e4b82775c956911581694c6ba462b6a04380af8a34cb56708ab2cb650c8e",
@@ -900,6 +903,7 @@
                         "blobGasUsed": "0x00",
                         "hash": "0x1c1e9818fb8c040850c98909c62ec5dae58dedcefcf7e7c5c2055dd2868168f1"
                     },
+                    "blocknumber": "15",
                     "transactions": [],
                     "uncleHeaders": [],
                     "withdrawals": []
@@ -937,9 +941,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=ShanghaiToCancunAtTime15k-excess_blob_gas_present=True-blob_gas_used_present=True-invalid_pre_fork_blob_fields": {
+    "tests/cancun/eip4844_blobs/test_excess_blob_gas_fork_transition.py::test_invalid_pre_fork_block_with_blob_fields[fork_ShanghaiToCancunAtTime15k-blockchain_test-excess_blob_gas_present_True-blob_gas_used_present_True]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },
@@ -1346,7 +1351,7 @@
             },
             {
                 "rlp": "0xf90221f9021ba07ae2e4b82775c956911581694c6ba462b6a04380af8a34cb56708ab2cb650c8ea01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa0948622f2177f30e161126ff783f720dced1aa9aaf394c0784c9867b59cf36df9a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000800f88016345785d8a000080823a9780a0000000000000000000000000000000000000000000000000000000000000000088000000000000000007a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b4218080c0c0c0",
-                "expectException": "invalid pre fork blob fields",
+                "expectException": "BlockException.INCORRECT_BLOCK_FORMAT",
                 "rlp_decoded": {
                     "blockHeader": {
                         "parentHash": "0x7ae2e4b82775c956911581694c6ba462b6a04380af8a34cb56708ab2cb650c8e",
@@ -1370,6 +1375,7 @@
                         "excessBlobGas": "0x00",
                         "hash": "0xeecbcca0613b3c5c92cf0a66a029c904038ef385f26f23c99a550e8a91fe73aa"
                     },
+                    "blocknumber": "15",
                     "transactions": [],
                     "uncleHeaders": [],
                     "withdrawals": []
