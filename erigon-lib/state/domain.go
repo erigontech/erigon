@@ -2190,7 +2190,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	}
 
 	seek := make([]byte, 0, 256)
-	for ; k != nil; k, v, err = keysCursor.Prev() {
+	for k != nil {
 		if err != nil {
 			return stat, fmt.Errorf("iterate over %s domain keys: %w", dc.d.filenameBase, err)
 		}
@@ -2225,6 +2225,8 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		stat.MaxStep = max(stat.MaxStep, is)
 		stat.MinStep = min(stat.MinStep, is)
 		mxPruneSizeDomain.Inc()
+
+		k, v, err = keysCursor.Prev()
 
 		select {
 		case <-ctx.Done():
