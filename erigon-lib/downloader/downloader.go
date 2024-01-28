@@ -359,7 +359,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				zeroProgress = append(zeroProgress, torrentName)
 			}
 
-			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName)
+			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
 			rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 			// more detailed statistic: download rate of each peer (for each file)
 			if !t.Complete.Bool() && progress != 0 {
@@ -415,7 +415,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string) ([]interface{}, []diagnostics.SegmentPeer) {
+func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diagnostics.SegmentPeer) {
 	seeds := make([]diagnostics.SegmentPeer, 0, len(weebseedPeersOfThisFile))
 	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 	webseedRates = append(webseedRates, "file", fName)
@@ -424,12 +424,13 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 		if urlObj, err := url.Parse(urlS); err == nil {
 			if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
 				rate := uint64(peer.DownloadRate())
-
-				seed := diagnostics.SegmentPeer{
-					Url:          urlObj.Host,
-					DownloadRate: rate,
+				if !finished {
+					seed := diagnostics.SegmentPeer{
+						Url:          urlObj.Host,
+						DownloadRate: rate,
+					}
+					seeds = append(seeds, seed)
 				}
-				seeds = append(seeds, seed)
 				webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(rate)))
 			}
 		}
