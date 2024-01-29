@@ -1405,7 +1405,7 @@ func (a *AggregatorV3) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 	a.snapshotBuildSema = semaphore
 }
 
-const aggregatorSnapBuildWeight int64 = 1
+//const aggregatorSnapBuildWeight int64 = 1
 
 // Returns channel which is closed when aggregation is done
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
