@@ -161,11 +161,11 @@ func SpawnZkIntermediateHashesStage(s *stagedsync.StageState, u stagedsync.Unwin
 		if cfg.hd != nil {
 			cfg.hd.ReportBadHeaderPoS(headerHash, syncHeadHeader.ParentHash)
 		}
-		if to > s.BlockNumber {
-			//unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
-			//log.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
-			//u.UnwindTo(unwindTo, headerHash)
-		}
+		// if to > s.BlockNumber {
+		//unwindTo := (to + s.BlockNumber) / 2 // Binary search for the correct block, biased to the lower numbers
+		//log.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+		//u.UnwindTo(unwindTo, headerHash)
+		// }
 	} else if err = s.Update(tx, to); err != nil {
 		return trie.EmptyRoot, err
 	}
@@ -341,9 +341,16 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 	codeChanges := make(map[libcommon.Address]string)
 	storageChanges := make(map[libcommon.Address]map[string]string)
 
+	// case when we are incrementing from block 1
+	// we chould include the 0 block which is the genesis data
+	from := s.BlockNumber
+	if from != 0 {
+		from += 1
+	}
+
 	// NB: changeset tables are zero indexed
 	// changeset tables contain historical value at N-1, so we look up values from plainstate
-	for i := s.BlockNumber + 1; i <= to; i++ {
+	for i := from; i <= to; i++ {
 		dupSortKey := dbutils.EncodeBlockNumber(i)
 
 		// i+1 to get state at the beginning of the next batch
