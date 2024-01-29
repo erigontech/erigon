@@ -211,7 +211,7 @@ func logMarshalledReceiptsUponHashMismatch(
 	logger log.Logger,
 ) {
 	if len(receipts) == 0 {
-		// no-op, can happen if vmConfig.StatelessExec is true
+		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
 		return
 	}
 
