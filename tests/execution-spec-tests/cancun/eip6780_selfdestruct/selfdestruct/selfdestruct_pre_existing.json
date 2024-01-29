@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=0-single_call": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-single_call]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -50,6 +51,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x289438632bbd3f8d09dbbe8118a95f0f714dc1a0c8ce6c3a6fd89d0a01e5de4f"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -139,9 +141,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=0-single_call_self_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-single_call_self_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -190,6 +193,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xc7c23925eea677d0570d2f1bc2fef27c034e6dcd4d9fa0c8df77996c934a981b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -263,9 +267,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_single_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_single_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -314,6 +319,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x7ed2d4e7b150ffe094a82d37f28b8f55707c88d7e9ef22397db42c3cb4a6f76b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -412,9 +418,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -463,6 +470,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xe60d5dac19f4d2358273760893993fdba1b28249e8cee545fd5a7e24a668fae2"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -593,9 +601,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients_including_self": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients_including_self]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -644,6 +653,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xd81fdc6b58c2bd45035e1fd383a431152daa9c6a6ccf5b76f58e4711c2aca216"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -758,9 +768,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients_including_self_different_order": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients_including_self_different_order]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -809,6 +820,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xaee7fa6554b8a07f30dd51ac0db109859e4bdabe7614643aa243adc003e6f024"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -923,9 +935,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients_including_self_last": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients_including_self_last]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -974,6 +987,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x02063b3c19875f4ec4f7a6e3099a06997efe29d4a32b42096f80cf52bf2f307c"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1081,9 +1095,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=100000-single_call": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-single_call]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1132,6 +1147,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x8fbedbc0f52ddb7834bdc9c8c0704b9d5986ab849e1c8a109bb2e3e8dff0ba4f"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1221,9 +1237,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "008-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=100000-single_call_self_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-single_call_self_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1272,6 +1289,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x0ab60319b849b568039bc2dc16654d4b89fa75e512cf3f87965fd6ec7d529e20"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1345,9 +1363,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "009-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_single_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_single_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1396,6 +1415,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x2d67c4dbf767455b1fd90f2f7d433c9cf285ccc2ea64a3244ed44546f5ba320b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1494,9 +1514,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "010-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1545,6 +1566,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x32f1cbb4b2c756460e64a00ac8c164089ae4556e984101c04de01f57a5c03395"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1675,9 +1697,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "011-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients_including_self": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients_including_self]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1726,6 +1749,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x33474cbdcc5a1c83ed170390521aebf8612fbb99a17e0feaac3f81a3e7ed16cc"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1840,9 +1864,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "012-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients_including_self_different_order": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients_including_self_different_order]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1891,6 +1916,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xb9e745e17428e71a5bf841692d7258c8b5d4a789bfb0de5e6fcc543ed48638d5"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2005,9 +2031,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "013-fork=Shanghai-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients_including_self_last": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Shanghai-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients_including_self_last]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2056,6 +2083,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x4331d2603e47af489e0ca9ac9be7f8ddb1b6e7b5050a9260e72b8f0db234cc95"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2163,9 +2191,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "014-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=0-single_call": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-single_call]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2220,6 +2249,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xb9a4b99f7d7623e0258dcb0824bcd236e301724fcb5d00740d386a34ac63d63f"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2331,9 +2361,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "015-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=0-single_call_self_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-single_call_self_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2388,6 +2419,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x09972dd2512a2e92a26abb7747c6a7a0f7c5af47351c63456415abffb0a92c6d"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2483,9 +2515,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "016-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_single_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_single_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2540,6 +2573,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xcc7d8a77ef48a2a437bb5b47737351315af059c0c1a34ff3f7b77d09c316a6c3"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2660,9 +2694,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "017-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2717,6 +2752,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x8661cb0beea8bd9283d2176ffb2ebec707554a51459c8eaf23ff51e6cac55ab2"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -2869,9 +2905,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "018-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients_including_self": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients_including_self]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -2926,6 +2963,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xe79d073126f2e29fdbe181d9f0df5809eabec4b731a4e4cbacde1ddd174db919"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3065,9 +3103,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "019-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients_including_self_different_order": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients_including_self_different_order]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -3122,6 +3161,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xb5c92971ee136f42cb16296f8b1b34fc947f4748cf785482d306d9dde4bee5cc"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3261,9 +3301,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "020-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=0-multiple_calls_multiple_sendall_recipients_including_self_last": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_0-multiple_calls_multiple_sendall_recipients_including_self_last]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -3318,6 +3359,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x4e1f7a918364af0c4fd6d8e615e21c0f564b25270adac8aa4ed863f8f759a2a7"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3448,9 +3490,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "021-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=100000-single_call": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-single_call]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -3505,6 +3548,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x52d9c967919800c76d9cd2b96bcfbeed9c7f504246b74f39ca8229d782be13ef"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3616,9 +3660,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "022-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=100000-single_call_self_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-single_call_self_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -3673,6 +3718,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xd29f337c6afd0add201c87f6bc1fdce2ee884f08cfa8950eb2709ccf2b160f33"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3769,9 +3815,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "023-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_single_sendall_recipient": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_single_sendall_recipient]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -3826,6 +3873,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x0499ac58a9bf1a207cebf134ea048719298ce7fc871c4eee71fad15bb8815c91"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -3946,9 +3994,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "024-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -4003,6 +4052,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xa585ceb55ac3cab84177cf870893a8c8eb38f0dcb97742b7643a6069f0a0fcba"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -4155,9 +4205,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "025-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients_including_self": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients_including_self]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -4212,6 +4263,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xb0da04c0cc5c7817c183e02916b8a2c332a21bd1dcbf2ce74119dcaa75701b8b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -4352,9 +4404,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "026-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients_including_self_different_order": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients_including_self_different_order]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -4409,6 +4462,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x53d341db9ff827ef262722a6884a0aafa71664d7ebeafaa859e39eac8e449e72"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -4548,9 +4602,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "027-fork=Cancun-pre_existing-selfdestruct_contract_initial_balance=100000-multiple_calls_multiple_sendall_recipients_including_self_last": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_selfdestruct_pre_existing[fork_Cancun-blockchain_test-pre_existing-selfdestruct_contract_initial_balance_100000-multiple_calls_multiple_sendall_recipients_including_self_last]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -4605,6 +4660,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xd502973975d360b3c1d4d7e287b41779dc4348ad5fc9d888983ea0b000f34a56"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

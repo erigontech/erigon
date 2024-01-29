@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
@@ -223,9 +224,13 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
+
+	//if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+	//	return err
+	//}
 
 	//if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
 	//	return err

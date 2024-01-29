@@ -131,14 +131,16 @@ func (e *EthereumExecutionModule) GetBodiesByHashes(ctx context.Context, req *ex
 		h := gointerfaces.ConvertH256ToHash(hash)
 		number := rawdb.ReadHeaderNumber(tx, h)
 		if number == nil {
-			break
+			bodies = append(bodies, nil)
+			continue
 		}
 		body, err := e.getBody(ctx, tx, h, *number)
 		if err != nil {
 			return nil, err
 		}
 		if body == nil {
-			break
+			bodies = append(bodies, nil)
+			continue
 		}
 		txs, err := types.MarshalTransactionsBinary(body.Transactions)
 		if err != nil {
