@@ -313,6 +313,7 @@ func (ic *InvertedIndexContext) maxWarmStep() uint64 {
 	return ic.maxTxNumInFiles(false) / ic.ii.aggregationStep
 }
 
+// endTxNum is always a multiply of aggregation step but this txnum is not available in file (it will be first tx of file to follow after that)
 func (dc *DomainContext) maxTxNumInDomainFiles(cold bool) uint64 {
 	if len(dc.files) == 0 {
 		return 0

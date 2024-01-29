@@ -42,7 +42,6 @@ import (
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
@@ -611,6 +610,7 @@ Loop:
 		case <-a.ctx.Done():
 			return a.ctx.Err()
 		case <-finished:
+			fmt.Println("BuildFiles finished")
 			break Loop
 		case <-logEvery.C:
 			if !(a.buildingFiles.Load() || a.mergeingFiles.Load() || a.buildingOptionalIndices.Load()) {
@@ -705,14 +705,35 @@ type flusher interface {
 }
 
 func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
-	return cmp.Min(
-		cmp.Min(
-			ac.account.maxTxNumInDomainFiles(cold),
-			ac.code.maxTxNumInDomainFiles(cold)),
-		cmp.Min(
-			ac.storage.maxTxNumInDomainFiles(cold),
-			ac.commitment.maxTxNumInDomainFiles(cold)),
+	return min(
+		ac.account.maxTxNumInDomainFiles(cold),
+		ac.code.maxTxNumInDomainFiles(cold),
+		ac.storage.maxTxNumInDomainFiles(cold),
+		ac.commitment.maxTxNumInDomainFiles(cold),
 	)
+}
+
+func (ac *AggregatorV3Context) maximinTxNumAggregated(cold bool) uint64 {
+	return min(
+		ac.maxTxNumInDomainFiles(cold),
+		ac.maxTxNumInIndexFiles(cold),
+		ac.maxTxNumInHistoryFiles(cold))
+}
+
+func (ac *AggregatorV3Context) maxTxNumInHistoryFiles(cold bool) uint64 {
+	return min(
+		ac.account.hc.maxTxNumInFiles(cold),
+		ac.code.hc.maxTxNumInFiles(cold),
+		ac.storage.hc.maxTxNumInFiles(cold),
+		ac.commitment.hc.maxTxNumInFiles(cold))
+}
+
+func (ac *AggregatorV3Context) maxTxNumInIndexFiles(cold bool) uint64 {
+	return min(
+		ac.logAddrs.maxTxNumInFiles(cold),
+		ac.logTopics.maxTxNumInFiles(cold),
+		ac.tracesFrom.maxTxNumInFiles(cold),
+		ac.tracesTo.maxTxNumInFiles(cold))
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
@@ -883,7 +904,8 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	}
 
 	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
-	txTo := ac.maxTxNumInDomainFiles(false)
+	//txTo := ac.maximinTxNumAggregated(false)
+	txTo := ac.a.minimaxTxNumInFiles.Load()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
 		step = (txTo - 1) / ac.a.StepSize()
@@ -988,14 +1010,10 @@ func (ac *AggregatorV3Context) LogStats(tx kv.Tx, tx2block func(endTxNumMinimax 
 }
 
 func (a *AggregatorV3) EndTxNumNoCommitment() uint64 {
-	min := a.accounts.endTxNumMinimax()
-	if txNum := a.storage.endTxNumMinimax(); txNum < min {
-		min = txNum
-	}
-	if txNum := a.code.endTxNumMinimax(); txNum < min {
-		min = txNum
-	}
-	return min
+	return min(
+		a.accounts.endTxNumMinimax(),
+		a.storage.endTxNumMinimax(),
+		a.code.endTxNumMinimax())
 }
 
 func (a *AggregatorV3) EndTxNumMinimax() uint64 { return a.minimaxTxNumInFiles.Load() }
@@ -1020,17 +1038,14 @@ func (a *AggregatorV3) FirstTxNumOfStep(step uint64) uint64 {
 }
 
 func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
-	return cmp.Min(
-		cmp.Min(
-			a.accounts.endIndexedTxNumMinimax(true),
-			a.storage.endIndexedTxNumMinimax(true),
-		),
-		cmp.Min(
-			a.code.endIndexedTxNumMinimax(true),
-			a.commitment.endIndexedTxNumMinimax(true),
-		),
+	return min(
+		a.accounts.endIndexedTxNumMinimax(true),
+		a.storage.endIndexedTxNumMinimax(true),
+		a.code.endIndexedTxNumMinimax(true),
+		a.commitment.endIndexedTxNumMinimax(true),
 	)
 }
+
 func (a *AggregatorV3) recalcMaxTxNum() {
 	min := a.accounts.endTxNumMinimax()
 	if txNum := a.storage.endTxNumMinimax(); txNum < min {
@@ -1348,6 +1363,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if err == nil {
 		closeFiles = false
 	}
+	fmt.Printf("[snapshots] merge done %s\n", r.String())
 	return mf, err
 }
 

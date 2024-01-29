@@ -2059,17 +2059,18 @@ func (dc *DomainContext) CanPruneUntil(tx kv.Tx) bool {
 }
 
 // checks if there is anything to prune in DOMAIN tables.
+// everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
 func (dc *DomainContext) canPruneDomainTables(tx kv.Tx) (can bool, maxPrunableStep uint64) {
-	maxPrunableStep = dc.maxTxNumInDomainFiles(false) / dc.d.aggregationStep
-	if maxPrunableStep > 0 {
-		maxPrunableStep--
+	if m := dc.maxTxNumInDomainFiles(false); m > 0 {
+		maxPrunableStep = (m - 1) / dc.d.aggregationStep
 	}
-	return dc.CanPruneFrom(tx) <= maxPrunableStep, maxPrunableStep
+	sm := dc.smallestStepForPruning(tx)
+	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxPrunableStep)
+	return sm <= maxPrunableStep, maxPrunableStep
 }
 
-// CanPruneFrom returns step from which domain tables can be pruned
-func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
+func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
 	pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
 	if err != nil {
 		dc.d.logger.Warn("CanPruneFrom: failed to get progress", "domain", dc.d.filenameBase, "error", err)
@@ -2084,11 +2085,15 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 	defer c.Close()
 
 	var k, v []byte
+	minStep := uint64(math.MaxUint64)
+
 	if pkr != nil {
-		_, _, err = c.Seek(pkr)
+		_, vs, err := c.Seek(pkr)
 		if err != nil {
 			return math.MaxUint64
 		}
+		minStep = min(minStep, ^binary.BigEndian.Uint64(vs))
+
 		k, v, err = c.PrevNoDup()
 	} else {
 		k, v, err = c.First()
@@ -2097,14 +2102,14 @@ func (dc *DomainContext) CanPruneFrom(tx kv.Tx) uint64 {
 		return math.MaxUint64
 	}
 
-	minStep := min(math.MaxUint64, ^binary.BigEndian.Uint64(v))
+	minStep = min(minStep, ^binary.BigEndian.Uint64(v))
 	fv, err := c.LastDup()
 	if err != nil {
 		return math.MaxUint64
 	}
 	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
 
-	//fmt.Printf("found CanPrune from %x first %d last %d\n", k, ^binary.BigEndian.Uint64(v), ^binary.BigEndian.Uint64(fv))
+	//fmt.Printf("CanPruneFrom (%s) %x minFound %d\n", dc.d.filenameBase, k, minStep)
 	return minStep
 }
 
@@ -2142,13 +2147,12 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	}
 }
 
+// TODO test idea. Generate 4 keys with updates for several steps. Count commitment after each prune over 4 known keys.
+
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
 func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
-		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	}
 	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx)
 	if !canPrune {
 		return stat, nil
@@ -2250,6 +2254,10 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 	mxPruneTookDomain.ObserveDuration(st)
+
+	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	}
 	return stat, nil
 }
 
