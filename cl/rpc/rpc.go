@@ -221,6 +221,7 @@ func (b *BeaconRpcP2P) AdvertiseSubnetsForEpoch(ctx context.Context, epoch uint6
 		Topics: topics,
 	})
 	if err != nil {
+		cn()
 		return nil, err
 	}
 	_, err = b.sentinel.UpdateEnr(ctx, &sentinel.EnrEntry{

@@ -166,7 +166,7 @@ func (b *NetworkConfig) ComputeSubscribedSubnets(nodeID enode.ID, epoch uint64) 
 
 func (b *NetworkConfig) ComputeSubscribedSubnet(nodeID enode.ID, epoch uint64, index uint64) (uint64, error) {
 	nodeOffset, nodeIdPrefix := b.ComputeOffsetAndPrefix(nodeID)
-	seedInput := (nodeOffset + uint64(epoch)) / b.EpochsPerSubnetSubscription
+	seedInput := (nodeOffset + epoch) / b.EpochsPerSubnetSubscription
 	sha256Optimized := utils.OptimizedSha256NotThreadSafe()
 	permSeed := sha256Optimized(ssz.Uint64SSZ(seedInput))
 	eth2ShuffleHash := func(data []byte) []byte {
@@ -174,7 +174,7 @@ func (b *NetworkConfig) ComputeSubscribedSubnet(nodeID enode.ID, epoch uint64, i
 		return hashed[:]
 	}
 	permutated_prefix := eth2shuffle.PermuteIndex(eth2ShuffleHash, 90, nodeIdPrefix, 1<<b.AttestationSubnetPrefixBits(), permSeed)
-	subnet := (uint64(permutated_prefix) + index) % b.AttestationSubnetCount
+	subnet := (permutated_prefix + index) % b.AttestationSubnetCount
 	return subnet, nil
 }
 
@@ -1118,7 +1118,7 @@ func (b *BeaconChainConfig) CurrentEpochAttestationsLength() uint64 {
 func (b *BeaconChainConfig) ComputeSubnetForAttestation(committees_per_slot uint64,
 	slot uint64,
 	committee_index uint64) uint64 {
-	slots_since_epoch_start := uint64(slot % b.SlotsPerEpoch)
+	slots_since_epoch_start := slot % b.SlotsPerEpoch
 	committees_since_epoch_start := committees_per_slot * slots_since_epoch_start
 
 	return (committees_since_epoch_start + committee_index) % b.SyncCommitteeSubnetCount
