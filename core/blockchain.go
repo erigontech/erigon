@@ -138,7 +138,7 @@ func ExecuteBlockEphemerally(
 
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
-		if dbg.LogMarshalledReceiptsUponHashMismatch() {
+		if dbg.LogHashMismatchReason() {
 			logMarshalledReceiptsUponHashMismatch(receipts, includedTxs, chainConfig, header, logger)
 		}
 
