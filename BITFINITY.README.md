@@ -2,6 +2,8 @@
 
 Block importer is a process that periodically polls the blocks from the EVMC canister and writes it into a file-based erigon db. It can be used to launch a blockhain explorer that introspects the EMVC blockchain.
 
+The code of the blockimporter is in `cmd/blockimporter`.
+
 # Archiving historical data
 
 ```
