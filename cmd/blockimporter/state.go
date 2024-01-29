@@ -29,6 +29,7 @@ import (
 
 type State struct {
 	db              *DB
+	trieLoader      *trie.FlatDBTrieLoader
 	blockNum        *big.Int
 	totalDifficulty *big.Int
 	chainConfig     *chain.Config
@@ -41,7 +42,14 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 	}
 	defer tx.Rollback()
 
-	state := &State{db: db}
+	state := &State{
+		db:         db,
+		trieLoader: trie.NewFlatDBTrieLoader("loader"),
+	}
+
+	if err := state.trieLoader.Reset(trie.NewRetainList(0), nil, nil, false); err != nil {
+		return nil, err
+	}
 
 	if blockNum := rawdb.ReadCurrentBlockNumber(tx); blockNum == nil || *blockNum == 0 {
 		// Close the transaction
@@ -97,7 +105,9 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 		if err = stagedsync.PromoteHashedStateCleanly("logPrefix", tx, stagedsync.StageHashStateCfg(db.chain, dirs, false, nil), context.Background()); err != nil {
 			return nil, fmt.Errorf("error while promoting state: %v", err)
 		}
-		if root, err := trie.CalcRoot("block state root", tx); err != nil {
+
+		root, err := state.trieLoader.CalcTrieRoot(tx, nil, nil)
+		if err != nil {
 			return nil, err
 		} else if root != block.Root() {
 			// This error may happen if we forgot to initialize the data for state root calculation.
@@ -167,12 +177,16 @@ func (state *State) ProcessBlock(block types.Block) error {
 		return nil
 	}
 
-	// check state root hash
 	dirs := datadir2.New(state.db.path)
 	if err = stagedsync.PromoteHashedStateIncrementally("hashedstate", block.NumberU64()-1, block.NumberU64(), tx, stagedsync.StageHashStateCfg(nil, dirs, false, nil), context.Background(), false); err != nil {
 		return err
 	}
-	if root, err := trie.CalcRoot("block state root", tx); err != nil {
+
+	s := stagedsync.StageState{
+		BlockNumber: block.NumberU64() - 1,
+	}
+	cfg := stagedsync.StageTrieCfg(state.db.chain, false, true, true, state.db.path, nil, nil, false, nil)
+	if root, err := stagedsync.IncrementIntermediateHashes("increment hashes", &s, tx, block.NumberU64(), cfg, common.Hash{}, nil); err != nil {
 		return err
 	} else if root != block.Root() {
 		return fmt.Errorf("invalid root, have: %s, want: %s", root.String(), block.Root().String())
