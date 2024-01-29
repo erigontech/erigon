@@ -26,8 +26,10 @@ import (
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
+	case evm.chainRules.IsForkID7Etrog:
+		precompiles = PrecompiledContractForkID7Etrog
 	default:
-		precompiles = PrecompiledContractsZKEVMDragonfruit
+		precompiles = PrecompiledContractsForkID5Dragonfruit
 	}
 	p, ok := precompiles[addr]
 	return p, ok

@@ -17,6 +17,8 @@
 package vm
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -24,18 +26,21 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/blake2b"
 	"github.com/ledgerwatch/erigon/crypto/bls12381"
 	"github.com/ledgerwatch/erigon/params"
+	"golang.org/x/crypto/ripemd160"
 	//lint:ignore SA1019 Needed for precompile
 )
 
-// PrecompiledContractsZKEVMDragonfruit contains the default set of pre-compiled zkEVM Dragonfruit
-var PrecompiledContractsZKEVMDragonfruit = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover_zkevm{},
+// PrecompiledContractsForkID5Dragonfruit contains the default set of pre-compiled ForkID5 Dragonfruit
+var PrecompiledContractsForkID5Dragonfruit = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{1}): &ecrecover_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{2}): &sha256hash_zkevm{},
 	libcommon.BytesToAddress([]byte{3}): &ripemd160hash_zkevm{},
-	libcommon.BytesToAddress([]byte{4}): &dataCopy_zkevm{},
+	libcommon.BytesToAddress([]byte{4}): &dataCopy_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{5}): &bigModExp_zkevm{eip2565: true},
 	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul_zkevm{},
 	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul_zkevm{},
@@ -43,14 +48,37 @@ var PrecompiledContractsZKEVMDragonfruit = map[libcommon.Address]PrecompiledCont
 	libcommon.BytesToAddress([]byte{9}): &blake2F_zkevm{},
 }
 
+// PrecompiledContractForkID7Etrog contains the default set of pre-compiled ForkID7 Etrog.
+// TODO Add: sha256, Modexp, ecAdd ,ecMul, ecPairing
+var PrecompiledContractForkID7Etrog = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{1}): &ecrecover_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{2}): &sha256hash_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{3}): &ripemd160hash_zkevm{},
+	libcommon.BytesToAddress([]byte{4}): &dataCopy_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{5}): &bigModExp_zkevm{enabled: true, eip2565: true},
+	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul_zkevm{},
+	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul_zkevm{},
+	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul_zkevm{},
+	libcommon.BytesToAddress([]byte{9}): &blake2F_zkevm{},
+}
+
 // ECRECOVER implemented as a native contract.
-type ecrecover_zkevm struct{}
+type ecrecover_zkevm struct {
+	enabled bool
+}
 
 func (c *ecrecover_zkevm) RequiredGas(input []byte) uint64 {
+	if !c.enabled {
+		return 0
+	}
 	return params.EcrecoverGas
 }
 
 func (c *ecrecover_zkevm) Run(input []byte) ([]byte, error) {
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
+
 	const ecRecoverInputLength = 128
 
 	// [zkevm] - this was a bug prior to forkId6
@@ -88,256 +116,306 @@ func (c *ecrecover_zkevm) Run(input []byte) ([]byte, error) {
 }
 
 // SHA256 implemented as a native contract.
-type sha256hash_zkevm struct{}
+type sha256hash_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 //
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *sha256hash_zkevm) RequiredGas(input []byte) uint64 {
-	//[zkevm]
-	return 0
-	// return uint64(len(input)+31)/32*params.Sha256PerWordGas + params.Sha256BaseGas
+	if !c.enabled {
+		return 0
+	}
+
+	return uint64(len(input)+31)/32*params.Sha256PerWordGas + params.Sha256BaseGas
 }
 func (c *sha256hash_zkevm) Run(input []byte) ([]byte, error) {
-	//[zkevm]
-	return []byte{}, ErrExecutionReverted
-	// h := sha256.Sum256(input)
-	// return h[:], nil
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
+	h := sha256.Sum256(input)
+	return h[:], nil
 }
 
 // RIPEMD160 implemented as a native contract.
-type ripemd160hash_zkevm struct{}
+type ripemd160hash_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 //
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *ripemd160hash_zkevm) RequiredGas(input []byte) uint64 {
-	//[zkevm]
-	return 0
-	// return uint64(len(input)+31)/32*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
+	if !c.enabled {
+		return 0
+	}
+	return uint64(len(input)+31)/32*params.Ripemd160PerWordGas + params.Ripemd160BaseGas
 }
 func (c *ripemd160hash_zkevm) Run(input []byte) ([]byte, error) {
-	//[zkevm]
-	// ripemd := ripemd160.New()
-	// ripemd.Write(input)
-	// return common.LeftPadBytes(ripemd.Sum(nil), 32), nil
-	return []byte{}, ErrExecutionReverted
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
+
+	ripemd := ripemd160.New()
+	ripemd.Write(input)
+	return common.LeftPadBytes(ripemd.Sum(nil), 32), nil
 }
 
 // data copy implemented as a native contract.
-type dataCopy_zkevm struct{}
+type dataCopy_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 //
 // This method does not require any overflow checking as the input size gas costs
 // required for anything significant is so high it's impossible to pay for.
 func (c *dataCopy_zkevm) RequiredGas(input []byte) uint64 {
+	if !c.enabled {
+		return 0
+	}
 	return uint64(len(input)+31)/32*params.IdentityPerWordGas + params.IdentityBaseGas
 }
 func (c *dataCopy_zkevm) Run(in []byte) ([]byte, error) {
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
 	return in, nil
 }
 
 // bigModExp implements a native big integer exponential modular operation.
 type bigModExp_zkevm struct {
 	eip2565 bool
+	enabled bool
 }
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bigModExp_zkevm) RequiredGas(input []byte) uint64 {
-	//[zkevm]
-	return 0
-	// var (
-	// 	baseLen = new(big.Int).SetBytes(getData(input, 0, 32))
-	// 	expLen  = new(big.Int).SetBytes(getData(input, 32, 32))
-	// 	modLen  = new(big.Int).SetBytes(getData(input, 64, 32))
-	// )
-	// if len(input) > 96 {
-	// 	input = input[96:]
-	// } else {
-	// 	input = input[:0]
-	// }
-	// // Retrieve the head 32 bytes of exp for the adjusted exponent length
-	// var expHead *big.Int
-	// if big.NewInt(int64(len(input))).Cmp(baseLen) <= 0 {
-	// 	expHead = new(big.Int)
-	// } else {
-	// 	if expLen.Cmp(big32) > 0 {
-	// 		expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), 32))
-	// 	} else {
-	// 		expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), expLen.Uint64()))
-	// 	}
-	// }
-	// // Calculate the adjusted exponent length
-	// var msb int
-	// if bitlen := expHead.BitLen(); bitlen > 0 {
-	// 	msb = bitlen - 1
-	// }
-	// adjExpLen := new(big.Int)
-	// if expLen.Cmp(big32) > 0 {
-	// 	adjExpLen.Sub(expLen, big32)
-	// 	adjExpLen.Mul(big8, adjExpLen)
-	// }
-	// adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
-	// // Calculate the gas cost of the operation
-	// gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
-	// if c.eip2565 {
-	// 	// EIP-2565 has three changes
-	// 	// 1. Different multComplexity (inlined here)
-	// 	// in EIP-2565 (https://eips.ethereum.org/EIPS/eip-2565):
-	// 	//
-	// 	// def mult_complexity(x):
-	// 	//    ceiling(x/8)^2
-	// 	//
-	// 	//where is x is max(length_of_MODULUS, length_of_BASE)
-	// 	gas = gas.Add(gas, big7)
-	// 	gas = gas.Div(gas, big8)
-	// 	gas.Mul(gas, gas)
+	if !c.enabled {
+		return 0
+	}
+	var (
+		baseLen = new(big.Int).SetBytes(getData(input, 0, 32))
+		expLen  = new(big.Int).SetBytes(getData(input, 32, 32))
+		modLen  = new(big.Int).SetBytes(getData(input, 64, 32))
+	)
+	if len(input) > 96 {
+		input = input[96:]
+	} else {
+		input = input[:0]
+	}
+	// Retrieve the head 32 bytes of exp for the adjusted exponent length
+	var expHead *big.Int
+	if big.NewInt(int64(len(input))).Cmp(baseLen) <= 0 {
+		expHead = new(big.Int)
+	} else {
+		if expLen.Cmp(big32) > 0 {
+			expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), 32))
+		} else {
+			expHead = new(big.Int).SetBytes(getData(input, baseLen.Uint64(), expLen.Uint64()))
+		}
+	}
+	// Calculate the adjusted exponent length
+	var msb int
+	if bitlen := expHead.BitLen(); bitlen > 0 {
+		msb = bitlen - 1
+	}
+	adjExpLen := new(big.Int)
+	if expLen.Cmp(big32) > 0 {
+		adjExpLen.Sub(expLen, big32)
+		adjExpLen.Mul(big8, adjExpLen)
+	}
+	adjExpLen.Add(adjExpLen, big.NewInt(int64(msb)))
+	// Calculate the gas cost of the operation
+	gas := new(big.Int).Set(math.BigMax(modLen, baseLen))
+	if c.eip2565 {
+		// EIP-2565 has three changes
+		// 1. Different multComplexity (inlined here)
+		// in EIP-2565 (https://eips.ethereum.org/EIPS/eip-2565):
+		//
+		// def mult_complexity(x):
+		//    ceiling(x/8)^2
+		//
+		//where is x is max(length_of_MODULUS, length_of_BASE)
+		gas = gas.Add(gas, big7)
+		gas = gas.Div(gas, big8)
+		gas.Mul(gas, gas)
 
-	// 	gas.Mul(gas, math.BigMax(adjExpLen, big1))
-	// 	// 2. Different divisor (`GQUADDIVISOR`) (3)
-	// 	gas.Div(gas, big3)
-	// 	if gas.BitLen() > 64 {
-	// 		return math.MaxUint64
-	// 	}
-	// 	// 3. Minimum price of 200 gas
-	// 	if gas.Uint64() < 200 {
-	// 		return 200
-	// 	}
-	// 	return gas.Uint64()
-	// }
-	// gas = modexpMultComplexity(gas)
-	// gas.Mul(gas, math.BigMax(adjExpLen, big1))
-	// gas.Div(gas, big20)
+		gas.Mul(gas, math.BigMax(adjExpLen, big1))
+		// 2. Different divisor (`GQUADDIVISOR`) (3)
+		gas.Div(gas, big3)
+		if gas.BitLen() > 64 {
+			return math.MaxUint64
+		}
+		// 3. Minimum price of 200 gas
+		if gas.Uint64() < 200 {
+			return 200
+		}
+		return gas.Uint64()
+	}
+	gas = modexpMultComplexity(gas)
+	gas.Mul(gas, math.BigMax(adjExpLen, big1))
+	gas.Div(gas, big20)
 
-	// if gas.BitLen() > 64 {
-	// 	return math.MaxUint64
-	// }
-	// return gas.Uint64()
+	if gas.BitLen() > 64 {
+		return math.MaxUint64
+	}
+	return gas.Uint64()
 }
 
 func (c *bigModExp_zkevm) Run(input []byte) ([]byte, error) {
-	//[zkevm]
-	return []byte{}, ErrExecutionReverted
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
 
-	// var (
-	// 	baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
-	// 	expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
-	// 	modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
-	// )
-	// if len(input) > 96 {
-	// 	input = input[96:]
-	// } else {
-	// 	input = input[:0]
-	// }
-	// // Handle a special case when both the base and mod length is zero
-	// if baseLen == 0 && modLen == 0 {
-	// 	return []byte{}, nil
-	// }
-	// // Retrieve the operands and execute the exponentiation
-	// var (
-	// 	base = new(big.Int).SetBytes(getData(input, 0, baseLen))
-	// 	exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
-	// 	mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
-	// 	v    []byte
-	// )
-	// switch {
-	// case mod.BitLen() == 0:
-	// 	// Modulo 0 is undefined, return zero
-	// 	return common.LeftPadBytes([]byte{}, int(modLen)), nil
-	// case base.Cmp(libcommon.Big1) == 0:
-	// 	//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
-	// 	v = base.Mod(base, mod).Bytes()
-	// //case mod.Bit(0) == 0:
-	// //	// Modulo is even
-	// //	v = math.FastExp(base, exp, mod).Bytes()
-	// default:
-	// 	// Modulo is odd
-	// 	v = base.Exp(base, exp, mod).Bytes()
-	// }
-	// return common.LeftPadBytes(v, int(modLen)), nil
+	var (
+		baseLen = new(big.Int).SetBytes(getData(input, 0, 32)).Uint64()
+		expLen  = new(big.Int).SetBytes(getData(input, 32, 32)).Uint64()
+		modLen  = new(big.Int).SetBytes(getData(input, 64, 32)).Uint64()
+	)
+	if len(input) > 96 {
+		input = input[96:]
+	} else {
+		input = input[:0]
+	}
+	// Handle a special case when both the base and mod length is zero
+	if baseLen == 0 && modLen == 0 {
+		return []byte{}, nil
+	}
+	// Retrieve the operands and execute the exponentiation
+	var (
+		base = new(big.Int).SetBytes(getData(input, 0, baseLen))
+		exp  = new(big.Int).SetBytes(getData(input, baseLen, expLen))
+		mod  = new(big.Int).SetBytes(getData(input, baseLen+expLen, modLen))
+		v    []byte
+	)
+	switch {
+	case mod.BitLen() == 0:
+		// Modulo 0 is undefined, return zero
+		return common.LeftPadBytes([]byte{}, int(modLen)), nil
+	case base.Cmp(libcommon.Big1) == 0:
+		//If base == 1, then we can just return base % mod (if mod >= 1, which it is)
+		v = base.Mod(base, mod).Bytes()
+	//case mod.Bit(0) == 0:
+	//	// Modulo is even
+	//	v = math.FastExp(base, exp, mod).Bytes()
+	default:
+		// Modulo is odd
+		v = base.Exp(base, exp, mod).Bytes()
+	}
+	return common.LeftPadBytes(v, int(modLen)), nil
 }
 
 // bn256Add implements a native elliptic curve point addition conforming to
 // Istanbul consensus rules.
-type bn256AddIstanbul_zkevm struct{}
+type bn256AddIstanbul_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bn256AddIstanbul_zkevm) RequiredGas(input []byte) uint64 {
-	//[zkevm]
-	return 0
-	// return params.Bn256AddGasIstanbul
+	if !c.enabled {
+		return 0
+	}
+	return params.Bn256AddGasIstanbul
 }
 
 func (c *bn256AddIstanbul_zkevm) Run(input []byte) ([]byte, error) {
-	//[zkevm]
-	return []byte{}, ErrExecutionReverted
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
 
-	// return runBn256Add(input)
+	return runBn256Add(input)
 }
 
 // bn256AddByzantium implements a native elliptic curve point addition
 // conforming to Byzantium consensus rules.
-type bn256AddByzantium_zkevm struct{}
+type bn256AddByzantium_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bn256AddByzantium_zkevm) RequiredGas(input []byte) uint64 {
+	if !c.enabled {
+		return 0
+	}
+
 	return params.Bn256AddGasByzantium
 }
 
 func (c *bn256AddByzantium_zkevm) Run(input []byte) ([]byte, error) {
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
 	return runBn256Add(input)
 }
 
 // bn256ScalarMulIstanbul implements a native elliptic curve scalar
 // multiplication conforming to Istanbul consensus rules.
-type bn256ScalarMulIstanbul_zkevm struct{}
+type bn256ScalarMulIstanbul_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bn256ScalarMulIstanbul_zkevm) RequiredGas(input []byte) uint64 {
-	//[zkevm]
-	return 0
-	// return params.Bn256ScalarMulGasIstanbul
+	if !c.enabled {
+		return 0
+	}
+
+	return params.Bn256ScalarMulGasIstanbul
 }
 
 func (c *bn256ScalarMulIstanbul_zkevm) Run(input []byte) ([]byte, error) {
-	//[zkevm]
-	return []byte{}, ErrExecutionReverted
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
 
-	// return runBn256ScalarMul(input)
+	return runBn256ScalarMul(input)
 }
 
 // bn256ScalarMulByzantium implements a native elliptic curve scalar
 // multiplication conforming to Byzantium consensus rules.
-type bn256ScalarMulByzantium_zkevm struct{}
+type bn256ScalarMulByzantium_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bn256ScalarMulByzantium_zkevm) RequiredGas(input []byte) uint64 {
+	if !c.enabled {
+		return 0
+	}
 	return params.Bn256ScalarMulGasByzantium
 }
 
 func (c *bn256ScalarMulByzantium_zkevm) Run(input []byte) ([]byte, error) {
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
 	return runBn256ScalarMul(input)
 }
 
 // bn256PairingIstanbul implements a pairing pre-compile for the bn256 curve
 // conforming to Istanbul consensus rules.
-type bn256PairingIstanbul_zkevm struct{}
+type bn256PairingIstanbul_zkevm struct {
+	enabled bool
+}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
 func (c *bn256PairingIstanbul_zkevm) RequiredGas(input []byte) uint64 {
-	//[zkevm]
-	return 0
-	// return params.Bn256PairingBaseGasIstanbul + uint64(len(input)/192)*params.Bn256PairingPerPointGasIstanbul
+	if !c.enabled {
+		return 0
+	}
+	return params.Bn256PairingBaseGasIstanbul + uint64(len(input)/192)*params.Bn256PairingPerPointGasIstanbul
 }
 
 func (c *bn256PairingIstanbul_zkevm) Run(input []byte) ([]byte, error) {
-	//[zkevm]
-	return []byte{}, ErrExecutionReverted
-
-	// return runBn256Pairing(input)
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
+	return runBn256Pairing(input)
 }
 
 // bn256PairingByzantium implements a pairing pre-compile for the bn256 curve
@@ -353,59 +431,63 @@ func (c *bn256PairingByzantium_zkevm) Run(input []byte) ([]byte, error) {
 	return runBn256Pairing(input)
 }
 
-type blake2F_zkevm struct{}
+type blake2F_zkevm struct {
+	enabled bool
+}
 
 func (c *blake2F_zkevm) RequiredGas(input []byte) uint64 {
-	//[zkevm]
-	return 0
+	if !c.enabled {
+		return 0
+	}
 	// If the input is malformed, we can't calculate the gas, return 0 and let the
 	// actual call choke and fault.
-	// if len(input) != blake2FInputLength {
-	// 	return 0
-	// }
-	// return uint64(binary.BigEndian.Uint32(input[0:4]))
+	if len(input) != blake2FInputLength {
+		return 0
+	}
+	return uint64(binary.BigEndian.Uint32(input[0:4]))
 }
 
 func (c *blake2F_zkevm) Run(input []byte) ([]byte, error) {
-	//[zkevm]
-	return []byte{}, ErrExecutionReverted
+	if !c.enabled {
+		return []byte{}, ErrExecutionReverted
+	}
 
 	// // Make sure the input is valid (correct length and final flag)
-	// if len(input) != blake2FInputLength {
-	// 	return nil, errBlake2FInvalidInputLength
-	// }
-	// if input[212] != blake2FNonFinalBlockBytes && input[212] != blake2FFinalBlockBytes {
-	// 	return nil, errBlake2FInvalidFinalFlag
-	// }
-	// // Parse the input into the Blake2b call parameters
-	// var (
-	// 	rounds = binary.BigEndian.Uint32(input[0:4])
-	// 	final  = input[212] == blake2FFinalBlockBytes
+	if len(input) != blake2FInputLength {
+		return nil, errBlake2FInvalidInputLength
+	}
+	if input[212] != blake2FNonFinalBlockBytes && input[212] != blake2FFinalBlockBytes {
+		return nil, errBlake2FInvalidFinalFlag
+	}
+	// Parse the input into the Blake2b call parameters
+	var (
+		rounds = binary.BigEndian.Uint32(input[0:4])
+		final  = input[212] == blake2FFinalBlockBytes
 
-	// 	h [8]uint64
-	// 	m [16]uint64
-	// 	t [2]uint64
-	// )
-	// for i := 0; i < 8; i++ {
-	// 	offset := 4 + i*8
-	// 	h[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
-	// }
-	// for i := 0; i < 16; i++ {
-	// 	offset := 68 + i*8
-	// 	m[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
-	// }
-	// t[0] = binary.LittleEndian.Uint64(input[196:204])
-	// t[1] = binary.LittleEndian.Uint64(input[204:212])
+		h [8]uint64
+		m [16]uint64
+		t [2]uint64
+	)
+	for i := 0; i < 8; i++ {
+		offset := 4 + i*8
+		h[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
+	}
+	for i := 0; i < 16; i++ {
+		offset := 68 + i*8
+		m[i] = binary.LittleEndian.Uint64(input[offset : offset+8])
+	}
+	t[0] = binary.LittleEndian.Uint64(input[196:204])
+	t[1] = binary.LittleEndian.Uint64(input[204:212])
 
-	// // Execute the compression function, extract and return the result
-	// blake2b.F(&h, m, t, final, rounds)
+	// Execute the compression function, extract and return the result
+	blake2b.F(&h, m, t, final, rounds)
 
-	// output := make([]byte, 64)
-	// for i := 0; i < 8; i++ {
-	// 	offset := i * 8
-	// 	binary.LittleEndian.PutUint64(output[offset:offset+8], h[i])
-	// }
-	// return output, nil
+	output := make([]byte, 64)
+	for i := 0; i < 8; i++ {
+		offset := i * 8
+		binary.LittleEndian.PutUint64(output[offset:offset+8], h[i])
+	}
+	return output, nil
 }
 
 // bls12381G1Add implements EIP-2537 G1Add precompile.

@@ -107,7 +107,6 @@ var (
 		TerminalTotalDifficultyPassed: true,
 		ShanghaiTime:                  big.NewInt(0),
 		Ethash:                        new(erigonchain.EthashConfig),
-		MordorBlock:                   big.NewInt(0),
 	}
 
 	// AllCliqueProtocolChanges contains every protocol change (EIPs) introduced
@@ -126,7 +125,6 @@ var (
 		BerlinBlock:           big.NewInt(0),
 		LondonBlock:           big.NewInt(0),
 		Clique:                &erigonchain.CliqueConfig{Period: 0, Epoch: 30000},
-		MordorBlock:           big.NewInt(0),
 	}
 
 	MumbaiChainConfig = readChainSpec("chainspecs/mumbai.json")

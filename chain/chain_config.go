@@ -25,6 +25,10 @@ import (
 	"github.com/ledgerwatch/erigon/zk/zkchainconfig"
 )
 
+const ForkID5Dragonfruit = 5
+const ForkID6IncaBerry = 6
+const ForkID7Etrog = 7
+
 // Config is the core config which determines the blockchain settings.
 //
 // Config is stored in the database on a per block basis. This means
@@ -77,13 +81,16 @@ type Config struct {
 	Bor    *chain.BorConfig    `json:"bor,omitempty"`
 
 	//zkEVM updates
-	MordorBlock *big.Int `json:"mordorBlock,omitempty"`
+	ForkID4Block            *big.Int `json:"forkID4Block,omitempty"`
+	ForkID5DragonfruitBlock *big.Int `json:"forkID5DragonfruitBlock,omitempty"`
+	ForkID6IncaBerryBlock   *big.Int `json:"forkID6IncaBerryBlock,omitempty"`
+	ForkID7EtrogBlock       *big.Int `json:"forkID7EtrogBlock,omitempty"`
 }
 
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Engine: %v, Mordor: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Engine: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -104,7 +111,6 @@ func (c *Config) String() string {
 		c.CancunTime,
 		c.PragueTime,
 		engine,
-		c.MordorBlock,
 	)
 }
 
@@ -209,8 +215,20 @@ func (c *Config) IsEip1559FeeCollector(num uint64) bool {
 	return c.Eip1559FeeCollector != nil && isForked(c.Eip1559FeeCollectorTransition, num)
 }
 
-func (c *Config) IsMordor(num uint64) bool {
-	return isForked(c.MordorBlock, num)
+func (c *Config) IsForkID4(num uint64) bool {
+	return isForked(c.ForkID4Block, num)
+}
+
+func (c *Config) IsForkID5Dragonfruit(num uint64) bool {
+	return isForked(c.ForkID5DragonfruitBlock, num)
+}
+
+func (c *Config) IsForkID6IncaBerry(num uint64) bool {
+	return isForked(c.ForkID6IncaBerryBlock, num)
+}
+
+func (c *Config) IsForkID7Etrog(num uint64) bool {
+	return isForked(c.ForkID7EtrogBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -253,7 +271,6 @@ func (c *Config) forkBlockNumbers() []forkBlockNumber {
 		{name: "arrowGlacierBlock", blockNumber: c.ArrowGlacierBlock, optional: true},
 		{name: "grayGlacierBlock", blockNumber: c.GrayGlacierBlock, optional: true},
 		{name: "mergeNetsplitBlock", blockNumber: c.MergeNetsplitBlock, optional: true},
-		{name: "mordorBlock", blockNumber: c.MordorBlock, optional: true},
 	}
 }
 
@@ -347,11 +364,6 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *chain.ConfigCompa
 	if incompatible(c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock, head) {
 		return newCompatError("Merge netsplit block", c.MergeNetsplitBlock, newcfg.MergeNetsplitBlock)
 	}
-
-	//zkEVM forks
-	if incompatible(c.MordorBlock, newcfg.MordorBlock, head) {
-		return newCompatError("Merge netsplit block", c.MordorBlock, newcfg.MordorBlock)
-	}
 	return nil
 }
 
@@ -388,12 +400,12 @@ func newCompatError(what string, storedblock, newblock *big.Int) *chain.ConfigCo
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                 *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
-	IsEip1559FeeCollector, IsAura, IsMordor                 bool
-	IsZkEVMForkID4                                          bool
+	ChainID                                                             *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                   bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul             bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague                  bool
+	IsEip1559FeeCollector, IsAura                                       bool
+	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -419,7 +431,10 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsPrague:              c.IsPrague(time),
 		IsEip1559FeeCollector: c.IsEip1559FeeCollector(num),
 		IsAura:                c.Aura != nil,
-		IsMordor:              c.IsMordor(num),
+		IsForkID4:             c.IsForkID4(num),
+		IsForkID5Dragonfruit:  c.IsForkID5Dragonfruit(num),
+		IsForkID6IncaBerry:    c.IsForkID6IncaBerry(num),
+		IsForkID7Etrog:        c.IsForkID7Etrog(num),
 	}
 }
 
