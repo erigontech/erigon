@@ -26,12 +26,14 @@ build/bin/rpcdaemon --datadir <DB_PATH> --http.corsdomain * --http.api=eth,erigo
 docker run --rm -p 5100:80 --name otterscan -d --env ERIGON_URL=localhost:8545 otterscan/otterscan:v1.29.0
 ```
 
-In a case when you don't need blocks explorer fronend just remove the last line:
+In a case when you don't need blocks explorer frontend just remove the last line:
 
 ```
 build/bin/blockimporter --evm <EVMC_CANISTER_URL> --db <DB_PATH> &\
 build/bin/rpcdaemon --datadir <DB_PATH> --http.corsdomain * --http.api=eth,erigon,ots
 ```
+
+In this case the Erigon API can be accessed by address localhost:8545 (which is a default setting for the rpcdaemon that can be changed by passing `--http.port` argument). For more options run `build/bin/rpcdaemon --help`
 
 Another option is to us the docker-compose file:
 
