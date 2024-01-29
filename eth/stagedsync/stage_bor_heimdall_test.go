@@ -25,7 +25,7 @@ func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
-	numBlocks := 16
+	numBlocks := 4000
 	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
 		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
 		GenerateChainNumBlocks: numBlocks,
