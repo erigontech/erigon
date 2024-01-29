@@ -777,24 +777,34 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 			}
 			return nil
 		} else if unwind > 0 {
-			s := stage(sync, tx, nil, stages.BorHeimdall)
+			sn, borSn, agg := allSnapshots(ctx, db, snapshotVersion, logger)
+			defer sn.Close()
+			defer borSn.Close()
+			defer agg.Close()
 
-			if unwind > s.BlockNumber {
-				return fmt.Errorf("cannot unwind past 0")
+			stageState := stage(sync, tx, nil, stages.BorHeimdall)
+
+			snapshotsMaxBlock := borSn.BlocksAvailable()
+			if unwind <= snapshotsMaxBlock {
+				return fmt.Errorf(fmt.Sprintf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock))
 			}
 
-			u := sync.NewUnwindState(stages.BorHeimdall, s.BlockNumber-unwind, s.BlockNumber)
+			if unwind > stageState.BlockNumber {
+				return fmt.Errorf(fmt.Sprintf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber))
+			}
+
+			unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber)
 			cfg := stagedsync.StageBorHeimdallCfg(db, nil, stagedsync.MiningState{}, *chainConfig, nil, nil, nil, nil, nil, nil, nil)
-			if err := stagedsync.BorHeimdallUnwind(u, ctx, s, tx, cfg); err != nil {
+			if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, tx, cfg); err != nil {
 				return err
 			}
 
-			progress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
+			stageProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
 			if err != nil {
 				return fmt.Errorf("re-read bor heimdall progress: %w", err)
 			}
 
-			logger.Info("progress", "bor heimdall", progress)
+			logger.Info("progress", "bor heimdall", stageProgress)
 			return nil
 		}
 
