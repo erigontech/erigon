@@ -55,7 +55,7 @@ func TestBorHeimdallForwardFetchesFirstSpanDuringSecondSprintStart(t *testing.T)
 	t.Parallel()
 
 	ctx := context.Background()
-	numBlocks := 16 // Start of 2nd sprint of 1st span
+	numBlocks := 16 // Start of 2nd sprint of 0th span
 	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
 		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
 		GenerateChainNumBlocks: numBlocks,
