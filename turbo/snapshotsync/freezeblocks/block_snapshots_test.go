@@ -102,7 +102,7 @@ func TestMergeSnapshots(t *testing.T) {
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 0, logger)
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
 	{
@@ -163,7 +163,7 @@ func TestRemoveOverlaps(t *testing.T) {
 		createFile(200_000+i*10_000, 200_000+(i+1)*10_000)
 	}
 
-	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, logger)
+	s := NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, 0, logger)
 
 	defer s.Close()
 	require.NoError(s.ReopenFolder())
@@ -219,7 +219,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile := func(from, to uint64, name snaptype.Type) {
 			createTestSegmentFile(t, from, to, name.Enum(), dir, 1, logger)
 		}
-		s := NewRoSnapshots(cfg, dir, logger)
+		s := NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
 		err := s.ReopenFolder()
 		require.NoError(err)
@@ -232,7 +232,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		s.Close()
 
 		createFile(500_000, 1_000_000, snaptype.Bodies)
-		s = NewRoSnapshots(cfg, dir, logger)
+		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
 		require.NotNil(getSegs(snaptype.Enums.Bodies))
 		require.Equal(0, len(getSegs(snaptype.Enums.Bodies).segments))
@@ -240,7 +240,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 
 		createFile(500_000, 1_000_000, snaptype.Headers)
 		createFile(500_000, 1_000_000, snaptype.Transactions)
-		s = NewRoSnapshots(cfg, dir, logger)
+		s = NewRoSnapshots(cfg, dir, 0, logger)
 		err = s.ReopenFolder()
 		require.NoError(err)
 		require.NotNil(getSegs(snaptype.Enums.Headers))
@@ -250,7 +250,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(0, 500_000, snaptype.Bodies)
 		createFile(0, 500_000, snaptype.Headers)
 		createFile(0, 500_000, snaptype.Transactions)
-		s = NewRoSnapshots(cfg, dir, logger)
+		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
 
 		err = s.ReopenFolder()
@@ -275,7 +275,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		// Erigon may create new snapshots by itself - with high bigger than hardcoded ExpectedBlocks
 		// ExpectedBlocks - says only how much block must come from Torrent
 		chainSnapshotCfg.ExpectBlocks = 500_000 - 1
-		s = NewRoSnapshots(cfg, dir, logger)
+		s = NewRoSnapshots(cfg, dir, 0, logger)
 		err = s.ReopenFolder()
 		require.NoError(err)
 		defer s.Close()
@@ -286,7 +286,7 @@ func TestOpenAllSnapshot(t *testing.T) {
 		createFile(500_000, 900_000, snaptype.Bodies)
 		createFile(500_000, 900_000, snaptype.Transactions)
 		chainSnapshotCfg.ExpectBlocks = math.MaxUint64
-		s = NewRoSnapshots(cfg, dir, logger)
+		s = NewRoSnapshots(cfg, dir, 0, logger)
 		defer s.Close()
 		err = s.ReopenFolder()
 		require.NoError(err)

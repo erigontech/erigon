@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/big"
 	"os"
@@ -645,6 +646,10 @@ func (u *snapshotUploader) downloadManifest(ctx context.Context) ([]fs.DirEntry,
 		return nil, err
 	}
 
+	if len(entries) == 0 {
+		return nil, io.ErrUnexpectedEOF
+	}
+
 	return entries, nil
 }
 
@@ -753,7 +758,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 		return err
 	}
 
-	lastSegments := map[snaptype.Type]fs.FileInfo{}
+	lastSegments := map[snaptype.Enum]fs.FileInfo{}
 	torrents := map[string]string{}
 
 	for _, ent := range entries {
@@ -766,12 +771,12 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 			snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
 			if ok && snapInfo.Type() != nil {
-				if last, ok := lastSegments[snapInfo.Type()]; ok {
+				if last, ok := lastSegments[snapInfo.Type().Enum()]; ok {
 					if lastInfo, ok := last.Sys().(downloader.SnapInfo); ok && snapInfo.To() > lastInfo.To() {
-						lastSegments[snapInfo.Type()] = info
+						lastSegments[snapInfo.Type().Enum()] = info
 					}
 				} else {
-					lastSegments[snapInfo.Type()] = info
+					lastSegments[snapInfo.Type().Enum()] = info
 				}
 			} else {
 				if ext := filepath.Ext(info.Name()); ext == ".torrent" {
@@ -799,7 +804,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 					if info, err := ent.Info(); err == nil {
 						snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
-						if ok && snapInfo.Type() == segType &&
+						if ok && snapInfo.Type().Enum() == segType &&
 							snapInfo.From() == min {
 							lastSegments[segType] = info
 						}
@@ -826,17 +831,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 }
 
 func (u *snapshotUploader) maxSeedableHeader() uint64 {
-	var max uint64
-
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
-		for _, info := range list {
-			if u.seedable(info) && info.Type.Enum() == snaptype.Enums.Headers && info.To > max {
-				max = info.To
-			}
-		}
-	}
-
-	return max
+	return snapcfg.MaxSeedableSegment(u.cfg.chainConfig.ChainName, u.cfg.dirs.Snap)
 }
 
 func (u *snapshotUploader) minBlockNumber() uint64 {

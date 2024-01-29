@@ -176,9 +176,11 @@ func (f FileInfo) As(t Type) FileInfo {
 func IdxFiles(dir string) (res []FileInfo, err error) {
 	return FilesWithExt(dir, ".idx")
 }
+
 func Segments(dir string) (res []FileInfo, err error) {
 	return FilesWithExt(dir, ".seg")
 }
+
 func TmpFiles(dir string) (res []string, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {

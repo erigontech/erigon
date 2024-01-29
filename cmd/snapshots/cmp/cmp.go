@@ -454,19 +454,23 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 					return err
 				}
 
+				info1, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Name())
+
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
 					Produce:      false,
 					NoDownloader: true,
-				}, c.session1.LocalFsRoot(), logger)
+				}, info1.Dir(), info1.From, logger)
 
 				f1snaps.ReopenList([]string{ent1.Name()}, false)
+
+				info2, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
 					Produce:      false,
 					NoDownloader: true,
-				}, c.session2.LocalFsRoot(), logger)
+				}, info2.Dir(), info2.From, logger)
 
 				f2snaps.ReopenList([]string{ent2.Name()}, false)
 
@@ -733,19 +737,23 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					return err
 				}
 
+				info1, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
+
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
 					Produce:      false,
 					NoDownloader: true,
-				}, c.session1.LocalFsRoot(), logger)
+				}, info1.Dir(), info1.From, logger)
 
 				f1snaps.ReopenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
+
+				info2, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
 					Produce:      false,
 					NoDownloader: true,
-				}, c.session2.LocalFsRoot(), logger)
+				}, info2.Dir(), info2.From, logger)
 
 				f2snaps.ReopenList([]string{ent2.Body.Name(), ent2.Transactions.Name()}, false)
 

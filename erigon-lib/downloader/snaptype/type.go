@@ -269,7 +269,7 @@ var (
 	Headers = snapType{
 		enum: Enums.Headers,
 		versions: Versions{
-			Current:      2,
+			Current:      1, //2,
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.HeaderHash},
@@ -278,7 +278,7 @@ var (
 	Bodies = snapType{
 		enum: Enums.Bodies,
 		versions: Versions{
-			Current:      2,
+			Current:      1, //2,
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.BodyHash},
@@ -287,7 +287,7 @@ var (
 	Transactions = snapType{
 		enum: Enums.Transactions,
 		versions: Versions{
-			Current:      2,
+			Current:      1, //2,
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
@@ -296,7 +296,7 @@ var (
 	BorEvents = snapType{
 		enum: Enums.BorEvents,
 		versions: Versions{
-			Current:      2,
+			Current:      1, //2,
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.BorTxnHash},
@@ -305,7 +305,7 @@ var (
 	BorSpans = snapType{
 		enum: Enums.BorSpans,
 		versions: Versions{
-			Current:      2,
+			Current:      1, //2,
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.BorSpanId},

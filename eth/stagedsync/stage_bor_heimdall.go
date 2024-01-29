@@ -219,7 +219,7 @@ func BorHeimdallForward(
 			return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 		}
 
-		if blockNum > cfg.blockReader.BorSnapshots().SegmentsMin() {
+		if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
 			// SegmentsMin is only set if running as an uploader process (check SnapshotsCfg.snapshotUploader and
 			// UploadLocationFlag) when we remove snapshots based on FrozenBlockLimit and number of uploaded snapshots
 			// avoid calling this if block for blockNums <= SegmentsMin to avoid reinsertion of snapshots

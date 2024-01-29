@@ -335,6 +335,20 @@ func MergeLimit(networkName string, fromBlock uint64) uint64 {
 	return KnownCfg(networkName).MergeLimit(fromBlock)
 }
 
+func MaxSeedableSegment(chain string, dir string) uint64 {
+	var max uint64
+
+	if list, err := snaptype.Segments(dir); err == nil {
+		for _, info := range list {
+			if Seedable(chain, info) && info.Type.Enum() == snaptype.Enums.Headers && info.To > max {
+				max = info.To
+			}
+		}
+	}
+
+	return max
+}
+
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
 func MergeSteps(networkName string, fromBlock uint64) []uint64 {

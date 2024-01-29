@@ -272,18 +272,21 @@ type RoSnapshots struct {
 //   - all snapshots of given blocks range must exist - to make this blocks range available
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
-func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, logger log.Logger) *RoSnapshots {
-	return newRoSnapshots(cfg, snapDir, snaptype.BlockSnapshotTypes, logger)
+func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *RoSnapshots {
+	return newRoSnapshots(cfg, snapDir, snaptype.BlockSnapshotTypes, segmentsMin, logger)
 }
 
-func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, logger log.Logger) *RoSnapshots {
+func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snaptype.Type, segmentsMin uint64, logger log.Logger) *RoSnapshots {
 	var segs btree.Map[snaptype.Enum, *segments]
 
 	for _, snapType := range types {
 		segs.Set(snapType.Enum(), &segments{})
 	}
 
-	return &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger}
+	s.segmentsMin.Store(segmentsMin)
+
+	return s
 }
 
 func (s *RoSnapshots) Cfg() ethconfig.BlocksFreezing { return s.cfg }
@@ -579,7 +582,7 @@ func (s *RoSnapshots) ReopenFolder() error {
 }
 
 func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
-	files, _, err := typedSegments(s.dir, 0, types)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types)
 
 	if err != nil {
 		return err

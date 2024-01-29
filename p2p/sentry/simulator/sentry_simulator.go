@@ -65,7 +65,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		Enabled:      true,
 		Produce:      false,
 		NoDownloader: true,
-	}, "", logger)
+	}, "", 0, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
 
@@ -80,7 +80,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		Enabled:      true,
 		Produce:      false,
 		NoDownloader: true,
-	}, snapshotLocation, logger)
+	}, snapshotLocation, 0, logger)
 
 	if err := activeSnapshots.ReopenFolder(); err != nil {
 		return nil, err
