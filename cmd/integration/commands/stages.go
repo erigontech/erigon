@@ -776,8 +776,7 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 				return err
 			}
 			return nil
-		}
-		if unwind > 0 {
+		} else if unwind > 0 {
 			s := stage(sync, tx, nil, stages.BorHeimdall)
 
 			if unwind > s.BlockNumber {
@@ -792,9 +791,10 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 
 			progress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
 			if err != nil {
-				return fmt.Errorf("re-read BorHeimdall progress: %w", err)
+				return fmt.Errorf("re-read bor heimdall progress: %w", err)
 			}
-			logger.Info("Progress", "BorHeimdall", progress)
+
+			logger.Info("progress", "bor heimdall", progress)
 			return nil
 		}
 
