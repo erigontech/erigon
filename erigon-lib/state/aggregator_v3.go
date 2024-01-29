@@ -1365,6 +1365,9 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		go func() {
 			defer a.wg.Done()
 			defer a.mergeingFiles.Store(false)
+
+			//TODO: merge must have own semphore
+
 			defer func() { close(fin) }()
 			if err := a.MergeLoop(a.ctx); err != nil {
 				if errors.Is(err, context.Canceled) || errors.Is(err, common2.ErrStopped) {
