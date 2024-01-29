@@ -104,9 +104,9 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 
 	// Take lock as we interact with state.
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	headHash, _, err := f.getHead()
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	s, err := f.forkGraph.GetState(headHash, false)
@@ -116,11 +116,9 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 	}
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return fmt.Errorf("unable to retrieve state: %v", err)
 	}
 	if !proposer.IsSlashable(state.Epoch(s)) {
-		f.mu.Unlock()
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconProposer, state.GetEpochAtSlot(s.BeaconConfig(), h1.Slot))
@@ -132,7 +130,6 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return fmt.Errorf("unable to get domain: %v", err)
 	}
 	pk := proposer.PublicKey()
-	f.mu.Unlock()
 	if test {
 		f.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(proposerSlashing), proposerSlashing)
 		return nil
@@ -174,30 +171,26 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 
 	// Take lock as we interact with state.
 	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	headHash, _, err := f.getHead()
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return fmt.Errorf("unable to retrieve state: %v", err)
 	}
 	wc := validator.WithdrawalCredentials()
 
 	if wc[0] != f.beaconCfg.BLSWithdrawalPrefixByte {
-		f.mu.Unlock()
 		return fmt.Errorf("invalid withdrawal credentials prefix")
 	}
 	genesisValidatorRoot := s.GenesisValidatorsRoot()
-	f.mu.Unlock()
 	// Perform full validation if requested.
 	if !test {
 		// Check the validator's withdrawal credentials against the provided message.
