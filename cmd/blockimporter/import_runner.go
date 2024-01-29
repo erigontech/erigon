@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pion/udp/pkg/sync"
 )
 
 type Settings struct {
@@ -38,32 +40,55 @@ func RunImport(settings *Settings, blockSource BlockSource, secondaryBlocksSourc
 		panic(err)
 	}
 
-	blockNum := state.BlockNum()
 	blockSource = makeBlockSource(settings, blockSource, secondaryBlocksSource)
-	for {
-		select {
-		case <-settings.Terminated:
-			{
-				return nil
+
+	blocksChan := make(chan []types.Block, 10)
+
+	var resultErr error
+	wg := sync.NewWaitGroup()
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		blockNum := state.BlockNum()
+
+		for {
+			blocks, err := blockSource.PollBlocks(blockNum)
+			if err != nil {
+				resultErr = fmt.Errorf("failed to poll blocks: %w", err)
+				close(blocksChan)
+				close(settings.Terminated)
+				return
 			}
 
-		default:
-			{
-				blocks, err := blockSource.PollBlocks(blockNum)
-				if err != nil {
-					return fmt.Errorf("failed to poll blocks: %w", err)
-				}
+			blockNum += uint64(len(blocks))
 
-				for _, block := range blocks {
-					if err := state.ProcessBlock(block); err != nil {
-						return fmt.Errorf("failed to process block: %w", err)
-					}
+			select {
+			case blocksChan <- blocks:
+			case <-settings.Terminated:
+				close(blocksChan)
+				return
+			}
+		}
+	}()
 
-					blockNum += 1
+	go func() {
+		defer wg.Done()
+
+		for blocks := range blocksChan {
+			for _, block := range blocks {
+				if err := state.ProcessBlock(block); err != nil {
+					resultErr = fmt.Errorf("failed to process block: %w", err)
+					close(settings.Terminated)
+					return
 				}
 			}
 		}
-	}
+	}()
+
+	wg.Wait()
+	return resultErr
 }
 
 func makeBlockSource(settings *Settings, blockSource BlockSource, secondaryBlockSource BlockSource) BlockSource {
