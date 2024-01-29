@@ -1440,8 +1440,6 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	return nil
 }
 
-const blockRetireAllowedWeight int64 = 1
-
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
 	if maxBlockNum > br.maxScheduledBlock.Load() {
 		br.maxScheduledBlock.Store(maxBlockNum)
@@ -1452,13 +1450,15 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	}
 
 	go func() {
-
 		defer br.working.Store(false)
+
 		if br.snBuildAllowed != nil {
-			if !br.snBuildAllowed.TryAcquire(blockRetireAllowedWeight) {
+			//we are inside own goroutine - it's fine to block here
+			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
+				br.logger.Warn("[snapshots] retire blocks", "err", err)
 				return
 			}
-			defer br.snBuildAllowed.Release(blockRetireAllowedWeight)
+			defer br.snBuildAllowed.Release(1)
 		}
 
 		for {
