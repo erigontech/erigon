@@ -10,6 +10,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/prysmaticlabs/go-bitfield"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -53,6 +55,7 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinel.SentinelClient,
 		sentinel:      sentinel,
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
+		networkConfig: networkConfig,
 	}
 }
 
@@ -196,9 +199,19 @@ func (b *BeaconRpcP2P) PropagateBlock(block *cltypes.SignedBeaconBlock) error {
 	return err
 }
 
-func (b *BeaconRpcP2P) AdvertiseSubnetsForEpoch(ctx context.Context, epoch int) (func(), error) {
-	ids := []uint64{}
-
+func (b *BeaconRpcP2P) AdvertiseSubnetsForEpoch(ctx context.Context, epoch uint64) (func(), error) {
+	nodeInfo, err := b.sentinel.GetNodeInfo(ctx, &sentinel.EmptyMessage{})
+	if err != nil {
+		return nil, err
+	}
+	ids, err := b.networkConfig.ComputeSubscribedSubnets(enode.ID(nodeInfo.NodeId), epoch)
+	if err != nil {
+		return nil, err
+	}
+	bitvector := bitfield.NewBitvector64()
+	for _, v := range ids {
+		bitvector.SetBitAt(v, true)
+	}
 	topics := []string{}
 	for _, v := range ids {
 		topics = append(topics, fmt.Sprintf("beacon_attestation_%d", v))
@@ -211,12 +224,17 @@ func (b *BeaconRpcP2P) AdvertiseSubnetsForEpoch(ctx context.Context, epoch int) 
 		return nil, err
 	}
 	_, err = b.sentinel.UpdateEnr(ctx, &sentinel.EnrEntry{
-		Key: b.networkConfig.AttSubnetKey,
+		Key:  b.networkConfig.AttSubnetKey,
+		Data: bitvector.Bytes(),
 	})
-	return func() {
-		// server should unsubscribe
-		sub.CloseSend()
+	if err != nil {
 		cn()
+		return nil, err
+	}
+	return func() {
+		// server should unsubscribe at this point
+		cn()
+		sub.CloseSend()
 	}, nil
 }
 

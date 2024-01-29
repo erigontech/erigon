@@ -29,6 +29,14 @@ type SentinelClientDirect struct {
 	server sentinel.SentinelServer
 }
 
+func (s *SentinelClientDirect) UpdateEnr(ctx context.Context, in *sentinel.EnrEntry, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+	return s.server.UpdateEnr(ctx, in)
+}
+
+func (s *SentinelClientDirect) GetNodeInfo(ctx context.Context, in *sentinel.EmptyMessage, opts ...grpc.CallOption) (*sentinel.NodeData, error) {
+	return s.server.GetNodeInfo(ctx, in)
+}
+
 func NewSentinelClientDirect(sentinel sentinel.SentinelServer) sentinel.SentinelClient {
 	return &SentinelClientDirect{server: sentinel}
 }

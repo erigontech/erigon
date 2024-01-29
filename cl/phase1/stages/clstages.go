@@ -648,11 +648,16 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					if args.seenEpoch-lastSubscriptionEpoch > cfg.networkCfg.EpochsPerSubnetSubscription {
-
+						logger.Info("advertising new attnet", "epoch", args.seenEpoch)
+						closer, err := cfg.rpc.AdvertiseSubnetsForEpoch(ctx, args.seenEpoch)
+						if err != nil {
+							return err
+						}
 						lastSubscriptionEpoch = args.seenEpoch
 						if closeLastSubscription != nil {
 							closeLastSubscription()
 						}
+						closeLastSubscription = closer
 					}
 					return nil
 				},
