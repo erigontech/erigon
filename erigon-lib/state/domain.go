@@ -2153,6 +2153,9 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
 func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
+	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
+	}
 	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx)
 	if !canPrune {
 		return stat, nil
@@ -2254,10 +2257,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
 	}
 	mxPruneTookDomain.ObserveDuration(st)
-
-	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
-		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
-	}
 	return stat, nil
 }
 
