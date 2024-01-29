@@ -224,10 +224,11 @@ func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Con
 
 	result, err := json.Marshal(marshalled)
 	if err != nil {
-		logger.Error("problem logging receipts upon hash mismatch", "err", err)
+		logger.Error("marshalling error when logging receipts", "err", err)
+		return
 	}
 
-	logger.Info("marshalled receipts causing hash mismatch", "result", string(result))
+	logger.Info("marshalled receipts", "result", string(result))
 }
 
 func rlpHash(x interface{}) (h libcommon.Hash) {
