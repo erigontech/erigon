@@ -2094,7 +2094,7 @@ func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
 		}
 		minStep = min(minStep, ^binary.BigEndian.Uint64(vs))
 
-		k, v, err = c.PrevNoDup()
+		k, v, err = c.PrevNoDup() //nolint
 	} else {
 		k, v, err = c.First()
 	}
