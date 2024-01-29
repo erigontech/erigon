@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_other_address-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Shanghai-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_0-selfdestruct_other_address-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -165,9 +166,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_to_self-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Shanghai-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_0-selfdestruct_to_self-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -315,9 +317,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_other_address-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Shanghai-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_100000-selfdestruct_other_address-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -487,9 +490,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Shanghai-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_to_self-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Shanghai-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_100000-selfdestruct_to_self-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -659,9 +663,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_other_address-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Cancun-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_0-selfdestruct_other_address-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -845,9 +850,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=0-selfdestruct_to_self-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Cancun-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_0-selfdestruct_to_self-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1031,9 +1037,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_other_address-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Cancun-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_100000-selfdestruct_other_address-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
@@ -1223,9 +1230,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Cancun-call_times=1-recreate_times=1-selfdestruct_contract_initial_balance=100000-selfdestruct_to_self-create_opcode=CREATE2": {
+    "tests/cancun/eip6780_selfdestruct/test_selfdestruct.py::test_recreate_self_destructed_contract_different_txs[fork_Cancun-blockchain_test-call_times_1-recreate_times_1-selfdestruct_contract_initial_balance_100000-selfdestruct_to_self-create_opcode_CREATE2]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-6780.md",
             "reference-spec-version": "2f8299df31bb8173618901a03a8366a3183479b0"
         },
