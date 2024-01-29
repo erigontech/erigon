@@ -95,7 +95,7 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 		}
 		committees_per_slot := s.CommitteeCount(uint64(x.Slot) / v.BeaconChainCfg.SlotsPerEpoch)
 		subnet := v.BeaconChainCfg.ComputeSubnetForAttestation(committees_per_slot, uint64(x.Slot), uint64(x.CommitteeIndex))
-		topicString := fmt.Sprintf("/eth2/%x/beacon_attestation_%s/%s", digest, subnet, "ssz_snappy")
+		topicString := fmt.Sprintf("/eth2/%x/beacon_attestation_%d/%s", digest, subnet, "ssz_snappy")
 		topics = append(topics, topicString)
 	}
 
