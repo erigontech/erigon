@@ -2148,6 +2148,7 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 }
 
 // TODO test idea. Generate 4 keys with updates for several steps. Count commitment after each prune over 4 known keys.
+//   минус локалити - не умеет отсеивать несуществующие ключи, и это не шардед индекс а кросс шардед (1 файл на все кв или еф файлы)
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
@@ -2161,7 +2162,6 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		return stat, nil
 	}
 	if step > maxPrunableStep {
-		fmt.Printf("prune domain %s: step %d is too big, max is %d\n", dc.d.filenameBase, step, maxPrunableStep)
 		step = maxPrunableStep
 	}
 
