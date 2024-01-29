@@ -1354,7 +1354,6 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		}
 		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
-		//TODO: merge must have own semphore and own goroutine
 		if dbg.NoMerge() {
 			return
 		}
