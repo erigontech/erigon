@@ -713,29 +713,6 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 	)
 }
 
-func (ac *AggregatorV3Context) maximinTxNumAggregated(cold bool) uint64 {
-	return min(
-		ac.maxTxNumInDomainFiles(cold),
-		ac.maxTxNumInIndexFiles(cold),
-		ac.maxTxNumInHistoryFiles(cold))
-}
-
-func (ac *AggregatorV3Context) maxTxNumInHistoryFiles(cold bool) uint64 {
-	return min(
-		ac.account.hc.maxTxNumInFiles(cold),
-		ac.code.hc.maxTxNumInFiles(cold),
-		ac.storage.hc.maxTxNumInFiles(cold),
-		ac.commitment.hc.maxTxNumInFiles(cold))
-}
-
-func (ac *AggregatorV3Context) maxTxNumInIndexFiles(cold bool) uint64 {
-	return min(
-		ac.logAddrs.maxTxNumInFiles(cold),
-		ac.logTopics.maxTxNumInFiles(cold),
-		ac.tracesFrom.maxTxNumInFiles(cold),
-		ac.tracesTo.maxTxNumInFiles(cold))
-}
-
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
 	return ac.somethingToPrune(tx)
 }
@@ -904,7 +881,6 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	}
 
 	var txFrom, step uint64 // txFrom is always 0 to avoid dangling keys in indices/hist
-	//txTo := ac.maximinTxNumAggregated(false)
 	txTo := ac.a.minimaxTxNumInFiles.Load()
 	if txTo > 0 {
 		// txTo is first txNum in next step, has to go 1 tx behind to get correct step number
