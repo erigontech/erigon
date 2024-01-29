@@ -87,7 +87,7 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 	}
 
 	//calculate gossip_subnets
-	var topics []string
+	topics := make([]string, 0, len(req))
 	for _, x := range req {
 		// skip ones we are aggregator for
 		if !x.IsAggregator {
