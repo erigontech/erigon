@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -62,7 +63,15 @@ func extractBlobSideCarIndex(topic string) int {
 	return blobIndex
 }
 
-//BanPeer(context.Context, *Peer) (*EmptyMessage, error)
+func (s *SentinelServer) UpdateEnr(_ context.Context, e *sentinelrpc.EnrEntry) (*sentinelrpc.EmptyMessage, error) {
+	n := s.sentinel.LocalNode()
+	if e.Remove {
+		n.Delete(enr.WithEntry(e.Key, e.Data))
+		return &sentinelrpc.EmptyMessage{}, nil
+	}
+	n.Set(enr.WithEntry(e.Key, e.Data))
+	return &sentinelrpc.EmptyMessage{}, nil
+}
 
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
 	var pid peer.ID

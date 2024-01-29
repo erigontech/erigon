@@ -28,6 +28,7 @@ const (
 	Sentinel_PenalizePeer_FullMethodName    = "/sentinel.Sentinel/PenalizePeer"
 	Sentinel_RewardPeer_FullMethodName      = "/sentinel.Sentinel/RewardPeer"
 	Sentinel_PublishGossip_FullMethodName   = "/sentinel.Sentinel/PublishGossip"
+	Sentinel_UpdateEnr_FullMethodName       = "/sentinel.Sentinel/UpdateEnr"
 )
 
 // SentinelClient is the client API for Sentinel service.
@@ -43,6 +44,7 @@ type SentinelClient interface {
 	PenalizePeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
 	RewardPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
 	PublishGossip(ctx context.Context, in *GossipData, opts ...grpc.CallOption) (*EmptyMessage, error)
+	UpdateEnr(ctx context.Context, in *EnrEntry, opts ...grpc.CallOption) (*EmptyMessage, error)
 }
 
 type sentinelClient struct {
@@ -157,6 +159,15 @@ func (c *sentinelClient) PublishGossip(ctx context.Context, in *GossipData, opts
 	return out, nil
 }
 
+func (c *sentinelClient) UpdateEnr(ctx context.Context, in *EnrEntry, opts ...grpc.CallOption) (*EmptyMessage, error) {
+	out := new(EmptyMessage)
+	err := c.cc.Invoke(ctx, Sentinel_UpdateEnr_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SentinelServer is the server API for Sentinel service.
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility
@@ -170,6 +181,7 @@ type SentinelServer interface {
 	PenalizePeer(context.Context, *Peer) (*EmptyMessage, error)
 	RewardPeer(context.Context, *Peer) (*EmptyMessage, error)
 	PublishGossip(context.Context, *GossipData) (*EmptyMessage, error)
+	UpdateEnr(context.Context, *EnrEntry) (*EmptyMessage, error)
 	mustEmbedUnimplementedSentinelServer()
 }
 
@@ -203,6 +215,9 @@ func (UnimplementedSentinelServer) RewardPeer(context.Context, *Peer) (*EmptyMes
 }
 func (UnimplementedSentinelServer) PublishGossip(context.Context, *GossipData) (*EmptyMessage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PublishGossip not implemented")
+}
+func (UnimplementedSentinelServer) UpdateEnr(context.Context, *EnrEntry) (*EmptyMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateEnr not implemented")
 }
 func (UnimplementedSentinelServer) mustEmbedUnimplementedSentinelServer() {}
 
@@ -382,6 +397,24 @@ func _Sentinel_PublishGossip_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Sentinel_UpdateEnr_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnrEntry)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).UpdateEnr(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentinel_UpdateEnr_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).UpdateEnr(ctx, req.(*EnrEntry))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Sentinel_ServiceDesc is the grpc.ServiceDesc for Sentinel service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -420,6 +453,10 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PublishGossip",
 			Handler:    _Sentinel_PublishGossip_Handler,
+		},
+		{
+			MethodName: "UpdateEnr",
+			Handler:    _Sentinel_UpdateEnr_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

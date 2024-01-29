@@ -301,6 +301,8 @@ github.com/ledgerwatch/interfaces v0.0.0-20240127222926-45bf6c8afcdc h1:TKD8cUbm
 github.com/ledgerwatch/interfaces v0.0.0-20240127222926-45bf6c8afcdc/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
 github.com/ledgerwatch/interfaces v0.0.0-20240127223043-14b9c2d822e1 h1:4UL768LNFjQ0zQqFDDPJBABRnlOfsYj8zPbUPE4EiA0=
 github.com/ledgerwatch/interfaces v0.0.0-20240127223043-14b9c2d822e1/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
+github.com/ledgerwatch/interfaces v0.0.0-20240129024129-89868cb89103 h1:3u3ByS0Ir9ga+DQGfSRu5hwtavCi+pnQtcYFHS6vve4=
+github.com/ledgerwatch/interfaces v0.0.0-20240129024129-89868cb89103/go.mod h1:ugQv1QllJzBny3cKZKxUrSnykkjkBgm27eQM6dnGAcc=
 github.com/ledgerwatch/log/v3 v3.9.0 h1:iDwrXe0PVwBC68Dd94YSsHbMgQ3ufsgjzXtFNFVZFRk=
 github.com/ledgerwatch/log/v3 v3.9.0/go.mod h1:EiAY6upmI/6LkNhOVxb4eVsmsP11HZCnZ3PlJMjYiqE=
 github.com/ledgerwatch/secp256k1 v1.0.0 h1:Usvz87YoTG0uePIV8woOof5cQnLXGYa162rFf3YnwaQ=
