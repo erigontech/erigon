@@ -2073,13 +2073,13 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx) (can bool, maxPrunableSt
 func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
 	pkr, err := GetExecV3PruneProgress(tx, dc.d.keysTable)
 	if err != nil {
-		dc.d.logger.Warn("CanPruneFrom: failed to get progress", "domain", dc.d.filenameBase, "error", err)
+		dc.d.logger.Warn("smallestStepForPruning: failed to get progress", "domain", dc.d.filenameBase, "error", err)
 		return math.MaxUint64
 	}
 
 	c, err := tx.CursorDupSort(dc.d.keysTable)
 	if err != nil {
-		dc.d.logger.Warn("CanPruneFrom: failed to open cursor", "domain", dc.d.filenameBase, "error", err)
+		dc.d.logger.Warn("smallestStepForPruning: failed to open cursor", "domain", dc.d.filenameBase, "error", err)
 		return math.MaxUint64
 	}
 	defer c.Close()
@@ -2098,7 +2098,11 @@ func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
 	} else {
 		k, v, err = c.First()
 	}
-	if err != nil || k == nil {
+	if k == nil {
+		return math.MaxUint64
+	}
+	if err != nil {
+		dc.d.logger.Warn("smallestStepForPruning: failed to seek", "domain", dc.d.filenameBase, "error", err)
 		return math.MaxUint64
 	}
 
@@ -2107,10 +2111,7 @@ func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
 	if err != nil {
 		return math.MaxUint64
 	}
-	minStep = min(minStep, ^binary.BigEndian.Uint64(fv))
-
-	//fmt.Printf("CanPruneFrom (%s) %x minFound %d\n", dc.d.filenameBase, k, minStep)
-	return minStep
+	return min(minStep, ^binary.BigEndian.Uint64(fv))
 }
 
 type DomainPruneStat struct {
