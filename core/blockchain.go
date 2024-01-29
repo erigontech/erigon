@@ -18,10 +18,10 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/goccy/go-json"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -29,6 +29,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
@@ -95,19 +96,14 @@ func ExecuteBlockEphemerally(
 	gp := new(GasPool)
 	gp.AddGas(block.GasLimit()).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock())
 
-	var (
-		rejectedTxs []*RejectedTx
-		includedTxs types.Transactions
-		receipts    types.Receipts
-	)
-
 	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger); err != nil {
 		return nil, err
 	}
 
+	var rejectedTxs []*RejectedTx
+	includedTxs := make(types.Transactions, 0, block.Transactions().Len())
+	receipts := make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
-	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
-	marshalledReceipts := make([]map[string]interface{}, 0, block.Transactions().Len())
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -138,18 +134,13 @@ func ExecuteBlockEphemerally(
 				receipts = append(receipts, receipt)
 			}
 		}
-
-		marshalledReceipts = append(marshalledReceipts, ethutils.MarshalReceipt(receipt, tx, chainConfig, header, tx.Hash(), true))
 	}
 
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
-		json, err := json.MarshalIndent(marshalledReceipts, "", "  ")
-		if err != nil {
-			return nil, err
+		if dbg.LogMarshalledReceiptsUponHashMismatch() {
+			logMarshalledReceiptsUponHashMismatch(receipts, includedTxs, chainConfig, header, logger)
 		}
-
-		log.Info("receipts", "value", string(json))
 
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
@@ -210,6 +201,45 @@ func ExecuteBlockEphemerally(
 	}
 
 	return execRs, nil
+}
+
+func logMarshalledReceiptsUponHashMismatch(
+	receipts types.Receipts,
+	includedTxns types.Transactions,
+	chainConfig *chain.Config,
+	header *types.Header,
+	logger log.Logger,
+) {
+	if len(receipts) == 0 {
+		// no-op, can happen if vmConfig.StatelessExec is true
+		return
+	}
+
+	// note we do not return errors from this func since this is a debug-only
+	// informative feature that is best-effort and should not interfere with execution
+	if len(receipts) != len(includedTxns) {
+		logger.Error(
+			"problem logging marshalled receipts upon hash mismatch",
+			"err", "receipts and included txns sizes differ",
+			"receiptsLen", receipts.Len(),
+			"includedTxnsLen", includedTxns.Len(),
+		)
+
+		return
+	}
+
+	marshalled := make([]map[string]interface{}, len(receipts))
+	for i, receipt := range receipts {
+		txn := includedTxns[i]
+		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true))
+	}
+
+	result, err := json.Marshal(marshalled)
+	if err != nil {
+		logger.Error("problem logging receipts upon hash mismatch", "err", err)
+	}
+
+	logger.Info("marshalled receipts causing hash mismatch", "result", string(result))
 }
 
 func rlpHash(x interface{}) (h libcommon.Hash) {

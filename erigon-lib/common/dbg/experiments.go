@@ -299,3 +299,19 @@ func SnapshotVersion() uint8 {
 	})
 	return snapshotVersion
 }
+
+var (
+	logMarshalledReceiptsUponHashMismatch     bool
+	logMarshalledReceiptsUponHashMismatchOnce sync.Once
+)
+
+func LogMarshalledReceiptsUponHashMismatch() bool {
+	logMarshalledReceiptsUponHashMismatchOnce.Do(func() {
+		v, _ := os.LookupEnv("LOG_MARSHALLED_RECEIPTS_UPON_HASH_MISMATCH")
+		if v == "true" {
+			logMarshalledReceiptsUponHashMismatch = true
+			log.Info("[Experiment]", "LOG_MARSHALLED_RECEIPTS_UPON_HASH_MISMATCH", logMarshalledReceiptsUponHashMismatch)
+		}
+	})
+	return logMarshalledReceiptsUponHashMismatch
+}
