@@ -8,7 +8,9 @@ Block importer is a process that periodically polls the blocks from the EVMC can
 blockimporter [--evm <EVMC_CANISTER_URL>] [--db <DATABASE_PATH>] [--secondary-blocks-url <PATH TO A SECONDARY SOURCE OF BLOCKS>]
 ```
 
-# Running Ottrerscan with blockimporter
+# Running blockimporter with rpcdaemon
+
+You can use rpcdaemon to setup an endpoint with JSON RPC server to access the blockchain state from blockimporter.
 
 To build the project just run in the project folder.
 
@@ -16,7 +18,19 @@ To build the project just run in the project folder.
 git checkout origin/evmc_importer
 make
 ```
+
 The binary artifacts can be found in `build/bin` folder.
+
+Now you can run two processes together sharing the same Db path:
+
+```
+build/bin/blockimporter --evm <EVMC_CANISTER_URL> --db <DB_PATH> &\
+build/bin/rpcdaemon --datadir <DB_PATH> --http.corsdomain * --http.api=eth,erigon,ots
+```
+
+In this case the JSON RPC API can be accessed by address localhost:8545 (which is a default setting for the `rpcdaemon` that can be changed by passing `--http.port` argument). For more options run `build/bin/rpcdaemon --help`
+
+# Setuping the otterscan block explorer
 
 Otterscan can be run with `blockimporter` using the integration via rpcdaemon:
 
@@ -25,15 +39,6 @@ build/bin/blockimporter --evm <EVMC_CANISTER_URL> --db <DB_PATH> &\
 build/bin/rpcdaemon --datadir <DB_PATH> --http.corsdomain * --http.api=eth,erigon,ots &\
 docker run --rm -p 5100:80 --name otterscan -d --env ERIGON_URL=localhost:8545 otterscan/otterscan:v1.29.0
 ```
-
-In a case when you don't need blocks explorer frontend just remove the last line:
-
-```
-build/bin/blockimporter --evm <EVMC_CANISTER_URL> --db <DB_PATH> &\
-build/bin/rpcdaemon --datadir <DB_PATH> --http.corsdomain * --http.api=eth,erigon,ots
-```
-
-In this case the Erigon API can be accessed by address localhost:8545 (which is a default setting for the rpcdaemon that can be changed by passing `--http.port` argument). For more options run `build/bin/rpcdaemon --help`
 
 Another option is to us the docker-compose file:
 
