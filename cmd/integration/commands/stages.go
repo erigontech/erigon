@@ -786,11 +786,11 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 
 			snapshotsMaxBlock := borSn.BlocksAvailable()
 			if unwind <= snapshotsMaxBlock {
-				return fmt.Errorf(fmt.Sprintf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock))
+				return fmt.Errorf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock)
 			}
 
 			if unwind > stageState.BlockNumber {
-				return fmt.Errorf(fmt.Sprintf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber))
+				return fmt.Errorf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber)
 			}
 
 			unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber)
