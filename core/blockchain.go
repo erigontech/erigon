@@ -139,7 +139,7 @@ func ExecuteBlockEphemerally(
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
 		if dbg.LogHashMismatchReason() {
-			logMarshalledReceiptsUponHashMismatch(receipts, includedTxs, chainConfig, header, logger)
+			logReceipts(receipts, includedTxs, chainConfig, header, logger)
 		}
 
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
@@ -203,13 +203,7 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-func logMarshalledReceiptsUponHashMismatch(
-	receipts types.Receipts,
-	includedTxns types.Transactions,
-	chainConfig *chain.Config,
-	header *types.Header,
-	logger log.Logger,
-) {
+func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
 	if len(receipts) == 0 {
 		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
 		return
@@ -217,21 +211,15 @@ func logMarshalledReceiptsUponHashMismatch(
 
 	// note we do not return errors from this func since this is a debug-only
 	// informative feature that is best-effort and should not interfere with execution
-	if len(receipts) != len(includedTxns) {
-		logger.Error(
-			"problem logging marshalled receipts upon hash mismatch",
-			"err", "receipts and included txns sizes differ",
-			"receiptsLen", receipts.Len(),
-			"includedTxnsLen", includedTxns.Len(),
-		)
-
+	if len(receipts) != len(txns) {
+		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
 		return
 	}
 
 	marshalled := make([]map[string]interface{}, len(receipts))
 	for i, receipt := range receipts {
-		txn := includedTxns[i]
-		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true))
+		txn := txns[i]
+		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true))
 	}
 
 	result, err := json.Marshal(marshalled)
