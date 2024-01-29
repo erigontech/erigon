@@ -39,6 +39,7 @@ type Cfg struct {
 	rpc             *rpc.BeaconRpcP2P
 	genesisCfg      *clparams.GenesisConfig
 	beaconCfg       *clparams.BeaconChainConfig
+	networkCfg      *clparams.NetworkConfig
 	executionClient execution_client.ExecutionEngine
 	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
@@ -69,6 +70,7 @@ func ClStagesCfg(
 	antiquary *antiquary.Antiquary,
 	genesisCfg *clparams.GenesisConfig,
 	beaconCfg *clparams.BeaconChainConfig,
+	networkCfg *clparams.NetworkConfig,
 	state *state.CachingBeaconState,
 	executionClient execution_client.ExecutionEngine,
 	gossipManager *network2.GossipManager,
@@ -89,6 +91,7 @@ func ClStagesCfg(
 		beaconCfg:       beaconCfg,
 		state:           state,
 		executionClient: executionClient,
+		networkCfg:      networkCfg,
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
 		tmpdir:          tmpdir,
@@ -109,6 +112,7 @@ const (
 	CatchUpBlocks            StageName = "CatchUpBlocks"
 	ForkChoice               StageName = "ForkChoice"
 	ListenForForks           StageName = "ListenForForks"
+	UpdateNetworkState       StageName = "UpdateNetworkState"
 	CleanupAndPruning        StageName = "CleanupAndPruning"
 	SleepForSlot             StageName = "SleepForSlot"
 	DownloadHistoricalBlocks StageName = "DownloadHistoricalBlocks"
@@ -168,13 +172,13 @@ digraph {
 
     CatchUpBlocks -> ForkChoice
     ForkChoice -> ListenForForks
-
-    SleepForSlot -> WaitForPeers
-
+		ListenForForks -> UpdateNetworkState
     ListenForForks -> ForkChoice
     ListenForForks -> SleepForSlot
-    ListenForForks -> CleanupAndPruning
+    UpdateNetworkState -> CleanupAndPruning
+
     CleanupAndPruning -> SleepForSlot
+		SleepForSlot -> WaitForPeers
 }
 */
 
@@ -201,6 +205,11 @@ func ConsensusClStages(ctx context.Context,
 	// Probably the correct long term solution is to create a third generic parameter that defines shared state
 	// but for now, all it would have are the two gossip sources and the forkChoicesSinceReorg, so i don't think its worth it (yet).
 	shouldForkChoiceSinceReorg := false
+
+	// NOTE: now we have added two more things to the global state. is it worth it? who knows.
+
+	lastSubscriptionEpoch := uint64(0)
+	var closeLastSubscription func()
 
 	// clstages run in a single thread - so we don't need to worry about any synchronization.
 	return &clstages.StageGraph[*Cfg, Args]{
@@ -589,11 +598,11 @@ func ConsensusClStages(ctx context.Context,
 					if x := MetaCatchingUp(args); x != "" {
 						return x
 					}
+					// if a reorg was found during the stage, we should go to fork choice stage.
 					if shouldForkChoiceSinceReorg {
 						return ForkChoice
 					}
-					return CleanupAndPruning
-
+					return UpdateNetworkState
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					slotTime := utils.GetSlotTime(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot, args.targetSlot).Add(
@@ -627,6 +636,25 @@ func ConsensusClStages(ctx context.Context,
 						logger.Debug("extra block received", "slot", args.seenSlot)
 					}
 					return tx.Commit()
+				},
+			},
+			UpdateNetworkState: {
+				Description: `updating things like attnets`,
+				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
+					if x := MetaCatchingUp(args); x != "" {
+						return x
+					}
+					return CleanupAndPruning
+				},
+				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
+					if args.seenEpoch-lastSubscriptionEpoch > cfg.networkCfg.EpochsPerSubnetSubscription {
+
+						lastSubscriptionEpoch = args.seenEpoch
+						if closeLastSubscription != nil {
+							closeLastSubscription()
+						}
+					}
+					return nil
 				},
 			},
 			CleanupAndPruning: {

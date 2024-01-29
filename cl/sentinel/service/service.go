@@ -73,6 +73,12 @@ func (s *SentinelServer) UpdateEnr(_ context.Context, e *sentinelrpc.EnrEntry) (
 	return &sentinelrpc.EmptyMessage{}, nil
 }
 
+func (s *SentinelServer) GetNodeInfo(context.Context, *sentinelrpc.EmptyMessage) (*sentinelrpc.NodeData, error) {
+	return &sentinelrpc.NodeData{
+		NodeId: s.sentinel.LocalNode().ID().Bytes(),
+	}, nil
+}
+
 func (s *SentinelServer) BanPeer(_ context.Context, p *sentinelrpc.Peer) (*sentinelrpc.EmptyMessage, error) {
 	var pid peer.ID
 	if err := pid.UnmarshalText([]byte(p.Pid)); err != nil {

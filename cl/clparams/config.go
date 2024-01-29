@@ -22,12 +22,15 @@ import (
 	"path"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/eth2shuffle"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"gopkg.in/yaml.v2"
 
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/p2p/enode"
 )
 
 type CaplinConfig struct {
@@ -122,6 +125,9 @@ type NetworkConfig struct {
 	MaxRequestBlocks                uint64        `json:"max_request_blocks"`                 // Maximum number of blocks in a single request
 	MaxChunkSize                    uint64        `json:"max_chunk_size"`                     // The maximum allowed size of uncompressed req/resp chunked responses.
 	AttestationSubnetCount          uint64        `json:"attestation_subnet_count"`           // The number of attestation subnets used in the gossipsub protocol.
+	AttestationSubnetExtraBits      uint64        `json:"attestation_subnet_extra_bits"`      // The number of extra bits of a NodeId to use when mapping to a subscribed subnet
+	SubnetsPerNode                  uint64        `json:"subnets_per_node"`                   // The number of long-lived subnets a beacon node should be subscribed to.
+	EpochsPerSubnetSubscription     uint64        `json:"epochs_per_subnet_subscription"`     // Number of epochs on a subnet subscription (~27 hours)
 	TtfbTimeout                     time.Duration `json:"ttfbt_timeout"`                      // The maximum time to wait for first byte of request response (time-to-first-byte).
 	RespTimeout                     time.Duration `json:"resp_timeout"`                       // The maximum time for complete response transfer.
 	AttestationPropagationSlotRange uint64        `json:"attestation_propagation_slot_range"` // The maximum number of slots during which an attestation can be propagated.
@@ -138,6 +144,49 @@ type NetworkConfig struct {
 	ContractDeploymentBlock uint64 // the eth1 block in which the deposit contract is deployed.
 	BootNodes               []string
 	StaticPeers             []string
+}
+
+func (b *NetworkConfig) AttestationSubnetPrefixBits() int {
+	return int(math.Ceil(math.Log2(float64(b.AttestationSubnetCount))) + float64(b.AttestationSubnetExtraBits))
+}
+
+func (b *NetworkConfig) ComputeSubscribedSubnets(nodeID enode.ID, epoch uint64) ([]uint64, error) {
+	subs := []uint64{}
+	for i := uint64(0); i < b.SubnetsPerNode; i++ {
+		sub, err := b.ComputeSubscribedSubnet(nodeID, epoch, i)
+		if err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	return subs, nil
+}
+
+// taken partially from prysm
+
+func (b *NetworkConfig) ComputeSubscribedSubnet(nodeID enode.ID, epoch uint64, index uint64) (uint64, error) {
+	nodeOffset, nodeIdPrefix := b.ComputeOffsetAndPrefix(nodeID)
+	seedInput := (nodeOffset + uint64(epoch)) / b.EpochsPerSubnetSubscription
+	sha256Optimized := utils.OptimizedSha256NotThreadSafe()
+	permSeed := sha256Optimized(ssz.Uint64SSZ(seedInput))
+	eth2ShuffleHash := func(data []byte) []byte {
+		hashed := sha256Optimized(data)
+		return hashed[:]
+	}
+	permutated_prefix := eth2shuffle.PermuteIndex(eth2ShuffleHash, 90, nodeIdPrefix, 1<<b.AttestationSubnetPrefixBits(), permSeed)
+	subnet := (uint64(permutated_prefix) + index) % b.AttestationSubnetCount
+	return subnet, nil
+}
+
+func (b *NetworkConfig) ComputeOffsetAndPrefix(nodeID enode.ID) (uint64, uint64) {
+	num := uint256.NewInt(0).SetBytes(nodeID.Bytes())
+	remBits := 256 - b.AttestationSubnetPrefixBits()
+	// Number of bits left will be representable by a uint64 value.
+	nodeIdPrefix := num.Rsh(num, uint(remBits)).Uint64()
+	// Reinitialize big int.
+	num = uint256.NewInt(0).SetBytes(nodeID.Bytes())
+	nodeOffset := num.Mod(num, uint256.NewInt(b.EpochsPerSubnetSubscription)).Uint64()
+	return nodeOffset, nodeIdPrefix
 }
 
 type GenesisConfig struct {
@@ -158,6 +207,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		EpochsPerSubnetSubscription:     2 << 8, // 256
+		AttestationSubnetExtraBits:      0,
+		SubnetsPerNode:                  2,
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -178,6 +230,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		EpochsPerSubnetSubscription:     2 << 8, // 256
+		AttestationSubnetExtraBits:      0,
+		SubnetsPerNode:                  2,
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -198,6 +253,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		EpochsPerSubnetSubscription:     2 << 8, // 256
+		AttestationSubnetExtraBits:      0,
+		SubnetsPerNode:                  2,
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -218,6 +276,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		EpochsPerSubnetSubscription:     2 << 8, // 256
+		AttestationSubnetExtraBits:      0,
+		SubnetsPerNode:                  2,
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -238,6 +299,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		EpochsPerSubnetSubscription:     2 << 8, // 256
+		AttestationSubnetExtraBits:      0,
+		SubnetsPerNode:                  2,
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",
@@ -258,6 +322,9 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		MaximumGossipClockDisparity:     500 * time.Millisecond,
 		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
 		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		EpochsPerSubnetSubscription:     2 << 8, // 256
+		AttestationSubnetExtraBits:      0,
+		SubnetsPerNode:                  2,
 		Eth2key:                         "eth2",
 		AttSubnetKey:                    "attnets",
 		SyncCommsSubnetKey:              "syncnets",

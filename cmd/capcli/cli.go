@@ -86,8 +86,8 @@ type chainCfg struct {
 	Chain string `help:"chain" default:"mainnet"`
 }
 
-func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, err error) {
-	genesisConfig, _, beaconConfig, _, err = clparams.GetConfigsByNetworkName(c.Chain)
+func (c *chainCfg) configs() (beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, networkConfig *clparams.NetworkConfig, err error) {
+	genesisConfig, networkConfig, beaconConfig, _, err = clparams.GetConfigsByNetworkName(c.Chain)
 	return
 }
 
@@ -136,12 +136,12 @@ func (b *Blocks) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	beaconConfig, genesisConfig, err := b.configs()
+	beaconConfig, genesisConfig, networkConfig, err := b.configs()
 	if err != nil {
 		return err
 	}
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig, networkConfig)
 	err = beacon.SetStatus(
 		genesisConfig.GenesisValidatorRoot,
 		beaconConfig.GenesisEpoch,
@@ -202,7 +202,7 @@ func (b *Epochs) Run(cctx *Context) error {
 	if err != nil {
 		return err
 	}
-	beaconConfig, genesisConfig, err := b.configs()
+	beaconConfig, genesisConfig, networkConfig, err := b.configs()
 	if err != nil {
 		return err
 	}
@@ -214,7 +214,7 @@ func (b *Epochs) Run(cctx *Context) error {
 
 	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig, networkConfig)
 	rpcSource := persistence2.NewBeaconRpcSource(beacon)
 
 	err = beacon.SetStatus(
@@ -316,7 +316,7 @@ type Migrate struct {
 }
 
 func resolveState(source string, chain chainCfg) (abstract.BeaconState, error) {
-	beaconConfig, _, err := chain.configs()
+	beaconConfig, _, _, err := chain.configs()
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func (m *Migrate) getBlock(ctx *Context, block string) (*cltypes.SignedBeaconBlo
 	if err != nil {
 		return nil, err
 	}
-	b, _, err := m.chainCfg.configs()
+	b, _, _, err := m.chainCfg.configs()
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +392,7 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 
-	genesisConfig, _, beaconConfig, networkType, err := clparams.GetConfigsByNetworkName(c.Chain)
+	genesisConfig, networkConfig, beaconConfig, networkType, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -411,7 +411,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 	defer db.Close()
 
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
+	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig, networkConfig)
 
 	bs, err := core.RetrieveBeaconState(ctx, beaconConfig, genesisConfig, clparams.GetCheckpointSyncEndpoint(networkType))
 	if err != nil {
