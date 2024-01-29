@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func MarshallReceipt(
+func MarshalReceipt(
 	receipt *types.Receipt,
 	txn types.Transaction,
 	chainConfig *chain.Config,

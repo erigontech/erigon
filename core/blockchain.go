@@ -139,7 +139,7 @@ func ExecuteBlockEphemerally(
 			}
 		}
 
-		marshalledReceipts = append(marshalledReceipts, ethutils.MarshallReceipt(receipt, tx, chainConfig, header, tx.Hash(), true))
+		marshalledReceipts = append(marshalledReceipts, ethutils.MarshalReceipt(receipt, tx, chainConfig, header, tx.Hash(), true))
 	}
 
 	receiptSha := types.DeriveSha(receipts)
