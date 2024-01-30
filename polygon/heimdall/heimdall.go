@@ -371,7 +371,7 @@ func (h *heimdallImpl) OnSpanEvent(ctx context.Context, io SpanIO, callback func
 				case <-pollDelayTimer.C:
 				}
 			} else {
-				m, err := h.FetchSpans(ctx, io, currentCount+1, SpanId(latestSpan.Id))
+				m, err := h.FetchSpans(ctx, io, currentCount+1, latestSpan.Id)
 				currentCount = latestSpan.Id
 
 				if err != nil {
