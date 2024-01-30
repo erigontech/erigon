@@ -1484,9 +1484,9 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
 		log.Warn("[dbg] d0", "br.blockReader.FrozenBorBlocks()", br.blockReader.FrozenBorBlocks(), "minBlockNum", minBlockNum)
-		for br.blockReader.FrozenBorBlocks() < minBlockNum {
+		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
 			log.Warn("[dbg] d1", "br.blockReader.FrozenBorBlocks()", br.blockReader.FrozenBorBlocks(), "maxBlockNum", maxBlockNum)
-			ok, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			ok, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), br.blockReader.FrozenBlocks(), lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
