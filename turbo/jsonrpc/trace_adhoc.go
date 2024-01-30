@@ -1224,6 +1224,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 		var execResult *core.ExecutionResult
 		if args.isBorStateSyncTxn {
 			txFinalized = true
+			txCtx := tracer.InitBorStateSyncTxContext(header.Number.Uint64(), header.Hash())
 			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
 				ctx,
 				dbtx,
@@ -1236,6 +1237,7 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				header.Hash(),
 				header.Number.Uint64(),
 				header.Time,
+				txCtx,
 			)
 		} else {
 			if args.txHash != nil {

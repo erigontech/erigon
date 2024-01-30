@@ -34,6 +34,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	blockNum uint64,
 	blockTime uint64,
 	blockCtx evmtypes.BlockContext,
+	txCtx evmtypes.TxContext,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
 ) error {
@@ -43,7 +44,6 @@ func TraceBorStateSyncTxnDebugAPI(
 		return err
 	}
 
-	txCtx := InitBorStateSyncTxContext(blockNum, blockHash)
 	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
@@ -74,6 +74,7 @@ func TraceBorStateSyncTxnTraceAPI(
 	blockHash libcommon.Hash,
 	blockNum uint64,
 	blockTime uint64,
+	txCtx evmtypes.TxContext,
 ) (*core.ExecutionResult, error) {
 	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
 	if err != nil {
@@ -85,14 +86,12 @@ func TraceBorStateSyncTxnTraceAPI(
 		vmConfig.Tracer = NewBorStateSyncTxnTracer(vmConfig.Tracer, len(stateSyncEvents), stateReceiverContract)
 	}
 
-	txCtx := InitBorStateSyncTxContext(blockNum, blockHash)
 	rules := chainConfig.Rules(blockNum, blockTime)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, *vmConfig)
 	return applyBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, true)
 }
 
 //
-// TODO - see if i can refactor other 2 funcs above to accept txCtx as input
 // TODO - see if i can refactor out common logic for getting all block transactions + check for bor state sync txn in 1 func
 //
 
