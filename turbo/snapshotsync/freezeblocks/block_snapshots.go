@@ -1315,7 +1315,7 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = params.FullImmutabilityThreshold / 2 //TODO: we will remove `/2` after some db optimizations
+	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
 	if curBlockNum <= keep {
 		return
 	}
@@ -1355,7 +1355,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
-	var keep uint64 = params.FullImmutabilityThreshold / 2
+	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
 	if curBlockNum+999 < keep {
 		// To prevent overflow of uint64 below
 		return blocksInSnapshots + 1
@@ -1452,13 +1452,15 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	}
 
 	go func() {
-
 		defer br.working.Store(false)
+
 		if br.snBuildAllowed != nil {
-			if !br.snBuildAllowed.TryAcquire(blockRetireAllowedWeight) {
+			//we are inside own goroutine - it's fine to block here
+			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
+				br.logger.Warn("[snapshots] retire blocks", "err", err)
 				return
 			}
-			defer br.snBuildAllowed.Release(blockRetireAllowedWeight)
+			defer br.snBuildAllowed.Release(1)
 		}
 
 		for {

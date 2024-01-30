@@ -1405,8 +1405,6 @@ func (a *AggregatorV3) SetSnapshotBuildSema(semaphore *semaphore.Weighted) {
 	a.snapshotBuildSema = semaphore
 }
 
-const aggregatorSnapBuildWeight int64 = 1
-
 // Returns channel which is closed when aggregation is done
 func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 	fin := make(chan struct{})
@@ -1427,14 +1425,14 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		defer a.wg.Done()
 		defer a.buildingFiles.Store(false)
 
-		//TODO: seems Erigon always building block snaps and doesn't have enough time to build agg3 snaps.
-		//          Maybe need "active wait" instead of "return". Or maybe need increase capacity of channel when `initialSync=true`
-		//if a.snapshotBuildSema != nil {
-		//	if !a.snapshotBuildSema.TryAcquire(aggregatorSnapBuildWeight) {
-		//		return //nolint
-		//	}
-		//	defer a.snapshotBuildSema.Release(aggregatorSnapBuildWeight)
-		//}
+		if a.snapshotBuildSema != nil {
+			//we are inside own goroutine - it's fine to block here
+			if err := a.snapshotBuildSema.Acquire(a.ctx, 1); err != nil {
+				log.Warn("[snapshots] buildFilesInBackground", "err", err)
+				return //nolint
+			}
+			defer a.snapshotBuildSema.Release(1)
+		}
 
 		// check if db has enough data (maybe we didn't commit them yet or all keys are unique so history is empty)
 		lastInDB := lastIdInDB(a.db, a.accounts)
