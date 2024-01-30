@@ -1483,40 +1483,35 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		log.Warn("[dbg] d0", "br.blockReader.FrozenBorBlocks()", br.blockReader.FrozenBorBlocks(), "minBlockNum", minBlockNum)
 		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
-			log.Warn("[dbg] d1", "br.blockReader.FrozenBorBlocks()", br.blockReader.FrozenBorBlocks(), "maxBlockNum", maxBlockNum)
-			ok, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), br.blockReader.FrozenBlocks(), lvl, seedNewSnapshots, onDeleteSnapshots)
+			haveMore, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), br.blockReader.FrozenBlocks(), lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
-			if !ok {
-				log.Warn("[dbg] d01")
+			if !haveMore {
 				break
 			}
 		}
 	}
 
-	var ok, okBor bool
+	var blockHaveMore, borHaveMore bool
 	for {
-		log.Warn("[dbg] d20", "br.blockReader.FrozenBlocks()", br.blockReader.FrozenBlocks())
 		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
 			minBlockNum = frozen
 		}
 
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		blockHaveMore, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
 
 		if includeBor {
-			okBor, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			borHaveMore, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
 		}
-		log.Warn("[dbg] d2", "minBlockNum", minBlockNum, "maxBlockNum", maxBlockNum)
-		haveMore := ok || okBor
+		haveMore := blockHaveMore || borHaveMore
 		if !haveMore {
 			break
 		}
