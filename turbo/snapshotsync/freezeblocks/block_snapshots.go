@@ -1491,6 +1491,7 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 				return err
 			}
 			if !ok {
+				log.Warn("[dbg] d01")
 				break
 			}
 		}
