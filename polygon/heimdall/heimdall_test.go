@@ -80,6 +80,15 @@ func (test heimdallTest) setupCheckpoints(count int) []*Checkpoint {
 		return expectedCheckpoints[number-1], nil
 	}).AnyTimes()
 
+	// this is a dummy store
+	test.store.EXPECT().
+		LastCheckpointId(gomock.Any()).Return(CheckpointId(0), false, nil).AnyTimes()
+	test.store.EXPECT().
+		PutCheckpoint(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
+			return nil
+		}).AnyTimes()
+
 	return expectedCheckpoints
 }
 
@@ -95,6 +104,15 @@ func (test heimdallTest) setupMilestones(count int) []*Milestone {
 	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, number int64) (*Milestone, error) {
 		return expectedMilestones[number-1], nil
 	}).AnyTimes()
+
+	// this is a dummy store
+	test.store.EXPECT().
+		LastMilestoneId(gomock.Any()).Return(MilestoneId(0), false, nil).AnyTimes()
+	test.store.EXPECT().
+		PutMilestone(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
+			return nil
+		}).AnyTimes()
 
 	return expectedMilestones
 }
@@ -213,6 +231,15 @@ func TestFetchMilestonesStartingBeforeEvictionPoint(t *testing.T) {
 		}
 		return expectedMilestones[number-1], nil
 	}).AnyTimes()
+
+	// this is a dummy store
+	test.store.EXPECT().
+		LastMilestoneId(gomock.Any()).Return(MilestoneId(0), false, nil).AnyTimes()
+	test.store.EXPECT().
+		PutMilestone(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
+			return nil
+		}).AnyTimes()
 
 	milestones, err := test.heimdall.FetchMilestonesFromBlock(test.ctx, test.store, 0)
 	require.NotNil(t, err)
