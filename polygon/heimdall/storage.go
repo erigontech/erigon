@@ -12,50 +12,50 @@ import (
 
 type SpanReader interface {
 	LastSpanId(ctx context.Context) (SpanId, bool, error)
-	ReadSpan(ctx context.Context, spanId SpanId) (*Span, error)
+	GetSpan(ctx context.Context, spanId SpanId) (*Span, error)
 }
 
 type SpanWriter interface {
-	WriteSpan(ctx context.Context, span *Span) error
+	PutSpan(ctx context.Context, span *Span) error
 }
 
-type SpanIO interface {
+type SpanStore interface {
 	SpanReader
 	SpanWriter
 }
 
 type MilestoneReader interface {
 	LastMilestoneId(ctx context.Context) (MilestoneId, bool, error)
-	ReadMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error)
+	GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error)
 }
 
 type MilestoneWriter interface {
-	WriteMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error
+	PutMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error
 }
 
-type MilestoneIO interface {
+type MilestoneStore interface {
 	MilestoneReader
 	MilestoneWriter
 }
 
 type CheckpointReader interface {
 	LastCheckpointId(ctx context.Context) (CheckpointId, bool, error)
-	ReadCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error)
+	GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error)
 }
 
 type CheckpointWriter interface {
-	WriteCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error
+	PutCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error
 }
 
-type CheckpointIO interface {
+type CheckpointStore interface {
 	CheckpointReader
 	CheckpointWriter
 }
 
-type IO interface {
-	SpanIO
-	MilestoneIO
-	CheckpointIO
+type Store interface {
+	SpanStore
+	MilestoneStore
+	CheckpointStore
 }
 
 type reader interface {
@@ -63,21 +63,23 @@ type reader interface {
 	services.BorSpanReader
 }
 
-type blockReaderIO struct {
+type blockReaderStore struct {
 	reader reader
 	tx     kv.Tx
 }
 
-func NewBlockReaderIO(reader reader, tx kv.Tx) blockReaderIO {
-	return blockReaderIO{reader: reader, tx: tx}
+var _ Store = blockReaderStore{}
+
+func NewBlockReaderStore(reader reader, tx kv.Tx) blockReaderStore {
+	return blockReaderStore{reader: reader, tx: tx}
 }
 
-func (io blockReaderIO) LastSpanId(ctx context.Context) (uint64, bool, error) {
+func (io blockReaderStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
 	return 0, false, fmt.Errorf("TODO: need bor_accumulators")
 	//return io.reader.LastSpanId(ctx, io.tx)
 }
 
-func (io blockReaderIO) ReadSpan(ctx context.Context, spanId SpanId) (*Span, error) {
+func (io blockReaderStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error) {
 	spanBytes, err := io.reader.Span(ctx, io.tx, uint64(spanId))
 
 	if err != nil {
@@ -93,7 +95,7 @@ func (io blockReaderIO) ReadSpan(ctx context.Context, spanId SpanId) (*Span, err
 	return &span, nil
 }
 
-func (io blockReaderIO) WriteSpan(ctx context.Context, span *Span) error {
+func (io blockReaderStore) PutSpan(ctx context.Context, span *Span) error {
 	tx, ok := io.tx.(kv.RwTx)
 
 	if !ok {
@@ -112,13 +114,13 @@ func (io blockReaderIO) WriteSpan(ctx context.Context, span *Span) error {
 	return tx.Put(kv.BorSpans, spanIdBytes[:], spanBytes)
 }
 
-func (io blockReaderIO) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
+func (io blockReaderStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
 	return 0, false, fmt.Errorf("TODO: need bor_accumulators")
 	//id, ok, err := io.reader.LastMilestoneId(ctx, io.tx)
 	//return MilestoneId(id), ok, err
 }
 
-func (io blockReaderIO) ReadMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
+func (io blockReaderStore) GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
 	return nil, fmt.Errorf("TODO: need bor_accumulators")
 	/*
 	   milestoneBytes, err := io.reader.Milestone(ctx, io.tx, uint64(milestoneId))
@@ -137,7 +139,7 @@ func (io blockReaderIO) ReadMilestone(ctx context.Context, milestoneId Milestone
 	*/
 }
 
-func (io blockReaderIO) WriteMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
+func (io blockReaderStore) PutMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
 	tx, ok := io.tx.(kv.RwTx)
 
 	if !ok {
@@ -156,13 +158,13 @@ func (io blockReaderIO) WriteMilestone(ctx context.Context, milestoneId Mileston
 	return tx.Put(kv.BorMilestones, spanIdBytes[:], spanBytes)
 }
 
-func (io blockReaderIO) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
+func (io blockReaderStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
 	return 0, false, fmt.Errorf("TODO: need bor_accumulators")
 	//id, ok, err := io.reader.LastCheckpointId(ctx, io.tx)
 	//return CheckpointId(id), ok, err
 }
 
-func (io blockReaderIO) ReadCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
+func (io blockReaderStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
 	return nil, fmt.Errorf("TODO: need bor_accumulators")
 	/*checkpointBytes, err := io.reader.Milestone(ctx, io.tx, uint64(checkpointId))
 
@@ -180,7 +182,7 @@ func (io blockReaderIO) ReadCheckpoint(ctx context.Context, checkpointId Checkpo
 	*/
 }
 
-func (io blockReaderIO) WriteCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
+func (io blockReaderStore) PutCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
 	tx, ok := io.tx.(kv.RwTx)
 
 	if !ok {

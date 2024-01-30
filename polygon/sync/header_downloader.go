@@ -42,27 +42,13 @@ type HeaderDownloader struct {
 	statePointHeadersMemo *lru.Cache[common.Hash, []*types.Header] // statePoint.rootHash->[headers part of state point]
 }
 
-func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, io CheckpointIO, start uint64) error {
-	checkpoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, io, start)
+func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, store CheckpointStore, start uint64) error {
+	checkpoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, store, start)
 	if err != nil {
 		return err
 	}
 
-	err = hd.downloadUsingWaypoints(ctx, io, checkpoints)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, io MilestoneIO, start uint64) error {
-	milestones, err := hd.heimdall.FetchMilestonesFromBlock(ctx, io, start)
-	if err != nil {
-		return err
-	}
-
-	err = hd.downloadUsingWaypoints(ctx, io, milestones)
+	err = hd.downloadUsingWaypoints(ctx, store, checkpoints)
 	if err != nil {
 		return err
 	}
@@ -70,7 +56,21 @@ func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, io Mile
 	return nil
 }
 
-func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, io HeaderIO, hashAccumulators heimdall.Waypoints) error {
+func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, store MilestoneStore, start uint64) error {
+	milestones, err := hd.heimdall.FetchMilestonesFromBlock(ctx, store, start)
+	if err != nil {
+		return err
+	}
+
+	err = hd.downloadUsingWaypoints(ctx, store, milestones)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store HeaderStore, hashAccumulators heimdall.Waypoints) error {
 	for len(hashAccumulators) > 0 {
 		allPeers := hd.sentry.PeersWithBlockNumInfo()
 		if len(allPeers) == 0 {
@@ -178,7 +178,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, io Heade
 		}
 
 		dbWriteStartTime := time.Now()
-		if err := io.WriteHeaders(headers); err != nil {
+		if err := store.PutHeaders(headers); err != nil {
 			return err
 		}
 
