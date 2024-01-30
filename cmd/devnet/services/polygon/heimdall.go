@@ -160,7 +160,7 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, err
 		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
-			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
+			return nil, fmt.Errorf("can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
