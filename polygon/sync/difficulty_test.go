@@ -56,7 +56,7 @@ func TestSignerDifficulty(t *testing.T) {
 		libcommon.HexToAddress("02"),
 	}
 	validatorSetFactory := func(uint64) validatorSetInterface { return &testValidatorSetInterface{signers: signers} }
-	calc := NewDifficultyCalculator(&borConfig, nil, validatorSetFactory, nil).(*difficultyCalculatorImpl)
+	calc := NewDifficultyCalculator(&borConfig, nil, validatorSetFactory, nil).(*difficultyCalculator)
 
 	var d uint64
 
@@ -131,7 +131,7 @@ func TestHeaderDifficultyNoSignature(t *testing.T) {
 func TestSignerDifficultyNoSpan(t *testing.T) {
 	borConfig := borcfg.BorConfig{}
 	spans := NewSpansCache()
-	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil).(*difficultyCalculatorImpl)
+	calc := NewDifficultyCalculator(&borConfig, spans, nil, nil).(*difficultyCalculator)
 
 	_, err := calc.signerDifficulty(libcommon.HexToAddress("00"), 0)
 	require.ErrorContains(t, err, "no span")

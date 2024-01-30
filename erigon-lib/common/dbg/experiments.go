@@ -299,3 +299,19 @@ func SnapshotVersion() uint8 {
 	})
 	return snapshotVersion
 }
+
+var (
+	logHashMismatchReason     bool
+	logHashMismatchReasonOnce sync.Once
+)
+
+func LogHashMismatchReason() bool {
+	logHashMismatchReasonOnce.Do(func() {
+		v, _ := os.LookupEnv("LOG_HASH_MISMATCH_REASON")
+		if v == "true" {
+			logHashMismatchReason = true
+			log.Info("[Experiment]", "LOG_HASH_MISMATCH_REASON", logHashMismatchReason)
+		}
+	})
+	return logHashMismatchReason
+}

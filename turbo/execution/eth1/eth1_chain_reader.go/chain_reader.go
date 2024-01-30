@@ -283,21 +283,50 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error 
 }
 
 func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block) error {
+	blocks := []*types.Block{block}
+	request := &execution.InsertBlocksRequest{
+		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
+	}
+
+	response, err := c.executionModule.InsertBlocks(c.ctx, request)
+	if err != nil {
+		return err
+	}
+	retryInterval := time.NewTicker(retryTimeout)
+	defer retryInterval.Stop()
+	for response.Result == execution.ExecutionStatus_Busy {
+		select {
+		case <-retryInterval.C:
+			response, err = c.executionModule.InsertBlocks(c.ctx, request)
+			if err != nil {
+				return err
+			}
+		case <-c.ctx.Done():
+			return context.Canceled
+		}
+	}
+	if response.Result != execution.ExecutionStatus_Success {
+		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
+	}
 	return c.InsertBlocksAndWait([]*types.Block{block})
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(hash libcommon.Hash, number uint64) (execution.ExecutionStatus, libcommon.Hash, error) {
+func (c ChainReaderWriterEth1) ValidateChain(hash libcommon.Hash, number uint64) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
 	resp, err := c.executionModule.ValidateChain(c.ctx, &execution.ValidationRequest{
 		Hash:   gointerfaces.ConvertHashToH256(hash),
 		Number: number,
 	})
 	if err != nil {
-		return 0, libcommon.Hash{}, err
+		return 0, nil, libcommon.Hash{}, err
 	}
-	return resp.ValidationStatus, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	var validatonError *string
+	if len(resp.ValidationError) > 0 {
+		validatonError = &resp.ValidationError
+	}
+	return resp.ValidationStatus, validatonError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, libcommon.Hash, error) {
+func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
 	resp, err := c.executionModule.UpdateForkChoice(c.ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
@@ -305,9 +334,13 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash
 		Timeout:            c.fcuTimoutMillis,
 	})
 	if err != nil {
-		return 0, libcommon.Hash{}, err
+		return 0, nil, libcommon.Hash{}, err
 	}
-	return resp.Status, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	var validatonError *string
+	if len(resp.ValidationError) > 0 {
+		validatonError = &resp.ValidationError
+	}
+	return resp.Status, validatonError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
 func (c ChainReaderWriterEth1) GetForkchoice() (headHash, finalizedHash, safeHash libcommon.Hash, err error) {

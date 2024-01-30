@@ -26,19 +26,19 @@ type Heimdall interface {
 // ErrIncompleteMilestoneRange happens when FetchMilestones is called with an old start block because old milestones are evicted
 var ErrIncompleteMilestoneRange = errors.New("milestone range doesn't contain the start block")
 
-type HeimdallImpl struct {
+type syncHeimdall struct {
 	client    heimdall.HeimdallClient
 	pollDelay time.Duration
 	logger    log.Logger
 }
 
 func NewHeimdall(client heimdall.HeimdallClient, logger log.Logger) Heimdall {
-	impl := HeimdallImpl{
+	h := syncHeimdall{
 		client:    client,
 		pollDelay: time.Second,
 		logger:    logger,
 	}
-	return &impl
+	return &h
 }
 
 func cmpNumToRange(n uint64, min *big.Int, max *big.Int) int {
@@ -60,8 +60,8 @@ func cmpBlockNumToMilestoneRange(n uint64, m *heimdall.Milestone) int {
 	return cmpNumToRange(n, m.StartBlock, m.EndBlock)
 }
 
-func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([]*heimdall.Checkpoint, error) {
-	count, err := impl.client.FetchCheckpointCount(ctx)
+func (h *syncHeimdall) FetchCheckpoints(ctx context.Context, start uint64) ([]*heimdall.Checkpoint, error) {
+	count, err := h.client.FetchCheckpointCount(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +69,7 @@ func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([
 	var checkpoints []*heimdall.Checkpoint
 
 	for i := count; i >= 1; i-- {
-		c, err := impl.client.FetchCheckpoint(ctx, i)
+		c, err := h.client.FetchCheckpoint(ctx, i)
 		if err != nil {
 			return nil, err
 		}
@@ -92,8 +92,8 @@ func (impl *HeimdallImpl) FetchCheckpoints(ctx context.Context, start uint64) ([
 	return checkpoints, nil
 }
 
-func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]*heimdall.Milestone, error) {
-	count, err := impl.client.FetchMilestoneCount(ctx)
+func (h *syncHeimdall) FetchMilestones(ctx context.Context, start uint64) ([]*heimdall.Milestone, error) {
+	count, err := h.client.FetchMilestoneCount(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]
 	var milestones []*heimdall.Milestone
 
 	for i := count; i >= 1; i-- {
-		m, err := impl.client.FetchMilestone(ctx, i)
+		m, err := h.client.FetchMilestone(ctx, i)
 		if err != nil {
 			if errors.Is(err, heimdall.ErrNotInMilestoneList) {
 				common.SliceReverse(milestones)
@@ -128,28 +128,28 @@ func (impl *HeimdallImpl) FetchMilestones(ctx context.Context, start uint64) ([]
 	return milestones, nil
 }
 
-func (impl *HeimdallImpl) FetchSpan(ctx context.Context, start uint64) (*heimdall.HeimdallSpan, error) {
-	return impl.client.Span(ctx, bor.SpanIDAt(start))
+func (h *syncHeimdall) FetchSpan(ctx context.Context, start uint64) (*heimdall.HeimdallSpan, error) {
+	return h.client.Span(ctx, bor.SpanIDAt(start))
 }
 
-func (impl *HeimdallImpl) OnMilestoneEvent(ctx context.Context, callback func(*heimdall.Milestone)) error {
-	currentCount, err := impl.client.FetchMilestoneCount(ctx)
+func (h *syncHeimdall) OnMilestoneEvent(ctx context.Context, callback func(*heimdall.Milestone)) error {
+	currentCount, err := h.client.FetchMilestoneCount(ctx)
 	if err != nil {
 		return err
 	}
 
 	go func() {
 		for {
-			count, err := impl.client.FetchMilestoneCount(ctx)
+			count, err := h.client.FetchMilestoneCount(ctx)
 			if err != nil {
 				if !errors.Is(err, context.Canceled) {
-					impl.logger.Error("HeimdallImpl.OnMilestoneEvent FetchMilestoneCount error", "err", err)
+					h.logger.Error("syncHeimdall.OnMilestoneEvent FetchMilestoneCount error", "err", err)
 				}
 				break
 			}
 
 			if count <= currentCount {
-				pollDelayTimer := time.NewTimer(impl.pollDelay)
+				pollDelayTimer := time.NewTimer(h.pollDelay)
 				select {
 				case <-ctx.Done():
 					return
@@ -157,10 +157,10 @@ func (impl *HeimdallImpl) OnMilestoneEvent(ctx context.Context, callback func(*h
 				}
 			} else {
 				currentCount = count
-				m, err := impl.client.FetchMilestone(ctx, count)
+				m, err := h.client.FetchMilestone(ctx, count)
 				if err != nil {
 					if !errors.Is(err, context.Canceled) {
-						impl.logger.Error("HeimdallImpl.OnMilestoneEvent FetchMilestone error", "err", err)
+						h.logger.Error("syncHeimdall.OnMilestoneEvent FetchMilestone error", "err", err)
 					}
 					break
 				}

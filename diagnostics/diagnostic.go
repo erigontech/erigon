@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"context"
 	"net/http"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -16,7 +17,9 @@ type DiagnosticClient struct {
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
 
-	syncStats diaglib.SyncStatistics
+	syncStats        diaglib.SyncStatistics
+	snapshotFileList diaglib.SnapshoFilesList
+	mu               sync.Mutex
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
@@ -30,7 +33,40 @@ func (d *DiagnosticClient) Setup() {
 	d.runSegmentIndexingFinishedListener()
 	d.runCurrentSyncStageListener()
 	d.runSyncStagesListListener()
+	d.runBlockExecutionListener()
+	d.runSnapshotFilesListListener()
+
+	//d.logDiagMsgs()
 }
+
+/*func (d *DiagnosticClient) logDiagMsgs() {
+	ticker := time.NewTicker(20 * time.Second)
+	quit := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				d.logStr()
+			case <-quit:
+				ticker.Stop()
+				return
+			}
+		}
+	}()
+}
+func (d *DiagnosticClient) logStr() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	log.Info("SyncStatistics", "stats", interfaceToJSONString(d.syncStats))
+}
+
+func interfaceToJSONString(i interface{}) string {
+	b, err := json.Marshal(i)
+	if err != nil {
+		return ""
+	}
+	return string(b)
+}*/
 
 func (d *DiagnosticClient) runSnapshotListener() {
 	go func() {
@@ -46,6 +82,7 @@ func (d *DiagnosticClient) runSnapshotListener() {
 				cancel()
 				return
 			case info := <-ch:
+				d.mu.Lock()
 				d.syncStats.SnapshotDownload.Downloaded = info.Downloaded
 				d.syncStats.SnapshotDownload.Total = info.Total
 				d.syncStats.SnapshotDownload.TotalTime = info.TotalTime
@@ -58,6 +95,7 @@ func (d *DiagnosticClient) runSnapshotListener() {
 				d.syncStats.SnapshotDownload.Sys = info.Sys
 				d.syncStats.SnapshotDownload.DownloadFinished = info.DownloadFinished
 				d.syncStats.SnapshotDownload.TorrentMetadataReady = info.TorrentMetadataReady
+				d.mu.Unlock()
 
 				if info.DownloadFinished {
 					return
@@ -72,13 +110,16 @@ func (d *DiagnosticClient) SyncStatistics() diaglib.SyncStatistics {
 	return d.syncStats
 }
 
+func (d *DiagnosticClient) SnapshotFilesList() diaglib.SnapshoFilesList {
+	return d.snapshotFileList
+}
+
 func (d *DiagnosticClient) runSegmentDownloadingListener() {
 	go func() {
 		ctx, ch, cancel := diaglib.Context[diaglib.SegmentDownloadStatistics](context.Background(), 1)
 		defer cancel()
 
 		rootCtx, _ := common.RootContext()
-
 		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SegmentDownloadStatistics{}), log.Root())
 		for {
 			select {
@@ -86,11 +127,13 @@ func (d *DiagnosticClient) runSegmentDownloadingListener() {
 				cancel()
 				return
 			case info := <-ch:
+				d.mu.Lock()
 				if d.syncStats.SnapshotDownload.SegmentsDownloading == nil {
 					d.syncStats.SnapshotDownload.SegmentsDownloading = map[string]diaglib.SegmentDownloadStatistics{}
 				}
 
 				d.syncStats.SnapshotDownload.SegmentsDownloading[info.Name] = info
+				d.mu.Unlock()
 			}
 		}
 	}()
@@ -130,6 +173,7 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener() {
 				cancel()
 				return
 			case info := <-ch:
+				d.mu.Lock()
 				found := false
 				for i := range d.syncStats.SnapshotIndexing.Segments {
 					if d.syncStats.SnapshotIndexing.Segments[i].SegmentName == info.SegmentName {
@@ -146,12 +190,15 @@ func (d *DiagnosticClient) runSegmentIndexingFinishedListener() {
 						Sys:         0,
 					})
 				}
+				d.mu.Unlock()
 			}
 		}
 	}()
 }
 
 func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd diaglib.SnapshotIndexingStatistics) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if d.syncStats.SnapshotIndexing.Segments == nil {
 		d.syncStats.SnapshotIndexing.Segments = []diaglib.SnapshotSegmentIndexingStatistics{}
 	}
@@ -190,7 +237,9 @@ func (d *DiagnosticClient) runSyncStagesListListener() {
 				cancel()
 				return
 			case info := <-ch:
+				d.mu.Lock()
 				d.syncStats.SyncStages.StagesList = info.Stages
+				d.mu.Unlock()
 				return
 			}
 		}
@@ -211,8 +260,62 @@ func (d *DiagnosticClient) runCurrentSyncStageListener() {
 				cancel()
 				return
 			case info := <-ch:
+				d.mu.Lock()
 				d.syncStats.SyncStages.CurrentStage = info.Stage
 				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+					return
+				}
+				d.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runBlockExecutionListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.BlockExecutionStatistics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockExecutionStatistics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.syncStats.BlockExecution = info
+				d.mu.Unlock()
+
+				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runSnapshotFilesListListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.SnapshoFilesList](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SnapshoFilesList{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.snapshotFileList = info
+				d.mu.Unlock()
+
+				if len(info.Files) > 0 {
 					return
 				}
 			}

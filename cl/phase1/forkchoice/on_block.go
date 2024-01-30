@@ -4,16 +4,43 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
+	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 )
+
+func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.Eth1Block, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
+	expectedBlobHashes := []common.Hash{}
+	transactions, err := types.DecodeTransactions(block.Transactions.UnderlyngReference())
+	if err != nil {
+		return fmt.Errorf("unable to decode transactions: %v", err)
+	}
+	kzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
+		var kzg libcommon.Hash
+		kzg, err = utils.KzgCommitmentToVersionedHash(libcommon.Bytes48(*value))
+		if err != nil {
+			return false
+		}
+		expectedBlobHashes = append(expectedBlobHashes, kzg)
+		return true
+	})
+	if err != nil {
+		return err
+	}
+
+	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, cfg.MaxBlobsPerBlock, expectedBlobHashes, &transactions)
+}
 
 func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 	f.mu.Lock()
@@ -32,15 +59,38 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if block.Block.Slot <= finalizedSlot {
 		return nil
 	}
+	// Now we find the versioned hashes
+	var versionedHashes []libcommon.Hash
+	if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
+		versionedHashes = []libcommon.Hash{}
+		solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
+			versionedHash, err := utils.KzgCommitmentToVersionedHash(libcommon.Bytes48(*k))
+			if err != nil {
+				return err
+			}
+			versionedHashes = append(versionedHashes, versionedHash)
+			return nil
+		})
+	}
 
 	var invalidBlock bool
 	if newPayload && f.engine != nil {
-		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot); err != nil {
+		if block.Version() >= clparams.DenebVersion {
+			if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block.Body.ExecutionPayload, block.Block.Body.BlobKzgCommitments); err != nil {
+				return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
+			}
+		}
+
+		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes); err != nil {
 			if invalidBlock {
 				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			}
 			log.Warn("newPayload failed", "err", err)
 			return err
+		}
+		if invalidBlock {
+			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+			return fmt.Errorf("execution client failed")
 		}
 	}
 

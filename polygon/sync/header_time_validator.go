@@ -18,7 +18,7 @@ type HeaderTimeValidator interface {
 	ValidateHeaderTime(header *types.Header, now time.Time, parent *types.Header) error
 }
 
-type headerTimeValidatorImpl struct {
+type headerTimeValidator struct {
 	borConfig           *borcfg.BorConfig
 	spans               *SpansCache
 	validatorSetFactory func(headerNum uint64) validatorSetInterface
@@ -39,7 +39,7 @@ func NewHeaderTimeValidator(
 		}
 	}
 
-	impl := headerTimeValidatorImpl{
+	htv := headerTimeValidator{
 		borConfig:           borConfig,
 		spans:               spans,
 		validatorSetFactory: validatorSetFactory,
@@ -47,31 +47,31 @@ func NewHeaderTimeValidator(
 	}
 
 	if validatorSetFactory == nil {
-		impl.validatorSetFactory = impl.makeValidatorSet
+		htv.validatorSetFactory = htv.makeValidatorSet
 	}
 
-	return &impl
+	return &htv
 }
 
-func (impl *headerTimeValidatorImpl) makeValidatorSet(headerNum uint64) validatorSetInterface {
-	span := impl.spans.SpanAt(headerNum)
+func (htv *headerTimeValidator) makeValidatorSet(headerNum uint64) validatorSetInterface {
+	span := htv.spans.SpanAt(headerNum)
 	if span == nil {
 		return nil
 	}
 	return valset.NewValidatorSet(span.ValidatorSet.Validators)
 }
 
-func (impl *headerTimeValidatorImpl) ValidateHeaderTime(header *types.Header, now time.Time, parent *types.Header) error {
+func (htv *headerTimeValidator) ValidateHeaderTime(header *types.Header, now time.Time, parent *types.Header) error {
 	headerNum := header.Number.Uint64()
-	validatorSet := impl.validatorSetFactory(headerNum)
+	validatorSet := htv.validatorSetFactory(headerNum)
 	if validatorSet == nil {
-		return fmt.Errorf("headerTimeValidatorImpl.ValidateHeaderTime: no span at %d", headerNum)
+		return fmt.Errorf("headerTimeValidator.ValidateHeaderTime: no span at %d", headerNum)
 	}
 
-	sprintNum := impl.borConfig.CalculateSprintNumber(headerNum)
+	sprintNum := htv.borConfig.CalculateSprintNumber(headerNum)
 	if sprintNum > 0 {
 		validatorSet.IncrementProposerPriority(int(sprintNum))
 	}
 
-	return bor.ValidateHeaderTime(header, now, parent, validatorSet, impl.borConfig, impl.signaturesCache)
+	return bor.ValidateHeaderTime(header, now, parent, validatorSet, htv.borConfig, htv.signaturesCache)
 }

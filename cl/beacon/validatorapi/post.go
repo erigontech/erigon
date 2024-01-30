@@ -2,6 +2,8 @@ package validatorapi
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
@@ -10,11 +12,13 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
+var errNotImplemented = errors.New("not implemented")
+
 func (v *ValidatorApiHandler) PostEthV1ValidatorPrepareBeaconProposer(w http.ResponseWriter, r *http.Request) (*int, error) {
 	var req []building.PrepareBeaconProposer
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	for _, x := range req {
 		v.state.SetFeeRecipient(x.ValidatorIndex, x.FeeRecipient)
@@ -26,60 +30,60 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorContributionAndProofs(w http.Res
 	var req []*cltypes.ContributionAndProof
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.ResponseWriter, r *http.Request) (*int, error) {
 	var req []building.SyncCommitteeSubscription
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w http.ResponseWriter, r *http.Request) (*int, error) {
 	var req []building.BeaconCommitteeSubscription
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV1ValidatorAggregateAndProofs(w http.ResponseWriter, r *http.Request) (*int, error) {
 	var req []cltypes.SignedAggregateAndProof
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r *http.Request) (*int, error) {
 	var req []*solid.SyncCommittee
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) (*int, error) {
 	var req []*solid.Attestation
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) (*int, error) {
@@ -87,11 +91,11 @@ func (v *ValidatorApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *ht
 	var req cltypes.SignedBeaconBlock
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
 	_ = ethConsensusVersion
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) (*int, error) {
@@ -101,16 +105,16 @@ func (v *ValidatorApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *ht
 	}
 	ethConsensusVersion := r.Header.Get("Eth-Consensus-Version")
 	if ethConsensusVersion == "" {
-		return nil, beaconhttp.NewEndpointError(400, "no eth consensus version set")
+		return nil, beaconhttp.NewEndpointError(400, errors.New("no eth consensus version set"))
 	}
 	var req cltypes.SignedBeaconBlock
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
 	_, _ = broadcastValidation, ethConsensusVersion
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV1BeaconBlindedBlocks(w http.ResponseWriter, r *http.Request) (*int, error) {
@@ -118,11 +122,11 @@ func (v *ValidatorApiHandler) PostEthV1BeaconBlindedBlocks(w http.ResponseWriter
 	var req cltypes.SignedBlindedBeaconBlock
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
 	_ = ethConsensusVersion
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }
 
 func (v *ValidatorApiHandler) PostEthV2BeaconBlindedBlocks(w http.ResponseWriter, r *http.Request) (*int, error) {
@@ -132,14 +136,14 @@ func (v *ValidatorApiHandler) PostEthV2BeaconBlindedBlocks(w http.ResponseWriter
 	}
 	ethConsensusVersion := r.Header.Get("Eth-Consensus-Version")
 	if ethConsensusVersion == "" {
-		return nil, beaconhttp.NewEndpointError(400, "no eth consensus version set")
+		return nil, beaconhttp.NewEndpointError(400, errors.New("no eth consensus version set"))
 	}
 	var req cltypes.SignedBlindedBeaconBlock
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(400, "invalid request: "+err.Error())
+		return nil, beaconhttp.NewEndpointError(400, fmt.Errorf("invalid request: %w", err))
 	}
 	// TODO: this endpoint
 	_, _ = broadcastValidation, ethConsensusVersion
-	return nil, beaconhttp.NewEndpointError(404, "not implemented")
+	return nil, beaconhttp.NewEndpointError(404, errNotImplemented)
 }

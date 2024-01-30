@@ -23,7 +23,7 @@ func NewExecutionClientDirect(ctx context.Context, chainRW eth1_chain_reader.Cha
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -43,7 +43,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 		return false, err
 	}
 
-	status, _, err := cc.chainRW.ValidateChain(payload.BlockHash, payload.BlockNumber)
+	status, _, _, err := cc.chainRW.ValidateChain(payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return false, err
 	}
@@ -53,7 +53,7 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 }
 
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
-	status, _, err := cc.chainRW.UpdateForkChoice(head, head, finalized)
+	status, _, _, err := cc.chainRW.UpdateForkChoice(head, head, finalized)
 	if err != nil {
 		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
