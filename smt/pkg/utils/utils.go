@@ -583,6 +583,21 @@ func Key(ethAddr string, c int) (NodeKey, error) {
 	return Hash(key1.ToUintArray(), key1Capacity)
 }
 
+func KeyBig(k *big.Int, c int) ([4]uint64, error) {
+	if k == nil {
+		return [4]uint64{}, errors.New("nil key")
+	}
+	add := ScalarToArrayBig(k)
+
+	key1 := NodeValue8{add[0], add[1], add[2], add[3], add[4], add[5], big.NewInt(int64(c)), big.NewInt(0)}
+	key1Capacity, err := StringToH4(HASH_POSEIDON_ALL_ZEROES)
+	if err != nil {
+		return NodeKey{}, err
+	}
+
+	return Hash(key1.ToUintArray(), key1Capacity)
+}
+
 func StrValToBigInt(v string) (*big.Int, bool) {
 	if strings.HasPrefix(v, "0x") {
 		return new(big.Int).SetString(v[2:], 16)

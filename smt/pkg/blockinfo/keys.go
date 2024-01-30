@@ -1,0 +1,63 @@
+package blockinfo
+
+import (
+	"errors"
+	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"math/big"
+)
+
+const IndexBlockHeaderParamBlockHash = 0
+const IndexBlockHeaderParamCoinbase = 1
+const IndexBlockHeaderParamNumber = 2
+const IndexBlockHeaderParamGasLimit = 3
+const IndexBlockHeaderParamTimestamp = 4
+const IndexBlockHeaderParamGer = 5
+const IndexBlockHeaderParamBlockHashL1 = 6
+const IndexBlockHeaderParamGasUsed = 7
+const IndexBlockHeaderTransactionHash = 8
+const IndexBlockHeaderStatus = 9
+const IndexBlockHeaderCumulativeGasUsed = 10
+const IndexBlockHeaderLogs = 11
+const IndexBlockHeaderEffectivePercentage = 12
+
+func KeyBlockHeaderParams(paramKey *big.Int) (utils.NodeKey, error) {
+	return utils.KeyBig(paramKey, IndexBlockHeaderParamGasUsed)
+}
+
+func KeyTxLogs(txIndex, logIndex *big.Int) (utils.NodeKey, error) {
+	if txIndex == nil || logIndex == nil {
+		return [4]uint64{}, errors.New("nil key")
+	}
+
+	txIndexKey := utils.ScalarToArrayBig(txIndex)
+	key1 := utils.NodeValue8{txIndexKey[0], txIndexKey[1], txIndexKey[2], txIndexKey[3], txIndexKey[4], txIndexKey[5], big.NewInt(int64(IndexBlockHeaderLogs)), big.NewInt(0)}
+
+	logIndexArray := utils.ScalarToArrayBig(logIndex)
+	lia, err := utils.NodeValue8FromBigIntArray(logIndexArray)
+	if err != nil {
+		return [4]uint64{}, err
+	}
+
+	hk0, err := utils.Hash(lia.ToUintArray(), utils.BranchCapacity)
+	if err != nil {
+		return [4]uint64{}, err
+	}
+
+	return utils.Hash(key1.ToUintArray(), hk0)
+}
+
+func KeyTxStatus(paramKey *big.Int) (utils.NodeKey, error) {
+	return utils.KeyBig(paramKey, IndexBlockHeaderStatus)
+}
+
+func KeyCumulativeGasUsed(paramKey *big.Int) (utils.NodeKey, error) {
+	return utils.KeyBig(paramKey, IndexBlockHeaderCumulativeGasUsed)
+}
+
+func KeyTxHash(paramKey *big.Int) (utils.NodeKey, error) {
+	return utils.KeyBig(paramKey, IndexBlockHeaderTransactionHash)
+}
+
+func KeyEffectivePercentage(paramKey *big.Int) (utils.NodeKey, error) {
+	return utils.KeyBig(paramKey, IndexBlockHeaderEffectivePercentage)
+}
