@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/c2h5oh/datasize"
@@ -27,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/sync/errgroup"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
