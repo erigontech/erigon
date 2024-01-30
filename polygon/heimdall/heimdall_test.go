@@ -44,7 +44,7 @@ type heimdallTest struct {
 	client   *MockHeimdallClient
 	heimdall Heimdall
 	logger   log.Logger
-	store    Store
+	store    *MockStore
 }
 
 func newHeimdallTest(t *testing.T) heimdallTest {
@@ -232,19 +232,31 @@ func TestOnMilestoneEvent(t *testing.T) {
 	defer cancel()
 
 	client := test.client
-	count := new(int64)
+	count := int64(1)
 	client.EXPECT().FetchMilestoneCount(gomock.Any()).DoAndReturn(func(ctx context.Context) (int64, error) {
-		c := *count
+		c := count
 		if c == 2 {
 			cancel()
 			return 0, ctx.Err()
 		}
-		*count += 1
+		count++
 		return c, nil
 	}).AnyTimes()
 
 	expectedMilestone := makeMilestone(0, 12)
-	client.EXPECT().FetchMilestone(gomock.Any(), gomock.Any()).Return(expectedMilestone, nil)
+
+	client.EXPECT().
+		FetchMilestone(gomock.Any(), gomock.Any()).Return(expectedMilestone, nil).AnyTimes()
+
+	lastMilestoneId := MilestoneId(0)
+	test.store.EXPECT().
+		LastMilestoneId(gomock.Any()).Return(lastMilestoneId, true, nil).AnyTimes()
+	test.store.EXPECT().
+		PutMilestone(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
+			lastMilestoneId = milestoneId
+			return nil
+		}).AnyTimes()
 
 	eventChan := make(chan *Milestone)
 	err := test.heimdall.OnMilestoneEvent(test.ctx, test.store, func(m *Milestone) {
