@@ -3,6 +3,7 @@ package fork_graph
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -65,9 +66,9 @@ type savedStateRecord struct {
 type forkGraphDisk struct {
 	// Alternate beacon states
 	fs        afero.Fs
-	blocks    sync.Map                                      // set of blocks (block root -> block)
-	headers   map[libcommon.Hash]*cltypes.BeaconBlockHeader // set of headers
-	badBlocks map[libcommon.Hash]struct{}                   // blocks that are invalid and that leads to automatic fail of extension.
+	blocks    sync.Map                    // set of blocks (block root -> block)
+	headers   sync.Map                    // set of headers
+	badBlocks map[libcommon.Hash]struct{} // blocks that are invalid and that leads to automatic fail of extension.
 
 	// TODO: this leaks, but it isn't a big deal since it's only ~24 bytes per block.
 	// the dirty solution is to just make it an LRU with max size of like 128 epochs or something probably?
@@ -118,7 +119,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// storage
-		headers:    headers,
 		badBlocks:  make(map[libcommon.Hash]struct{}),
 		stateRoots: make(map[libcommon.Hash]libcommon.Hash),
 		// current state data
@@ -152,7 +152,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, LogisticError, err
 	}
 
-	if _, ok := f.headers[blockRoot]; ok {
+	if _, ok := f.GetHeader(libcommon.Hash(blockRoot)); ok {
 		return nil, PreValidated, nil
 	}
 	// Blocks below anchors are invalid.
@@ -205,13 +205,15 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	if err != nil {
 		return nil, LogisticError, err
 	}
-	f.headers[blockRoot] = &cltypes.BeaconBlockHeader{
+
+	fmt.Println("add", blockRoot)
+	f.headers.Store(libcommon.Hash(blockRoot), &cltypes.BeaconBlockHeader{
 		Slot:          block.Slot,
 		ProposerIndex: block.ProposerIndex,
 		ParentRoot:    block.ParentRoot,
 		Root:          block.StateRoot,
 		BodyRoot:      bodyRoot,
-	}
+	})
 
 	// add the state root
 	stateRoot, err := newState.HashSSZ()
@@ -239,8 +241,12 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 }
 
 func (f *forkGraphDisk) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	obj, has := f.headers[blockRoot]
-	return obj, has
+	fmt.Println("get", blockRoot)
+	obj, has := f.headers.Load(blockRoot)
+	if !has {
+		return nil, false
+	}
+	return obj.(*cltypes.BeaconBlockHeader), true
 }
 
 func (f *forkGraphDisk) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -418,7 +424,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.blocks.Delete(root)
 		delete(f.currentJustifiedCheckpoints, root)
 		delete(f.finalizedCheckpoints, root)
-		delete(f.headers, root)
+		f.headers.Delete(root)
 		delete(f.saveStates, root)
 		delete(f.syncCommittees, root)
 		delete(f.blockRewards, root)
