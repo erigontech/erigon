@@ -1315,12 +1315,20 @@ func (c *Bor) checkAndCommitSpan(
 		return err
 	}
 
-	// check span is not set initially
+	// fetchAndCommitSpan basically calls `commitSpan` on the genesis contracts and the
+	// checks below makes sure that bor has necessary span before it proceeds.
+
+	// Whenever `checkAndCommitSpan` is called for the first time, during the start of 'technically'
+	// second sprint, we need the 0th as well as the 1st span. The contract returns an empty
+	// span (i.e. all fields set to 0). Span 0 doesn't need to be committed explicitly and
+	// is committed eventually when we commit 1st span (as per the contract). The check below
+	// takes care of that and commits the 1st span (hence the `currentSpan.ID+1` param).
 	if currentSpan.EndBlock == 0 {
-		return c.fetchAndCommitSpan(currentSpan.ID, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)
 	}
 
-	// if current block is first block of last sprint in current span
+	// For eventuall calls to this function, we need to commit the next span when we're in the
+	// last sprint of the current span.
 	sprintLength := c.config.CalculateSprintLength(headerNumber)
 	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
 		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)

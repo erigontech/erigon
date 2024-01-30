@@ -44,7 +44,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/consensuschain"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	trace_logger "github.com/ledgerwatch/erigon/eth/tracers/logger"
+	tracelogger "github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -163,7 +163,7 @@ func executeBlock(
 	}
 
 	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
-		return trace_logger.NewStructLogger(&trace_logger.LogConfig{}), nil
+		return tracelogger.NewStructLogger(&tracelogger.LogConfig{}), nil
 	}
 
 	callTracer := calltracer.NewCallTracer()
@@ -188,7 +188,7 @@ func executeBlock(
 		}
 
 		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
-			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
+			if err := rawdb.WriteBorReceipt(tx, block.NumberU64(), stateSyncReceipt); err != nil {
 				return err
 			}
 		}

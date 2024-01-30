@@ -108,6 +108,14 @@ type BlockExecutionStatistics struct {
 	TimeElapsed float64 `json:"timeElapsed"`
 }
 
+type SnapshoFilesList struct {
+	Files []string `json:"files"`
+}
+
+func (ti SnapshoFilesList) Type() Type {
+	return TypeOf(ti)
+}
+
 func (ti BlockExecutionStatistics) Type() Type {
 	return TypeOf(ti)
 }
