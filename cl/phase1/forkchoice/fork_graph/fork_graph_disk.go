@@ -3,7 +3,6 @@ package fork_graph
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -107,12 +106,10 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 	if err != nil {
 		panic(err)
 	}
-	headers := make(map[libcommon.Hash]*cltypes.BeaconBlockHeader)
 	anchorHeader := anchorState.LatestBlockHeader()
 	if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
 		panic(err)
 	}
-	headers[anchorRoot] = &anchorHeader
 
 	farthestExtendingPath[anchorRoot] = true
 
@@ -136,6 +133,8 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 		anchorSlot:         anchorState.Slot(),
 		lowestAvaiableSlot: anchorState.Slot(),
 	}
+	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
+
 	f.dumpBeaconStateOnDisk(anchorState, anchorRoot)
 	return f
 }
@@ -206,7 +205,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, LogisticError, err
 	}
 
-	fmt.Println("add", blockRoot)
 	f.headers.Store(libcommon.Hash(blockRoot), &cltypes.BeaconBlockHeader{
 		Slot:          block.Slot,
 		ProposerIndex: block.ProposerIndex,
@@ -241,7 +239,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 }
 
 func (f *forkGraphDisk) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	fmt.Println("get", blockRoot)
 	obj, has := f.headers.Load(blockRoot)
 	if !has {
 		return nil, false
@@ -355,7 +352,6 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
-
 	// try and find the point of recconection
 	for {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
