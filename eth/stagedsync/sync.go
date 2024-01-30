@@ -90,7 +90,6 @@ func (s *Sync) NextStage() {
 		return
 	}
 	s.currentStage++
-
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.CurrentSyncStage{}).Enabled()
 	if isDiagEnabled {
 		diagnostics.Send(diagnostics.CurrentSyncStage{Stage: s.currentStage})

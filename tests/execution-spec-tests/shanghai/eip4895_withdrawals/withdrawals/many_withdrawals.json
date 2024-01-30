@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_many_withdrawals[fork_Shanghai-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
@@ -7276,9 +7277,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun": {
+    "tests/shanghai/eip4895_withdrawals/test_withdrawals.py::test_many_withdrawals[fork_Cancun-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4895.md",
             "reference-spec-version": "81af3b60b632bc9c03513d1d137f25410e3f4d34"
         },
