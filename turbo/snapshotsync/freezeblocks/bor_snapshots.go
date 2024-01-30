@@ -178,6 +178,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	snapshots := br.borSnapshots()
 	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
+	logger.Log(log.LvlWarn, "[bor dbg] Retire Bor Blocks", "blockFrom", blockFrom, "blockTo", blockTo, "ok", ok)
 	if ok {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 		if err := DumpBorBlocks(ctx, chainConfig, snapshots.version, blockFrom, blockTo, snaptype.Erigon2MergeLimit, tmpDir, snapshots.Dir(), firstTxNum, db, workers, lvl, logger, blockReader); err != nil {
