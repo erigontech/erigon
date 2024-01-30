@@ -36,22 +36,22 @@ func TestHeimdallServer(t *testing.T) {
 			Time: time.Now(),
 		},
 	}
-	client.EXPECT().StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
+	client.EXPECT().FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes().Return(events, nil)
 
-	span := &heimdall.HeimdallSpan{
-		Span: heimdall.Span{
-			ID:         1,
-			StartBlock: 1000,
-			EndBlock:   2000,
-		},
-		ChainID: "80001",
+	span := &heimdall.Span{
+		Id:         1,
+		StartBlock: 1000,
+		EndBlock:   2000,
+		ChainID:    "80001",
 	}
-	client.EXPECT().Span(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
+	client.EXPECT().FetchSpan(gomock.Any(), gomock.Any()).AnyTimes().Return(span, nil)
 
 	checkpoint1 := &heimdall.Checkpoint{
-		StartBlock: big.NewInt(1000),
-		EndBlock:   big.NewInt(1999),
-		BorChainID: "80001",
+		Fields: heimdall.WaypointFields{
+			StartBlock: big.NewInt(1000),
+			EndBlock:   big.NewInt(1999),
+			ChainID:    "80001",
+		},
 	}
 	client.EXPECT().FetchCheckpoint(gomock.Any(), gomock.Any()).AnyTimes().Return(checkpoint1, nil)
 	client.EXPECT().FetchCheckpointCount(gomock.Any()).AnyTimes().Return(int64(1), nil)

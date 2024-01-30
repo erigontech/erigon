@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
@@ -41,10 +42,10 @@ func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
 	spans, err := testHarness.ReadSpansFromDB(ctx)
 	require.NoError(t, err)
 	require.Len(t, spans, 2)
-	require.Equal(t, uint64(0), spans[0].ID)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
 	require.Equal(t, uint64(0), spans[0].StartBlock)
 	require.Equal(t, uint64(255), spans[0].EndBlock)
-	require.Equal(t, uint64(1), spans[1].ID)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
 	require.Equal(t, uint64(256), spans[1].StartBlock)
 	require.Equal(t, uint64(6655), spans[1].EndBlock)
 }
@@ -71,10 +72,10 @@ func TestBorHeimdallForwardFetchesFirstSpanDuringSecondSprintStart(t *testing.T)
 	spans, err := testHarness.ReadSpansFromDB(ctx)
 	require.NoError(t, err)
 	require.Len(t, spans, 2)
-	require.Equal(t, uint64(0), spans[0].ID)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
 	require.Equal(t, uint64(0), spans[0].StartBlock)
 	require.Equal(t, uint64(255), spans[0].EndBlock)
-	require.Equal(t, uint64(1), spans[1].ID)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
 	require.Equal(t, uint64(256), spans[1].StartBlock)
 	require.Equal(t, uint64(6655), spans[1].EndBlock)
 }
@@ -102,13 +103,13 @@ func TestBorHeimdallForwardFetchesNextSpanDuringLastSprintOfCurrentSpan(t *testi
 	spans, err := testHarness.ReadSpansFromDB(ctx)
 	require.NoError(t, err)
 	require.Len(t, spans, 3)
-	require.Equal(t, uint64(0), spans[0].ID)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
 	require.Equal(t, uint64(0), spans[0].StartBlock)
 	require.Equal(t, uint64(255), spans[0].EndBlock)
-	require.Equal(t, uint64(1), spans[1].ID)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
 	require.Equal(t, uint64(256), spans[1].StartBlock)
 	require.Equal(t, uint64(6655), spans[1].EndBlock)
-	require.Equal(t, uint64(2), spans[2].ID)
+	require.Equal(t, heimdall.SpanId(2), spans[2].Id)
 	require.Equal(t, uint64(6656), spans[2].StartBlock)
 	require.Equal(t, uint64(13055), spans[2].EndBlock)
 }

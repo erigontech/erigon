@@ -147,7 +147,7 @@ type Harness struct {
 	stateSync                  *stagedsync.Sync
 	bhCfg                      stagedsync.BorHeimdallCfg
 	heimdallClient             *heimdall.MockHeimdallClient
-	heimdallNextMockSpan       *heimdall.HeimdallSpan
+	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
 	heimdallLastEventHeaderNum uint64
 	heimdallProducersOverride  map[uint64][]valset.Validator // spanID -> selected producers override
@@ -217,7 +217,7 @@ func (h *Harness) RunStageForwardWithReturnError(t *testing.T, id stages.SyncSta
 	return stage.Forward(true, false, stageState, h.stateSync, wrap.TxContainer{}, h.logger)
 }
 
-func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.HeimdallSpan, err error) {
+func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
 		spanIter, err := tx.Range(kv.BorSpans, nil, nil)
 		if err != nil {
@@ -230,14 +230,14 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Heimda
 				return err
 			}
 
-			spanKey := binary.BigEndian.Uint64(keyBytes)
-			var heimdallSpan heimdall.HeimdallSpan
+			spanKey := heimdall.SpanId(binary.BigEndian.Uint64(keyBytes))
+			var heimdallSpan heimdall.Span
 			if err = json.Unmarshal(spanBytes, &heimdallSpan); err != nil {
 				return err
 			}
 
-			if spanKey != heimdallSpan.ID {
-				return fmt.Errorf("span key and id mismatch %d!=%d", spanKey, heimdallSpan.ID)
+			if spanKey != heimdallSpan.Id {
+				return fmt.Errorf("span key and id mismatch %d!=%d", spanKey, heimdallSpan.Id)
 			}
 
 			spans = append(spans, &heimdallSpan)
@@ -512,12 +512,10 @@ func (h *Harness) setHeimdallNextMockSpan() {
 		selectedProducers[i] = *validators[i]
 	}
 
-	h.heimdallNextMockSpan = &heimdall.HeimdallSpan{
-		Span: heimdall.Span{
-			ID:         0,
-			StartBlock: 0,
-			EndBlock:   255,
-		},
+	h.heimdallNextMockSpan = &heimdall.Span{
+		Id:                0,
+		StartBlock:        0,
+		EndBlock:          255,
 		ValidatorSet:      *validatorSet,
 		SelectedProducers: selectedProducers,
 	}
@@ -547,20 +545,18 @@ func (h *Harness) mockBorSpanner() {
 func (h *Harness) mockHeimdallClient() {
 	h.heimdallClient.
 		EXPECT().
-		Span(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, spanID uint64) (*heimdall.HeimdallSpan, error) {
+		FetchSpan(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 			res := h.heimdallNextMockSpan
-			h.heimdallNextMockSpan = &heimdall.HeimdallSpan{
-				Span: heimdall.Span{
-					ID:         res.ID + 1,
-					StartBlock: res.EndBlock + 1,
-					EndBlock:   res.EndBlock + 6400,
-				},
+			h.heimdallNextMockSpan = &heimdall.Span{
+				Id:                res.Id + 1,
+				StartBlock:        res.EndBlock + 1,
+				EndBlock:          res.EndBlock + 6400,
 				ValidatorSet:      res.ValidatorSet,
 				SelectedProducers: res.SelectedProducers,
 			}
 
-			if selectedProducers, ok := h.heimdallProducersOverride[res.ID]; ok {
+			if selectedProducers, ok := h.heimdallProducersOverride[uint64(res.Id)]; ok {
 				res.SelectedProducers = selectedProducers
 			}
 
@@ -570,8 +566,8 @@ func (h *Harness) mockHeimdallClient() {
 
 	h.heimdallClient.
 		EXPECT().
-		StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*heimdall.EventRecordWithTime, error) {
+		FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uint64, _ time.Time, _ int) ([]*heimdall.EventRecordWithTime, error) {
 			h.heimdallLastEventID++
 			h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
 			stateSyncDelay := h.borConfig.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)

@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon/core/types"
-	heimdallspan "github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 type testDifficultyCalculator struct {
@@ -23,7 +23,7 @@ func (*testDifficultyCalculator) HeaderDifficulty(header *types.Header) (uint64,
 	return header.Difficulty.Uint64(), nil
 }
 
-func (*testDifficultyCalculator) SetSpan(*heimdallspan.HeimdallSpan) {}
+func (*testDifficultyCalculator) SetSpan(*heimdall.Span) {}
 
 func makeRoot() *types.Header {
 	return &types.Header{
