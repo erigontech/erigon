@@ -755,7 +755,7 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 			}
 			return nil
 		} else if unwind > 0 {
-			sn, borSn, agg := allSnapshots(ctx, db, snapshotVersion, logger)
+			sn, borSn, agg := allSnapshots(ctx, db, logger)
 			defer sn.Close()
 			defer borSn.Close()
 			defer agg.Close()

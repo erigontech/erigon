@@ -230,14 +230,6 @@ func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) err
 	return fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
-}
-
-func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
-}
-
 func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
 	return nil, fmt.Errorf("TODO")
 }

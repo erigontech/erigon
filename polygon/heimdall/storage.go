@@ -61,6 +61,8 @@ type Store interface {
 type reader interface {
 	services.BorEventReader
 	services.BorSpanReader
+	services.BorCheckpointReader
+	services.BorMilestoneReader
 }
 
 type blockReaderStore struct {
@@ -75,8 +77,8 @@ func NewBlockReaderStore(reader reader, tx kv.Tx) blockReaderStore {
 }
 
 func (io blockReaderStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
-	return 0, false, fmt.Errorf("TODO: need bor_accumulators")
-	//return io.reader.LastSpanId(ctx, io.tx)
+	spanId, ok, err := io.reader.LastSpanId(ctx, io.tx)
+	return SpanId(spanId), ok, err
 }
 
 func (io blockReaderStore) GetSpan(ctx context.Context, spanId SpanId) (*Span, error) {
@@ -115,28 +117,24 @@ func (io blockReaderStore) PutSpan(ctx context.Context, span *Span) error {
 }
 
 func (io blockReaderStore) LastMilestoneId(ctx context.Context) (MilestoneId, bool, error) {
-	return 0, false, fmt.Errorf("TODO: need bor_accumulators")
-	//id, ok, err := io.reader.LastMilestoneId(ctx, io.tx)
-	//return MilestoneId(id), ok, err
+	id, ok, err := io.reader.LastMilestoneId(ctx, io.tx)
+	return MilestoneId(id), ok, err
 }
 
 func (io blockReaderStore) GetMilestone(ctx context.Context, milestoneId MilestoneId) (*Milestone, error) {
-	return nil, fmt.Errorf("TODO: need bor_accumulators")
-	/*
-	   milestoneBytes, err := io.reader.Milestone(ctx, io.tx, uint64(milestoneId))
+	milestoneBytes, err := io.reader.Milestone(ctx, io.tx, uint64(milestoneId))
 
-	   	if err != nil {
-	   		return nil, err
-	   	}
+	if err != nil {
+		return nil, err
+	}
 
-	   var milestone Milestone
+	var milestone Milestone
 
-	   	if err := json.Unmarshal(milestoneBytes, &milestone); err != nil {
-	   		return nil, err
-	   	}
+	if err := json.Unmarshal(milestoneBytes, &milestone); err != nil {
+		return nil, err
+	}
 
-	   return &milestone, nil
-	*/
+	return &milestone, nil
 }
 
 func (io blockReaderStore) PutMilestone(ctx context.Context, milestoneId MilestoneId, milestone *Milestone) error {
@@ -159,14 +157,12 @@ func (io blockReaderStore) PutMilestone(ctx context.Context, milestoneId Milesto
 }
 
 func (io blockReaderStore) LastCheckpointId(ctx context.Context) (CheckpointId, bool, error) {
-	return 0, false, fmt.Errorf("TODO: need bor_accumulators")
-	//id, ok, err := io.reader.LastCheckpointId(ctx, io.tx)
-	//return CheckpointId(id), ok, err
+	id, ok, err := io.reader.LastCheckpointId(ctx, io.tx)
+	return CheckpointId(id), ok, err
 }
 
 func (io blockReaderStore) GetCheckpoint(ctx context.Context, checkpointId CheckpointId) (*Checkpoint, error) {
-	return nil, fmt.Errorf("TODO: need bor_accumulators")
-	/*checkpointBytes, err := io.reader.Milestone(ctx, io.tx, uint64(checkpointId))
+	checkpointBytes, err := io.reader.Milestone(ctx, io.tx, uint64(checkpointId))
 
 	if err != nil {
 		return nil, err
@@ -179,7 +175,6 @@ func (io blockReaderStore) GetCheckpoint(ctx context.Context, checkpointId Check
 	}
 
 	return &checkpoint, nil
-	*/
 }
 
 func (io blockReaderStore) PutCheckpoint(ctx context.Context, checkpointId CheckpointId, checkpoint *Checkpoint) error {
