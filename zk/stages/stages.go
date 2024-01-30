@@ -449,6 +449,21 @@ func DefaultZkStages(
 	}
 }
 
+var AllStagesZk = []stages2.SyncStage{
+	stages2.L1Syncer,
+	stages2.Batches,
+	stages2.CumulativeIndex,
+	stages2.BlockHashes,
+	stages2.Senders,
+	stages2.Execution,
+	stages2.HashState,
+	stages2.IntermediateHashes,
+	stages2.LogIndex,
+	stages2.CallTraces,
+	stages2.TxLookup,
+	stages2.Finish,
+}
+
 var ZkSequencerUnwindOrder = stages.UnwindOrder{
 	stages2.IntermediateHashes, // need to unwind SMT before we remove history
 	stages2.Execution,

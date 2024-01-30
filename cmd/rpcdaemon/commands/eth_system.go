@@ -14,8 +14,10 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/gasprice"
 	"github.com/ledgerwatch/erigon/rpc"
+
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	stageszk "github.com/ledgerwatch/erigon/zk/stages"
 )
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
@@ -39,7 +41,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	highestBlock, err := stages.GetStageProgress(tx, stages.Headers)
+	highestBlock, err := stages.GetStageProgress(tx, stages.Batches)
 	if err != nil {
 		return false, err
 	}
@@ -58,8 +60,8 @@ func (api *APIImpl) Syncing(ctx context.Context) (interface{}, error) {
 		StageName   string         `json:"stage_name"`
 		BlockNumber hexutil.Uint64 `json:"block_number"`
 	}
-	stagesMap := make([]S, len(stages.AllStages))
-	for i, stage := range stages.AllStages {
+	stagesMap := make([]S, len(stageszk.AllStagesZk))
+	for i, stage := range stageszk.AllStagesZk {
 		progress, err := stages.GetStageProgress(tx, stage)
 		if err != nil {
 			return nil, err
