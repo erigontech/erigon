@@ -52,7 +52,7 @@ func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
 }
 
-func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit ...int) ([]*heimdall.EventRecordWithTime, error) {
+func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
 	return nil, nil
 }
 

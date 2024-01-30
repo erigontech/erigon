@@ -236,7 +236,7 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 	return nil, fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit ...int) ([]*heimdall.EventRecordWithTime, error) {
+func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -445,7 +445,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *ch
 			return
 		}
 
-		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0))
+		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0), 0)
 		writeResponse(w, result, err)
 	})
 
