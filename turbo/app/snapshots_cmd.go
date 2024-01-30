@@ -361,6 +361,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
+	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
+		return err
+	}
+	return nil
+
 	if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
 		return err
 	}
