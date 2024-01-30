@@ -198,11 +198,10 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 
 		u.init(ctx, logger)
 
-		fmt.Println("downloadLatestSnapshots")
 		if cfg.syncConfig.UploadFrom != rpc.EarliestBlockNumber {
 			u.downloadLatestSnapshots(ctx, cfg.syncConfig.UploadFrom)
 		}
-		fmt.Println("maxSeedable", u.maxSeedableHeader())
+
 		if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
 			blockLimit := maxSeedable - u.minBlockNumber()
 
@@ -210,7 +209,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 				blockLimit = u.cfg.syncConfig.FrozenBlockLimit
 			}
 
-			fmt.Println("seg min", maxSeedable-blockLimit)
 			if snapshots, ok := u.cfg.blockReader.Snapshots().(*freezeblocks.RoSnapshots); ok {
 				snapshots.SetSegmentsMin(maxSeedable - blockLimit)
 			}
@@ -783,7 +781,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 	if err != nil {
 		return err
 	}
-	fmt.Println(entries)
+
 	lastSegments := map[snaptype.Enum]fs.FileInfo{}
 	torrents := map[string]string{}
 
@@ -849,7 +847,6 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 		}
 	}
 
-	fmt.Println("downloads", downloads)
 	if len(downloads) > 0 {
 		return u.uploadSession.Download(ctx, downloads...)
 	}
