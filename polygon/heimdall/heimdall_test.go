@@ -56,7 +56,7 @@ func newHeimdallTest(t *testing.T) heimdallTest {
 
 	client := NewMockHeimdallClient(ctrl)
 	heimdall := NewHeimdall(client, logger)
-	store := NewMockIO(ctrl)
+	store := NewMockStore(ctrl)
 
 	return heimdallTest{
 		ctx,
