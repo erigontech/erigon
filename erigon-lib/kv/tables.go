@@ -802,12 +802,14 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:  {Flags: DupSort},
-	BorFinality:  {Flags: DupSort},
-	BorTxLookup:  {Flags: DupSort},
-	BorEvents:    {Flags: DupSort},
-	BorEventNums: {Flags: DupSort},
-	BorSpans:     {Flags: DupSort},
+	BorReceipts:    {Flags: DupSort},
+	BorFinality:    {Flags: DupSort},
+	BorTxLookup:    {Flags: DupSort},
+	BorEvents:      {Flags: DupSort},
+	BorEventNums:   {Flags: DupSort},
+	BorSpans:       {Flags: DupSort},
+	BorCheckpoints: {Flags: DupSort},
+	BorMilestones:  {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}

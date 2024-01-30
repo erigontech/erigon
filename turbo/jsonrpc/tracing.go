@@ -105,7 +105,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	stream.WriteArrayStart()
 
 	txns := block.Transactions()
-	var borStateSyncTx types.Transaction
+	var borStateSyncTxn types.Transaction
 	if *config.BorTraceEnabled {
 		borStateSyncTxHash := types.ComputeBorTxHash(block.NumberU64(), block.Hash())
 		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
@@ -114,15 +114,15 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			return err
 		}
 		if ok {
-			borStateSyncTx = types.NewBorTransaction()
-			txns = append(txns, borStateSyncTx)
+			borStateSyncTxn = types.NewBorTransaction()
+			txns = append(txns, borStateSyncTxn)
 		}
 	}
 
 	for idx, txn := range txns {
-		isBorStateSyncTx := borStateSyncTx == txn
+		isBorStateSyncTxn := borStateSyncTxn == txn
 		var txnHash common.Hash
-		if isBorStateSyncTx {
+		if isBorStateSyncTxn {
 			txnHash = types.ComputeBorTxHash(block.NumberU64(), block.Hash())
 		} else {
 			txnHash = txn.Hash()
@@ -137,9 +137,11 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		default:
 		case <-ctx.Done():
 			stream.WriteNil()
+			stream.WriteObjectEnd()
+			stream.WriteArrayEnd()
 			return ctx.Err()
 		}
-		ibs.SetTxContext(txn.Hash(), block.Hash(), idx)
+		ibs.SetTxContext(txnHash, block.Hash(), idx)
 		msg, _ := txn.AsMessage(*signer, block.BaseFee(), rules)
 
 		if msg.FeeCap().IsZero() && engine != nil {
@@ -150,13 +152,13 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		txCtx := evmtypes.TxContext{
-			TxHash:   txn.Hash(),
+			TxHash:   txnHash,
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice(),
 		}
 
-		if isBorStateSyncTx {
-			err = polygontracer.TraceBorStateSyncTxn(
+		if isBorStateSyncTxn {
+			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
 				tx,
 				chainConfig,
@@ -176,25 +178,28 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		if err == nil {
 			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
 		}
-		stream.WriteObjectEnd()
 
 		// if we have an error we want to output valid json for it before continuing after clearing down potential writes to the stream
 		if err != nil {
 			stream.WriteMore()
-			stream.WriteObjectStart()
-			err = rpc.HandleError(err, stream)
-			stream.WriteObjectEnd()
-			if err != nil {
-				return err
-			}
+			rpc.HandleError(err, stream)
 		}
+
+		stream.WriteObjectEnd()
 		if idx != len(txns)-1 {
 			stream.WriteMore()
 		}
-		stream.Flush()
+
+		if err := stream.Flush(); err != nil {
+			return err
+		}
 	}
+
 	stream.WriteArrayEnd()
-	stream.Flush()
+	if err := stream.Flush(); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -212,7 +217,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	var isBorStateSyncTx bool
+	var isBorStateSyncTxn bool
 	blockNum, ok, err := api.txnLookup(tx, hash)
 	if err != nil {
 		stream.WriteNil()
@@ -239,7 +244,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			return nil
 		}
 
-		isBorStateSyncTx = true
+		isBorStateSyncTxn = true
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -260,7 +265,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	}
 	var txnIndex int
 	var txn types.Transaction
-	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTx; i++ {
+	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTxn; i++ {
 		transaction := block.Transactions()[i]
 		if transaction.Hash() == hash {
 			txnIndex = i
@@ -269,7 +274,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		}
 	}
 	if txn == nil {
-		if isBorStateSyncTx {
+		if isBorStateSyncTxn {
 			// bor state sync tx is appended at the end of the block
 			txnIndex = block.Transactions().Len()
 		} else {
@@ -284,8 +289,8 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return err
 	}
-	if isBorStateSyncTx {
-		return polygontracer.TraceBorStateSyncTxn(
+	if isBorStateSyncTxn {
+		return polygontracer.TraceBorStateSyncTxnDebugAPI(
 			ctx,
 			tx,
 			chainConfig,
@@ -525,38 +530,39 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 
 	stream.WriteArrayStart()
-	for bundle_index, bundle := range bundles {
+	for bundleIndex, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change blockContext
 		blockHeaderOverride(&blockCtx, bundle.BlockOverride, overrideBlockHash)
-		for txn_index, txn := range bundle.Transactions {
+		for txnIndex, txn := range bundle.Transactions {
 			if txn.Gas == nil || *(txn.Gas) == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
 			msg, err := txn.ToMessage(api.GasCap, blockCtx.BaseFee)
 			if err != nil {
-				stream.WriteNil()
+				stream.WriteArrayEnd()
+				stream.WriteArrayEnd()
 				return err
 			}
 			txCtx = core.NewEVMTxContext(msg)
 			ibs := evm.IntraBlockState().(*state.IntraBlockState)
-			ibs.SetTxContext(common.Hash{}, parent.Hash(), txn_index)
+			ibs.SetTxContext(common.Hash{}, parent.Hash(), txnIndex)
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, evm.IntraBlockState(), config, chainConfig, stream, api.evmCallTimeout)
-
 			if err != nil {
-				stream.WriteNil()
+				stream.WriteArrayEnd()
+				stream.WriteArrayEnd()
 				return err
 			}
 
 			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 
-			if txn_index < len(bundle.Transactions)-1 {
+			if txnIndex < len(bundle.Transactions)-1 {
 				stream.WriteMore()
 			}
 		}
 		stream.WriteArrayEnd()
 
-		if bundle_index < len(bundles)-1 {
+		if bundleIndex < len(bundles)-1 {
 			stream.WriteMore()
 		}
 		blockCtx.BlockNumber++

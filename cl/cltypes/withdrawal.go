@@ -11,10 +11,10 @@ import (
 )
 
 type Withdrawal struct {
-	Index     uint64            `json:"index,string"`          // monotonically increasing identifier issued by consensus layer
-	Validator uint64            `json:"validatorIndex,string"` // index of validator associated with withdrawal
-	Address   libcommon.Address `json:"address"`               // target address for withdrawn ether
-	Amount    uint64            `json:"amount,string"`         // value of withdrawal in GWei
+	Index     uint64            `json:"index,string"`           // monotonically increasing identifier issued by consensus layer
+	Validator uint64            `json:"validator_index,string"` // index of validator associated with withdrawal
+	Address   libcommon.Address `json:"address"`                // target address for withdrawn ether
+	Amount    uint64            `json:"amount,string"`          // value of withdrawal in GWei
 }
 
 func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {

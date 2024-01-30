@@ -24,8 +24,8 @@ func newHeaderDownloaderTest(t *testing.T) *headerDownloaderTest {
 
 func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts) *headerDownloaderTest {
 	ctrl := gomock.NewController(t)
-	checkpointIO := NewMockCheckpointIO(ctrl)
-	milestoneIO := NewMockMilestoneIO(ctrl)
+	checkpointStore := NewMockCheckpointStore(ctrl)
+	milestoneStore := NewMockMilestoneStore(ctrl)
 	heimdall := heimdall.NewMockHeimdall(ctrl)
 	sentry := NewMockSentry(ctrl)
 	sentry.EXPECT().MaxPeers().Return(100).Times(1)
@@ -36,8 +36,8 @@ func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts
 		heimdall:         heimdall,
 		sentry:           sentry,
 		headerDownloader: headerDownloader,
-		milestoneIO:      milestoneIO,
-		checkpointIO:     checkpointIO,
+		milestoneStore:   milestoneStore,
+		checkpointStore:  checkpointStore,
 	}
 }
 
@@ -58,8 +58,8 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() Accumula
 type headerDownloaderTest struct {
 	heimdall         *heimdall.MockHeimdall
 	sentry           *MockSentry
-	milestoneIO      *MockMilestoneIO
-	checkpointIO     *MockCheckpointIO
+	milestoneStore   *MockMilestoneStore
+	checkpointStore  *MockCheckpointStore
 	headerDownloader *HeaderDownloader
 }
 
@@ -148,12 +148,12 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(4)
 	var persistedHeaders []*types.Header
-	test.milestoneIO.EXPECT().
-		WriteHeaders(gomock.Any()).
+	test.milestoneStore.EXPECT().
+		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(1)
 
-	err := test.headerDownloader.DownloadUsingMilestones(context.Background(), test.milestoneIO, 1)
+	err := test.headerDownloader.DownloadUsingMilestones(context.Background(), test.milestoneStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 4)
 	// check headers are written in order
@@ -178,12 +178,12 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
-	test.checkpointIO.EXPECT().
-		WriteHeaders(gomock.Any()).
+	test.checkpointStore.EXPECT().
+		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointIO, 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
 	// check headers are written in order
@@ -233,17 +233,17 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Times(1)
 	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
 	gomock.InOrder(
-		test.checkpointIO.EXPECT().
-			WriteHeaders(gomock.Any()).
+		test.checkpointStore.EXPECT().
+			PutHeaders(gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersFirstTime)).
 			Times(1),
-		test.checkpointIO.EXPECT().
-			WriteHeaders(gomock.Any()).
+		test.checkpointStore.EXPECT().
+			PutHeaders(gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersRemaining)).
 			Times(2),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointIO, 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeadersFirstTime, 1)
 	require.Len(t, persistedHeadersRemaining, 5)
@@ -260,8 +260,8 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
-	test.checkpointIO.EXPECT().
-		WriteHeaders(gomock.Any()).
+	test.checkpointStore.EXPECT().
+		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 	gomock.InOrder(
@@ -282,7 +282,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 			Times(4),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointIO, 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
 }

@@ -161,7 +161,7 @@ func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span
 		nextSpan.StartBlock = 1 //256
 	} else {
 		if spanID != uint64(h.currentSpan.Id+1) {
-			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
+			return nil, fmt.Errorf("can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
@@ -230,7 +230,15 @@ func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) err
 	return fmt.Errorf("TODO")
 }
 
-func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit ...int) ([]*heimdall.EventRecordWithTime, error) {
+func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
 	return nil, fmt.Errorf("TODO")
 }
 
@@ -439,7 +447,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *ch
 			return
 		}
 
-		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0))
+		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0), 0)
 		writeResponse(w, result, err)
 	})
 
