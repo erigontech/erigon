@@ -159,4 +159,6 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, libcommon.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 
+	newestLc := store.NewestLightClientUpdate()
+	require.Nil(t, newestLc)
 }

@@ -25,6 +25,12 @@ type LightClientHeader struct {
 }
 
 func NewLightClientHeader(version clparams.StateVersion) *LightClientHeader {
+	if version < clparams.CapellaVersion {
+		return &LightClientHeader{
+			version: version,
+			Beacon:  &BeaconBlockHeader{},
+		}
+	}
 	return &LightClientHeader{
 		version:                version,
 		Beacon:                 &BeaconBlockHeader{},
