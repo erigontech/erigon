@@ -348,14 +348,14 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	isEIP3860 := vmConfig.HasEip3860(rules)
 
 	// Check clauses 4-5, subtract intrinsic gas if everything is correct
-	gas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
+	intrinsicGas, err := IntrinsicGas(st.data, st.msg.AccessList(), contractCreation, rules.IsHomestead, rules.IsIstanbul, isEIP3860)
 	if err != nil {
 		return nil, err
 	}
-	if st.gas < gas {
-		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
+	if st.gas < intrinsicGas {
+		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, intrinsicGas)
 	}
-	st.gas -= gas
+	st.gas -= intrinsicGas
 
 	var bailout bool
 	// Gas bailout (for trace_call) should only be applied if there is not sufficient balance to perform value transfer
@@ -388,11 +388,11 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		// nonce to calculate the address of the contract that is being created
 		// It does get incremented inside the `Create` call, after the computation
 		// of the contract's address, but before the execution of the code.
-		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value)
+		ret, _, st.gas, vmerr = st.evm.Create(sender, st.data, st.gas, st.value, intrinsicGas)
 	} else {
 		// Increment the nonce for the next transaction
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
-		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout)
+		ret, st.gas, vmerr = st.evm.Call(sender, st.to(), st.data, st.gas, st.value, bailout, intrinsicGas)
 	}
 	if refunds {
 		if rules.IsLondon {

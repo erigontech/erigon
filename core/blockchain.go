@@ -382,6 +382,7 @@ func SysCallContract(contract libcommon.Address, data []byte, chainConfig chain.
 		msg.Gas(),
 		msg.Value(),
 		false,
+		0,
 	)
 	if isBor && err != nil {
 		return nil, nil

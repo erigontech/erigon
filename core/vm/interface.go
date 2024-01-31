@@ -42,8 +42,8 @@ type CallContext interface {
 // VMInterface exposes the EVM interface for external callers.
 type VMInterface interface {
 	Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState)
-	Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
-	Call(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool) (ret []byte, leftOverGas uint64, err error)
+	Create(caller ContractRef, code []byte, gas uint64, value *uint256.Int, intrinsicGas uint64) (ret []byte, contractAddr libcommon.Address, leftOverGas uint64, err error)
+	Call(caller ContractRef, addr libcommon.Address, input []byte, gas uint64, value *uint256.Int, bailout bool, intrinsicGas uint64) (ret []byte, leftOverGas uint64, err error)
 	Cancel()
 	Config() Config
 	ChainConfig() *chain.Config

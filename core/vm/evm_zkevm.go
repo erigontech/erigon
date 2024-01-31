@@ -36,7 +36,7 @@ func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 }
 
 // create creates a new contract using code as deployment code.
-func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool) ([]byte, libcommon.Address, uint64, error) {
+func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas uint64, value *uint256.Int, address libcommon.Address, typ OpCode, incrementNonce bool, intrinsicGas uint64) ([]byte, libcommon.Address, uint64, error) {
 	var ret []byte
 	var err error
 	var gasConsumption uint64
@@ -44,7 +44,7 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 
 	if evm.config.Debug {
 		if depth == 0 {
-			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas, value, nil)
+			evm.config.Tracer.CaptureStart(evm, caller.Address(), address, false /* precompile */, true /* create */, codeAndHash.code, gas+intrinsicGas, value, nil)
 			defer func() {
 				evm.config.Tracer.CaptureEnd(ret, gasConsumption, err)
 			}()

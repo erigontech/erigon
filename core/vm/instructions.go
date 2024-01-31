@@ -653,7 +653,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 	scope.Contract.UseGas(gas)
 
-	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value)
+	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, 0)
 
 	// Push item on the stack based on the returned error. If the ruleset is
 	// homestead we must check for CodeStoreOutOfGasError (homestead only
@@ -732,7 +732,7 @@ func opCall(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byt
 		gas += params.CallStipend
 	}
 
-	ret, returnGas, err := interpreter.evm.Call(scope.Contract, toAddr, args, gas, &value, false /* bailout */)
+	ret, returnGas, err := interpreter.evm.Call(scope.Contract, toAddr, args, gas, &value, false /* bailout */, 0)
 
 	if err != nil {
 		temp.Clear()

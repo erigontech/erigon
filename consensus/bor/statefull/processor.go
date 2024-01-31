@@ -48,6 +48,7 @@ func ApplyBorMessage(vmenv vm.EVM, msg Callmsg) (*core.ExecutionResult, error) {
 		msg.Gas(),
 		msg.Value(),
 		false,
+		0, /* intrinsicGas is zero here*/
 	)
 
 	gasUsed := initialGas - gasLeft
