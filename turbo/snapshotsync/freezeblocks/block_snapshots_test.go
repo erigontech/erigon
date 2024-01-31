@@ -86,7 +86,7 @@ func TestFindMergeRange(t *testing.T) {
 	t.Run("small", func(t *testing.T) {
 		var rangesOld Ranges
 		for i := uint64(0); i < 240; i++ {
-			rangesOld = append(rangesOld, Range{from: uint64(i * 10_000), to: uint64((i + 1) * 10_000)})
+			rangesOld = append(rangesOld, Range{from: i * 10_000, to: (i + 1) * 10_000})
 		}
 		found := merger.FindMergeRanges(rangesOld, uint64(240*10_000))
 		var expect Ranges
@@ -102,7 +102,7 @@ func TestFindMergeRange(t *testing.T) {
 		var rangesNew Ranges
 		start := uint64(19_000_000)
 		for i := uint64(0); i < 240; i++ {
-			rangesNew = append(rangesNew, Range{from: start + uint64(i*10_000), to: start + uint64((i+1)*10_000)})
+			rangesNew = append(rangesNew, Range{from: start + i*10_000, to: start + (i+1)*10_000})
 		}
 		found = merger.FindMergeRanges(rangesNew, uint64(240*10_000))
 		expect = nil
