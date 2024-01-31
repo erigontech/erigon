@@ -76,11 +76,41 @@ func RunImport(settings *Settings, blockSource BlockSource, secondaryBlocksSourc
 	go func() {
 		defer wg.Done()
 
-		for blocks := range blocksChan {
-			for _, block := range blocks {
-				if err := state.ProcessBlock(block); err != nil {
-					resultErr = fmt.Errorf("failed to process block: %w", err)
-					close(settings.Terminated)
+		for {
+			select {
+			case blocks, ok := <-blocksChan:
+				{
+					if !ok {
+						return
+					}
+
+					for {
+						select {
+						case newBlocks, ok := <-blocksChan:
+							{
+								if !ok {
+									return
+								}
+
+								blocks = append(blocks, newBlocks...)
+							}
+						default:
+							{
+								if err := state.ProcessBlocks(blocks); err != nil {
+									resultErr = fmt.Errorf("failed to process block: %w", err)
+									close(settings.Terminated)
+									return
+								}
+
+								blocks = nil
+
+								break
+							}
+						}
+					}
+				}
+			case <-settings.Terminated:
+				{
 					return
 				}
 			}
@@ -92,12 +122,12 @@ func RunImport(settings *Settings, blockSource BlockSource, secondaryBlocksSourc
 }
 
 func makeBlockSource(settings *Settings, blockSource BlockSource, secondaryBlockSource BlockSource) BlockSource {
-	primarySource := makeSingleBlockSource(settings, blockSource)
 	if secondaryBlockSource != nil {
-		return WithSecondaryBlocksSource(primarySource, makeSingleBlockSource(settings, secondaryBlockSource))
-	} else {
-		return primarySource
+		blockSource = WithSecondaryBlocksSource(blockSource, secondaryBlockSource)
 	}
+
+	return makeSingleBlockSource(settings, blockSource)
+
 }
 
 func makeSingleBlockSource(settings *Settings, blockSource BlockSource) BlockSource {

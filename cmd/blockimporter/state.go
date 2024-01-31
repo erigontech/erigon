@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
 	"github.com/ledgerwatch/erigon/core"
@@ -142,19 +143,59 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 	return state, err
 }
 
-func (state *State) ProcessBlock(block types.Block) error {
-	log.Info(fmt.Sprintf("processing block %d", block.NumberU64()))
+func (state *State) ProcessBlocks(blocks []types.Block) error {
+	if len(blocks) == 0 {
+		return nil
+	}
+
+	log.Info(fmt.Sprintf("processing %d blocks", len(blocks)))
 
 	tx, err := state.db.GetChain().BeginRw(context.Background())
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+
+	for _, block := range blocks {
+		if err := state.processBlock(block, tx); err != nil {
+			return err
+		}
+	}
+
+	prevBlockNum := blocks[0].NumberU64() - 1
+	currBlock := blocks[len(blocks)-1]
+	currBlockNum := currBlock.NumberU64()
+
+	dirs := datadir2.New(state.db.path)
+	if err = stagedsync.PromoteHashedStateIncrementally("hashedstate", prevBlockNum, currBlockNum, tx, stagedsync.StageHashStateCfg(nil, dirs, false, nil), context.Background(), false); err != nil {
+		return err
+	}
+
+	s := stagedsync.StageState{
+		BlockNumber: prevBlockNum,
+	}
+	cfg := stagedsync.StageTrieCfg(state.db.chain, false, true, true, state.db.path, nil, nil, false, nil)
+	if root, err := stagedsync.IncrementIntermediateHashes("increment hashes", &s, tx, currBlockNum, cfg, common.Hash{}, nil); err != nil {
+		return err
+	} else if root != currBlock.Root() {
+		return fmt.Errorf("invalid root, have: %s, want: %s", root.String(), currBlock.Root().String())
+	}
+
+	log.Info("state root verified")
+
+	err = tx.Commit()
+
+	log.Info(fmt.Sprintf("%d blocks successfully processed", len(blocks)))
+
+	return err
+}
+
+func (state *State) processBlock(block types.Block, tx kv.RwTx) error {
+	log.Info(fmt.Sprintf("processing block %d", block.NumberU64()))
 
 	batch := olddb.NewHashBatch(tx, make(<-chan struct{}), ".")
 	defer batch.Rollback()
-	stateReader := coreState.NewPlainStateReader(tx)
-	stateWriter := coreState.NewPlainStateWriter(tx, tx, block.NumberU64())
+	stateReader := coreState.NewPlainStateReader(batch)
+	stateWriter := coreState.NewPlainStateWriter(batch, tx, block.NumberU64())
 	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
 		return nil, nil
 	}
@@ -170,26 +211,9 @@ func (state *State) ProcessBlock(block types.Block) error {
 		stagedsync.NewChainReaderImpl(state.chainConfig, tx, nil),
 		getTracer)
 	if err != nil {
-		// NOTE: Temporary fix
-		log.Error(fmt.Sprintf("failed to process block %d: %s, ignoring it", block.NumberU64(), err))
-		state.blockNum.Add(state.blockNum, big.NewInt(1))
+		log.Error(fmt.Sprintf("failed to process block %d: %s", block.NumberU64(), err))
 
-		return nil
-	}
-
-	dirs := datadir2.New(state.db.path)
-	if err = stagedsync.PromoteHashedStateIncrementally("hashedstate", block.NumberU64()-1, block.NumberU64(), tx, stagedsync.StageHashStateCfg(nil, dirs, false, nil), context.Background(), false); err != nil {
 		return err
-	}
-
-	s := stagedsync.StageState{
-		BlockNumber: block.NumberU64() - 1,
-	}
-	cfg := stagedsync.StageTrieCfg(state.db.chain, false, true, true, state.db.path, nil, nil, false, nil)
-	if root, err := stagedsync.IncrementIntermediateHashes("increment hashes", &s, tx, block.NumberU64(), cfg, common.Hash{}, nil); err != nil {
-		return err
-	} else if root != block.Root() {
-		return fmt.Errorf("invalid root, have: %s, want: %s", root.String(), block.Root().String())
 	}
 
 	stateSyncReceipt := execRs.StateSyncReceipt
@@ -203,7 +227,6 @@ func (state *State) ProcessBlock(block types.Block) error {
 	if err := stateWriter.WriteHistory(); err != nil {
 		return fmt.Errorf("failed to write history: %v", err)
 	}
-
 	if err := rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64()); err != nil {
 		return err
 	}
@@ -271,7 +294,7 @@ func (state *State) ProcessBlock(block types.Block) error {
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 func (state *State) BlockNum() uint64 {
