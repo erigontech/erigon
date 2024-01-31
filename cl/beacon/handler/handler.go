@@ -100,7 +100,9 @@ func (a *ApiHandler) init() {
 					r.Post("/sync_committees", http.NotFound) // TODO
 				})
 				r.Route("/light_client", func(r chi.Router) {
-					r.Get("/bootstrap/{block_id}", beaconhttp.HandleEndpointFunc(a.EthV1BeaconLightClientBootstrap))
+					r.Get("/bootstrap/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientBootstrap))
+					r.Get("/optimistic_update", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientOptimisticUpdate))
+					r.Get("/finality_update", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientFinalityUpdate))
 				})
 				r.Get("/node/syncing", http.NotFound)
 				r.Route("/states", func(r chi.Router) {

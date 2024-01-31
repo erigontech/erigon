@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -61,6 +62,14 @@ type savedStateRecord struct {
 	slot uint64
 }
 
+func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
+	out := solid.NewHashVector(len(in))
+	for i, v := range in {
+		out.Set(i, libcommon.Hash(v))
+	}
+	return out
+}
+
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
@@ -95,6 +104,7 @@ type forkGraphDisk struct {
 	genesisTime uint64
 	// highest block seen
 	highestSeen, lowestAvaiableSlot, anchorSlot uint64
+	newestLightClientUpdate                     atomic.Value
 
 	// reusable buffers
 	sszBuffer       bytes.Buffer
@@ -177,7 +187,27 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
+	finalizedBlock, hasFinalizedBlock := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
+	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
+	// Before processing the state: update the newest lightclient update.
+	if block.Version() >= clparams.AltairVersion && hasFinalizedBlock && hasParentBlock && fullValidation {
+		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
+		if err != nil {
+			return nil, LogisticError, err
+		}
+		finalityBranch, err := newState.FinalityRootBranch()
+		if err != nil {
+			return nil, LogisticError, err
+		}
+
+		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
+			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
+		if err != nil {
+			return nil, LogisticError, err
+		}
+		f.newestLightClientUpdate.Store(lightclientUpdate)
+	}
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 	// Execute the state
 	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
@@ -465,4 +495,11 @@ func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot libcommon.Hash) (*clty
 		return nil, false
 	}
 	return obj.(*cltypes.LightClientBootstrap), true
+}
+
+func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
+	if f.newestLightClientUpdate.Load() == nil {
+		return nil
+	}
+	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
 }

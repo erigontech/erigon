@@ -43,6 +43,7 @@ type ForkChoiceStorageReader interface {
 	ForkNodes() []ForkNode
 	Synced() bool
 	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
+	NewestLightClientUpdate() *cltypes.LightClientUpdate
 }
 
 type ForkChoiceStorageWriter interface {

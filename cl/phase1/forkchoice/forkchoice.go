@@ -494,3 +494,7 @@ func (f *ForkChoiceStore) SetSynced(s bool) {
 func (f *ForkChoiceStore) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {
 	return f.forkGraph.GetLightClientBootstrap(blockRoot)
 }
+
+func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
+	return f.forkGraph.NewestLightClientUpdate()
+}
