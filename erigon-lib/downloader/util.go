@@ -388,8 +388,8 @@ func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Inf
 		}
 
 		if fileInfo != nil {
-			len := fileInfo.Length
-			info.Length = &len
+			length := fileInfo.Length
+			info.Length = &length
 		}
 
 		if completed && info.Completed == nil {
