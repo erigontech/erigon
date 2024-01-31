@@ -13,6 +13,7 @@ import (
 func SequencerZkStages(
 	ctx context.Context,
 	cumulativeIndex stagedsync.CumulativeIndexCfg,
+	l1InfoTreeCfg L1SequencerSyncCfg,
 	dataStreamCatchupCfg DataStreamCatchupCfg,
 	sequencerInterhashesCfg SequencerInterhashesCfg,
 	exec SequenceBlockCfg,
@@ -43,8 +44,19 @@ func SequencerZkStages(
 				},
 			},
 		*/
-		/* TODO: here should be some stage of getting GERs from the L1 and writing to the DB for future batches
-		 */
+		{
+			ID:          stages2.L1Syncer,
+			Description: "L1 Sequencer Sync Updates",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnL1SequencerSyncStage(s, u, tx, l1InfoTreeCfg, ctx, firstCycle, quiet)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return UnwindL1SequencerSyncStage(u, tx, l1InfoTreeCfg, ctx)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return PruneL1SequencerSyncStage(p, tx, l1InfoTreeCfg, ctx)
+			},
+		},
 		{
 			/*
 				TODO:

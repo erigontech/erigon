@@ -103,7 +103,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 	}
 
 	// [zkevm] change
-	evm.interpreter = NewZKEVMInterpreter(evm, vmConfig)
+	evm.interpreter = NewZKEVMInterpreter(evm, NewZkConfig(vmConfig, nil))
 
 	return evm
 }
@@ -126,7 +126,7 @@ func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtype
 	evm.chainRules = chainRules
 
 	// [zkevm] change
-	evm.interpreter = NewZKEVMInterpreter(evm, vmConfig)
+	evm.interpreter = NewZKEVMInterpreter(evm, NewZkConfig(vmConfig, nil))
 
 	// ensure the evm is reset to be used again
 	atomic.StoreInt32(&evm.abort, 0)

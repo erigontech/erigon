@@ -5,7 +5,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 
+	"encoding/binary"
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -32,4 +34,34 @@ type Batch struct {
 	Transactions   []ethTypes.Transaction
 	GlobalExitRoot common.Hash
 	ForcedBatchNum *uint64
+}
+
+type L1InfoTreeUpdate struct {
+	Index           uint64
+	GER             common.Hash
+	MainnetExitRoot common.Hash
+	RollupExitRoot  common.Hash
+	ParentHash      common.Hash
+	Timestamp       uint64
+}
+
+func (l *L1InfoTreeUpdate) Marshall() []byte {
+	result := make([]byte, 8+32+32+32+32+8)
+	idx := utils.Uint64ToLE(l.Index)
+	copy(result[:8], idx)
+	copy(result[8:], l.GER[:])
+	copy(result[40:], l.MainnetExitRoot[:])
+	copy(result[72:], l.RollupExitRoot[:])
+	copy(result[104:], l.ParentHash[:])
+	copy(result[136:], utils.Uint64ToLE(l.Timestamp))
+	return result
+}
+
+func (l *L1InfoTreeUpdate) Unmarshall(input []byte) {
+	l.Index = binary.LittleEndian.Uint64(input[:8])
+	copy(l.GER[:], input[8:40])
+	copy(l.MainnetExitRoot[:], input[40:72])
+	copy(l.RollupExitRoot[:], input[72:104])
+	copy(l.ParentHash[:], input[104:136])
+	l.Timestamp = binary.LittleEndian.Uint64(input[136:])
 }

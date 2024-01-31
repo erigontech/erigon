@@ -58,6 +58,9 @@ type Contract struct {
 
 	Gas   uint64
 	value *uint256.Int
+
+	// zkevm
+	IsCreate bool
 }
 
 // NewContract returns a new contract environment for the execution of EVM.

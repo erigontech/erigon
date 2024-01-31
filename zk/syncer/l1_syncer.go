@@ -12,13 +12,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/zk/types"
 )
 
 var (
-	sequencedBatchTopic = common.HexToHash("0x303446e6a8cb73c83dff421c0b1d5e5ce0719dab1bff13660fc254e58cc17fce")
-	verificationTopic   = common.HexToHash("0xcb339b570a7f0b25afa7333371ff11192092a0aeace12b671f4c212f2815c6fe")
-
 	batchWorkers = 2
 )
 
@@ -41,6 +37,7 @@ type jobResult struct {
 type L1Syncer struct {
 	em                IEtherman
 	l1ContractAddress common.Address
+	topics            [][]common.Hash
 	blockRange        uint64
 	queryDelay        uint64
 
@@ -52,20 +49,19 @@ type L1Syncer struct {
 	lastCheckedL1Block atomic.Uint64
 
 	// Channels
-	verificationsChan   chan types.L1BatchInfo
-	sequencesChan       chan types.L1BatchInfo
+	logsChan            chan ethTypes.Log
 	progressMessageChan chan string
 }
 
-func NewL1Syncer(em IEtherman, l1ContractAddress common.Address, blockRange, queryDelay uint64) *L1Syncer {
+func NewL1Syncer(em IEtherman, l1ContractAddress common.Address, topics [][]common.Hash, blockRange, queryDelay uint64) *L1Syncer {
 	return &L1Syncer{
 		em:                  em,
 		l1ContractAddress:   l1ContractAddress,
+		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
-		verificationsChan:   make(chan types.L1BatchInfo, 1000),
-		sequencesChan:       make(chan types.L1BatchInfo, 1000),
 		progressMessageChan: make(chan string),
+		logsChan:            make(chan ethTypes.Log),
 	}
 }
 
@@ -82,12 +78,8 @@ func (s *L1Syncer) GetLastCheckedL1Block() uint64 {
 }
 
 // Channels
-func (s *L1Syncer) GetVerificationsChan() chan types.L1BatchInfo {
-	return s.verificationsChan
-}
-
-func (s *L1Syncer) GetSequencesChan() chan types.L1BatchInfo {
-	return s.sequencesChan
+func (s *L1Syncer) GetLogsChan() chan ethTypes.Log {
+	return s.logsChan
 }
 
 func (s *L1Syncer) GetProgressMessageChan() chan string {
@@ -132,6 +124,10 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 			time.Sleep(time.Duration(s.queryDelay) * time.Millisecond)
 		}
 	}()
+}
+
+func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
+	return s.em.BlockByNumber(context.Background(), new(big.Int).SetUint64(number))
 }
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {
@@ -201,18 +197,7 @@ loop:
 			progress += res.Size
 			if len(res.Logs) > 0 {
 				for _, l := range res.Logs {
-					info := convertResultToBatchInfo(&l)
-					if l.Topics[0] == sequencedBatchTopic {
-						s.sequencesChan <- info
-					} else if l.Topics[0] == verificationTopic {
-
-						stateRootData := l.Data[:32]
-						stateRoot := common.BytesToHash(stateRootData)
-						info.StateRoot = stateRoot
-						s.verificationsChan <- info
-					} else {
-						log.Warn("L1 Syncer unknown topic", "topic", l.Topics[0])
-					}
+					s.logsChan <- l
 				}
 			}
 
@@ -232,17 +217,6 @@ loop:
 	return nil
 }
 
-func convertResultToBatchInfo(log *ethTypes.Log) types.L1BatchInfo {
-	batchNumber := new(big.Int).SetBytes(log.Topics[1].Bytes())
-	l1TxHash := common.BytesToHash(log.TxHash.Bytes())
-	blockNumber := log.BlockNumber
-	return types.L1BatchInfo{
-		BatchNo:   batchNumber.Uint64(),
-		L1BlockNo: blockNumber,
-		L1TxHash:  l1TxHash,
-	}
-}
-
 func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult, stop chan bool) {
 	for {
 		select {
@@ -256,7 +230,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 				FromBlock: big.NewInt(int64(j.From)),
 				ToBlock:   big.NewInt(int64(j.To)),
 				Addresses: []common.Address{s.l1ContractAddress},
-				Topics:    [][]common.Hash{{sequencedBatchTopic, verificationTopic}},
+				Topics:    s.topics,
 			}
 
 			var logs []ethTypes.Log

@@ -3,7 +3,6 @@ package stages
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"time"
 
@@ -32,27 +31,20 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
-	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
-	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
-	"github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/secp256k1"
 	"io"
 	"math/big"
-	"sync/atomic"
 )
 
 const (
@@ -62,18 +54,15 @@ const (
 	stateStreamLimit uint64 = 1_000
 
 	transactionGasLimit = 30000000
-	blobGasLimit        = 30000000 // not sure if this applies to zk but separating it out anyway
+	blockGasLimit       = 30000000
 )
 
 var (
-	fixedUncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
-
 	// todo: seq: this should be read in from somewhere rather than hard coded!
-	fixedMiner = common.HexToAddress("0x650c68bef674dc40b54962e1ae9b6c0e35b9d781")
+	constMiner = common.HexToAddress("0x650c68bef674dc40b54962e1ae9b6c0e35b9d781")
 
-	emptyUncles      = make([]*types.Header, 0)
-	emptyReceipts    = make([]*types.Receipt, 0)
-	emptyWithdrawals = make([]*types.Withdrawal, 0)
+	noop            = state.NewNoopWriter()
+	blockDifficulty = new(big.Int).SetUint64(0)
 )
 
 type HasChangeSetWriter interface {
@@ -89,7 +78,7 @@ type SequenceBlockCfg struct {
 	changeSetHook ChangeSetHook
 	chainConfig   *chain.Config
 	engine        consensus.Engine
-	vmConfig      *vm.Config
+	zkVmConfig    *vm.ZkConfig
 	badBlockHalt  bool
 	stateStream   bool
 	accumulator   *shards.Accumulator
@@ -113,7 +102,7 @@ func StageSequenceBlocksCfg(
 	changeSetHook ChangeSetHook,
 	chainConfig *chain.Config,
 	engine consensus.Engine,
-	vmConfig *vm.Config,
+	vmConfig *vm.ZkConfig,
 	accumulator *shards.Accumulator,
 	stateStream bool,
 	badBlockHalt bool,
@@ -136,7 +125,7 @@ func StageSequenceBlocksCfg(
 		changeSetHook: changeSetHook,
 		chainConfig:   chainConfig,
 		engine:        engine,
-		vmConfig:      vmConfig,
+		zkVmConfig:    vmConfig,
 		dirs:          dirs,
 		accumulator:   accumulator,
 		stateStream:   stateStream,
@@ -150,136 +139,6 @@ func StageSequenceBlocksCfg(
 		txPool:        txPool,
 		txPoolDb:      txPoolDb,
 	}
-}
-
-func executeBlock(
-	block *types.Block,
-	header *types.Header,
-	tx kv.RwTx,
-	batch ethdb.Database,
-	gers []*dstypes.GerUpdate,
-	cfg SequenceBlockCfg,
-	vmConfig vm.Config, // emit copy, because will modify it
-	writeChangesets bool,
-	writeReceipts bool,
-	writeCallTraces bool,
-	initialCycle bool,
-	stateStream bool,
-	roHermezDb state.ReadOnlyHermezDb,
-) error {
-	blockNum := block.NumberU64()
-
-	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
-	if err != nil {
-		return err
-	}
-
-	// [zkevm] - write the global exit root inside the batch so we can unwind it
-	// [zkevm] push the global exit root for the related batch into the db ahead of batch execution
-	blockNoBytes := make([]byte, 8)
-	binary.BigEndian.PutUint64(blockNoBytes, blockNum)
-
-	for _, ger := range gers {
-		// [zkevm] - add GER if there is one for this batch
-		if err := utils.WriteGlobalExitRoot(stateReader, stateWriter, ger.GlobalExitRoot, ger.Timestamp); err != nil {
-			return err
-		}
-	}
-
-	// [zkevm] - finished writing global exit root to state
-
-	// where the magic happens
-	getHeader := func(hash common.Hash, number uint64) *types.Header {
-		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
-		return h
-	}
-
-	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
-		// return logger.NewJSONFileLogger(&logger.LogConfig{}, txHash.String()), nil
-		return logger.NewStructLogger(&logger.LogConfig{}), nil
-	}
-
-	callTracer := calltracer.NewCallTracer()
-	vmConfig.Debug = true
-	vmConfig.Tracer = callTracer
-
-	var receipts types.Receipts
-	var stateSyncReceipt *types.Receipt
-	var execRs *core.EphemeralExecResult
-	getHashFn := core.GetHashFn(block.Header(), getHeader)
-
-	execRs, err = core.ExecuteBlockEphemerally(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, stagedsync.NewChainReaderImpl(cfg.chainConfig /*config*/, tx /*tx*/, cfg.blockReader /*blockReader*/), getTracer, tx, roHermezDb)
-	if err != nil {
-		return err
-	}
-	receipts = execRs.Receipts
-	stateSyncReceipt = execRs.StateSyncReceipt
-
-	// [zkevm] - add in the state root to the receipts.  As we only have one tx per block
-	// for now just add the header root to the receipt
-	for _, r := range receipts {
-		r.PostState = header.Root.Bytes()
-	}
-
-	header.GasUsed = uint64(execRs.GasUsed)
-	header.ReceiptHash = types.DeriveSha(receipts)
-	header.Bloom = execRs.Bloom
-
-	if writeReceipts {
-		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
-			return err
-		}
-
-		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
-			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
-				return err
-			}
-		}
-	}
-
-	if cfg.changeSetHook != nil {
-		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
-			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
-		}
-	}
-	if writeCallTraces {
-		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
-	}
-	return nil
-}
-
-func newStateReaderWriter(
-	batch ethdb.Database,
-	tx kv.RwTx,
-	block *types.Block,
-	writeChangesets bool,
-	accumulator *shards.Accumulator,
-	initialCycle bool,
-	stateStream bool,
-) (state.StateReader, state.WriterWithChangeSets, error) {
-
-	var stateReader state.StateReader
-	var stateWriter state.WriterWithChangeSets
-
-	stateReader = state.NewPlainStateReader(batch)
-
-	if !initialCycle && stateStream {
-		txs, err := rawdb.RawTransactionsRange(tx, block.NumberU64(), block.NumberU64())
-		if err != nil {
-			return nil, nil, err
-		}
-		accumulator.StartChange(block.NumberU64(), block.Hash(), txs, false)
-	} else {
-		accumulator = nil
-	}
-	if writeChangesets {
-		stateWriter = state.NewPlainStateWriter(batch, tx, block.NumberU64()).SetAccumulator(accumulator)
-
-	} else {
-		stateWriter = state.NewPlainStateWriterNoHistory(batch).SetAccumulator(accumulator)
-	}
-
-	return stateReader, stateWriter, nil
 }
 
 func SpawnSequencingStage(
@@ -309,43 +168,125 @@ func SpawnSequencingStage(
 	if err != nil {
 		return err
 	}
-	blockNum := executionAt + 1
+	nextBlockNum := executionAt + 1
 
-	slots := make([]types2.TxsRlp, 0)
+	parentBlock, err := rawdb.ReadBlockByNumber(tx, executionAt)
+	if err != nil {
+		return err
+	}
+
+	hermezDb, err := hermez_db.NewHermezDb(tx)
+	if err != nil {
+		return err
+	}
+
+	/*
+		batch: here we need to open up a new batch ready to populate with transactions.
+
+		the loop below that yields the `best` transactions from the pool should loop until we hit one of two
+		limits:
+		1: time based - for the batch to be closed
+		2: counter based - if the transactions in the batch have exhausted the virtual counters
+
+		It can work with the open mining block whilst all of this is happening until we hit one of those conditions.
+
+		After the condition is met we need to close the batch and hold it in the db for a future stage to submit this
+		for proving
+	*/
+
+	lastBatch, err := stages.GetStageProgress(tx, stages.HighestSeenBatchNumber)
+	if err != nil {
+		return err
+	}
+	thisBatch := lastBatch + 1
+
+	batchCounters := vm.NewBatchCounterCollector(80)
+
+	// whilst in the 1 batch = 1 block = 1 tx flow we can immediately add in the changeL2BlockTx calculation
+	// as this is the first tx we can skip the overflow check
+	batchCounters.StartNewBlock()
+
+	stateReader := state.NewPlainStateReader(tx)
+	ibs := state.New(stateReader)
+
+	// calculate and store the l1 info tree index used for this block
+	l1InfoIndex, l1Info, err := calculateNextL1IndexToUse(nextBlockNum, tx, hermezDb)
+	if err != nil {
+		return err
+	}
+	if err = hermezDb.WriteBlockL1InfoTreeIndex(nextBlockNum, l1InfoIndex); err != nil {
+		return err
+	}
+
+	newBlockTimestamp := uint64(time.Now().Unix())
+
+	if err := handleStateForNewBlockStarting(executionAt, newBlockTimestamp, l1Info, ibs, hermezDb); err != nil {
+		return err
+	}
+
+	header := &types.Header{
+		ParentHash: parentBlock.Hash(),
+		Coinbase:   common.Address{},
+		Difficulty: blockDifficulty,
+		Number:     new(big.Int).SetUint64(nextBlockNum),
+		GasLimit:   math.MaxUint64,
+		GasUsed:    0,
+		Time:       newBlockTimestamp,
+		Extra:      nil,
+	}
 
 	// start waiting for a new transaction to arrive
 	ticker := time.NewTicker(10 * time.Second)
 	log.Info(fmt.Sprintf("[%s] Waiting for txs from the pool...", logPrefix))
-	reachedDesiredLimit := false
+	done := false
+	var addedTransactions []types.Transaction
+	var addedReceipts []*types.Receipt
+	yielded := mapset.NewSet[[32]byte]()
+
+	// start to wait for transactions to come in from the pool and attempt to add them to the current batch.  Once we detect a counter
+	// overflow we revert the IBS back to the previous snapshot and don't add the transaction/receipt to the collection that will
+	// end up in the finalised block
 	for {
-		if reachedDesiredLimit {
+		if done {
 			break
 		}
-		var count = 0
-		var err error
 
 		select {
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
 		default:
-			/*
-				todo: seq: for now we only care about one tx and we'll move on to executing the block, but in the future
-				when we're timeboxing the block or using counters the yielded set will be useful to ensure we don't double
-				up any tx
-			*/
-			yielded := mapset.NewSet[[32]byte]()
-
 			if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
-				txSlots := types2.TxsRlp{}
-				if _, count, err = cfg.txPool.YieldBest(1, &txSlots, poolTx, executionAt, transactionGasLimit, yielded); err != nil {
+				slots := types2.TxsRlp{}
+				_, count, err := cfg.txPool.YieldBest(1, &slots, poolTx, executionAt, transactionGasLimit, yielded)
+				if err != nil {
 					return err
 				}
 				if count == 0 {
 					time.Sleep(1 * time.Millisecond)
 				} else {
-					slots = append(slots, txSlots)
+					transactions, err := extractTransactionsFromSlot(slots)
+					if err != nil {
+						return err
+					}
 
-					reachedDesiredLimit = true
+					for _, transaction := range transactions {
+						snap := ibs.Snapshot()
+						receipt, overflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs)
+						if err != nil {
+							ibs.RevertToSnapshot(snap)
+							return err
+						}
+						if overflow {
+							ibs.RevertToSnapshot(snap)
+							log.Debug(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "tx-hash", transaction.Hash())
+							done = true
+							break
+						}
+
+						addedTransactions = append(addedTransactions, transaction)
+						addedReceipts = append(addedReceipts, receipt)
+						done = true
+					}
 				}
 				return nil
 			}); err != nil {
@@ -354,109 +295,40 @@ func SpawnSequencingStage(
 		}
 	}
 
-	var transactions []types.Transaction
-	reader := bytes.NewReader([]byte{})
-	stream := new(rlp.Stream)
-	for _, slot := range slots {
-		for idx, txBytes := range slot.Txs {
-			reader.Reset(txBytes)
-			stream.Reset(reader, uint64(len(txBytes)))
-			transaction, err := types.DecodeTransaction(stream)
-			if err == io.EOF {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			var sender common.Address
-			copy(sender[:], slot.Senders.At(idx))
-			transaction.SetSender(sender)
-			transactions = append(transactions, transaction)
-		}
-	}
-
-	txStream := types.NewTransactionsFixedOrder(transactions)
-
-	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
-
-	previousHeader, err := rawdb.ReadBlockByNumber(tx, executionAt)
-	if err != nil {
-		return err
-	}
-	nextNumber := new(big.Int).SetUint64(blockNum)
-	difficulty := new(big.Int).SetUint64(0)
-	current := &stagedsync.MiningBlock{
-		Header: &types.Header{
-			ParentHash: previousHeader.Hash(),
-			Coinbase:   common.Address{},
-			Difficulty: difficulty,
-			Number:     nextNumber,
-			GasLimit:   math.MaxUint64,
-			GasUsed:    0,
-			Time:       0,
-			Extra:      nil,
-		},
-	}
-
-	quitChan := make(chan struct{})
-	var interrupt *int32
-	stateReader := state.NewPlainStateReader(tx)
-	ibs := state.New(stateReader)
-
-	_, _, err = addTransactionsToMiningBlock(
-		s.LogPrefix(),
-		current,
-		*cfg.chainConfig,
-		cfg.vmConfig,
-		getHeader,
-		cfg.engine,
-		txStream,
-		common.Address{}, // todo: zk: where do I get the miner address?
-		ibs,
-		quitChan,
-		interrupt,
-		0,
-	)
-	if err != nil {
-		return err
-	}
-
-	if current.Uncles == nil {
-		current.Uncles = []*types.Header{}
-	}
-	if current.Txs == nil {
-		current.Txs = []types.Transaction{}
-	}
-	if current.Receipts == nil {
-		current.Receipts = types.Receipts{}
-	}
-
-	parentHeader := getHeader(current.Header.ParentHash, current.Header.Number.Uint64()-1)
-
-	stateWriter := state.NewPlainStateWriter(tx, tx, current.Header.Number.Uint64())
+	stateWriter := state.NewPlainStateWriter(tx, tx, executionAt+1)
 	//stateWriter := state.NewPlainStateWriter(batch, tx, block.NumberU64())
 	chainReader := stagedsync.ChainReader{
 		Cfg: *cfg.chainConfig,
 		Db:  tx,
 	}
-	hermezDb, err := hermez_db.NewHermezDb(tx)
 
 	var excessDataGas *big.Int
-	if parentHeader != nil {
-		excessDataGas = parentHeader.ExcessDataGas
+	if parentBlock != nil {
+		excessDataGas = parentBlock.ExcessDataGas()
+	}
+
+	newHeader := &types.Header{
+		ParentHash: parentBlock.Hash(),
+		Coinbase:   constMiner,
+		Difficulty: blockDifficulty,
+		Number:     new(big.Int).SetUint64(executionAt + 1),
+		GasLimit:   blockGasLimit,
+		GasUsed:    0,
+		Time:       0,
+		Extra:      nil,
 	}
 
 	finalBlock, finalTransactions, finalReceipts, err := core.FinalizeBlockExecution(
 		cfg.engine,
 		stateReader,
-		current.Header,
-		current.Txs,
-		current.Uncles,
+		newHeader,
+		addedTransactions,
+		[]*types.Header{}, // no uncles
 		stateWriter,
 		cfg.chainConfig,
 		ibs,
-		current.Receipts,
-		current.Withdrawals,
+		addedReceipts,
+		[]*types.Withdrawal{}, // no withdrawals
 		chainReader,
 		true,
 		excessDataGas,
@@ -465,19 +337,19 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	newHeader := finalBlock.Header()
-	newHeader.Coinbase = fixedMiner
-	newHeader.GasLimit = transactionGasLimit
+	finalHeader := finalBlock.Header()
+	finalHeader.Coinbase = constMiner
+	finalHeader.GasLimit = blockGasLimit
 	newNum := finalBlock.Number()
 
-	rawdb.WriteHeader(tx, newHeader)
-	err = rawdb.WriteCanonicalHash(tx, newHeader.Hash(), newNum.Uint64())
+	rawdb.WriteHeader(tx, finalHeader)
+	err = rawdb.WriteCanonicalHash(tx, finalHeader.Hash(), newNum.Uint64())
 	if err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
 
 	erigonDB := erigon_db.NewErigonDb(tx)
-	err = erigonDB.WriteBody(newNum, newHeader.Hash(), finalTransactions)
+	err = erigonDB.WriteBody(newNum, finalHeader.Hash(), finalTransactions)
 	if err != nil {
 		return fmt.Errorf("failed to write body: %v", err)
 	}
@@ -489,24 +361,14 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	// now add in the zk batch to block references
-	if err := hermezDb.WriteBlockBatch(newNum.Uint64(), newNum.Uint64()); err != nil {
-		return fmt.Errorf("write block batch error: %v", err)
+	// now process the senders to avoid a stage by itself
+	if err := addSenders(cfg, newNum, finalTransactions, tx, finalHeader); err != nil {
+		return err
 	}
 
-	// now process the senders to avoid a stage by itself
-	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64())
-	cryptoContext := secp256k1.ContextForThread(1)
-	var senders []common.Address
-	for _, transaction := range finalTransactions {
-		from, err := signer.SenderWithContext(cryptoContext, transaction)
-		if err != nil {
-			return err
-		}
-		senders = append(senders, from)
-	}
-	if err = rawdb.WriteSenders(tx, newHeader.Hash(), newNum.Uint64(), senders); err != nil {
-		return err
+	// now add in the zk batch to block references
+	if err := hermezDb.WriteBlockBatch(newNum.Uint64(), thisBatch); err != nil {
+		return fmt.Errorf("write block batch error: %v", err)
 	}
 
 	// now update stages that will be used later on in stageloop.go and other stages. As we're the sequencer
@@ -517,8 +379,10 @@ func SpawnSequencingStage(
 	if err = stages.SaveStageProgress(tx, stages.Headers, newNum.Uint64()); err != nil {
 		return err
 	}
-	// todo: hack! for now one block to one batch but this will change shortly
-	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, newNum.Uint64()); err != nil {
+	if err = stages.SaveStageProgress(tx, stages.HighestSeenBatchNumber, thisBatch); err != nil {
+		return err
+	}
+	if err = stages.SaveStageProgress(tx, stages.HighestUsedL1InfoIndex, l1InfoIndex); err != nil {
 		return err
 	}
 
@@ -531,144 +395,172 @@ func SpawnSequencingStage(
 	return nil
 }
 
-func addTransactionsToMiningBlock(
-	logPrefix string,
-	current *stagedsync.MiningBlock,
-	chainConfig chain.Config,
-	vmConfig *vm.Config,
-	getHeader func(hash common.Hash, number uint64) *types.Header,
-	engine consensus.Engine,
-	txs types.TransactionsStream,
-	coinbase common.Address,
+func handleStateForNewBlockStarting(
+	lastBlockNumber uint64,
+	newBlockTimestamp uint64,
+	l1info *zktypes.L1InfoTreeUpdate,
 	ibs *state.IntraBlockState,
-	quit <-chan struct{},
-	interrupt *int32,
-	payloadId uint64,
-) (types.Logs, bool, error) {
-	header := current.Header
-	tcount := 0
-	gasPool := new(core.GasPool).AddGas(header.GasLimit - header.GasUsed)
-	signer := types.MakeSigner(&chainConfig, header.Number.Uint64())
+	db *hermez_db.HermezDb,
+) error {
+	// first we need to write the last (block number -> hash pair) to the scalable contract
+	if err := ibs.ScalableSetBlockNumberToHash(lastBlockNumber, db); err != nil {
+		return err
+	}
 
-	var coalescedLogs types.Logs
-	noop := state.NewNoopWriter()
+	// now lets check the timestamp for this block and that it's valid
+	contractTimestamp := ibs.ScalableGetTimestamp()
+	if contractTimestamp == 0 {
+		return fmt.Errorf("expected a timestamp to be present in the scalable contract")
+	}
+	// todo: [zkevm] how do we perform this check as it varies per block
+	//if newBlockTimestamp >= 1_000_000 {
+	//	return fmt.Errorf("delta timestamp for new block is too high")
+	//}
 
-	parentHeader := getHeader(header.ParentHash, header.Number.Uint64()-1)
+	// all valid so let's write the timestamp to the scalable contract
+	ibs.ScalableSetTimestamp(newBlockTimestamp)
 
-	var miningCommitTx = func(txn types.Transaction, coinbase common.Address, vmConfig *vm.Config, chainConfig chain.Config, ibs *state.IntraBlockState, current *stagedsync.MiningBlock) ([]*types.Log, error) {
-		ibs.Prepare(txn.Hash(), common.Hash{}, tcount)
-		gasSnap := gasPool.Gas()
-		snap := ibs.Snapshot()
-		log.Debug("addTransactionsToMiningBlock", "txn hash", txn.Hash())
-		receipt, _, err := core.ApplyTransaction(&chainConfig, core.GetHashFn(header, getHeader), engine, &coinbase, gasPool, ibs, noop, header, txn, &header.GasUsed, *vmConfig, parentHeader.ExcessDataGas, zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
+	// handle writing to the ger manager contract
+	if l1info != nil {
+		// first check if this ger has already been written
+		l1BlockHash := ibs.ReadGerManagerL1BlockHash(l1info.GER)
+		if l1BlockHash != (common.Hash{}) {
+			// not in the contract so let's write it!
+			ibs.WriteGerManagerL1BlockHash(l1info.GER, l1info.ParentHash)
+		}
+	}
+
+	return nil
+}
+
+func handleStateForBlockEnding(newBlockNumber uint64) {
+	//todo: [zkevm] store the block hash as step 1
+	// then add the hash to the state and store the new hash/state root
+	// we need this so that we can return the pre/post block hash for the
+	// data stream later on
+}
+
+func addSenders(
+	cfg SequenceBlockCfg,
+	newNum *big.Int,
+	finalTransactions types.Transactions,
+	tx kv.RwTx,
+	finalHeader *types.Header,
+) error {
+	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64())
+	cryptoContext := secp256k1.ContextForThread(1)
+	var senders []common.Address
+	for _, transaction := range finalTransactions {
+		from, err := signer.SenderWithContext(cryptoContext, transaction)
 		if err != nil {
-			ibs.RevertToSnapshot(snap)
-			gasPool = new(core.GasPool).AddGas(gasSnap) // restore gasPool as well as ibs
+			return err
+		}
+		senders = append(senders, from)
+	}
+
+	return rawdb.WriteSenders(tx, finalHeader.Hash(), newNum.Uint64(), senders)
+}
+
+func extractTransactionsFromSlot(slot types2.TxsRlp) ([]types.Transaction, error) {
+	var transactions []types.Transaction
+	reader := bytes.NewReader([]byte{})
+	stream := new(rlp.Stream)
+	for idx, txBytes := range slot.Txs {
+		reader.Reset(txBytes)
+		stream.Reset(reader, uint64(len(txBytes)))
+		transaction, err := types.DecodeTransaction(stream)
+		if err == io.EOF {
+			continue
+		}
+		if err != nil {
 			return nil, err
 		}
+		var sender common.Address
+		copy(sender[:], slot.Senders.At(idx))
+		transaction.SetSender(sender)
+		transactions = append(transactions, transaction)
+	}
+	return transactions, nil
+}
 
-		current.Txs = append(current.Txs, txn)
-		current.Receipts = append(current.Receipts, receipt)
-		return receipt.Logs, nil
+func attemptAddTransaction(
+	tx kv.RwTx,
+	cfg SequenceBlockCfg,
+	batchCounters *vm.BatchCounterCollector,
+	header *types.Header,
+	parentHeader *types.Header,
+	transaction types.Transaction,
+	ibs *state.IntraBlockState,
+) (*types.Receipt, bool, error) {
+	txCounters := vm.NewTransactionCounter(transaction)
+	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
+	if err != nil {
+		return nil, false, err
+	}
+	if overflow {
+		return nil, true, nil
 	}
 
-	var stopped *time.Ticker
-	defer func() {
-		if stopped != nil {
-			stopped.Stop()
-		}
-	}()
+	gasPool := new(core.GasPool).AddGas(transactionGasLimit)
+	getHeader := func(hash common.Hash, number uint64) *types.Header { return rawdb.ReadHeader(tx, hash, number) }
 
-	done := false
+	// set the counter collector on the config so that we can gather info during the execution
+	cfg.zkVmConfig.CounterCollector = txCounters.ExecutionCounters()
 
-LOOP:
-	for {
-		// see if we need to stop now
-		if stopped != nil {
-			select {
-			case <-stopped.C:
-				done = true
-				break LOOP
-			default:
-			}
-		}
+	receipt, _, err := core.ApplyTransaction(
+		cfg.chainConfig,
+		core.GetHashFn(header, getHeader),
+		cfg.engine,
+		&constMiner,
+		gasPool,
+		ibs,
+		noop,
+		header,
+		transaction,
+		&header.GasUsed,
+		cfg.zkVmConfig.Config,
+		parentHeader.ExcessDataGas,
+		zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
 
-		if err := common.Stopped(quit); err != nil {
-			return nil, true, err
-		}
+	// now that we have executed we can check again for an overflow
+	overflow = batchCounters.CheckForOverflow()
 
-		if interrupt != nil && atomic.LoadInt32(interrupt) != 0 && stopped == nil {
-			log.Debug("Transaction adding was requested to stop", "payload", payloadId)
-			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
-			stopped = time.NewTicker(500 * time.Millisecond)
-		}
-		// If we don't have enough gas for any further transactions then we're done
-		if gasPool.Gas() < params.TxGas {
-			log.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
-			done = true
-			break
-		}
-		// Retrieve the next transaction and abort if all done
-		txn := txs.Peek()
-		if txn == nil {
-			break
-		}
+	return receipt, overflow, err
+}
 
-		// We use the eip155 signer regardless of the env hf.
-		from, err := txn.Sender(*signer)
-		if err != nil {
-			log.Warn(fmt.Sprintf("[%s] Could not recover transaction sender", logPrefix), "hash", txn.Hash(), "err", err)
-			txs.Pop()
-			continue
-		}
+// will be called at the start of every new block created within a batch to figure out if there is a new GER
+// we can use or not.  In the special case that this is the first block we just return 0 as we need to use the
+// 0 index first before we can use 1+
+func calculateNextL1IndexToUse(blockNumber uint64, tx kv.RwTx, hermezDb *hermez_db.HermezDb) (uint64, *zktypes.L1InfoTreeUpdate, error) {
+	// always default to 0 and only update this if the next available index has reached finality
+	var nextL1Index uint64 = 0
 
-		// Check whether the txn is replay protected. If we're not in the EIP155 (Spurious Dragon) hf
-		// phase, start ignoring the sender until we do.
-		if txn.Protected() && !chainConfig.IsSpuriousDragon(header.Number.Uint64()) {
-			log.Debug(fmt.Sprintf("[%s] Ignoring replay protected transaction", logPrefix), "hash", txn.Hash(), "eip155", chainConfig.SpuriousDragonBlock)
-
-			txs.Pop()
-			continue
-		}
-
-		// Start executing the transaction
-		logs, err := miningCommitTx(txn, coinbase, vmConfig, chainConfig, ibs, current)
-
-		if errors.Is(err, core.ErrGasLimitReached) {
-			// Pop the env out-of-gas transaction without shifting in the next from the account
-			log.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
-			txs.Pop()
-		} else if errors.Is(err, core.ErrNonceTooLow) {
-			// New head notification data race between the transaction pool and miner, shift
-			log.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
-			txs.Shift()
-		} else if errors.Is(err, core.ErrNonceTooHigh) {
-			// Reorg notification data race between the transaction pool and miner, skip account =
-			log.Debug(fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
-			txs.Pop()
-		} else if err == nil {
-			// Everything ok, collect the logs and shift in the next transaction from the same account
-			log.Debug(fmt.Sprintf("[%s] addTransactionsToMiningBlock Successful", logPrefix), "sender", from, "nonce", txn.GetNonce(), "payload", payloadId)
-			coalescedLogs = append(coalescedLogs, logs...)
-			tcount++
-			txs.Shift()
-		} else {
-			// Strange error, discard the transaction and get the next in line (note, the
-			// nonce-too-high clause will prevent us from executing in vain).
-			log.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
-			txs.Shift()
-		}
+	// special case for the first block, we must use the 0 index first
+	if blockNumber == 1 {
+		return 0, nil, nil
 	}
 
-	/*
-		// Notify resubmit loop to decrease resubmitting interval if env interval is larger
-		// than the user-specified one.
-		if interrupt != nil {
-			w.resubmitAdjustCh <- &intervalAdjust{inc: false}
-		}
-	*/
-	return coalescedLogs, done, nil
+	// check which was the last used index
+	lastInfoIndex, err := stages.GetStageProgress(tx, stages.HighestUsedL1InfoIndex)
+	if err != nil {
+		return 0, nil, err
+	}
 
+	// check if the next index is there and if it has reached finality or not
+	l1Info, err := hermezDb.GetL1InfoTreeUpdate(lastInfoIndex + 1)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	// check that we have reached finality on the l1 info tree event before using it
+	// todo: [zkevm] think of a better way to handle finality
+	now := time.Now()
+	target := now.Add(-(12 * time.Minute))
+	if l1Info != nil && l1Info.Timestamp < uint64(target.Unix()) {
+		nextL1Index = l1Info.Index
+	}
+
+	return nextL1Index, l1Info, nil
 }
 
 func UnwindSequenceExecutionStage(u *stagedsync.UnwindState, s *stagedsync.StageState, tx kv.RwTx, ctx context.Context, cfg SequenceBlockCfg, initialCycle bool) (err error) {

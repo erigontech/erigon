@@ -1,17 +1,17 @@
 package vm
 
 import (
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"fmt"
 	"github.com/holiman/uint256"
-	"math/big"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/vm/stack"
-	"testing"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/core/vm/stack"
+	"github.com/ledgerwatch/erigon/params"
+	"math/big"
+	"testing"
 )
 
 func TestBlockhashV2(t *testing.T) {
@@ -23,7 +23,7 @@ func TestBlockhashV2(t *testing.T) {
 	var (
 		env            = NewEVM(evmtypes.BlockContext{GetHash: gethashFn}, evmtypes.TxContext{}, TestIntraBlockState{}, params.TestChainConfig, Config{})
 		stack          = stack.New()
-		evmInterpreter = NewZKEVMInterpreter(env, env.Config())
+		evmInterpreter = NewZKEVMInterpreter(env, NewZkConfig(env.Config(), nil))
 		pc             = uint64(0)
 	)
 

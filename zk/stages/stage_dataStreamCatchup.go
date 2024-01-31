@@ -176,7 +176,6 @@ func SpawnStageDataStreamCatchup(
 
 	// Start on the current batch number + 1
 	currentBatchNumber++
-	target := highestSeenBatchNumber - currentBatchNumber
 
 	var currentGER = common.Hash{}
 	logTicker := time.NewTicker(10 * time.Second)
@@ -195,7 +194,7 @@ LOOP:
 		case <-logTicker.C:
 			log.Info(fmt.Sprintf("[%s]: progress", logPrefix),
 				"batch", currentBatchNumber,
-				"target", highestSeenBatchNumber, "%", math.Round(float64(total)/float64(target)*100),
+				"target", highestSeenBatchNumber, "%", math.Round(float64(currentBatchNumber)/float64(highestSeenBatchNumber)*100),
 				"currentBlock", currentBlock)
 		default:
 		}
@@ -306,8 +305,8 @@ LOOP:
 	}
 
 	log.Info(fmt.Sprintf("[%s]: stage complete", logPrefix),
-		"batch", currentBatchNumber,
-		"target", highestSeenBatchNumber, "%", math.Round(float64(total)/float64(target)*100),
+		"batch", currentBatchNumber-1,
+		"target", highestSeenBatchNumber, "%", math.Round(float64(currentBatchNumber-1)/float64(highestSeenBatchNumber)*100),
 		"currentBlock", currentBlock)
 
 	return err

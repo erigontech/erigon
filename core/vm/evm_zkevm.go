@@ -100,6 +100,9 @@ func (evm *EVM) createZkEvm(caller ContractRef, codeAndHash *codeAndHash, gas ui
 	contract := NewContract(caller, AccountRef(address), value, gas, evm.config.SkipAnalysis)
 	contract.SetCodeOptionalHash(&address, codeAndHash)
 
+	// zkevm: ensure we set the IsCreate flag here so that zk virtual counters get the correct context
+	contract.IsCreate = true
+
 	if evm.config.NoRecursion && depth > 0 {
 		return nil, address, gas, nil
 	}

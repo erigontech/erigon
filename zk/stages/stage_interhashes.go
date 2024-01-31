@@ -199,7 +199,7 @@ func UnwindZkIntermediateHashesStage(u *stagedsync.UnwindState, s *stagedsync.St
 	}
 	expectedRootHash := syncHeadHeader.Root
 
-	root, err := unwindZkSMT(s.LogPrefix(), s.BlockNumber, u.UnwindPoint, tx, cfg, &expectedRootHash, quit)
+	root, err := unwindZkSMT(s.LogPrefix(), s.BlockNumber, u.UnwindPoint, tx, false, &expectedRootHash, quit)
 	if err != nil {
 		return err
 	}
@@ -460,7 +460,7 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 	return hash, nil
 }
 
-func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, cfg ZkInterHashesCfg, expectedRootHash *libcommon.Hash, quit <-chan struct{}) (libcommon.Hash, error) {
+func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, expectedRootHash *libcommon.Hash, quit <-chan struct{}) (libcommon.Hash, error) {
 	log.Info(fmt.Sprintf("[%s] Unwind trie hashes started", logPrefix))
 	defer log.Info(fmt.Sprintf("[%s] Unwind ended", logPrefix))
 
@@ -606,7 +606,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, cfg ZkInterHashe
 		}
 	}
 
-	if err := verifyLastHash(dbSmt, expectedRootHash, cfg.checkRoot, logPrefix); err != nil {
+	if err := verifyLastHash(dbSmt, expectedRootHash, checkRoot, logPrefix); err != nil {
 		log.Error("failed to verify hash")
 		eridb.RollbackBatch()
 		return trie.EmptyRoot, err

@@ -110,6 +110,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/snap"
 	stages2 "github.com/ledgerwatch/erigon/turbo/stages"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
+	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
@@ -717,9 +718,21 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			}
 		}
 
+		cfg := backend.config.Zk
+
 		// entering ZK territory!
 		if sequencer.IsSequencer() {
 			// if we are sequencing transactions, we do the sequencing loop...
+
+			etherMan := newEtherMan(cfg)
+			l1Topics := [][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.InitialSequenceBatchesTopic}}
+			zkL1Syncer := syncer.NewL1Syncer(
+				etherMan.EthClient,
+				cfg.L1ContractAddress,
+				l1Topics,
+				cfg.L1BlockRange,
+				cfg.L1QueryDelay,
+			)
 
 			backend.syncStages = stages2.NewSequencerZkStages(
 				backend.sentryCtx,
@@ -733,6 +746,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.forkValidator,
 				backend.engine,
 				backend.dataStream,
+				zkL1Syncer,
 				backend.txPool2,
 				backend.txPool2DB,
 			)
@@ -751,13 +765,15 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 
 			*/
 
-			cfg := backend.config.Zk
 			datastreamClient := initDataStreamClient(cfg)
+
+			l1Topics := [][]libcommon.Hash{{contracts.SequencedBatchTopic, contracts.VerificationTopic}}
 
 			etherMan := newEtherMan(cfg)
 			zkL1Syncer := syncer.NewL1Syncer(
 				etherMan.EthClient,
 				cfg.L1ContractAddress,
+				l1Topics,
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
 			)

@@ -8,13 +8,17 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/types"
+	"math/big"
 )
 
 type IL1Syncer interface {
@@ -25,8 +29,7 @@ type IL1Syncer interface {
 	GetLastCheckedL1Block() uint64
 
 	// Channels
-	GetVerificationsChan() chan types.L1BatchInfo
-	GetSequencesChan() chan types.L1BatchInfo
+	GetLogsChan() chan ethTypes.Log
 	GetProgressMessageChan() chan string
 
 	Run(lastCheckedBlock uint64)
@@ -99,8 +102,7 @@ func SpawnStageL1Syncer(
 		cfg.syncer.Run(l1BlockProgress)
 	}
 
-	verificationsChan := cfg.syncer.GetVerificationsChan()
-	sequencesChan := cfg.syncer.GetSequencesChan()
+	logsChan := cfg.syncer.GetLogsChan()
 	progressMessageChan := cfg.syncer.GetProgressMessageChan()
 	highestVerification := types.L1BatchInfo{}
 
@@ -109,20 +111,28 @@ func SpawnStageL1Syncer(
 Loop:
 	for {
 		select {
-		case verification := <-verificationsChan:
-			if verification.BatchNo > highestVerification.BatchNo {
-				highestVerification = verification
+		case l := <-logsChan:
+			info := convertResultToBatchInfo(&l)
+			if l.Topics[0] == contracts.SequencedBatchTopic {
+				err = hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot)
+				if err != nil {
+					return fmt.Errorf("failed to write batch info, %w", err)
+				}
+				newSequencesCount++
+			} else if l.Topics[0] == contracts.VerificationTopic {
+				stateRootData := l.Data[:32]
+				stateRoot := common.BytesToHash(stateRootData)
+				info.StateRoot = stateRoot
+				if info.BatchNo > highestVerification.BatchNo {
+					highestVerification = info
+				}
+				if err := hermezDb.WriteVerification(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
+					return fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
+				}
+				newVerificationsCount++
+			} else {
+				log.Warn("L1 Syncer unknown topic", "topic", l.Topics[0])
 			}
-			if err := hermezDb.WriteVerification(verification.L1BlockNo, verification.BatchNo, verification.L1TxHash, verification.StateRoot); err != nil {
-				return fmt.Errorf("failed to write verification for block %d, %w", verification.L1BlockNo, err)
-			}
-			newVerificationsCount++
-		case sequence := <-sequencesChan:
-			err = hermezDb.WriteSequence(sequence.L1BlockNo, sequence.BatchNo, sequence.L1TxHash, sequence.StateRoot)
-			if err != nil {
-				return fmt.Errorf("failed to write batch info, %w", err)
-			}
-			newSequencesCount++
 		case progressMessage := <-progressMessageChan:
 			log.Info(fmt.Sprintf("[%s] %s", logPrefix, progressMessage))
 		default:
@@ -166,6 +176,17 @@ Loop:
 	}
 
 	return nil
+}
+
+func convertResultToBatchInfo(log *ethTypes.Log) types.L1BatchInfo {
+	batchNumber := new(big.Int).SetBytes(log.Topics[1].Bytes())
+	l1TxHash := common.BytesToHash(log.TxHash.Bytes())
+	blockNumber := log.BlockNumber
+	return types.L1BatchInfo{
+		BatchNo:   batchNumber.Uint64(),
+		L1BlockNo: blockNumber,
+		L1TxHash:  l1TxHash,
+	}
 }
 
 func UnwindL1SyncerStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg L1SyncerCfg, ctx context.Context) (err error) {
