@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -32,7 +33,6 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 

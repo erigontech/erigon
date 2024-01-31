@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
 
 	"github.com/google/btree"
 	"golang.org/x/crypto/sha3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"

@@ -3,6 +3,7 @@ package snapcfg
 import (
 	_ "embed"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -10,7 +11,6 @@ import (
 	snapshothashes "github.com/ledgerwatch/erigon-snapshot"
 	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
-	"golang.org/x/exp/slices"
 )
 
 var (

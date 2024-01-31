@@ -10,12 +10,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"

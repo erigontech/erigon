@@ -3,6 +3,7 @@ package fork_graph
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -15,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
-	"golang.org/x/exp/slices"
 )
 
 type syncCommittees struct {

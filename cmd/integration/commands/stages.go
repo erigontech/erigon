@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +20,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 

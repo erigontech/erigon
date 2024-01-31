@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -18,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/turbo/services"
