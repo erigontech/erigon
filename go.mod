@@ -18,7 +18,7 @@ require (
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.2
-	github.com/alecthomas/kong v0.8.0
+	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
 	github.com/anacrolix/sync v0.4.0
 	github.com/anacrolix/torrent v1.52.6-0.20231201115409-7ea994b6bbd8
