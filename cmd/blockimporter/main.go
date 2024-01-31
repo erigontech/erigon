@@ -54,7 +54,7 @@ func main() {
 		secondarySource := NewHttpBlockSource(*secondaryBlockSourceUrl)
 		secondaryBlockSource = &secondarySource
 	}
-	err = RunImport(&settings, &blockSource, secondaryBlockSource)
+	err := RunImport(&settings, &blockSource, secondaryBlockSource)
 
 	if err != nil {
 		logger.Error(err.Error())
