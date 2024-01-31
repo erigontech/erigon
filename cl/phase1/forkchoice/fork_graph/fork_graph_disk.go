@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
@@ -86,7 +87,8 @@ type forkGraphDisk struct {
 	// keep track of rewards too
 	blockRewards map[libcommon.Hash]*eth2.BlockRewardsCollector
 	// for each block root we keep track of the sync committees for head retrieval.
-	syncCommittees map[libcommon.Hash]syncCommittees
+	syncCommittees        map[libcommon.Hash]syncCommittees
+	lightclientBootstraps sync.Map
 
 	// configurations
 	beaconCfg   *clparams.BeaconChainConfig
@@ -199,6 +201,12 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
 	}
 
+	lightclientBootstrap, err := lightclient_utils.CreateLightClientBootstrap(newState, signedBlock)
+	if err != nil {
+		return nil, LogisticError, err
+	}
+
+	f.lightclientBootstraps.Store(libcommon.Hash(blockRoot), lightclientBootstrap)
 	f.blocks.Store(libcommon.Hash(blockRoot), signedBlock)
 	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
 	if err != nil {
@@ -418,6 +426,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	for _, root := range oldRoots {
 		delete(f.badBlocks, root)
 		f.blocks.Delete(root)
+		f.lightclientBootstraps.Delete(root)
 		delete(f.currentJustifiedCheckpoints, root)
 		delete(f.finalizedCheckpoints, root)
 		f.headers.Delete(root)
@@ -446,4 +455,12 @@ func (f *forkGraphDisk) GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRe
 
 func (f *forkGraphDisk) LowestAvaiableSlot() uint64 {
 	return f.lowestAvaiableSlot
+}
+
+func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {
+	obj, has := f.lightclientBootstraps.Load(blockRoot)
+	if !has {
+		return nil, false
+	}
+	return obj.(*cltypes.LightClientBootstrap), true
 }

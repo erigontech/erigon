@@ -42,6 +42,7 @@ type ForkChoiceStorageReader interface {
 	GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	ForkNodes() []ForkNode
 	Synced() bool
+	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
 }
 
 type ForkChoiceStorageWriter interface {

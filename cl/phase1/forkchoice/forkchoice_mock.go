@@ -67,6 +67,7 @@ type ForkChoiceStorageMock struct {
 	GetSyncCommitteesVal      map[common.Hash][2]*solid.SyncCommittee
 	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
 	WeightsMock               []ForkNode
+	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
 
 	Pool pool.OperationsPool
 }
@@ -88,6 +89,7 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		StateAtSlotVal:            make(map[uint64]*state.CachingBeaconState),
 		GetSyncCommitteesVal:      make(map[common.Hash][2]*solid.SyncCommittee),
 		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
+		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
 	}
 }
 
@@ -232,4 +234,8 @@ func (f *ForkChoiceStorageMock) Synced() bool {
 
 func (f *ForkChoiceStorageMock) SetSynced(synced bool) {
 	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool) {
+	return f.LightClientBootstraps[blockRoot], f.LightClientBootstraps[blockRoot] != nil
 }

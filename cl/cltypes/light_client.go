@@ -33,6 +33,10 @@ func NewLightClientHeader(version clparams.StateVersion) *LightClientHeader {
 	}
 }
 
+func (l *LightClientHeader) Version() clparams.StateVersion {
+	return l.version
+}
+
 func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(buf, l.getSchema()...)
 }

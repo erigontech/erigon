@@ -99,6 +99,9 @@ func (a *ApiHandler) init() {
 					r.Post("/attestations", http.NotFound)    // TODO
 					r.Post("/sync_committees", http.NotFound) // TODO
 				})
+				r.Route("/light_client", func(r chi.Router) {
+					r.Get("/bootstrap/{block_id}", beaconhttp.HandleEndpointFunc(a.EthV1BeaconLightClientBootstrap))
+				})
 				r.Get("/node/syncing", http.NotFound)
 				r.Route("/states", func(r chi.Router) {
 					r.Route("/{state_id}", func(r chi.Router) {
