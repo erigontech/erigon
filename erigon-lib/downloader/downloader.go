@@ -185,6 +185,10 @@ func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, lo
 		}
 	}
 
+	if !cfg.SnapshotLock {
+		return initSnapshotLock(ctx, cfg, db, logger)
+	}
+
 	var data []byte
 
 	if file != nil {

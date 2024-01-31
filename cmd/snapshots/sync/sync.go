@@ -162,7 +162,7 @@ func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error)
 
 	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
 		cliCtx.Int(utils.TorrentPortFlag.Name),
-		cliCtx.Int(utils.TorrentConnsPerFileFlag.Name), 0, nil, webseedsList, chain)
+		cliCtx.Int(utils.TorrentConnsPerFileFlag.Name), 0, nil, webseedsList, chain, true)
 
 	if err != nil {
 		return nil, err

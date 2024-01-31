@@ -766,7 +766,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	}
 	version := "erigon: " + params.VersionWithCommit(params.GitCommit)
 
-	downloaderCfg, err := downloadercfg.New(dirs, version, lg.Info, downloadRate, uploadRate, 42069, 10, 3, nil, webSeeds, d.Chain)
+	downloaderCfg, err := downloadercfg.New(dirs, version, lg.Info, downloadRate, uploadRate, 42069, 10, 3, nil, webSeeds, d.Chain, true)
 	if err != nil {
 		return err
 	}
