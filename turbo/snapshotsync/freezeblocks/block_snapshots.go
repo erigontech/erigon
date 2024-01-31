@@ -1027,7 +1027,12 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 }
 
 func chooseSegmentEnd(from, to uint64, chainConfig *chain.Config) uint64 {
-	blocksPerFile := snapcfg.MergeLimit(chainConfig.ChainName, from)
+	var chainName string
+
+	if chainConfig != nil {
+		chainName = chainConfig.ChainName
+	}
+	blocksPerFile := snapcfg.MergeLimit(chainName, from)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = cmp.Min(next, to)
