@@ -66,7 +66,7 @@ func TestSepoliaForkDigest(t *testing.T) {
 	require.NoError(t, err)
 	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
-	require.Equal(t, [4]uint8{0x47, 0xeb, 0x72, 0xb3}, digest)
+	require.Equal(t, [4]uint8{0xd3, 0x1f, 0x61, 0x91}, digest)
 }
 
 // ForkDigestVersion
