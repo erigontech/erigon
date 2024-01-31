@@ -1453,6 +1453,7 @@ func (a *AggregatorV3) BuildFilesInBackground(txNum uint64) chan struct{} {
 		a.BuildOptionalMissedIndicesInBackground(a.ctx, 1)
 
 		if dbg.NoMerge() {
+			close(fin)
 			return
 		}
 		if ok := a.mergeingFiles.CompareAndSwap(false, true); !ok {
