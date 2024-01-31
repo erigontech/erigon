@@ -63,25 +63,51 @@ func TestFindMergeRange(t *testing.T) {
 	merger := NewMerger("x", 1, log.LvlInfo, nil, params.MainnetChainConfig, nil)
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
-		var ranges []Range
+		var rangesOld []Range
 		for i := 0; i < 24; i++ {
-			ranges = append(ranges, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
+			rangesOld = append(rangesOld, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
 		}
-		found := merger.FindMergeRanges(ranges, uint64(24*100_000))
+		found := merger.FindMergeRanges(rangesOld, uint64(24*100_000))
 
-		expect := Ranges{}
+		expect := Ranges{{0, 500000}, {500000, 1000000}, {1000000, 1500000}, {1500000, 2000000}}
+		require.Equal(t, expect.String(), Ranges(found).String())
+
+		var rangesNew []Range
+		start := uint64(19_000_000)
+		for i := uint64(0); i < 24; i++ {
+			rangesNew = append(rangesNew, Range{from: start + (i * 100_000), to: start + ((i + 1) * 100_000)})
+		}
+		found = merger.FindMergeRanges(rangesNew, uint64(24*100_000))
+
+		expect = Ranges{}
 		require.Equal(t, expect.String(), Ranges(found).String())
 	})
 
 	t.Run("small", func(t *testing.T) {
-		var ranges Ranges
-		for i := 0; i < 240; i++ {
-			ranges = append(ranges, Range{from: uint64(i * 10_000), to: uint64((i + 1) * 10_000)})
+		var rangesOld Ranges
+		for i := uint64(0); i < 240; i++ {
+			rangesOld = append(rangesOld, Range{from: uint64(i * 10_000), to: uint64((i + 1) * 10_000)})
 		}
-		found := merger.FindMergeRanges(ranges, uint64(240*10_000))
+		found := merger.FindMergeRanges(rangesOld, uint64(240*10_000))
 		var expect Ranges
+		for i := uint64(0); i < 4; i++ {
+			expect = append(expect, Range{from: i * snaptype.Erigon2OldMergeLimit, to: (i + 1) * snaptype.Erigon2OldMergeLimit})
+		}
+		for i := uint64(0); i < 4; i++ {
+			expect = append(expect, Range{from: 2_000_000 + i*snaptype.Erigon2MergeLimit, to: 2_000_000 + (i+1)*snaptype.Erigon2MergeLimit})
+		}
+
+		require.Equal(t, expect.String(), Ranges(found).String())
+
+		var rangesNew Ranges
+		start := uint64(19_000_000)
+		for i := uint64(0); i < 240; i++ {
+			rangesNew = append(rangesNew, Range{from: start + uint64(i*10_000), to: start + uint64((i+1)*10_000)})
+		}
+		found = merger.FindMergeRanges(rangesNew, uint64(240*10_000))
+		expect = nil
 		for i := uint64(0); i < 24; i++ {
-			expect = append(expect, Range{from: i * snaptype.Erigon2MergeLimit, to: (i + 1) * snaptype.Erigon2MergeLimit})
+			expect = append(expect, Range{from: start + i*snaptype.Erigon2MergeLimit, to: start + (i+1)*snaptype.Erigon2MergeLimit})
 		}
 
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -99,6 +125,7 @@ func TestMergeSnapshots(t *testing.T) {
 	}
 
 	N := uint64(70)
+
 	for i := uint64(0); i < N; i++ {
 		createFile(i*10_000, (i+1)*10_000)
 	}
@@ -114,12 +141,12 @@ func TestMergeSnapshots(t *testing.T) {
 		require.NoError(err)
 	}
 
-	expectedFileName := snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 100_000, 200_000, snaptype.Transactions.Enum())
+	expectedFileName := snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 0, 500_000, snaptype.Transactions.Enum())
 	d, err := compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()
-	require.Equal(10, a)
+	require.Equal(50, a)
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
@@ -131,6 +158,45 @@ func TestMergeSnapshots(t *testing.T) {
 	}
 
 	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 600_000, 700_000, snaptype.Transactions.Enum())
+	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	require.NoError(err)
+	defer d.Close()
+	a = d.Count()
+	require.Equal(10, a)
+
+	start := uint64(19_000_000)
+	for i := uint64(0); i < N; i++ {
+		createFile(start+i*10_000, start+(i+1)*10_000)
+	}
+	s = NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: true}, dir, start, logger)
+	defer s.Close()
+	require.NoError(s.ReopenFolder())
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+		merger.DisableFsync()
+		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+		require.True(len(ranges) > 0)
+		err := merger.Merge(context.Background(), s, snaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+		require.NoError(err)
+	}
+
+	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, start+100_000, start+200_000, snaptype.Transactions.Enum())
+	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	require.NoError(err)
+	defer d.Close()
+	a = d.Count()
+	require.Equal(10, a)
+
+	{
+		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
+		merger.DisableFsync()
+		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
+		require.True(len(ranges) == 0)
+		err := merger.Merge(context.Background(), s, snaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
+		require.NoError(err)
+	}
+
+	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, start+600_000, start+700_000, snaptype.Transactions.Enum())
 	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()

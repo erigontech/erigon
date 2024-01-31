@@ -1096,7 +1096,13 @@ func canRetire(from, to uint64, chainConfig *chain.Config) (blockFrom, blockTo u
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
 
-	mergeLimit := snapcfg.MergeLimit(chainConfig.ChainName, blockFrom)
+	var chainName string
+
+	if chainConfig != nil {
+		chainName = chainConfig.ChainName
+	}
+
+	mergeLimit := snapcfg.MergeLimit(chainName, blockFrom)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
