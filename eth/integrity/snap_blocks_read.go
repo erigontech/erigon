@@ -44,3 +44,37 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 	}
 	return nil
 }
+
+func SnapBorSpanRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context, failFast bool) error {
+	defer log.Info("[integrity] SnapBorSpanRead: done")
+	logEvery := time.NewTicker(10 * time.Second)
+	defer logEvery.Stop()
+
+	for i := uint64(0); i < 10_000; i++ {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			b, err := blockReader.(services.BorSpanReader).Span(ctx, tx, i)
+			if err != nil {
+				return err
+			}
+			if b == nil {
+				err := fmt.Errorf("span not found: %d\n", i)
+				if failFast {
+					return err
+				}
+				log.Error("[integrity] SnapBlocksRead", "err", err)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-logEvery.C:
+			log.Info("[integrity] SnapBorSpanRead", "span", i)
+		default:
+		}
+	}
+	return nil
+}
