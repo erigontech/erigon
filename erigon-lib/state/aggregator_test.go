@@ -350,6 +350,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	}()
 
 	err = agg.BuildFiles(maxTx)
+	require.NoError(t, err)
 
 	ac = agg.MakeContext()
 	for i := 0; i < 10; i++ {
@@ -468,6 +469,7 @@ func extractKVErrIterator(t *testing.T, it iter.KV) map[string][]byte {
 }
 
 func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rand.Rand, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
+	t.Helper()
 	usedKeys := make(map[string]struct{}, keysCount*maxTxNum)
 	for txNum := uint64(1); txNum <= maxTxNum; txNum++ {
 		used := generateSharedDomainsUpdatesForTx(t, domains, txNum, rnd, usedKeys, keyMaxLen, keysCount)
@@ -527,6 +529,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			usedKeys[string(key)] = struct{}{}
 
 			prev, step, err := domains.LatestCode(key)
+			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.CodeDomain, key, nil, codeUpd, prev, step)
 			require.NoError(t, err)
