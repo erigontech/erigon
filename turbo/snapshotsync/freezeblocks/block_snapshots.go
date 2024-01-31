@@ -142,7 +142,7 @@ func (s *Segment) close() {
 }
 
 func (s *Segment) openFiles() []string {
-	var files []string
+	files := make([]string, 0, len(s.indexes))
 
 	if s.IsOpen() {
 		files = append(files, s.FilePath())
