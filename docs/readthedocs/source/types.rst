@@ -125,7 +125,7 @@ an alias for an array of Transaction. Instead of []Transaction, Transactions can
 
     type Transactions []*Transaction
 
-repressent an Ethereum Transaction.
+represent an Ethereum Transaction.
 
 Block Header
 ============

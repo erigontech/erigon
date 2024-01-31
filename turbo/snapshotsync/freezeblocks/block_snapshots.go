@@ -1257,34 +1257,34 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 		}
 
 		for br.blockReader.FrozenBorBlocks() < minBlockNum {
-			ok, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			haveMore, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
-			if !ok {
+			if !haveMore {
 				break
 			}
 		}
 	}
 
-	var ok, okBor bool
+	var blockHaveMore, borHaveMore bool
 	for {
 		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
 			minBlockNum = frozen
 		}
 
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		blockHaveMore, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
 
 		if includeBor {
-			okBor, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			borHaveMore, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
 		}
-		haveMore := ok || okBor
+		haveMore := blockHaveMore || borHaveMore
 		if !haveMore {
 			break
 		}
