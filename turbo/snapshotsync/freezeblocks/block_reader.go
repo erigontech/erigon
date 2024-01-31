@@ -1203,22 +1203,17 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.idx == nil {
-			fmt.Printf("[dbg] span(%d): continue1 %d, %s\n", spanId, sn.idx.BaseDataID(), sn.idx.FileName())
 			continue
 		}
-		fmt.Printf("[dbg] span(%d): %d, %s\n", spanId, sn.idx.BaseDataID(), sn.idx.FileName())
 		spanFrom := bor.SpanIDAt(sn.from)
 		if spanId < spanFrom {
-			fmt.Printf("[dbg] span(%d): continue2 %d, spanFrom=%d, %s\n", spanId, sn.idx.BaseDataID(), spanFrom, sn.idx.FileName())
 			continue
 		}
 		spanTo := bor.SpanIDAt(sn.to)
 		if spanId >= spanTo {
-			fmt.Printf("[dbg] span(%d): continue3 %d, %s\n", spanId, sn.idx.BaseDataID(), sn.idx.FileName())
 			continue
 		}
 		if sn.idx.KeyCount() == 0 {
-			fmt.Printf("[dbg] span(%d): continue4 %d, %s\n", spanId, sn.idx.BaseDataID(), sn.idx.FileName())
 			continue
 		}
 		offset := sn.idx.OrdinalLookup(spanId - sn.idx.BaseDataID())
