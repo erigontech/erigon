@@ -1,6 +1,7 @@
 package db
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"sync"
@@ -13,6 +14,7 @@ type MemDb struct {
 	DbAccVal    map[string][]string
 	DbKeySource map[string][]byte
 	DbHashKey   map[string][]byte
+	DbCode      map[string][]byte
 	LastRoot    *big.Int
 
 	lock sync.RWMutex
@@ -24,6 +26,7 @@ func NewMemDb() *MemDb {
 		DbAccVal:    make(map[string][]string),
 		DbKeySource: make(map[string][]byte),
 		DbHashKey:   make(map[string][]byte),
+		DbCode:      make(map[string][]byte),
 		LastRoot:    big.NewInt(0),
 	}
 }
@@ -132,9 +135,8 @@ func (m *MemDb) GetKeySource(key utils.NodeKey) ([]byte, error) {
 	defer m.lock.RUnlock() // Make sure to unlock when done
 
 	keyConc := utils.ArrayToScalar(key[:])
-	k := utils.ConvertBigIntToHex(keyConc)
 
-	s, ok := m.DbKeySource[k]
+	s, ok := m.DbKeySource[keyConc.String()]
 
 	if !ok {
 		return nil, fmt.Errorf("key not found")
@@ -177,7 +179,29 @@ func (m *MemDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 }
 
 func (m *MemDb) GetCode(codeHash []byte) ([]byte, error) {
-	return nil, fmt.Errorf("not implemented")
+	m.lock.RLock()         // Lock for reading
+	defer m.lock.RUnlock() // Make sure to unlock when done
+
+	s, ok := m.DbCode[fmt.Sprintf("0x%x", codeHash)]
+
+	if !ok {
+		return nil, fmt.Errorf("key not found")
+	}
+
+	return s, nil
+}
+
+func (m *MemDb) AddCode(code []byte) error {
+	m.lock.Lock()         // Lock for writing
+	defer m.lock.Unlock() // Make sure to unlock when done
+
+	codeHash, err := utils.HashContractBytecode(hex.EncodeToString(code))
+	if err != nil {
+		return err
+	}
+
+	m.DbCode[codeHash] = code
+	return nil
 }
 
 func (m *MemDb) Delete(key string) error {

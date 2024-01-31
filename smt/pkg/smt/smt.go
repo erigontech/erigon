@@ -653,6 +653,10 @@ func (s *SMT) CheckOrphanedNodes(ctx context.Context) int {
 type TraverseAction func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error)
 
 func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction) error {
+	return s.traverse(ctx, node, action, []byte{})
+}
+
+func (s *SMT) traverse(ctx context.Context, node *big.Int, action TraverseAction, prefix []byte) error {
 	if node == nil || node.Cmp(big.NewInt(0)) == 0 {
 		return nil
 	}
@@ -671,7 +675,7 @@ func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction
 		return err
 	}
 
-	shouldContinue, err := action(nil, ky, nodeValue)
+	shouldContinue, err := action(prefix, ky, nodeValue)
 
 	if err != nil {
 		return err
@@ -686,7 +690,10 @@ func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction
 			return errors.New("nodeValue has insufficient length")
 		}
 		child := utils.NodeKeyFromBigIntArray(nodeValue[i*4 : i*4+4])
-		err := s.Traverse(ctx, child.ToBigInt(), action)
+		childPrefix := make([]byte, len(prefix)+1)
+		copy(childPrefix, prefix)
+		childPrefix[len(prefix)] = byte(i)
+		err := s.traverse(ctx, child.ToBigInt(), action, childPrefix)
 		if err != nil {
 			fmt.Println(err)
 			return err

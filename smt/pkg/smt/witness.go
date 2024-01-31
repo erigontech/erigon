@@ -17,7 +17,7 @@ func BuildWitness(s *SMT, rd trie.RetainDecider, ctx context.Context) (*trie.Wit
 	}
 
 	action := func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error) {
-		if rd != nil && !rd.Retain(prefix) {
+		if rd != nil && !rd.Retain(prefix) || (v.IsFinalNode() && !rd.Retain(prefix[:len(prefix)-1])) {
 			h := libcommon.BigToHash(k.ToBigInt())
 			hNode := trie.OperatorHash{Hash: h}
 			operands = append(operands, &hNode)

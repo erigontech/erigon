@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -18,9 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
-	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
@@ -404,134 +400,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address libcommon.Address, sto
 		return nil, fmt.Errorf("mismatch in expected state root computed %v vs %v indicates bug in proof implementation", root, header.Root)
 	}
 	return pr.ProofResult()
-}
-
-func (api *APIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error) {
-	dbg := false
-	if debug != nil {
-		dbg = *debug
-	}
-	return api.getWitness(ctx, api.db, blockNrOrHash, dbg)
-}
-
-func (api *BaseAPI) getWitness(ctx context.Context, db kv.RoDB, blockNrOrHash rpc.BlockNumberOrHash, debug bool) (hexutility.Bytes, error) {
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	if api.historyV3(tx) {
-		return nil, fmt.Errorf("not supported by Erigon3")
-	}
-
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters) // DoCall cannot be executed on non-canonical blocks
-
-	if err != nil {
-		return nil, err
-	}
-
-	// Witness for genesis block is empty
-	if blockNr == 0 {
-		w := trie.NewWitness(make([]trie.WitnessOperator, 0))
-
-		var buf bytes.Buffer
-		_, err = w.WriteInto(&buf, debug)
-		if err != nil {
-			return nil, err
-		}
-
-		return buf.Bytes(), nil
-	}
-
-	block, err := api.blockWithSenders(tx, hash, blockNr)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
-	}
-
-	// prevHeader, err := api._blockReader.HeaderByNumber(ctx, tx, blockNr-1)
-	if err != nil {
-		return nil, err
-	}
-
-	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	if latestBlock < blockNr-1 {
-		// shouldn't happen, but check anyway
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, blockNr)
-	}
-
-	batch := memdb.NewMemoryBatch(tx, api.dirs.Tmp)
-	defer batch.Rollback()
-
-	// Hack for now for the new tables not defined in erigon-lib
-	err = batch.CreateBucket(db2.TableSmt)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableAccountValues)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableLastRoot)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableMetadata)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableHashKey)
-	if err != nil {
-		return nil, err
-	}
-
-	if blockNr-1 < latestBlock {
-		if latestBlock-blockNr > maxGetProofRewindBlockCount {
-			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
-		}
-
-		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr - 1}
-		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
-
-		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.dirs, api.historyV3(batch), api._agg)
-		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
-			return nil, err
-		}
-
-		interHashStageCfg := zkStages.StageZkInterHashesCfg(nil, true, true, false, api.dirs.Tmp, api._blockReader, nil, api.historyV3(batch), api._agg, nil)
-
-		err = zkStages.UnwindZkIntermediateHashesStage(unwindState, stageState, batch, interHashStageCfg, ctx)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	eridb := db2.NewEriDb(batch)
-	smtTrie := smt.NewSMT(eridb)
-
-	witness, err := smt.BuildWitness(smtTrie, nil, ctx)
-
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	_, err = witness.WriteInto(&buf, debug)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
 }
 
 func (api *APIImpl) tryBlockFromLru(hash libcommon.Hash) *types.Block {
