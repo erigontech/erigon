@@ -22,12 +22,14 @@ func main() {
 	)
 	flag.Parse()
 
-	f, err := os.Create(*cpuprofile)
-	if err != nil {
-		log.Fatal(err)
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
 	}
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
 
 	logger := logging.GetLogger("blockimporter")
 	settings := Settings{
