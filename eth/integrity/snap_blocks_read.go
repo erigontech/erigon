@@ -50,7 +50,7 @@ func SnapBorSpanRead(db kv.RoDB, blockReader services.FullBlockReader, ctx conte
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	for i := uint64(0); i < 12_000; i++ {
+	for i := uint64(0); i < 20_000; i++ {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			b, err := blockReader.(services.BorSpanReader).Span(ctx, tx, i)
 			if err != nil {
