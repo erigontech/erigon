@@ -23,27 +23,18 @@ import (
 // header.state_root = hash_tree_root(state)
 // assert hash_tree_root(header) == hash_tree_root(block.message)
 // update_signature_period = compute_sync_committee_period_at_slot(block.message.slot)
-
-// X
-
 // assert attested_state.slot == attested_state.latest_block_header.slot
 // attested_header = attested_state.latest_block_header.copy()
 // attested_header.state_root = hash_tree_root(attested_state)
 // assert hash_tree_root(attested_header) == hash_tree_root(attested_block.message) == block.message.parent_root
 // update_attested_period = compute_sync_committee_period_at_slot(attested_block.message.slot)
-
-// X
-
 // update = LightClientUpdate()
-
 // update.attested_header = block_to_light_client_header(attested_block)
-
 // # `next_sync_committee` is only useful if the message is signed by the current sync committee
 // if update_attested_period == update_signature_period:
 // update.next_sync_committee = attested_state.next_sync_committee
 // update.next_sync_committee_branch = NextSyncCommitteeBranch(
 // compute_merkle_proof(attested_state, NEXT_SYNC_COMMITTEE_GINDEX))
-
 // # Indicate finality whenever possible
 // if finalized_block is not None:
 // if finalized_block.message.slot != GENESIS_SLOT:
@@ -63,6 +54,7 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 	attestedBlock *cltypes.SignedBeaconBlock, attestedSlot uint64,
 	attestedNextSyncCommittee *solid.SyncCommittee, attestedFinalizedCheckpoint solid.Checkpoint,
 	attestedNextSyncCommitteeBranch, attestedFinalityBranch solid.HashVectorSSZ) (*cltypes.LightClientUpdate, error) {
+	var err error
 	if attestedSlot/cfg.SlotsPerEpoch < cfg.AltairForkEpoch {
 		return nil, fmt.Errorf("attested slot %d is before altair fork epoch %d", attestedSlot, cfg.AltairForkEpoch)
 	}
@@ -79,14 +71,20 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 	updateAttestedPeriod := cfg.SyncCommitteePeriod(attestedBlock.Block.Slot)
 
 	update := cltypes.NewLightClientUpdate(block.Version())
-	update.AttestedHeader = BlockToLightClientHeader(attestedBlock)
+	update.AttestedHeader, err = BlockToLightClientHeader(attestedBlock)
+	if err != nil {
+		return nil, err
+	}
 	if updateAttestedPeriod == updateSignaturePeriod {
 		update.NextSyncCommittee = attestedNextSyncCommittee
 		update.NextSyncCommitteeBranch = attestedNextSyncCommitteeBranch
 	}
 	if finalizedBlock != nil {
 		if finalizedBlock.Block.Slot != cfg.GenesisSlot {
-			update.FinalizedHeader = BlockToLightClientHeader(finalizedBlock)
+			update.FinalizedHeader, err = BlockToLightClientHeader(finalizedBlock)
+			if err != nil {
+				return nil, err
+			}
 			finalizedBeaconRoot, err := update.FinalizedHeader.Beacon.HashSSZ()
 			if err != nil {
 				return nil, err
@@ -115,10 +113,27 @@ func CreateLightClientUpdate(cfg *clparams.BeaconChainConfig, block *cltypes.Sig
 //	        body_root=hash_tree_root(block.message.body),
 //	    ),
 //	)
-func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) *cltypes.LightClientHeader {
+func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) (*cltypes.LightClientHeader, error) {
 	h := cltypes.NewLightClientHeader(block.Version())
 	h.Beacon = block.SignedBeaconBlockHeader().Header
-	return h
+	if block.Version() < clparams.CapellaVersion {
+		return h, nil
+	}
+	var err error
+	h.ExecutionPayloadHeader, err = block.Block.Body.ExecutionPayload.PayloadHeader()
+	if err != nil {
+		return nil, err
+	}
+	payloadMerkleProof, err := block.Block.Body.ExecutionPayloadMerkleProof()
+	if err != nil {
+		return nil, err
+	}
+	payloadMerkleProofHashVector := solid.NewHashVector(len(payloadMerkleProof))
+	for i := range payloadMerkleProof {
+		payloadMerkleProofHashVector.Set(i, payloadMerkleProof[i])
+	}
+	h.ExecutionBranch = payloadMerkleProofHashVector
+	return h, nil
 }
 
 // def create_light_client_bootstrap(state: BeaconState,
@@ -157,11 +172,14 @@ func CreateLightClientBootstrap(state *state.CachingBeaconState, block *cltypes.
 	for i := range currentSyncCommitteeBranch {
 		hashVector.Set(i, currentSyncCommitteeBranch[i])
 	}
+	lcHeader, err := BlockToLightClientHeader(block)
+	if err != nil {
+		return nil, err
+	}
 
 	return &cltypes.LightClientBootstrap{
-		Header:                     BlockToLightClientHeader(block),
+		Header:                     lcHeader,
 		CurrentSyncCommittee:       state.CurrentSyncCommittee(),
 		CurrentSyncCommitteeBranch: hashVector,
 	}, nil
-
 }
