@@ -11,7 +11,8 @@ import (
 	"strings"
 
 	"github.com/iden3/go-iden3-crypto/keccak256"
-	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common"
 )
 
 type HTTPResponse struct {
@@ -33,7 +34,7 @@ type AccountDump struct {
 	Balance  string
 	Nonce    uint64
 	Storage  map[string]string
-	Codehash common.Hash
+	Codehash libcommon.Hash
 }
 
 func main() {
@@ -199,7 +200,7 @@ func compareCodeHash(accountHash, value string) {
 	json.Unmarshal(body, &httpResp)
 
 	remoteValueDecode := httpResp.Result
-	commonHash := common.HexToHash(remoteValueDecode).Bytes()
+	commonHash := libcommon.HexToHash(remoteValueDecode).Bytes()
 	value2 := common.Bytes2Hex(keccak256.Hash(commonHash))
 	if value != value2 {
 		fmt.Printf("Nonce ismatch detected for %s. Local: %d, Remote: %d\n", accountHash, value, value2)
