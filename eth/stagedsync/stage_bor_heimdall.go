@@ -475,7 +475,7 @@ func initValidatorSets(
 			return nil, fmt.Errorf("zero span not found")
 		}
 
-		var zeroSpan heimdall.HeimdallSpan
+		var zeroSpan heimdall.Span
 		if err = json.Unmarshal(zeroSpanBytes, &zeroSpan); err != nil {
 			return nil, err
 		}
@@ -546,7 +546,7 @@ func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *
 func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
 	spanID := bor.SpanIDAt(header.Number.Uint64() + 1)
 	spanBytes := chr.BorSpan(spanID)
-	var sp heimdall.HeimdallSpan
+	var sp heimdall.Span
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
 		return err
 	}

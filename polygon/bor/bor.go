@@ -888,7 +888,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
-		spanID := SpanIDAt(number + 1)
+		spanID := uint64(heimdall.SpanIdAt(number + 1))
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
@@ -1315,23 +1315,15 @@ func (c *Bor) checkAndCommitSpan(
 		return err
 	}
 
-	// fetchAndCommitSpan basically calls `commitSpan` on the genesis contracts and the
-	// checks below makes sure that bor has necessary span before it proceeds.
-
-	// Whenever `checkAndCommitSpan` is called for the first time, during the start of 'technically'
-	// second sprint, we need the 0th as well as the 1st span. The contract returns an empty
-	// span (i.e. all fields set to 0). Span 0 doesn't need to be committed explicitly and
-	// is committed eventually when we commit 1st span (as per the contract). The check below
-	// takes care of that and commits the 1st span (hence the `currentSpan.ID+1` param).
+	// check span is not set initially
 	if currentSpan.EndBlock == 0 {
-		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(uint64(currentSpan.Id), state, header, chain, syscall)
 	}
 
-	// For eventuall calls to this function, we need to commit the next span when we're in the
-	// last sprint of the current span.
+	// if current block is first block of last sprint in current span
 	sprintLength := c.config.CalculateSprintLength(headerNumber)
 	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
-		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
 	}
 
 	return nil
@@ -1344,7 +1336,7 @@ func (c *Bor) fetchAndCommitSpan(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	var heimdallSpan heimdall.HeimdallSpan
+	var heimdallSpan heimdall.Span
 
 	if c.HeimdallClient == nil {
 		// fixme: move to a new mock or fake and remove c.HeimdallClient completely
@@ -1477,7 +1469,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) (*heimdall.HeimdallSpan, error) {
+) (*heimdall.Span, error) {
 	headerNumber := header.Number.Uint64()
 
 	spanBor, err := c.spanner.GetCurrentSpan(syscall)
@@ -1492,7 +1484,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	}
 
 	// new span
-	spanBor.ID = newSpanID
+	spanBor.Id = heimdall.SpanId(newSpanID)
 	if spanBor.EndBlock == 0 {
 		spanBor.StartBlock = 256
 	} else {
@@ -1506,14 +1498,13 @@ func (c *Bor) getNextHeimdallSpanForTest(
 		selectedProducers[i] = *v
 	}
 
-	heimdallSpan := &heimdall.HeimdallSpan{
-		Span:              *spanBor,
-		ValidatorSet:      *snap.ValidatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           c.chainConfig.ChainID.String(),
-	}
+	heimdallSpan := *spanBor
 
-	return heimdallSpan, nil
+	heimdallSpan.ValidatorSet = *snap.ValidatorSet
+	heimdallSpan.SelectedProducers = selectedProducers
+	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
+
+	return &heimdallSpan, nil
 }
 
 func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {

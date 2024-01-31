@@ -65,9 +65,9 @@ type savedStateRecord struct {
 type forkGraphDisk struct {
 	// Alternate beacon states
 	fs        afero.Fs
-	blocks    map[libcommon.Hash]*cltypes.SignedBeaconBlock // set of blocks
-	headers   map[libcommon.Hash]*cltypes.BeaconBlockHeader // set of headers
-	badBlocks map[libcommon.Hash]struct{}                   // blocks that are invalid and that leads to automatic fail of extension.
+	blocks    sync.Map                    // set of blocks (block root -> block)
+	headers   sync.Map                    // set of headers
+	badBlocks map[libcommon.Hash]struct{} // blocks that are invalid and that leads to automatic fail of extension.
 
 	// TODO: this leaks, but it isn't a big deal since it's only ~24 bytes per block.
 	// the dirty solution is to just make it an LRU with max size of like 128 epochs or something probably?
@@ -106,20 +106,16 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 	if err != nil {
 		panic(err)
 	}
-	headers := make(map[libcommon.Hash]*cltypes.BeaconBlockHeader)
 	anchorHeader := anchorState.LatestBlockHeader()
 	if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
 		panic(err)
 	}
-	headers[anchorRoot] = &anchorHeader
 
 	farthestExtendingPath[anchorRoot] = true
 
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// storage
-		blocks:     make(map[libcommon.Hash]*cltypes.SignedBeaconBlock),
-		headers:    headers,
 		badBlocks:  make(map[libcommon.Hash]struct{}),
 		stateRoots: make(map[libcommon.Hash]libcommon.Hash),
 		// current state data
@@ -137,6 +133,8 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 		anchorSlot:         anchorState.Slot(),
 		lowestAvaiableSlot: anchorState.Slot(),
 	}
+	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
+
 	f.dumpBeaconStateOnDisk(anchorState, anchorRoot)
 	return f
 }
@@ -153,7 +151,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, LogisticError, err
 	}
 
-	if _, ok := f.headers[blockRoot]; ok {
+	if _, ok := f.GetHeader(libcommon.Hash(blockRoot)); ok {
 		return nil, PreValidated, nil
 	}
 	// Blocks below anchors are invalid.
@@ -201,18 +199,19 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
 	}
 
-	f.blocks[blockRoot] = signedBlock
+	f.blocks.Store(libcommon.Hash(blockRoot), signedBlock)
 	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
 	if err != nil {
 		return nil, LogisticError, err
 	}
-	f.headers[blockRoot] = &cltypes.BeaconBlockHeader{
+
+	f.headers.Store(libcommon.Hash(blockRoot), &cltypes.BeaconBlockHeader{
 		Slot:          block.Slot,
 		ProposerIndex: block.ProposerIndex,
 		ParentRoot:    block.ParentRoot,
 		Root:          block.StateRoot,
 		BodyRoot:      bodyRoot,
-	}
+	})
 
 	// add the state root
 	stateRoot, err := newState.HashSSZ()
@@ -240,13 +239,20 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 }
 
 func (f *forkGraphDisk) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	obj, has := f.headers[blockRoot]
-	return obj, has
+	obj, has := f.headers.Load(blockRoot)
+	if !has {
+		return nil, false
+	}
+	return obj.(*cltypes.BeaconBlockHeader), true
 }
 
 func (f *forkGraphDisk) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	obj, has := f.blocks[blockRoot]
-	return obj, has
+	obj, has := f.blocks.Load(blockRoot)
+	if !has {
+		return nil, false
+	}
+
+	return obj.(*cltypes.SignedBeaconBlock), true
 }
 
 // GetStateAtSlot is for getting a state based off the slot number
@@ -256,7 +262,7 @@ func (f *forkGraphDisk) GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool
 	if !ok {
 		return nil, ErrStateNotFound
 	}
-	blockSlot, ok := f.blocks[blockRoot]
+	blockSlot, ok := f.getBlock(blockRoot)
 	if !ok {
 		return nil, ErrStateNotFound
 	}
@@ -311,11 +317,13 @@ func (f *forkGraphDisk) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.Cac
 	// what we need to do is grab every block in our block store that is between the target slot and the current slot
 	// this is linear time from the distance to our last snapshot.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
-	for _, v := range f.blocks {
-		if v.Block.Slot <= f.currentState.Slot() && v.Block.Slot >= slot {
-			blocksInTheWay = append(blocksInTheWay, v)
+	f.blocks.Range(func(key, value interface{}) bool {
+		block := value.(*cltypes.SignedBeaconBlock)
+		if block.Block.Slot <= f.currentState.Slot() && block.Block.Slot >= slot {
+			blocksInTheWay = append(blocksInTheWay, block)
 		}
-	}
+		return true
+	})
 
 	// sort the slots from low to high
 	slices.SortStableFunc(blocksInTheWay, func(a, b *cltypes.SignedBeaconBlock) int {
@@ -344,7 +352,6 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
 	// Use the parent root as a reverse iterator.
 	currentIteratorRoot := blockRoot
-
 	// try and find the point of recconection
 	for {
 		block, isSegmentPresent := f.getBlock(currentIteratorRoot)
@@ -396,20 +403,24 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
-	oldRoots := make([]libcommon.Hash, 0, len(f.blocks))
-	for hash, signedBlock := range f.blocks {
+	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
+	f.blocks.Range(func(key, value interface{}) bool {
+		hash := key.(libcommon.Hash)
+		signedBlock := value.(*cltypes.SignedBeaconBlock)
 		if signedBlock.Block.Slot >= pruneSlot {
-			continue
+			return true
 		}
 		oldRoots = append(oldRoots, hash)
-	}
+		return true
+	})
+
 	f.lowestAvaiableSlot = pruneSlot + 1
 	for _, root := range oldRoots {
 		delete(f.badBlocks, root)
-		delete(f.blocks, root)
+		f.blocks.Delete(root)
 		delete(f.currentJustifiedCheckpoints, root)
 		delete(f.finalizedCheckpoints, root)
-		delete(f.headers, root)
+		f.headers.Delete(root)
 		delete(f.saveStates, root)
 		delete(f.syncCommittees, root)
 		delete(f.blockRewards, root)

@@ -23,8 +23,10 @@ var (
 	ErrShutdownDetected      = errors.New("shutdown detected")
 	ErrNoResponse            = errors.New("got a nil response")
 	ErrNotSuccessfulResponse = errors.New("error while fetching data from Heimdall")
-	ErrNotInRejectedList     = errors.New("milestoneID doesn't exist in rejected list")
-	ErrNotInMilestoneList    = errors.New("milestoneID doesn't exist in Heimdall")
+	ErrNotInRejectedList     = errors.New("milestoneId doesn't exist in rejected list")
+	ErrNotInMilestoneList    = errors.New("milestoneId doesn't exist in Heimdall")
+	ErrNotInCheckpointList   = errors.New("checkpontId doesn't exist in Heimdall")
+	ErrNotInSpanList         = errors.New("milestoneId doesn't exist in Heimdall")
 	ErrServiceUnavailable    = errors.New("service unavailable")
 )
 
@@ -37,8 +39,11 @@ const (
 
 //go:generate mockgen -destination=./client_mock.go -package=heimdall . HeimdallClient
 type HeimdallClient interface {
-	StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error)
-	Span(ctx context.Context, spanID uint64) (*HeimdallSpan, error)
+	FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*EventRecordWithTime, error)
+
+	FetchLatestSpan(ctx context.Context) (*Span, error)
+	FetchSpan(ctx context.Context, spanID uint64) (*Span, error)
+
 	FetchCheckpoint(ctx context.Context, number int64) (*Checkpoint, error)
 	FetchCheckpointCount(ctx context.Context) (int64, error)
 	FetchMilestone(ctx context.Context, number int64) (*Milestone, error)
@@ -55,6 +60,8 @@ type HeimdallClient interface {
 
 	Close()
 }
+
+var _ HeimdallClient = &Client{}
 
 type Client struct {
 	urlString    string
@@ -110,14 +117,17 @@ const (
 	fetchNoAckMilestone     = "/milestone/noAck/%s"
 	fetchMilestoneID        = "/milestone/ID/%s"
 
-	fetchSpanFormat = "bor/span/%d"
+	fetchSpanFormat     = "bor/span/%d"
+	fetchSpanLatest     = "bor/latest-span"
+	fetchSpanListFormat = "page=%d&limit=%d" // max limit = 20
+	fetchSpanListPath   = "bor/span-list"
 )
 
-func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*EventRecordWithTime, error) {
+func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*EventRecordWithTime, error) {
 	eventRecords := make([]*EventRecordWithTime, 0)
 
 	for {
-		url, err := stateSyncURL(c.urlString, fromID, to)
+		url, err := stateSyncURL(c.urlString, fromID, to.Unix())
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +156,7 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 
 		eventRecords = append(eventRecords, response.Result...)
 
-		if len(response.Result) < stateFetchLimit {
+		if len(response.Result) < stateFetchLimit || (limit > 0 && len(eventRecords) >= limit) {
 			break
 		}
 
@@ -160,7 +170,23 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 	return eventRecords, nil
 }
 
-func (c *Client) Span(ctx context.Context, spanID uint64) (*HeimdallSpan, error) {
+func (c *Client) FetchLatestSpan(ctx context.Context) (*Span, error) {
+	url, err := latestSpanURL(c.urlString)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx = withRequestType(ctx, spanRequest)
+
+	response, err := FetchWithRetry[SpanResponse](ctx, c, url)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response.Result, nil
+}
+
+func (c *Client) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	url, err := spanURL(c.urlString, spanID)
 	if err != nil {
 		return nil, err
@@ -400,6 +426,10 @@ func Fetch[T any](ctx context.Context, request *Request) (*T, error) {
 
 func spanURL(urlString string, spanID uint64) (*url.URL, error) {
 	return makeURL(urlString, fmt.Sprintf(fetchSpanFormat, spanID), "")
+}
+
+func latestSpanURL(urlString string) (*url.URL, error) {
+	return makeURL(urlString, fetchSpanLatest, "")
 }
 
 func stateSyncURL(urlString string, fromID uint64, to int64) (*url.URL, error) {

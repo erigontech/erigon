@@ -356,13 +356,15 @@ const (
 	StateCommitment = "StateCommitment"
 
 	// BOR
-	BorReceipts  = "BorReceipt"
-	BorFinality  = "BorFinality"
-	BorTxLookup  = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorSeparate  = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
-	BorEvents    = "BorEvents"                 // event_id -> event_payload
-	BorEventNums = "BorEventNums"              // block_num -> event_id (first event_id in that block)
-	BorSpans     = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorReceipts    = "BorReceipt"
+	BorFinality    = "BorFinality"
+	BorTxLookup    = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
+	BorSeparate    = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
+	BorEvents      = "BorEvents"                 // event_id -> event_payload
+	BorEventNums   = "BorEventNums"              // block_num -> event_id (first event_id in that block)
+	BorSpans       = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorCheckpoints = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
+	BorMilestones  = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -599,6 +601,8 @@ var ChaindataTables = []string{
 	BorEvents,
 	BorEventNums,
 	BorSpans,
+	BorCheckpoints,
+	BorMilestones,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -808,12 +812,14 @@ var ChaindataTablesCfg = TableCfg{
 }
 
 var BorTablesCfg = TableCfg{
-	BorReceipts:  {Flags: DupSort},
-	BorFinality:  {Flags: DupSort},
-	BorTxLookup:  {Flags: DupSort},
-	BorEvents:    {Flags: DupSort},
-	BorEventNums: {Flags: DupSort},
-	BorSpans:     {Flags: DupSort},
+	BorReceipts:    {Flags: DupSort},
+	BorFinality:    {Flags: DupSort},
+	BorTxLookup:    {Flags: DupSort},
+	BorEvents:      {Flags: DupSort},
+	BorEventNums:   {Flags: DupSort},
+	BorSpans:       {Flags: DupSort},
+	BorCheckpoints: {Flags: DupSort},
+	BorMilestones:  {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}
