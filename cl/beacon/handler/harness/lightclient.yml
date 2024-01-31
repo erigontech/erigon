@@ -1,0 +1,11 @@
+vars:
+  head_hash: '0x0d86eab4d6fd68775a23fda562ab7e059a88d36768729f7ba6d817ba67a6a7ee'
+  bad_hash: '0xbeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeef'
+tests:
+  - name: bootstrap
+    actual:
+      handler: i
+      path: /eth/v1/beacon/light_client/bootstrap/{{.Vars.head_hash}}
+    expect:
+      file: "light_client_bootstrap_1"
+      fs: td

@@ -155,7 +155,7 @@ func BlockToLightClientHeader(block *cltypes.SignedBeaconBlock) (*cltypes.LightC
 // )
 func CreateLightClientBootstrap(state *state.CachingBeaconState, block *cltypes.SignedBeaconBlock) (*cltypes.LightClientBootstrap, error) {
 	cfg := state.BeaconConfig()
-	if state.Slot()/cfg.SlotsPerEpoch < cfg.AltairForkEpoch {
+	if state.Version() < clparams.AltairVersion {
 		return nil, fmt.Errorf("state slot %d is before altair fork epoch %d", state.Slot(), cfg.AltairForkEpoch)
 	}
 

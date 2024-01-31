@@ -23,6 +23,7 @@ func (a *ApiHandler) EthV1BeaconLightClientBootstrap(w http.ResponseWriter, r *h
 	if err != nil {
 		return nil, err
 	}
+
 	bootstrap, ok := a.forkchoiceStore.GetLightClientBootstrap(root)
 	if !ok {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("bootstrap object evicted"))

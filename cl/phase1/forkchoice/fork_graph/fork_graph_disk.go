@@ -201,12 +201,14 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
 	}
 
-	lightclientBootstrap, err := lightclient_utils.CreateLightClientBootstrap(newState, signedBlock)
-	if err != nil {
-		return nil, LogisticError, err
+	if block.Version() >= clparams.AltairVersion {
+		lightclientBootstrap, err := lightclient_utils.CreateLightClientBootstrap(newState, signedBlock)
+		if err != nil {
+			return nil, LogisticError, err
+		}
+		f.lightclientBootstraps.Store(libcommon.Hash(blockRoot), lightclientBootstrap)
 	}
 
-	f.lightclientBootstraps.Store(libcommon.Hash(blockRoot), lightclientBootstrap)
 	f.blocks.Store(libcommon.Hash(blockRoot), signedBlock)
 	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacontest"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/log/v3"
@@ -43,6 +44,14 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 	}
 	_, blocks, _, _, postState, handler, _, sm, fcu := setupTestingHandler(c.t, c.v, logger)
 	var err error
+
+	lastBlockRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(c.t, err)
+
+	if c.v >= clparams.AltairVersion {
+		fcu.LightClientBootstraps[lastBlockRoot], err = lightclient_utils.CreateLightClientBootstrap(postState, blocks[len(blocks)-1])
+		require.NoError(c.t, err)
+	}
 
 	if c.forkmode == 0 {
 		fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
