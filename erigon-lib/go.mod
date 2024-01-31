@@ -43,7 +43,7 @@ require (
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.6.0
 	golang.org/x/crypto v0.18.0
-	golang.org/x/exp v0.0.0-20240119083558-1b970713d09a
+	golang.org/x/exp v0.0.0-20231226003508-02704c960a9b
 	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.16.0
 	golang.org/x/time v0.5.0
