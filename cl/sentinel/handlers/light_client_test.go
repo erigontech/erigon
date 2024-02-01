@@ -96,11 +96,11 @@ func TestLightClientOptimistic(t *testing.T) {
 func TestLightClientFinality(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6000"
+	listenAddrHost := "/ip4/127.0.0.1/tcp/6005"
 	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6001"
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6006"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
 
@@ -165,11 +165,11 @@ func TestLightClientFinality(t *testing.T) {
 func TestLightClientBootstrap(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6000"
+	listenAddrHost := "/ip4/127.0.0.1/tcp/6007"
 	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6001"
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6008"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
 
@@ -245,7 +245,7 @@ func TestLightClientBootstrap(t *testing.T) {
 func TestLightClientUpdates(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6000"
+	listenAddrHost := "/ip4/127.0.0.1/tcp/6009"
 	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
 
