@@ -14,9 +14,11 @@ import (
 
 type EnrichedTransaction struct {
 	types.Transaction
-	idx              int
-	isBorStateSync   bool
-	borStateSyncHash *common.Hash // using a pointer to be memory efficient (Hash takes 32 bytes)
+	idx            int
+	isBorStateSync bool
+	// borStateSyncHash uses a pointer to be memory efficient in the case of this
+	// not being a bor state sync txn (empty common.Hash takes 32 bytes)
+	borStateSyncHash *common.Hash
 }
 
 func (et *EnrichedTransaction) Hash() common.Hash {
