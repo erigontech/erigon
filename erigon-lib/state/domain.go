@@ -1831,7 +1831,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if LastTxNumOfStep(foundStep, dc.d.aggregationStep) > dc.maxTxNumInDomainFiles(false) {
+		if LastTxNumOfStep(foundStep, dc.d.aggregationStep) >= dc.maxTxNumInDomainFiles(false) {
 			copy(dc.valKeyBuf[:], key)
 			copy(dc.valKeyBuf[len(key):], foundInvStep)
 
