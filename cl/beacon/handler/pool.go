@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -16,7 +15,6 @@ func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	fmt.Println("GetEthV1BeaconPoolAttesterSlashings", a.operationsPool.AttesterSlashingsPool.Raw())
 	return newBeaconResponse(a.operationsPool.AttesterSlashingsPool.Raw()), nil
 }
 

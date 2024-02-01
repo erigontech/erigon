@@ -135,7 +135,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		if !discover {
 			return
 		}
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedS3Tokens, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
@@ -335,6 +335,15 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var zeroProgress []string
 	var noMetadata []string
 
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.SnapshoFilesList{}).Enabled()
+	if isDiagEnabled {
+		filesList := make([]string, 0, len(torrents))
+		for _, t := range torrents {
+			filesList = append(filesList, t.Name())
+		}
+		diagnostics.Send(diagnostics.SnapshoFilesList{Files: filesList})
+	}
+
 	for _, t := range torrents {
 		select {
 		case <-t.GotInfo():
@@ -359,7 +368,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				zeroProgress = append(zeroProgress, torrentName)
 			}
 
-			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName)
+			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
 			rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 			// more detailed statistic: download rate of each peer (for each file)
 			if !t.Complete.Bool() && progress != 0 {
@@ -415,7 +424,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	d.stats = stats
 }
 
-func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string) ([]interface{}, []diagnostics.SegmentPeer) {
+func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName string, finished bool) ([]interface{}, []diagnostics.SegmentPeer) {
 	seeds := make([]diagnostics.SegmentPeer, 0, len(weebseedPeersOfThisFile))
 	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 	webseedRates = append(webseedRates, "file", fName)
@@ -424,12 +433,13 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 		if urlObj, err := url.Parse(urlS); err == nil {
 			if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
 				rate := uint64(peer.DownloadRate())
-
-				seed := diagnostics.SegmentPeer{
-					Url:          urlObj.Host,
-					DownloadRate: rate,
+				if !finished {
+					seed := diagnostics.SegmentPeer{
+						Url:          urlObj.Host,
+						DownloadRate: rate,
+					}
+					seeds = append(seeds, seed)
 				}
-				seeds = append(seeds, seed)
 				webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(rate)))
 			}
 		}
@@ -572,7 +582,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	// Paranoic Mode on: if same file changed infoHash - skip it
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
-	if d.alreadyHaveThisName(name) {
+	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
 	if d.torrentFiles.newDownloadsAreProhibited() {

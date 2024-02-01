@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
@@ -21,8 +22,8 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, indiciesDB kv.RwDB, logger log.Logger) (*sentinel.Sentinel, error) {
-	sent, err := sentinel.New(context.Background(), cfg, db, indiciesDB, logger)
+func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
+	sent, err := sentinel.New(context.Background(), cfg, db, indiciesDB, logger, forkChoiceReader)
 	if err != nil {
 		return nil, err
 	}
@@ -61,9 +62,9 @@ func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockC
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, indiciesDB kv.RwDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, indiciesDB kv.RwDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(cfg, db, indiciesDB, logger)
+	sent, err := createSentinel(cfg, db, indiciesDB, forkChoiceReader, logger)
 	if err != nil {
 		return nil, err
 	}

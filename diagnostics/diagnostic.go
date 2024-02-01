@@ -17,8 +17,9 @@ type DiagnosticClient struct {
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
 
-	syncStats diaglib.SyncStatistics
-	mu        sync.Mutex
+	syncStats        diaglib.SyncStatistics
+	snapshotFileList diaglib.SnapshoFilesList
+	mu               sync.Mutex
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
@@ -33,6 +34,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runCurrentSyncStageListener()
 	d.runSyncStagesListListener()
 	d.runBlockExecutionListener()
+	d.runSnapshotFilesListListener()
 
 	//d.logDiagMsgs()
 }
@@ -106,6 +108,10 @@ func (d *DiagnosticClient) runSnapshotListener() {
 
 func (d *DiagnosticClient) SyncStatistics() diaglib.SyncStatistics {
 	return d.syncStats
+}
+
+func (d *DiagnosticClient) SnapshotFilesList() diaglib.SnapshoFilesList {
+	return d.snapshotFileList
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener() {
@@ -284,6 +290,32 @@ func (d *DiagnosticClient) runBlockExecutionListener() {
 				d.mu.Unlock()
 
 				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+					return
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runSnapshotFilesListListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.SnapshoFilesList](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.SnapshoFilesList{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.snapshotFileList = info
+				d.mu.Unlock()
+
+				if len(info.Files) > 0 {
 					return
 				}
 			}

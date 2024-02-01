@@ -40,12 +40,23 @@ var testHeader = &cltypes.BeaconBlockHeader{
 	BodyRoot:      libcommon.HexToHash("ad"),
 }
 
+var testBlockRoot = &cltypes.Root{
+	Root: libcommon.HexToHash("a"),
+}
+
+var testLightClientUpdatesByRange = &cltypes.LightClientUpdatesByRangeRequest{
+	StartPeriod: 100,
+	Count:       10,
+}
+
 func TestMarshalNetworkTypes(t *testing.T) {
 	cases := []ssz.EncodableSSZ{
 		testMetadata,
 		testPing,
 		testBlockRangeRequest,
 		testStatus,
+		testBlockRoot,
+		testLightClientUpdatesByRange,
 	}
 
 	unmarshalDestinations := []ssz.EncodableSSZ{
@@ -53,6 +64,8 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		&cltypes.Ping{},
 		&cltypes.BeaconBlocksByRangeRequest{},
 		&cltypes.Status{},
+		&cltypes.Root{},
+		&cltypes.LightClientUpdatesByRangeRequest{},
 	}
 	for i, tc := range cases {
 		marshalledBytes, err := tc.EncodeSSZ(nil)

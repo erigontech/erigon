@@ -27,6 +27,7 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -41,6 +42,7 @@ import (
 
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -50,13 +52,10 @@ import (
 // udpOrHttpTrackers - torrent library spawning several goroutines and producing many requests for each tracker. So we limit amout of trackers by 8
 var udpOrHttpTrackers = []string{
 	"udp://tracker.opentrackr.org:1337/announce",
-	"udp://9.rarbg.com:2810/announce",
 	"udp://tracker.openbittorrent.com:6969/announce",
-	"http://tracker.openbittorrent.com:80/announce",
 	"udp://opentracker.i2p.rocks:6969/announce",
-	"https://opentracker.i2p.rocks:443/announce",
 	"udp://tracker.torrent.eu.org:451/announce",
-	"udp://tracker.moeking.me:6969/announce",
+	"udp://open.stealth.si:80/announce",
 }
 
 // nolint
@@ -189,7 +188,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	}
 
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 16)
 	var i atomic.Int32
 
 	for _, file := range files {
@@ -288,6 +287,18 @@ func AllTorrentSpecs(dirs datadir.Dirs, torrentFiles *TorrentFiles) (res []*torr
 	return res, nil
 }
 
+// if $DOWNLOADER_ONLY_BLOCKS!="" filters out all non-v1 snapshots
+func IsSnapNameAllowed(name string) bool {
+	if dbg.DownloaderOnlyBlocks {
+		for _, p := range []string{"domain", "history", "idx"} {
+			if strings.HasPrefix(name, p) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // addTorrentFile - adding .torrent file to torrentClient (and checking their hashes), if .torrent file
 // added first time - pieces verification process will start (disk IO heavy) - Progress
 // kept in `piece completion storage` (surviving reboot). Once it done - no disk IO needed again.
@@ -319,7 +330,9 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 		return nil, false, ctx.Err()
 	default:
 	}
-
+	if !IsSnapNameAllowed(ts.DisplayName) {
+		return nil, false, nil
+	}
 	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
 	var have bool
 	t, have = torrentClient.Torrent(ts.InfoHash)

@@ -1,32 +1,64 @@
 package heimdall
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
+var _ Waypoint = Checkpoint{}
+
+type CheckpointId uint64
+
 // Checkpoint defines a response object type of bor checkpoint
 type Checkpoint struct {
-	Proposer   libcommon.Address `json:"proposer"`
-	StartBlock *big.Int          `json:"start_block"`
-	EndBlock   *big.Int          `json:"end_block"`
-	RootHash   libcommon.Hash    `json:"root_hash"`
-	BorChainID string            `json:"bor_chain_id"`
-	Timestamp  uint64            `json:"timestamp"`
+	Fields WaypointFields
+}
+
+func (c Checkpoint) StartBlock() *big.Int {
+	return c.Fields.StartBlock
+}
+
+func (c Checkpoint) EndBlock() *big.Int {
+	return c.Fields.EndBlock
+}
+
+func (c Checkpoint) RootHash() libcommon.Hash {
+	return c.Fields.RootHash
+}
+
+func (c Checkpoint) Timestamp() uint64 {
+	return c.Fields.Timestamp
+}
+
+func (c Checkpoint) Length() int {
+	return c.Fields.Length()
+}
+
+func (c Checkpoint) CmpRange(n uint64) int {
+	return c.Fields.CmpRange(n)
 }
 
 func (m Checkpoint) String() string {
 	return fmt.Sprintf(
 		"Checkpoint {%v (%d:%d) %v %v %v}",
-		m.Proposer.String(),
-		m.StartBlock,
-		m.EndBlock,
-		m.RootHash.Hex(),
-		m.BorChainID,
-		m.Timestamp,
+		m.Fields.Proposer.String(),
+		m.Fields.StartBlock,
+		m.Fields.EndBlock,
+		m.Fields.RootHash.Hex(),
+		m.Fields.ChainID,
+		m.Fields.Timestamp,
 	)
+}
+
+func (c Checkpoint) MarshalJSON() ([]byte, error) {
+	return json.Marshal(c.Fields)
+}
+
+func (c *Checkpoint) UnmarshalJSON(b []byte) error {
+	return json.Unmarshal(b, &c.Fields)
 }
 
 type CheckpointResponse struct {

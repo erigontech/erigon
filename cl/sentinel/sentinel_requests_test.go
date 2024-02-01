@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -58,7 +59,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, raw, db, log.New())
+	}, raw, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -163,7 +164,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, raw, db, log.New())
+	}, raw, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -273,7 +274,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, raw, db, log.New())
+	}, raw, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
