@@ -534,12 +534,15 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			err = domains.DomainPut(kv.CodeDomain, key, nil, codeUpd, prev, step)
 			require.NoError(t, err)
 		case r == 100:
-			prev, step, err := domains.LatestAccount(key)
-			require.NoError(t, err)
+			//prev, step, err := domains.LatestAccount(key)
+			//require.NoError(t, err)
+			if !existed {
+				continue
+			}
 
 			usedKeys[string(key)] = struct{}{}
 
-			err = domains.DomainDel(kv.AccountsDomain, key, nil, prev, step)
+			err := domains.DomainDel(kv.AccountsDomain, key, nil, nil, 0)
 			require.NoError(t, err)
 
 		case r > 66:
