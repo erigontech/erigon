@@ -1806,7 +1806,6 @@ func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
-	//t := time.Now()
 	key := key1
 	if len(key2) > 0 {
 		key = append(append(dc.keyBuf[:0], key1...), key2...)
@@ -1820,7 +1819,8 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 	var v, foundInvStep []byte
 	if traceGetLatest == dc.d.filenameBase {
 		defer func() {
-			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; is=%x)\n", dc.d.filenameBase, key, v, foundInvStep != nil, foundInvStep)
+			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
+				dc.d.filenameBase, key, v, foundInvStep != nil, foundInvStep, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
 		}()
 	}
 
@@ -1831,7 +1831,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if foundStep*dc.d.aggregationStep > dc.maxTxNumInDomainFiles(false) {
+		if LastTxNumOfStep(foundStep, dc.d.aggregationStep) > dc.maxTxNumInDomainFiles(false) {
 			copy(dc.valKeyBuf[:], key)
 			copy(dc.valKeyBuf[len(key):], foundInvStep)
 
@@ -1846,21 +1846,20 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 			//LatestStateReadDB.ObserveDuration(t)
 			return v, foundStep, true, nil
 		}
-		//} else {
 		//if traceGetLatest == dc.d.filenameBase {
-		//it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//l := iter.ToArrU64Must(it)
-		//fmt.Printf("L: %d\n", l)
-		//it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
-		//if err != nil {
-		//	panic(err)
-		//}
-		//l2 := iter.ToArrU64Must(it2)
-		//fmt.Printf("K: %d\n", l2)
-		//panic(1)
+		//	it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	l := iter.ToArrU64Must(it)
+		//	fmt.Printf("L: %d\n", l)
+		//	it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	l2 := iter.ToArrU64Must(it2)
+		//	fmt.Printf("K: %d\n", l2)
+		//	panic(1)
 		//
 		//	fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
 		//}

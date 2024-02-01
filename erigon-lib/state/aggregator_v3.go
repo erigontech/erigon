@@ -1006,11 +1006,23 @@ func (a *AggregatorV3) FilesAmount() []int {
 	}
 }
 
+func FirstTxNumOfStep(step, size uint64) uint64 {
+	return step * size
+}
+
+func LastTxNumOfStep(step, size uint64) uint64 {
+	return (step + 1) * size
+}
+
+func StepStartEndTxNum(step, stepSize uint64) (start, end uint64) {
+	return FirstTxNumOfStep(step, stepSize), LastTxNumOfStep(step, stepSize)
+}
+
 // FirstTxNumOfStep returns txStepBeginning of given step.
 // Step 0 is a range [0, stepSize).
-// To prune step needed to Prune ragne [txStepBeginning, txNextStepBeginning)
-func (a *AggregatorV3) FirstTxNumOfStep(step uint64) uint64 {
-	return step * a.StepSize()
+// To prune step needed to fully Prune range [txStepBeginning, txNextStepBeginning)
+func (a *AggregatorV3) FirstTxNumOfStep(step uint64) uint64 { // could have some smaller steps to prune// could have some smaller steps to prune
+	return FirstTxNumOfStep(step, a.StepSize())
 }
 
 func (a *AggregatorV3) EndTxNumDomainsFrozen() uint64 {
