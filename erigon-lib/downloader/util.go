@@ -346,7 +346,9 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
-		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool()))
+		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool())); err != nil {
+			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
+		}
 
 		return t, true, nil
 	}
