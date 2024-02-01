@@ -100,7 +100,6 @@ func (a *ApiHandler) GetEthV1BeaconLightClientUpdates(w http.ResponseWriter, r *
 			notFoundPrev = true
 			continue
 		}
-		fmt.Println(i, update)
 		if notFoundPrev {
 			resp = []interface{}{}
 			notFoundPrev = false
