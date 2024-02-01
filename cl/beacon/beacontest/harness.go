@@ -241,6 +241,7 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 	if len(c.Exprs) == 0 && c.Expr == "" {
 		exprs = append(exprs, "actual_code == 200", "actual == expect")
 	}
+
 	env, err := cel.NewEnv(
 		cel.Variable("expect", aType),
 		cel.Variable("actual", bType),
@@ -278,6 +279,8 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 		}
 		if !assert.Equal(t, bres, true, `expr: %s`, expr) {
 			if os.Getenv("HIDE_HARNESS_LOG") != "1" {
+				// b1, _ := json.Marshal(b)
+				// panic(string(b1))
 				t.Logf(`name: %s
 				expect%d: %v
 				actual%d: %v
@@ -376,7 +379,8 @@ func (s *Source) executeRemote(ctx context.Context) (json.RawMessage, int, error
 		q.Add(k, v)
 	}
 	purl.RawQuery = q.Encode()
-	request, err := http.NewRequest(method, purl.String(), body)
+
+	request, err := http.NewRequest(method, strings.ReplaceAll(purl.String(), "%3F", "?"), body)
 	if err != nil {
 		return nil, 0, err
 	}
