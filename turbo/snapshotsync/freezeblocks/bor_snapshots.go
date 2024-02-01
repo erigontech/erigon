@@ -176,7 +176,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.borSnapshots()
-	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
+	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum)
 	if ok {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
