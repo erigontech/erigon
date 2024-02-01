@@ -15,25 +15,23 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/metrics"
-	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -41,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -228,7 +227,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
-	//if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+	//if err := blockReader.IntegrityTxnID(false); err != nil {
 	//	return err
 	//}
 
