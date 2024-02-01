@@ -1831,7 +1831,7 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 
 	if foundInvStep != nil {
 		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if foundStep*dc.d.aggregationStep >= dc.maxTxNumInDomainFiles(false) {
+		if foundStep*dc.d.aggregationStep > dc.maxTxNumInDomainFiles(false) {
 			copy(dc.valKeyBuf[:], key)
 			copy(dc.valKeyBuf[len(key):], foundInvStep)
 
@@ -2197,6 +2197,12 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	var k, v []byte
 	if prunedKey != nil {
 		k, v, err = keysCursor.Seek(prunedKey)
+		if err != nil {
+			return stat, err
+		}
+		if k != nil { // could have some smaller steps to prune
+			v, err = keysCursor.LastDup()
+		}
 	} else {
 		k, v, err = keysCursor.Last()
 	}
