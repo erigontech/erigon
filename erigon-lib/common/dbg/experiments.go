@@ -26,6 +26,11 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+var (
+	// force skipping of any non-Erigon2 .torrent files
+	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
+)
+
 var StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
 
 var doMemstat = true
