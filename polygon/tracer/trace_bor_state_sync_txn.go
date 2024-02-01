@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -20,8 +19,27 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/erigon/turbo/transactions"
 )
+
+type assembleTracerFunc func(
+	ctx context.Context,
+	traceConfig *tracers.TraceConfig,
+	txHash libcommon.Hash,
+	stream *jsoniter.Stream,
+	callTimeout time.Duration,
+) (tracer vm.EVMLogger, streaming bool, cancel context.CancelFunc, err error)
+
+type executeTraceTxFunc func(
+	blockCtx evmtypes.BlockContext,
+	txCtx evmtypes.TxContext,
+	ibs evmtypes.IntraBlockState,
+	config *tracers.TraceConfig,
+	chainConfig *chain.Config,
+	stream *jsoniter.Stream,
+	tracer vm.EVMLogger,
+	streaming bool,
+	execCb func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error),
+) error
 
 func TraceBorStateSyncTxnDebugAPI(
 	ctx context.Context,
@@ -37,6 +55,8 @@ func TraceBorStateSyncTxnDebugAPI(
 	txCtx evmtypes.TxContext,
 	stream *jsoniter.Stream,
 	callTimeout time.Duration,
+	assembleTracer assembleTracerFunc,
+	executeTraceTx executeTraceTxFunc,
 ) error {
 	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
 	if err != nil {
@@ -44,7 +64,7 @@ func TraceBorStateSyncTxnDebugAPI(
 		return err
 	}
 
-	tracer, streaming, cancel, err := transactions.AssembleTracer(ctx, traceConfig, txCtx.TxHash, stream, callTimeout)
+	tracer, streaming, cancel, err := assembleTracer(ctx, traceConfig, txCtx.TxHash, stream, callTimeout)
 	if err != nil {
 		stream.WriteNil()
 		return err
@@ -59,7 +79,7 @@ func TraceBorStateSyncTxnDebugAPI(
 		return applyBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, refunds)
 	}
 
-	return transactions.ExecuteTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
+	return executeTraceTx(blockCtx, txCtx, ibs, traceConfig, chainConfig, stream, tracer, streaming, execCb)
 }
 
 func TraceBorStateSyncTxnTraceAPI(
@@ -91,10 +111,6 @@ func TraceBorStateSyncTxnTraceAPI(
 	return applyBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, true)
 }
 
-//
-// TODO - see if i can refactor out common logic for getting all block transactions + check for bor state sync txn in 1 func
-//
-
 func ApplyBorStateSyncTxn(
 	ctx context.Context,
 	dbTx kv.Tx,
@@ -115,14 +131,6 @@ func ApplyBorStateSyncTxn(
 
 	stateReceiverContract := libcommon.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContract)
 	return applyBorStateSyncTxn(ctx, ibs, stateWriter, stateReceiverContract, stateSyncEvents, evm, rules, txCtx, true)
-}
-
-func InitBorStateSyncTxContext(blockNum uint64, blockHash libcommon.Hash) evmtypes.TxContext {
-	return evmtypes.TxContext{
-		TxHash:   types.ComputeBorTxHash(blockNum, blockHash),
-		Origin:   libcommon.Address{},
-		GasPrice: uint256.NewInt(0),
-	}
 }
 
 func applyBorStateSyncTxn(

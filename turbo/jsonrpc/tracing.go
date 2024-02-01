@@ -104,46 +104,28 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 	rules := chainConfig.Rules(block.NumberU64(), block.Time())
 	stream.WriteArrayStart()
 
-	txns := block.Transactions()
-	var borStateSyncTxn types.Transaction
-	if *config.BorTraceEnabled {
-		borStateSyncTxHash := types.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		_, ok, err := api._blockReader.EventLookup(ctx, tx, borStateSyncTxHash)
-		if err != nil {
-			stream.WriteArrayEnd()
-			return err
-		}
-		if ok {
-			borStateSyncTxn = types.NewBorTransaction()
-			txns = append(txns, borStateSyncTxn)
-		}
+	txns, err := transactions.AllBlockTransactions(ctx, block, chainConfig, api._blockReader, tx)
+	if err != nil {
+		return err
 	}
 
 	for idx, txn := range txns {
-		isBorStateSyncTxn := borStateSyncTxn == txn
-		var msg types.Message
-		var txCtx evmtypes.TxContext
-		if isBorStateSyncTxn {
-			// we use an empty message for bor state sync txn since it gets handled differently
-			txCtx = polygontracer.InitBorStateSyncTxContext(block.NumberU64(), block.Hash())
-		} else {
-			msg, err = txn.AsMessage(*signer, block.BaseFee(), rules)
-			if err != nil {
-				return err
-			}
+		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
+		if err != nil {
+			return err
+		}
 
-			if msg.FeeCap().IsZero() && engine != nil {
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, chainConfig, ibs, block.Header(), engine, true /* constCall */)
-				}
-				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		if msg.FeeCap().IsZero() && engine != nil {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, chainConfig, ibs, block.Header(), engine, true /* constCall */)
 			}
+			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		}
 
-			txCtx = evmtypes.TxContext{
-				TxHash:   txn.Hash(),
-				Origin:   msg.From(),
-				GasPrice: msg.GasPrice(),
-			}
+		txCtx := evmtypes.TxContext{
+			TxHash:   txn.Hash(),
+			Origin:   msg.From(),
+			GasPrice: msg.GasPrice(),
 		}
 
 		stream.WriteObjectStart()
@@ -162,7 +144,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		ibs.SetTxContext(txCtx.TxHash, block.Hash(), idx)
 
-		if isBorStateSyncTxn {
+		if txn.IsBorStateSync() {
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(
 				ctx,
 				tx,
@@ -177,6 +159,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 				txCtx,
 				stream,
 				api.evmCallTimeout,
+				transactions.AssembleTracer,
+				transactions.ExecuteTraceTx,
 			)
 		} else {
 			err = transactions.TraceTx(ctx, msg, blockCtx, txCtx, ibs, config, chainConfig, stream, api.evmCallTimeout)
@@ -223,7 +207,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	var isBorStateSyncTxn bool
 	blockNum, ok, err := api.txnLookup(tx, hash)
 	if err != nil {
 		stream.WriteNil()
@@ -249,8 +232,6 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
 			return nil
 		}
-
-		isBorStateSyncTxn = true
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -269,25 +250,14 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		stream.WriteNil()
 		return nil
 	}
-	var txnIndex int
-	var txn types.Transaction
-	for i := 0; i < block.Transactions().Len() && !isBorStateSyncTxn; i++ {
-		transaction := block.Transactions()[i]
-		if transaction.Hash() == hash {
-			txnIndex = i
-			txn = transaction
-			break
-		}
+
+	txn, err := transactions.FindTransactionInBlock(ctx, hash, block, chainConfig, api._blockReader, tx)
+	if err != nil {
+		stream.WriteNil()
+		return err
 	}
-	if txn == nil {
-		if isBorStateSyncTxn {
-			// bor state sync tx is appended at the end of the block
-			txnIndex = block.Transactions().Len()
-		} else {
-			stream.WriteNil()
-			return fmt.Errorf("transaction %#x not found", hash)
-		}
-	}
+
+	txnIndex := txn.Idx()
 	engine := api.engine()
 
 	msg, blockCtx, txCtx, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, txnIndex, api.historyV3(tx))
@@ -296,7 +266,7 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 
-	if isBorStateSyncTxn {
+	if txn.IsBorStateSync() {
 		return polygontracer.TraceBorStateSyncTxnDebugAPI(
 			ctx,
 			tx,
@@ -311,6 +281,8 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 			txCtx,
 			stream,
 			api.evmCallTimeout,
+			transactions.AssembleTracer,
+			transactions.ExecuteTraceTx,
 		)
 	}
 

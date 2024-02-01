@@ -47,7 +47,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	var isBorStateSyncTxn bool
 	blockNumber, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
@@ -65,8 +64,6 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		if !ok {
 			return nil, nil
 		}
-
-		isBorStateSyncTxn = true
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNumber)
@@ -77,19 +74,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	var txIndex int
-	for idx := 0; idx < block.Transactions().Len() && !isBorStateSyncTxn; idx++ {
-		txn := block.Transactions()[idx]
-		if txn.Hash() == txHash {
-			txIndex = idx
-			break
-		}
+	txn, err := transactions.FindTransactionInBlock(ctx, txHash, block, chainConfig, api._blockReader, tx)
+	if err != nil {
+		return nil, err
 	}
 
-	if isBorStateSyncTxn {
-		txIndex = block.Transactions().Len()
-	}
-
+	txIndex := txn.Idx()
 	bn := hexutil.Uint64(blockNumber)
 	hash := block.Hash()
 	signer := types.MakeSigner(chainConfig, blockNumber, block.Time())
@@ -900,24 +890,12 @@ func (api *TraceAPIImpl) callManyTransactions(
 	parentNo := rpc.BlockNumber(pNo)
 	rules := cfg.Rules(blockNumber, block.Time())
 	header := block.Header()
-	txs := block.Transactions()
-	var borStateSyncTxn types.Transaction
-	var borStateSyncTxnHash common.Hash
-	if cfg.Bor != nil {
-		// check if this block has state sync txn
-		blockHash := block.Hash()
-		borStateSyncTxnHash = types.ComputeBorTxHash(blockNumber, blockHash)
-		_, ok, err := api._blockReader.EventLookup(ctx, dbtx, borStateSyncTxnHash)
-		if err != nil {
-			return nil, nil, err
-		}
-		if ok {
-			borStateSyncTxn = types.NewBorTransaction()
-			txs = append(txs, borStateSyncTxn)
-		}
+	txns, err := transactions.AllBlockTransactions(ctx, block, cfg, api._blockReader, dbtx)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	callParams := make([]TraceCallParam, 0, len(txs))
+	callParams := make([]TraceCallParam, 0, len(txns))
 	reader, err := rpchelper.CreateHistoryStateReader(dbtx, blockNumber, txIndex, api.historyV3(dbtx), cfg.ChainName)
 	if err != nil {
 		return nil, nil, err
@@ -936,35 +914,26 @@ func (api *TraceAPIImpl) callManyTransactions(
 		return nil, nil, err
 	}
 
-	msgs := make([]types.Message, len(txs))
-	for i, tx := range txs {
-		isBorStateSyncTxn := tx == borStateSyncTxn
-		var txnHash common.Hash
-		var msg types.Message
-		var err error
-		if isBorStateSyncTxn {
-			txnHash = borStateSyncTxnHash
-			// we use an empty message for bor state sync txn since it gets handled differently
-		} else {
-			txnHash = tx.Hash()
-			msg, err = tx.AsMessage(*signer, header.BaseFee, rules)
-			if err != nil {
-				return nil, nil, fmt.Errorf("convert tx into msg: %w", err)
-			}
-
-			// gnosis might have a fee free account here
-			if msg.FeeCap().IsZero() && engine != nil {
-				syscall := func(contract common.Address, data []byte) ([]byte, error) {
-					return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
-				}
-				msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
-			}
+	msgs := make([]types.Message, len(txns))
+	for i, txn := range txns {
+		msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
+		if err != nil {
+			return nil, nil, fmt.Errorf("convert tx into msg: %w", err)
 		}
 
+		// gnosis might have a fee free account here
+		if msg.FeeCap().IsZero() && engine != nil {
+			syscall := func(contract common.Address, data []byte) ([]byte, error) {
+				return core.SysCallContract(contract, data, cfg, initialState, header, engine, true /* constCall */)
+			}
+			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
+		}
+
+		txnHash := txn.Hash()
 		callParams = append(callParams, TraceCallParam{
 			txHash:            &txnHash,
 			traceTypes:        traceTypes,
-			isBorStateSyncTxn: isBorStateSyncTxn,
+			isBorStateSyncTxn: txn.IsBorStateSync(),
 		})
 
 		msgs[i] = msg

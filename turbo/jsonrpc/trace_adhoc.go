@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/polygon/tracer"
+	polygontracer "github.com/ledgerwatch/erigon/polygon/tracer"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -725,7 +725,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, err
 	}
 
-	var isBorStateSyncTxn bool
 	blockNum, ok, err := api.txnLookup(tx, txHash)
 	if err != nil {
 		return nil, err
@@ -743,8 +742,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		if !ok {
 			return nil, nil
 		}
-
-		isBorStateSyncTxn = true
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)
@@ -755,19 +752,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, nil
 	}
 
-	var txnIndex int
-	for idx := 0; idx < block.Transactions().Len() && !isBorStateSyncTxn; idx++ {
-		txn := block.Transactions()[idx]
-		if txn.Hash() == txHash {
-			txnIndex = idx
-			break
-		}
+	txn, err := transactions.FindTransactionInBlock(ctx, txHash, block, chainConfig, api._blockReader, tx)
+	if err != nil {
+		return nil, err
 	}
 
-	if isBorStateSyncTxn {
-		txnIndex = block.Transactions().Len()
-	}
-
+	txnIndex := txn.Idx()
 	signer := types.MakeSigner(chainConfig, blockNum, block.Time())
 	// Returns an array of trace arrays, one trace array for each transaction
 	traces, _, err := api.callManyTransactions(ctx, tx, block, traceTypes, txnIndex, *gasBailOut, signer, chainConfig)
@@ -1220,12 +1210,12 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 
 		ibs.Reset()
 
+		txCtx := core.NewEVMTxContext(msg)
 		var txFinalized bool
 		var execResult *core.ExecutionResult
 		if args.isBorStateSyncTxn {
 			txFinalized = true
-			txCtx := tracer.InitBorStateSyncTxContext(header.Number.Uint64(), header.Hash())
-			execResult, err = tracer.TraceBorStateSyncTxnTraceAPI(
+			execResult, err = polygontracer.TraceBorStateSyncTxnTraceAPI(
 				ctx,
 				dbtx,
 				&vmConfig,
@@ -1246,7 +1236,6 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 				ibs.SetTxContext(libcommon.Hash{}, header.Hash(), txIndex)
 			}
 
-			txCtx := core.NewEVMTxContext(msg)
 			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 			gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 

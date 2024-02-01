@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
-	"github.com/ledgerwatch/erigon/polygon/tracer"
+	polygontracer "github.com/ledgerwatch/erigon/polygon/tracer"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
@@ -46,20 +46,9 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	// Create the parent state database
 	statedb := state.New(reader)
 
-	// check if we need to handle bor state sync txn
-	var borStateSyncTxn types.Transaction
-	var borStateSyncTxContext evmtypes.TxContext
-	txns := block.Transactions()
-	if cfg.Bor != nil {
-		borStateSyncTxContext = tracer.InitBorStateSyncTxContext(block.NumberU64(), block.Hash())
-		_, ok, err := blockReader.EventLookup(ctx, dbtx, borStateSyncTxContext.TxHash)
-		if err != nil {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-		}
-		if ok {
-			borStateSyncTxn = types.NewBorTransaction()
-			txns = append(txns, borStateSyncTxn)
-		}
+	txns, err := AllBlockTransactions(ctx, block, cfg, blockReader, dbtx)
+	if err != nil {
+		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
 
 	if txIndex == 0 && len(txns) == 0 {
@@ -78,19 +67,12 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if historyV3 {
 		rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 		txn := txns[txIndex]
-		var msg types.Message
-		var txnCtx evmtypes.TxContext
-		if txn == borStateSyncTxn {
-			txnCtx = borStateSyncTxContext
-			// empty msg for bor state sync txn since we handle that differently
-		} else {
-			txnCtx = core.NewEVMTxContext(msg)
-			msg, err = txn.AsMessage(*signer, block.BaseFee(), rules)
-			if err != nil {
-				return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-			}
+		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
+		if err != nil {
+			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 		}
 
+		txnCtx := core.NewEVMTxContext(msg)
 		statedb.SetTxContext(txnCtx.TxHash, block.Hash(), txIndex)
 
 		if msg.FeeCap().IsZero() && engine != nil {
@@ -119,21 +101,12 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, ctx.Err()
 		}
 
-		var msg types.Message
-		var txContext evmtypes.TxContext
-		isBorStateSyncTxn := txn == borStateSyncTxn
-		if isBorStateSyncTxn {
-			txContext = borStateSyncTxContext
-			// empty msg for bor state sync txn since we handle that differently
-		} else {
-			msg, err = txn.AsMessage(*signer, block.BaseFee(), rules)
-			if err != nil {
-				return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
-			}
-
-			txContext = core.NewEVMTxContext(msg)
+		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
+		if err != nil {
+			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 		}
 
+		txContext := core.NewEVMTxContext(msg)
 		statedb.SetTxContext(txContext.TxHash, block.Hash(), idx)
 
 		if msg.FeeCap().IsZero() && engine != nil {
@@ -150,8 +123,8 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 		evm.Reset(txContext, statedb)
 
 		// Not yet the searched for transaction, execute on top of the current state
-		if isBorStateSyncTxn {
-			_, err = tracer.ApplyBorStateSyncTxn(ctx, dbtx, cfg, blockReader, statedb, state.NewNoopWriter(), rules, evm, txContext, block.Hash(), block.NumberU64())
+		if txn.IsBorStateSync() {
+			_, err = polygontracer.ApplyBorStateSyncTxn(ctx, dbtx, cfg, blockReader, statedb, state.NewNoopWriter(), rules, evm, txContext, block.Hash(), block.NumberU64())
 		} else {
 			_, err = core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */)
 		}
