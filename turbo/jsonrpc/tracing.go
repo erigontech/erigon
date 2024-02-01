@@ -130,7 +130,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
-		stream.WriteString(txCtx.TxHash.Hex())
+		stream.WriteString(txn.Hash().Hex())
 		stream.WriteMore()
 		stream.WriteObjectField("result")
 		select {
@@ -142,7 +142,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			return ctx.Err()
 		}
 
-		ibs.SetTxContext(txCtx.TxHash, block.Hash(), idx)
+		ibs.SetTxContext(txn.Hash(), block.Hash(), idx)
 
 		if txn.IsBorStateSync() {
 			err = polygontracer.TraceBorStateSyncTxnDebugAPI(

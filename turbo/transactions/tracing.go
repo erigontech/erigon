@@ -67,13 +67,11 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	if historyV3 {
 		rules := cfg.Rules(blockContext.BlockNumber, blockContext.Time)
 		txn := txns[txIndex]
+		statedb.SetTxContext(txn.Hash(), block.Hash(), txIndex)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 		}
-
-		txnCtx := core.NewEVMTxContext(msg)
-		statedb.SetTxContext(txnCtx.TxHash, block.Hash(), txIndex)
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
@@ -82,6 +80,8 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
 
+		txnCtx := core.NewEVMTxContext(msg)
+		txnCtx.TxHash = txn.Hash()
 		return msg, blockContext, txnCtx, statedb, reader, nil
 	}
 
@@ -101,13 +101,12 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, ctx.Err()
 		}
 
+		statedb.SetTxContext(txn.Hash(), block.Hash(), idx)
+
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 		}
-
-		txContext := core.NewEVMTxContext(msg)
-		statedb.SetTxContext(txContext.TxHash, block.Hash(), idx)
 
 		if msg.FeeCap().IsZero() && engine != nil {
 			syscall := func(contract libcommon.Address, data []byte) ([]byte, error) {
@@ -116,6 +115,8 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			msg.SetIsFree(engine.IsServiceTransaction(msg.From(), syscall))
 		}
 
+		txContext := core.NewEVMTxContext(msg)
+		txContext.TxHash = txn.Hash()
 		if idx == txIndex {
 			return msg, blockContext, txContext, statedb, reader, nil
 		}
@@ -129,7 +130,7 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 			_, err = core.ApplyMessage(evm, msg, new(core.GasPool).AddGas(txn.GetGas()).AddBlobGas(txn.GetBlobGas()), true /* refunds */, false /* gasBailout */)
 		}
 		if err != nil {
-			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", txContext.TxHash, err)
+			return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, fmt.Errorf("transaction %x failed: %w", txn.Hash(), err)
 		}
 
 		// Ensure any modifications are committed to the state
