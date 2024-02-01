@@ -106,7 +106,7 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 		Filter: &filterString,
 		Topics: topics, // TODO: this should be done in advance in the sentinel and recalculated every once in a while
 	}
-	subDuration := time.Duration(v.BeaconChainCfg.SecondsPerSlot*v.BeaconChainCfg.SlotsPerEpoch*v.BeaconChainCfg.EpochsPerSyncCommitteePeriod) * time.Second
+	subDuration := time.Duration(v.BeaconChainCfg.SecondsPerSlot*v.NetworkCfg.AttestationPropagationSlotRange*2) * time.Second
 	ctx, cn := context.WithTimeout(r.Context(), subDuration)
 	sub, err := v.Sentinel.SubscribeGossip(ctx, subscriptionData)
 	if err != nil {

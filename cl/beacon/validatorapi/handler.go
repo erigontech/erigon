@@ -20,6 +20,7 @@ type ValidatorApiHandler struct {
 
 	BeaconChainCfg *clparams.BeaconChainConfig
 	GenesisCfg     *clparams.GenesisConfig
+	NetworkCfg     *clparams.NetworkConfig
 	Emitters       *beaconevents.Emitters
 	Sentinel       sentinel.SentinelClient
 

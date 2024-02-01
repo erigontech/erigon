@@ -221,6 +221,7 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 			FC:             forkChoice,
 			BeaconChainCfg: beaconConfig,
 			GenesisCfg:     genesisConfig,
+			NetworkCfg:     networkConfig,
 			Emitters:       emitters,
 			Sentinel:       sentinel,
 			Machine:        &eth2.Impl{FullValidation: true},
