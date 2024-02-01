@@ -103,6 +103,7 @@ type BlockRetire interface {
 	HasNewFrozenFiles() bool
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)
+	GetWorkers() int
 }
 
 /*

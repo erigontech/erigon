@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	_ "net/http/pprof" //nolint:gosec
+	"slices"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cmd/caplin-regression/regression"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 var nameTestsMap = map[string]func(*forkchoice.ForkChoiceStore, *cltypes.SignedBeaconBlock) error{

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -1294,9 +1294,8 @@ func NewBlockRetire(
 	}
 }
 
-func (br *BlockRetire) SetWorkers(workers int) {
-	br.workers = workers
-}
+func (br *BlockRetire) SetWorkers(workers int) { br.workers = workers }
+func (br *BlockRetire) GetWorkers() int        { return br.workers }
 
 func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
@@ -1315,7 +1314,7 @@ func (br *BlockRetire) HasNewFrozenFiles() bool {
 }
 
 func CanRetire(curBlockNum uint64, blocksInSnapshots uint64) (blockFrom, blockTo uint64, can bool) {
-	var keep uint64 = params.FullImmutabilityThreshold / 2 //TODO: we will remove `/2` after some db optimizations
+	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
 	if curBlockNum <= keep {
 		return
 	}
@@ -1355,7 +1354,7 @@ func canRetire(from, to uint64) (blockFrom, blockTo uint64, can bool) {
 }
 
 func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) {
-	var keep uint64 = params.FullImmutabilityThreshold / 2
+	var keep uint64 = params.FullImmutabilityThreshold / 20 //TODO: we will remove `/20` after some db optimizations
 	if curBlockNum+999 < keep {
 		// To prevent overflow of uint64 below
 		return blocksInSnapshots + 1
@@ -1452,13 +1451,15 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 	}
 
 	go func() {
-
 		defer br.working.Store(false)
+
 		if br.snBuildAllowed != nil {
-			if !br.snBuildAllowed.TryAcquire(blockRetireAllowedWeight) {
+			//we are inside own goroutine - it's fine to block here
+			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
+				br.logger.Warn("[snapshots] retire blocks", "err", err)
 				return
 			}
-			defer br.snBuildAllowed.Release(blockRetireAllowedWeight)
+			defer br.snBuildAllowed.Release(1)
 		}
 
 		for {
@@ -1483,39 +1484,35 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
-		for br.blockReader.FrozenBorBlocks() < minBlockNum {
-			ok, err := br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
+			haveMore, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), br.blockReader.FrozenBlocks(), lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
-			if !ok {
+			if !haveMore {
 				break
 			}
 		}
 	}
 
-	var ok, okBor bool
+	var blockHaveMore, borHaveMore bool
 	for {
 		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
 			minBlockNum = frozen
 		}
 
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		blockHaveMore, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
 
 		if includeBor {
-			okBor, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			borHaveMore, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
 		}
-		haveMore := ok || okBor
+		haveMore := blockHaveMore || borHaveMore
 		if !haveMore {
 			break
 		}

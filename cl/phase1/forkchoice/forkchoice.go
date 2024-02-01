@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -16,7 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

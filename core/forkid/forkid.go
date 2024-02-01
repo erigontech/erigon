@@ -24,10 +24,10 @@ import (
 	"math"
 	"math/big"
 	"reflect"
+	"slices"
 	"strings"
 
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"

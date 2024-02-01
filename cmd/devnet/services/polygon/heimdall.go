@@ -78,8 +78,8 @@ type Heimdall struct {
 	pendingCheckpoint  *heimdall.Checkpoint
 	latestCheckpoint   *CheckpointAck
 	ackWaiter          *sync.Cond
-	currentSpan        *heimdall.HeimdallSpan
-	spans              map[uint64]*heimdall.HeimdallSpan
+	currentSpan        *heimdall.Span
+	spans              map[heimdall.SpanId]*heimdall.Span
 	logger             log.Logger
 	cancelFunc         context.CancelFunc
 	syncSenderAddress  libcommon.Address
@@ -105,7 +105,7 @@ func NewHeimdall(
 		borConfig:          chainConfig.Bor.(*borcfg.BorConfig),
 		listenAddr:         serverURL[7:],
 		checkpointConfig:   *checkpointConfig,
-		spans:              map[uint64]*heimdall.HeimdallSpan{},
+		spans:              map[heimdall.SpanId]*heimdall.Span{},
 		pendingSyncRecords: map[syncRecordKey]*EventRecordWithBlock{},
 		logger:             logger}
 
@@ -142,24 +142,25 @@ func NewHeimdall(
 	return heimdall
 }
 
-func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.HeimdallSpan, error) {
+func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 	h.Lock()
 	defer h.Unlock()
 
-	if span, ok := h.spans[spanID]; ok {
+	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
 		h.currentSpan = span
 		return span, nil
 	}
 
 	var nextSpan = heimdall.Span{
-		ID: spanID,
+		Id:      heimdall.SpanId(spanID),
+		ChainID: h.chainConfig.ChainID.String(),
 	}
 
 	if h.currentSpan == nil || spanID == 0 {
 		nextSpan.StartBlock = 1 //256
 	} else {
-		if spanID != h.currentSpan.ID+1 {
-			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
+		if spanID != uint64(h.currentSpan.Id+1) {
+			return nil, fmt.Errorf("can't initialize span: non consecutive span")
 		}
 
 		nextSpan.StartBlock = h.currentSpan.EndBlock + 1
@@ -175,14 +176,12 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.HeimdallS
 		selectedProducers[i] = *v
 	}
 
-	h.currentSpan = &heimdall.HeimdallSpan{
-		Span:              nextSpan,
-		ValidatorSet:      *h.validatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           h.chainConfig.ChainID.String(),
-	}
+	nextSpan.ValidatorSet = *h.validatorSet
+	nextSpan.SelectedProducers = selectedProducers
 
-	h.spans[h.currentSpan.ID] = h.currentSpan
+	h.currentSpan = &nextSpan
+
+	h.spans[h.currentSpan.Id] = h.currentSpan
 
 	return h.currentSpan, nil
 }
@@ -227,6 +226,18 @@ func (h *Heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) 
 
 func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
+}
+
+func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	return nil, fmt.Errorf("TODO")
 }
 
 func (h *Heimdall) Close() {
@@ -434,7 +445,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *ch
 			return
 		}
 
-		result, err := client.StateSyncEvents(ctx, fromId, toTime)
+		result, err := client.FetchStateSyncEvents(ctx, fromId, time.Unix(toTime, 0), 0)
 		writeResponse(w, result, err)
 	})
 
@@ -445,7 +456,7 @@ func makeHeimdallRouter(ctx context.Context, client heimdall.HeimdallClient) *ch
 			http.Error(w, http.StatusText(400), 400)
 			return
 		}
-		result, err := client.Span(ctx, id)
+		result, err := client.FetchSpan(ctx, id)
 		writeResponse(w, result, err)
 	})
 

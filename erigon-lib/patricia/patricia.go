@@ -19,11 +19,11 @@ package patricia
 import (
 	"fmt"
 	"math/bits"
+	"slices"
 	"strings"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/sais"
-	"golang.org/x/exp/slices"
 )
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string

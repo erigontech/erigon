@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/urfave/cli/v2"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 )
 

@@ -121,7 +121,15 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	logger log.Logger,
 ) (uint64, error) {
 	requiredSpanID := bor.SpanIDAt(toBlockNum)
+	// This check handles the case when we're in the last sprint of the current span
+	// and need to commit next span.
 	if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+		requiredSpanID++
+	}
+
+	// This check handles the case when we need to fetch 1st span when we're starting
+	// the second sprint (of span 0, a special case to fetch span 1).
+	if bor.IsSecondSprintStart(toBlockNum, cfg.borConfig) {
 		requiredSpanID++
 	}
 
@@ -157,7 +165,7 @@ func fetchAndWriteHeimdallSpan(
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	response, err := heimdallClient.Span(ctx, spanID)
+	response, err := heimdallClient.FetchSpan(ctx, spanID)
 	if err != nil {
 		return 0, err
 	}
@@ -242,7 +250,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		"to", to.Format(time.RFC3339),
 	)
 
-	eventRecords, err := heimdallClient.StateSyncEvents(ctx, from, to.Unix())
+	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, to, 0)
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}

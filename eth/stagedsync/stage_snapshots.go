@@ -451,6 +451,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 			}
 
+			if initialCycle {
+				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
+			} else {
+				cfg.blockRetire.SetWorkers(1)
+			}
 			cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
 				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {

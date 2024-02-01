@@ -57,17 +57,22 @@ type EthereumExecutionModule struct {
 
 	// configuration
 	config    *chain.Config
+	syncCfg   ethconfig.Sync
 	historyV3 bool
 	// consensus
 	engine consensus.Engine
 
-	syncCfg ethconfig.Sync
-
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, engine consensus.Engine, historyV3 bool, syncCfg ethconfig.Sync) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB,
+	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc,
+	hook *stages.Hook, accumulator *shards.Accumulator,
+	stateChangeConsumer shards.StateChangeConsumer,
+	logger log.Logger, engine consensus.Engine,
+	historyV3 bool, syncCfg ethconfig.Sync,
+) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
 		db:                  db,
@@ -82,8 +87,9 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		accumulator:         accumulator,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
-		historyV3:           historyV3,
-		syncCfg:             syncCfg,
+
+		historyV3: historyV3,
+		syncCfg:   syncCfg,
 	}
 }
 

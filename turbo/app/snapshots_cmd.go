@@ -391,9 +391,13 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
+
+	//if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+	//	return err
+	//}
 
 	if err := integrity.E3EfFiles(ctx, chainDB, agg); err != nil {
 		return err

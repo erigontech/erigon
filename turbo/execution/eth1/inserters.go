@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -63,27 +62,6 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			if err != nil || parentTd == nil {
 				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
-		}
-		// check the blob hashes if we need to.
-		if block.CheckExpectedBlobHashes {
-			if header.BlobGasUsed == nil {
-				return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: blob gas used is nil")
-			}
-			versionedHashes := []libcommon.Hash{}
-			for _, h := range block.ExpectedBlobHashes {
-				versionedHashes = append(versionedHashes, gointerfaces.ConvertH256ToHash(h))
-			}
-			txs := make([]types.Transaction, len(body.Transactions))
-			for i, tx := range body.Transactions {
-				var decodeErr error
-				if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(tx); decodeErr != nil {
-					return nil, decodeErr
-				}
-			}
-			if err := e.validatePayloadBlobs(versionedHashes, txs, *header.BlobGasUsed); err != nil {
-				return nil, err
-			}
-
 		}
 
 		// Sum TDs.
