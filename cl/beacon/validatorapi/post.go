@@ -110,6 +110,7 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 	ctx, cn := context.WithTimeout(r.Context(), subDuration)
 	sub, err := v.Sentinel.SubscribeGossip(ctx, subscriptionData)
 	if err != nil {
+		cn()
 		return nil, err
 	}
 	go func() {
