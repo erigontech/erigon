@@ -29,11 +29,11 @@ import (
 func TestLightClientOptimistic(t *testing.T) {
 	ctx := context.Background()
 
-	listenAddrHost := "/ip4/127.0.0.1/tcp/6000"
+	listenAddrHost := "/ip4/127.0.0.1/tcp/6011"
 	host, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost))
 	require.NoError(t, err)
 
-	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6001"
+	listenAddrHost1 := "/ip4/127.0.0.1/tcp/6013"
 	host1, err := libp2p.New(libp2p.ListenAddrStrings(listenAddrHost1))
 	require.NoError(t, err)
 
