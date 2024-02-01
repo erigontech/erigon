@@ -1011,11 +1011,7 @@ func FirstTxNumOfStep(step, size uint64) uint64 {
 }
 
 func LastTxNumOfStep(step, size uint64) uint64 {
-	return (step + 1) * size
-}
-
-func StepStartEndTxNum(step, stepSize uint64) (start, end uint64) {
-	return FirstTxNumOfStep(step, stepSize), LastTxNumOfStep(step, stepSize)
+	return FirstTxNumOfStep(step+1, size) - 1
 }
 
 // FirstTxNumOfStep returns txStepBeginning of given step.
