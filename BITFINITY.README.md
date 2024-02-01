@@ -6,8 +6,8 @@ The code of the blockimporter is in `cmd/blockimporter`.
 
 # Archiving historical data
 
-```
-blockimporter [--evm <EVMC_CANISTER_URL>] [--db <DATABASE_PATH>] [--secondary-blocks-url <PATH TO A SECONDARY SOURCE OF BLOCKS>]
+```sh
+blockimporter [--evm <JSON_RPC_URL>] [--db <DATABASE_PATH>] [--secondary-blocks-url <PATH TO A SECONDARY SOURCE OF BLOCKS>]
 ```
 
 # Serving rpcdaemon (EVM JSON RPC)
@@ -16,7 +16,7 @@ You can use rpcdaemon to setup an endpoint with JSON RPC server to access the bl
 
 To build the project just run in the project folder.
 
-```
+```sh
 git checkout origin/evmc_importer
 make
 ```
@@ -25,8 +25,8 @@ The binary artifacts can be found in `build/bin` folder.
 
 Now you can run two processes together sharing the same Db path:
 
-```
-build/bin/blockimporter --evm <EVMC_CANISTER_URL> --db <DB_PATH> &\
+```sh
+build/bin/blockimporter --evm <JSON_RPC_URL> --db <DB_PATH> &\
 build/bin/rpcdaemon --datadir <DB_PATH> --http.corsdomain * --http.api=eth,erigon,ots
 ```
 
@@ -36,15 +36,15 @@ In this case the JSON RPC API can be accessed by address localhost:8545 (which i
 
 Otterscan can be run with `blockimporter` using the integration via rpcdaemon:
 
-```
-build/bin/blockimporter --evm <EVMC_CANISTER_URL> --db <DB_PATH> &\
+```sh
+build/bin/blockimporter --evm <JSON_RPC_URL> --db <DB_PATH> &\
 build/bin/rpcdaemon --datadir <DB_PATH> --http.corsdomain * --http.api=eth,erigon,ots &\
 docker run --rm -p 5100:80 --name otterscan -d --env ERIGON_URL=localhost:8545 otterscan/otterscan:v1.29.0
 ```
 
 Another option is to us the docker-compose file:
 
-```
+```sh
 cd docker
 mkdir ./db
 chmod 777 ./db
