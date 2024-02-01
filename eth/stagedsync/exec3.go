@@ -155,9 +155,7 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
-	applyTx := txc.Tx
-	useExternalTx := applyTx != nil
-	if !useExternalTx {
+	if initialCycle {
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		defer agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
@@ -169,7 +167,11 @@ func ExecV3(ctx context.Context,
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
+	}
 
+	applyTx := txc.Tx
+	useExternalTx := applyTx != nil
+	if !useExternalTx {
 		if !parallel {
 			var err error
 			applyTx, err = chainDb.BeginRw(ctx) //nolint
@@ -978,6 +980,11 @@ Loop:
 			return err
 		}
 	}
+
+	if blocksFreezeCfg.Produce {
+		agg.BuildFilesInBackground(outputTxNum.Load())
+	}
+
 	return nil
 }
 
