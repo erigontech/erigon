@@ -79,7 +79,10 @@ func ComputeTxEnv(ctx context.Context, engine consensus.EngineReader, block *typ
 	consensusHeaderReader := stagedsync.NewChainReaderImpl(cfg, dbtx, nil, nil)
 
 	logger := log.New("tracing")
-	core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger)
+	err = core.InitializeBlockExecution(engine.(consensus.Engine), consensusHeaderReader, header, cfg, statedb, logger)
+	if err != nil {
+		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
+	}
 
 	for idx, txn := range block.Transactions() {
 		select {
@@ -224,8 +227,6 @@ func ExecuteTraceTx(
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
-			stream.WriteMore()
-			stream.WriteObjectField("resultHack") // higher-level func will assing it to NULL
 		} else {
 			stream.WriteNil()
 		}

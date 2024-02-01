@@ -38,7 +38,7 @@ func (m *MockSpanner) EXPECT() *MockSpannerMockRecorder {
 }
 
 // CommitSpan mocks base method.
-func (m *MockSpanner) CommitSpan(arg0 heimdall.HeimdallSpan, arg1 consensus.SystemCall) error {
+func (m *MockSpanner) CommitSpan(arg0 heimdall.Span, arg1 consensus.SystemCall) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "CommitSpan", arg0, arg1)
 	ret0, _ := ret[0].(error)

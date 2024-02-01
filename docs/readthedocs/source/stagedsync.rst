@@ -26,7 +26,7 @@ Stage 1 : Download Block Headers
 			},
 		},
 
-This stage uses two processes, a fetcher method and a processer method.
+This stage uses two processes, a fetcher method and a processor method.
 
 .. code-block:: go
 
