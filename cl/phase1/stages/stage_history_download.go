@@ -130,7 +130,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
-			foundLatestEth1ValidBlock.Store(len(bodyChainHeader) > 0 || cfg.engine.FrozenBlocks() > payload.BlockNumber)
+			foundLatestEth1ValidBlock.Store((len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks() > payload.BlockNumber)
 		}
 		if blk.Version() <= clparams.AltairVersion {
 			foundLatestEth1ValidBlock.Store(true)

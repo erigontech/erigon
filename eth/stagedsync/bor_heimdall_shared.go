@@ -165,7 +165,7 @@ func fetchAndWriteHeimdallSpan(
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	response, err := heimdallClient.Span(ctx, spanID)
+	response, err := heimdallClient.FetchSpan(ctx, spanID)
 	if err != nil {
 		return 0, err
 	}
@@ -250,7 +250,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		"to", to.Format(time.RFC3339),
 	)
 
-	eventRecords, err := heimdallClient.StateSyncEvents(ctx, from, to.Unix())
+	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, to, 0)
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}
