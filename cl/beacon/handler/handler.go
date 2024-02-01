@@ -103,6 +103,7 @@ func (a *ApiHandler) init() {
 					r.Get("/bootstrap/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientBootstrap))
 					r.Get("/optimistic_update", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientOptimisticUpdate))
 					r.Get("/finality_update", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientFinalityUpdate))
+					r.Get("/updates", a.GetEthV1BeaconLightClientUpdates)
 				})
 				r.Get("/node/syncing", http.NotFound)
 				r.Route("/states", func(r chi.Router) {

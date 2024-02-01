@@ -59,6 +59,8 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		fcu.NewestLCUpdate.AttestedHeader, err = lightclient_utils.BlockToLightClientHeader(blocks[len(blocks)-1])
 		require.NoError(c.t, err)
 		fcu.NewestLCUpdate.FinalizedHeader = fcu.NewestLCUpdate.AttestedHeader
+		fcu.LCUpdates[1] = fcu.NewestLCUpdate
+		fcu.LCUpdates[2] = fcu.NewestLCUpdate
 	}
 
 	if c.forkmode == 0 {

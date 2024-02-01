@@ -498,3 +498,7 @@ func (f *ForkChoiceStore) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cl
 func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.forkGraph.NewestLightClientUpdate()
 }
+
+func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+	return f.forkGraph.GetLightClientUpdate(period)
+}

@@ -23,3 +23,10 @@ tests:
     expect:
       file: "light_client_finality_1"
       fs: td
+  - name: updates
+    actual:
+      handler: i
+      path: /eth/v1/beacon/light_client/updates?start_period=1&count=3
+    expect:
+      file: "light_client_update_1"
+      fs: td

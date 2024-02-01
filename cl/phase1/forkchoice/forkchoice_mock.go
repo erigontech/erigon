@@ -69,6 +69,7 @@ type ForkChoiceStorageMock struct {
 	WeightsMock               []ForkNode
 	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
 	NewestLCUpdate            *cltypes.LightClientUpdate
+	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
 
 	Pool pool.OperationsPool
 }
@@ -91,6 +92,7 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		GetSyncCommitteesVal:      make(map[common.Hash][2]*solid.SyncCommittee),
 		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
 		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
+		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
 	}
 }
 
@@ -243,4 +245,8 @@ func (f *ForkChoiceStorageMock) GetLightClientBootstrap(blockRoot common.Hash) (
 
 func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 	return f.NewestLCUpdate
+}
+
+func (f *ForkChoiceStorageMock) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+	return f.LCUpdates[period], f.LCUpdates[period] != nil
 }

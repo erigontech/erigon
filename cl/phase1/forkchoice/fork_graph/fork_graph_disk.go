@@ -3,6 +3,7 @@ package fork_graph
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -105,6 +106,8 @@ type forkGraphDisk struct {
 	// highest block seen
 	highestSeen, lowestAvaiableSlot, anchorSlot uint64
 	newestLightClientUpdate                     atomic.Value
+	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
+	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// reusable buffers
 	sszBuffer       bytes.Buffer
@@ -187,11 +190,12 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
-	finalizedBlock, hasFinalizedBlock := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
+	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
 	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
+	fmt.Println(hasFinalized, hasParentBlock, fullValidation)
 	// Before processing the state: update the newest lightclient update.
-	if block.Version() >= clparams.AltairVersion && hasFinalizedBlock && hasParentBlock && fullValidation {
+	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation {
 		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
 		if err != nil {
 			return nil, LogisticError, err
@@ -204,9 +208,16 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
-			return nil, LogisticError, err
+			log.Warn("Could not create light client update", "err", err)
+		} else {
+			f.newestLightClientUpdate.Store(lightclientUpdate)
+			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
+			_, hasPeriod := f.lightClientUpdates.Load(period)
+			if !hasPeriod && hasFinalized {
+				log.Info("Adding light client update", "period", period)
+				f.lightClientUpdates.Store(period, lightclientUpdate)
+			}
 		}
-		f.newestLightClientUpdate.Store(lightclientUpdate)
 	}
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 	// Execute the state
@@ -502,4 +513,12 @@ func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 		return nil
 	}
 	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
+}
+
+func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+	obj, has := f.lightClientUpdates.Load(period)
+	if !has {
+		return nil, false
+	}
+	return obj.(*cltypes.LightClientUpdate), true
 }
