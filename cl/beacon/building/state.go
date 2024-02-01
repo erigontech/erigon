@@ -15,9 +15,10 @@ var ErrFailedAddAttestation = errors.New("failed to add aggregate")
 type State struct {
 	BeaconConfig *clparams.BeaconChainConfig
 
-	feeRecipients     map[int]common.Address
-	validAttestations map[uint64]map[common.Bytes96]*ReceivedAttestation
-	mu                sync.RWMutex
+	currentlySubscribed map[string]int
+	feeRecipients       map[int]common.Address
+	validAttestations   map[uint64]map[common.Bytes96]*ReceivedAttestation
+	mu                  sync.RWMutex
 }
 
 type ReceivedAttestation struct {

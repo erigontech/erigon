@@ -1,12 +1,14 @@
 package validatorapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -104,7 +106,9 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 		Filter: &filterString,
 		Topics: topics, // TODO: this should be done in advance in the sentinel and recalculated every once in a while
 	}
-	sub, err := v.Sentinel.SubscribeGossip(r.Context(), subscriptionData)
+	subDuration := time.Duration(v.BeaconChainCfg.SecondsPerSlot*v.BeaconChainCfg.SlotsPerEpoch*v.BeaconChainCfg.EpochsPerSyncCommitteePeriod) * time.Second
+	ctx, cn := context.WithTimeout(r.Context(), subDuration)
+	sub, err := v.Sentinel.SubscribeGossip(ctx, subscriptionData)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +116,7 @@ func (v *ValidatorApiHandler) PostEthV1ValidatorBeaconCommitteeSubscriptions(w h
 		l.Info("[beacon api] started aggregating gossip", "subscription", subscriptionData)
 		defer func() {
 			l.Info("[beacon api] aggregation gossip subscriber closed")
+			cn()
 		}()
 		for {
 			dat, err := sub.Recv()
