@@ -275,13 +275,13 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		}
 
 		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
-			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(fmt.Sprintf(
+			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
 				"invalid event record received %s, %s, %s, %s",
 				fmt.Sprintf("blockNum=%d", blockNum),
 				fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
 				fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
 				fmt.Sprintf("time=%s (exp to %s)", eventRecord.Time, to),
-			))
+			)
 		}
 
 		eventRecordWithoutTime := eventRecord.BuildEventRecord()
