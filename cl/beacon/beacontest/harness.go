@@ -241,7 +241,6 @@ func (c *Comparison) Compare(t *testing.T, aRaw, bRaw json.RawMessage, aCode, bC
 	if len(c.Exprs) == 0 && c.Expr == "" {
 		exprs = append(exprs, "actual_code == 200", "actual == expect")
 	}
-	fmt.Println(t.Name())
 
 	env, err := cel.NewEnv(
 		cel.Variable("expect", aType),
