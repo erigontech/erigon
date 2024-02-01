@@ -3,7 +3,6 @@ package fork_graph
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -193,9 +192,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
 	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
-	fmt.Println(hasFinalized, hasParentBlock, fullValidation)
 	// Before processing the state: update the newest lightclient update.
-	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation {
+	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized {
 		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
 		if err != nil {
 			return nil, LogisticError, err
@@ -213,7 +211,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			f.newestLightClientUpdate.Store(lightclientUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
 			_, hasPeriod := f.lightClientUpdates.Load(period)
-			if !hasPeriod && hasFinalized {
+			if !hasPeriod {
 				log.Info("Adding light client update", "period", period)
 				f.lightClientUpdates.Store(period, lightclientUpdate)
 			}

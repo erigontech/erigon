@@ -50,8 +50,10 @@ func (l *LightClientHeader) EncodeSSZ(buf []byte) ([]byte, error) {
 func (l *LightClientHeader) DecodeSSZ(buf []byte, version int) error {
 	l.version = clparams.StateVersion(version)
 	l.Beacon = &BeaconBlockHeader{}
-	l.ExecutionBranch = solid.NewHashVector(ExecutionBranchSize)
-	l.ExecutionPayloadHeader = NewEth1Header(l.version)
+	if version >= int(clparams.CapellaVersion) {
+		l.ExecutionPayloadHeader = NewEth1Header(l.version)
+		l.ExecutionBranch = solid.NewHashVector(ExecutionBranchSize)
+	}
 	return ssz2.UnmarshalSSZ(buf, version, l.getSchema()...)
 }
 
