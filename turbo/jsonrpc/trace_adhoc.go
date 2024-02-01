@@ -874,6 +874,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		if traceTypeVmTrace {
 			tr.VmTrace = trace.VmTrace
 		}
+		tr.TransactionHash = trace.TransactionHash
 		result[i] = tr
 	}
 
