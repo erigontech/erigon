@@ -100,18 +100,19 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 
-	signer := types.MakeSigner(chainConfig, block.NumberU64(), block.Time())
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
-	stream.WriteArrayStart()
-
 	txns, err := transactions.AllBlockTransactions(ctx, block, chainConfig, api._blockReader, tx)
 	if err != nil {
+		stream.WriteNil()
 		return err
 	}
 
+	signer := types.MakeSigner(chainConfig, block.NumberU64(), block.Time())
+	rules := chainConfig.Rules(block.NumberU64(), block.Time())
+	stream.WriteArrayStart()
 	for idx, txn := range txns {
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
+			stream.WriteArrayEnd()
 			return err
 		}
 
