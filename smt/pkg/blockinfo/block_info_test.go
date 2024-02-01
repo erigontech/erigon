@@ -6,9 +6,33 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"math/big"
 	"testing"
+	"github.com/stretchr/testify/require"
 )
 
-func TestBlockInfo(t *testing.T) {
+func TestBlockInfoTree(t *testing.T) {
+	smt := smt.NewSMT(nil)
+
+	sequencerAddress := new(big.Int)
+	sequencerAddress.SetString("a9127a157cee3cd2452a194e4efc2f8a5612cfc36c66e768700727ede4d0e2e6", 16)
+	newBlockNumber := big.NewInt(1)
+	blockGasLimit := big.NewInt(1)
+	finalTimestamp := big.NewInt(1)
+	finalGER := big.NewInt(1)
+	finalBlockHash := new(big.Int)
+	finalBlockHash.SetString("a9127a157cee3cd2452a194e4efc2f8a5612cfc36c66e768700727ede4d0e2e6", 16)
+	oldBlockHash := new(big.Int)
+	oldBlockHash.SetString("a9127a157cee3cd2452a194e4efc2f8a5612cfc36c66e768700727ede4d0e2e6", 16)
+
+	root, err := BuildBlockInfoTree(smt, oldBlockHash, sequencerAddress, newBlockNumber, blockGasLimit, finalTimestamp, finalGER, finalBlockHash)
+	require.NoError(t, err, "Building block info tree should not produce an error")
+
+	expectedRoot := new(big.Int)
+	expectedRoot.SetString("208579169e61f707c35ab2e4e6c37179eb016ff39e6ab5d1f1389ca85d135d58", 16)
+
+	require.Equal(t, expectedRoot, root, "The calculated root hash should match the expected root hash")
+}
+
+func TestReceiptTree(t *testing.T) {
 	smt := smt.NewSMT(nil)
 
 	logs := []*types.Log{
@@ -38,7 +62,7 @@ func TestBlockInfo(t *testing.T) {
 		},
 	}
 
-	root, err := BuildBlockInfoTree(
+	root, err := BuildReceiptTree(
 		smt,
 		big.NewInt(1),
 		logs,
