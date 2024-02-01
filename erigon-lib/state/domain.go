@@ -2195,13 +2195,12 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 
 	var k, v []byte
 	if prunedKey != nil {
-		k, v, err = keysCursor.Seek(prunedKey)
+		_, _, err = keysCursor.Seek(prunedKey)
 		if err != nil {
 			return stat, err
 		}
-		if k != nil { // could have some smaller steps to prune
-			v, err = keysCursor.LastDup()
-		}
+		// could have some smaller steps to prune
+		k, v, err = keysCursor.NextNoDup()
 	} else {
 		k, v, err = keysCursor.Last()
 	}
