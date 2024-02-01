@@ -50,8 +50,6 @@ func TestMainnerForkDigestWithNoValidatorRootHash(t *testing.T) {
 }
 
 func TestGoerliForkDigest(t *testing.T) {
-	t.Skip("FIXME cl")
-
 	beaconCfg := clparams.BeaconConfigs[clparams.GoerliNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.GoerliNetwork]
 	digest, err := ComputeForkDigest(&beaconCfg, &genesisCfg)
@@ -62,14 +60,13 @@ func TestGoerliForkDigest(t *testing.T) {
 }
 
 func TestSepoliaForkDigest(t *testing.T) {
-	t.Skip("TODO: will be fixed in `devel`")
 	beaconCfg := clparams.BeaconConfigs[clparams.SepoliaNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.SepoliaNetwork]
 	digest, err := ComputeForkDigest(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
 	_, err = ComputeForkId(&beaconCfg, &genesisCfg)
 	require.NoError(t, err)
-	require.Equal(t, [4]uint8{0x47, 0xeb, 0x72, 0xb3}, digest)
+	require.Equal(t, [4]uint8{0xd3, 0x1f, 0x61, 0x91}, digest)
 }
 
 // ForkDigestVersion
