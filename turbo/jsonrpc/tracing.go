@@ -208,31 +208,14 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	blockNum, ok, err := api.txnLookup(tx, hash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
 	if !ok {
-		if chainConfig.Bor == nil {
-			stream.WriteNil()
-			return nil
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, hash)
-		if err != nil {
-			stream.WriteNil()
-			return err
-		}
-		if !ok {
-			stream.WriteNil()
-			return nil
-		}
-		if config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false {
-			stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
-			return nil
-		}
+		stream.WriteNil()
+		return nil
 	}
 
 	// check pruning to ensure we have history at this block level
@@ -256,6 +239,11 @@ func (api *PrivateDebugAPIImpl) TraceTransaction(ctx context.Context, hash commo
 	if err != nil {
 		stream.WriteNil()
 		return err
+	}
+
+	if txn.IsBorStateSync() && (config == nil || config.BorTraceEnabled == nil || *config.BorTraceEnabled == false) {
+		stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
+		return nil
 	}
 
 	txnIndex := txn.Idx()

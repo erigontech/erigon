@@ -9,8 +9,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -18,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -25,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
-
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/misc"
@@ -154,8 +152,27 @@ func (api *BaseAPI) genesis(tx kv.Tx) (*types.Block, error) {
 	return genesis, err
 }
 
-func (api *BaseAPI) txnLookup(tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
-	return api._txnReader.TxnLookup(context.Background(), tx, txnHash)
+func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (uint64, bool, error) {
+	blockNum, ok, err := api._txnReader.TxnLookup(context.Background(), tx, txnHash)
+	if err != nil {
+		return 0, false, err
+	}
+	if ok {
+		return blockNum, true, nil
+	}
+
+	// if blockNum for txnHash is not found check if it is a bor state sync txn
+	chainConfig, err := api.chainConfig(tx)
+	if err != nil {
+		return 0, false, err
+	}
+
+	if chainConfig.Bor == nil {
+		// not found and not a bor node
+		return 0, false, nil
+	}
+
+	return api._blockReader.EventLookup(ctx, tx, txnHash)
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(tx kv.Tx, number uint64) (*types.Block, error) {

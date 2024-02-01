@@ -725,23 +725,12 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash libcommon
 		return nil, err
 	}
 
-	blockNum, ok, err := api.txnLookup(tx, txHash)
+	blockNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		if chainConfig.Bor == nil {
-			return nil, nil
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNum, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
+		return nil, nil
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNum)

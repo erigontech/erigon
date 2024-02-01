@@ -47,23 +47,12 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	blockNumber, ok, err := api.txnLookup(tx, txHash)
+	blockNumber, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		if chainConfig.Bor == nil {
-			return nil, nil
-		}
-
-		// otherwise this may be a bor state sync transaction - check
-		blockNumber, ok, err = api._blockReader.EventLookup(ctx, tx, txHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
+		return nil, nil
 	}
 
 	block, err := api.blockByNumberWithSenders(tx, blockNumber)
