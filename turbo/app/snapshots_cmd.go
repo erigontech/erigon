@@ -15,24 +15,23 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -40,6 +39,7 @@ import (
 	"github.com/ledgerwatch/erigon/diagnostics"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
+	"github.com/ledgerwatch/erigon/eth/integrity"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
@@ -101,14 +101,24 @@ var snapshotCommand = cli.Command{
 					&erigoncli.UploadFromFlag,
 					&erigoncli.FrozenBlockLimitFlag,
 				}),
-			Before: func(context *cli.Context) error {
-				erigoncli.SyncLoopBreakAfterFlag.Value = "Senders"
-				erigoncli.SyncLoopBlockLimitFlag.Value = 100000
-				erigoncli.SyncLoopPruneLimitFlag.Value = 100000
-				erigoncli.FrozenBlockLimitFlag.Value = 1500000
-				utils.NoDownloaderFlag.Value = true
-				utils.HTTPEnabledFlag.Value = false
-				utils.TxPoolDisableFlag.Value = true
+			Before: func(ctx *cli.Context) error {
+				ctx.Set(erigoncli.SyncLoopBreakAfterFlag.Name, "Senders")
+				ctx.Set(utils.NoDownloaderFlag.Name, "true")
+				ctx.Set(utils.HTTPEnabledFlag.Name, "false")
+				ctx.Set(utils.TxPoolDisableFlag.Name, "true")
+
+				if !ctx.IsSet(erigoncli.SyncLoopBlockLimitFlag.Name) {
+					ctx.Set(erigoncli.SyncLoopBlockLimitFlag.Name, "100000")
+				}
+
+				if !ctx.IsSet(erigoncli.FrozenBlockLimitFlag.Name) {
+					ctx.Set(erigoncli.FrozenBlockLimitFlag.Name, "1500000")
+				}
+
+				if !ctx.IsSet(erigoncli.SyncLoopPruneLimitFlag.Name) {
+					ctx.Set(erigoncli.SyncLoopPruneLimitFlag.Name, "100000")
+				}
+
 				return nil
 			},
 		},
@@ -213,9 +223,13 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	if err := blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(false); err != nil {
+	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
+
+	//if err := blockReader.IntegrityTxnID(false); err != nil {
+	//	return err
+	//}
 
 	//if err := integrity.E3HistoryNoSystemTxs(ctx, chainDB, agg); err != nil {
 	//	return err

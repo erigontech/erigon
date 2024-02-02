@@ -1,4 +1,4 @@
-package handler
+package handler_test
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -23,7 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, handler *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
+func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *handler.ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
 	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {
 		blocks, preState, postState = tests.GetPhase0Random()
@@ -44,7 +45,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, true, f)
+	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, nil, logger, true, true, f)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, f, preState)
@@ -52,7 +53,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
 	gC := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	handler = NewApiHandler(
+	h = handler.NewApiHandler(
 		&gC,
 		&bcfg,
 		rawDB,
@@ -64,6 +65,6 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion) (db kv.RwDB, blo
 		statesReader,
 		nil,
 		"test-version")
-	handler.init()
+	h.Init()
 	return
 }

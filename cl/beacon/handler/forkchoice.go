@@ -2,14 +2,15 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 )
 
-func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	if a.syncedData.Syncing() {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, "beacon node is syncing")
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
 	}
 	hash, slotNumber, err := a.forkchoiceStore.GetHead()
 	if err != nil {

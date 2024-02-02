@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
@@ -63,7 +64,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		peersPool,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{}, true,
+		&cltypes.Metadata{}, &forkchoice.ForkChoiceStorageMock{}, true,
 	)
 	c.Start()
 	req := &cltypes.BeaconBlocksByRangeRequest{

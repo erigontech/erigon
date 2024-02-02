@@ -5,7 +5,8 @@ import (
 )
 
 type notFoundNoWriter struct {
-	rw http.ResponseWriter
+	http.ResponseWriter
+	r *http.Request
 
 	code    int
 	headers http.Header
@@ -34,7 +35,7 @@ func (f *notFoundNoWriter) Write(xs []byte) (int, error) {
 		return 0, nil
 	}
 	// pass on the write
-	return f.rw.Write(xs)
+	return f.ResponseWriter.Write(xs)
 }
 
 func (f *notFoundNoWriter) WriteHeader(statusCode int) {
@@ -46,14 +47,28 @@ func (f *notFoundNoWriter) WriteHeader(statusCode int) {
 		f.headers = nil
 		return
 	}
-	f.rw.WriteHeader(statusCode)
+	f.ResponseWriter.WriteHeader(statusCode)
 	// if we get here, it means it is a successful write.
 	if f.headers != nil {
 		for k, v := range f.headers {
 			for _, x := range v {
-				f.rw.Header().Add(k, x)
+				f.ResponseWriter.Header().Add(k, x)
 			}
 		}
 	}
-	f.headers = f.rw.Header()
+	f.headers = f.ResponseWriter.Header()
+}
+func (f *notFoundNoWriter) Flush() {
+	flusher, ok := f.ResponseWriter.(http.Flusher)
+	if !ok {
+		return
+	}
+	select {
+	case <-f.r.Context().Done():
+		return
+	default:
+	}
+	if flusher != nil {
+		flusher.Flush()
+	}
 }

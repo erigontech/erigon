@@ -12,13 +12,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/checkpoint"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/milestone"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/sync/mock"
-	"github.com/ledgerwatch/erigon/polygon/sync/peerinfo"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
@@ -28,28 +24,30 @@ func newHeaderDownloaderTest(t *testing.T) *headerDownloaderTest {
 
 func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts) *headerDownloaderTest {
 	ctrl := gomock.NewController(t)
-	heimdall := mock.NewMockHeimdall(ctrl)
-	sentry := mock.NewMockSentry(ctrl)
+	checkpointStore := NewMockCheckpointStore(ctrl)
+	milestoneStore := NewMockMilestoneStore(ctrl)
+	heimdall := heimdall.NewMockHeimdall(ctrl)
+	sentry := NewMockSentry(ctrl)
 	sentry.EXPECT().MaxPeers().Return(100).Times(1)
-	db := mock.NewMockDB(ctrl)
 	logger := testlog.Logger(t, log.LvlDebug)
 	headerVerifier := opts.getOrCreateDefaultHeaderVerifier()
-	headerDownloader := NewHeaderDownloader(logger, sentry, db, heimdall, headerVerifier)
+	headerDownloader := NewHeaderDownloader(logger, sentry, heimdall, headerVerifier)
 	return &headerDownloaderTest{
 		heimdall:         heimdall,
 		sentry:           sentry,
-		db:               db,
 		headerDownloader: headerDownloader,
+		milestoneStore:   milestoneStore,
+		checkpointStore:  checkpointStore,
 	}
 }
 
 type headerDownloaderTestOpts struct {
-	headerVerifier HeaderVerifier
+	headerVerifier AccumulatedHeadersVerifier
 }
 
-func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() HeaderVerifier {
+func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() AccumulatedHeadersVerifier {
 	if opts.headerVerifier == nil {
-		return func(_ *statePoint, _ []*types.Header) error {
+		return func(_ heimdall.Waypoint, _ []*types.Header) error {
 			return nil
 		}
 	}
@@ -58,14 +56,15 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() HeaderVe
 }
 
 type headerDownloaderTest struct {
-	heimdall         *mock.MockHeimdall
-	sentry           *mock.MockSentry
-	db               *mock.MockDB
+	heimdall         *heimdall.MockHeimdall
+	sentry           *MockSentry
+	milestoneStore   *MockMilestoneStore
+	checkpointStore  *MockCheckpointStore
 	headerDownloader *HeaderDownloader
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) peerinfo.PeersWithBlockNumInfo {
-	peers := make(peerinfo.PeersWithBlockNumInfo, count)
+func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) PeersWithBlockNumInfo {
+	peers := make(PeersWithBlockNumInfo, count)
 	for i := range peers {
 		var blockNum *big.Int
 		if i < len(blockNums) {
@@ -74,7 +73,7 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) peer
 			blockNum = new(big.Int).SetUint64(math.MaxUint64)
 		}
 
-		peers[i] = &peerinfo.PeerWithBlockNumInfo{
+		peers[i] = &PeerWithBlockNumInfo{
 			ID:       fmt.Sprintf("peer%d", i+1),
 			BlockNum: blockNum,
 		}
@@ -83,28 +82,32 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) peer
 	return peers
 }
 
-func (hdt headerDownloaderTest) fakeCheckpoints(count int) []*checkpoint.Checkpoint {
-	checkpoints := make([]*checkpoint.Checkpoint, count)
+func (hdt headerDownloaderTest) fakeCheckpoints(count int) heimdall.Waypoints {
+	checkpoints := make(heimdall.Waypoints, count)
 	for i := range checkpoints {
 		num := i + 1
-		checkpoints[i] = &checkpoint.Checkpoint{
-			StartBlock: big.NewInt(int64(num)),
-			EndBlock:   big.NewInt(int64(num)),
-			RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+		checkpoints[i] = &heimdall.Checkpoint{
+			Fields: heimdall.WaypointFields{
+				StartBlock: big.NewInt(int64(num)),
+				EndBlock:   big.NewInt(int64(num)),
+				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+			},
 		}
 	}
 
 	return checkpoints
 }
 
-func (hdt headerDownloaderTest) fakeMilestones(count int) []*milestone.Milestone {
-	milestones := make([]*milestone.Milestone, count)
+func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
+	milestones := make(heimdall.Waypoints, count)
 	for i := range milestones {
 		num := i + 1
-		milestones[i] = &milestone.Milestone{
-			StartBlock: big.NewInt(int64(num)),
-			EndBlock:   big.NewInt(int64(num)),
-			Hash:       common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+		milestones[i] = &heimdall.Milestone{
+			Fields: heimdall.WaypointFields{
+				StartBlock: big.NewInt(int64(num)),
+				EndBlock:   big.NewInt(int64(num)),
+				RootHash:   common.BytesToHash([]byte(fmt.Sprintf("0x%d", num))),
+			},
 		}
 	}
 
@@ -133,7 +136,7 @@ func (hdt headerDownloaderTest) defaultWriteHeadersMock(capture *[]*types.Header
 func TestHeaderDownloadUsingMilestones(t *testing.T) {
 	test := newHeaderDownloaderTest(t)
 	test.heimdall.EXPECT().
-		FetchMilestones(gomock.Any(), gomock.Any()).
+		FetchMilestonesFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeMilestones(4), nil).
 		Times(1)
 	test.sentry.EXPECT().
@@ -145,12 +148,12 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(4)
 	var persistedHeaders []*types.Header
-	test.db.EXPECT().
-		WriteHeaders(gomock.Any()).
+	test.milestoneStore.EXPECT().
+		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(1)
 
-	err := test.headerDownloader.DownloadUsingMilestones(context.Background(), 1)
+	err := test.headerDownloader.DownloadUsingMilestones(context.Background(), test.milestoneStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 4)
 	// check headers are written in order
@@ -163,7 +166,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 	test := newHeaderDownloaderTest(t)
 	test.heimdall.EXPECT().
-		FetchCheckpoints(gomock.Any(), gomock.Any()).
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.sentry.EXPECT().
@@ -175,12 +178,12 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
-	test.db.EXPECT().
-		WriteHeaders(gomock.Any()).
+	test.checkpointStore.EXPECT().
+		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
 	// check headers are written in order
@@ -198,8 +201,8 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
-		headerVerifier: func(statePoint *statePoint, headers []*types.Header) error {
-			if statePoint.startBlock.Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
+		headerVerifier: func(hashAccumulator heimdall.Waypoint, headers []*types.Header) error {
+			if hashAccumulator.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid checkpoint")
 			}
@@ -207,7 +210,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		},
 	})
 	test.heimdall.EXPECT().
-		FetchCheckpoints(gomock.Any(), gomock.Any()).
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.sentry.EXPECT().
@@ -230,17 +233,17 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Times(1)
 	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
 	gomock.InOrder(
-		test.db.EXPECT().
-			WriteHeaders(gomock.Any()).
+		test.checkpointStore.EXPECT().
+			PutHeaders(gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersFirstTime)).
 			Times(1),
-		test.db.EXPECT().
-			WriteHeaders(gomock.Any()).
+		test.checkpointStore.EXPECT().
+			PutHeaders(gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersRemaining)).
 			Times(2),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeadersFirstTime, 1)
 	require.Len(t, persistedHeadersRemaining, 5)
@@ -249,7 +252,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 	test := newHeaderDownloaderTest(t)
 	test.heimdall.EXPECT().
-		FetchCheckpoints(gomock.Any(), gomock.Any()).
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.sentry.EXPECT().
@@ -257,8 +260,8 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
-	test.db.EXPECT().
-		WriteHeaders(gomock.Any()).
+	test.checkpointStore.EXPECT().
+		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 	gomock.InOrder(
@@ -279,7 +282,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 			Times(4),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
 }

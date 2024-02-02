@@ -67,6 +67,9 @@ type ForkChoiceStorageMock struct {
 	GetSyncCommitteesVal      map[common.Hash][2]*solid.SyncCommittee
 	GetFinalityCheckpointsVal map[common.Hash][3]solid.Checkpoint
 	WeightsMock               []ForkNode
+	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
+	NewestLCUpdate            *cltypes.LightClientUpdate
+	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
 
 	Pool pool.OperationsPool
 }
@@ -88,6 +91,8 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		StateAtSlotVal:            make(map[uint64]*state.CachingBeaconState),
 		GetSyncCommitteesVal:      make(map[common.Hash][2]*solid.SyncCommittee),
 		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
+		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
+		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
 	}
 }
 
@@ -224,4 +229,24 @@ func (f *ForkChoiceStorageMock) ForkNodes() []ForkNode {
 func (f *ForkChoiceStorageMock) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
 	f.Pool.AttestationsPool.Insert(aggregateAndProof.Message.Aggregate.Signature(), aggregateAndProof.Message.Aggregate)
 	return nil
+}
+
+func (f *ForkChoiceStorageMock) Synced() bool {
+	return true
+}
+
+func (f *ForkChoiceStorageMock) SetSynced(synced bool) {
+	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) GetLightClientBootstrap(blockRoot common.Hash) (*cltypes.LightClientBootstrap, bool) {
+	return f.LightClientBootstraps[blockRoot], f.LightClientBootstraps[blockRoot] != nil
+}
+
+func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUpdate {
+	return f.NewestLCUpdate
+}
+
+func (f *ForkChoiceStorageMock) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+	return f.LCUpdates[period], f.LCUpdates[period] != nil
 }

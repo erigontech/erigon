@@ -311,7 +311,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		shanghaiTime := mock.ChainConfig.ShanghaiTime
 		cancunTime := mock.ChainConfig.CancunTime
 		maxBlobsPerBlock := mock.ChainConfig.GetMaxBlobsPerBlock()
-		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, nil /* agraBlock */, cancunTime, maxBlobsPerBlock, logger)
+		mock.TxPool, err = txpool.New(newTxs, mock.DB, poolCfg, kvcache.NewDummy(), *chainID, shanghaiTime, nil /* agraBlock */, cancunTime, maxBlobsPerBlock, nil, logger)
 		if err != nil {
 			tb.Fatal(err)
 		}
@@ -329,7 +329,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		mock.TxPoolFetch.ConnectSentries()
 		mock.StreamWg.Wait()
 
-		go txpool.MainLoop(mock.Ctx, mock.txPoolDB, mock.DB, mock.TxPool, newTxs, mock.TxPoolSend, mock.TxPoolGrpcServer.NewSlotsStreams, func() {})
+		go txpool.MainLoop(mock.Ctx, mock.txPoolDB, mock.TxPool, newTxs, mock.TxPoolSend, mock.TxPoolGrpcServer.NewSlotsStreams, func() {})
 	}
 
 	// Committed genesis will be shared between download and mock sentry
@@ -478,7 +478,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		snapshotsDownloader, mock.BlockReader, blockRetire, mock.agg, nil, forkValidator, logger, checkStateRoot)
 	mock.posStagedSync = stagedsync.New(cfg.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 
-	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, engine, histV3)
+	mock.Eth1ExecutionService = eth1.NewEthereumExecutionModule(mock.BlockReader, mock.DB, mock.posStagedSync, forkValidator, mock.ChainConfig, assembleBlockPOS, nil, mock.Notifications.Accumulator, mock.Notifications.StateChangesConsumer, logger, engine, histV3, cfg.Sync)
 
 	mock.sentriesClient.Hd.StartPoSDownloader(mock.Ctx, sendHeaderRequest, penalize)
 
@@ -608,6 +608,12 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		return nil
 	}
 
+	for i := 0; i < chain.Length(); i++ {
+		if err := chain.Blocks[i].HashCheck(); err != nil {
+			return err
+		}
+	}
+
 	// Send NewBlock message
 	b, err := rlp.EncodeToBytes(&eth.NewBlockPacket{
 		Block: chain.Blocks[n-1],
@@ -692,7 +698,7 @@ func (ms *MockSentry) insertPoSBlocks(chain *core.ChainPack) error {
 
 	tipHash := chain.TopBlock.Hash()
 
-	status, lvh, err := wr.UpdateForkChoice(tipHash, tipHash, tipHash)
+	status, _, lvh, err := wr.UpdateForkChoice(tipHash, tipHash, tipHash)
 
 	if err != nil {
 		return err

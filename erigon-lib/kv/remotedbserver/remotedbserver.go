@@ -458,17 +458,27 @@ func (s *KvServer) SendStateChanges(_ context.Context, sc *remote.StateChangeBat
 	s.stateChangeStreams.Pub(sc)
 }
 
-func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
+func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (reply *remote.SnapshotsReply, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%v, %s", rec, dbg.Stack())
+		}
+	}()
 	if s.blockSnapshots == nil || reflect.ValueOf(s.blockSnapshots).IsNil() { // nolint
 		return &remote.SnapshotsReply{BlocksFiles: []string{}, HistoryFiles: []string{}}, nil
 	}
 
 	blockFiles := s.blockSnapshots.Files()
-	if s.borSnapshots != nil {
+	if s.borSnapshots != nil && !reflect.ValueOf(s.borSnapshots).IsNil() { // nolint
 		blockFiles = append(blockFiles, s.borSnapshots.Files()...)
 	}
 
-	return &remote.SnapshotsReply{BlocksFiles: blockFiles, HistoryFiles: s.historySnapshots.Files()}, nil
+	reply = &remote.SnapshotsReply{BlocksFiles: blockFiles}
+	if s.historySnapshots != nil && !reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
+		reply.HistoryFiles = s.historySnapshots.Files()
+	}
+
+	return reply, nil
 }
 
 type StateChangePubSub struct {

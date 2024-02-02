@@ -11,8 +11,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/mock"
-
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
@@ -29,7 +27,7 @@ func (ebrc emptyBodyReadCloser) Close() error {
 func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	httpClient := mock.NewMockHttpClient(ctrl)
+	httpClient := NewMockHttpClient(ctrl)
 	httpClient.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{
@@ -40,7 +38,7 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, 100*time.Millisecond, 5, logger)
 
-	spanRes, err := heimdallClient.Span(ctx, 1534)
+	spanRes, err := heimdallClient.FetchSpan(ctx, 1534)
 	require.Nil(t, spanRes)
 	require.Error(t, err)
 }
@@ -48,7 +46,7 @@ func TestHeimdallClientFetchesTerminateUponTooManyErrors(t *testing.T) {
 func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBody(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	httpClient := mock.NewMockHttpClient(ctrl)
+	httpClient := NewMockHttpClient(ctrl)
 	httpClient.EXPECT().
 		Do(gomock.Any()).
 		Return(&http.Response{
@@ -59,7 +57,7 @@ func TestHeimdallClientStateSyncEventsReturnsErrNoResponseWhenHttp200WithEmptyBo
 	logger := testlog.Logger(t, log.LvlDebug)
 	heimdallClient := newHeimdallClient("https://dummyheimdal.com", httpClient, time.Millisecond, 2, logger)
 
-	spanRes, err := heimdallClient.StateSyncEvents(ctx, 100, time.Now().Unix())
+	spanRes, err := heimdallClient.FetchStateSyncEvents(ctx, 100, time.Now(), 0)
 	require.Nil(t, spanRes)
 	require.ErrorIs(t, err, ErrNoResponse)
 }

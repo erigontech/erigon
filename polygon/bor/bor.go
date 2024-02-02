@@ -22,9 +22,6 @@ import (
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -46,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/whitelist"
 	"github.com/ledgerwatch/erigon/polygon/bor/statefull"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -111,9 +109,9 @@ var (
 	// their extra-data fields.
 	errExtraValidators = errors.New("non-sprint-end block contains extra validator list")
 
-	// errInvalidSpanValidators is returned if a block contains an
+	// errInvalidSprintValidators is returned if a block contains an
 	// invalid list of validators (i.e. non divisible by 40 bytes).
-	errInvalidSpanValidators = errors.New("invalid validator list on sprint end block")
+	errInvalidSprintValidators = errors.New("invalid validator list on sprint end block")
 
 	// errInvalidMixDigest is returned if a block's mix digest is non-zero.
 	errInvalidMixDigest = errors.New("non-zero mix digest")
@@ -226,6 +224,48 @@ func CalcProducerDelay(number uint64, succession int, c *borcfg.BorConfig) uint6
 	return delay
 }
 
+func MinNextBlockTime(parent *types.Header, succession int, config *borcfg.BorConfig) uint64 {
+	return parent.Time + CalcProducerDelay(parent.Number.Uint64()+1, succession, config)
+}
+
+// ValidateHeaderTimeSignerSuccessionNumber - valset.ValidatorSet abstraction for unit tests
+type ValidateHeaderTimeSignerSuccessionNumber interface {
+	GetSignerSuccessionNumber(signer libcommon.Address, number uint64) (int, error)
+}
+
+func ValidateHeaderTime(
+	header *types.Header,
+	now time.Time,
+	parent *types.Header,
+	validatorSet ValidateHeaderTimeSignerSuccessionNumber,
+	config *borcfg.BorConfig,
+	signaturesCache *lru.ARCCache[libcommon.Hash, libcommon.Address],
+) error {
+	if header.Time > uint64(now.Unix()) {
+		return consensus.ErrFutureBlock
+	}
+
+	if parent == nil {
+		return nil
+	}
+
+	signer, err := Ecrecover(header, signaturesCache, config)
+	if err != nil {
+		return err
+	}
+
+	succession, err := validatorSet.GetSignerSuccessionNumber(signer, header.Number.Uint64())
+	if err != nil {
+		return err
+	}
+
+	if header.Time < MinNextBlockTime(parent, succession, config) {
+		return &BlockTooSoonError{header.Number.Uint64(), succession}
+	}
+
+	return nil
+}
+
 // BorRLP returns the rlp bytes which needs to be signed for the bor
 // sealing. The RLP to sign consists of the entire header apart from the 65 byte signature
 // contained at the end of the extra data.
@@ -255,8 +295,8 @@ type Bor struct {
 	execCtx context.Context // context of caller execution stage
 
 	spanner                Spanner
-	GenesisContractsClient GenesisContract
-	HeimdallClient         heimdall.IHeimdallClient
+	GenesisContractsClient GenesisContracts
+	HeimdallClient         heimdall.HeimdallClient
 
 	// scope event.SubscriptionScope
 	// The fields below are for testing only
@@ -281,8 +321,8 @@ func New(
 	db kv.RwDB,
 	blockReader services.FullBlockReader,
 	spanner Spanner,
-	heimdallClient heimdall.IHeimdallClient,
-	genesisContracts GenesisContract,
+	heimdallClient heimdall.HeimdallClient,
+	genesisContracts GenesisContracts,
 	logger log.Logger,
 ) *Bor {
 	// get bor config
@@ -316,7 +356,7 @@ func New(
 		libcommon.Address{},
 		func(_ libcommon.Address, _ string, i []byte) ([]byte, error) {
 			// return an error to prevent panics
-			return nil, &UnauthorizedSignerError{0, libcommon.Address{}.Bytes()}
+			return nil, &valset.UnauthorizedSignerError{Number: 0, Signer: libcommon.Address{}.Bytes()}
 		},
 	})
 
@@ -352,7 +392,7 @@ func (w rwWrapper) BeginRwNosync(ctx context.Context) (kv.RwTx, error) {
 
 // This is used by the rpcdaemon and tests which need read only access to the provided data services
 func NewRo(chainConfig *chain.Config, db kv.RoDB, blockReader services.FullBlockReader, spanner Spanner,
-	genesisContracts GenesisContract, logger log.Logger) *Bor {
+	genesisContracts GenesisContracts, logger log.Logger) *Bor {
 	// get bor config
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 
@@ -437,7 +477,6 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 	if header.Number == nil {
 		return errUnknownBlock
 	}
-
 	number := header.Number.Uint64()
 
 	// Don't waste time checking blocks from the future
@@ -445,23 +484,58 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return consensus.ErrFutureBlock
 	}
 
-	if err := ValidateHeaderExtraField(header.Extra); err != nil {
+	if err := ValidateHeaderUnusedFields(header); err != nil {
 		return err
 	}
 
-	// check extr adata
-	isSprintEnd := isSprintStart(number+1, c.config.CalculateSprintLength(number))
+	if err := ValidateHeaderExtraLength(header.Extra); err != nil {
+		return err
+	}
+	if err := ValidateHeaderSprintValidators(header, c.config); err != nil {
+		return err
+	}
 
-	// Ensure that the extra-data contains a signer list on checkpoint, but none otherwise
-	signersBytes := len(GetValidatorBytes(header, c.config))
-	if !isSprintEnd && signersBytes != 0 {
+	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
+	if (number > 0) && (header.Difficulty == nil) {
+		return errInvalidDifficulty
+	}
+
+	// All basic checks passed, verify cascading fields
+	return c.verifyCascadingFields(chain, header, parents)
+}
+
+// ValidateHeaderExtraLength validates that the extra-data contains both the vanity and signature.
+// header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
+func ValidateHeaderExtraLength(extraBytes []byte) error {
+	if len(extraBytes) < types.ExtraVanityLength {
+		return errMissingVanity
+	}
+
+	if len(extraBytes) < types.ExtraVanityLength+types.ExtraSealLength {
+		return errMissingSignature
+	}
+
+	return nil
+}
+
+// ValidateHeaderSprintValidators validates that the extra-data contains a validators list only in the last header of a sprint.
+func ValidateHeaderSprintValidators(header *types.Header, config *borcfg.BorConfig) error {
+	number := header.Number.Uint64()
+	isSprintEnd := isSprintStart(number+1, config.CalculateSprintLength(number))
+	validatorBytes := GetValidatorBytes(header, config)
+	validatorBytesLen := len(validatorBytes)
+
+	if !isSprintEnd && (validatorBytesLen != 0) {
 		return errExtraValidators
 	}
-
-	if isSprintEnd && signersBytes%validatorHeaderBytesLength != 0 {
-		return errInvalidSpanValidators
+	if isSprintEnd && (validatorBytesLen%validatorHeaderBytesLength != 0) {
+		return errInvalidSprintValidators
 	}
+	return nil
+}
 
+// ValidateHeaderUnusedFields validates that unused fields are empty.
+func ValidateHeaderUnusedFields(header *types.Header) error {
 	// Ensure that the mix digest is zero as we don't have fork protection currently
 	if header.MixDigest != (libcommon.Hash{}) {
 		return errInvalidMixDigest
@@ -472,38 +546,11 @@ func (c *Bor) verifyHeader(chain consensus.ChainHeaderReader, header *types.Head
 		return errInvalidUncleHash
 	}
 
-	// Ensure that the block's difficulty is meaningful (may not be correct at this point)
-	if number > 0 {
-		if header.Difficulty == nil {
-			return errInvalidDifficulty
-		}
-	}
-
-	// Verify that the gas limit is <= 2^63-1
-	if header.GasLimit > params.MaxGasLimit {
-		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
-	}
-
 	if header.WithdrawalsHash != nil {
 		return consensus.ErrUnexpectedWithdrawals
 	}
 
-	// All basic checks passed, verify cascading fields
-	return c.verifyCascadingFields(chain, header, parents)
-}
-
-// ValidateHeaderExtraField validates that the extra-data contains both the vanity and signature.
-// header.Extra = header.Vanity + header.ProducerBytes (optional) + header.Seal
-func ValidateHeaderExtraField(extraBytes []byte) error {
-	if len(extraBytes) < types.ExtraVanityLength {
-		return errMissingVanity
-	}
-
-	if len(extraBytes) < types.ExtraVanityLength+types.ExtraSealLength {
-		return errMissingSignature
-	}
-
-	return nil
+	return misc.VerifyAbsenceOfCancunHeaderFields(header)
 }
 
 // verifyCascadingFields verifies all the header fields that are not standalone,
@@ -531,12 +578,30 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		return consensus.ErrUnknownAncestor
 	}
 
+	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
+		return ErrInvalidTimestamp
+	}
+
+	return ValidateHeaderGas(header, parent, chain.Config())
+}
+
+// ValidateHeaderGas validates GasUsed, GasLimit and BaseFee.
+func ValidateHeaderGas(header *types.Header, parent *types.Header, chainConfig *chain.Config) error {
+	// Verify that the gas limit is <= 2^63-1
+	if header.GasLimit > params.MaxGasLimit {
+		return fmt.Errorf("invalid gasLimit: have %v, max %v", header.GasLimit, params.MaxGasLimit)
+	}
+
 	// Verify that the gasUsed is <= gasLimit
 	if header.GasUsed > header.GasLimit {
 		return fmt.Errorf("invalid gasUsed: have %d, gasLimit %d", header.GasUsed, header.GasLimit)
 	}
 
-	if !chain.Config().IsLondon(header.Number.Uint64()) {
+	if parent == nil {
+		return nil
+	}
+
+	if !chainConfig.IsLondon(header.Number.Uint64()) {
 		// Verify BaseFee not present before EIP-1559 fork.
 		if header.BaseFee != nil {
 			return fmt.Errorf("invalid baseFee before fork: have %d, want <nil>", header.BaseFee)
@@ -544,14 +609,11 @@ func (c *Bor) verifyCascadingFields(chain consensus.ChainHeaderReader, header *t
 		if err := misc.VerifyGaslimit(parent.GasLimit, header.GasLimit); err != nil {
 			return err
 		}
-	} else if err := misc.VerifyEip1559Header(chain.Config(), parent, header, false /*skipGasLimit*/); err != nil {
+	} else if err := misc.VerifyEip1559Header(chainConfig, parent, header, false /*skipGasLimit*/); err != nil {
 		// Verify the header's EIP-1559 attributes.
 		return err
 	}
 
-	if parent.Time+c.config.CalculatePeriod(number) > header.Time {
-		return ErrInvalidTimestamp
-	}
 	return nil
 }
 
@@ -768,21 +830,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	if number == 0 {
 		return errUnknownBlock
 	}
-	// Resolve the authorization key and check against signers
-	signer, err := Ecrecover(header, c.Signatures, c.config)
-	if err != nil {
-		return err
-	}
-
-	if !snap.ValidatorSet.HasAddress(signer) {
-		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
-	}
-
-	succession, err := snap.GetSignerSuccessionNumber(signer)
-	if err != nil {
-		return err
-	}
 
 	var parent *types.Header
 	if len(parents) > 0 { // if parents is nil, len(parents) is zero
@@ -791,12 +838,17 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 		parent = chain.GetHeader(header.ParentHash, number-1)
 	}
 
-	if parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, c.config) {
-		return &BlockTooSoonError{number, succession}
+	if err := ValidateHeaderTime(header, time.Now(), parent, snap.ValidatorSet, c.config, c.Signatures); err != nil {
+		return err
 	}
 
 	// Ensure that the difficulty corresponds to the turn-ness of the signer
 	if !c.fakeDiff {
+		signer, err := Ecrecover(header, c.Signatures, c.config)
+		if err != nil {
+			return err
+		}
+
 		difficulty := snap.Difficulty(signer)
 		if header.Difficulty.Uint64() != difficulty {
 			return &WrongDifficultyError{number, difficulty, header.Difficulty.Uint64(), signer.Bytes()}
@@ -804,10 +856,6 @@ func (c *Bor) verifySeal(chain consensus.ChainHeaderReader, header *types.Header
 	}
 
 	return nil
-}
-
-func IsBlockOnTime(parent *types.Header, header *types.Header, number uint64, succession int, cfg *borcfg.BorConfig) bool {
-	return parent != nil && header.Time < parent.Time+CalcProducerDelay(number, succession, cfg)
 }
 
 // Prepare implements consensus.Engine, preparing all the consensus fields of the
@@ -840,7 +888,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
-		spanID := span.IDAt(number + 1)
+		spanID := uint64(heimdall.SpanIdAt(number + 1))
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
@@ -849,7 +897,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 		// sort validator by address
 		sort.Sort(valset.ValidatorsByAddress(newValidators))
 
-		if c.config.IsParallelUniverse(header.Number.Uint64()) {
+		if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 			var tempValidatorBytes []byte
 
 			for _, validator := range newValidators {
@@ -873,7 +921,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 				header.Extra = append(header.Extra, validator.HeaderBytes()...)
 			}
 		}
-	} else if c.config.IsParallelUniverse(header.Number.Uint64()) {
+	} else if c.config.IsNapoli(header.Number.Uint64()) { // PIP-16: Transaction Dependency Data
 		blockExtraData := &BlockExtraData{
 			ValidatorBytes: nil,
 			TxDependency:   nil,
@@ -901,15 +949,16 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	}
 
 	var succession int
+	signer := c.authorizedSigner.Load().signer
 	// if signer is not empty
-	if signer := c.authorizedSigner.Load().signer; !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
-		succession, err = snap.GetSignerSuccessionNumber(signer)
+	if !bytes.Equal(signer.Bytes(), libcommon.Address{}.Bytes()) {
+		succession, err = snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 		if err != nil {
 			return err
 		}
 	}
 
-	header.Time = parent.Time + CalcProducerDelay(number, succession, c.config)
+	header.Time = MinNextBlockTime(parent, succession, c.config)
 	if header.Time < uint64(time.Now().Unix()) {
 		header.Time = uint64(time.Now().Unix())
 	}
@@ -1082,13 +1131,7 @@ func (c *Bor) Seal(chain consensus.ChainHeaderReader, block *types.Block, result
 		return err
 	}
 
-	// Bail out if we're unauthorized to sign a block
-	if !snap.ValidatorSet.HasAddress(signer) {
-		// Check the UnauthorizedSignerError.Error() msg to see why we pass number-1
-		return &UnauthorizedSignerError{number - 1, signer.Bytes()}
-	}
-
-	successionNumber, err := snap.GetSignerSuccessionNumber(signer)
+	successionNumber, err := snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 	if err != nil {
 		return err
 	}
@@ -1176,7 +1219,6 @@ func (c *Bor) IsValidator(header *types.Header) (bool, error) {
 // IsProposer returns true if this instance is the proposer for this block
 func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 	number := header.Number.Uint64()
-
 	if number == 0 {
 		return false, nil
 	}
@@ -1186,14 +1228,8 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 		return false, err
 	}
 
-	currentSigner := c.authorizedSigner.Load()
-
-	if !snap.ValidatorSet.HasAddress(currentSigner.signer) {
-		return false, nil
-	}
-
-	successionNumber, err := snap.GetSignerSuccessionNumber(currentSigner.signer)
-
+	signer := c.authorizedSigner.Load().signer
+	successionNumber, err := snap.ValidatorSet.GetSignerSuccessionNumber(signer, number)
 	return successionNumber == 0, err
 }
 
@@ -1281,13 +1317,13 @@ func (c *Bor) checkAndCommitSpan(
 
 	// check span is not set initially
 	if currentSpan.EndBlock == 0 {
-		return c.fetchAndCommitSpan(currentSpan.ID, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(uint64(currentSpan.Id), state, header, chain, syscall)
 	}
 
 	// if current block is first block of last sprint in current span
 	sprintLength := c.config.CalculateSprintLength(headerNumber)
 	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
-		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
 	}
 
 	return nil
@@ -1300,7 +1336,7 @@ func (c *Bor) fetchAndCommitSpan(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	var heimdallSpan span.HeimdallSpan
+	var heimdallSpan heimdall.Span
 
 	if c.HeimdallClient == nil {
 		// fixme: move to a new mock or fake and remove c.HeimdallClient completely
@@ -1354,12 +1390,23 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 	if start > end || end > currentHeaderNumber {
 		return "", &valset.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
-	blockHeaders := make([]*types.Header, end-start+1)
+	blockHeaders := make([]*types.Header, length)
 	for number := start; number <= end; number++ {
 		blockHeaders[number-start], _ = c.getHeaderByNumber(ctx, tx, number)
 	}
 
-	headers := make([][32]byte, NextPowerOfTwo(length))
+	hash, err := ComputeHeadersRootHash(blockHeaders)
+	if err != nil {
+		return "", err
+	}
+
+	hashStr := hex.EncodeToString(hash)
+	c.rootHashCache.Add(cacheKey, hashStr)
+	return hashStr, nil
+}
+
+func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
+	headers := make([][32]byte, NextPowerOfTwo(uint64(len(blockHeaders))))
 	for i := 0; i < len(blockHeaders); i++ {
 		blockHeader := blockHeaders[i]
 		header := crypto.Keccak256(AppendBytes32(
@@ -1375,13 +1422,10 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 	}
 	tree := merkle.NewTreeWithOpts(merkle.TreeOptions{EnableHashSorting: false, DisableHashLeaves: true})
 	if err := tree.Generate(Convert(headers), sha3.NewLegacyKeccak256()); err != nil {
-		return "", err
+		return nil, err
 	}
-	root := hex.EncodeToString(tree.Root().Hash)
 
-	c.rootHashCache.Add(cacheKey, root)
-
-	return root, nil
+	return tree.Root().Hash, nil
 }
 
 func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Header, error) {
@@ -1411,7 +1455,7 @@ func (c *Bor) CommitStates(
 	return nil
 }
 
-func (c *Bor) SetHeimdallClient(h heimdall.IHeimdallClient) {
+func (c *Bor) SetHeimdallClient(h heimdall.HeimdallClient) {
 	c.HeimdallClient = h
 }
 
@@ -1425,7 +1469,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) (*span.HeimdallSpan, error) {
+) (*heimdall.Span, error) {
 	headerNumber := header.Number.Uint64()
 
 	spanBor, err := c.spanner.GetCurrentSpan(syscall)
@@ -1440,7 +1484,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	}
 
 	// new span
-	spanBor.ID = newSpanID
+	spanBor.Id = heimdall.SpanId(newSpanID)
 	if spanBor.EndBlock == 0 {
 		spanBor.StartBlock = 256
 	} else {
@@ -1454,14 +1498,13 @@ func (c *Bor) getNextHeimdallSpanForTest(
 		selectedProducers[i] = *v
 	}
 
-	heimdallSpan := &span.HeimdallSpan{
-		Span:              *spanBor,
-		ValidatorSet:      *snap.ValidatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           c.chainConfig.ChainID.String(),
-	}
+	heimdallSpan := *spanBor
 
-	return heimdallSpan, nil
+	heimdallSpan.ValidatorSet = *snap.ValidatorSet
+	heimdallSpan.SelectedProducers = selectedProducers
+	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
+
+	return &heimdallSpan, nil
 }
 
 func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {
@@ -1540,7 +1583,7 @@ func GetTxDependency(b *types.Block) [][]uint64 {
 func GetValidatorBytes(h *types.Header, config *borcfg.BorConfig) []byte {
 	tempExtra := h.Extra
 
-	if !config.IsParallelUniverse(h.Number.Uint64()) {
+	if !config.IsNapoli(h.Number.Uint64()) {
 		return tempExtra[types.ExtraVanityLength : len(tempExtra)-types.ExtraSealLength]
 	}
 

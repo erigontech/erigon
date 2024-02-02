@@ -11,9 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services"
-	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
@@ -23,16 +22,16 @@ import (
 	_ "github.com/ledgerwatch/erigon/cmd/devnet/contracts/steps"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnetutils"
+	"github.com/ledgerwatch/erigon/cmd/devnet/networks"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/cmd/devnet/scenarios"
-	"github.com/ledgerwatch/log/v3"
-
+	"github.com/ledgerwatch/erigon/cmd/devnet/services"
+	"github.com/ledgerwatch/erigon/cmd/devnet/services/polygon"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/params"
 	erigon_app "github.com/ledgerwatch/erigon/turbo/app"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/erigon/turbo/logging"
-	"github.com/urfave/cli/v2"
 )
 
 var (
@@ -77,10 +76,10 @@ var (
 		Usage: "Run with a devnet local Heimdall service",
 	}
 
-	HeimdallGrpcAddressFlag = cli.StringFlag{
-		Name:  "bor.heimdallgRPC",
-		Usage: "Address of Heimdall gRPC service",
-		Value: polygon.HeimdallGrpcAddressDefault,
+	HeimdallURLFlag = cli.StringFlag{
+		Name:  "bor.heimdall",
+		Usage: "URL of Heimdall service",
+		Value: polygon.HeimdallURLDefault,
 	}
 
 	BorSprintSizeFlag = cli.IntFlag{
@@ -166,7 +165,7 @@ func main() {
 		&BaseRpcPortFlag,
 		&WithoutHeimdallFlag,
 		&LocalHeimdallFlag,
-		&HeimdallGrpcAddressFlag,
+		&HeimdallURLFlag,
 		&BorSprintSizeFlag,
 		&MetricsEnabledFlag,
 		&MetricsNodeFlag,
@@ -409,9 +408,9 @@ func initDevnet(ctx *cli.Context, logger log.Logger) (devnet.Devnet, error) {
 		if ctx.Bool(WithoutHeimdallFlag.Name) {
 			return networks.NewBorDevnetWithoutHeimdall(dataDir, baseRpcHost, baseRpcPort, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		} else if ctx.Bool(LocalHeimdallFlag.Name) {
-			heimdallGrpcAddr := ctx.String(HeimdallGrpcAddressFlag.Name)
+			heimdallURL := ctx.String(HeimdallURLFlag.Name)
 			sprintSize := uint64(ctx.Int(BorSprintSizeFlag.Name))
-			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallGrpcAddr, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
+			return networks.NewBorDevnetWithLocalHeimdall(dataDir, baseRpcHost, baseRpcPort, heimdallURL, sprintSize, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		} else {
 			return networks.NewBorDevnetWithRemoteHeimdall(dataDir, baseRpcHost, baseRpcPort, producerCount, gasLimit, logger, consoleLogLevel, dirLogLevel), nil
 		}

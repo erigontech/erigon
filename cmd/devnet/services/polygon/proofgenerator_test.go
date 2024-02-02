@@ -14,8 +14,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pion/randutil"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -34,8 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/bor"
-	"github.com/ledgerwatch/erigon/polygon/bor/contract"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/jsonrpc"
@@ -77,9 +75,9 @@ func newRequestGenerator(sentry *mock.MockSentry, chain *core.ChainPack) (*reque
 		sentry: sentry,
 		bor: bor.NewRo(params.BorDevnetChainConfig, db, reader,
 			&spanner{
-				span.NewChainSpanner(contract.ValidatorSet(), params.BorDevnetChainConfig, false, log.Root()),
+				bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), params.BorDevnetChainConfig, false, log.Root()),
 				libcommon.Address{},
-				span.Span{}},
+				heimdall.Span{}},
 			genesisContract{}, log.Root()),
 		txBlockMap: map[libcommon.Hash]*types.Block{},
 	}, nil
@@ -276,17 +274,17 @@ func (g genesisContract) LastStateId(syscall consensus.SystemCall) (*big.Int, er
 }
 
 type spanner struct {
-	*span.ChainSpanner
+	*bor.ChainSpanner
 	validatorAddress libcommon.Address
-	currentSpan      span.Span
+	currentSpan      heimdall.Span
 }
 
-func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*span.Span, error) {
+func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) {
 	return &c.currentSpan, nil
 }
 
-func (c *spanner) CommitSpan(heimdallSpan span.HeimdallSpan, syscall consensus.SystemCall) error {
-	c.currentSpan = heimdallSpan.Span
+func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+	c.currentSpan = heimdallSpan
 	return nil
 }
 

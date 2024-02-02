@@ -21,8 +21,6 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/ledgerwatch/erigon/polygon/heimdall/span"
-
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
@@ -35,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -49,6 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/silkworm"
@@ -407,7 +405,13 @@ func (s *RoSnapshots) IndicesMax() uint64            { return s.idxMax.Load() }
 func (s *RoSnapshots) SegmentsMax() uint64           { return s.segmentsMax.Load() }
 func (s *RoSnapshots) SegmentsMin() uint64           { return s.segmentsMin.Load() }
 func (s *RoSnapshots) SetSegmentsMin(min uint64)     { s.segmentsMin.Store(min) }
-func (s *RoSnapshots) BlocksAvailable() uint64       { return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load()) }
+func (s *RoSnapshots) BlocksAvailable() uint64 {
+	if s == nil {
+		return 0
+	}
+
+	return cmp.Min(s.segmentsMax.Load(), s.idxMax.Load())
+}
 func (s *RoSnapshots) LogStat(label string) {
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
@@ -1471,7 +1475,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 		canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks())
 		br.logger.Info("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
 
-		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, span.IDAt); err != nil {
+		if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit, bor.SpanIDAt); err != nil {
 			return err
 		}
 	}
@@ -1513,39 +1517,35 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
-		for br.blockReader.FrozenBorBlocks() < minBlockNum {
-			ok, err := br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
+			haveMore, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), br.blockReader.FrozenBlocks(), lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
-			if !ok {
+			if !haveMore {
 				break
 			}
 		}
 	}
 
-	var ok, okBor bool
+	var blockHaveMore, borHaveMore bool
 	for {
 		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
 			minBlockNum = frozen
 		}
 
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		blockHaveMore, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
 
 		if includeBor {
-			okBor, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			borHaveMore, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
 		}
-		haveMore := ok || okBor
+		haveMore := blockHaveMore || borHaveMore
 		if !haveMore {
 			break
 		}
@@ -1641,7 +1641,7 @@ func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPe
 	}
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
+	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
 		lastTxNum, err := dumpBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger)
 		if err != nil {
@@ -2173,28 +2173,26 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, version uin
 	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    d.Count(),
-		Enums:       true,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions.String())),
-		BaseDataID:  firstTxID,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		KeyCount:   d.Count(),
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions.String())),
+		BaseDataID: firstTxID,
 	}, logger)
 	if err != nil {
 		return err
 	}
 
 	txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    d.Count(),
-		Enums:       false,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpDir,
-		IndexFile:   filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions2Block.String())),
-		BaseDataID:  firstBlockNum,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		KeyCount:   d.Count(),
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.Transactions2Block.String())),
+		BaseDataID: firstBlockNum,
 	}, logger)
 	if err != nil {
 		return err
@@ -2382,14 +2380,13 @@ func Idx(ctx context.Context, d *compress.Decompressor, firstDataID uint64, tmpD
 	var idxFilePath = segmentFileName[0:len(segmentFileName)-len(extension)] + ".idx"
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    d.Count(),
-		Enums:       true,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpDir,
-		IndexFile:   idxFilePath,
-		BaseDataID:  firstDataID,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		KeyCount:   d.Count(),
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  idxFilePath,
+		BaseDataID: firstDataID,
 	}, logger)
 	if err != nil {
 		return err

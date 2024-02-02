@@ -1,15 +1,17 @@
 package sync
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 )
 
-//go:generate mockgen -destination=./mock/canonical_chain_builder_mock.go -package=mock . CanonicalChainBuilder
+//go:generate mockgen -destination=./canonical_chain_builder_mock.go -package=sync . CanonicalChainBuilder
 type CanonicalChainBuilder interface {
 	Reset(root *types.Header)
 	ContainsHash(hash libcommon.Hash) bool
@@ -31,36 +33,45 @@ type forkTreeNode struct {
 	totalDifficulty uint64
 }
 
-type canonicalChainBuilderImpl struct {
+type canonicalChainBuilder struct {
 	root *forkTreeNode
 	tip  *forkTreeNode
 
-	difficultyCalc DifficultyCalculator
+	difficultyCalc  DifficultyCalculator
+	headerValidator HeaderValidator
+	spansCache      *SpansCache
 }
 
 func NewCanonicalChainBuilder(
 	root *types.Header,
 	difficultyCalc DifficultyCalculator,
+	headerValidator HeaderValidator,
+	spansCache *SpansCache,
 ) CanonicalChainBuilder {
-	impl := &canonicalChainBuilderImpl{
-		difficultyCalc: difficultyCalc,
+	ccb := &canonicalChainBuilder{
+		difficultyCalc:  difficultyCalc,
+		headerValidator: headerValidator,
+		spansCache:      spansCache,
 	}
-	impl.Reset(root)
-	return impl
+	ccb.Reset(root)
+	return ccb
 }
 
-func (impl *canonicalChainBuilderImpl) Reset(root *types.Header) {
-	impl.root = &forkTreeNode{
+func (ccb *canonicalChainBuilder) Reset(root *types.Header) {
+	ccb.root = &forkTreeNode{
 		children:   make(map[producerSlotIndex]*forkTreeNode),
 		header:     root,
 		headerHash: root.Hash(),
 	}
-	impl.tip = impl.root
+	ccb.tip = ccb.root
+	if ccb.spansCache != nil {
+		ccb.spansCache.Prune(root.Number.Uint64())
+	}
 }
 
 // depth-first search
-func (impl *canonicalChainBuilderImpl) enumerate(visitFunc func(*forkTreeNode) bool) {
-	stack := []*forkTreeNode{impl.root}
+func (ccb *canonicalChainBuilder) enumerate(visitFunc func(*forkTreeNode) bool) {
+	stack := []*forkTreeNode{ccb.root}
 	for len(stack) > 0 {
 		// pop
 		node := stack[len(stack)-1]
@@ -76,9 +87,9 @@ func (impl *canonicalChainBuilderImpl) enumerate(visitFunc func(*forkTreeNode) b
 	}
 }
 
-func (impl *canonicalChainBuilderImpl) nodeByHash(hash libcommon.Hash) *forkTreeNode {
+func (ccb *canonicalChainBuilder) nodeByHash(hash libcommon.Hash) *forkTreeNode {
 	var result *forkTreeNode
-	impl.enumerate(func(node *forkTreeNode) bool {
+	ccb.enumerate(func(node *forkTreeNode) bool {
 		if node.headerHash == hash {
 			result = node
 		}
@@ -87,17 +98,17 @@ func (impl *canonicalChainBuilderImpl) nodeByHash(hash libcommon.Hash) *forkTree
 	return result
 }
 
-func (impl *canonicalChainBuilderImpl) ContainsHash(hash libcommon.Hash) bool {
-	return impl.nodeByHash(hash) != nil
+func (ccb *canonicalChainBuilder) ContainsHash(hash libcommon.Hash) bool {
+	return ccb.nodeByHash(hash) != nil
 }
 
-func (impl *canonicalChainBuilderImpl) Tip() *types.Header {
-	return impl.tip.header
+func (ccb *canonicalChainBuilder) Tip() *types.Header {
+	return ccb.tip.header
 }
 
-func (impl *canonicalChainBuilderImpl) Headers() []*types.Header {
+func (ccb *canonicalChainBuilder) Headers() []*types.Header {
 	var headers []*types.Header
-	node := impl.tip
+	node := ccb.tip
 	for node != nil {
 		headers = append(headers, node.header)
 		node = node.parent
@@ -106,8 +117,8 @@ func (impl *canonicalChainBuilderImpl) Headers() []*types.Header {
 	return headers
 }
 
-func (impl *canonicalChainBuilderImpl) HeadersInRange(start uint64, count uint64) []*types.Header {
-	headers := impl.Headers()
+func (ccb *canonicalChainBuilder) HeadersInRange(start uint64, count uint64) []*types.Header {
+	headers := ccb.Headers()
 	if len(headers) == 0 {
 		return nil
 	}
@@ -122,40 +133,59 @@ func (impl *canonicalChainBuilderImpl) HeadersInRange(start uint64, count uint64
 	return headers[offset : offset+count]
 }
 
-func (impl *canonicalChainBuilderImpl) Prune(newRootNum uint64) error {
-	if (newRootNum < impl.root.header.Number.Uint64()) || (newRootNum > impl.Tip().Number.Uint64()) {
-		return errors.New("canonicalChainBuilderImpl.Prune: newRootNum outside of the canonical chain")
+func (ccb *canonicalChainBuilder) Prune(newRootNum uint64) error {
+	if (newRootNum < ccb.root.header.Number.Uint64()) || (newRootNum > ccb.Tip().Number.Uint64()) {
+		return errors.New("canonicalChainBuilder.Prune: newRootNum outside of the canonical chain")
 	}
 
-	newRoot := impl.tip
+	newRoot := ccb.tip
 	for newRoot.header.Number.Uint64() > newRootNum {
 		newRoot = newRoot.parent
 	}
+	ccb.root = newRoot
 
-	impl.root = newRoot
+	if ccb.spansCache != nil {
+		ccb.spansCache.Prune(newRootNum)
+	}
 	return nil
 }
 
-func (impl *canonicalChainBuilderImpl) updateTipIfNeeded(tipCandidate *forkTreeNode) {
-	if tipCandidate.totalDifficulty > impl.tip.totalDifficulty {
-		impl.tip = tipCandidate
+// compareForkTreeNodes compares 2 fork tree nodes.
+// It returns a positive number if the chain ending at node1 is "better" than the chain ending at node2.
+// The better node belongs to the canonical chain, and it has:
+// * a greater total difficulty,
+// * or a smaller block number,
+// * or a lexicographically greater hash.
+// See: https://github.com/maticnetwork/bor/blob/master/core/forkchoice.go#L82
+func compareForkTreeNodes(node1 *forkTreeNode, node2 *forkTreeNode) int {
+	difficultyDiff := int64(node1.totalDifficulty) - int64(node2.totalDifficulty)
+	if difficultyDiff != 0 {
+		return int(difficultyDiff)
 	}
-	// else if tipCandidate.totalDifficulty == impl.tip.totalDifficulty {
-	// TODO: is it possible? which one is selected?
-	// }
+	blockNumDiff := node1.header.Number.Cmp(node2.header.Number)
+	if blockNumDiff != 0 {
+		return -blockNumDiff
+	}
+	return bytes.Compare(node1.headerHash.Bytes(), node2.headerHash.Bytes())
 }
 
-func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
-	if (len(headers) > 0) && (headers[0].Number != nil) && (headers[0].Number.Cmp(impl.root.header.Number) == 0) {
+func (ccb *canonicalChainBuilder) updateTipIfNeeded(tipCandidate *forkTreeNode) {
+	if compareForkTreeNodes(tipCandidate, ccb.tip) > 0 {
+		ccb.tip = tipCandidate
+	}
+}
+
+func (ccb *canonicalChainBuilder) Connect(headers []*types.Header) error {
+	if (len(headers) > 0) && (headers[0].Number != nil) && (headers[0].Number.Cmp(ccb.root.header.Number) == 0) {
 		headers = headers[1:]
 	}
 	if len(headers) == 0 {
 		return nil
 	}
 
-	parent := impl.nodeByHash(headers[0].ParentHash)
+	parent := ccb.nodeByHash(headers[0].ParentHash)
 	if parent == nil {
-		return errors.New("canonicalChainBuilderImpl.Connect: can't connect headers")
+		return errors.New("canonicalChainBuilder.Connect: can't connect headers")
 	}
 
 	headersHashes := libcommon.SliceMap(headers, func(header *types.Header) libcommon.Hash {
@@ -165,7 +195,7 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 	// check if headers are linked by ParentHash
 	for i, header := range headers[1:] {
 		if header.ParentHash != headersHashes[i] {
-			return errors.New("canonicalChainBuilderImpl.Connect: invalid headers slice ParentHash")
+			return errors.New("canonicalChainBuilder.Connect: invalid headers slice ParentHash")
 		}
 	}
 
@@ -194,22 +224,19 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 
 	// attach nodes for the new headers
 	for i, header := range headers {
-		if (header.Number == nil) && (header.Number.Uint64() != parent.header.Number.Uint64()+1) {
-			return errors.New("canonicalChainBuilderImpl.Connect: invalid header.Number")
+		if (header.Number == nil) || (header.Number.Uint64() != parent.header.Number.Uint64()+1) {
+			return errors.New("canonicalChainBuilder.Connect: invalid header.Number")
 		}
 
-		// TODO: validate using CalcProducerDelay
-		if header.Time <= parent.header.Time {
-			return errors.New("canonicalChainBuilderImpl.Connect: invalid header.Time")
+		if ccb.headerValidator != nil {
+			if err := ccb.headerValidator.ValidateHeader(header, parent.header, time.Now()); err != nil {
+				return fmt.Errorf("canonicalChainBuilder.Connect: invalid header error %w", err)
+			}
 		}
 
-		if err := bor.ValidateHeaderExtraField(header.Extra); err != nil {
-			return fmt.Errorf("canonicalChainBuilderImpl.Connect: invalid header.Extra %w", err)
-		}
-
-		difficulty, err := impl.difficultyCalc.HeaderDifficulty(header)
+		difficulty, err := ccb.difficultyCalc.HeaderDifficulty(header)
 		if err != nil {
-			return fmt.Errorf("canonicalChainBuilderImpl.Connect: header difficulty error %w", err)
+			return fmt.Errorf("canonicalChainBuilder.Connect: header difficulty error %w", err)
 		}
 		if (header.Difficulty == nil) || (header.Difficulty.Uint64() != difficulty) {
 			return &bor.WrongDifficultyError{
@@ -222,7 +249,7 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 
 		slot := producerSlotIndex(difficulty)
 		if _, ok := parent.children[slot]; ok {
-			return errors.New("canonicalChainBuilderImpl.Connect: producer slot is already filled by a different header")
+			return errors.New("canonicalChainBuilder.Connect: producer slot is already filled by a different header")
 		}
 
 		node := &forkTreeNode{
@@ -237,7 +264,7 @@ func (impl *canonicalChainBuilderImpl) Connect(headers []*types.Header) error {
 
 		parent.children[slot] = node
 		parent = node
-		impl.updateTipIfNeeded(node)
+		ccb.updateTipIfNeeded(node)
 	}
 
 	return nil

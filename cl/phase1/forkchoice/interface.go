@@ -41,6 +41,10 @@ type ForkChoiceStorageReader interface {
 	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	ForkNodes() []ForkNode
+	Synced() bool
+	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
+	NewestLightClientUpdate() *cltypes.LightClientUpdate
+	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 }
 
 type ForkChoiceStorageWriter interface {
@@ -52,4 +56,5 @@ type ForkChoiceStorageWriter interface {
 	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
 	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error
 	OnTick(time uint64)
+	SetSynced(synced bool)
 }

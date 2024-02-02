@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -56,6 +57,7 @@ type EthereumExecutionModule struct {
 
 	// configuration
 	config    *chain.Config
+	syncCfg   ethconfig.Sync
 	historyV3 bool
 	// consensus
 	engine consensus.Engine
@@ -63,8 +65,14 @@ type EthereumExecutionModule struct {
 	execution.UnimplementedExecutionServer
 }
 
-func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB, executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
-	config *chain.Config, builderFunc builder.BlockBuilderFunc, hook *stages.Hook, accumulator *shards.Accumulator, stateChangeConsumer shards.StateChangeConsumer, logger log.Logger, engine consensus.Engine, historyV3 bool) *EthereumExecutionModule {
+func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB,
+	executionPipeline *stagedsync.Sync, forkValidator *engine_helpers.ForkValidator,
+	config *chain.Config, builderFunc builder.BlockBuilderFunc,
+	hook *stages.Hook, accumulator *shards.Accumulator,
+	stateChangeConsumer shards.StateChangeConsumer,
+	logger log.Logger, engine consensus.Engine,
+	historyV3 bool, syncCfg ethconfig.Sync,
+) *EthereumExecutionModule {
 	return &EthereumExecutionModule{
 		blockReader:         blockReader,
 		db:                  db,
@@ -79,6 +87,9 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		accumulator:         accumulator,
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
+
+		historyV3: historyV3,
+		syncCfg:   syncCfg,
 	}
 }
 
@@ -204,10 +215,14 @@ func (e *EthereumExecutionModule) ValidateChain(ctx context.Context, req *execut
 		e.logger.Warn("ethereumExecutionModule.ValidateChain: chain is invalid", "hash", libcommon.Hash(blockHash))
 		validationStatus = execution.ExecutionStatus_BadBlock
 	}
-	return &execution.ValidationReceipt{
+	validationReceipt := &execution.ValidationReceipt{
 		ValidationStatus: validationStatus,
 		LatestValidHash:  gointerfaces.ConvertHashToH256(lvh),
-	}, tx.Commit()
+	}
+	if validationError != nil {
+		validationReceipt.ValidationError = validationError.Error()
+	}
+	return validationReceipt, tx.Commit()
 }
 
 func (e *EthereumExecutionModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash libcommon.Hash) error {

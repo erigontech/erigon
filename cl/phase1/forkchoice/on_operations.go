@@ -6,7 +6,9 @@ import (
 	"fmt"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/pool"
@@ -20,6 +22,7 @@ import (
 func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error {
 	voluntaryExit := signedVoluntaryExit.VoluntaryExit
 	if f.operationsPool.VoluntaryExistsPool.Has(voluntaryExit.ValidatorIndex) {
+		f.emitters.Publish("voluntary_exit", voluntaryExit)
 		return nil
 	}
 	f.mu.Lock()
@@ -49,10 +52,18 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 	pk := val.PublicKey()
 	f.mu.Unlock()
 
-	domain, err := s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
+	domainType := f.beaconCfg.DomainVoluntaryExit
+	var domain []byte
+
+	if s.Version() < clparams.DenebVersion {
+		domain, err = s.GetDomain(domainType, voluntaryExit.Epoch)
+	} else if s.Version() >= clparams.DenebVersion {
+		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(s.BeaconConfig().CapellaForkVersion), s.GenesisValidatorsRoot())
+	}
 	if err != nil {
 		return err
 	}
+
 	signingRoot, err := fork.ComputeSigningRoot(voluntaryExit, domain)
 	if err != nil {
 		return err
@@ -66,6 +77,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 			return errors.New("ProcessVoluntaryExit: BLS verification failed")
 		}
 	}
+	f.emitters.Publish("voluntary_exit", voluntaryExit)
 	f.operationsPool.VoluntaryExistsPool.Insert(voluntaryExit.ValidatorIndex, signedVoluntaryExit)
 	return nil
 }
@@ -92,9 +104,9 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 
 	// Take lock as we interact with state.
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	headHash, _, err := f.getHead()
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	s, err := f.forkGraph.GetState(headHash, false)
@@ -104,11 +116,9 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 	}
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return fmt.Errorf("unable to retrieve state: %v", err)
 	}
 	if !proposer.IsSlashable(state.Epoch(s)) {
-		f.mu.Unlock()
 		return fmt.Errorf("proposer is not slashable: %v", proposer)
 	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconProposer, state.GetEpochAtSlot(s.BeaconConfig(), h1.Slot))
@@ -120,7 +130,6 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return fmt.Errorf("unable to get domain: %v", err)
 	}
 	pk := proposer.PublicKey()
-	f.mu.Unlock()
 	if test {
 		f.operationsPool.ProposerSlashingsPool.Insert(pool.ComputeKeyForProposerSlashing(proposerSlashing), proposerSlashing)
 		return nil
@@ -155,36 +164,33 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 
 func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error {
 	if f.operationsPool.BLSToExecutionChangesPool.Has(signedChange.Signature) {
+		f.emitters.Publish("bls_to_execution_change", signedChange)
 		return nil
 	}
 	change := signedChange.Message
 
 	// Take lock as we interact with state.
 	f.mu.Lock()
+	defer f.mu.Unlock()
 
 	headHash, _, err := f.getHead()
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return fmt.Errorf("unable to retrieve state: %v", err)
 	}
 	wc := validator.WithdrawalCredentials()
 
 	if wc[0] != f.beaconCfg.BLSWithdrawalPrefixByte {
-		f.mu.Unlock()
 		return fmt.Errorf("invalid withdrawal credentials prefix")
 	}
 	genesisValidatorRoot := s.GenesisValidatorsRoot()
-	f.mu.Unlock()
 	// Perform full validation if requested.
 	if !test {
 		// Check the validator's withdrawal credentials against the provided message.
@@ -212,5 +218,142 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 
 	f.operationsPool.BLSToExecutionChangesPool.Insert(signedChange.Signature, signedChange)
+
+	// emit bls_to_execution_change
+	f.emitters.Publish("bls_to_execution_change", signedChange)
+	return nil
+}
+
+func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.SignedContributionAndProof, test bool) error {
+	if f.operationsPool.SignedContributionAndProofPool.Has(signedChange.Signature) {
+		f.emitters.Publish("contribution_and_proof", signedChange)
+		return nil
+	}
+	// https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/p2p-interface.md#sync_committee_contribution_and_proof
+	contribution_and_proof := signedChange.Message
+	contribution := contribution_and_proof.Contribution
+
+	if contribution.SubcommitteeIndex() < f.beaconCfg.SyncCommitteeSubnetCount {
+		return fmt.Errorf("subcommitte index not in allowed range")
+	}
+	found := false
+	for _, v := range contribution.AggregationBits() {
+		if v != 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("contribution has no participants")
+	}
+
+	// Take lock as we interact with state.
+	f.mu.Lock()
+	next_slot_epoch := f.computeEpochAtSlot(f.Slot() + 1)
+	headHash, _, err := f.getHead()
+	if err != nil {
+		f.mu.Unlock()
+		return err
+	}
+	s, err := f.forkGraph.GetState(headHash, false)
+	if err != nil {
+		f.mu.Unlock()
+		return err
+	}
+
+	var sync_committee *solid.SyncCommittee
+	if f.computeSyncPeriod(f.computeEpochAtSlot(f.Slot())) == f.computeSyncPeriod(next_slot_epoch) {
+		sync_committee = s.CurrentSyncCommittee()
+	} else {
+		sync_committee = s.NextSyncCommittee()
+	}
+	sync_subcommitte_size := f.beaconCfg.SyncCommitteeSize / f.beaconCfg.SyncCommitteeSubnetCount
+	idx := contribution.SubcommitteeIndex() * sync_subcommitte_size
+	syncSubcommitteePubkeys := sync_committee.GetCommittee()[idx : idx+sync_subcommitte_size]
+	genesisValidatorRoot := s.GenesisValidatorsRoot()
+	declaredValidator := s.Validators().Get(int(contribution_and_proof.AggregatorIndex))
+	if contribution.Slot() == f.Slot() {
+		f.mu.Unlock()
+		return nil
+	}
+	f.mu.Unlock()
+
+	if !test {
+		found := false
+		for _, v := range syncSubcommitteePubkeys {
+			if v == declaredValidator.PublicKey() {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("aggregator validator index not in subcommittee")
+		}
+		// validate the contributionAndProof
+		committeeSignatureDomain, err := fork.ComputeDomain(f.beaconCfg.DomainContributionAndProof[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
+		if err != nil {
+			return err
+		}
+		// signing root
+		signedRootContributionAndProof, err := fork.ComputeSigningRoot(signedChange.Message, committeeSignatureDomain)
+		if err != nil {
+			return err
+		}
+		validContributionAndProof, err := bls.Verify(signedChange.Signature[:], signedRootContributionAndProof[:], declaredValidator.PublicKeyBytes())
+		if err != nil {
+			return err
+		}
+		if !validContributionAndProof {
+			return fmt.Errorf("invalid contribution signature signature")
+		}
+		// done validation contributionAndProof
+
+		// validate the contribution
+		contributionSignatureDomain, err := fork.ComputeDomain(f.beaconCfg.DomainSyncCommittee[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
+		if err != nil {
+			return err
+		}
+		// signing root
+		signedRootContribution, err := fork.ComputeSigningRoot(signedChange.Message, contributionSignatureDomain)
+		if err != nil {
+			return err
+		}
+		contibutionSig := contribution.Signature()
+		validContribution, err := bls.Verify(contibutionSig[:], signedRootContribution[:], declaredValidator.PublicKeyBytes())
+		if err != nil {
+			return err
+		}
+		if !validContribution {
+			return fmt.Errorf("invalid contribution signature signature")
+		}
+		// done validate the contribution
+
+		// validate the selection proof
+		selectionProofDomain, err := fork.ComputeDomain(f.beaconCfg.DomainSyncCommitteeSelectionProof[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
+		if err != nil {
+			return err
+		}
+		signedRootSelectionProof, err := fork.ComputeSigningRoot(&cltypes.SyncAggregatorSelectionData{
+			Slot:              contribution.Slot(),
+			SubcommitteeIndex: contribution.SubcommitteeIndex(),
+		}, selectionProofDomain)
+		if err != nil {
+			return err
+		}
+		validSelectionProof, err := bls.Verify(contribution_and_proof.SelectionProof[:], signedRootSelectionProof[:], declaredValidator.PublicKeyBytes())
+		if err != nil {
+			return err
+		}
+		if !validSelectionProof {
+			return fmt.Errorf("invalid contribution signature signature")
+		}
+		// done validation selection proof
+
+	}
+
+	f.operationsPool.SignedContributionAndProofPool.Insert(signedChange.Signature, signedChange)
+
+	// emit contribution_and_proof
+	f.emitters.Publish("contribution_and_proof", signedChange)
 	return nil
 }

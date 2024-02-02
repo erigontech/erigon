@@ -90,6 +90,8 @@ type BorConfig interface {
 	fmt.Stringer
 	IsAgra(num uint64) bool
 	GetAgraBlock() *big.Int
+	IsNapoli(num uint64) bool
+	GetNapoliBlock() *big.Int
 }
 
 func (c *Config) String() string {
@@ -214,6 +216,11 @@ func (c *Config) IsAgra(num uint64) bool {
 	return (c != nil) && (c.Bor != nil) && c.Bor.IsAgra(num)
 }
 
+// Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
+func (c *Config) IsNapoli(num uint64) bool {
+	return (c != nil) && (c.Bor != nil) && c.Bor.IsNapoli(num)
+}
+
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
 	return isForked(c.CancunTime, time)
@@ -233,28 +240,28 @@ func (c *Config) GetBurntContract(num uint64) *common.Address {
 }
 
 func (c *Config) GetMinBlobGasPrice() uint64 {
-	if c.MinBlobGasPrice != nil {
+	if c != nil && c.MinBlobGasPrice != nil {
 		return *c.MinBlobGasPrice
 	}
 	return 1 // MIN_BLOB_GASPRICE (EIP-4844)
 }
 
 func (c *Config) GetMaxBlobGasPerBlock() uint64 {
-	if c.MaxBlobGasPerBlock != nil {
+	if c != nil && c.MaxBlobGasPerBlock != nil {
 		return *c.MaxBlobGasPerBlock
 	}
 	return 786432 // MAX_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
 func (c *Config) GetTargetBlobGasPerBlock() uint64 {
-	if c.TargetBlobGasPerBlock != nil {
+	if c != nil && c.TargetBlobGasPerBlock != nil {
 		return *c.TargetBlobGasPerBlock
 	}
 	return 393216 // TARGET_BLOB_GAS_PER_BLOCK (EIP-4844)
 }
 
 func (c *Config) GetBlobGasPriceUpdateFraction() uint64 {
-	if c.BlobGasPriceUpdateFraction != nil {
+	if c != nil && c.BlobGasPriceUpdateFraction != nil {
 		return *c.BlobGasPriceUpdateFraction
 	}
 	return 3338477 // BLOB_GASPRICE_UPDATE_FRACTION (EIP-4844)
@@ -484,11 +491,13 @@ func borKeyValueConfigHelper[T uint64 | common.Address](field map[string]T, numb
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                 *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon       bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague      bool
-	IsAura                                                  bool
+	ChainID                                           *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
+	IsByzantium, IsConstantinople, IsPetersburg       bool
+	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
+	IsCancun, IsNapoli                                bool
+	IsPrague                                          bool
+	IsAura                                            bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -511,6 +520,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsLondon:           c.IsLondon(num),
 		IsShanghai:         c.IsShanghai(time) || c.IsAgra(num),
 		IsCancun:           c.IsCancun(time),
+		IsNapoli:           c.IsNapoli(num),
 		IsPrague:           c.IsPrague(time),
 		IsAura:             c.Aura != nil,
 	}
