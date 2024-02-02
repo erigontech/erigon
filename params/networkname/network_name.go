@@ -18,6 +18,7 @@ const (
 	HermezCardonaChainName         = "hermez-cardona"
 	HermezCardonaInternalChainName = "hermez-cardona-internal"
 	X1TestnetChainName             = "x1-testnet"
+	HermezEtrogChainName           = "hermez-etrog"
 )
 
 var All = []string{
@@ -34,6 +35,7 @@ var All = []string{
 	HermezLocalDevnetChainName,
 	HermezTestnetChainName,
 	HermezBlueberryChainName,
+	HermezEtrogChainName,
 	HermezCardonaChainName,
 	HermezCardonaInternalChainName,
 	X1TestnetChainName,

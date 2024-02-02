@@ -63,3 +63,33 @@ func WriteGlobalExitRoot(stateReader state.StateReader, stateWriter state.Writer
 
 	return nil
 }
+
+func WriteGlobalExitRootEtrog(stateWriter state.WriterWithChangeSets, ger common.Hash) error {
+	empty := common.Hash{}
+	if ger == empty {
+		return nil
+	}
+
+	//get Global Exit Root position
+	gerb := make([]byte, 32)
+	binary.BigEndian.PutUint64(gerb, GLOBAL_EXIT_ROOT_STORAGE_POS)
+
+	// concat global exit root and global_exit_root_storage_pos
+	rootPlusStorage := append(ger[:], gerb...)
+	globalExitRootPosBytes := keccak256.Hash(rootPlusStorage)
+	gerp := common.BytesToHash(globalExitRootPosBytes[:])
+
+	addr := common.HexToAddress(ADDRESS_GLOBAL_EXIT_ROOT_MANAGER_L2)
+
+	old := common.Hash{}.Big()
+	emptyUint256, _ := uint256.FromBig(old) // no need to check for overflow due to line above
+
+	zero := uint256.NewInt(0)
+
+	// write global exit root to state
+	if err := stateWriter.WriteAccountStorage(addr, uint64(1), &gerp, emptyUint256, zero); err != nil {
+		return err
+	}
+
+	return nil
+}

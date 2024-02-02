@@ -18,6 +18,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"bytes"
+	"io"
+	"math/big"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/chain"
@@ -43,8 +46,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	zktypes "github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/secp256k1"
-	"io"
-	"math/big"
 )
 
 const (

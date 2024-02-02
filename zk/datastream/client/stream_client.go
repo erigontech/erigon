@@ -23,6 +23,7 @@ type EntityDefinition struct {
 
 type StreamClient struct {
 	server     string // Server address to connect IP:port
+	version    int
 	streamType StreamType
 	conn       net.Conn
 	id         string            // Client id
@@ -36,7 +37,7 @@ type StreamClient struct {
 
 	// Channels
 	L2BlockChan    chan types.FullL2Block
-	GerUpdatesChan chan types.GerUpdate
+	GerUpdatesChan chan types.GerUpdate // NB: unused from etrog onwards (forkid 7)
 }
 
 const (
@@ -49,14 +50,18 @@ const (
 	PtData    = 2    // Data entry
 	PtResult  = 0xff // Not stored/present in file (just for client command result)
 
+	// Versions
+	PreBigEndianVersion = 1
+	BigEndianVersion    = 2
 )
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(server string) *StreamClient {
+func NewClient(server string, version int) *StreamClient {
 	// Create the client data stream
 	c := &StreamClient{
 		server:     server,
+		version:    version,
 		streamType: StSequencer,
 		id:         "",
 		entriesDefinition: map[types.EntryType]EntityDefinition{
@@ -156,7 +161,13 @@ func (c *StreamClient) ReadEntries(bookmark *types.Bookmark, l2BlocksAmount int)
 	}
 
 	// send start command
-	if err := c.initiateDownloadBookmark(bookmark.Encode()); err != nil {
+	var encodedBookmark []byte
+	if c.version == PreBigEndianVersion {
+		encodedBookmark = bookmark.Encode()
+	} else {
+		encodedBookmark = bookmark.EncodeBigEndian()
+	}
+	if err := c.initiateDownloadBookmark(encodedBookmark); err != nil {
 		return nil, nil, nil, 0, ErrBadBookmark
 	}
 
@@ -171,8 +182,14 @@ func (c *StreamClient) ReadEntries(bookmark *types.Bookmark, l2BlocksAmount int)
 // reads entries to the end of the stream
 // at end will wait for new entries to arrive
 func (c *StreamClient) ReadAllEntriesToChannel(bookmark *types.Bookmark) error {
+	var encodedBookmark []byte
+	if c.version == PreBigEndianVersion {
+		encodedBookmark = bookmark.Encode()
+	} else {
+		encodedBookmark = bookmark.EncodeBigEndian()
+	}
 	// send start command
-	if err := c.initiateDownloadBookmark(bookmark.Encode()); err != nil {
+	if err := c.initiateDownloadBookmark(encodedBookmark); err != nil {
 		return ErrBadBookmark
 	}
 
@@ -234,10 +251,12 @@ func (c *StreamClient) afterStartCommand() error {
 // reads all entries from the server and sends them to a channel
 // sends the parsed FullL2Blocks with transactions to a channel
 func (c *StreamClient) readAllFullL2BlocksToChannel() error {
+	var err error
 	for {
-		fullBlock, gerUpdates, _, _, _, err := c.readFullBlock()
-		if err != nil {
-			return fmt.Errorf("failed to read full block: %v", err)
+		fullBlock, gerUpdates, _, _, _, localErr := c.readFullBlock()
+		if localErr != nil {
+			err = localErr
+			break
 		}
 
 		if gerUpdates != nil {
@@ -251,7 +270,7 @@ func (c *StreamClient) readAllFullL2BlocksToChannel() error {
 	}
 
 	c.Streaming.Store(false)
-	return nil
+	return err
 }
 
 // reads a set amount of l2blocks from the server and returns them
@@ -292,7 +311,6 @@ func (c *StreamClient) readFullL2Blocks(l2BlocksAmount int) (*[]types.FullL2Bloc
 func (c *StreamClient) readFullBlock() (*types.FullL2Block, *[]types.GerUpdate, []byte, uint64, uint64, error) {
 	entriesRead := uint64(0)
 
-	// TODO: maybe parse it and return it if needed
 	file, err := c.readFileEntry()
 	if err != nil {
 		return nil, nil, []byte{}, 0, 0, fmt.Errorf("read file entry error: %v", err)
@@ -311,7 +329,13 @@ func (c *StreamClient) readFullBlock() (*types.FullL2Block, *[]types.GerUpdate, 
 		if file.IsBookmark() {
 			bookmark = file.Data
 		} else if file.IsGerUpdate() {
-			gerUpdate, err := types.DecodeGerUpdate(file.Data)
+			var gerUpdate *types.GerUpdate
+			var err error
+			if c.version == PreBigEndianVersion {
+				gerUpdate, err = types.DecodeGerUpdate(file.Data)
+			} else {
+				gerUpdate, err = types.DecodeGerUpdateBigEndian(file.Data)
+			}
 			if err != nil {
 				return nil, nil, []byte{}, 0, 0, fmt.Errorf("parse gerUpdate error: %v", err)
 			}
@@ -333,7 +357,12 @@ func (c *StreamClient) readFullBlock() (*types.FullL2Block, *[]types.GerUpdate, 
 	l2Txs := []types.L2Transaction{}
 	var endL2Block *types.EndL2Block
 	if file.IsBlockStart() {
-		startL2Block, err = types.DecodeStartL2Block(file.Data)
+		var err error
+		if c.version == PreBigEndianVersion {
+			startL2Block, err = types.DecodeStartL2Block(file.Data)
+		} else {
+			startL2Block, err = types.DecodeStartL2BlockBigEndian(file.Data)
+		}
 		if err != nil {
 			return nil, nil, []byte{}, 0, 0, fmt.Errorf("read start of block error: %v", err)
 		}
@@ -347,13 +376,24 @@ func (c *StreamClient) readFullBlock() (*types.FullL2Block, *[]types.GerUpdate, 
 			entriesRead++
 
 			if file.IsTx() {
-				l2Tx, err := types.DecodeL2Transaction(file.Data)
+				var l2Tx *types.L2Transaction
+				var err error
+				if c.version == PreBigEndianVersion {
+					l2Tx, err = types.DecodeL2Transaction(file.Data)
+				} else {
+					l2Tx, err = types.DecodeL2TransactionBigEndian(file.Data)
+				}
 				if err != nil {
 					return nil, nil, []byte{}, 0, 0, fmt.Errorf("parse l2Transaction error: %v", err)
 				}
 				l2Txs = append(l2Txs, *l2Tx)
 			} else if file.IsBlockEnd() {
-				endL2Block, err = types.DecodeEndL2Block(file.Data)
+				var err error
+				if c.version == PreBigEndianVersion {
+					endL2Block, err = types.DecodeEndL2Block(file.Data)
+				} else {
+					endL2Block, err = types.DecodeEndL2BlockBigEndian(file.Data)
+				}
 				if err != nil {
 					return nil, nil, []byte{}, 0, 0, fmt.Errorf("parse endL2Block error: %v", err)
 				}
@@ -430,10 +470,26 @@ func (c *StreamClient) readFileEntry() (*types.FileEntry, error) {
 // reads header bytes from socket and tries to parse them
 // returns the parsed HeaderEntry
 func (c *StreamClient) readHeaderEntry() (*types.HeaderEntry, error) {
+
 	// Read header stream bytes
-	binaryHeader, err := readBuffer(c.conn, types.HeaderSize)
+	binaryHeader, err := readBuffer(c.conn, types.HeaderSizePreEtrog)
 	if err != nil {
 		return &types.HeaderEntry{}, fmt.Errorf("failed to read header bytes %v", err)
+	}
+
+	var headLength uint32
+	if c.version == PreBigEndianVersion {
+		headLength = binary.LittleEndian.Uint32(binaryHeader[1:5])
+	} else {
+		headLength = binary.BigEndian.Uint32(binaryHeader[1:5])
+	}
+	if headLength == types.HeaderSize {
+		// Read the rest of fixed size fields
+		buffer, err := readBuffer(c.conn, types.HeaderSize-types.HeaderSizePreEtrog)
+		if err != nil {
+			return &types.HeaderEntry{}, fmt.Errorf("failed to read header bytes %v", err)
+		}
+		binaryHeader = append(binaryHeader, buffer...)
 	}
 
 	// Decode bytes stream to header entry struct

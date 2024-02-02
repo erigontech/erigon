@@ -26,3 +26,10 @@ func (b *Bookmark) Encode() []byte {
 	bytes = binary.LittleEndian.AppendUint64(bytes, b.From)
 	return bytes
 }
+
+func (b *Bookmark) EncodeBigEndian() []byte {
+	bytes := make([]byte, 0)
+	bytes = append(bytes, b.Type)
+	bytes = binary.BigEndian.AppendUint64(bytes, b.From)
+	return bytes
+}

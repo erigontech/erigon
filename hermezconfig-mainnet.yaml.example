@@ -7,13 +7,17 @@ zkevm.l2-sequencer-rpc-url: "https://zkevm-rpc.com"
 zkevm.l2-datastreamer-url: "stream.zkevm-rpc.com:6900"
 zkevm.l1-chain-id: 1
 zkevm.l1-rpc-url: "https://rpc.eth.gateway.fm/"
-zkevm.l1-contract-address: "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2"
-zkevm.l1-block-range: 20000
-zkevm.l1-query-delay: 6000
+zkevm.l1-polygon-rollup-manager: "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2"
+zkevm.l1-rollup: "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2"
 zkevm.l1-matic-contract-address: "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0"
 zkevm.l1-ger-manager-contract-address: "0x580bda1e7A0CFAe92Fa7F6c20A3794F169CE3CFb"
+zkevm.l1-topic-verification: "0xcb339b570a7f0b25afa7333371ff11192092a0aeace12b671f4c212f2815c6fe"
+zkevm.l1-topic-sequence: "0x303446e6a8cb73c83dff421c0b1d5e5ce0719dab1bff13660fc254e58cc17fce"
+zkevm.l1-block-range: 20000
+zkevm.l1-query-delay: 6000
 zkevm.l1-first-block: 16896700
 zkevm.rpc-ratelimit: 250
+zkevm.datastream-version: 1
 
 externalcl: true
 http.api : ["eth","debug","net","trace","web3","erigon","zkevm"]

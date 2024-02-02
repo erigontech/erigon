@@ -46,48 +46,38 @@ func NewHermezDb(tx kv.RwTx) (*HermezDb, error) {
 }
 
 func CreateHermezBuckets(tx kv.RwTx) error {
-	err := tx.CreateBucket(L1VERIFICATIONS)
-	if err != nil {
+	if err := tx.CreateBucket(L1VERIFICATIONS); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(L1SEQUENCES)
-	if err != nil {
+	if err := tx.CreateBucket(L1SEQUENCES); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(FORKIDS)
-	if err != nil {
+	if err := tx.CreateBucket(FORKIDS); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(FORKID_BLOCK)
-	if err != nil {
+	if err := tx.CreateBucket(FORKID_BLOCK); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(BLOCKBATCHES)
-	if err != nil {
+	if err := tx.CreateBucket(BLOCKBATCHES); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(GLOBAL_EXIT_ROOTS)
-	if err != nil {
+	if err := tx.CreateBucket(GLOBAL_EXIT_ROOTS); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(GLOBAL_EXIT_ROOTS_BATCHES)
-	if err != nil {
+	if err := tx.CreateBucket(GLOBAL_EXIT_ROOTS_BATCHES); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(TX_PRICE_PERCENTAGE)
-	if err != nil {
+	if err := tx.CreateBucket(TX_PRICE_PERCENTAGE); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(STATE_ROOTS)
-	if err != nil {
+	if err := tx.CreateBucket(STATE_ROOTS); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(L1_INFO_TREE_UPDATES)
-	if err != nil {
+
+	if err := tx.CreateBucket(L1_INFO_TREE_UPDATES); err != nil {
 		return err
 	}
-	err = tx.CreateBucket(BLOCK_L1_INFO_TREE_INDEX)
-	if err != nil {
+	if err := tx.CreateBucket(BLOCK_L1_INFO_TREE_INDEX); err != nil {
 		return err
 	}
 	return nil
@@ -232,12 +222,12 @@ func (db *HermezDbReader) getByL1Block(table string, l1BlockNo uint64) (*types.L
 		}
 
 		if l1Block == l1BlockNo {
-			if len(v) != 64 {
+			if len(v) != 96 && len(v) != 64 {
 				return nil, fmt.Errorf("invalid hash length")
 			}
 
 			l1TxHash := common.BytesToHash(v[:32])
-			stateRoot := common.BytesToHash(v[32:])
+			stateRoot := common.BytesToHash(v[32:64])
 
 			return &types.L1BatchInfo{
 				BatchNo:   batchNo,
@@ -270,18 +260,23 @@ func (db *HermezDbReader) getByBatchNo(table string, batchNo uint64) (*types.L1B
 		}
 
 		if batch == batchNo {
-			if len(v) != 64 {
+			if len(v) != 96 && len(v) != 64 {
 				return nil, fmt.Errorf("invalid hash length")
 			}
 
 			l1TxHash := common.BytesToHash(v[:32])
-			stateRoot := common.BytesToHash(v[32:])
+			stateRoot := common.BytesToHash(v[32:64])
+			var l1InfoRoot common.Hash
+			if len(v) > 64 {
+				l1InfoRoot = common.BytesToHash(v[64:])
+			}
 
 			return &types.L1BatchInfo{
-				BatchNo:   batchNo,
-				L1BlockNo: l1Block,
-				StateRoot: stateRoot,
-				L1TxHash:  l1TxHash,
+				BatchNo:    batchNo,
+				L1BlockNo:  l1Block,
+				StateRoot:  stateRoot,
+				L1TxHash:   l1TxHash,
+				L1InfoRoot: l1InfoRoot,
 			}, nil
 		}
 	}
@@ -314,23 +309,29 @@ func (db *HermezDbReader) getLatest(table string) (*types.L1BatchInfo, error) {
 		return nil, err
 	}
 
-	if len(v) != 64 {
+	if len(v) != 96 && len(v) != 64 {
 		return nil, fmt.Errorf("invalid hash length")
 	}
 
 	l1TxHash := common.BytesToHash(v[:32])
-	stateRoot := common.BytesToHash(v[32:])
+	stateRoot := common.BytesToHash(v[32:64])
+	var l1InfoRoot common.Hash
+	if len(v) > 64 {
+		l1InfoRoot = common.BytesToHash(v[64:])
+	}
 
 	return &types.L1BatchInfo{
-		BatchNo:   batchNo,
-		L1BlockNo: l1BlockNo,
-		L1TxHash:  l1TxHash,
-		StateRoot: stateRoot,
+		BatchNo:    batchNo,
+		L1BlockNo:  l1BlockNo,
+		L1TxHash:   l1TxHash,
+		StateRoot:  stateRoot,
+		L1InfoRoot: l1InfoRoot,
 	}, nil
 }
 
-func (db *HermezDb) WriteSequence(l1BlockNo, batchNo uint64, l1TxHash common.Hash, stateRoot common.Hash) error {
-	return db.tx.Put(L1SEQUENCES, ConcatKey(l1BlockNo, batchNo), append(l1TxHash.Bytes(), stateRoot.Bytes()...))
+func (db *HermezDb) WriteSequence(l1BlockNo, batchNo uint64, l1TxHash, stateRoot common.Hash) error {
+	val := append(l1TxHash.Bytes(), stateRoot.Bytes()...)
+	return db.tx.Put(L1SEQUENCES, ConcatKey(l1BlockNo, batchNo), val)
 }
 
 func (db *HermezDb) WriteVerification(l1BlockNo, batchNo uint64, l1TxHash common.Hash, stateRoot common.Hash) error {
@@ -341,19 +342,29 @@ func (db *HermezDb) WriteBlockBatch(l2BlockNo, batchNo uint64) error {
 	return db.tx.Put(BLOCKBATCHES, Uint64ToBytes(l2BlockNo), Uint64ToBytes(batchNo))
 }
 
-func (db *HermezDb) WriteBlockGlobalExitRoot(l2BlockNo uint64, ger common.Hash) error {
-	return db.tx.Put(GLOBAL_EXIT_ROOTS, Uint64ToBytes(l2BlockNo), ger.Bytes())
+func (db *HermezDb) WriteBlockGlobalExitRoot(l2BlockNo uint64, ger, l1BlockHash common.Hash) error {
+	key := ConcatGerKey(l2BlockNo, l1BlockHash)
+	return db.tx.Put(GLOBAL_EXIT_ROOTS, key, ger.Bytes())
 }
 
-func (db *HermezDbReader) GetBlockGlobalExitRoot(l2BlockNo uint64) (common.Hash, error) {
-	data, err := db.tx.GetOne(GLOBAL_EXIT_ROOTS, Uint64ToBytes(l2BlockNo))
+func (db *HermezDbReader) GetBlockGlobalExitRoot(l2BlockNo uint64) (common.Hash, common.Hash, error) {
+	var h common.Hash
+	var l1BlockHash common.Hash
+
+	blockNoBytes := Uint64ToBytes(l2BlockNo)
+	err := db.tx.ForPrefix(GLOBAL_EXIT_ROOTS, blockNoBytes, func(k, v []byte) error {
+		h = common.BytesToHash(v)
+		if len(k) == 40 {
+			l1BlockHash = common.BytesToHash(k[8:])
+		}
+		return nil
+	})
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, common.Hash{}, err
 	}
 
-	return common.BytesToHash(data), nil
+	return h, l1BlockHash, nil
 }
-
 func (db *HermezDb) WriteBatchGBatchGlobalExitRoot(batchNumber uint64, ger dstypes.GerUpdate) error {
 	return db.tx.Put(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(batchNumber), ger.EncodeToBytes())
 }

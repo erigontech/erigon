@@ -1,12 +1,12 @@
 package core
 
 import (
-	"math/big"
-	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/erigon/core/types"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
+	"math/big"
 )
 
 func HermezMainnetGenesisBlock() *types.Genesis {
@@ -36,6 +36,16 @@ func HermezBlueberryGenesisBlock() *types.Genesis {
 		GasLimit:   0x0,
 		Difficulty: big.NewInt(0x0),
 		Alloc:      readPrealloc("allocs/hermez-blueberry.json"),
+	}
+}
+
+func HermezEtrogGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HermezEtrogChainConfig,
+		Timestamp:  1703260380,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/hermez-etrog.json"),
 	}
 }
 

@@ -371,9 +371,24 @@ var (
 		Usage: "Ethereum L1 RPC endpoint",
 		Value: "",
 	}
-	L1ContractAddressFlag = cli.StringFlag{
-		Name:  "zkevm.l1-contract-address",
-		Usage: "Ethereum L1 contract address",
+	L1PolygonRollupManagerFlag = cli.StringFlag{
+		Name:  "zkevm.l1-polygon-rollup-manager",
+		Usage: "Ethereum L1 Polygon Rollup Manager Address",
+		Value: "",
+	}
+	L1RollupFlag = cli.StringFlag{
+		Name:  "zkevm.l1-rollup",
+		Usage: "Ethereum L1 Rollup Address",
+		Value: "",
+	}
+	L1TopicVerificationFlag = cli.StringFlag{
+		Name:  "zkevm.l1-topic-verification",
+		Usage: "Ethereum L1 topic for verification",
+		Value: "",
+	}
+	L1TopicSequenceFlag = cli.StringFlag{
+		Name:  "zkevm.l1-topic-sequence",
+		Usage: "Ethereum L1 topic for sequence",
 		Value: "",
 	}
 	L1BlockRangeFlag = cli.Uint64Flag{
@@ -411,6 +426,11 @@ var (
 		Name:  "zkevm.rpc-ratelimit",
 		Usage: "RPC rate limit in requests per second.",
 		Value: 0,
+	}
+	DatastreamVersionFlag = cli.IntFlag{
+		Name:  "zkevm.datastream-version",
+		Usage: "Stream version indicator 1: PreBigEndian, 2: BigEndian.",
+		Value: 1,
 	}
 	DataStreamPort = cli.UintFlag{
 		Name:  "zkevm.data-stream-port",

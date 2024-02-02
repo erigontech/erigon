@@ -1,13 +1,13 @@
 package core_test
 
 import (
-	"github.com/ledgerwatch/erigon/params"
-	"testing"
-	"github.com/stretchr/testify/require"
-	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/params/networkname"
+	"github.com/stretchr/testify/require"
+	"testing"
 )
 
 func TestHermezBlockRoots(t *testing.T) {
@@ -34,6 +34,14 @@ func TestHermezBlockRoots(t *testing.T) {
 		require.NoError(err)
 		if block.Root() != params.HermezBlueberryGenesisHash {
 			t.Errorf("wrong Hermez Testnet genesis state root, got %v, want %v", block.Root(), params.HermezTestnetGenesisHash)
+		}
+	})
+
+	t.Run("Hermez Etrog Testnet", func(t *testing.T) {
+		block, _, err := core.GenesisToBlock(core.HermezEtrogGenesisBlock(), "")
+		require.NoError(err)
+		if block.Root() != params.HermezEtrogGenesisHash {
+			t.Errorf("wrong Hermez Etrog Testnet genesis state root, got %v, want %v", block.Root(), params.HermezTestnetGenesisHash)
 		}
 	})
 

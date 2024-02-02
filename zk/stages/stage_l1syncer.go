@@ -8,6 +8,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"math/big"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
@@ -18,7 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/erigon/zk/types"
-	"math/big"
 )
 
 type IL1Syncer interface {

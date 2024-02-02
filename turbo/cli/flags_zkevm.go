@@ -1,12 +1,13 @@
 package cli
 
 import (
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/zk/sequencer"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/urfave/cli/v2"
 	"fmt"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/urfave/cli/v2"
 )
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -29,14 +30,18 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L2DataStreamerUrl:           ctx.String(utils.L2DataStreamerUrlFlag.Name),
 		L1ChainId:                   ctx.Uint64(utils.L1ChainIdFlag.Name),
 		L1RpcUrl:                    ctx.String(utils.L1RpcUrlFlag.Name),
-		L1ContractAddress:           libcommon.HexToAddress(ctx.String(utils.L1ContractAddressFlag.Name)),
+		L1PolygonRollupManager:      libcommon.HexToAddress(ctx.String(utils.L1PolygonRollupManagerFlag.Name)),
+		L1Rollup:                    libcommon.HexToAddress(ctx.String(utils.L1RollupFlag.Name)),
+		L1TopicVerification:         libcommon.HexToHash(ctx.String(utils.L1TopicVerificationFlag.Name)),
+		L1TopicSequence:             libcommon.HexToHash(ctx.String(utils.L1TopicSequenceFlag.Name)),
+		L1BlockRange:                ctx.Uint64(utils.L1BlockRangeFlag.Name),
+		L1QueryDelay:                ctx.Uint64(utils.L1QueryDelayFlag.Name),
 		L1MaticContractAddress:      libcommon.HexToAddress(ctx.String(utils.L1MaticContractAddressFlag.Name)),
 		L1GERManagerContractAddress: libcommon.HexToAddress(ctx.String(utils.L1GERManagerContractAddressFlag.Name)),
 		L1FirstBlock:                ctx.Uint64(utils.L1FirstBlockFlag.Name),
 		RpcRateLimits:               ctx.Int(utils.RpcRateLimitsFlag.Name),
+		DatastreamVersion:           ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:            ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
-		L1BlockRange:                ctx.Uint64(utils.L1BlockRangeFlag.Name),
-		L1QueryDelay:                ctx.Uint64(utils.L1QueryDelayFlag.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)
@@ -46,7 +51,10 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 	checkFlag(utils.L1ChainIdFlag.Name, cfg.Zk.L1ChainId)
 	checkFlag(utils.L1RpcUrlFlag.Name, cfg.Zk.L1RpcUrl)
-	checkFlag(utils.L1ContractAddressFlag.Name, cfg.Zk.L1ContractAddress.Hex())
+	checkFlag(utils.L1PolygonRollupManagerFlag.Name, cfg.Zk.L1PolygonRollupManager.Hex())
+	checkFlag(utils.L1RollupFlag.Name, cfg.Zk.L1Rollup.Hex())
+	checkFlag(utils.L1TopicVerificationFlag.Name, cfg.Zk.L1TopicVerification.Hex())
+	checkFlag(utils.L1TopicSequenceFlag.Name, cfg.Zk.L1TopicSequence.Hex())
 	checkFlag(utils.L1MaticContractAddressFlag.Name, cfg.Zk.L1MaticContractAddress.Hex())
 	checkFlag(utils.L1GERManagerContractAddressFlag.Name, cfg.Zk.L1GERManagerContractAddress.Hex())
 	checkFlag(utils.L1FirstBlockFlag.Name, cfg.Zk.L1FirstBlock)

@@ -35,7 +35,8 @@ type jobResult struct {
 }
 
 type L1Syncer struct {
-	em                IEtherman
+	em IEtherman
+
 	l1ContractAddress common.Address
 	topics            [][]common.Hash
 	blockRange        uint64

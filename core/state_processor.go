@@ -63,9 +63,6 @@ func applyTransaction(config *chain.Config, engine consensus.EngineReader, gp *G
 		txContext.TxHash = tx.Hash()
 	}
 
-	// [zkevm] - set txnum in magic account
-	ibs.ScalableSetTxNum()
-
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
 

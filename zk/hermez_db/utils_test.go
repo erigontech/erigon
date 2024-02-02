@@ -1,7 +1,9 @@
 package hermez_db
 
 import (
+	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"testing"
 )
 
@@ -47,4 +49,92 @@ func TestSplitKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestConcatGerKey(t *testing.T) {
+	tests := map[string]struct {
+		blockNo     uint64
+		l1BlockHash common.Hash
+		expected    []byte
+	}{
+		"Normal Case": {
+			blockNo:     12345,
+			l1BlockHash: common.HexToHash("0xbeef"),
+			expected:    append(Uint64ToBytes(12345), common.HexToHash("0xbeef").Bytes()...),
+		},
+		"Zero l1BlockHash": {
+			blockNo:     12345,
+			l1BlockHash: common.Hash{},
+			expected:    Uint64ToBytes(12345),
+		},
+		"Extreme Block Number": {
+			blockNo:     ^uint64(0),
+			l1BlockHash: common.HexToHash("0xbeef"),
+			expected:    append(Uint64ToBytes(^uint64(0)), common.HexToHash("0xbeef").Bytes()...),
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := ConcatGerKey(tt.blockNo, tt.l1BlockHash); !bytes.Equal(got, tt.expected) {
+				t.Errorf("ConcatGerKey() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSplitGerKey(t *testing.T) {
+	beefHash := common.HexToHash("0xbeef")
+
+	tests := map[string]struct {
+		input       []byte
+		wantBlockNo uint64
+		wantHash    *common.Hash
+		wantErr     bool
+	}{
+		"Normal Case 40 Bytes": {
+			input:       append(Uint64ToBytes(12345), common.HexToHash("0xbeef").Bytes()...),
+			wantBlockNo: 12345,
+			wantHash:    &beefHash,
+		},
+		"Normal Case 8 Bytes": {
+			input:       Uint64ToBytes(12345),
+			wantBlockNo: 12345,
+		},
+		"Incorrect Data Length": {
+			input:   []byte{0x00, 0x01},
+			wantErr: true,
+		},
+		"Extreme Block Number": {
+			input:       append(Uint64ToBytes(^uint64(0)), common.HexToHash("0xbeef").Bytes()...),
+			wantBlockNo: ^uint64(0), // max uint64
+			wantHash:    &beefHash,
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			gotBlockNo, gotHash, err := SplitGerKey(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("SplitGerKey() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotBlockNo != tt.wantBlockNo {
+				t.Errorf("SplitGerKey() gotBlockNo = %v, want %v", gotBlockNo, tt.wantBlockNo)
+			}
+			if !hashesEqual(gotHash, tt.wantHash) {
+				t.Errorf("SplitGerKey() gotHash = %v, want %v", gotHash, tt.wantHash)
+			}
+		})
+	}
+}
+
+func hashesEqual(a, b *common.Hash) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a != nil && b != nil {
+		return *a == *b
+	}
+	return false
 }

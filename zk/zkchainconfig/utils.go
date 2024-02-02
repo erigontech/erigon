@@ -7,6 +7,7 @@ var chainIds = []uint64{
 	1442,   // testnet
 	2440,   // cardona internal
 	2442,   // cardona
+	10010,  //etrog testnet
 	999999, // local devnet
 }
 

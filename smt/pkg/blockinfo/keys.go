@@ -2,10 +2,12 @@ package blockinfo
 
 import (
 	"errors"
-	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 )
 
+// SMT block header data leaf keys
 const IndexBlockHeaderParamBlockHash = 0
 const IndexBlockHeaderParamCoinbase = 1
 const IndexBlockHeaderParamNumber = 2
@@ -14,6 +16,9 @@ const IndexBlockHeaderParamTimestamp = 4
 const IndexBlockHeaderParamGer = 5
 const IndexBlockHeaderParamBlockHashL1 = 6
 const IndexBlockHeaderParamGasUsed = 7
+
+// SMT block header constant keys
+const IndexBlockHeaderParam = 7
 const IndexBlockHeaderTransactionHash = 8
 const IndexBlockHeaderStatus = 9
 const IndexBlockHeaderCumulativeGasUsed = 10
@@ -21,7 +26,7 @@ const IndexBlockHeaderLogs = 11
 const IndexBlockHeaderEffectivePercentage = 12
 
 func KeyBlockHeaderParams(paramKey *big.Int) (utils.NodeKey, error) {
-	return utils.KeyBig(paramKey, IndexBlockHeaderParamGasUsed)
+	return utils.KeyBig(paramKey, IndexBlockHeaderParam)
 }
 
 func KeyTxLogs(txIndex, logIndex *big.Int) (utils.NodeKey, error) {

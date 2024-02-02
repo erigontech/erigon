@@ -12,20 +12,26 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+
+	"math/big"
 
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/calltracer"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/eth/tracers/logger"
 	"github.com/ledgerwatch/erigon/ethdb"
 	"github.com/ledgerwatch/erigon/ethdb/olddb"
-	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	rawdbZk "github.com/ledgerwatch/erigon/zk/rawdb"
 	"github.com/ledgerwatch/erigon/zk/utils"
-	"math/big"
 )
 
 func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock uint64, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool, quiet bool) (err error) {
@@ -127,20 +133,6 @@ Loop:
 			break
 		}
 
-		//[zkevm] - get the last batch number so we can check for empty batches in between it and the new one
-		lastBatchInserted, err := hermezDb.GetBatchNoByL2Block(stageProgress - 1)
-		if err != nil {
-			return fmt.Errorf("failed to get last batch inserted: %v", err)
-		}
-
-		// write batches between last block and this if they exist
-		currentBatch, err := hermezDb.GetBatchNoByL2Block(blockNum)
-		if err != nil {
-			return err
-		}
-
-		gers := []*dstypes.GerUpdate{}
-
 		preExecuteHeaderHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
 		if err != nil {
 			return err
@@ -164,29 +156,6 @@ Loop:
 			continue
 		}
 
-		//[zkevm] get batches between last block and this one
-		// plus this blocks ger
-		gersInBetween, err := hermezDb.GetBatchGlobalExitRoots(lastBatchInserted, currentBatch)
-		if err != nil {
-			return err
-		}
-
-		if gersInBetween != nil {
-			gers = append(gers, gersInBetween...)
-		}
-
-		blockGer, err := hermezDb.GetBlockGlobalExitRoot(blockNum)
-		if err != nil {
-			return err
-		}
-
-		blockGerUpdate := dstypes.GerUpdate{
-			GlobalExitRoot: blockGer,
-			Timestamp:      header.Time,
-		}
-		gers = append(gers, &blockGerUpdate)
-		//[zkevm] finished getting gers
-
 		lastLogTx += uint64(block.Transactions().Len())
 
 		// Incremental move of next stages depend on fully written ChangeSets, Receipts, CallTraceSet
@@ -196,7 +165,7 @@ Loop:
 		if err = updateZkEVMBlockCfg(&cfg, hermezDb, logPrefix); err != nil {
 			return err
 		}
-		if err = executeBlock(block, header, tx, batch, gers, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
+		if err = executeBlockZk(block, header, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -327,6 +296,88 @@ Loop:
 		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	}
 	return stoppedErr
+}
+
+func executeBlockZk(
+	block *types.Block,
+	header *types.Header,
+	tx kv.RwTx,
+	batch ethdb.Database,
+	cfg ExecuteBlockCfg,
+	vmConfig vm.Config, // emit copy, because will modify it
+	writeChangesets bool,
+	writeReceipts bool,
+	writeCallTraces bool,
+	initialCycle bool,
+	stateStream bool,
+	roHermezDb state.ReadOnlyHermezDb,
+) error {
+	blockNum := block.NumberU64()
+
+	stateReader, stateWriter, err := newStateReaderWriter(batch, tx, block, writeChangesets, cfg.accumulator, initialCycle, stateStream)
+	if err != nil {
+		return err
+	}
+
+	// where the magic happens
+	getHeader := func(hash common.Hash, number uint64) *types.Header {
+		h, _ := cfg.blockReader.Header(context.Background(), tx, hash, number)
+		return h
+	}
+
+	getTracer := func(txIndex int, txHash common.Hash) (vm.EVMLogger, error) {
+		// return logger.NewJSONFileLogger(&logger.LogConfig{}, txHash.String()), nil
+		return logger.NewStructLogger(&logger.LogConfig{}), nil
+	}
+
+	callTracer := calltracer.NewCallTracer()
+	vmConfig.Debug = true
+	vmConfig.Tracer = callTracer
+
+	var receipts types.Receipts
+	var stateSyncReceipt *types.Receipt
+	var execRs *core.EphemeralExecResult
+	getHashFn := core.GetHashFn(block.Header(), getHeader)
+
+	execRs, err = core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, tx, roHermezDb)
+
+	if err != nil {
+		return err
+	}
+	receipts = execRs.Receipts
+	stateSyncReceipt = execRs.StateSyncReceipt
+
+	// [zkevm] - add in the state root to the receipts.  As we only have one tx per block
+	// for now just add the header root to the receipt
+	for _, r := range receipts {
+		r.PostState = header.Root.Bytes()
+	}
+
+	header.GasUsed = uint64(execRs.GasUsed)
+	header.ReceiptHash = types.DeriveSha(receipts)
+	header.Bloom = execRs.Bloom
+
+	if writeReceipts {
+		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+			return err
+		}
+
+		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
+			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
+				return err
+			}
+		}
+	}
+
+	if cfg.changeSetHook != nil {
+		if hasChangeSet, ok := stateWriter.(HasChangeSetWriter); ok {
+			cfg.changeSetHook(blockNum, hasChangeSet.ChangeSetWriter())
+		}
+	}
+	if writeCallTraces {
+		return callTracer.WriteToDb(tx, block, *cfg.vmConfig)
+	}
+	return nil
 }
 
 func UnwindExecutionStageZk(u *UnwindState, s *StageState, tx kv.RwTx, ctx context.Context, cfg ExecuteBlockCfg, initialCycle bool) (err error) {

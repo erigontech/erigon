@@ -728,7 +728,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			l1Topics := [][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.InitialSequenceBatchesTopic}}
 			zkL1Syncer := syncer.NewL1Syncer(
 				etherMan.EthClient,
-				cfg.L1ContractAddress,
+				cfg.L1PolygonRollupManager,
 				l1Topics,
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
@@ -772,7 +772,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			etherMan := newEtherMan(cfg)
 			zkL1Syncer := syncer.NewL1Syncer(
 				etherMan.EthClient,
-				cfg.L1ContractAddress,
+				cfg.L1PolygonRollupManager,
 				l1Topics,
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
@@ -811,7 +811,7 @@ func newEtherMan(cfg *ethconfig.Zk) *etherman.Client {
 	ethmanConf := etherman.Config{
 		URL:                       cfg.L1RpcUrl,
 		L1ChainID:                 cfg.L1ChainId,
-		PoEAddr:                   cfg.L1ContractAddress,
+		PoEAddr:                   cfg.L1PolygonRollupManager,
 		MaticAddr:                 cfg.L1MaticContractAddress,
 		GlobalExitRootManagerAddr: cfg.L1GERManagerContractAddress,
 	}
@@ -830,7 +830,7 @@ func initDataStreamClient(cfg *ethconfig.Zk) *client.StreamClient {
 	// Create client
 	log.Info("Starting datastream client...")
 	// retry connection
-	datastreamClient := client.NewClient(cfg.L2DataStreamerUrl)
+	datastreamClient := client.NewClient(cfg.L2DataStreamerUrl, cfg.DatastreamVersion)
 
 	for i := 0; i < 30; i++ {
 		// Start client (connect to the server)
