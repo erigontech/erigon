@@ -260,11 +260,7 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	return result, nil
 }
 
-func (r *RemoteBlockReader) LastEventID(_ kv.RwTx) (uint64, error) {
-	panic("not implemented")
-}
-
-func (r *RemoteBlockReader) LastFrozenEventID() uint64 {
+func (r *RemoteBlockReader) LastFrozenEventId() uint64 {
 	panic("not implemented")
 }
 
@@ -272,11 +268,11 @@ func (r *RemoteBlockReader) Span(_ context.Context, _ kv.Getter, _ uint64) ([]by
 	panic("not implemented")
 }
 
-func (r *RemoteBlockReader) LastSpanID(_ kv.RwTx) (uint64, bool, error) {
+func (r *RemoteBlockReader) LastSpanId(_ context.Context, _ kv.Tx) (uint64, bool, error) {
 	panic("not implemented")
 }
 
-func (r *RemoteBlockReader) LastFrozenSpanID() uint64 {
+func (r *RemoteBlockReader) LastFrozenSpanId() uint64 {
 	panic("not implemented")
 }
 
@@ -1193,32 +1189,34 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	return result, nil
 }
 
-func (r *BlockReader) LastEventID(tx kv.RwTx) (uint64, error) {
+func (r *BlockReader) LastEventId(_ context.Context, tx kv.Tx) (uint64, bool, error) {
 	cursor, err := tx.Cursor(kv.BorEvents)
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	defer cursor.Close()
 	k, _, err := cursor.Last()
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
 
 	var lastEventId uint64
+	var ok bool
 	if k != nil {
 		lastEventId = binary.BigEndian.Uint64(k)
+		ok = true
 	}
 
-	snapshotLastEventId := r.LastFrozenEventID()
+	snapshotLastEventId := r.LastFrozenEventId()
 	if snapshotLastEventId > lastEventId {
-		return snapshotLastEventId, nil
+		return snapshotLastEventId, true, nil
 	}
 
-	return lastEventId, nil
+	return lastEventId, ok, nil
 }
 
-func (r *BlockReader) LastFrozenEventID() uint64 {
+func (r *BlockReader) LastFrozenEventId() uint64 {
 	if r.borSn == nil {
 		return 0
 	}
@@ -1273,22 +1271,6 @@ func lastId(ctx context.Context, tx kv.Tx, db string) (uint64, bool, error) {
 	}
 
 	return last, ok, nil
-}
-
-func (r *BlockReader) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	lastSpanId, ok, err := lastId(ctx, tx, kv.BorSpans)
-
-	if err != nil {
-		return 0, false, err
-	}
-
-	snapshotLastSpanId := r.LastFrozenSpanId()
-
-	if snapshotLastSpanId > lastSpanId {
-		return snapshotLastSpanId, true, nil
-	}
-
-	return lastSpanId, ok, nil
 }
 
 func (r *BlockReader) LastFrozenSpanId() uint64 {
@@ -1371,7 +1353,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	return nil, fmt.Errorf("%w: %w", SpanNotFoundErr, err)
 }
 
-func (r *BlockReader) LastSpanID(tx kv.RwTx) (uint64, bool, error) {
+func (r *BlockReader) LastSpanId(_ context.Context, tx kv.Tx) (uint64, bool, error) {
 	sCursor, err := tx.Cursor(kv.BorSpans)
 	if err != nil {
 		return 0, false, err
@@ -1388,7 +1370,7 @@ func (r *BlockReader) LastSpanID(tx kv.RwTx) (uint64, bool, error) {
 		lastSpanId = binary.BigEndian.Uint64(k)
 	}
 
-	snapshotLastSpanId := r.LastFrozenSpanID()
+	snapshotLastSpanId := r.LastFrozenSpanId()
 	if snapshotLastSpanId > lastSpanId {
 		return snapshotLastSpanId, true, nil
 	}

@@ -294,11 +294,7 @@ func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bo
 	return back.blockReader.LastSpanId(ctx, tx)
 }
 
-func (back *RemoteBackend) LastEventID(_ kv.RwTx) (uint64, error) {
-	panic("not implemented")
-}
-
-func (back *RemoteBackend) LastFrozenEventID() uint64 {
+func (back *RemoteBackend) LastFrozenEventId() uint64 {
 	panic("not implemented")
 }
 
@@ -322,11 +318,7 @@ func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Getter, spanId uin
 	return nil, nil
 }
 
-func (back *RemoteBackend) LastSpanID(_ kv.RwTx) (uint64, bool, error) {
-	panic("not implemented")
-}
-
-func (back *RemoteBackend) LastFrozenSpanID() uint64 {
+func (back *RemoteBackend) LastFrozenSpanId() uint64 {
 	panic("not implemented")
 }
 
