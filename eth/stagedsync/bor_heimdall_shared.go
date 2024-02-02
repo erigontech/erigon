@@ -58,7 +58,7 @@ func fetchRequiredHeimdallSpansIfNeeded(
 ) (uint64, error) {
 	requiredSpanID := bor.SpanIDAt(toBlockNum)
 	if requiredSpanID == 0 && toBlockNum >= cfg.borConfig.CalculateSprintLength(toBlockNum) {
-		// when in span 0 we fetch the next span (span 1) at the beginning of the sprint 2 (block 16 or later)
+		// when in span 0 we fetch the next span (span 1) at the beginning of sprint 2 (block 16 or later)
 		requiredSpanID++
 	} else if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
 		// for subsequent spans, we always fetch the next span at the beginning of the last sprint of a span
