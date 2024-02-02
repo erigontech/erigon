@@ -32,12 +32,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/state"
-
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -57,7 +56,7 @@ type SnapshotsCfg struct {
 	dirs        datadir.Dirs
 
 	blockRetire        services.BlockRetire
-	snapshotDownloader proto_downloader.DownloaderClient
+	snapshotDownloader protodownloader.DownloaderClient
 	blockReader        services.FullBlockReader
 	notifier           *shards.Notifications
 
@@ -74,7 +73,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 	syncConfig ethconfig.Sync,
 	dirs datadir.Dirs,
 	blockRetire services.BlockRetire,
-	snapshotDownloader proto_downloader.DownloaderClient,
+	snapshotDownloader protodownloader.DownloaderClient,
 	blockReader services.FullBlockReader,
 	notifier *shards.Notifications,
 	historyV3 bool,
@@ -355,10 +354,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 
 		case stages.Bodies:
-			type LastTxNumProvider interface {
-				FirstTxNumNotInSnapshots() uint64
-			}
-			firstTxNum := blockReader.(LastTxNumProvider).FirstTxNumNotInSnapshots()
+			firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 			// ResetSequence - allow set arbitrary value to sequence (for example to decrement it to exact value)
 			if err := rawdb.ResetSequence(tx, kv.EthTx, firstTxNum); err != nil {
 				return err
@@ -373,10 +369,7 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 			}
 			if historyV3 {
 				_ = tx.ClearBucket(kv.MaxTxNum)
-				type IterBody interface {
-					IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
-				}
-				if err := blockReader.(IterBody).IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
+				if err := blockReader.IterateFrozenBodies(func(blockNum, baseTxNum, txAmount uint64) error {
 					select {
 					case <-ctx.Done():
 						return ctx.Err()
@@ -451,6 +444,11 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				minBlockNumber = cfg.snapshotUploader.minBlockNumber()
 			}
 
+			if initialCycle {
+				cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
+			} else {
+				cfg.blockRetire.SetWorkers(1)
+			}
 			cfg.blockRetire.RetireBlocksInBackground(ctx, minBlockNumber, s.ForwardProgress, log.LvlDebug, func(downloadRequest []services.DownloadRequest) error {
 				if cfg.snapshotDownloader != nil && !reflect.ValueOf(cfg.snapshotDownloader).IsNil() {
 					if err := snapshotsync.RequestSnapshotsDownload(ctx, downloadRequest, cfg.snapshotDownloader); err != nil {
@@ -465,7 +463,7 @@ func SnapshotsPrune(s *PruneState, initialCycle bool, cfg SnapshotsCfg, ctx cont
 				//}
 
 				if !(cfg.snapshotDownloader == nil || reflect.ValueOf(cfg.snapshotDownloader).IsNil()) {
-					_, err := cfg.snapshotDownloader.Delete(ctx, &proto_downloader.DeleteRequest{Paths: l})
+					_, err := cfg.snapshotDownloader.Delete(ctx, &protodownloader.DeleteRequest{Paths: l})
 					return err
 				}
 

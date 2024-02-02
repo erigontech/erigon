@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
@@ -11,7 +12,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/abstract"
 
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"

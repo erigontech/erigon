@@ -11,9 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
-	"github.com/ledgerwatch/erigon/polygon/heimdall"
-
 	"github.com/golang/mock/gomock"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -34,7 +31,9 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
@@ -49,18 +48,19 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 	borConsensusDB := memdb.NewTestDB(t)
 	ctrl := gomock.NewController(t)
 	heimdallClient := heimdall.NewMockHeimdallClient(ctrl)
+	miningState := stagedsync.NewProposingState(&ethconfig.Defaults.Miner)
 	bhCfg := stagedsync.StageBorHeimdallCfg(
 		chainDataDB,
 		borConsensusDB,
-		stagedsync.NewProposingState(&ethconfig.Defaults.Miner),
+		miningState,
 		*cfg.ChainConfig,
 		heimdallClient,
 		blockReader,
 		nil, // headerDownloader
 		nil, // penalize
-		nil, // not used
-		nil, // not used
-		nil,
+		nil, // loopBreakCheck
+		nil, // recent bor snapshots cached
+		nil, // signatures lru cache
 	)
 	stateSyncStages := stagedsync.DefaultStages(
 		ctx,
@@ -80,7 +80,29 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		stagedsync.FinishCfg{},
 		true,
 	)
-	stateSync := stagedsync.New(ethconfig.Defaults.Sync, stateSyncStages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
+	stateSync := stagedsync.New(
+		ethconfig.Defaults.Sync,
+		stateSyncStages,
+		stagedsync.DefaultUnwindOrder,
+		stagedsync.DefaultPruneOrder,
+		logger,
+	)
+	miningSyncStages := stagedsync.MiningStages(
+		ctx,
+		stagedsync.MiningCreateBlockCfg{},
+		bhCfg,
+		stagedsync.MiningExecCfg{},
+		stagedsync.HashStateCfg{},
+		stagedsync.TrieCfg{},
+		stagedsync.MiningFinishCfg{},
+	)
+	miningSync := stagedsync.New(
+		ethconfig.Defaults.Sync,
+		miningSyncStages,
+		stagedsync.MiningUnwindOrder,
+		stagedsync.MiningPruneOrder,
+		logger,
+	)
 	validatorKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	validatorAddress := crypto.PubkeyToAddress(validatorKey.PublicKey)
@@ -93,6 +115,9 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		blockReader:               blockReader,
 		stateSyncStages:           stateSyncStages,
 		stateSync:                 stateSync,
+		miningSyncStages:          miningSyncStages,
+		miningSync:                miningSync,
+		miningState:               miningState,
 		bhCfg:                     bhCfg,
 		heimdallClient:            heimdallClient,
 		heimdallProducersOverride: cfg.GetOrCreateDefaultHeimdallProducersOverride(),
@@ -145,9 +170,12 @@ type Harness struct {
 	blockReader                services.BlockReader
 	stateSyncStages            []*stagedsync.Stage
 	stateSync                  *stagedsync.Sync
+	miningSyncStages           []*stagedsync.Stage
+	miningSync                 *stagedsync.Sync
+	miningState                stagedsync.MiningState
 	bhCfg                      stagedsync.BorHeimdallCfg
 	heimdallClient             *heimdall.MockHeimdallClient
-	heimdallNextMockSpan       *heimdall.HeimdallSpan
+	heimdallNextMockSpan       *heimdall.Span
 	heimdallLastEventID        uint64
 	heimdallLastEventHeaderNum uint64
 	heimdallProducersOverride  map[uint64][]valset.Validator // spanID -> selected producers override
@@ -195,29 +223,68 @@ func (h *Harness) StateSyncUnwindReason() stagedsync.UnwindReason {
 	return h.stateSync.UnwindReason()
 }
 
-func (h *Harness) RunStageForward(t *testing.T, id stages.SyncStage) {
-	h.RunStageForwardWithErrorIs(t, id, nil)
+func (h *Harness) RunStateSyncStageForward(t *testing.T, id stages.SyncStage) {
+	h.RunStateSyncStageForwardWithErrorIs(t, id, nil)
 }
 
-func (h *Harness) RunStageForwardWithErrorIs(t *testing.T, id stages.SyncStage, wantErr error) {
-	err := h.RunStageForwardWithReturnError(t, id)
-	require.ErrorIs(t, err, wantErr)
+func (h *Harness) RunStateSyncStageForwardWithErrorIs(t *testing.T, id stages.SyncStage, wantErr error) {
+	h.runSyncStageForwardWithErrorIs(t, id, h.stateSync, h.stateSyncStages, wantErr, wrap.TxContainer{})
 }
 
-func (h *Harness) RunStageForwardWithReturnError(t *testing.T, id stages.SyncStage) error {
-	err := h.stateSync.SetCurrentStage(id)
+func (h *Harness) RunStateStageForwardWithReturnError(t *testing.T, id stages.SyncStage) error {
+	return h.runSyncStageForwardWithReturnError(t, id, h.stateSync, h.stateSyncStages, wrap.TxContainer{})
+}
+
+func (h *Harness) RunMiningStageForward(ctx context.Context, t *testing.T, id stages.SyncStage) {
+	h.RunMiningStageForwardWithErrorIs(ctx, t, id, nil)
+}
+
+func (h *Harness) RunMiningStageForwardWithErrorIs(ctx context.Context, t *testing.T, id stages.SyncStage, wantErr error) {
+	tx, err := h.chainDataDB.BeginRw(ctx)
 	require.NoError(t, err)
+	defer tx.Rollback()
 
-	stage, found := h.findStateSyncStageByID(id)
-	require.True(t, found)
+	txc := wrap.TxContainer{Tx: tx}
+	h.runSyncStageForwardWithErrorIs(t, id, h.miningSync, h.miningSyncStages, wantErr, txc)
 
-	stageState, err := h.stateSync.StageState(id, nil, h.chainDataDB)
+	err = tx.Commit()
 	require.NoError(t, err)
-
-	return stage.Forward(true, false, stageState, h.stateSync, wrap.TxContainer{}, h.logger)
 }
 
-func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.HeimdallSpan, err error) {
+func (h *Harness) RunMiningStageForwardWithReturnError(ctx context.Context, t *testing.T, id stages.SyncStage) error {
+	tx, err := h.chainDataDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	txc := wrap.TxContainer{Tx: tx}
+	err = h.runSyncStageForwardWithReturnError(t, id, h.miningSync, h.miningSyncStages, txc)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit()
+	require.NoError(t, err)
+	return nil
+}
+
+func (h *Harness) SaveHeader(ctx context.Context, t *testing.T, header *types.Header) {
+	h.saveHeaders(ctx, t, []*types.Header{header})
+}
+
+func (h *Harness) SetMiningBlockEmptyHeader(ctx context.Context, t *testing.T, parentNum uint64) {
+	tx, err := h.chainDataDB.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	parent := rawdb.ReadHeaderByNumber(tx, parentNum)
+	require.NotNil(t, parent)
+
+	timestamp := uint64(time.Now().Unix())
+	gasLimit := &h.miningState.MiningConfig.GasLimit
+	h.miningState.MiningBlock.Header = core.MakeEmptyHeader(parent, h.chainConfig, timestamp, gasLimit)
+}
+
+func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Span, err error) {
 	err = h.chainDataDB.View(ctx, func(tx kv.Tx) error {
 		spanIter, err := tx.Range(kv.BorSpans, nil, nil)
 		if err != nil {
@@ -230,14 +297,14 @@ func (h *Harness) ReadSpansFromDB(ctx context.Context) (spans []*heimdall.Heimda
 				return err
 			}
 
-			spanKey := binary.BigEndian.Uint64(keyBytes)
-			var heimdallSpan heimdall.HeimdallSpan
+			spanKey := heimdall.SpanId(binary.BigEndian.Uint64(keyBytes))
+			var heimdallSpan heimdall.Span
 			if err = json.Unmarshal(spanBytes, &heimdallSpan); err != nil {
 				return err
 			}
 
-			if spanKey != heimdallSpan.ID {
-				return fmt.Errorf("span key and id mismatch %d!=%d", spanKey, heimdallSpan.ID)
+			if spanKey != heimdallSpan.Id {
+				return fmt.Errorf("span key and id mismatch %d!=%d", spanKey, heimdallSpan.Id)
 			}
 
 			spans = append(spans, &heimdallSpan)
@@ -344,6 +411,10 @@ func createGenesisInitData(t *testing.T, chainConfig *chain.Config) *genesisInit
 }
 
 func (h *Harness) generateChain(ctx context.Context, t *testing.T, ctrl *gomock.Controller, cfg HarnessCfg) {
+	if cfg.GenerateChainNumBlocks == 0 {
+		return
+	}
+
 	consensusEngine := h.consensusEngine(t, cfg)
 	var parentBlock *types.Block
 	err := h.chainDataDB.View(ctx, func(tx kv.Tx) (err error) {
@@ -448,10 +519,6 @@ func (h *Harness) consensusEngine(t *testing.T, cfg HarnessCfg) consensus.Engine
 	return nil
 }
 
-func (h *Harness) SaveHeader(ctx context.Context, t *testing.T, header *types.Header) {
-	h.saveHeaders(ctx, t, []*types.Header{header})
-}
-
 func (h *Harness) saveHeaders(ctx context.Context, t *testing.T, headers []*types.Header) {
 	rwTx, err := h.chainDataDB.BeginRw(ctx)
 	require.NoError(t, err)
@@ -512,12 +579,10 @@ func (h *Harness) setHeimdallNextMockSpan() {
 		selectedProducers[i] = *validators[i]
 	}
 
-	h.heimdallNextMockSpan = &heimdall.HeimdallSpan{
-		Span: heimdall.Span{
-			ID:         0,
-			StartBlock: 0,
-			EndBlock:   255,
-		},
+	h.heimdallNextMockSpan = &heimdall.Span{
+		Id:                0,
+		StartBlock:        0,
+		EndBlock:          255,
 		ValidatorSet:      *validatorSet,
 		SelectedProducers: selectedProducers,
 	}
@@ -547,20 +612,18 @@ func (h *Harness) mockBorSpanner() {
 func (h *Harness) mockHeimdallClient() {
 	h.heimdallClient.
 		EXPECT().
-		Span(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, spanID uint64) (*heimdall.HeimdallSpan, error) {
+		FetchSpan(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 			res := h.heimdallNextMockSpan
-			h.heimdallNextMockSpan = &heimdall.HeimdallSpan{
-				Span: heimdall.Span{
-					ID:         res.ID + 1,
-					StartBlock: res.EndBlock + 1,
-					EndBlock:   res.EndBlock + 6400,
-				},
+			h.heimdallNextMockSpan = &heimdall.Span{
+				Id:                res.Id + 1,
+				StartBlock:        res.EndBlock + 1,
+				EndBlock:          res.EndBlock + 6400,
 				ValidatorSet:      res.ValidatorSet,
 				SelectedProducers: res.SelectedProducers,
 			}
 
-			if selectedProducers, ok := h.heimdallProducersOverride[res.ID]; ok {
+			if selectedProducers, ok := h.heimdallProducersOverride[uint64(res.Id)]; ok {
 				res.SelectedProducers = selectedProducers
 			}
 
@@ -570,10 +633,12 @@ func (h *Harness) mockHeimdallClient() {
 
 	h.heimdallClient.
 		EXPECT().
-		StateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ uint64, _ int64) ([]*heimdall.EventRecordWithTime, error) {
+		FetchStateSyncEvents(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, _ uint64, _ time.Time, _ int) ([]*heimdall.EventRecordWithTime, error) {
+			if h.heimdallLastEventID > 0 {
+				h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
+			}
 			h.heimdallLastEventID++
-			h.heimdallLastEventHeaderNum += h.borConfig.CalculateSprintLength(h.heimdallLastEventHeaderNum)
 			stateSyncDelay := h.borConfig.CalculateStateSyncDelay(h.heimdallLastEventHeaderNum)
 			newEvent := heimdall.EventRecordWithTime{
 				EventRecord: heimdall.EventRecord{
@@ -589,8 +654,39 @@ func (h *Harness) mockHeimdallClient() {
 		AnyTimes()
 }
 
-func (h *Harness) findStateSyncStageByID(id stages.SyncStage) (*stagedsync.Stage, bool) {
-	for _, s := range h.stateSyncStages {
+func (h *Harness) runSyncStageForwardWithErrorIs(
+	t *testing.T,
+	id stages.SyncStage,
+	sync *stagedsync.Sync,
+	syncStages []*stagedsync.Stage,
+	wantErr error,
+	txc wrap.TxContainer,
+) {
+	err := h.runSyncStageForwardWithReturnError(t, id, sync, syncStages, txc)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func (h *Harness) runSyncStageForwardWithReturnError(
+	t *testing.T,
+	id stages.SyncStage,
+	sync *stagedsync.Sync,
+	syncStages []*stagedsync.Stage,
+	txc wrap.TxContainer,
+) error {
+	err := sync.SetCurrentStage(id)
+	require.NoError(t, err)
+
+	stage, found := h.findSyncStageByID(id, syncStages)
+	require.True(t, found)
+
+	stageState, err := sync.StageState(id, txc.Tx, h.chainDataDB)
+	require.NoError(t, err)
+
+	return stage.Forward(true, false, stageState, sync, txc, h.logger)
+}
+
+func (h *Harness) findSyncStageByID(id stages.SyncStage, syncStages []*stagedsync.Stage) (*stagedsync.Stage, bool) {
+	for _, s := range syncStages {
 		if s.ID == id {
 			return s, true
 		}

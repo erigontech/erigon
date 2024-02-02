@@ -31,13 +31,13 @@ const MAX_REQUEST_BLOCKS = 96
 
 func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "beaconBlocksByRange", rateLimits.beaconBlocksByRangeLimit); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		return err
-	}
 
 	req := &cltypes.BeaconBlocksByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+		return err
+	}
+	if err := c.checkRateLimit(peerId, "beaconBlocksByRange", rateLimits.beaconBlocksByRangeLimit, int(req.Count)); err != nil {
+		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
 
@@ -95,13 +95,13 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 
 func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "beaconBlocksByRoot", rateLimits.beaconBlocksByRootLimit); err != nil {
-		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
-		return err
-	}
 
 	var req solid.HashListSSZ = solid.NewHashList(100)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.Phase0Version); err != nil {
+		return err
+	}
+	if err := c.checkRateLimit(peerId, "beaconBlocksByRoot", rateLimits.beaconBlocksByRootLimit, req.Length()); err != nil {
+		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
 
@@ -159,7 +159,7 @@ func (c *ConsensusHandlers) beaconBlocksByRootHandler(s network.Stream) error {
 		// Read block from DB
 		block := cltypes.NewSignedBeaconBlock(c.beaconConfig)
 
-		if err := ssz_snappy.DecodeAndReadNoForkDigest(r, block, clparams.Phase0Version); err != nil {
+		if err := ssz_snappy.DecodeAndReadNoForkDigest(r, block, block.Version()); err != nil {
 			return err
 		}
 		if err := ssz_snappy.EncodeAndWrite(s, block); err != nil {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +21,6 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -1294,9 +1294,8 @@ func NewBlockRetire(
 	}
 }
 
-func (br *BlockRetire) SetWorkers(workers int) {
-	br.workers = workers
-}
+func (br *BlockRetire) SetWorkers(workers int) { br.workers = workers }
+func (br *BlockRetire) GetWorkers() int        { return br.workers }
 
 func (br *BlockRetire) IO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return br.blockReader, br.blockWriter
@@ -1485,39 +1484,35 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
-		for br.blockReader.FrozenBorBlocks() < minBlockNum {
-			ok, err := br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		for br.blockReader.FrozenBorBlocks() < br.blockReader.FrozenBlocks() {
+			haveMore, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), br.blockReader.FrozenBlocks(), lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
-			if !ok {
+			if !haveMore {
 				break
 			}
 		}
 	}
 
-	var ok, okBor bool
+	var blockHaveMore, borHaveMore bool
 	for {
 		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
 			minBlockNum = frozen
 		}
 
-		ok, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		blockHaveMore, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
 
 		if includeBor {
-			okBor, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+			borHaveMore, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
 				return err
 			}
 		}
-		haveMore := ok || okBor
+		haveMore := blockHaveMore || borHaveMore
 		if !haveMore {
 			break
 		}
@@ -1613,7 +1608,7 @@ func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPe
 	}
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
+	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
 		lastTxNum, err := dumpBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger)
 		if err != nil {

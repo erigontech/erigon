@@ -769,76 +769,6 @@ func TestDomain_Delete(t *testing.T) {
 	}
 }
 
-func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[uint64][]bool) {
-	t.Helper()
-	db, d := testDbAndDomainOfStep(t, aggStep, logger)
-	ctx := context.Background()
-	tx, err := db.BeginRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-	dc := d.MakeContext()
-	defer dc.Close()
-	writer := dc.NewWriter()
-	defer writer.close()
-
-	// keys are encodings of numbers 1..31
-	// each key changes value on every txNum which is multiple of the key
-	dat := make(map[uint64][]bool) // K:V is key -> list of bools. If list[i] == true, i'th txNum should persists
-
-	var k [8]byte
-	var v [8]byte
-	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInColdFile
-	prev := map[string]string{}
-
-	// key 0: only in frozen file 0
-	// key 1: only in frozen file 1 and file 2
-	// key 2: in frozen file 2 and in warm files
-	// other keys: only in warm files
-	for txNum := uint64(1); txNum <= txCount; txNum++ {
-		writer.SetTxNum(txNum)
-		step := txNum / d.aggregationStep
-		frozenFileNum := step / 32
-		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
-			if frozenFileNum < maxFrozenFiles { // frozen data
-				allowInsert := (keyNum == 0 && frozenFileNum == 0) ||
-					(keyNum == 1 && (frozenFileNum == 1 || frozenFileNum == 2)) ||
-					(keyNum == 2 && frozenFileNum == 2)
-				if !allowInsert {
-					continue
-				}
-				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
-			} else { //warm data
-				if keyNum == 0 || keyNum == 1 {
-					continue
-				}
-				if keyNum == txNum%d.aggregationStep {
-					continue
-				}
-				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
-			}
-
-			binary.BigEndian.PutUint64(k[:], keyNum)
-			binary.BigEndian.PutUint64(v[:], txNum)
-			//v[0] = 3 // value marker
-			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]), 0)
-			require.NoError(t, err)
-			if _, ok := dat[keyNum]; !ok {
-				dat[keyNum] = make([]bool, txCount+1)
-			}
-			dat[keyNum][txNum] = true
-
-			prev[string(k[:])] = string(v[:])
-		}
-		if txNum%d.aggregationStep == 0 {
-			err = writer.Flush(ctx, tx)
-			require.NoError(t, err)
-		}
-	}
-	err = tx.Commit()
-	require.NoError(t, err)
-	return db, d, dat
-}
-
 // firstly we write all the data to domain
 // then we collate-merge-prune
 // then check.
@@ -1386,6 +1316,77 @@ type upd struct {
 	value []byte
 }
 
+func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, logger log.Logger) (kv.RwDB, *Domain, map[uint64][]bool) {
+	t.Helper()
+	db, d := testDbAndDomainOfStep(t, aggStep, logger)
+	ctx := context.Background()
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	dc := d.MakeContext()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	// keys are encodings of numbers 1..31
+	// each key changes value on every txNum which is multiple of the key
+	dat := make(map[uint64][]bool) // K:V is key -> list of bools. If list[i] == true, i'th txNum should persists
+
+	var k [8]byte
+	var v [8]byte
+	maxFrozenFiles := (txCount / d.aggregationStep) / StepsInColdFile
+	prev := map[string]string{}
+
+	// key 0: only in frozen file 0
+	// key 1: only in frozen file 1 and file 2
+	// key 2: in frozen file 2 and in warm files
+	// other keys: only in warm files
+	for txNum := uint64(1); txNum <= txCount; txNum++ {
+		writer.SetTxNum(txNum)
+		step := txNum / d.aggregationStep
+		frozenFileNum := step / 32
+		for keyNum := uint64(0); keyNum < keysCount; keyNum++ {
+			if frozenFileNum < maxFrozenFiles { // frozen data
+				allowInsert := (keyNum == 0 && frozenFileNum == 0) ||
+					(keyNum == 1 && (frozenFileNum == 1 || frozenFileNum == 2)) ||
+					(keyNum == 2 && frozenFileNum == 2)
+				if !allowInsert {
+					continue
+				}
+				//fmt.Printf("put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
+			} else { //warm data
+				if keyNum == 0 || keyNum == 1 {
+					continue
+				}
+				if keyNum == txNum%d.aggregationStep {
+					continue
+				}
+				//fmt.Printf("put: %d, step=%d\n", keyNum, step)
+			}
+
+			binary.BigEndian.PutUint64(k[:], keyNum)
+			binary.BigEndian.PutUint64(v[:], txNum)
+			//v[0] = 3 // value marker
+			err = writer.PutWithPrev(k[:], nil, v[:], []byte(prev[string(k[:])]), 0)
+			require.NoError(t, err)
+			if _, ok := dat[keyNum]; !ok {
+				dat[keyNum] = make([]bool, txCount+1)
+			}
+			dat[keyNum][txNum] = true
+
+			prev[string(k[:])] = string(v[:])
+		}
+		if txNum%d.aggregationStep == 0 {
+			err = writer.Flush(ctx, tx)
+			require.NoError(t, err)
+		}
+	}
+	err = tx.Commit()
+	require.NoError(t, err)
+	return db, d, dat
+}
+
+// generate arbitrary values for arbitrary keys within given totalTx
 func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
 	tb.Helper()
 
@@ -1412,9 +1413,14 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 }
 
 func generateRandomKey(r *rand.Rand, size uint64) string {
+	return string(generateRandomKeyBytes(r, size))
+}
+
+func generateRandomKeyBytes(r *rand.Rand, size uint64) []byte {
 	key := make([]byte, size)
 	r.Read(key)
-	return string(key)
+
+	return key
 }
 
 func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {

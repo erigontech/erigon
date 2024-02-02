@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/c2h5oh/datasize"
@@ -18,7 +20,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/ledgerwatch/secp256k1"
 	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 
@@ -27,7 +28,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/turbo/builder"
-	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/sync/errgroup"
 
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
@@ -857,11 +856,11 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 
 			snapshotsMaxBlock := borSn.BlocksAvailable()
 			if unwind <= snapshotsMaxBlock {
-				return fmt.Errorf(fmt.Sprintf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock))
+				return fmt.Errorf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock)
 			}
 
 			if unwind > stageState.BlockNumber {
-				return fmt.Errorf(fmt.Sprintf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber))
+				return fmt.Errorf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber)
 			}
 
 			unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber)

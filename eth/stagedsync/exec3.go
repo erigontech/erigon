@@ -155,21 +155,23 @@ func ExecV3(ctx context.Context,
 	chainConfig, genesis := cfg.chainConfig, cfg.genesis
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
-	applyTx := txc.Tx
-	useExternalTx := applyTx != nil
-	if !useExternalTx {
+	if initialCycle {
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		defer agg.SetCompressWorkers(1)
 		agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
-		defer agg.SetCollateAndBuildWorkers(1)
-
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
 		if err := agg.BuildMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
+	} else {
+		agg.SetCompressWorkers(1)
+		agg.SetCollateAndBuildWorkers(1)
+	}
 
+	applyTx := txc.Tx
+	useExternalTx := applyTx != nil
+	if !useExternalTx {
 		if !parallel {
 			var err error
 			applyTx, err = chainDb.BeginRw(ctx) //nolint
@@ -933,7 +935,7 @@ Loop:
 				}
 				logger.Info("Committed", "time", time.Since(commitStart),
 					"block", doms.BlockNum(), "txNum", doms.TxNum(),
-					"step", stepsInDB,
+					"step", fmt.Sprintf("%.1f", float64(doms.TxNum())/float64(agg.StepSize())),
 					"flush+commitment", t1, "tx.commit", t2, "prune", t3, "warmup", t4)
 			default:
 			}
@@ -977,6 +979,11 @@ Loop:
 			return err
 		}
 	}
+
+	if blocksFreezeCfg.Produce {
+		agg.BuildFilesInBackground(outputTxNum.Load())
+	}
+
 	return nil
 }
 

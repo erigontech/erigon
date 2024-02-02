@@ -2,12 +2,14 @@ package forkchoice
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -16,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -488,4 +489,16 @@ func (f *ForkChoiceStore) SetSynced(s bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.synced.Store(s)
+}
+
+func (f *ForkChoiceStore) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {
+	return f.forkGraph.GetLightClientBootstrap(blockRoot)
+}
+
+func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
+	return f.forkGraph.NewestLightClientUpdate()
+}
+
+func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+	return f.forkGraph.GetLightClientUpdate(period)
 }

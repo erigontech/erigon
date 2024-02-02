@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
 
-var ErrTokenIndexOutOfRange = errors.New("Index is grater than the number of tokens in transaction")
+var ErrTokenIndexOutOfRange = errors.New("index is grater than the number of tokens in transaction")
 
 type ProofGenerator struct {
 	heimdall *Heimdall

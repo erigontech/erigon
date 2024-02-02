@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -22,7 +23,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
-	"golang.org/x/exp/slices"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
