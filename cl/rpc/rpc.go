@@ -62,6 +62,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		Topic: topic,
 	})
 	if err != nil {
+		fmt.Println(err)
 		return nil, "", err
 	}
 	if message.Error {
