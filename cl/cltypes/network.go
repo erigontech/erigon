@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
@@ -55,6 +56,41 @@ func (p *Ping) EncodingSizeSSZ() int {
 func (p *Ping) DecodeSSZ(buf []byte, _ int) error {
 	p.Id = ssz.UnmarshalUint64SSZ(buf)
 	return nil
+}
+
+// Root is a SSZ wrapper around a Hash
+type Root struct {
+	Root libcommon.Hash
+}
+
+func (r *Root) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, r.Root[:]...), nil
+}
+
+func (r *Root) DecodeSSZ(buf []byte, _ int) error {
+	copy(r.Root[:], buf)
+	return nil
+}
+
+func (r *Root) EncodingSizeSSZ() int {
+	return 32
+}
+
+type LightClientUpdatesByRangeRequest struct {
+	StartPeriod uint64
+	Count       uint64
+}
+
+func (l *LightClientUpdatesByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, &l.StartPeriod, &l.Count)
+}
+
+func (l *LightClientUpdatesByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
+	return ssz2.UnmarshalSSZ(buf, 0, &l.StartPeriod, &l.Count)
+}
+
+func (l *LightClientUpdatesByRangeRequest) EncodingSizeSSZ() int {
+	return 16
 }
 
 /*
