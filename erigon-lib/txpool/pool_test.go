@@ -1117,3 +1117,76 @@ func TestBlobSlots(t *testing.T) {
 		assert.Equal(txpoolcfg.BlobPoolOverflow, reason, reason.String())
 	}
 }
+
+func TestGasLimitChanged(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan types.Announcements, 100)
+	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
+
+	cfg := txpoolcfg.DefaultConfig
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, nil, nil, nil, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	assert.NoError(err)
+	require.True(pool != nil)
+	ctx := context.Background()
+	var stateVersionID uint64 = 0
+	pendingBaseFee := uint64(200000)
+	// start blocks from 0, set empty hash - then kvcache will also work on this
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	var addr [20]byte
+	addr[0] = 1
+	v := make([]byte, types.EncodeSenderLengthForStorage(2, *uint256.NewInt(1 * common.Ether)))
+	types.EncodeSender(2, *uint256.NewInt(1 * common.Ether), v)
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+
+	change := &remote.StateChangeBatch{
+		StateVersionId:      stateVersionID,
+		PendingBlockBaseFee: pendingBaseFee,
+		BlockGasLimit:       50_000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+		Action:  remote.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    v,
+	})
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
+	assert.NoError(err)
+
+	var txSlots types.TxSlots
+	txSlot1 := &types.TxSlot{
+		Tip:    *uint256.NewInt(300000),
+		FeeCap: *uint256.NewInt(300000),
+		Gas:    100_000,
+		Nonce:  3,
+	}
+	txSlot1.IDHash[0] = 1
+	txSlots.Append(txSlot1, addr[:], true)
+
+	reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+	assert.NoError(err)
+	for _, reason := range reasons {
+		assert.Equal(txpoolcfg.Success, reason, reason.String())
+	}
+
+	mtx, ok := pool.byHash[string(txSlot1.IDHash[:])]
+	assert.True(ok)
+	assert.Zero(mtx.subPool&NotTooMuchGas, "Should be insufficient block space for the tx")
+
+	change.ChangeBatch[0].Changes = nil
+	change.BlockGasLimit = 150_000
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
+	assert.NoError(err)
+
+	assert.NotZero(mtx.subPool&NotTooMuchGas, "Should now have block space for the tx")
+
+	change.BlockGasLimit = 50_000
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
+	assert.NoError(err)
+
+	assert.Zero(mtx.subPool&NotTooMuchGas, "Should now have block space (again) for the tx")
+}
