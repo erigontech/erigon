@@ -412,10 +412,14 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 		}
 	}
 
-	total := len(accChanges) + len(codeChanges) + len(storageChanges)
+	storageTotal := 0
+	for _, v := range storageChanges {
+		storageTotal += len(v)
+	}
+
+	total := len(accChanges) + len(codeChanges) + storageTotal
 
 	progressChan, stopProgressPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress inserting values", logPrefix), uint64(total))
-
 	// update the tree
 	for addr, acc := range accChanges {
 		if err := updateAccInTree(dbSmt, addr, acc); err != nil {
@@ -434,11 +438,10 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 	}
 
 	for addr, storage := range storageChanges {
-		if _, err := dbSmt.SetContractStorage(addr.String(), storage); err != nil {
+		if _, err := dbSmt.SetContractStorage(addr.String(), storage, progressChan); err != nil {
 			stopProgressPrinter()
 			return trie.EmptyRoot, err
 		}
-		progressChan <- 1
 	}
 	stopProgressPrinter()
 
@@ -592,7 +595,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 		}
 
 		for addr, storage := range storageChanges {
-			if _, err := dbSmt.SetContractStorage(addr.String(), storage); err != nil {
+			if _, err := dbSmt.SetContractStorage(addr.String(), storage, nil); err != nil {
 				return trie.EmptyRoot, err
 			}
 		}

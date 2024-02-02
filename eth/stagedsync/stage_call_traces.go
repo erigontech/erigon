@@ -47,6 +47,10 @@ func StageCallTracesCfg(
 }
 
 func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.Context) error {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -62,11 +66,11 @@ func SpawnCallTraces(s *StageState, tx kv.RwTx, cfg CallTracesCfg, ctx context.C
 	if cfg.ToBlock > 0 && cfg.ToBlock < endBlock {
 		endBlock = cfg.ToBlock
 	}
-	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	if endBlock == s.BlockNumber {
+		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
 		return nil
 	}
 

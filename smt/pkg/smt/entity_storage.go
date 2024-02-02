@@ -111,7 +111,7 @@ func (s *SMT) SetContractBytecode(ethAddr string, bytecode string) error {
 	return err
 }
 
-func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string) (*big.Int, error) {
+func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string, progressChan chan uint64) (*big.Int, error) {
 	storageKeys := make([]string, len(storage))
 	ii := 0
 	for k := range storage {
@@ -201,7 +201,7 @@ func (s *SMT) SetContractStorage(ethAddr string, storage map[string]string) (*bi
 		}
 	}
 
-	auxRes, err := s.InsertStorage(ethAddr, &storage, &chm, &vhm)
+	auxRes, err := s.InsertStorage(ethAddr, &storage, &chm, &vhm, progressChan)
 	if err != nil {
 		return nil, err
 	}

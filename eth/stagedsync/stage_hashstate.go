@@ -50,6 +50,12 @@ func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool, agg *state
 }
 
 func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx context.Context, quiet bool) error {
+	logPrefix := s.LogPrefix()
+	if !quiet {
+		log.Info(fmt.Sprintf("[%s] Started", logPrefix))
+		defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
+	}
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -60,7 +66,6 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 		defer tx.Rollback()
 	}
 
-	logPrefix := s.LogPrefix()
 	to, err := s.ExecutionAt(tx)
 	if err != nil {
 		return err
@@ -69,6 +74,9 @@ func SpawnHashStateStage(s *StageState, tx kv.RwTx, cfg HashStateCfg, ctx contex
 	if s.BlockNumber == to {
 		// we already did hash check for this block
 		// we don't do the obvious `if s.BlockNumber > to` to support reorgs more naturally
+		if !quiet {
+			log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
+		}
 		return nil
 	}
 	if s.BlockNumber > to {

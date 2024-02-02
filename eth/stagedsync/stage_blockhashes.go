@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
@@ -37,6 +38,10 @@ func StageBlockHashesCfg(db kv.RwDB, tmpDir string, cc *chain.Config) BlockHashe
 }
 
 func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx context.Context) (err error) {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Etl transform started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Etl transform ended", logPrefix))
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		tx, err = cfg.db.BeginRw(ctx)
@@ -51,6 +56,8 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 		return fmt.Errorf("getting headers progress: %w", err)
 	}
 	if s.BlockNumber == headNumber {
+		log.Info(fmt.Sprintf("[%s] Nothing new to transform", logPrefix))
+
 		return nil
 	}
 
@@ -59,7 +66,6 @@ func SpawnBlockHashStage(s *StageState, tx kv.RwTx, cfg BlockHashesCfg, ctx cont
 	endKey := dbutils.HeaderKey(headNumber+1, libcommon.Hash{}) // etl.Tranform uses ExractEndKey as exclusive bound, therefore +1
 
 	//todo do we need non canonical headers ?
-	logPrefix := s.LogPrefix()
 	if err := etl.Transform(
 		logPrefix,
 		tx,

@@ -44,6 +44,7 @@ func SpawnStageDataStreamCatchup(
 
 	if stream == nil {
 		// skip the stage if there is no streamer provided
+		log.Info(fmt.Sprintf("[%s]: no streamer provided, skipping stage", logPrefix))
 		return nil
 	}
 

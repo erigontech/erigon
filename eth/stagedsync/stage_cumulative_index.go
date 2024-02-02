@@ -15,8 +15,8 @@ import (
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type CumulativeIndexCfg struct {
@@ -30,6 +30,10 @@ func StageCumulativeIndexCfg(db kv.RwDB) CumulativeIndexCfg {
 }
 
 func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx, ctx context.Context) error {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
+
 	useExternalTx := tx != nil
 
 	if !useExternalTx {
@@ -50,6 +54,7 @@ func SpawnStageCumulativeIndex(cfg CumulativeIndexCfg, s *StageState, tx kv.RwTx
 	}
 	// If we are done already, we can exit the stage
 	if s.BlockNumber == headNumber {
+		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
 		return nil
 	}
 

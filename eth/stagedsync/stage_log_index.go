@@ -49,6 +49,10 @@ func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string) LogIndexCfg {
 }
 
 func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Context, prematureEndBlock uint64) error {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -60,7 +64,6 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	endBlock, err := s.ExecutionAt(tx)
-	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
@@ -73,6 +76,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	// in which case it is important that we skip this stage,
 	// or else we could overwrite stage_at with prematureEndBlock
 	if endBlock <= s.BlockNumber {
+		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
 		return nil
 	}
 

@@ -48,6 +48,10 @@ func StageHistoryCfg(db kv.RwDB, prune prune.Mode, tmpDir string) HistoryCfg {
 }
 
 func SpawnAccountHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) error {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -60,11 +64,12 @@ func SpawnAccountHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	quitCh := ctx.Done()
 
 	endBlock, err := s.ExecutionAt(tx)
-	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf(" getting last executed block: %w", err)
 	}
 	if endBlock <= s.BlockNumber {
+		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
+
 		return nil
 	}
 
@@ -96,6 +101,10 @@ func SpawnAccountHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 }
 
 func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx context.Context) error {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -108,11 +117,11 @@ func SpawnStorageHistoryIndex(s *StageState, tx kv.RwTx, cfg HistoryCfg, ctx con
 	quitCh := ctx.Done()
 
 	executionAt, err := s.ExecutionAt(tx)
-	logPrefix := s.LogPrefix()
 	if err != nil {
 		return fmt.Errorf("getting last executed block: %w", err)
 	}
 	if executionAt <= s.BlockNumber {
+		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
 		return nil
 	}
 

@@ -76,7 +76,7 @@ func prepareSMT(t *testing.T) (*SMT, *trie.RetainList) {
 
 	storage[sKey.String()] = sVal.String()
 
-	smtTrie.SetContractStorage(contract.String(), storage)
+	smtTrie.SetContractStorage(contract.String(), storage, nil)
 
 	return smtTrie, rl
 }

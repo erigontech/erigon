@@ -26,7 +26,7 @@ func ProgressPrinter(message string, total uint64) (chan uint64, func()) {
 		for {
 			select {
 			case newPc := <-progress:
-				pc = newPc
+				pc += newPc
 				if total > 0 {
 					pct = (pc * 100) / total
 				}

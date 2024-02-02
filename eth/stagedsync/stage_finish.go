@@ -39,6 +39,10 @@ func StageFinishCfg(db kv.RwDB, tmpDir string, forkValidator *engineapi.ForkVali
 }
 
 func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) error {
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Started", logPrefix))
+	defer log.Info(fmt.Sprintf("[%s] Finished", logPrefix))
+
 	useExternalTx := tx != nil
 	if !useExternalTx {
 		var err error
@@ -55,6 +59,7 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg, initialCycle bool) 
 		return err
 	}
 	if executionAt <= s.BlockNumber {
+		log.Info(fmt.Sprintf("[%s] Nothing new to process", logPrefix))
 		return nil
 	}
 	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))

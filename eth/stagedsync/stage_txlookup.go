@@ -45,7 +45,8 @@ func StageTxLookupCfg(
 }
 
 func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context) (err error) {
-
+	logPrefix := s.LogPrefix()
+	log.Info(fmt.Sprintf("[%s] Skipping", logPrefix))
 	// TODO: abstract
 	return nil
 
@@ -58,7 +59,6 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		}
 		defer tx.Rollback()
 	}
-	logPrefix := s.LogPrefix()
 	endBlock, err := s.ExecutionAt(tx)
 	if err != nil {
 		return err

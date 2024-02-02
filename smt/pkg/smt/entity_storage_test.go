@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"context"
+
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 )
 
@@ -85,7 +86,7 @@ func runGenesisTest(tb testing.TB, filename string) {
 		}
 		// add storage if defined
 		if len(addr.Storage) > 0 {
-			_, _ = smt.SetContractStorage(addr.Address, addr.Storage)
+			_, _ = smt.SetContractStorage(addr.Address, addr.Storage, nil)
 		}
 	}
 
@@ -142,7 +143,7 @@ func runTestVectors(t *testing.T, filename string) {
 				}
 				// add storage if defined
 				if len(addr.Storage) > 0 {
-					_, _ = smt.SetContractStorage(addr.Address, addr.Storage)
+					_, _ = smt.SetContractStorage(addr.Address, addr.Storage, nil)
 				}
 			}
 

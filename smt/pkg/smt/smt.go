@@ -132,7 +132,7 @@ func (s *SMT) InsertKA(key utils.NodeKey, value *big.Int) (*SMTResponse, error) 
 	return s.insertSingle(key, *v, [4]uint64{})
 }
 
-func (s *SMT) InsertStorage(ethAddr string, storage *map[string]string, chm *map[string]*utils.NodeValue8, vhm *map[string][4]uint64) (*SMTResponse, error) {
+func (s *SMT) InsertStorage(ethAddr string, storage *map[string]string, chm *map[string]*utils.NodeValue8, vhm *map[string][4]uint64, progressChan chan uint64) (*SMTResponse, error) {
 	s.clearUpMutex.Lock()
 	defer s.clearUpMutex.Unlock()
 
@@ -165,6 +165,10 @@ func (s *SMT) InsertStorage(ethAddr string, storage *map[string]string, chm *map
 
 		if err != nil {
 			return nil, err
+		}
+
+		if progressChan != nil {
+			progressChan <- 1
 		}
 	}
 
