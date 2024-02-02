@@ -30,9 +30,11 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 	"github.com/ledgerwatch/erigon/turbo/trie"
+	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
+	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
@@ -417,6 +419,26 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		return nil, err
 	}
 
+	err = batch.CreateBucket(hermez_db.BLOCKBATCHES)
+	if err != nil {
+		return nil, err
+	}
+
+	err = batch.CreateBucket(hermez_db.GLOBAL_EXIT_ROOTS)
+	if err != nil {
+		return nil, err
+	}
+
+	err = batch.CreateBucket(hermez_db.GLOBAL_EXIT_ROOTS_BATCHES)
+	if err != nil {
+		return nil, err
+	}
+
+	err = batch.CreateBucket(hermez_db.STATE_ROOTS)
+	if err != nil {
+		return nil, err
+	}
+
 	if blockNr-1 < latestBlock {
 		if latestBlock-blockNr > maxGetProofRewindBlockCount {
 			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
@@ -485,13 +507,49 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		}
 
 		tds.SetStateReader(reader)
-		statedb := state.New(tds)
 
-		getHashFn := core.GetHashFn(block.Header(), getHeader)
+		gers := []*dstypes.GerUpdate{}
 
-		usedGas := new(uint64)
-		gp := new(core.GasPool).AddGas(block.GasLimit())
-		var receipts eritypes.Receipts
+		hermezDb := hermez_db.NewHermezDbReader(tx)
+
+		//[zkevm] get batches between last block and this one
+		// plus this blocks ger
+		lastBatchInserted, err := hermezDb.GetBatchNoByL2Block(i - 1)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get batch for block %d: %v", i-1, err)
+		}
+
+		currentBatch, err := hermezDb.GetBatchNoByL2Block(i)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get batch for block %d: %v", i, err)
+		}
+
+		gersInBetween, err := hermezDb.GetBatchGlobalExitRoots(lastBatchInserted, currentBatch)
+		if err != nil {
+			return nil, err
+		}
+
+		if gersInBetween != nil {
+			gers = append(gers, gersInBetween...)
+		}
+
+		blockGer, err := hermezDb.GetBlockGlobalExitRoot(i)
+		if err != nil {
+			return nil, err
+		}
+
+		blockGerUpdate := dstypes.GerUpdate{
+			GlobalExitRoot: blockGer,
+			Timestamp:      block.Header().Time,
+		}
+		gers = append(gers, &blockGerUpdate)
+
+		for _, ger := range gers {
+			// [zkevm] - add GER if there is one for this batch
+			if err := zkUtils.WriteGlobalExitRoot(tds, trieStateWriter, ger.GlobalExitRoot, ger.Timestamp); err != nil {
+				return nil, err
+			}
+		}
 
 		engine, ok := api.ethApi.engine().(consensus.Engine)
 
@@ -499,43 +557,17 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 			return nil, fmt.Errorf("engine is not consensus.Engine")
 		}
 
-		chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil)
-
 		vmConfig := vm.Config{}
 
-		if err := core.InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, statedb, nil); err != nil {
-			if err != nil {
-				return nil, err
-			}
-		}
+		getHashFn := core.GetHashFn(block.Header(), getHeader)
 
-		for i, txn := range block.Transactions() {
-			statedb.Prepare(txn.Hash(), block.Hash(), i)
+		chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil)
 
-			effectiveGasPricePercentage, err := api.ethApi.getEffectiveGasPricePercentage(tx, txn.Hash())
+		_, err = core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
 
-			if err != nil {
-				return nil, err
-			}
-
-			receipt, _, err := core.ApplyTransaction(chainConfig, getHashFn, api.ethApi.engine(), nil, gp, statedb, trieStateWriter, block.Header(), txn, usedGas, vmConfig, nil, effectiveGasPricePercentage)
-			if err != nil {
-				return nil, err
-			}
-
-			if !chainConfig.IsByzantium(block.NumberU64()) {
-				tds.StartNewBuffer()
-			}
-
-			receipts = append(receipts, receipt)
-		}
-
-		if _, _, _, err = engine.FinalizeAndAssemble(chainConfig, block.Header(), statedb, block.Transactions(), block.Uncles(), receipts, block.Withdrawals(), nil, nil, nil); err != nil {
-			fmt.Printf("Finalize of block %d failed: %v\n", blockNr, err)
+		if err != nil {
 			return nil, err
 		}
-
-		statedb.FinalizeTx(chainConfig.Rules(block.NumberU64(), block.Header().Time), trieStateWriter)
 	}
 
 	rl, err := tds.ResolveSMTRetainList()

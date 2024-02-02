@@ -802,6 +802,13 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnat
 	return nil
 }
 
+func (tsw *TrieStateWriter) WriteChangeSets() error {
+	return nil
+}
+func (tsw *TrieStateWriter) WriteHistory() error {
+	return nil
+}
+
 func (tds *TrieDbState) makeBlockWitnessForPrefix(prefix []byte, trace bool, rl trie.RetainDecider, isBinary bool) (*trie.Witness, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
