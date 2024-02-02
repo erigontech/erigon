@@ -86,7 +86,7 @@ func fetchRequiredHeimdallSpansIfNeeded(
 		}
 	}
 
-	return uint64(requiredSpanID), err
+	return requiredSpanID, err
 }
 
 func fetchAndWriteHeimdallSpan(
