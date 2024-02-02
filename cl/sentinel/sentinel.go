@@ -374,9 +374,26 @@ func (s *Sentinel) Identity() (pid, enr string, p2pAddresses, discoveryAddresses
 	enr = s.listener.LocalNode().Node().String()
 	p2pAddresses = make([]string, 0, len(s.host.Addrs()))
 	for _, addr := range s.host.Addrs() {
-		p2pAddresses = append(p2pAddresses, addr.String())
+		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/%s", addr.String(), pid))
 	}
-	discoveryAddresses = []string{s.listener.LocalNode().Node().IP().String()}
+	discoveryAddresses = []string{}
+
+	if s.listener.LocalNode().Node().TCP() != 0 {
+		protocol := "ip4"
+		if s.listener.LocalNode().Node().IP().To4() == nil {
+			protocol = "ip6"
+		}
+		port := s.listener.LocalNode().Node().TCP()
+		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/tcp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
+	}
+	if s.listener.LocalNode().Node().UDP() != 0 {
+		protocol := "ip4"
+		if s.listener.LocalNode().Node().IP().To4() == nil {
+			protocol = "ip6"
+		}
+		port := s.listener.LocalNode().Node().UDP()
+		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
+	}
 	metadata = s.metadataV2
 	return
 }
