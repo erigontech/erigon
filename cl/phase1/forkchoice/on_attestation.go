@@ -101,8 +101,8 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 	end := (activeIndiciesLength * (committeeIndex + 1)) / count
 	committeeLength := end - start
 	if !state.IsAggregator(f.beaconCfg, committeeLength, slot, committeeIndex, selectionProof) {
-		log.Warn("invalid aggregate and proof")
-		return fmt.Errorf("invalid aggregate and proof")
+		log.Warn("[forkChoice] invalid aggregate and proof")
+		return fmt.Errorf("[forkChoice] invalid aggregate and proof")
 	}
 	return f.OnAttestation(aggregateAndProof.Message.Aggregate, false, false)
 }
