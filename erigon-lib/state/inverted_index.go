@@ -994,14 +994,6 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
 
 	ii := ic.ii
-	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
-	if err != nil {
-		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
-	}
-	defer keysCursor.Close()
-
-	var txKey [8]byte
-
 	//defer func() {
 	//	ii.logger.Error("[snapshots] prune index",
 	//		"name", ii.filenameBase,
@@ -1011,18 +1003,28 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	//		"tx until limit", limit)
 	//}()
 
-	itc, err := rwTx.CursorDupSort(ii.indexTable)
-	if err != nil {
-		return nil, err
-	}
-	idxValuesCount, err := itc.Count()
-	itc.Close()
-	if err != nil {
-		return nil, err
-	}
 	// do not collect and sort keys if it's History index
-	indexWithHistoryValues := idxValuesCount == 0 && fn != nil
+	var indexWithHistoryValues bool
+	{
+		itc, err := rwTx.CursorDupSort(ii.indexTable)
+		if err != nil {
+			return nil, err
+		}
+		idxValuesCount, err := itc.Count()
+		itc.Close()
+		if err != nil {
+			return nil, err
+		}
+		indexWithHistoryValues = idxValuesCount == 0 && fn != nil
+	}
 
+	keysCursor, err := rwTx.RwCursorDupSort(ii.indexKeysTable)
+	if err != nil {
+		return stat, fmt.Errorf("create %s keys cursor: %w", ii.filenameBase, err)
+	}
+	defer keysCursor.Close()
+
+	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], txFrom)
 	k, v, err := keysCursor.Seek(txKey[:])
 	if err != nil {
@@ -1048,7 +1050,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	// Means: can use DeleteCurrentDuplicates all values of given `txNum`
 	for ; k != nil; k, v, err = keysCursor.NextNoDup() {
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 		}
 
 		txNum := binary.BigEndian.Uint64(k)
@@ -1064,7 +1066,7 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 
 		for ; v != nil; _, v, err = keysCursor.NextDup() {
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
 			}
 			if !indexWithHistoryValues {
 				if err := collector.Collect(v, nil); err != nil {
@@ -1078,18 +1080,16 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 			}
 			stat.PruneCountValues++
 		}
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
 
 		stat.PruneCountTx++
 		// This DeleteCurrent needs to the last in the loop iteration, because it invalidates k and v
 		if err = rwTx.Delete(ii.indexKeysTable, k); err != nil {
 			return nil, err
 		}
-	}
-	if err != nil {
-		return nil, fmt.Errorf("iterate over %s index keys: %w", ii.filenameBase, err)
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 	}
 
 	if indexWithHistoryValues {

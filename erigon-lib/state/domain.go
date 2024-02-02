@@ -2153,6 +2153,10 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
 func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+	if limit == 0 {
+		limit = math.MaxUint64
+	}
+
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
 	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
@@ -2221,7 +2225,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 		if limit == 0 {
 			if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, k); err != nil {
-				dc.d.logger.Error("save domain pruning progress", "name", dc.d.filenameBase, "error", err)
+				return stat, fmt.Errorf("save domain pruning progress: %s, %w", dc.d.filenameBase, err)
 			}
 			return stat, nil
 		}
@@ -2259,7 +2263,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 		}
 	}
 	if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, nil); err != nil {
-		dc.d.logger.Error("reset domain pruning progress", "name", dc.d.filenameBase, "error", err)
+		return stat, fmt.Errorf("save domain pruning progress: %s, %w", dc.d.filenameBase, err)
 	}
 	mxPruneTookDomain.ObserveDuration(st)
 	return stat, nil
