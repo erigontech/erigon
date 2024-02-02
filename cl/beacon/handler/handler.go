@@ -56,7 +56,7 @@ func (a *ApiHandler) init() {
 	// otterscn specific ones are commented as such
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
-			r.Get("/builder/states/{state_id}/expected_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEth1V1BuilderStatesExpectedWit))
+			r.Get("/builder/states/{state_id}/expected_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEth1V1BuilderStatesExpectedWithdrawals))
 			r.Get("/events", http.NotFound)
 			r.Route("/node", func(r chi.Router) {
 				r.Get("/health", a.GetEthV1NodeHealth)
@@ -98,6 +98,12 @@ func (a *ApiHandler) init() {
 					r.Get("/attestations", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolAttestations))
 					r.Post("/attestations", http.NotFound)    // TODO
 					r.Post("/sync_committees", http.NotFound) // TODO
+				})
+				r.Route("/light_client", func(r chi.Router) {
+					r.Get("/bootstrap/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientBootstrap))
+					r.Get("/optimistic_update", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientOptimisticUpdate))
+					r.Get("/finality_update", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientFinalityUpdate))
+					r.Get("/updates", a.GetEthV1BeaconLightClientUpdates)
 				})
 				r.Get("/node/syncing", http.NotFound)
 				r.Route("/states", func(r chi.Router) {

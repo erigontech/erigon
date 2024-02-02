@@ -8,24 +8,23 @@ import (
 	"fmt"
 	"math/big"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
 var (
 	ErrHeaderValidatorsLengthMismatch = errors.New("header validators length mismatch")
 	ErrHeaderValidatorsBytesMismatch  = errors.New("header validators bytes mismatch")
 )
-
-// LastSpanID TODO - move to block reader
 
 func FetchSpanZeroForMiningIfNeeded(
 	ctx context.Context,
@@ -36,18 +35,16 @@ func FetchSpanZeroForMiningIfNeeded(
 ) error {
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		_, err := blockReader.Span(ctx, tx, 0)
-		if err == nil {
+		if err != nil {
+			if errors.Is(err, freezeblocks.SpanNotFoundErr) {
+				_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
+				return err
+			}
+
 			return err
 		}
 
-		// TODO refactor to use errors.Is
-		if !strings.Contains(err.Error(), "not found") {
-			// span exists, no need to fetch
-			return nil
-		}
-
-		_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
-		return err
+		return nil
 	})
 }
 
@@ -59,20 +56,16 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	requiredSpanID := heimdall.SpanIdAt(toBlockNum)
-	// This check handles the case when we're in the last sprint of the current span
-	// and need to commit next span.
-	if heimdall.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+	requiredSpanID := bor.SpanIDAt(toBlockNum)
+	if requiredSpanID == 0 && toBlockNum >= cfg.borConfig.CalculateSprintLength(toBlockNum) {
+		// when in span 0 we fetch the next span (span 1) at the beginning of sprint 2 (block 16 or later)
+		requiredSpanID++
+	} else if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+		// for subsequent spans, we always fetch the next span at the beginning of the last sprint of a span
 		requiredSpanID++
 	}
 
-	// This check handles the case when we need to fetch 1st span when we're starting
-	// the second sprint (of span 0, a special case to fetch span 1).
-	if heimdall.IsSecondSprintStart(toBlockNum, cfg.borConfig) {
-		requiredSpanID++
-	}
-
-	lastSpanID, exists, err := cfg.blockReader.LastSpanId(ctx, tx)
+	lastSpanID, exists, err := cfg.blockReader.LastSpanID(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -228,13 +221,13 @@ func fetchAndWriteHeimdallStateSyncEvents(
 		}
 
 		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
-			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(fmt.Sprintf(
+			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
 				"invalid event record received %s, %s, %s, %s",
 				fmt.Sprintf("blockNum=%d", blockNum),
 				fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
 				fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
 				fmt.Sprintf("time=%s (exp to %s)", eventRecord.Time, to),
-			))
+			)
 		}
 
 		eventRecordWithoutTime := eventRecord.BuildEventRecord()
