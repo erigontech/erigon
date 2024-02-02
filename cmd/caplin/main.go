@@ -17,6 +17,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -25,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -123,6 +125,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 
 	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), 0).Version
+	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
 
 	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
 		LightClientDiscoveryAddr:    cfg.Addr,
@@ -138,5 +141,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		AllowedOrigins:   cfg.AllowedOrigins,
 		AllowedMethods:   cfg.AllowedMethods,
 		AllowCredentials: cfg.AllowCredentials,
-	}, nil, nil, false, false, historyDB, indiciesDB, nil)
+	}, nil, nil, false, false, historyDB, indiciesDB, nil, blockSnapBuildSema)
 }
