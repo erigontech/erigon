@@ -18,7 +18,6 @@ import (
 )
 
 func testDynamicTx(t *testing.T, ctx context.Context) {
-	t.Skip()
 	t.Run("InitSubscriptions", func(t *testing.T) {
 		services.InitSubscriptions(withTestLogger(ctx, t), []requests.SubMethod{requests.Methods.ETHNewHeads})
 	})
