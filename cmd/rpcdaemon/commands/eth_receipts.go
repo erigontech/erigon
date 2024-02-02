@@ -676,7 +676,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, fmt.Errorf("block has less receipts than expected: %d <= %d, block: %d", len(receipts), int(txnIndex), blockNum)
 	}
 
-	return marshalReceipt(receipts[txnIndex], block.Transactions()[txnIndex], cc, block.HeaderNoCopy(), txnHash, true), nil
+	return api.addEffectiveGasPercentage(marshalReceipt(receipts[txnIndex], txn, cc, block.HeaderNoCopy(), txnHash, true), tx, txn)
 }
 
 // GetBlockReceipts - receipts for individual block
