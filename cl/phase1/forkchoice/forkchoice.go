@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -488,4 +489,16 @@ func (f *ForkChoiceStore) SetSynced(s bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.synced.Store(s)
+}
+
+func (f *ForkChoiceStore) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {
+	return f.forkGraph.GetLightClientBootstrap(blockRoot)
+}
+
+func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
+	return f.forkGraph.NewestLightClientUpdate()
+}
+
+func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+	return f.forkGraph.GetLightClientUpdate(period)
 }

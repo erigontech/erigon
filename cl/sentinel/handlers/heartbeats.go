@@ -25,7 +25,7 @@ import (
 
 func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "ping", rateLimits.pingLimit); err != nil {
+	if err := c.checkRateLimit(peerId, "ping", rateLimits.pingLimit, 1); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
@@ -36,7 +36,7 @@ func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
 
 func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "goodbye", rateLimits.goodbyeLimit); err != nil {
+	if err := c.checkRateLimit(peerId, "goodbye", rateLimits.goodbyeLimit, 1); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
@@ -47,7 +47,7 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 
 func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "metadataV1", rateLimits.metadataV1Limit); err != nil {
+	if err := c.checkRateLimit(peerId, "metadataV1", rateLimits.metadataV1Limit, 1); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
@@ -60,7 +60,7 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
 
-	if err := c.checkRateLimit(peerId, "metadataV2", rateLimits.metadataV2Limit); err != nil {
+	if err := c.checkRateLimit(peerId, "metadataV2", rateLimits.metadataV2Limit, 1); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
@@ -70,7 +70,7 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 // TODO: Actually respond with proper status
 func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
-	if err := c.checkRateLimit(peerId, "status", rateLimits.statusLimit); err != nil {
+	if err := c.checkRateLimit(peerId, "status", rateLimits.statusLimit, 1); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}

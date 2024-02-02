@@ -461,10 +461,6 @@ const (
 	// BlockRoot => Beacon Block Header
 	BeaconBlockHeaders = "BeaconBlockHeaders"
 
-	// LightClientStore => LightClientStore object
-	// LightClientFinalityUpdate => latest finality update
-	// LightClientOptimisticUpdate => latest optimistic update
-	LightClient = "LightClient"
 	// Period (one every 27 hours) => LightClientUpdate
 	LightClientUpdates = "LightClientUpdates"
 	// Beacon historical data
@@ -662,7 +658,6 @@ var ChaindataTables = []string{
 	BeaconBlockHeaders,
 	HighestFinalized,
 	Attestetations,
-	LightClient,
 	LightClientUpdates,
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,

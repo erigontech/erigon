@@ -5,11 +5,13 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
@@ -60,6 +62,14 @@ type savedStateRecord struct {
 	slot uint64
 }
 
+func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
+	out := solid.NewHashVector(len(in))
+	for i, v := range in {
+		out.Set(i, libcommon.Hash(v))
+	}
+	return out
+}
+
 // ForkGraph is our graph for ETH 2.0 consensus forkchoice. Each node is a (block root, changes) pair and
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
@@ -86,13 +96,17 @@ type forkGraphDisk struct {
 	// keep track of rewards too
 	blockRewards map[libcommon.Hash]*eth2.BlockRewardsCollector
 	// for each block root we keep track of the sync committees for head retrieval.
-	syncCommittees map[libcommon.Hash]syncCommittees
+	syncCommittees        map[libcommon.Hash]syncCommittees
+	lightclientBootstraps sync.Map
 
 	// configurations
 	beaconCfg   *clparams.BeaconChainConfig
 	genesisTime uint64
 	// highest block seen
 	highestSeen, lowestAvaiableSlot, anchorSlot uint64
+	newestLightClientUpdate                     atomic.Value
+	// the lightclientUpdates leaks memory, but it's not a big deal since new data is added every 27 hours.
+	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// reusable buffers
 	sszBuffer       bytes.Buffer
@@ -175,7 +189,34 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
 		return nil, MissingSegment, nil
 	}
+	finalizedBlock, hasFinalized := f.getBlock(newState.FinalizedCheckpoint().BlockRoot())
+	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
+	// Before processing the state: update the newest lightclient update.
+	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized {
+		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
+		if err != nil {
+			return nil, LogisticError, err
+		}
+		finalityBranch, err := newState.FinalityRootBranch()
+		if err != nil {
+			return nil, LogisticError, err
+		}
+
+		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
+			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
+		if err != nil {
+			log.Warn("Could not create light client update", "err", err)
+		} else {
+			f.newestLightClientUpdate.Store(lightclientUpdate)
+			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
+			_, hasPeriod := f.lightClientUpdates.Load(period)
+			if !hasPeriod {
+				log.Info("Adding light client update", "period", period)
+				f.lightClientUpdates.Store(period, lightclientUpdate)
+			}
+		}
+	}
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 	// Execute the state
 	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
@@ -197,6 +238,14 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	f.syncCommittees[blockRoot] = syncCommittees{
 		currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
 		nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
+	}
+
+	if block.Version() >= clparams.AltairVersion {
+		lightclientBootstrap, err := lightclient_utils.CreateLightClientBootstrap(newState, signedBlock)
+		if err != nil {
+			return nil, LogisticError, err
+		}
+		f.lightclientBootstraps.Store(libcommon.Hash(blockRoot), lightclientBootstrap)
 	}
 
 	f.blocks.Store(libcommon.Hash(blockRoot), signedBlock)
@@ -418,6 +467,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	for _, root := range oldRoots {
 		delete(f.badBlocks, root)
 		f.blocks.Delete(root)
+		f.lightclientBootstraps.Delete(root)
 		delete(f.currentJustifiedCheckpoints, root)
 		delete(f.finalizedCheckpoints, root)
 		f.headers.Delete(root)
@@ -446,4 +496,27 @@ func (f *forkGraphDisk) GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRe
 
 func (f *forkGraphDisk) LowestAvaiableSlot() uint64 {
 	return f.lowestAvaiableSlot
+}
+
+func (f *forkGraphDisk) GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool) {
+	obj, has := f.lightclientBootstraps.Load(blockRoot)
+	if !has {
+		return nil, false
+	}
+	return obj.(*cltypes.LightClientBootstrap), true
+}
+
+func (f *forkGraphDisk) NewestLightClientUpdate() *cltypes.LightClientUpdate {
+	if f.newestLightClientUpdate.Load() == nil {
+		return nil
+	}
+	return f.newestLightClientUpdate.Load().(*cltypes.LightClientUpdate)
+}
+
+func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
+	obj, has := f.lightClientUpdates.Load(period)
+	if !has {
+		return nil, false
+	}
+	return obj.(*cltypes.LightClientUpdate), true
 }

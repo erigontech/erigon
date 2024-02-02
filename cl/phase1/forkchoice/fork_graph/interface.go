@@ -30,6 +30,9 @@ type ForkGraph interface {
 	Prune(uint64) error
 	GetBlockRewards(blockRoot libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
 	LowestAvaiableSlot() uint64
+	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
+	NewestLightClientUpdate() *cltypes.LightClientUpdate
+	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 
 	// extra methods for validator api
 	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)

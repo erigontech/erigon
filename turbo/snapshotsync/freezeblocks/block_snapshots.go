@@ -1608,7 +1608,7 @@ func DumpBlocks(ctx context.Context, version uint8, blockFrom, blockTo, blocksPe
 	}
 	chainConfig := fromdb.ChainConfig(chainDB)
 
-	firstTxNum := blockReader.(*BlockReader).FirstTxNumNotInSnapshots()
+	firstTxNum := blockReader.FirstTxnNumNotInSnapshots()
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, blocksPerFile) {
 		lastTxNum, err := dumpBlocksRange(ctx, version, i, chooseSegmentEnd(i, blockTo, blocksPerFile), tmpDir, snapDir, firstTxNum, chainDB, *chainConfig, workers, lvl, logger)
 		if err != nil {

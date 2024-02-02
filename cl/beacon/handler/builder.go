@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
