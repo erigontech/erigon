@@ -33,10 +33,3 @@ func IsBlockInLastSprintOfSpan(blockNum uint64, config *borcfg.BorConfig) bool {
 	startBlockNum := endBlockNum - sprintLen + 1
 	return startBlockNum <= blockNum && blockNum <= endBlockNum
 }
-
-// IsSecondSprintStart returns true if the block num is first block of second sprint
-// E.g. for sprint length 16, it will return true only for block 16. This is
-// to handle a special case for fetching 1st span.
-func IsSecondSprintStart(blockNum uint64, config *borcfg.BorConfig) bool {
-	return blockNum == config.CalculateSprintLength(blockNum)
-}

@@ -80,6 +80,41 @@ func TestBorHeimdallForwardFetchesFirstSpanDuringSecondSprintStart(t *testing.T)
 	require.Equal(t, uint64(6655), spans[1].EndBlock)
 }
 
+func TestBorHeimdallForwardFetchesFirstSpanAfterSecondSprintStart(t *testing.T) {
+	// Note this test differs from TestBorHeimdallForwardFetchesFirstSpanDuringSecondSprintStart
+	// since we should be able to handle both scenarios:
+	//   - calling the stage with toBlockNum=16
+	//   - calling the stage with toBlockNum=20 (some block num after second sprint start)
+	//
+	// span 0 and 1 are required at and after the start of second sprint (of 0th span) to commit
+	// in genesis contracts. we need span 1 at that time to mimic behaviour in bor.
+	t.Parallel()
+
+	ctx := context.Background()
+	numBlocks := 20 // After the start of 2nd sprint of 0th span
+	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
+		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
+		GenerateChainNumBlocks: numBlocks,
+		LogLvl:                 log.LvlInfo,
+	})
+	// pretend-update previous stage progress
+	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
+
+	// run stage under test
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
+
+	// asserts
+	spans, err := testHarness.ReadSpansFromDB(ctx)
+	require.NoError(t, err)
+	require.Len(t, spans, 2)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
+	require.Equal(t, uint64(0), spans[0].StartBlock)
+	require.Equal(t, uint64(255), spans[0].EndBlock)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
+	require.Equal(t, uint64(256), spans[1].StartBlock)
+	require.Equal(t, uint64(6655), spans[1].EndBlock)
+}
+
 func TestBorHeimdallForwardFetchesNextSpanDuringLastSprintOfCurrentSpan(t *testing.T) {
 	// heimdall prepares the next span a number of sprints before the end of the current one
 	// we should be fetching the next span once we reach the last sprint of the current span

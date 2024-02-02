@@ -57,15 +57,11 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	logger log.Logger,
 ) (uint64, error) {
 	requiredSpanID := bor.SpanIDAt(toBlockNum)
-	// This check handles the case when we're in the last sprint of the current span
-	// and need to commit next span.
-	if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+	if requiredSpanID == 0 && toBlockNum >= cfg.borConfig.CalculateSprintLength(toBlockNum) {
+		// when in span 0 we fetch the next span (span 1) at the beginning of sprint 2 (block 16 or later)
 		requiredSpanID++
-	}
-
-	// This check handles the case when we need to fetch 1st span when we're starting
-	// the second sprint (of span 0, a special case to fetch span 1).
-	if bor.IsSecondSprintStart(toBlockNum, cfg.borConfig) {
+	} else if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+		// for subsequent spans, we always fetch the next span at the beginning of the last sprint of a span
 		requiredSpanID++
 	}
 
