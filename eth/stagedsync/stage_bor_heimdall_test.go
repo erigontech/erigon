@@ -36,7 +36,7 @@ func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	spans, err := testHarness.ReadSpansFromDB(ctx)
@@ -66,7 +66,7 @@ func TestBorHeimdallForwardFetchesFirstSpanDuringSecondSprintStart(t *testing.T)
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	spans, err := testHarness.ReadSpansFromDB(ctx)
@@ -97,7 +97,7 @@ func TestBorHeimdallForwardFetchesNextSpanDuringLastSprintOfCurrentSpan(t *testi
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	spans, err := testHarness.ReadSpansFromDB(ctx)
@@ -128,7 +128,7 @@ func TestBorHeimdallForwardPersistsStateSyncEvents(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	// 1 event per sprint expected
@@ -171,7 +171,7 @@ func TestBorHeimdallForwardErrHeaderValidatorsLengthMismatch(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsLengthMismatch)
+	testHarness.RunStateSyncStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsLengthMismatch)
 }
 
 func TestBorHeimdallForwardErrHeaderValidatorsBytesMismatch(t *testing.T) {
@@ -195,7 +195,7 @@ func TestBorHeimdallForwardErrHeaderValidatorsBytesMismatch(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsBytesMismatch)
+	testHarness.RunStateSyncStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsBytesMismatch)
 }
 
 func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
@@ -230,7 +230,7 @@ func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
 	require.Equal(t, uint64(0), testHarness.GetStageProgress(ctx, t, stages.BorHeimdall))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	require.Equal(t, uint64(numBlocks+1), testHarness.GetStageProgress(ctx, t, stages.BorHeimdall))

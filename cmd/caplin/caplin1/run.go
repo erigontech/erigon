@@ -2,6 +2,7 @@ package caplin1
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path"
 	"time"
@@ -17,12 +18,18 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/beacon/validatorapi"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/rpc"
+	"github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/erigon/cl/sentinel/service"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
@@ -38,12 +45,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -89,16 +94,14 @@ func OpenCaplinDatabase(ctx context.Context,
 	return persistence2.NewBeaconChainDatabaseFilesystem(rawBeaconChain, engine, beaconConfig), db, nil
 }
 
-func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engine execution_client.ExecutionEngine,
+func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, snapshotVersion uint8, cfg beacon_router_configuration.RouterConfiguration, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool, historyDB persistence.BeaconChainDatabase, indexDB kv.RwDB, snBuildSema *semaphore.Weighted) error {
+	snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool, historyDB persistence.BeaconChainDatabase, indexDB kv.RwDB, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
 	rawDB, af := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
 
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
-
-	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
 
 	logger := log.New("app", "caplin")
 
@@ -135,6 +138,34 @@ func RunCaplinPhase1(ctx context.Context, sentinel sentinel.SentinelClient, engi
 		}
 		return true
 	})
+
+	forkDigest, err := fork.ComputeForkDigest(beaconConfig, genesisConfig)
+	if err != nil {
+		return err
+	}
+
+	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
+		IpAddr:        config.LightClientDiscoveryAddr,
+		Port:          int(config.LightClientDiscoveryPort),
+		TCPPort:       uint(config.LightClientDiscoveryTCPPort),
+		GenesisConfig: genesisConfig,
+		NetworkConfig: networkConfig,
+		BeaconConfig:  beaconConfig,
+		TmpDir:        dirs.Tmp,
+		EnableBlocks:  true,
+	}, rawDB, indexDB, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
+		ForkDigest:     forkDigest,
+		FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+		HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
+		HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+	}, forkChoice, logger)
+	if err != nil {
+		return err
+	}
+
+	beaconRpc := rpc.NewBeaconRpcP2P(ctx, sentinel, beaconConfig, genesisConfig)
+
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, caplinFreezer, emitters)
 	{ // start ticking forkChoice
 		go func() {

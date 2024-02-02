@@ -183,7 +183,7 @@ func BorHeimdallForward(
 		return err
 	}
 
-	lastStateSyncEventID, err := LastStateSyncEventID(tx, cfg.blockReader)
+	lastStateSyncEventID, err := cfg.blockReader.LastEventID(tx)
 	if err != nil {
 		return err
 	}
