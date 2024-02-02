@@ -10,12 +10,13 @@ import (
 )
 
 type Settings struct {
-	DBPath        string
-	Logger        log.Logger
-	Terminated    chan struct{}
-	RetryCount    uint64
-	RetryInterval time.Duration
-	PollInterval  time.Duration
+	DBPath          string
+	Logger          log.Logger
+	Terminated      chan struct{}
+	RetryCount      uint64
+	RetryInterval   time.Duration
+	PollInterval    time.Duration
+	SaveHistoryData bool
 }
 
 func RunImport(settings *Settings, blockSource BlockSource, secondaryBlocksSource BlockSource) error {
@@ -96,7 +97,7 @@ func RunImport(settings *Settings, blockSource BlockSource, secondaryBlocksSourc
 							}
 						default:
 							{
-								if err := state.ProcessBlocks(blocks); err != nil {
+								if err := state.ProcessBlocks(blocks, settings.SaveHistoryData); err != nil {
 									resultErr = fmt.Errorf("failed to process block: %w", err)
 									close(settings.Terminated)
 									return

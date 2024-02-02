@@ -19,6 +19,7 @@ func main() {
 		evmUrl                  = flag.String("evm", "http://127.0.0.1:8545", "EVM canister HTTP endpoint URL")
 		secondaryBlockSourceUrl = flag.String("secondary-blocks-url", "", "URL of the secondary blocks source")
 		cpuprofile              = flag.String("cpuprofile", "", "write cpu profile to file")
+		saveHistory             = flag.Bool("save-history-data", false, "save history data to the database")
 	)
 	flag.Parse()
 
@@ -33,12 +34,13 @@ func main() {
 
 	logger := logging.GetLogger("blockimporter")
 	settings := Settings{
-		DBPath:        *dbPath,
-		Logger:        logger,
-		Terminated:    make(chan struct{}),
-		RetryCount:    100,
-		RetryInterval: time.Second,
-		PollInterval:  time.Second,
+		DBPath:          *dbPath,
+		Logger:          logger,
+		Terminated:      make(chan struct{}),
+		RetryCount:      100,
+		RetryInterval:   time.Second,
+		PollInterval:    time.Second,
+		SaveHistoryData: *saveHistory,
 	}
 
 	c := make(chan os.Signal, 10)

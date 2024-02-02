@@ -143,7 +143,7 @@ func NewState(db *DB, initialBalances []BalanceEntry, chainID int64) (*State, er
 	return state, err
 }
 
-func (state *State) ProcessBlocks(blocks []types.Block) error {
+func (state *State) ProcessBlocks(blocks []types.Block, saveHistoryData bool) error {
 	if len(blocks) == 0 {
 		return nil
 	}
@@ -156,11 +156,12 @@ func (state *State) ProcessBlocks(blocks []types.Block) error {
 	}
 
 	for _, block := range blocks {
-		if err := state.processBlock(block, tx); err != nil {
+		if err := state.processBlock(block, tx, saveHistoryData); err != nil {
 			return err
 		}
 	}
 
+	log.Info("verifying state root")
 	prevBlockNum := blocks[0].NumberU64() - 1
 	currBlock := blocks[len(blocks)-1]
 	currBlockNum := currBlock.NumberU64()
@@ -189,7 +190,7 @@ func (state *State) ProcessBlocks(blocks []types.Block) error {
 	return err
 }
 
-func (state *State) processBlock(block types.Block, tx kv.RwTx) error {
+func (state *State) processBlock(block types.Block, tx kv.RwTx, saveHistoryData bool) error {
 	log.Info(fmt.Sprintf("processing block %d", block.NumberU64()))
 
 	batch := olddb.NewHashBatch(tx, make(<-chan struct{}), ".")
@@ -224,8 +225,10 @@ func (state *State) processBlock(block types.Block, tx kv.RwTx) error {
 		return fmt.Errorf("some of the transactions were rejected")
 	}
 
-	if err := stateWriter.WriteHistory(); err != nil {
-		return fmt.Errorf("failed to write history: %v", err)
+	if saveHistoryData {
+		if err := stateWriter.WriteHistory(); err != nil {
+			return fmt.Errorf("failed to write history: %v", err)
+		}
 	}
 	if err := rawdb.WriteHeaderNumber(batch, block.Hash(), block.NumberU64()); err != nil {
 		return err

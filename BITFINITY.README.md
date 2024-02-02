@@ -7,8 +7,10 @@ The code of the blockimporter is in `cmd/blockimporter`.
 # Archiving historical data
 
 ```
-blockimporter [--evm <EVMC_CANISTER_URL>] [--db <DATABASE_PATH>] [--secondary-blocks-url <PATH TO A SECONDARY SOURCE OF BLOCKS>]
+blockimporter [--evm <EVMC_CANISTER_URL>] [--db <DATABASE_PATH>] [--secondary-blocks-url <PATH TO A SECONDARY SOURCE OF BLOCKS>] [--save-history-data]
 ```
+
+When `--save-history-data` flag is specified blockimporter stores history data that allows accessing the state at the given block.
 
 # Serving rpcdaemon (EVM JSON RPC)
 
