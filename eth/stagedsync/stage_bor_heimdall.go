@@ -264,6 +264,7 @@ func BorHeimdallForward(
 		fetchTime += callTime
 
 		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
+			headNumber = blockNum
 			break
 		}
 	}
@@ -278,7 +279,7 @@ func BorHeimdallForward(
 		}
 	}
 
-	logger.Info("["+s.LogPrefix()+"] Sync events processed", "progress", blockNum-1, "lastSpanID", lastSpanID, "lastStateSyncEventID", lastStateSyncEventID, "total records", eventRecords, "fetch time", fetchTime, "process time", time.Since(processStart))
+	logger.Info("["+s.LogPrefix()+"] Sync events processed", "progress", headNumber, "lastSpanID", lastSpanID, "lastStateSyncEventID", lastStateSyncEventID, "total records", eventRecords, "fetch time", fetchTime, "process time", time.Since(processStart))
 
 	return
 }
