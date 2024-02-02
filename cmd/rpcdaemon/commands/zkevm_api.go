@@ -533,7 +533,7 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 			gers = append(gers, gersInBetween...)
 		}
 
-		blockGer, err := hermezDb.GetBlockGlobalExitRoot(i)
+		blockGer, _, err := hermezDb.GetBlockGlobalExitRoot(i)
 		if err != nil {
 			return nil, err
 		}
