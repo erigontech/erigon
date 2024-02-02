@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -24,7 +25,7 @@ type proposerDuties struct {
 func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
@@ -39,7 +40,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			return nil, err
 		}
 		if len(indiciesBytes) != int(a.beaconChainCfg.SlotsPerEpoch*4) {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, "proposer duties is corrupted")
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("proposer duties is corrupted"))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
@@ -62,7 +63,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	state, cancel := a.syncedData.HeadState()
 	defer cancel()
 	if state == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, "beacon node is syncing")
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
 
 	}
 

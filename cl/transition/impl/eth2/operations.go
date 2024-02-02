@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"reflect"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
 
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
@@ -24,7 +24,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func (I *impl) ProcessProposerSlashing(s abstract.BeaconState, propSlashing *cltypes.ProposerSlashing) error {
@@ -449,39 +448,6 @@ func (I *impl) ProcessBlsToExecutionChange(s abstract.BeaconState, signedChange 
 	// Update the state with the modified validator.
 	s.SetWithdrawalCredentialForValidatorAtIndex(int(change.ValidatorIndex), credentials)
 	return nil
-}
-
-func (I *impl) VerifyKzgCommitmentsAgainstTransactions(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error) {
-	if I.FullValidation {
-		return true, nil
-	}
-	allVersionedHashes := []common.Hash{}
-	transactions.ForEach(func(tx []byte, idx, total int) bool {
-		if tx[0] != types.BlobTxType {
-			return true
-		}
-
-		allVersionedHashes = append(allVersionedHashes, txPeekBlobVersionedHashes(tx)...)
-		return true
-	})
-
-	commitmentVersionedHash := []common.Hash{}
-	var err error
-	var versionedHash common.Hash
-	kzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
-		versionedHash, err = kzgCommitmentToVersionedHash(value)
-		if err != nil {
-			return false
-		}
-
-		commitmentVersionedHash = append(commitmentVersionedHash, versionedHash)
-		return true
-	})
-	if err != nil {
-		return false, err
-	}
-
-	return reflect.DeepEqual(allVersionedHashes, commitmentVersionedHash), nil
 }
 
 func (I *impl) ProcessAttestations(s abstract.BeaconState, attestations *solid.ListSSZ[*solid.Attestation]) error {

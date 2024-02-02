@@ -18,7 +18,7 @@ type DifficultyCalculator interface {
 	HeaderDifficulty(header *types.Header) (uint64, error)
 }
 
-type difficultyCalculatorImpl struct {
+type difficultyCalculator struct {
 	borConfig           *borcfg.BorConfig
 	spans               *SpansCache
 	validatorSetFactory func(headerNum uint64) validatorSetInterface
@@ -39,7 +39,7 @@ func NewDifficultyCalculator(
 		}
 	}
 
-	impl := difficultyCalculatorImpl{
+	calc := difficultyCalculator{
 		borConfig:           borConfig,
 		spans:               spans,
 		validatorSetFactory: validatorSetFactory,
@@ -47,35 +47,35 @@ func NewDifficultyCalculator(
 	}
 
 	if validatorSetFactory == nil {
-		impl.validatorSetFactory = impl.makeValidatorSet
+		calc.validatorSetFactory = calc.makeValidatorSet
 	}
 
-	return &impl
+	return &calc
 }
 
-func (impl *difficultyCalculatorImpl) makeValidatorSet(headerNum uint64) validatorSetInterface {
-	span := impl.spans.SpanAt(headerNum)
+func (calc *difficultyCalculator) makeValidatorSet(headerNum uint64) validatorSetInterface {
+	span := calc.spans.SpanAt(headerNum)
 	if span == nil {
 		return nil
 	}
 	return valset.NewValidatorSet(span.ValidatorSet.Validators)
 }
 
-func (impl *difficultyCalculatorImpl) HeaderDifficulty(header *types.Header) (uint64, error) {
-	signer, err := bor.Ecrecover(header, impl.signaturesCache, impl.borConfig)
+func (calc *difficultyCalculator) HeaderDifficulty(header *types.Header) (uint64, error) {
+	signer, err := bor.Ecrecover(header, calc.signaturesCache, calc.borConfig)
 	if err != nil {
 		return 0, err
 	}
-	return impl.signerDifficulty(signer, header.Number.Uint64())
+	return calc.signerDifficulty(signer, header.Number.Uint64())
 }
 
-func (impl *difficultyCalculatorImpl) signerDifficulty(signer libcommon.Address, headerNum uint64) (uint64, error) {
-	validatorSet := impl.validatorSetFactory(headerNum)
+func (calc *difficultyCalculator) signerDifficulty(signer libcommon.Address, headerNum uint64) (uint64, error) {
+	validatorSet := calc.validatorSetFactory(headerNum)
 	if validatorSet == nil {
-		return 0, fmt.Errorf("difficultyCalculatorImpl.signerDifficulty: no span at %d", headerNum)
+		return 0, fmt.Errorf("difficultyCalculator.signerDifficulty: no span at %d", headerNum)
 	}
 
-	sprintNum := impl.borConfig.CalculateSprintNumber(headerNum)
+	sprintNum := calc.borConfig.CalculateSprintNumber(headerNum)
 	if sprintNum > 0 {
 		validatorSet.IncrementProposerPriority(int(sprintNum))
 	}

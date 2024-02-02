@@ -2,7 +2,6 @@ package handler
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -16,7 +15,6 @@ func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolAttesterSlashings(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	fmt.Println("GetEthV1BeaconPoolAttesterSlashings", a.operationsPool.AttesterSlashingsPool.Raw())
 	return newBeaconResponse(a.operationsPool.AttesterSlashingsPool.Raw()), nil
 }
 
@@ -31,11 +29,11 @@ func (a *ApiHandler) GetEthV1BeaconPoolBLSExecutionChanges(w http.ResponseWriter
 func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	slot, err := beaconhttp.Uint64FromQueryParams(r, "slot")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	committeeIndex, err := beaconhttp.Uint64FromQueryParams(r, "committee_index")
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	atts := a.operationsPool.AttestationsPool.Raw()
 	if slot == nil && committeeIndex == nil {

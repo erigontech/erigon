@@ -51,7 +51,6 @@ type Cfg struct {
 
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
-	WebSeedS3Tokens                 []string
 	ExpectedTorrentFilesHashes      snapcfg.Preverified
 	DownloadTorrentFilesFromWebseed bool
 	AddTorrentsFromDisk             bool
@@ -154,7 +153,6 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	webseedUrlsOrFiles := webseeds
 	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
 	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
-	webseedS3Providers := make([]string, 0, len(webseedUrlsOrFiles))
 	for _, webseed := range webseedUrlsOrFiles {
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
@@ -171,7 +169,6 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		if strings.HasPrefix(webseed, "v1:") {
 			withoutVerisonPrefix := webseed[3:]
 			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
-				webseedS3Providers = append(webseedS3Providers, webseed)
 				continue
 			}
 			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
@@ -192,7 +189,7 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	snapCfg := snapcfg.KnownCfg(chainName, 0)
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
+		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders,
 		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, ExpectedTorrentFilesHashes: snapCfg.Preverified,
 	}, nil
 }

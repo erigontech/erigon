@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -10,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -21,21 +22,21 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r 
 
 	blockId, err := beaconhttp.StateIdFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	root, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(httpStatus, err.Error())
+		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
 	if err != nil {
 		return nil, err
 	}
 	if slot == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 	}
 	if a.beaconChainCfg.GetCurrentStateVersion(*slot/a.beaconChainCfg.SlotsPerEpoch) < clparams.CapellaVersion {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, "the specified state is not a capella state")
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("the specified state is not a capella state"))
 	}
 	headRoot, _, err := a.forkchoiceStore.GetHead()
 	if err != nil {
@@ -49,7 +50,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r 
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {
 		if currSlot > a.syncedData.HeadSlot() {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 		}
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, currSlot)
 		if err != nil {
@@ -65,5 +66,5 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r 
 		return newBeaconResponse(blk.Block.Body.ExecutionPayload.Withdrawals).WithFinalized(false), nil
 	}
 
-	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "state not found")
+	return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 }

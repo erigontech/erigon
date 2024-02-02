@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -51,19 +52,19 @@ func (a *ApiHandler) getAttestationsRewards(w http.ResponseWriter, r *http.Reque
 
 	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	req := []string{}
 	// read the entire body
 	jsonBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 	// parse json body request
 	if len(jsonBytes) > 0 {
 		if err := json.Unmarshal(jsonBytes, &req); err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	}
 
@@ -77,7 +78,7 @@ func (a *ApiHandler) getAttestationsRewards(w http.ResponseWriter, r *http.Reque
 	}
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch > headEpoch {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "epoch is in the future")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch is in the future"))
 	}
 	// Few cases to handle:
 	// 1) finalized data
@@ -109,7 +110,7 @@ func (a *ApiHandler) getAttestationsRewards(w http.ResponseWriter, r *http.Reque
 			}
 			return a.computeAttestationsRewardsForAltair(s.ValidatorSet(), s.InactivityScores(), s.PreviousEpochParticipation(), state.InactivityLeaking(s), filterIndicies, epoch)
 		}
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "no block found for this epoch")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
 	}
 
 	if version == clparams.Phase0Version {
@@ -128,7 +129,7 @@ func (a *ApiHandler) getAttestationsRewards(w http.ResponseWriter, r *http.Reque
 			}
 			return a.computeAttestationsRewardsForPhase0(s, filterIndicies, epoch)
 		}
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "no block found for this epoch")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
 	}
 	lastSlot := epoch*a.beaconChainCfg.SlotsPerEpoch + a.beaconChainCfg.SlotsPerEpoch - 1
 	stateProgress, err := state_accessors.GetStateProcessingProgress(tx)
@@ -136,7 +137,7 @@ func (a *ApiHandler) getAttestationsRewards(w http.ResponseWriter, r *http.Reque
 		return nil, err
 	}
 	if lastSlot > stateProgress {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "requested range is not yet processed or the node is not archivial")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("requested range is not yet processed or the node is not archivial"))
 	}
 	validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, lastSlot)
 	if err != nil {

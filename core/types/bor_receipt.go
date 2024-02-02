@@ -1,13 +1,12 @@
 package types
 
 import (
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/big"
-	"sort"
 
 	"github.com/holiman/uint256"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -34,7 +33,7 @@ func NewBorTransaction() *LegacyTx {
 
 // DeriveFieldsForBorReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash libcommon.Hash, blockNumber uint64, receipts Receipts) error {
+func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash libcommon.Hash, blockNumber uint64, receipts Receipts) {
 	txHash := ComputeBorTxHash(blockNumber, blockHash)
 	txIndex := uint(len(receipts))
 
@@ -58,36 +57,4 @@ func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash libcommon.Hash, block
 		receipt.Logs[j].Index = uint(logIndex)
 		logIndex++
 	}
-
-	return nil
-}
-
-// DeriveFieldsForBorLogs fills the receipts with their computed fields based on consensus
-// data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorLogs(logs []*Log, blockHash libcommon.Hash, blockNumber uint64, txIndex uint, logIndex uint) {
-	txHash := ComputeBorTxHash(blockNumber, blockHash)
-
-	// the derived log fields can simply be set from the block and transaction
-	for j := 0; j < len(logs); j++ {
-		logs[j].BlockNumber = blockNumber
-		logs[j].BlockHash = blockHash
-		logs[j].TxHash = txHash
-		logs[j].TxIndex = txIndex
-		logs[j].Index = logIndex
-		logIndex++
-	}
-}
-
-// MergeBorLogs merges receipt logs and block receipt logs
-func MergeBorLogs(logs []*Log, borLogs []*Log) []*Log {
-	result := append(logs, borLogs...)
-
-	sort.SliceStable(result, func(i int, j int) bool {
-		if result[i].BlockNumber == result[j].BlockNumber {
-			return result[i].Index < result[j].Index
-		}
-		return result[i].BlockNumber < result[j].BlockNumber
-	})
-
-	return result
 }

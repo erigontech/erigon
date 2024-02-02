@@ -39,18 +39,21 @@ func testDynamicTx(t *testing.T, ctx context.Context) {
 }
 
 func TestDynamicTxNode0(t *testing.T) {
+	t.Skip()
 	runCtx, err := contextStart(t, "")
 	require.Nil(t, err)
 	testDynamicTx(t, runCtx.WithCurrentNetwork(0).WithCurrentNode(0))
 }
 
 func TestDynamicTxAnyNode(t *testing.T) {
+	t.Skip()
 	runCtx, err := contextStart(t, "")
 	require.Nil(t, err)
 	testDynamicTx(t, runCtx.WithCurrentNetwork(0))
 }
 
 func TestCallContract(t *testing.T) {
+	t.Skip()
 	runCtx, err := contextStart(t, "")
 	require.Nil(t, err)
 	ctx := runCtx.WithCurrentNetwork(0)

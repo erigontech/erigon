@@ -3,11 +3,34 @@ package eth1
 import (
 	"context"
 	"fmt"
+	"reflect"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
+
+func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libcommon.Hash, transactions []types.Transaction, blobGasUsed uint64) error {
+	if expectedBlobHashes == nil {
+		return &rpc.InvalidParamsError{Message: "nil blob hashes array"}
+	}
+	actualBlobHashes := []libcommon.Hash{}
+	for _, txn := range transactions {
+		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
+	}
+	if len(actualBlobHashes) > int(s.config.GetMaxBlobsPerBlock()) || blobGasUsed > s.config.GetMaxBlobGasPerBlock() {
+		return nil
+	}
+	if !reflect.DeepEqual(actualBlobHashes, expectedBlobHashes) {
+		s.logger.Warn("[NewPayload] mismatch in blob hashes",
+			"expectedBlobHashes", expectedBlobHashes, "actualBlobHashes", actualBlobHashes)
+		return nil
+	}
+	return nil
+}
 
 func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *execution.InsertBlocksRequest) (*execution.InsertionResult, error) {
 	if !e.semaphore.TryAcquire(1) {

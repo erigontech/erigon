@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -15,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/spf13/afero"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -54,7 +56,8 @@ func TestForkChoiceBasic(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
+	emitters := beaconevents.NewEmitters()
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -125,7 +128,8 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	}
 	// Initialize forkchoice store
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
+	emitters := beaconevents.NewEmitters()
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {
@@ -148,4 +152,10 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 
 	require.Equal(t, intermediaryState.CurrentSyncCommittee(), currentIntermediarySyncCommittee)
 	require.Equal(t, intermediaryState.NextSyncCommittee(), nextIntermediarySyncCommittee)
+
+	bs, has := store.GetLightClientBootstrap(intermediaryBlockRoot)
+	require.True(t, has)
+	bsRoot, err := bs.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, libcommon.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 }

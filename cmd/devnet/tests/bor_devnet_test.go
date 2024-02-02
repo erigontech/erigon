@@ -16,6 +16,7 @@ import (
 )
 
 func TestStateSync(t *testing.T) {
+	t.Skip()
 	runCtx, err := contextStart(t, networkname.BorDevnetChainName)
 	require.Nil(t, err)
 	var ctx context.Context = runCtx

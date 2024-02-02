@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai-during_staticcall": {
+    "tests/shanghai/eip3855_push0/test_push0.py::test_push0_during_staticcall[fork_Shanghai-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3855.md",
             "reference-spec-version": "42034250ae8dd4b21fdc6795773893c6f1e74d3a"
         },
@@ -50,6 +51,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x783f7c161ba15862267c6d94184599ee0708e07ad2111456f3120dc0b0376c81"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -122,9 +124,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun-during_staticcall": {
+    "tests/shanghai/eip3855_push0/test_push0.py::test_push0_during_staticcall[fork_Cancun-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3855.md",
             "reference-spec-version": "42034250ae8dd4b21fdc6795773893c6f1e74d3a"
         },
@@ -179,6 +182,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x431e68ec16d3904945e469c76ef5438a827797505a1c9ef671450a60cce8f857"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -13,7 +14,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -31,11 +31,11 @@ import (
 )
 
 type test_heimdall struct {
-	currentSpan  *heimdall.HeimdallSpan
+	currentSpan  *heimdall.Span
 	chainConfig  *chain.Config
 	borConfig    *borcfg.BorConfig
 	validatorSet *valset.ValidatorSet
-	spans        map[uint64]*heimdall.HeimdallSpan
+	spans        map[heimdall.SpanId]*heimdall.Span
 }
 
 func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
@@ -44,7 +44,7 @@ func newTestHeimdall(chainConfig *chain.Config) *test_heimdall {
 		chainConfig:  chainConfig,
 		borConfig:    chainConfig.Bor.(*borcfg.BorConfig),
 		validatorSet: nil,
-		spans:        map[uint64]*heimdall.HeimdallSpan{},
+		spans:        map[heimdall.SpanId]*heimdall.Span{},
 	}
 }
 
@@ -52,25 +52,27 @@ func (h *test_heimdall) BorConfig() *borcfg.BorConfig {
 	return h.borConfig
 }
 
-func (h test_heimdall) StateSyncEvents(ctx context.Context, fromID uint64, to int64) ([]*heimdall.EventRecordWithTime, error) {
+func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
 	return nil, nil
 }
 
-func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.HeimdallSpan, error) {
+func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 
-	if span, ok := h.spans[spanID]; ok {
+	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {
 		h.currentSpan = span
 		return span, nil
 	}
 
 	var nextSpan = heimdall.Span{
-		ID: spanID,
+		Id:           heimdall.SpanId(spanID),
+		ValidatorSet: *h.validatorSet,
+		ChainID:      h.chainConfig.ChainID.String(),
 	}
 
 	if h.currentSpan == nil || spanID == 0 {
 		nextSpan.StartBlock = 1 //256
 	} else {
-		if spanID != h.currentSpan.ID+1 {
+		if spanID != uint64(h.currentSpan.Id+1) {
 			return nil, fmt.Errorf("Can't initialize span: non consecutive span")
 		}
 
@@ -81,20 +83,15 @@ func (h *test_heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Heim
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
-	selectedProducers := make([]valset.Validator, len(h.validatorSet.Validators))
+	nextSpan.SelectedProducers = make([]valset.Validator, len(h.validatorSet.Validators))
 
 	for i, v := range h.validatorSet.Validators {
-		selectedProducers[i] = *v
+		nextSpan.SelectedProducers[i] = *v
 	}
 
-	h.currentSpan = &heimdall.HeimdallSpan{
-		Span:              nextSpan,
-		ValidatorSet:      *h.validatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           h.chainConfig.ChainID.String(),
-	}
+	h.currentSpan = &nextSpan
 
-	h.spans[h.currentSpan.ID] = h.currentSpan
+	h.spans[h.currentSpan.Id] = h.currentSpan
 
 	return h.currentSpan, nil
 }
@@ -133,6 +130,9 @@ func (h test_heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, err
 
 func (h test_heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
+}
+func (h test_heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
 }
 
 func (h test_heimdall) Close() {}
@@ -192,7 +192,7 @@ func (r headerReader) BorSpan(spanId uint64) []byte {
 
 type spanner struct {
 	*bor.ChainSpanner
-	validatorAddress common.Address
+	validatorAddress libcommon.Address
 	currentSpan      heimdall.Span
 }
 
@@ -200,8 +200,8 @@ func (c spanner) GetCurrentSpan(_ consensus.SystemCall) (*heimdall.Span, error) 
 	return &c.currentSpan, nil
 }
 
-func (c *spanner) CommitSpan(heimdallSpan heimdall.HeimdallSpan, syscall consensus.SystemCall) error {
-	c.currentSpan = heimdallSpan.Span
+func (c *spanner) CommitSpan(heimdallSpan heimdall.Span, syscall consensus.SystemCall) error {
+	c.currentSpan = heimdallSpan
 	return nil
 }
 
@@ -273,8 +273,6 @@ func (v validator) verifyBlocks(blocks []*types.Block) error {
 	return nil
 }
 
-type heimdallSpan = heimdall.Span
-
 func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*types.Block) validator {
 	logger := log.Root()
 
@@ -287,7 +285,6 @@ func newValidator(t *testing.T, heimdall *test_heimdall, blocks map[uint64]*type
 		&spanner{
 			ChainSpanner:     bor.NewChainSpanner(bor.GenesisContractValidatorSetABI(), heimdall.chainConfig, false, logger),
 			validatorAddress: validatorAddress,
-			currentSpan:      heimdallSpan{},
 		},
 		heimdall,
 		test_genesisContract{},

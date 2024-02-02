@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun": {
+    "tests/cancun/eip1153_tstore/test_tstorage.py::test_tload_after_sstore[fork_Cancun-blockchain_test]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1153.md",
             "reference-spec-version": "6f0be621c76a05a7b3aaf0e9297afd425c26e9d0"
         },
@@ -56,6 +57,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x6b7058143d59c7522d93d7899425c2db7764528b4de7e30aad5cafa1210d6b12"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

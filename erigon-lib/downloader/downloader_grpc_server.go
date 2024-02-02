@@ -46,7 +46,7 @@ type GrpcServer struct {
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	if err := s.d.prohibitNewDownloads(); err != nil {
+	if err := s.d.torrentFiles.prohibitNewDownloads(); err != nil {
 		return nil, err
 	}
 	return nil, nil
