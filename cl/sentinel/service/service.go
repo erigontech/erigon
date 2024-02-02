@@ -268,10 +268,33 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (
 }
 
 func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
+	count, connected, disconnected := s.sentinel.GetPeersCount()
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
-		Amount: uint64(s.sentinel.GetPeersCount()),
+		Active:       uint64(count),
+		Connected:    uint64(connected),
+		Disconnected: uint64(disconnected),
 	}, nil
+}
+
+func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfoRequest) (*sentinelrpc.PeersInfoResponse, error) {
+	peersInfos := s.sentinel.GetPeersInfos()
+	if r.Direction == nil && r.State == nil {
+		return peersInfos, nil
+	}
+	filtered := &sentinelrpc.PeersInfoResponse{
+		Peers: make([]*sentinelrpc.Peer, 0, len(peersInfos.Peers)),
+	}
+	for _, peer := range peersInfos.Peers {
+		if r.Direction != nil && peer.Direction != *r.Direction {
+			continue
+		}
+		if r.State != nil && peer.State != *r.State {
+			continue
+		}
+		filtered.Peers = append(filtered.Peers, peer)
+	}
+	return filtered, nil
 }
 
 func (s *SentinelServer) ListenToGossip() {

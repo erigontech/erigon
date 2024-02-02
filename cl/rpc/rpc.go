@@ -161,7 +161,7 @@ func (b *BeaconRpcP2P) Peers() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return amount.Amount, nil
+	return amount.Active, nil
 }
 
 func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch uint64, headRoot libcommon.Hash, headSlot uint64) error {
