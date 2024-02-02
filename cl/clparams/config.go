@@ -534,9 +534,9 @@ type BeaconChainConfig struct {
 	MaxBuilderConsecutiveMissedSlots uint64 // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
 
-	MaxBlobGasPerBlock uint64 // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
-	MaxBlobsPerBlock   uint64 // MaxBlobsPerBlock defines the maximum number of blobs per block.
-
+	MaxBlobGasPerBlock           uint64 // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
+	MaxBlobsPerBlock             uint64 // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	MaxRequestLightClientUpdates uint64 // MaxRequestLightClientUpdates defines the maximum number of light client updates per request.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -801,8 +801,9 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxBuilderConsecutiveMissedSlots: 3,
 	MaxBuilderEpochMissedSlots:       8,
 
-	MaxBlobGasPerBlock: 786432,
-	MaxBlobsPerBlock:   6,
+	MaxBlobGasPerBlock:           786432,
+	MaxBlobsPerBlock:             6,
+	MaxRequestLightClientUpdates: 128,
 }
 
 func mainnetConfig() BeaconChainConfig {

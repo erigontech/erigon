@@ -23,6 +23,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
@@ -84,6 +85,7 @@ type Sentinel struct {
 	metrics              bool
 	listenForPeersDoneCh chan struct{}
 	logger               log.Logger
+	forkChoiceReader     forkchoice.ForkChoiceStorageReader
 }
 
 func (s *Sentinel) createLocalNode(
@@ -168,7 +170,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	}
 
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2, s.cfg.EnableBlocks).Start()
+	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
 
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
@@ -184,14 +186,16 @@ func New(
 	db persistence.RawBeaconBlockChain,
 	indiciesDB kv.RoDB,
 	logger log.Logger,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:        ctx,
-		cfg:        cfg,
-		db:         db,
-		indiciesDB: indiciesDB,
-		metrics:    true,
-		logger:     logger,
+		ctx:              ctx,
+		cfg:              cfg,
+		db:               db,
+		indiciesDB:       indiciesDB,
+		metrics:          true,
+		logger:           logger,
+		forkChoiceReader: forkChoiceReader,
 	}
 
 	// Setup discovery
