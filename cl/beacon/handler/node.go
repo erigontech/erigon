@@ -134,3 +134,27 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 	}
 	http.Error(w, "peer not found", http.StatusNotFound)
 }
+
+func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request) {
+	id, err := a.sentinel.Identity(r.Context(), &sentinel.EmptyMessage{})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": map[string]interface{}{
+			"peer_id":             id.Pid,
+			"enr":                 id.Enr,
+			"p2p_addresses":       id.P2PAddresses,
+			"discovery_addresses": id.DiscoveryAddresses,
+			"metadata": map[string]interface{}{
+				"seq":      strconv.FormatUint(id.Metadata.Seq, 10),
+				"attnets":  id.Metadata.Attnets,
+				"syncnets": id.Metadata.Syncnets,
+			},
+		},
+	}); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+
+}

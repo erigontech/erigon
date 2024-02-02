@@ -255,6 +255,23 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 
 }
 
+func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {
+	// call s.sentinel.Identity()
+	pid, enr, p2pAddresses, discoveryAddresses, metadata := s.sentinel.Identity()
+	return &sentinelrpc.IdentityResponse{
+		Pid:                pid,
+		Enr:                enr,
+		P2PAddresses:       p2pAddresses,
+		DiscoveryAddresses: discoveryAddresses,
+		Metadata: &sentinelrpc.Metadata{
+			Seq:      metadata.SeqNumber,
+			Attnets:  fmt.Sprintf("%x", metadata.Attnets),
+			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
+		},
+	}, nil
+
+}
+
 func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
 	// Send the request and get the data if we get an answer.
 	s.sentinel.SetStatus(&cltypes.Status{

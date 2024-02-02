@@ -369,6 +369,18 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 	return out
 }
 
+func (s *Sentinel) Identity() (pid, enr string, p2pAddresses, discoveryAddresses []string, metadata *cltypes.Metadata) {
+	pid = s.host.ID().String()
+	enr = s.listener.LocalNode().Node().String()
+	p2pAddresses = make([]string, 0, len(s.host.Addrs()))
+	for _, addr := range s.host.Addrs() {
+		p2pAddresses = append(p2pAddresses, addr.String())
+	}
+	discoveryAddresses = []string{s.listener.LocalNode().Node().IP().String()}
+	metadata = s.metadataV2
+	return
+}
+
 func (s *Sentinel) Host() host.Host {
 	return s.host
 }

@@ -62,12 +62,8 @@ func (s *SentinelClientDirect) PublishGossip(ctx context.Context, in *sentinel.G
 	return s.server.PublishGossip(ctx, in)
 }
 
-func (s *SentinelClientDirect) Identity(ctx context.Context, in *sentinel.EmptyMessage, opts ...grpc.CallOption) (*sentinel.Peer, error) {
+func (s *SentinelClientDirect) Identity(ctx context.Context, in *sentinel.EmptyMessage, opts ...grpc.CallOption) (*sentinel.IdentityResponse, error) {
 	return s.server.Identity(ctx, in)
-}
-
-func (s *SentinelClientDirect) PeerInfo(ctx context.Context, in *sentinel.PeerInfoRequest, opts ...grpc.CallOption) (*sentinel.Peer, error) {
-	return s.server.PeerInfo(ctx, in)
 }
 
 func (s *SentinelClientDirect) PeersInfo(ctx context.Context, in *sentinel.PeersInfoRequest, opts ...grpc.CallOption) (*sentinel.PeersInfoResponse, error) {

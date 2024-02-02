@@ -29,7 +29,6 @@ const (
 	Sentinel_RewardPeer_FullMethodName      = "/sentinel.Sentinel/RewardPeer"
 	Sentinel_PublishGossip_FullMethodName   = "/sentinel.Sentinel/PublishGossip"
 	Sentinel_Identity_FullMethodName        = "/sentinel.Sentinel/Identity"
-	Sentinel_PeerInfo_FullMethodName        = "/sentinel.Sentinel/PeerInfo"
 	Sentinel_PeersInfo_FullMethodName       = "/sentinel.Sentinel/PeersInfo"
 )
 
@@ -46,8 +45,7 @@ type SentinelClient interface {
 	PenalizePeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
 	RewardPeer(ctx context.Context, in *Peer, opts ...grpc.CallOption) (*EmptyMessage, error)
 	PublishGossip(ctx context.Context, in *GossipData, opts ...grpc.CallOption) (*EmptyMessage, error)
-	Identity(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*Peer, error)
-	PeerInfo(ctx context.Context, in *PeerInfoRequest, opts ...grpc.CallOption) (*Peer, error)
+	Identity(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*IdentityResponse, error)
 	PeersInfo(ctx context.Context, in *PeersInfoRequest, opts ...grpc.CallOption) (*PeersInfoResponse, error)
 }
 
@@ -163,18 +161,9 @@ func (c *sentinelClient) PublishGossip(ctx context.Context, in *GossipData, opts
 	return out, nil
 }
 
-func (c *sentinelClient) Identity(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*Peer, error) {
-	out := new(Peer)
+func (c *sentinelClient) Identity(ctx context.Context, in *EmptyMessage, opts ...grpc.CallOption) (*IdentityResponse, error) {
+	out := new(IdentityResponse)
 	err := c.cc.Invoke(ctx, Sentinel_Identity_FullMethodName, in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *sentinelClient) PeerInfo(ctx context.Context, in *PeerInfoRequest, opts ...grpc.CallOption) (*Peer, error) {
-	out := new(Peer)
-	err := c.cc.Invoke(ctx, Sentinel_PeerInfo_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -203,8 +192,7 @@ type SentinelServer interface {
 	PenalizePeer(context.Context, *Peer) (*EmptyMessage, error)
 	RewardPeer(context.Context, *Peer) (*EmptyMessage, error)
 	PublishGossip(context.Context, *GossipData) (*EmptyMessage, error)
-	Identity(context.Context, *EmptyMessage) (*Peer, error)
-	PeerInfo(context.Context, *PeerInfoRequest) (*Peer, error)
+	Identity(context.Context, *EmptyMessage) (*IdentityResponse, error)
 	PeersInfo(context.Context, *PeersInfoRequest) (*PeersInfoResponse, error)
 	mustEmbedUnimplementedSentinelServer()
 }
@@ -240,11 +228,8 @@ func (UnimplementedSentinelServer) RewardPeer(context.Context, *Peer) (*EmptyMes
 func (UnimplementedSentinelServer) PublishGossip(context.Context, *GossipData) (*EmptyMessage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PublishGossip not implemented")
 }
-func (UnimplementedSentinelServer) Identity(context.Context, *EmptyMessage) (*Peer, error) {
+func (UnimplementedSentinelServer) Identity(context.Context, *EmptyMessage) (*IdentityResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Identity not implemented")
-}
-func (UnimplementedSentinelServer) PeerInfo(context.Context, *PeerInfoRequest) (*Peer, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method PeerInfo not implemented")
 }
 func (UnimplementedSentinelServer) PeersInfo(context.Context, *PeersInfoRequest) (*PeersInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method PeersInfo not implemented")
@@ -445,24 +430,6 @@ func _Sentinel_Identity_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Sentinel_PeerInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PeerInfoRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(SentinelServer).PeerInfo(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: Sentinel_PeerInfo_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SentinelServer).PeerInfo(ctx, req.(*PeerInfoRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _Sentinel_PeersInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PeersInfoRequest)
 	if err := dec(in); err != nil {
@@ -523,10 +490,6 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Identity",
 			Handler:    _Sentinel_Identity_Handler,
-		},
-		{
-			MethodName: "PeerInfo",
-			Handler:    _Sentinel_PeerInfo_Handler,
 		},
 		{
 			MethodName: "PeersInfo",
