@@ -1,10 +1,14 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"math"
 	"math/rand"
 	"os"
 	"path"
@@ -271,6 +275,309 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.EqualValues(t, maxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
+	aggStep := uint64(10)
+	db, agg := testDbAndAggregatorv3(t, aggStep)
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if tx != nil {
+			tx.Rollback()
+		}
+	}()
+
+	ac := agg.MakeContext()
+	defer ac.Close()
+
+	domains := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	defer domains.Close()
+
+	maxTx := aggStep * 5
+	t.Logf("step=%d tx_count=%d\n", aggStep, maxTx)
+
+	rnd := rand.New(rand.NewSource(0))
+
+	generateSharedDomainsUpdates(t, domains, maxTx, rnd, 20, 10, aggStep/2)
+
+	// flush and build files
+	err = domains.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	var (
+		// until pruning
+		accountsRange    map[string][]byte
+		storageRange     map[string][]byte
+		codeRange        map[string][]byte
+		accountHistRange map[string]vs
+		storageHistRange map[string]vs
+		codeHistRange    map[string]vs
+	)
+	maxInt := math.MaxInt
+	{
+		it, err := ac.DomainRangeLatest(tx, kv.AccountsDomain, nil, nil, maxInt)
+		require.NoError(t, err)
+		accountsRange = extractKVErrIterator(t, it)
+
+		it, err = ac.DomainRangeLatest(tx, kv.StorageDomain, nil, nil, maxInt)
+		require.NoError(t, err)
+		storageRange = extractKVErrIterator(t, it)
+
+		it, err = ac.DomainRangeLatest(tx, kv.CodeDomain, nil, nil, maxInt)
+		require.NoError(t, err)
+		codeRange = extractKVErrIterator(t, it)
+
+		its, err := ac.account.hc.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		require.NoError(t, err)
+		accountHistRange = extractKVSErrIterator(t, its)
+		its, err = ac.code.hc.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		require.NoError(t, err)
+		codeHistRange = extractKVSErrIterator(t, its)
+		its, err = ac.storage.hc.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		require.NoError(t, err)
+		storageHistRange = extractKVSErrIterator(t, its)
+	}
+
+	err = tx.Commit()
+	require.NoError(t, err)
+
+	buildTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if buildTx != nil {
+			buildTx.Rollback()
+		}
+	}()
+
+	err = agg.BuildFiles(maxTx)
+	require.NoError(t, err)
+
+	ac = agg.MakeContext()
+	for i := 0; i < 10; i++ {
+		err = ac.PruneSmallBatches(context.Background(), time.Second*3, buildTx)
+		require.NoError(t, err)
+	}
+	err = buildTx.Commit()
+	require.NoError(t, err)
+
+	afterTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if afterTx != nil {
+			afterTx.Rollback()
+		}
+	}()
+
+	var (
+		// after pruning
+		accountsRangeAfter    map[string][]byte
+		storageRangeAfter     map[string][]byte
+		codeRangeAfter        map[string][]byte
+		accountHistRangeAfter map[string]vs
+		storageHistRangeAfter map[string]vs
+		codeHistRangeAfter    map[string]vs
+	)
+
+	{
+		it, err := ac.DomainRangeLatest(afterTx, kv.AccountsDomain, nil, nil, maxInt)
+		require.NoError(t, err)
+		accountsRangeAfter = extractKVErrIterator(t, it)
+
+		it, err = ac.DomainRangeLatest(afterTx, kv.StorageDomain, nil, nil, maxInt)
+		require.NoError(t, err)
+		storageRangeAfter = extractKVErrIterator(t, it)
+
+		it, err = ac.DomainRangeLatest(afterTx, kv.CodeDomain, nil, nil, maxInt)
+		require.NoError(t, err)
+		codeRangeAfter = extractKVErrIterator(t, it)
+
+		its, err := ac.account.hc.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		require.NoError(t, err)
+		accountHistRangeAfter = extractKVSErrIterator(t, its)
+		its, err = ac.code.hc.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		require.NoError(t, err)
+		codeHistRangeAfter = extractKVSErrIterator(t, its)
+		its, err = ac.storage.hc.HistoryRange(0, int(maxTx), order.Asc, maxInt, tx)
+		require.NoError(t, err)
+		storageHistRangeAfter = extractKVSErrIterator(t, its)
+	}
+
+	{
+		// compare
+		compareMapsBytes(t, accountsRange, accountsRangeAfter)
+		compareMapsBytes(t, storageRange, storageRangeAfter)
+		compareMapsBytes(t, codeRange, codeRangeAfter)
+		compareMapsBytes2(t, accountHistRange, accountHistRangeAfter)
+		compareMapsBytes2(t, storageHistRange, storageHistRangeAfter)
+		compareMapsBytes2(t, codeHistRange, codeHistRangeAfter)
+	}
+
+}
+
+func compareMapsBytes2(t *testing.T, m1, m2 map[string]vs) {
+	t.Helper()
+	for k, v := range m1 {
+		v2, ok := m2[k]
+		require.Truef(t, ok, "key %x not found", k)
+		require.EqualValues(t, v.s, v2.s)
+		if !bytes.Equal(v.v, v2.v) { // empty value==nil
+			t.Logf("key %x expected '%x' but got '%x'\n", k, v, m2[k])
+		}
+		delete(m2, k)
+	}
+	require.Emptyf(t, m2, "m2 should be empty got %d: %v", len(m2), m2)
+}
+
+func compareMapsBytes(t *testing.T, m1, m2 map[string][]byte) {
+	t.Helper()
+	for k, v := range m1 {
+		require.EqualValues(t, v, m2[k])
+		delete(m2, k)
+	}
+	require.Emptyf(t, m2, "m2 should be empty got %d: %v", len(m2), m2)
+}
+
+type vs struct {
+	v []byte
+	s uint64
+}
+
+func extractKVSErrIterator(t *testing.T, it iter.KVS) map[string]vs {
+	t.Helper()
+
+	accounts := make(map[string]vs)
+	for it.HasNext() {
+		k, v, s, err := it.Next()
+		require.NoError(t, err)
+		accounts[hex.EncodeToString(k)] = vs{v: common.Copy(v), s: s}
+	}
+
+	return accounts
+}
+
+func extractKVErrIterator(t *testing.T, it iter.KV) map[string][]byte {
+	t.Helper()
+
+	accounts := make(map[string][]byte)
+	for it.HasNext() {
+		k, v, err := it.Next()
+		require.NoError(t, err)
+		accounts[hex.EncodeToString(k)] = common.Copy(v)
+	}
+
+	return accounts
+}
+
+func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rand.Rand, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
+	t.Helper()
+	usedKeys := make(map[string]struct{}, keysCount*maxTxNum)
+	for txNum := uint64(1); txNum <= maxTxNum; txNum++ {
+		used := generateSharedDomainsUpdatesForTx(t, domains, txNum, rnd, usedKeys, keyMaxLen, keysCount)
+		for k := range used {
+			usedKeys[k] = struct{}{}
+		}
+		if txNum%commitEvery == 0 {
+			_, err := domains.ComputeCommitment(context.Background(), true, txNum/commitEvery, "")
+			require.NoErrorf(t, err, "txNum=%d", txNum)
+		}
+	}
+	return usedKeys
+}
+
+func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txNum uint64, rnd *rand.Rand, prevKeys map[string]struct{}, keyMaxLen, keysCount uint64) map[string]struct{} {
+	t.Helper()
+	domains.SetTxNum(txNum)
+
+	getKey := func() ([]byte, bool) {
+		r := rnd.Intn(100)
+		if r < 50 && len(prevKeys) > 0 {
+			ri := rnd.Intn(len(prevKeys))
+			for k := range prevKeys {
+				if ri == 0 {
+					return []byte(k), true
+				}
+				ri--
+			}
+		} else {
+			return []byte(generateRandomKey(rnd, keyMaxLen)), false
+		}
+		panic("unreachable")
+	}
+
+	const maxStorageKeys = 350
+	usedKeys := make(map[string]struct{}, keysCount)
+
+	for j := uint64(0); j < keysCount; j++ {
+		key, existed := getKey()
+
+		r := rnd.Intn(101)
+		switch {
+		case r <= 33:
+			buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
+			prev, step, err := domains.LatestAccount(key)
+			require.NoError(t, err)
+
+			usedKeys[string(key)] = struct{}{}
+
+			err = domains.DomainPut(kv.AccountsDomain, key, nil, buf, prev, step)
+			require.NoError(t, err)
+
+		case r > 33 && r <= 66:
+			codeUpd := make([]byte, rnd.Intn(24576))
+			_, err := rnd.Read(codeUpd)
+			require.NoError(t, err)
+			usedKeys[string(key)] = struct{}{}
+
+			prev, step, err := domains.LatestCode(key)
+			require.NoError(t, err)
+
+			err = domains.DomainPut(kv.CodeDomain, key, nil, codeUpd, prev, step)
+			require.NoError(t, err)
+		case r == 100:
+			//prev, step, err := domains.LatestAccount(key)
+			//require.NoError(t, err)
+			if !existed {
+				continue
+			}
+
+			usedKeys[string(key)] = struct{}{}
+
+			err := domains.DomainDel(kv.AccountsDomain, key, nil, nil, 0)
+			require.NoError(t, err)
+
+		case r > 66:
+			if !existed {
+				// need to create account because commitment trie requires it (accounts are upper part of trie)
+				buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
+				prev, step, err := domains.LatestAccount(key)
+				require.NoError(t, err)
+
+				usedKeys[string(key)] = struct{}{}
+
+				err = domains.DomainPut(kv.AccountsDomain, key, nil, buf, prev, step)
+				require.NoError(t, err)
+			}
+			for i := 0; i < maxStorageKeys; i++ {
+				loc := generateRandomKeyBytes(rnd, 32)
+				if len(key)+len(loc) >= 52 {
+					key = append(key[0:], append(key, loc...)...)
+					loc = key[20 : 20+32]
+					key = key[:20]
+				}
+				usedKeys[string(append(key, loc...))] = struct{}{}
+
+				prev, step, err := domains.DomainGet(kv.StorageDomain, key, loc)
+				require.NoError(t, err)
+
+				err = domains.DomainPut(kv.StorageDomain, key, loc, uint256.NewInt(txNum).Bytes(), prev, step)
+				require.NoError(t, err)
+			}
+
+		}
+	}
+	return usedKeys
+}
+
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 	logger := log.New()
@@ -392,7 +699,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestAggregator_ReplaceCommittedKeys(t *testing.T) {
+func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	ctx := context.Background()
 	aggStep := uint64(500)
 
@@ -774,6 +1081,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 	}
 }
 
+// also useful to decode given input into v3 account
 func Test_helper_decodeAccountv3Bytes(t *testing.T) {
 	input, err := hex.DecodeString("000114000101")
 	require.NoError(t, err)
