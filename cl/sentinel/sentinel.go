@@ -364,6 +364,10 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 		} else {
 			continue
 		}
+		agent, err := s.host.Peerstore().Get(p, "AgentVersion")
+		if err == nil {
+			entry.AgentVersion = agent.(string)
+		}
 		out.Peers = append(out.Peers, entry)
 	}
 	return out

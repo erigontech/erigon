@@ -24,6 +24,7 @@ type peer struct {
 	Enr                string `json:"enr"`
 	LastSeenP2PAddress string `json:"last_seen_p2p_address"`
 	Direction          string `json:"direction"`
+	AgentVersion       string `json:"agent_version"`
 }
 
 func (a *ApiHandler) GetEthV1NodeHealth(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +102,7 @@ func (a *ApiHandler) GetEthV1NodePeersInfos(w http.ResponseWriter, r *http.Reque
 			Enr:                ret.Peers[i].Enr,
 			LastSeenP2PAddress: ret.Peers[i].Address,
 			Direction:          ret.Peers[i].Direction,
+			AgentVersion:       ret.Peers[i].AgentVersion,
 		})
 	}
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
@@ -122,10 +124,17 @@ func (a *ApiHandler) GetEthV1NodePeerInfos(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	// find the peer with matching enr
-	for _, peer := range ret.Peers {
-		if peer.Pid == pid {
+	for _, p := range ret.Peers {
+		if p.Pid == pid {
 			if err := json.NewEncoder(w).Encode(map[string]interface{}{
-				"data": peer,
+				"data": peer{
+					PeerID:             p.Pid,
+					State:              p.State,
+					Enr:                p.Enr,
+					LastSeenP2PAddress: p.Address,
+					Direction:          p.Direction,
+					AgentVersion:       p.AgentVersion,
+				},
 			}); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
