@@ -88,10 +88,14 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 	}
 
 	target := aggregateAndProof.Message.Aggregate.AttestantionData().Target()
+	// getCheckpointState is non-thread safe, so we need to lock
+	f.mu.Lock()
 	targetState, err := f.getCheckpointState(target)
 	if err != nil {
+		f.mu.Unlock()
 		return nil
 	}
+	f.mu.Unlock()
 
 	activeIndicies := targetState.getActiveIndicies(epoch)
 	activeIndiciesLength := uint64(len(activeIndicies))
