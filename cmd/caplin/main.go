@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -122,13 +121,11 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 
-	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), 0).Version
-
 	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, snapshotVersion, beacon_router_configuration.RouterConfiguration{
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon_router_configuration.RouterConfiguration{
 		Protocol:         cfg.BeaconProtocol,
 		Address:          cfg.BeaconAddr,
 		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,

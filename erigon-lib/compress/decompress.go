@@ -398,7 +398,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) EnableWillNeed() *Decompressor {
+func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}
