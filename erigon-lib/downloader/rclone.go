@@ -142,13 +142,6 @@ func (u *RCloneClient) sync(ctx context.Context, request *rcloneRequest) error {
 	return err
 }
 
-/*
-return retryConnects(ctx, func(ctx context.Context) error {
-	return client.CallContext(ctx, result, string(method), args...)
-})
-}
-*/
-
 func isConnectionError(err error) bool {
 	var opErr *net.OpError
 	if errors.As(err, &opErr) {
