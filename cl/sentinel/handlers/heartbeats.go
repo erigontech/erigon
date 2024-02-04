@@ -45,9 +45,12 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
 		return err
 	}
-	v, err := c.host.Peerstore().Get("AgentVersion", peerId)
-	if err == nil {
-		log.Debug("Received goodbye message from peer", "v", v)
+
+	if gid.Id == 250 { // 250 is the status code for getting banned due to whatever reason
+		v, err := c.host.Peerstore().Get("AgentVersion", peerId)
+		if err == nil {
+			log.Debug("Received goodbye message from peer", "v", v)
+		}
 	}
 
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
