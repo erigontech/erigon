@@ -964,7 +964,7 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error
 }
 
 func (a *ArchiveSanitizer) Run(ctx *Context) error {
-	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(r.Chain)
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(a.Chain)
 	if err != nil {
 		return err
 	}
@@ -997,4 +997,5 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 		}
 		log.Info("State at slot", "slot", i, "root", stateRoot)
 	}
+	return nil
 }
