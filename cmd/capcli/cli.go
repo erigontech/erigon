@@ -900,7 +900,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 type ArchiveSanitizer struct {
 	chainCfg
 	outputFolder
-	BeaconApiURL string `help:"beacon api url" default:"http://localhost:5050"`
+	BeaconApiURL string `help:"beacon api url" default:"http://localhost:5555"`
 	IntervalSlot uint64 `help:"interval slot" default:"19"` // odd number so that we can test many potential cases.
 	StartSlot    uint64 `help:"start slot" default:"0"`
 }
@@ -925,6 +925,7 @@ func getHead(beaconApiURL string) (uint64, error) {
 		return 0, fmt.Errorf("no head found")
 	}
 	head := data[0].(map[string]interface{})
+	fmt.Println(head)
 	slotStr, ok := head["slot"].(string)
 	if !ok {
 		return 0, fmt.Errorf("no slot found")
