@@ -83,6 +83,7 @@ var CLI struct {
 	LoopSnapshots           LoopSnapshots           `cmd:"" help:"loop over snapshots"`
 	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
 	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
+	ArchiveSanitizer        ArchiveSanitizer        `cmd:"" help:"archive sanitizer"`
 }
 
 type chainCfg struct {
