@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -891,4 +894,106 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
+}
+
+type ArchiveSanitizer struct {
+	chainCfg
+	outputFolder
+	BeaconApiURL string `help:"beacon api url" default:"http://localhost:5050"`
+	IntervalSlot uint64 `help:"interval slot" default:"19"` // odd number so that we can test many potential cases.
+	StartSlot    uint64 `help:"start slot" default:"0"`
+}
+
+func getHead(beaconApiURL string) (uint64, error) {
+	headResponse := map[string]interface{}{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v2/debug/beacon/heads", beaconApiURL), nil)
+	if err != nil {
+		return 0, err
+	}
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&headResponse); err != nil {
+		return 0, err
+	}
+	data := headResponse["data"].([]interface{})
+	if len(data) == 0 {
+		return 0, fmt.Errorf("no head found")
+	}
+	head := data[0].(map[string]interface{})
+	slotStr, ok := head["slot"].(string)
+	if !ok {
+		return 0, fmt.Errorf("no slot found")
+	}
+	slot, err := strconv.ParseUint(slotStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return slot, nil
+}
+
+func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error) {
+	response := map[string]interface{}{}
+	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		return libcommon.Hash{}, err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return libcommon.Hash{}, nil
+	}
+	defer resp.Body.Close()
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return libcommon.Hash{}, err
+	}
+	data := response["data"].(map[string]interface{})
+	if len(data) == 0 {
+		return libcommon.Hash{}, fmt.Errorf("no head found")
+	}
+	rootStr := data["root"].(string)
+
+	return libcommon.HexToHash(rootStr), nil
+}
+
+func (a *ArchiveSanitizer) Run(ctx *Context) error {
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(r.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+
+	// retrieve the head slot first through /eth/v2/debug/beacon/heads
+	headSlot, err := getHead(a.BeaconApiURL)
+	if err != nil {
+		return err
+	}
+	for i := a.StartSlot; i < headSlot; i += a.IntervalSlot {
+		// retrieve the state root at slot i and skip if not found (can happen)
+		stateRoot, err := getStateRootAtSlot(a.BeaconApiURL, i)
+		if err != nil {
+			return err
+		}
+		if stateRoot == (libcommon.Hash{}) {
+			continue
+		}
+		state, err := core.RetrieveBeaconState(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i))
+		if err != nil {
+			return err
+		}
+		stateRoot2, err := state.HashSSZ()
+		if err != nil {
+			return err
+		}
+		if stateRoot != stateRoot2 {
+			return fmt.Errorf("state mismatch at slot %d: got %s, want %s", i, stateRoot2, stateRoot)
+		}
+		log.Info("State at slot", "slot", i, "root", stateRoot)
+	}
 }
