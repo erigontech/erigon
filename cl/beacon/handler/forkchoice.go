@@ -20,7 +20,7 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 	return newBeaconResponse(
 		[]interface{}{
 			map[string]interface{}{
-				"slot":                 strconv.FormatUint(uint64(slotNumber), 10),
+				"slot":                 strconv.FormatUint(slotNumber, 10),
 				"root":                 hash,
 				"execution_optimistic": false,
 			},
