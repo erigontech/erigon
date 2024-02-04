@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -964,6 +965,42 @@ func getStateRootAtSlot(beaconApiURL string, slot uint64) (libcommon.Hash, error
 	return libcommon.HexToHash(rootStr), nil
 }
 
+func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, uri string, slot uint64) (*state.CachingBeaconState, error) {
+	log.Info("[Checkpoint Sync] Requesting beacon state", "uri", uri)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("Accept", "application/octet-stream")
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync request failed %s", err)
+	}
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = r.Body.Close()
+	}()
+	if r.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("checkpoint sync failed, bad status code %d", r.StatusCode)
+	}
+	marshaled, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+	}
+
+	epoch := slot / beaconConfig.SlotsPerEpoch
+
+	beaconState := state.New(beaconConfig)
+	err = beaconState.DecodeSSZ(marshaled, int(beaconConfig.GetCurrentStateVersion(epoch)))
+	if err != nil {
+		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+	}
+	return beaconState, nil
+}
+
 func (a *ArchiveSanitizer) Run(ctx *Context) error {
 	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(a.Chain)
 	if err != nil {
@@ -985,7 +1022,7 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 		if stateRoot == (libcommon.Hash{}) {
 			continue
 		}
-		state, err := core.RetrieveBeaconState(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i))
+		state, err := getBeaconState(ctx, beaconConfig, genesisConfig, fmt.Sprintf("%s/eth/v2/debug/beacon/states/%d", a.BeaconApiURL, i), i)
 		if err != nil {
 			return err
 		}
