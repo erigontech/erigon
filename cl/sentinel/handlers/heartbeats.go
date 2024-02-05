@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -40,6 +41,18 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
+	gid := &cltypes.Ping{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
+		return err
+	}
+
+	if gid.Id == 250 { // 250 is the status code for getting banned due to whatever reason
+		v, err := c.host.Peerstore().Get("AgentVersion", peerId)
+		if err == nil {
+			log.Debug("Received goodbye message from peer", "v", v)
+		}
+	}
+
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: 1,
 	}, SuccessfulResponsePrefix)

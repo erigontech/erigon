@@ -354,15 +354,17 @@ func ConsensusClStages(ctx context.Context,
 						sourceFunc := v.GetRange
 						go func(source persistence.BlockSource) {
 							if _, ok := source.(*persistence.BeaconRpcSource); ok {
-								time.Sleep(2 * time.Second)
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 							Loop:
 								for {
 									var err error
 									from := args.seenSlot - 2
 									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-									count := (currentSlot - from) + 2
-									if currentSlot <= cfg.forkChoice.HighestSeen() {
+									count := (currentSlot - from) + cfg.beaconCfg.SlotsPerEpoch
+									if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+										return
+									}
+									if currentSlot < cfg.forkChoice.HighestSeen()+2 { // if we are 2 slots behind, let's poll.
 										time.Sleep(100 * time.Millisecond)
 										continue
 									}

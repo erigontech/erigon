@@ -66,7 +66,6 @@ var rateLimits = RateLimits{
 
 type ConsensusHandlers struct {
 	handlers           map[protocol.ID]network.StreamHandler
-	host               host.Host
 	metadata           *cltypes.Metadata
 	beaconConfig       *clparams.BeaconChainConfig
 	genesisConfig      *clparams.GenesisConfig
@@ -76,6 +75,7 @@ type ConsensusHandlers struct {
 	peerRateLimits     sync.Map
 	punishmentEndTimes sync.Map
 	forkChoiceReader   forkchoice.ForkChoiceStorageReader
+	host               host.Host
 
 	enableBlocks bool
 }

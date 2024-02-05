@@ -11,20 +11,20 @@ import (
 type Metadata struct {
 	SeqNumber uint64
 	Attnets   uint64
-	Syncnets  *uint64
+	Syncnets  *[1]byte
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
 	if m.Syncnets == nil {
 		return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets)
 	}
-	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets, *m.Syncnets)
+	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets, m.Syncnets[:])
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
 	ret = 8 * 2
 	if m.Syncnets != nil {
-		ret += 8
+		ret += 1
 	}
 	return
 }
@@ -32,11 +32,11 @@ func (m *Metadata) EncodingSizeSSZ() (ret int) {
 func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
 	m.SeqNumber = ssz.UnmarshalUint64SSZ(buf)
 	m.Attnets = ssz.UnmarshalUint64SSZ(buf[8:])
-	if len(buf) < 24 {
+	if len(buf) < 17 {
 		return nil
 	}
-	m.Syncnets = new(uint64)
-	*m.Syncnets = ssz.UnmarshalUint64SSZ(buf[16:])
+	m.Syncnets = new([1]byte)
+	copy(m.Syncnets[:], buf[16:17])
 	return nil
 }
 
