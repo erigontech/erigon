@@ -67,8 +67,8 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(16) // dont need many
-	responses, pid, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed+1, count)
+	count := uint64(32) // dont need many
+	responses, pid, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-3, count)
 	if err != nil {
 		f.rpc.BanPeer(pid)
 		// Wait a bit in this case (we do not need to be super performant here).

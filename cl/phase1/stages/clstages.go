@@ -267,7 +267,7 @@ func ConsensusClStages(ctx context.Context,
 					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 					var currentSlot atomic.Uint64
 					currentSlot.Store(finalizedCheckpoint.Epoch() * cfg.beaconCfg.SlotsPerEpoch)
-					secsPerLog := 1
+					secsPerLog := 30
 					logTicker := time.NewTicker(time.Duration(secsPerLog) * time.Second)
 					// Always start from the current finalized checkpoint
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
