@@ -284,7 +284,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		}
 		if e.historyV3 {
 			if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-				//if err := rawdbv3.TxNums.Truncate(tx, fcuHeader.Number.Uint64()); err != nil {
 				sendForkchoiceErrorWithoutWaiting(outcomeCh, err)
 				return
 			}
