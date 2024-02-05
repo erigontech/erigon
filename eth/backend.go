@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -345,7 +346,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.gasPrice, _ = uint256.FromBig(config.Miner.GasPrice)
 
 	if config.SilkwormExecution || config.SilkwormRpcDaemon || config.SilkwormSentry {
-		backend.silkworm, err = silkworm.New(config.Dirs.DataDir)
+		backend.silkworm, err = silkworm.New(config.Dirs.DataDir, mdbx.Version())
 		if err != nil {
 			return nil, err
 		}
