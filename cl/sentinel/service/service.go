@@ -248,7 +248,7 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 			s.sentinel.Host().Network().ClosePeer(pid)
 			s.sentinel.Peers().SetBanStatus(pid, true)
 		}
-		s.logger.Debug("[sentinel] peer gave us bad data", "peer", pid, "err", err)
+		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
 		return nil, err
 	}
 	return resp, nil
