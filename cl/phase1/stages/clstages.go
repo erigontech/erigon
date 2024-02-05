@@ -256,7 +256,6 @@ func ConsensusClStages(ctx context.Context,
 					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					blockBatch := []*types.Block{}
 					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
@@ -273,6 +272,7 @@ func ConsensusClStages(ctx context.Context,
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
 					downloader.SetHighestProcessedSlot(currentSlot.Load())
 					downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed common.Hash, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
+						blockBatch := []*types.Block{}
 						for _, block := range blocks {
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
 								executionPayload := block.Block.Body.ExecutionPayload
@@ -293,6 +293,11 @@ func ConsensusClStages(ctx context.Context,
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								return highestSlotProcessed, highestBlockRootProcessed, err
+							}
+							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
+								if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
+									log.Warn("failed to insert blocks", "err", err)
+								}
 							}
 
 							if highestSlotProcessed < block.Block.Slot {
