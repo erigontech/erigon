@@ -483,7 +483,7 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 	if validators.Length() <= int(idx) {
 		return newBeaconResponse([]int{}).WithFinalized(finalized), nil
 	}
-	if idx < 0 || idx >= uint64(validators.Length()) {
+	if idx >= uint64(validators.Length()) {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found"))
 	}
 
