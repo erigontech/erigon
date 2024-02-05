@@ -86,7 +86,7 @@ func CheckChangeSets(ctx context.Context, genesis *types.Genesis, blockNum uint6
 	if err := allSnapshots.ReopenFolder(); err != nil {
 		return fmt.Errorf("reopen snapshot segments: %w", err)
 	}
-	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, snapshotVersion, logger)
+	allBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, dirs.Snap, 0, logger)
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
 
 	chainDb := db
