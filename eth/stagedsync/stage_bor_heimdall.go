@@ -6,10 +6,12 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sort"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -417,9 +419,12 @@ func persistValidatorSets(
 
 		select {
 		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
 			logger.Info(
 				fmt.Sprintf("[%s] Gathering headers for validator proposer prorities (backwards)", logPrefix),
 				"blockNum", blockNum,
+				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
 		}
