@@ -66,7 +66,7 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 		return err
 	}
 	subnetField := [8]byte{}
-	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, subnetField[:])
+	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, &subnetField)
 	if err := c.me.Node().Load(attSubEnr); err != nil {
 		return err
 	}
@@ -86,8 +86,8 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 	}
 	subnetField := [8]byte{}
 	syncnetField := [1]byte{}
-	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, subnetField[:])
-	syncNetEnr := enr.WithEntry(c.netCfg.SyncCommsSubnetKey, syncnetField[:])
+	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, &subnetField)
+	syncNetEnr := enr.WithEntry(c.netCfg.SyncCommsSubnetKey, &syncnetField)
 	if err := c.me.Node().Load(attSubEnr); err != nil {
 		return err
 	}
