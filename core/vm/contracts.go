@@ -110,11 +110,6 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{18}): &bls12381MapG2{},
 }
 
-var PrecompiledContractsDragonfruit = map[libcommon.Address]PrecompiledContract{
-	libcommon.BytesToAddress([]byte{1}): &ecrecover{},
-	libcommon.BytesToAddress([]byte{2}): &dataCopy{},
-}
-
 var (
 	PrecompiledAddressesBerlin      []libcommon.Address
 	PrecompiledAddressesIstanbul    []libcommon.Address
@@ -137,11 +132,11 @@ func init() {
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
+	for k := range PrecompiledContractsForkID5Dragonfruit {
+		PrecompiledAddressesDragonfruit = append(PrecompiledAddressesDragonfruit, k)
+	}
 	for k := range PrecompiledContractForkID7Etrog {
 		PrecompiledAddressesEtrog = append(PrecompiledAddressesEtrog, k)
-	}
-	for k := range PrecompiledContractsDragonfruit {
-		PrecompiledAddressesDragonfruit = append(PrecompiledAddressesDragonfruit, k)
 	}
 }
 
