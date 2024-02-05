@@ -19,7 +19,7 @@ services:
   blockimporter:
     <<: *default-erigon-service
     network_mode: host
-    command: ["blockimporter", "--db", "/chain-db", "--evm", "${EVMC_URL:-http://localhost:8545}", "--save-history-data"]
+    command: ["blockimporter", "--db", "/chain-db", "--evm", "${EVMC_URL:-http://localhost:8545}"]
     restart: unless-stopped
 
   # Reads data from db-volume
