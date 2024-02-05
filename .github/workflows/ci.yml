@@ -83,7 +83,7 @@ jobs:
 
     steps:
       - name: configure Pagefile
-        uses: al-cheb/configure-pagefile-action@v1.3
+        uses: al-cheb/configure-pagefile-action@v1.4
         with:
           minimum-size: 8GB
       - uses: actions/checkout@v3
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: AutoModality/action-clean@v1
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # fetch git tags for "git describe"
 
