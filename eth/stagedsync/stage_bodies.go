@@ -350,9 +350,6 @@ func UnwindBodiesStage(u *UnwindState, tx kv.RwTx, cfg BodiesCfg, ctx context.Co
 		defer tx.Rollback()
 	}
 
-	logEvery := time.NewTicker(logInterval)
-	defer logEvery.Stop()
-
 	if err := cfg.blockWriter.MakeBodiesNonCanonical(tx, u.UnwindPoint+1); err != nil {
 		return err
 	}
