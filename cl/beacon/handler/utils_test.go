@@ -1,4 +1,4 @@
-package handler_test
+package handler
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
-	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -24,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *handler.ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
+func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
 	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {
 		blocks, preState, postState = tests.GetPhase0Random()
@@ -32,8 +31,11 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		blocks, preState, postState = tests.GetBellatrixRandom()
-	} else {
-		require.FailNow(t, "unknown state version")
+	} else if v == clparams.CapellaVersion {
+		bcfg.AltairForkEpoch = 1
+		bcfg.BellatrixForkEpoch = 1
+		bcfg.CapellaForkEpoch = 1
+		blocks, preState, postState = tests.GetCapellaRandom()
 	}
 	fcu = forkchoice.NewForkChoiceStorageMock()
 	db = memdb.NewTestDB(t)
@@ -53,7 +55,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
 	gC := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	h = handler.NewApiHandler(
+	h = NewApiHandler(
 		&gC,
 		&bcfg,
 		rawDB,
