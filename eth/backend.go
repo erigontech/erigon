@@ -872,20 +872,21 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	if gpoParams.Default == nil {
 		gpoParams.Default = config.Miner.GasPrice
 	}
-	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
-	if config.Ethstats != "" {
-		var headCh chan [][]byte
-		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
-		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh); err != nil {
-			return err
-		}
-	}
 	// start HTTP API
 	httpRpcCfg := stack.Config().Http
 	ethRpcClient, txPoolRpcClient, miningRpcClient, stateCache, ff, err := cli.EmbeddedServices(ctx, chainKv, httpRpcCfg.StateCache, blockReader, ethBackendRPC,
 		s.txPoolGrpcServer, miningRPC, stateDiffClient, s.logger)
 	if err != nil {
 		return err
+	}
+
+	//eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+	if config.Ethstats != "" {
+		var headCh chan [][]byte
+		headCh, s.unsubscribeEthstat = s.notifications.Events.AddHeaderSubscription()
+		if err := ethstats.New(stack, s.sentryServers, chainKv, s.blockReader, s.engine, config.Ethstats, s.networkID, ctx.Done(), headCh, txPoolRpcClient); err != nil {
+			return err
+		}
 	}
 
 	s.apiList = jsonrpc.APIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, s.agg, &httpRpcCfg, s.engine, s.logger)
