@@ -61,6 +61,10 @@ func (a *ApiHandler) init() {
 			r.Route("/node", func(r chi.Router) {
 				r.Get("/health", a.GetEthV1NodeHealth)
 				r.Get("/version", a.GetEthV1NodeVersion)
+				r.Get("/peer_count", a.GetEthV1NodePeerCount)
+				r.Get("/peers", a.GetEthV1NodePeersInfos)
+				r.Get("/peers/{peer_id}", a.GetEthV1NodePeerInfos)
+				r.Get("/identity", a.GetEthV1NodeIdentity)
 			})
 			r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
 			r.Route("/config", func(r chi.Router) {

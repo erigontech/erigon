@@ -51,9 +51,10 @@ type Cfg struct {
 
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
-	ExpectedTorrentFilesHashes      snapcfg.Preverified
+	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
 	AddTorrentsFromDisk             bool
+	SnapshotLock                    bool
 	ChainName                       string
 
 	Dirs datadir.Dirs
@@ -91,7 +92,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string) (*Cfg, error) {
+func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots bool) (*Cfg, error) {
 	torrentConfig := Default()
 	//torrentConfig.PieceHashersPerTorrent = runtime.NumCPU()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
@@ -186,12 +187,12 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	if dir.FileExist(localCfgFile) {
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
-	//TODO: if don't pass "downloaded files list here" (which we store in db) - synced erigon will download new .torrent files. And erigon can't work with "unfinished" files.
-	snapCfg := snapcfg.KnownCfg(chainName, 0)
+
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
 		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders,
-		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, ExpectedTorrentFilesHashes: snapCfg.Preverified,
+		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
+		SnapshotConfig: snapcfg.KnownCfg(chainName),
 	}, nil
 }
 

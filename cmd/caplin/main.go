@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
@@ -26,8 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
@@ -123,14 +120,12 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 
-	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), 0).Version
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-
 	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, snapshotVersion, beacon_router_configuration.RouterConfiguration{
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon_router_configuration.RouterConfiguration{
 		Protocol:         cfg.BeaconProtocol,
 		Address:          cfg.BeaconAddr,
 		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,

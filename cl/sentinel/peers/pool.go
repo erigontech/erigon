@@ -54,6 +54,12 @@ func NewPool() *Pool {
 	}
 }
 
+func (p *Pool) LenBannedPeers() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.bannedPeers)
+}
+
 func (p *Pool) BanStatus(pid peer.ID) bool {
 	_, ok := p.bannedPeers[pid]
 	return ok

@@ -37,7 +37,7 @@ type rcloneInfo struct {
 	localInfo  fs.FileInfo
 }
 
-func (i *rcloneInfo) Version() uint8 {
+func (i *rcloneInfo) Version() snaptype.Version {
 	if i.snapInfo != nil {
 		return i.snapInfo.Version
 	}
@@ -63,10 +63,10 @@ func (i *rcloneInfo) To() uint64 {
 
 func (i *rcloneInfo) Type() snaptype.Type {
 	if i.snapInfo != nil {
-		return i.snapInfo.T
+		return i.snapInfo.Type
 	}
 
-	return snaptype.Unknown
+	return nil
 }
 
 type RCloneClient struct {
@@ -448,7 +448,7 @@ type remoteInfo struct {
 }
 
 type SnapInfo interface {
-	Version() uint8
+	Version() snaptype.Version
 	From() uint64
 	To() uint64
 	Type() snaptype.Type

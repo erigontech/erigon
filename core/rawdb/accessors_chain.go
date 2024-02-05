@@ -1059,7 +1059,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, spanIDAt func(number uint64) uint64) error {
+func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) error {
 	c, err := tx.Cursor(kv.BorEventNums)
 	if err != nil {
 		return err
@@ -1094,7 +1094,7 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, spanIDAt 
 	if err != nil {
 		return err
 	}
-	firstSpanToKeep := spanIDAt(blockTo)
+	firstSpanToKeep := SpanIdAt(blockTo)
 	c2, err := tx.RwCursor(kv.BorSpans)
 	if err != nil {
 		return err

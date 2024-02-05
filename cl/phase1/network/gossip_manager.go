@@ -129,7 +129,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		}
 
 		log.Debug("Received block via gossip",
-			"peers", count.Amount,
+			"peers", count.Active,
 			"slot", block.Block.Slot,
 		)
 

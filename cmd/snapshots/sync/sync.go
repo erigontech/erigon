@@ -44,7 +44,7 @@ type Locator struct {
 	LType   LType
 	Src     string
 	Root    string
-	Version uint8
+	Version snaptype.Version
 	Chain   string
 }
 
@@ -84,7 +84,7 @@ func ParseLocator(value string) (*Locator, error) {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
 
-				loc.Version = uint8(version)
+				loc.Version = snaptype.Version(version)
 			}
 
 		case len(matches[1]) > 0:
@@ -102,7 +102,7 @@ func ParseLocator(value string) (*Locator, error) {
 					return nil, fmt.Errorf("can't parse version: %s: %w", matches[3], err)
 				}
 
-				loc.Version = uint8(version)
+				loc.Version = snaptype.Version(version)
 			}
 
 		default:
@@ -162,7 +162,7 @@ func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error)
 
 	cfg, err := downloadercfg.New(dirs, version, logLevel, downloadRate, uploadRate,
 		cliCtx.Int(utils.TorrentPortFlag.Name),
-		cliCtx.Int(utils.TorrentConnsPerFileFlag.Name), 0, nil, webseedsList, chain)
+		cliCtx.Int(utils.TorrentConnsPerFileFlag.Name), 0, nil, webseedsList, chain, true)
 
 	if err != nil {
 		return nil, err
@@ -237,7 +237,7 @@ type torrentInfo struct {
 	hash     string
 }
 
-func (i *torrentInfo) Version() uint8 {
+func (i *torrentInfo) Version() snaptype.Version {
 	if i.snapInfo != nil {
 		return i.snapInfo.Version
 	}
@@ -263,10 +263,10 @@ func (i *torrentInfo) To() uint64 {
 
 func (i *torrentInfo) Type() snaptype.Type {
 	if i.snapInfo != nil {
-		return i.snapInfo.T
+		return i.snapInfo.Type
 	}
 
-	return 0
+	return nil
 }
 
 func (i *torrentInfo) Hash() string {
@@ -402,7 +402,7 @@ func (s *torrentSession) Label() string {
 
 func NewTorrentSession(cli *TorrentClient, chain string) *torrentSession {
 	session := &torrentSession{cli, map[string]snapcfg.PreverifiedItem{}}
-	for _, it := range snapcfg.KnownCfg(chain, 0).Preverified {
+	for _, it := range snapcfg.KnownCfg(chain).Preverified {
 		session.items[it.Name] = it
 	}
 

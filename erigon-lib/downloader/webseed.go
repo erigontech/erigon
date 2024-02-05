@@ -40,18 +40,19 @@ type WebSeeds struct {
 	torrentFiles *TorrentFiles
 }
 
-func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
+func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string, ignore snapcfg.Preverified) {
 	d.downloadWebseedTomlFromProviders(ctx, urls, files)
-	d.downloadTorrentFilesFromProviders(ctx, rootDir)
+	d.downloadTorrentFilesFromProviders(ctx, rootDir, ignore)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, httpProviders []*url.URL, diskProviders []string) {
 	log.Debug("[snapshots] webseed providers", "http", len(httpProviders), "disk", len(diskProviders))
 	list := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
+
 	for _, webSeedProviderURL := range httpProviders {
 		select {
 		case <-ctx.Done():
-			break
+			return
 		default:
 		}
 		response, err := d.callHttpProvider(ctx, webSeedProviderURL)
@@ -163,7 +164,7 @@ func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSee
 }
 
 // downloadTorrentFilesFromProviders - if they are not exist on file-system
-func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string) {
+func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string, ignore snapcfg.Preverified) {
 	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
 	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
 	//  - maybe need download new files if --snap.stop=true
@@ -182,7 +183,17 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	urlsByName := d.TorrentUrls()
 	//TODO:
 	// - what to do if node already synced?
+
+	fileName := func(name string) string {
+		name, _ = strings.CutSuffix(name, filepath.Ext(name))
+		return name
+	}
+
 	for name, tUrls := range urlsByName {
+		if ignore.Contains(fileName(name)) {
+			continue
+		}
+
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
 			continue
@@ -269,13 +280,7 @@ func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverifi
 }
 
 func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
-	fileName = strings.TrimSuffix(fileName, ".torrent")
-	for i := 0; i < len(whitelist); i++ {
-		if whitelist[i].Name == fileName {
-			return true
-		}
-	}
-	return false
+	return whitelist.Contains(strings.TrimSuffix(fileName, ".torrent"))
 }
 
 func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {

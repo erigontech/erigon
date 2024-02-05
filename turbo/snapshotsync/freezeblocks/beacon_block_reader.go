@@ -77,15 +77,17 @@ func (r *beaconSnapshotReader) ReadBlockBySlot(ctx context.Context, tx kv.Tx, sl
 		return nil, nil
 	}
 
-	if seg.idxSlot == nil {
+	idxSlot := seg.Index()
+
+	if idxSlot == nil {
 		return nil, nil
 	}
-	if slot < seg.idxSlot.BaseDataID() {
-		return nil, fmt.Errorf("slot %d is before the base data id %d", slot, seg.idxSlot.BaseDataID())
+	if slot < idxSlot.BaseDataID() {
+		return nil, fmt.Errorf("slot %d is before the base data id %d", slot, idxSlot.BaseDataID())
 	}
-	blockOffset := seg.idxSlot.OrdinalLookup(slot - seg.idxSlot.BaseDataID())
+	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
 
-	gg := seg.seg.MakeGetter()
+	gg := seg.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil
@@ -148,15 +150,17 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 		return nil, nil
 	}
 
-	if seg.idxSlot == nil {
+	idxSlot := seg.Index()
+
+	if idxSlot == nil {
 		return nil, nil
 	}
-	if *slot < seg.idxSlot.BaseDataID() {
-		return nil, fmt.Errorf("slot %d is before the base data id %d", slot, seg.idxSlot.BaseDataID())
+	if *slot < idxSlot.BaseDataID() {
+		return nil, fmt.Errorf("slot %d is before the base data id %d", slot, idxSlot.BaseDataID())
 	}
-	blockOffset := seg.idxSlot.OrdinalLookup(*slot - seg.idxSlot.BaseDataID())
+	blockOffset := idxSlot.OrdinalLookup(*slot - idxSlot.BaseDataID())
 
-	gg := seg.seg.MakeGetter()
+	gg := seg.MakeGetter()
 	gg.Reset(blockOffset)
 	if !gg.HasNext() {
 		return nil, nil

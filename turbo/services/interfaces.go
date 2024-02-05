@@ -37,16 +37,26 @@ type HeaderReader interface {
 }
 
 type BorEventReader interface {
+	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
-	LastEventID(tx kv.RwTx) (uint64, error)
-	LastFrozenEventID() uint64
+	LastFrozenEventId() uint64
 }
 
 type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Getter, spanNum uint64) ([]byte, error)
-	LastSpanID(tx kv.RwTx) (uint64, bool, error)
-	LastFrozenSpanID() uint64
+	Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error)
+	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
+	LastFrozenSpanId() uint64
+}
+
+type BorMilestoneReader interface {
+	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
+	Milestone(ctx context.Context, tx kv.Getter, milestoneId uint64) ([]byte, error)
+}
+
+type BorCheckpointReader interface {
+	LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
+	Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error)
 }
 
 type CanonicalReader interface {
@@ -84,6 +94,8 @@ type FullBlockReader interface {
 	HeaderReader
 	BorEventReader
 	BorSpanReader
+	BorMilestoneReader
+	BorCheckpointReader
 	TxnReader
 	CanonicalReader
 

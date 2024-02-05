@@ -81,7 +81,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, snapshotVersion, logger)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -104,7 +104,7 @@ var readDomains = &cobra.Command{
 }
 
 func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain string, addrs [][]byte, logger log.Logger) error {
-	sn, bsn, agg := allSnapshots(ctx, chainDb, snapshotVersion, logger)
+	sn, bsn, agg := allSnapshots(ctx, chainDb, logger)
 	defer sn.Close()
 	defer bsn.Close()
 	defer agg.Close()

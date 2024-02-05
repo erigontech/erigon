@@ -167,7 +167,7 @@ func copy(cliCtx *cli.Context) error {
 	version := cliCtx.Int(VersionFlag.Name)
 
 	if version != 0 {
-		dst.Version = uint8(version)
+		dst.Version = snaptype.Version(version)
 	}
 
 	if cliCtx.Args().Len() > pos {
@@ -270,7 +270,7 @@ type sinf struct {
 	snaptype.FileInfo
 }
 
-func (i sinf) Version() uint8 {
+func (i sinf) Version() snaptype.Version {
 	return i.FileInfo.Version
 }
 
@@ -283,10 +283,10 @@ func (i sinf) To() uint64 {
 }
 
 func (i sinf) Type() snaptype.Type {
-	return i.FileInfo.T
+	return i.FileInfo.Type
 }
 
-func selectFiles(entries []fs.DirEntry, version uint8, firstBlock, lastBlock uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) []string {
+func selectFiles(entries []fs.DirEntry, version snaptype.Version, firstBlock, lastBlock uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) []string {
 	var files []string
 
 	for _, ent := range entries {
@@ -304,7 +304,7 @@ func selectFiles(entries []fs.DirEntry, version uint8, firstBlock, lastBlock uin
 			}
 
 			switch {
-			case snapInfo != nil && snapInfo.Type() != snaptype.Unknown:
+			case snapInfo != nil && snapInfo.Type() != nil:
 				if (version == 0 || version == snapInfo.Version()) &&
 					(firstBlock == 0 || snapInfo.From() >= firstBlock) &&
 					(lastBlock == 0 || snapInfo.From() < lastBlock) {

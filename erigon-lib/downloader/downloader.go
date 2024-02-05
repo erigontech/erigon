@@ -18,9 +18,14 @@ package downloader
 
 import (
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -33,9 +38,11 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -68,6 +75,7 @@ type Downloader struct {
 	verbosity log.Lvl
 
 	torrentFiles *TorrentFiles
+	snapshotLock *snapshotLock
 }
 
 type AggStats struct {
@@ -102,6 +110,12 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		}
 	}
 
+	lock, err := getSnapshotLock(ctx, cfg, db, logger)
+
+	if err != nil {
+		return nil, fmt.Errorf("can't initialize snapshot lock: %w", err)
+	}
+
 	d := &Downloader{
 		cfg:               cfg,
 		db:                db,
@@ -109,18 +123,25 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		folder:            m,
 		torrentClient:     torrentClient,
 		statsLock:         &sync.RWMutex{},
-		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: cfg.ExpectedTorrentFilesHashes},
+		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: lock.Downloads},
 		logger:            logger,
 		verbosity:         verbosity,
 		torrentFiles:      &TorrentFiles{dir: cfg.Dirs.Snap},
+		snapshotLock:      lock,
 	}
+
 	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if cfg.AddTorrentsFromDisk {
-		if err := d.BuildTorrentFilesIfNeed(d.ctx); err != nil {
+		if err := d.addPreConfiguredHashes(ctx, lock.Downloads); err != nil {
 			return nil, err
 		}
+
+		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
+			return nil, err
+		}
+
 		if err := d.addTorrentFilesFromDisk(false); err != nil {
 			return nil, err
 		}
@@ -135,13 +156,330 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		if !discover {
 			return
 		}
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap, lock.Downloads)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 		}
 	}()
 	return d, nil
+}
+
+const SnapshotsLockFileName = "snapshot-lock.json"
+
+type snapshotLock struct {
+	Chain     string              `json:"chain"`
+	Downloads snapcfg.Preverified `json:"downloads"`
+}
+
+func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
+	snapDir := cfg.Dirs.Snap
+
+	lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
+
+	file, err := os.Open(lockPath)
+
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+
+	if !cfg.SnapshotLock {
+		return initSnapshotLock(ctx, cfg, db, logger)
+	}
+
+	var data []byte
+
+	if file != nil {
+		defer file.Close()
+
+		data, err = io.ReadAll(file)
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if file == nil || len(data) == 0 {
+		f, err := os.Create(lockPath)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+
+		lock, err := initSnapshotLock(ctx, cfg, db, logger)
+
+		if err != nil {
+			return nil, err
+		}
+
+		data, err := json.Marshal(lock)
+
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = f.Write(data)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if err := f.Sync(); err != nil {
+			return nil, err
+		}
+
+		return lock, nil
+	}
+
+	var lock snapshotLock
+
+	if err = json.Unmarshal(data, &lock); err != nil {
+		return nil, err
+	}
+
+	if lock.Chain != cfg.ChainName {
+		return nil, fmt.Errorf("unexpected chain name:%q expecting: %q", lock.Chain, cfg.ChainName)
+	}
+
+	return &lock, nil
+}
+
+func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
+	lock := &snapshotLock{
+		Chain: cfg.ChainName,
+	}
+
+	files, err := seedableFiles(cfg.Dirs, cfg.ChainName)
+
+	if err != nil {
+		return nil, err
+	}
+
+	snapCfg := cfg.SnapshotConfig
+
+	if snapCfg == nil {
+		snapCfg = snapcfg.KnownCfg(cfg.ChainName)
+	}
+
+	if len(files) == 0 {
+		lock.Downloads = snapCfg.Preverified
+	}
+
+	// if files exist on disk we assume that the lock file has been removed
+	// or was never present so compare them against the known config to
+	// recreate the lock file
+	//
+	// if the file is above the ExpectBlocks in the snapCfg we ignore it
+	// if the file is the same version of the known file we:
+	//   check if its mid upload
+	//     - in which case we compare the hash in the db to the known hash
+	//       - if they are different we delete the local file and include the
+	//         know file in the hash which will force a re-upload
+	//   otherwise
+	//      - if the file has a different hash to the known file we include
+	//        the files hash in the upload to preserve the local copy
+	// if the file is a different version - we see if the version for the
+	// file is available in know config - and if so we follow the procedure
+	// above, but we use the matching version from the known config.  If there
+	// is no matching version just use the one discovered for the file
+
+	versionedCfg := map[snaptype.Version]*snapcfg.Cfg{}
+
+	snapDir := cfg.Dirs.Snap
+
+	var downloadMap btree.Map[string, snapcfg.PreverifiedItem]
+	var downloadsMutex sync.Mutex
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(runtime.GOMAXPROCS(-1) * 4)
+	var i atomic.Int32
+
+	logEvery := time.NewTicker(20 * time.Second)
+	defer logEvery.Stop()
+
+	for _, file := range files {
+		file := file
+
+		g.Go(func() error {
+			i.Add(1)
+
+			if fileInfo, ok := snaptype.ParseFileName(snapDir, file); ok {
+				if fileInfo.From > snapCfg.ExpectBlocks {
+					return nil
+				}
+
+				if preverified, ok := snapCfg.Preverified.Get(fileInfo.Name()); ok {
+					hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
+
+					if err != nil {
+						return err
+					}
+
+					downloadsMutex.Lock()
+					defer downloadsMutex.Unlock()
+
+					if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
+						downloadMap.Set(fileInfo.Name(), preverified)
+					} else {
+						logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+						// TODO: check if it has an index - if not use the known hash and delete the file
+						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
+					}
+				} else {
+					versioned, ok := versionedCfg[fileInfo.Version]
+
+					if !ok {
+						versioned = snapcfg.VersionedCfg(cfg.ChainName, fileInfo.Version, fileInfo.Version)
+						versionedCfg[fileInfo.Version] = versioned
+					}
+
+					hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
+
+					if err != nil {
+						return err
+					}
+
+					downloadsMutex.Lock()
+					defer downloadsMutex.Unlock()
+
+					if preverified, ok := versioned.Preverified.Get(fileInfo.Name()); ok {
+						if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
+							downloadMap.Set(preverified.Name, preverified)
+						} else {
+							logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+							// TODO: check if it has an index - if not use the known hash and delete the file
+							downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
+						}
+					} else {
+						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hex.EncodeToString(hashBytes)})
+					}
+				}
+			}
+
+			return nil
+		})
+	}
+
+	func() {
+		for int(i.Load()) < len(files) {
+			select {
+			case <-ctx.Done():
+				return // g.Wait() will return right error
+			case <-logEvery.C:
+				if int(i.Load()) == len(files) {
+					return
+				}
+				log.Info("[snapshots] Initiating snapshot-lock", "progress", fmt.Sprintf("%d/%d", i.Load(), len(files)))
+			}
+		}
+	}()
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	var missingItems []snapcfg.PreverifiedItem
+	var downloads snapcfg.Preverified
+
+	downloadMap.Scan(func(key string, value snapcfg.PreverifiedItem) bool {
+		downloads = append(downloads, value)
+		return true
+	})
+
+	maxDownloadBlock, _ := downloads.MaxBlock(0)
+
+	for _, item := range snapCfg.Preverified {
+		if maxDownloadBlock > 0 {
+			if fileInfo, ok := snaptype.ParseFileName(snapDir, item.Name); ok {
+				if fileInfo.From > maxDownloadBlock {
+					missingItems = append(missingItems, item)
+				}
+			}
+		} else {
+			if !downloads.Contains(item.Name, true) {
+				missingItems = append(missingItems, item)
+			}
+		}
+	}
+
+	lock.Downloads = snapcfg.Merge(downloads, missingItems)
+
+	return lock, nil
+}
+
+func localHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, db kv.RoDB, logger log.Logger) ([]byte, error) {
+	var hashBytes []byte
+
+	if db != nil {
+		err := db.View(ctx, func(tx kv.Tx) (err error) {
+			infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileInfo.Name()))
+
+			if err != nil {
+				return err
+			}
+
+			if len(infoBytes) == 20 {
+				hashBytes = infoBytes
+				return nil
+			}
+
+			var info torrentInfo
+
+			if err = json.Unmarshal(infoBytes, &info); err == nil {
+				hashBytes = info.Hash
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(hashBytes) != 0 {
+		return hashBytes, nil
+	}
+
+	meta, err := metainfo.LoadFromFile(fileInfo.Path + ".torrent")
+
+	if err == nil {
+		if spec, err := torrent.TorrentSpecFromMetaInfoErr(meta); err == nil {
+			return spec.InfoHash.Bytes(), nil
+		}
+	}
+
+	info := &metainfo.Info{PieceLength: downloadercfg.DefaultPieceSize, Name: fileInfo.Name()}
+
+	if err := info.BuildFromFilePath(fileInfo.Path); err != nil {
+		return nil, fmt.Errorf("can't get local hash for %s: %w", fileInfo.Name(), err)
+	}
+
+	meta, err = CreateMetaInfo(info, nil)
+
+	if err != nil {
+		return nil, fmt.Errorf("can't get local hash for %s: %w", fileInfo.Name(), err)
+	}
+
+	spec, err := torrent.TorrentSpecFromMetaInfoErr(meta)
+
+	if err != nil {
+		return nil, fmt.Errorf("can't get local hash for %s: %w", fileInfo.Name(), err)
+	}
+
+	return spec.InfoHash.Bytes(), nil
+}
+
+// Add pre-configured
+func (d *Downloader) addPreConfiguredHashes(ctx context.Context, snapshots snapcfg.Preverified) error {
+	for _, it := range snapshots {
+		if err := d.addMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -221,8 +559,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 			for _, t := range torrents {
 				if t.Complete.Bool() {
+					select {
+					case <-d.ctx.Done():
+						return
+					case <-t.GotInfo():
+					}
+
+					if err := d.db.Update(d.ctx,
+						torrentInfoUpdater(t.Info().Name, nil, t.Info(), t.Complete.Bool())); err != nil {
+						d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
+					}
+
 					continue
 				}
+
 				if err := sem.Acquire(d.ctx, 1); err != nil {
 					return
 				}
@@ -345,6 +695,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	for _, t := range torrents {
+		torrentComplete := t.Complete.Bool()
+
 		select {
 		case <-t.GotInfo():
 			stats.MetadataReady++
@@ -387,9 +739,35 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		default:
 			noMetadata = append(noMetadata, t.Name())
+
+			var info torrentInfo
+
+			d.db.View(d.ctx, func(tx kv.Tx) (err error) {
+				infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(t.Name()))
+
+				if err != nil {
+					return err
+				}
+
+				if err = json.Unmarshal(infoBytes, &info); err != nil {
+					return err
+				}
+
+				return nil
+			})
+
+			if info.Completed != nil && info.Completed.Before(time.Now()) {
+				if info.Length != nil {
+					if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+						torrentComplete = fi.Size() == *info.Length
+						stats.BytesCompleted += uint64(*info.Length)
+						stats.BytesTotal += uint64(*info.Length)
+					}
+				}
+			}
 		}
 
-		stats.Completed = stats.Completed && t.Complete.Bool()
+		stats.Completed = stats.Completed && torrentComplete
 	}
 
 	if len(noMetadata) > 0 {
@@ -540,7 +918,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
 	ff, ok := snaptype.ParseFileName("", name)
 	if ok {
-		if !ff.Seedable() {
+		if !d.cfg.SnapshotConfig.Seedable(ff) {
 			return nil
 		}
 	} else {
@@ -558,7 +936,7 @@ func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error 
 	if err != nil {
 		return fmt.Errorf("AddNewSeedableFile: %w", err)
 	}
-	_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.webseeds)
+	_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return fmt.Errorf("addTorrentFile: %w", err)
 	}
@@ -579,13 +957,18 @@ func (d *Downloader) alreadyHaveThisName(name string) bool {
 }
 
 func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
+	return d.addMagnetLink(ctx, infoHash, name, false)
+}
+
+func (d *Downloader) addMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string, force bool) error {
 	// Paranoic Mode on: if same file changed infoHash - skip it
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
-	if d.torrentFiles.newDownloadsAreProhibited() {
+
+	if !force && d.torrentFiles.newDownloadsAreProhibited() {
 		return nil
 	}
 
@@ -595,7 +978,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if err != nil {
 		return err
 	}
-	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.webseeds)
+	t, ok, err := addTorrentFile(ctx, spec, d.torrentClient, d.db, d.webseeds)
 	if err != nil {
 		return err
 	}
@@ -611,11 +994,14 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-t.GotInfo():
 		}
 
-		mi := t.Metainfo()
-		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
-			d.logger.Warn("[snapshots] create torrent file", "err", err)
-			return
+		if !d.snapshotLock.Downloads.Contains(name) {
+			mi := t.Metainfo()
+			if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
+				d.logger.Warn("[snapshots] create torrent file", "err", err)
+				return
+			}
 		}
+
 		urls, ok := d.webseeds.ByFileName(t.Name())
 		if ok {
 			t.AddWebSeeds(urls)
@@ -625,8 +1011,8 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	return nil
 }
 
-func seedableFiles(dirs datadir.Dirs) ([]string, error) {
-	files, err := seedableSegmentFiles(dirs.Snap)
+func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
+	files, err := seedableSegmentFiles(dirs.Snap, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
@@ -654,7 +1040,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.webseeds)
+		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 		if err != nil {
 			return err
 		}
@@ -668,8 +1054,8 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	}
 	return nil
 }
-func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context) error {
-	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles)
+func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
+	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, chain, ignore)
 }
 func (d *Downloader) Stats() AggStats {
 	d.statsLock.RLock()

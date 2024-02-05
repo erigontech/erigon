@@ -147,15 +147,8 @@ func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
 }
 
 func (ii *InvertedIndex) enableLocalityIndex() error {
-	var err error
 	ii.warmLocalityIdx = NewLocalityIndex(true, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
-	if err != nil {
-		return fmt.Errorf("NewLocalityIndex: %s, %w", ii.filenameBase, err)
-	}
 	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
-	if err != nil {
-		return fmt.Errorf("NewLocalityIndex: %s, %w", ii.filenameBase, err)
-	}
 	return nil
 }
 func filesFromDir(dir string) ([]string, error) {
