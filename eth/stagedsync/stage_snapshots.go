@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"math/big"
 	"os"
@@ -100,7 +101,6 @@ func StageSnapshotsCfg(db kv.RwDB,
 		cfg.snapshotUploader = &snapshotUploader{
 			cfg:          &cfg,
 			uploadFs:     uploadFs,
-			version:      snapcfg.KnownCfg(chainConfig.ChainName, 0).Version,
 			torrentFiles: downloader.NewAtomicTorrentFiles(cfg.dirs.Snap),
 		}
 
@@ -198,7 +198,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		u.init(ctx, logger)
 
 		if cfg.syncConfig.UploadFrom != rpc.EarliestBlockNumber {
-			u.downloadLatestSnapshots(ctx, cfg.syncConfig.UploadFrom, u.version)
+			u.downloadLatestSnapshots(ctx, cfg.syncConfig.UploadFrom)
 		}
 
 		if maxSeedable := u.maxSeedableHeader(); u.cfg.syncConfig.FrozenBlockLimit > 0 && maxSeedable > u.cfg.syncConfig.FrozenBlockLimit {
@@ -510,7 +510,6 @@ type snapshotUploader struct {
 	uploadScheduled atomic.Bool
 	uploading       atomic.Bool
 	manifestMutex   sync.Mutex
-	version         uint8
 	torrentFiles    *downloader.TorrentFiles
 }
 
@@ -532,14 +531,14 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 		for _, state := range u.files {
 			if state.local && state.remote {
 				if state.info != nil {
-					if state.info.T == snaptype.Headers {
+					if state.info.Type.Enum() == snaptype.Enums.Headers {
 						if state.info.To > max {
 							max = state.info.To
 						}
 					}
 				} else {
 					if info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, state.file); ok {
-						if info.T == snaptype.Headers {
+						if info.Type.Enum() == snaptype.Enums.Headers {
 							if info.To > max {
 								max = info.To
 							}
@@ -556,6 +555,26 @@ func (u *snapshotUploader) maxUploadedHeader() uint64 {
 
 type dirEntry struct {
 	name string
+}
+
+type snapInfo struct {
+	snaptype.FileInfo
+}
+
+func (i *snapInfo) Version() snaptype.Version {
+	return i.FileInfo.Version
+}
+
+func (i *snapInfo) From() uint64 {
+	return i.FileInfo.From
+}
+
+func (i *snapInfo) To() uint64 {
+	return i.FileInfo.To
+}
+
+func (i *snapInfo) Type() snaptype.Type {
+	return i.FileInfo.Type
 }
 
 func (e dirEntry) Name() string {
@@ -583,6 +602,10 @@ func (e dirEntry) ModTime() time.Time {
 }
 
 func (e dirEntry) Sys() any {
+	if info, ok := snaptype.ParseFileName("", e.name); ok {
+		return &snapInfo{info}
+	}
+
 	return nil
 }
 
@@ -593,12 +616,12 @@ func (e dirEntry) Info() (fs.FileInfo, error) {
 var checkKnownSizes = false
 
 func (u *snapshotUploader) seedable(fi snaptype.FileInfo) bool {
-	if !fi.Seedable() {
+	if !snapcfg.Seedable(u.cfg.chainConfig.ChainName, fi) {
 		return false
 	}
 
 	if checkKnownSizes {
-		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName, 1).Preverified {
+		for _, it := range snapcfg.KnownCfg(u.cfg.chainConfig.ChainName).Preverified {
 			info, _ := snaptype.ParseFileName("", it.Name)
 
 			if fi.From == info.From {
@@ -638,6 +661,10 @@ func (u *snapshotUploader) downloadManifest(ctx context.Context) ([]fs.DirEntry,
 
 	if err := scanner.Err(); err != nil {
 		return nil, err
+	}
+
+	if len(entries) == 0 {
+		return nil, io.ErrUnexpectedEOF
 	}
 
 	return entries, nil
@@ -722,7 +749,7 @@ func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
 		} else {
 			info, ok := snaptype.ParseFileName(u.cfg.dirs.Snap, fi.Name())
 
-			if !ok || info.Version != u.version {
+			if !ok {
 				continue
 			}
 
@@ -736,7 +763,7 @@ func (u *snapshotUploader) updateRemotes(remoteFiles []fs.DirEntry) {
 	}
 }
 
-func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber rpc.BlockNumber, version uint8) error {
+func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNumber rpc.BlockNumber) error {
 
 	entries, err := u.downloadManifest(ctx)
 
@@ -748,7 +775,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 		return err
 	}
 
-	lastSegments := map[snaptype.Type]fs.FileInfo{}
+	lastSegments := map[snaptype.Enum]fs.FileInfo{}
 	torrents := map[string]string{}
 
 	for _, ent := range entries {
@@ -760,13 +787,13 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 
 			snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
-			if ok && snapInfo.Type() != snaptype.Unknown && snapInfo.Version() == version {
-				if last, ok := lastSegments[snapInfo.Type()]; ok {
+			if ok && snapInfo.Type() != nil {
+				if last, ok := lastSegments[snapInfo.Type().Enum()]; ok {
 					if lastInfo, ok := last.Sys().(downloader.SnapInfo); ok && snapInfo.To() > lastInfo.To() {
-						lastSegments[snapInfo.Type()] = info
+						lastSegments[snapInfo.Type().Enum()] = info
 					}
 				} else {
-					lastSegments[snapInfo.Type()] = info
+					lastSegments[snapInfo.Type().Enum()] = info
 				}
 			} else {
 				if ext := filepath.Ext(info.Name()); ext == ".torrent" {
@@ -794,8 +821,7 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 					if info, err := ent.Info(); err == nil {
 						snapInfo, ok := info.Sys().(downloader.SnapInfo)
 
-						if ok && snapInfo.Type() == segType &&
-							snapInfo.Version() == version &&
+						if ok && snapInfo.Type().Enum() == segType &&
 							snapInfo.From() == min {
 							lastSegments[segType] = info
 						}
@@ -822,23 +848,13 @@ func (u *snapshotUploader) downloadLatestSnapshots(ctx context.Context, blockNum
 }
 
 func (u *snapshotUploader) maxSeedableHeader() uint64 {
-	var max uint64
-
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.version); err == nil {
-		for _, info := range list {
-			if u.seedable(info) && info.T == snaptype.Headers && info.To > max {
-				max = info.To
-			}
-		}
-	}
-
-	return max
+	return snapcfg.MaxSeedableSegment(u.cfg.chainConfig.ChainName, u.cfg.dirs.Snap)
 }
 
 func (u *snapshotUploader) minBlockNumber() uint64 {
 	var min uint64
 
-	if list, err := snaptype.Segments(u.cfg.dirs.Snap, u.version); err == nil {
+	if list, err := snaptype.Segments(u.cfg.dirs.Snap); err == nil {
 		for _, info := range list {
 			if u.seedable(info) && min == 0 || info.From < min {
 				min = info.From
@@ -977,7 +993,7 @@ func (u *snapshotUploader) scheduleUpload(ctx context.Context, logger log.Logger
 }
 
 func (u *snapshotUploader) removeBefore(before uint64) {
-	list, err := snaptype.Segments(u.cfg.dirs.Snap, u.version)
+	list, err := snaptype.Segments(u.cfg.dirs.Snap)
 
 	if err != nil {
 		return
@@ -990,8 +1006,8 @@ func (u *snapshotUploader) removeBefore(before uint64) {
 
 	for _, f := range list {
 		if f.To > before {
-			switch f.T {
-			case snaptype.BorEvents, snaptype.BorSpans:
+			switch f.Type.Enum() {
+			case snaptype.Enums.BorEvents, snaptype.Enums.BorSpans:
 				borToReopen = append(borToReopen, filepath.Base(f.Path))
 			default:
 				toReopen = append(toReopen, filepath.Base(f.Path))

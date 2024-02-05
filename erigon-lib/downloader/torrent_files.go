@@ -9,7 +9,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
-	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 )
 
 // TorrentFiles - does provide thread-safe CRUD operations on .torrent files
@@ -32,7 +32,7 @@ func (tf *TorrentFiles) exists(name string) bool {
 	if !strings.HasSuffix(name, ".torrent") {
 		name += ".torrent"
 	}
-	return dir2.FileExist(filepath.Join(tf.dir, name))
+	return dir.FileExist(filepath.Join(tf.dir, name))
 }
 func (tf *TorrentFiles) Delete(name string) error {
 	tf.lock.Lock()
@@ -133,8 +133,10 @@ func (tf *TorrentFiles) prohibitNewDownloads() error {
 func (tf *TorrentFiles) newDownloadsAreProhibited() bool {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	return dir2.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName))
+	return dir.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName)) ||
+		dir.FileExist(filepath.Join(tf.dir, SnapshotsLockFileName))
 }
+
 func CreateProhibitNewDownloadsFile(dir string) error {
 	fPath := filepath.Join(dir, ProhibitNewDownloadsFileName)
 	f, err := os.Create(fPath)

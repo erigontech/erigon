@@ -172,7 +172,7 @@ func BorHeimdallForward(
 		return err
 	}
 
-	lastStateSyncEventID, err := cfg.blockReader.LastEventID(tx)
+	lastStateSyncEventID, _, err := cfg.blockReader.LastEventId(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,7 @@ func BorHeimdallForward(
 			return fmt.Errorf("verification failed for header %d: %x", blockNum, header.Hash())
 		}
 
-		if blockNum > cfg.blockReader.BorSnapshots().SegmentsMin() {
+		if cfg.blockReader.BorSnapshots().SegmentsMin() == 0 {
 			// SegmentsMin is only set if running as an uploader process (check SnapshotsCfg.snapshotUploader and
 			// UploadLocationFlag) when we remove snapshots based on FrozenBlockLimit and number of uploaded snapshots
 			// avoid calling this if block for blockNums <= SegmentsMin to avoid reinsertion of snapshots
@@ -280,9 +280,7 @@ func BorHeimdallForward(
 			cfg,
 			s.LogPrefix(),
 			logger,
-			func() (uint64, error) {
-				return lastStateSyncEventID, nil
-			},
+			lastStateSyncEventID,
 		)
 		if err != nil {
 			return err
@@ -594,8 +592,8 @@ func checkBorHeaderExtraDataIfRequired(chr consensus.ChainHeaderReader, header *
 }
 
 func checkBorHeaderExtraData(chr consensus.ChainHeaderReader, header *types.Header, cfg *borcfg.BorConfig) error {
-	spanID := bor.SpanIDAt(header.Number.Uint64() + 1)
-	spanBytes := chr.BorSpan(spanID)
+	spanID := heimdall.SpanIdAt(header.Number.Uint64() + 1)
+	spanBytes := chr.BorSpan(uint64(spanID))
 	var sp heimdall.Span
 	if err := json.Unmarshal(spanBytes, &sp); err != nil {
 		return err
@@ -690,10 +688,9 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 	}
 
 	defer spanCursor.Close()
-
-	lastSpanToKeep := bor.SpanIDAt(u.UnwindPoint)
+	lastSpanToKeep := heimdall.SpanIdAt(u.UnwindPoint)
 	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], lastSpanToKeep+1)
+	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
 	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
 		if err = spanCursor.DeleteCurrent(); err != nil {
 			return err

@@ -255,6 +255,23 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 
 }
 
+func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {
+	// call s.sentinel.Identity()
+	pid, enr, p2pAddresses, discoveryAddresses, metadata := s.sentinel.Identity()
+	return &sentinelrpc.IdentityResponse{
+		Pid:                pid,
+		Enr:                enr,
+		P2PAddresses:       p2pAddresses,
+		DiscoveryAddresses: discoveryAddresses,
+		Metadata: &sentinelrpc.Metadata{
+			Seq:      metadata.SeqNumber,
+			Attnets:  fmt.Sprintf("%x", metadata.Attnets),
+			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
+		},
+	}, nil
+
+}
+
 func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (*sentinelrpc.EmptyMessage, error) {
 	// Send the request and get the data if we get an answer.
 	s.sentinel.SetStatus(&cltypes.Status{
@@ -268,10 +285,33 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (
 }
 
 func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
+	count, connected, disconnected := s.sentinel.GetPeersCount()
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
-		Amount: uint64(s.sentinel.GetPeersCount()),
+		Active:       uint64(count),
+		Connected:    uint64(connected),
+		Disconnected: uint64(disconnected),
 	}, nil
+}
+
+func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfoRequest) (*sentinelrpc.PeersInfoResponse, error) {
+	peersInfos := s.sentinel.GetPeersInfos()
+	if r.Direction == nil && r.State == nil {
+		return peersInfos, nil
+	}
+	filtered := &sentinelrpc.PeersInfoResponse{
+		Peers: make([]*sentinelrpc.Peer, 0, len(peersInfos.Peers)),
+	}
+	for _, peer := range peersInfos.Peers {
+		if r.Direction != nil && peer.Direction != *r.Direction {
+			continue
+		}
+		if r.State != nil && peer.State != *r.State {
+			continue
+		}
+		filtered.Peers = append(filtered.Peers, peer)
+	}
+	return filtered, nil
 }
 
 func (s *SentinelServer) ListenToGossip() {

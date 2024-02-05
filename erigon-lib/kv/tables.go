@@ -363,8 +363,8 @@ const (
 	BorEvents      = "BorEvents"                 // event_id -> event_payload
 	BorEventNums   = "BorEventNums"              // block_num -> event_id (first event_id in that block)
 	BorSpans       = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorMilestones  = "BorMilestones"             // milestone_id -> checkpoint (in JSON encoding)
 	BorCheckpoints = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
-	BorMilestones  = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -591,8 +591,8 @@ var ChaindataTables = []string{
 	BorEvents,
 	BorEventNums,
 	BorSpans,
-	BorCheckpoints,
 	BorMilestones,
+	BorCheckpoints,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
