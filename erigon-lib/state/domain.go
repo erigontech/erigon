@@ -608,7 +608,7 @@ func (d *Domain) openFiles() (err error) {
 	invalidFileItems := make([]*filesItem, 0)
 	invalidFileItemsLock := sync.Mutex{}
 	g := &errgroup.Group{}
-	g.SetLimit(16)
+	g.SetLimit(32)
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item

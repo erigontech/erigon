@@ -497,7 +497,7 @@ func (ii *InvertedIndex) openFiles() error {
 	var invalidFileItems []*filesItem
 	invalidFileItemsLock := sync.Mutex{}
 	g := &errgroup.Group{}
-	g.SetLimit(16)
+	g.SetLimit(32)
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			item := item
