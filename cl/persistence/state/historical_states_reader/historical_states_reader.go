@@ -636,7 +636,6 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 			continue
 		}
 		currentEpoch := i / r.cfg.SlotsPerEpoch
-		fmt.Println("A")
 
 		// Read the participation flags
 		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
@@ -677,6 +676,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 			}
 			// apply the flags
 			for _, idx := range attestingIndicies {
+				fmt.Println(idx)
 				for flagIndex := range r.cfg.ParticipationWeights() {
 					var flagParticipation cltypes.ParticipationFlags
 					if isCurrentEpoch && currentEpoch != prevEpoch {
