@@ -711,9 +711,9 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 
 func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.Tx, slot, validatorSetSize uint64, previousActiveIndicies []uint64) (*solid.BitList, error) {
 	out := solid.NewBitList(int(validatorSetSize), int(r.cfg.ValidatorRegistryLimit))
-	//if slot/r.cfg.SlotsPerEpoch != r.cfg.AltairForkEpoch {
-	return out, nil
-	//}
+	if slot/r.cfg.SlotsPerEpoch != r.cfg.AltairForkEpoch {
+		return out, nil
+	}
 	slotFromPreviousEpoch := slot - r.cfg.SlotsPerEpoch
 	atts, err := state_accessors.ReadCurrentEpochAttestations(tx, r.cfg.RoundSlotToEpoch(slotFromPreviousEpoch), int(r.cfg.CurrentEpochAttestationsLength()))
 	if err != nil {
