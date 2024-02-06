@@ -7,9 +7,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-// checkpoints and milestones are both hash hashAccumulators as defined
-// here https://www.ethportal.net/concepts/hash-accumulators
-
 type Waypoint interface {
 	fmt.Stringer
 	StartBlock() *big.Int
