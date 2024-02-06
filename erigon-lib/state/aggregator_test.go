@@ -527,7 +527,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			_, err := rnd.Read(codeUpd)
 			require.NoError(t, err)
 			for limit := 1000; len(key) > length.Addr && limit > 0; limit-- {
-				key, existed = getKey()
+				key, existed = getKey() //nolint
 				if !existed {
 					continue
 				}
