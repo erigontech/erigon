@@ -443,6 +443,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, version uint8, bl
 		}
 	}
 	var idxFilePath = filepath.Join(snapDir, snaptype.IdxFileName(version, blockFrom, blockTo, snaptype.BorEvents.String()))
+	fmt.Printf("[dbg] %s, baseEventId=%d, %d\n", idxFilePath, baseEventId, blockCount)
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   blockCount,
