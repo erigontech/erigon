@@ -1043,6 +1043,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	maxBlockNumInFiles := r.FrozenBorBlocks()
 	fmt.Printf("[dbg] EventsByBlock: %d, maxBlockNumInFiles=%d\n", blockHeight, maxBlockNumInFiles)
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		fmt.Printf("[dbg] EventsByBlock1: %d\n", blockHeight)
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
@@ -1095,15 +1096,19 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
+			fmt.Printf("[dbg] EventsByBlock2 skip1: %s, %d\n", sn.seg.FileName(), sn.from)
 			continue
 		}
 		if sn.to <= blockHeight {
+			fmt.Printf("[dbg] EventsByBlock2 skip2: %s, %d\n", sn.seg.FileName(), sn.to)
 			continue
 		}
 		if sn.IdxBorTxnHash == nil {
+			fmt.Printf("[dbg] EventsByBlock2 skip3: %s, %d\n", sn.seg.FileName(), sn.to)
 			continue
 		}
 		if sn.IdxBorTxnHash.KeyCount() == 0 {
+			fmt.Printf("[dbg] EventsByBlock2 skip4: %s, %d\n", sn.seg.FileName(), sn.to)
 			continue
 		}
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
