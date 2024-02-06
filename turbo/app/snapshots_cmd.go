@@ -361,10 +361,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer agg.Close()
 
 	blockReader, _ := blockRetire.IO()
-	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
+
+	if err := integrity.SnapBorEventsRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
-	if err := integrity.SnapBorEventsRead(chainDB, blockReader, ctx, false); err != nil {
+	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
 	return nil
