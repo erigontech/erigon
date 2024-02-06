@@ -579,7 +579,6 @@ func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64, curren
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Println(previousEpochAttestations, currentEpochAttestations)
 	previousEpochAttestations.Truncate(int(previousEpochAttestationsLength))
 	currentEpochAttestations.Truncate(int(currentEpochAttestationsLength))
 	return currentEpochAttestations, previousEpochAttestations, nil
