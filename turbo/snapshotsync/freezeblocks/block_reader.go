@@ -1117,10 +1117,12 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
 		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
+			fmt.Printf("[dbg] EventsByBlock3: %s\n", sn.seg.FileName())
 			buf, _ = gg.Next(buf[:0])
 			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
 		}
 	}
+	fmt.Printf("[dbg] EventsByBlock4: %d\n", len(result))
 	return result, nil
 }
 
