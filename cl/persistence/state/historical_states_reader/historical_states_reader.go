@@ -624,6 +624,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	if err := r.tryCachingEpochsInParallell(tx, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
 		return nil, nil, err
 	}
+	fmt.Println(beginSlot, slot)
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
@@ -737,9 +738,6 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 		}
 		for _, idx := range indices {
 			for _, flagIndex := range flags {
-				if idx == 35 {
-					fmt.Println("A")
-				}
 				flagParticipation := cltypes.ParticipationFlags(out.Get(int(idx))).Add(int(flagIndex))
 				out.Set(int(idx), byte(flagParticipation))
 			}
