@@ -189,6 +189,7 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 }
 
 func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
+	defer func(t time.Time) { fmt.Printf("inverted_index.go:192: %s, %s\n", ii.filenameBase, time.Since(t)) }(time.Now())
 	{
 		if ii.withLocalityIndex {
 			accFiles, err := filesFromDir(ii.dirs.SnapAccessors)
@@ -204,8 +205,11 @@ func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
 		}
 	}
 
+	defer func(t time.Time) { fmt.Printf("inverted_index.go:208: %s, %s\n", ii.filenameBase, time.Since(t)) }(time.Now())
 	ii.closeWhatNotInList(fNames)
+	defer func(t time.Time) { fmt.Printf("inverted_index.go:210: %s, %s\n", ii.filenameBase, time.Since(t)) }(time.Now())
 	ii.garbageFiles = ii.scanStateFiles(fNames)
+	defer func(t time.Time) { fmt.Printf("inverted_index.go:212: %s, %s\n", ii.filenameBase, time.Since(t)) }(time.Now())
 	if err := ii.openFiles(); err != nil {
 		return fmt.Errorf("InvertedIndex(%s).openFiles: %w", ii.filenameBase, err)
 	}

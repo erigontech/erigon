@@ -442,7 +442,6 @@ func (d *Domain) openList(names []string, readonly bool) error {
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
-	defer func(t time.Time) { fmt.Printf("domain.go:445: %s, %s\n", d.filenameBase, time.Since(t)) }(time.Now())
 	d.protectFromHistoryFilesAheadOfDomainFiles(readonly)
 	d.reCalcRoFiles()
 	return nil
