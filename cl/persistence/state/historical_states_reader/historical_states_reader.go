@@ -650,7 +650,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 					activeIndicies = currentActiveIndicies
 				}
 			} else {
-				if currentEpoch == prevEpoch {
+				if currentEpoch == prevEpoch && currentEpoch != r.cfg.AltairForkEpoch {
 					return true
 				}
 				activeIndicies = previousActiveIndicies
