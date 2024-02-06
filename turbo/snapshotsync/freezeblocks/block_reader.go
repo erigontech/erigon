@@ -1117,9 +1117,14 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
 		fmt.Printf("[dbg] EventsByBlock30 blockEventId=%d, borTxHash=%x\n", blockEventId, borTxHash)
-		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
-			fmt.Printf("[dbg] EventsByBlock3: %s\n", sn.seg.FileName())
+		for gg.HasNext() {
+			buf, _ = gg.Next(buf[:0]) //key
+			fmt.Printf("[dbg] EventsByBlock3: %s, %d, %x\n", sn.seg.FileName(), len(buf), buf)
+			if !bytes.HasPrefix(buf, borTxHash[:]) {
+				break
+			}
 			buf, _ = gg.Next(buf[:0])
+			fmt.Printf("[dbg] EventsByBlock31: %s, %d, %x\n", sn.seg.FileName(), len(buf), buf)
 			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
 		}
 	}
