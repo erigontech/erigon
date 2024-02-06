@@ -467,6 +467,7 @@ RETRY:
 		word, nextPos = g.Next(word[:0])
 		i++
 		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
+			fmt.Printf("[dbg] add; %x, %d\n", word[:length.Hash], offset)
 			if err = rs.AddKey(word[:length.Hash], offset); err != nil {
 				return err
 			}
