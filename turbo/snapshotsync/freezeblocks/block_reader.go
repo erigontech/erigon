@@ -1165,6 +1165,39 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	return lastEventID
 }
 
+func (r *BlockReader) BorIntegrityEventIdNoGap(failFast bool) error {
+	if r.borSn == nil {
+		return nil
+	}
+
+	view := r.borSn.View()
+	defer view.Close()
+	var eventID, prevEventID uint64
+
+	// find the last segment which has a built index
+	for _, sn := range view.Events() {
+		if sn.IdxBorTxnHash == nil {
+			continue
+		}
+
+		gg := sn.seg.MakeGetter()
+		var buf []byte
+		for gg.HasNext() {
+			buf, _ = gg.Next(buf[:0])
+			eventID = binary.BigEndian.Uint64(buf[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+			if prevEventID > 0 && prevEventID+1 != eventID {
+				err := fmt.Errorf("[integrity] bor event id: gap %d -> %d\n", prevEventID, eventID)
+				if failFast {
+					return err
+				}
+				log.Warn(err.Error())
+			}
+			prevEventID = eventID
+		}
+	}
+	return nil
+}
+
 func (r *BlockReader) LastFrozenSpanID() uint64 {
 	if r.borSn == nil {
 		return 0

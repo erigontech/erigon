@@ -45,19 +45,30 @@ func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx contex
 	return nil
 }
 
-func SnapBorSpanRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context, failFast bool) error {
-	defer log.Info("[integrity] SnapBorSpanRead: done")
+func SnapBorEventsRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context, failFast bool) error {
+	defer log.Info("[integrity] SnapBlocksRead: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
-	for i := uint64(0); i < 20_000; i++ {
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		lastEventID, err := blockReader.(services.BorEventReader).LastEventId(ctx, tx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	maxBlockNum := blockReader.BorSnapshots().SegmentsMax()
+	for i := uint64(0); i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			b, err := blockReader.(services.BorSpanReader).Span(ctx, tx, i)
+			lastEventID, err := blockReader.(services.BorEventReader).LastEventId(ctx, tx)
 			if err != nil {
 				return err
 			}
 			if b == nil {
-				err := fmt.Errorf("span not found: %d\n", i)
+				err := fmt.Errorf("block not found in snapshots: %d\n", i)
 				if failFast {
 					return err
 				}
@@ -72,7 +83,7 @@ func SnapBorSpanRead(db kv.RoDB, blockReader services.FullBlockReader, ctx conte
 		case <-ctx.Done():
 			return nil
 		case <-logEvery.C:
-			log.Info("[integrity] SnapBorSpanRead", "span", i)
+			log.Info("[integrity] SnapBlocksRead", "blockNum", fmt.Sprintf("%dK/%dK", i/1000, maxBlockNum/1000))
 		default:
 		}
 	}
