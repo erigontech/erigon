@@ -131,7 +131,6 @@ func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
 	if err := h.InvertedIndex.OpenList(idxFiles, readonly); err != nil {
 		return err
 	}
-	defer func(t time.Time) { fmt.Printf("history.go:134: %s, %s\n", h.filenameBase, time.Since(t)) }(time.Now())
 	return h.openList(histNames)
 }
 func (h *History) openList(fNames []string) error {

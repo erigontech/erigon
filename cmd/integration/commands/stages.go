@@ -1543,15 +1543,12 @@ func allSnapshots(ctx context.Context, db kv.RoDB, version uint8, logger log.Log
 		if useSnapshots {
 			g := &errgroup.Group{}
 			g.Go(func() error {
-				defer func(t time.Time) { fmt.Printf("1 stages.go:1546: %s\n", time.Since(t)) }(time.Now())
 				return _allSnapshotsSingleton.ReopenFolder()
 			})
 			g.Go(func() error {
-				defer func(t time.Time) { fmt.Printf("2 stages.go:1549: %s\n", time.Since(t)) }(time.Now())
 				return _allBorSnapshotsSingleton.ReopenFolder()
 			})
 			g.Go(func() error {
-				defer func(t time.Time) { fmt.Printf("3 stages.go:1552: %s\n", time.Since(t)) }(time.Now())
 				return _aggSingleton.OpenFolder(true)
 			}) //TODO: open in read-only if erigon running?
 			err := g.Wait()
@@ -1559,7 +1556,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, version uint8, logger log.Log
 				panic(err)
 			}
 
-			defer func(t time.Time) { fmt.Printf("stages.go:1562: %s\n", time.Since(t)) }(time.Now())
 			_allSnapshotsSingleton.LogStat("all")
 			_allBorSnapshotsSingleton.LogStat("all")
 			_ = db.View(context.Background(), func(tx kv.Tx) error {
