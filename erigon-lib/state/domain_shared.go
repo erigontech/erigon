@@ -858,10 +858,22 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	if domain != kv.StorageDomain {
 		return fmt.Errorf("DomainDelPrefix: not supported")
 	}
+
+	type tuple struct {
+		k, v []byte
+		step uint64
+	}
+	tombs := make([]tuple, 0, 8)
 	if err := sd.IterateStoragePrefix(prefix, func(k, v []byte, step uint64) error {
-		return sd.DomainDel(kv.StorageDomain, k, nil, v, step)
+		tombs = append(tombs, tuple{k, v, step})
+		return nil
 	}); err != nil {
 		return err
+	}
+	for _, tomb := range tombs {
+		if err := sd.DomainDel(kv.StorageDomain, tomb.k, nil, tomb.v, tomb.step); err != nil {
+			return err
+		}
 	}
 
 	if assert.Enable {
