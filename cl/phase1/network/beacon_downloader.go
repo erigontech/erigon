@@ -81,7 +81,7 @@ Loop:
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
 				}
-				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-3, count)
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-6, count)
 
 				if err != nil {
 					return
