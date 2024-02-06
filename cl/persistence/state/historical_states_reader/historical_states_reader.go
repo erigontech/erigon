@@ -669,6 +669,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 			if err != nil {
 				return false
 			}
+			fmt.Println(attestingIndicies)
 			var participationFlagsIndicies []uint8
 			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, i, data, i-data.Slot(), true)
 			if err != nil {
