@@ -479,7 +479,6 @@ RETRY:
 	var i, offset, nextPos uint64
 	for g.HasNext() {
 		word, nextPos = g.Next(word[:0])
-		i++
 		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
 			fmt.Printf("add: %x, %d\n", word[:length.Hash], i)
 			if err = rs.AddKey(word[:length.Hash], offset); err != nil {
@@ -496,6 +495,8 @@ RETRY:
 		default:
 		}
 		offset = nextPos
+
+		i++
 	}
 	if err = rs.Build(ctx); err != nil {
 		if errors.Is(err, recsplit.ErrCollision) {
