@@ -732,8 +732,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				}
 				backend.sentryChief.Bd.AddToPrefetch(b.Header(), b.RawBody())
 
-				//p2p
-				//backend.sentryChief.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
 					logger.Error("txpool rpc mined block broadcast", "err", err)
