@@ -1094,15 +1094,14 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	var buf []byte
 	result := []rlp.RawValue{}
 	fmt.Printf("[dbg] EventsByBlock01 last: %s, %s\n", segments[len(segments)-1].seg.FileName(), segments[0].seg.FileName())
-	for i := len(segments) - 1; i >= 0; i-- {
+	for i := len(segments); i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
 			fmt.Printf("[dbg] EventsByBlock2 skip1: %s, %d\n", sn.seg.FileName(), sn.from)
 			continue
 		}
 		if sn.to <= blockHeight {
-			fmt.Printf("[dbg] EventsByBlock2 skip2: %s, %d\n", sn.seg.FileName(), sn.to)
-			continue
+			break
 		}
 		if sn.IdxBorTxnHash == nil {
 			fmt.Printf("[dbg] EventsByBlock2 skip3: %s, %d\n", sn.seg.FileName(), sn.to)
