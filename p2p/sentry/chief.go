@@ -276,7 +276,6 @@ func (c *Chief) SendBodyRequest(ctx context.Context, req *bodydownload.BodyReque
 			continue
 		}
 
-		//log.Info(fmt.Sprintf("Sending body request for %v", req.BlockNums))
 		var bytes []byte
 		var err error
 		bytes, err = rlp.EncodeToBytes(&eth.GetBlockBodiesPacket66{
@@ -514,7 +513,6 @@ func (c *Chief) HandleInboundMessage(ctx context.Context, message *protosentry.I
 func (c *Chief) handleInboundMessage(ctx context.Context, inreq *protosentry.InboundMessage, sentry direct.SentryClient) error {
 	switch inreq.Id {
 	// ========= eth 66 ==========
-
 	case protosentry.MessageId_NEW_BLOCK_HASHES_66:
 		return c.newBlockHashes66(ctx, inreq, sentry)
 	case protosentry.MessageId_BLOCK_HEADERS_66:
@@ -887,8 +885,16 @@ func (c *Chief) getReceipts66(ctx context.Context, inreq *protosentry.InboundMes
 	return nil
 }
 
-func makeInboundMessage() *protosentry.InboundMessage {
-	return new(protosentry.InboundMessage)
+func (c *Chief) randSentryIndex() (int, bool, func() (int, bool)) {
+	var i int
+	if len(c.sentries) > 1 {
+		i = rand.Intn(len(c.sentries) - 1) // nolint: gosec
+	}
+	to := i
+	return i, true, func() (int, bool) {
+		i = (i + 1) % len(c.sentries)
+		return i, i != to
+	}
 }
 
 func (c *Chief) makeStatusData() *protosentry.StatusData {
@@ -907,16 +913,8 @@ func (c *Chief) makeStatusData() *protosentry.StatusData {
 	}
 }
 
-func (c *Chief) randSentryIndex() (int, bool, func() (int, bool)) {
-	var i int
-	if len(c.sentries) > 1 {
-		i = rand.Intn(len(c.sentries) - 1) // nolint: gosec
-	}
-	to := i
-	return i, true, func() (int, bool) {
-		i = (i + 1) % len(c.sentries)
-		return i, i != to
-	}
+func makeInboundMessage() *protosentry.InboundMessage {
+	return new(protosentry.InboundMessage)
 }
 
 func networkTemporaryErr(err error) bool {
