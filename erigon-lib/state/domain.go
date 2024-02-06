@@ -438,6 +438,7 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bo
 func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
 	d.garbageFiles = d.scanStateFiles(names)
+	defer func(t time.Time) { fmt.Printf("domain.go:441: %s, %s\n", d.filenameBase, time.Since(t)) }(time.Now())
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
@@ -454,7 +455,6 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
 }
 
 func (d *Domain) OpenFolder(readonly bool) error {
-	defer func(t time.Time) { fmt.Printf("domain.go:457: %s, %s\n", d.filenameBase, time.Since(t)) }(time.Now())
 	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
 		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
