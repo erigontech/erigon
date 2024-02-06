@@ -451,7 +451,6 @@ func (cs *MultiClient) blockHeaders(ctx context.Context, pkt eth.BlockHeadersPac
 		}
 	} else {
 		sort.Sort(headerdownload.HeadersSort(csHeaders)) // Sorting by order of block heights
-		// TODO left reading up to here
 		canRequestMore := cs.Hd.ProcessHeaders(csHeaders, false /* newBlock */, sentry2.ConvertH512ToPeerID(peerID))
 
 		if canRequestMore {
