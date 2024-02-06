@@ -2,6 +2,7 @@ package types
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/stretchr/testify/require"
 	"testing"
 )
 
@@ -24,22 +25,27 @@ func Test_L1InfoTreeMarshallUnmarshall(t *testing.T) {
 	result := L1InfoTreeUpdate{}
 	result.Unmarshall(marshalled)
 
-	if result.Index != in.Index {
-		t.Errorf("index mismatch")
+	require.Equal(t, in, result)
+}
+
+func Test_L1InjectedBatchMarshallUnmarshall(t *testing.T) {
+	input := &L1InjectedBatch{
+		L1BlockNumber:      1,
+		Timestamp:          1000,
+		L1BlockHash:        libcommon.HexToHash("0x1"),
+		L1ParentHash:       libcommon.HexToHash("0x2"),
+		LastGlobalExitRoot: libcommon.HexToHash("0x3"),
+		Sequencer:          libcommon.HexToAddress("0x4"),
+		Transaction:        []byte{100},
 	}
-	if result.GER != in.GER {
-		t.Errorf("ger mismatch")
+
+	marshalled := input.Marshall()
+
+	result := &L1InjectedBatch{}
+	err := result.Unmarshall(marshalled)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if result.MainnetExitRoot != in.MainnetExitRoot {
-		t.Errorf("mainnet exit root mismatch")
-	}
-	if result.RollupExitRoot != in.RollupExitRoot {
-		t.Errorf("rollup exit root mismatch")
-	}
-	if result.ParentHash != in.ParentHash {
-		t.Errorf("parent hash mismatch")
-	}
-	if result.Timestamp != in.Timestamp {
-		t.Errorf("timestamp mismatch")
-	}
+
+	require.Equal(t, input, result)
 }

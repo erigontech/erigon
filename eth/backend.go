@@ -728,7 +728,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			l1Topics := [][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.InitialSequenceBatchesTopic}}
 			zkL1Syncer := syncer.NewL1Syncer(
 				etherMan.EthClient,
-				cfg.L1PolygonRollupManager,
+				[]libcommon.Address{cfg.L1Rollup, cfg.L1PolygonRollupManager},
 				l1Topics,
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,
@@ -772,7 +772,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			etherMan := newEtherMan(cfg)
 			zkL1Syncer := syncer.NewL1Syncer(
 				etherMan.EthClient,
-				cfg.L1PolygonRollupManager,
+				[]libcommon.Address{cfg.L1PolygonRollupManager},
 				l1Topics,
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,

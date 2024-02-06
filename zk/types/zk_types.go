@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 
+	"bytes"
 	"encoding/binary"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -65,4 +66,43 @@ func (l *L1InfoTreeUpdate) Unmarshall(input []byte) {
 	copy(l.RollupExitRoot[:], input[72:104])
 	copy(l.ParentHash[:], input[104:136])
 	l.Timestamp = binary.LittleEndian.Uint64(input[136:])
+}
+
+type L1InjectedBatch struct {
+	L1BlockNumber      uint64
+	Timestamp          uint64
+	L1BlockHash        common.Hash
+	L1ParentHash       common.Hash
+	LastGlobalExitRoot common.Hash
+	Sequencer          common.Address
+	Transaction        []byte
+}
+
+func (ib *L1InjectedBatch) Marshall() []byte {
+	result := make([]byte, 0)
+	result = append(result, utils.Uint64ToLE(ib.L1BlockNumber)...)
+	result = append(result, utils.Uint64ToLE(ib.Timestamp)...)
+	result = append(result, ib.L1BlockHash[:]...)
+	result = append(result, ib.L1ParentHash[:]...)
+	result = append(result, ib.LastGlobalExitRoot[:]...)
+	result = append(result, ib.Sequencer[:]...)
+	result = append(result, ib.Transaction[:]...)
+	return result
+}
+
+func (ib *L1InjectedBatch) Unmarshall(input []byte) error {
+	err := binary.Read(bytes.NewReader(input[:8]), binary.LittleEndian, &ib.L1BlockNumber)
+	if err != nil {
+		return err
+	}
+	err = binary.Read(bytes.NewReader(input[8:16]), binary.LittleEndian, &ib.Timestamp)
+	if err != nil {
+		return err
+	}
+	copy(ib.L1BlockHash[:], input[16:48])
+	copy(ib.L1ParentHash[:], input[48:80])
+	copy(ib.LastGlobalExitRoot[:], input[80:112])
+	copy(ib.Sequencer[:], input[112:132])
+	ib.Transaction = append([]byte{}, input[132:]...)
+	return nil
 }

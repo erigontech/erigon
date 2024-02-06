@@ -150,7 +150,7 @@ func ExecuteBlockEphemerallyZk(
 
 	// [zkevm] - finished writing global exit root to state
 
-	ibs.PreExecuteStateSet(chainConfig, block, &stateRoot)
+	ibs.PreExecuteStateSet(chainConfig, block.NumberU64(), block.Time(), &stateRoot)
 
 	blockInfoTree := blockinfo.NewBlockInfoTree()
 	parentHash := block.ParentHash()
@@ -237,7 +237,7 @@ func ExecuteBlockEphemerallyZk(
 		return nil, err
 	}
 	l1InfoRoot := libcommon.BigToHash(root)
-	ibs.PostExecuteStateSet(chainConfig, block.NumberU64(), &l1InfoRoot, &stateRoot)
+	ibs.PostExecuteStateSet(chainConfig, block.NumberU64(), &l1InfoRoot)
 
 	receiptSha := types.DeriveSha(receipts)
 	// [zkevm] todo

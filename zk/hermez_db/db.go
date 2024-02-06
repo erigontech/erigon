@@ -22,6 +22,7 @@ const TX_PRICE_PERCENTAGE = "hermez_txPricePercentage"             // txHash -> 
 const STATE_ROOTS = "hermez_stateRoots"                            // l2blockno -> stateRoot
 const L1_INFO_TREE_UPDATES = "l1_info_tree_updates"                // index -> L1InfoTreeUpdate
 const BLOCK_L1_INFO_TREE_INDEX = "block_l1_info_tree_index"        // block number -> l1 info tree index
+const L1_INJECTED_BATCHES = "l1_injected_batches"                  // index increasing by 1 -> injected batch for the start of the chain
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -46,39 +47,24 @@ func NewHermezDb(tx kv.RwTx) (*HermezDb, error) {
 }
 
 func CreateHermezBuckets(tx kv.RwTx) error {
-	if err := tx.CreateBucket(L1VERIFICATIONS); err != nil {
-		return err
+	tables := []string{
+		L1VERIFICATIONS,
+		L1SEQUENCES,
+		FORKIDS,
+		FORKID_BLOCK,
+		BLOCKBATCHES,
+		GLOBAL_EXIT_ROOTS,
+		GLOBAL_EXIT_ROOTS_BATCHES,
+		TX_PRICE_PERCENTAGE,
+		STATE_ROOTS,
+		L1_INFO_TREE_UPDATES,
+		BLOCK_L1_INFO_TREE_INDEX,
+		L1_INJECTED_BATCHES,
 	}
-	if err := tx.CreateBucket(L1SEQUENCES); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(FORKIDS); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(FORKID_BLOCK); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(BLOCKBATCHES); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(GLOBAL_EXIT_ROOTS); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(GLOBAL_EXIT_ROOTS_BATCHES); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(TX_PRICE_PERCENTAGE); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(STATE_ROOTS); err != nil {
-		return err
-	}
-
-	if err := tx.CreateBucket(L1_INFO_TREE_UPDATES); err != nil {
-		return err
-	}
-	if err := tx.CreateBucket(BLOCK_L1_INFO_TREE_INDEX); err != nil {
-		return err
+	for _, t := range tables {
+		if err := tx.CreateBucket(t); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -610,4 +596,41 @@ func (db *HermezDbReader) GetBlockL1InfoTreeIndex(blockNumber uint64) (uint64, e
 		return 0, err
 	}
 	return BytesToUint64(v), nil
+}
+
+func (db *HermezDb) WriteL1InjectedBatch(batch *types.L1InjectedBatch) error {
+	var nextIndex uint64 = 0
+
+	// get the next index for the write
+	cursor, err := db.tx.Cursor(L1_INJECTED_BATCHES)
+	if err != nil {
+		return err
+	}
+
+	count, err := cursor.Count()
+	if err != nil {
+		return err
+	}
+
+	if count > 0 {
+		nextIndex = count + 1
+	}
+
+	k := Uint64ToBytes(nextIndex)
+	v := batch.Marshall()
+	return db.tx.Put(L1_INJECTED_BATCHES, k, v)
+}
+
+func (db *HermezDb) GetL1InjectedBatch(index uint64) (*types.L1InjectedBatch, error) {
+	k := Uint64ToBytes(index)
+	v, err := db.tx.GetOne(L1_INJECTED_BATCHES, k)
+	if err != nil {
+		return nil, err
+	}
+	ib := new(types.L1InjectedBatch)
+	err = ib.Unmarshall(v)
+	if err != nil {
+		return nil, err
+	}
+	return ib, nil
 }

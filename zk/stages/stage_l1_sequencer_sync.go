@@ -84,9 +84,11 @@ Loop:
 		case l := <-logChan:
 			switch l.Topics[0] {
 			case contracts.UpdateL1InfoTreeTopic:
-				if err := handleL1InfoTreeUpdate(cfg, hermezDb, l, latestUpdate, found); err != nil {
+				latestUpdate, err = handleL1InfoTreeUpdate(cfg, hermezDb, l, latestUpdate, found)
+				if err != nil {
 					return err
 				}
+				found = true
 			case contracts.InitialSequenceBatchesTopic:
 				if err := handleInitialSequenceBatches(cfg, hermezDb, l); err != nil {
 					return err
@@ -125,10 +127,10 @@ func handleL1InfoTreeUpdate(
 	l ethTypes.Log,
 	latestUpdate *types.L1InfoTreeUpdate,
 	found bool,
-) error {
+) (*types.L1InfoTreeUpdate, error) {
 	if len(l.Topics) != 3 {
 		log.Warn("Received log for info tree that did not have 3 topics")
-		return nil
+		return nil, nil
 	}
 	mainnetExitRoot := l.Topics[1]
 	rollupExitRoot := l.Topics[2]
@@ -143,7 +145,6 @@ func handleL1InfoTreeUpdate(
 	if !found {
 		// starting from a fresh db here, so we need to create index 0
 		update.Index = 0
-		found = true
 	} else {
 		// increment the index from the previous entry
 		update.Index = latestUpdate.Index + 1
@@ -153,26 +154,56 @@ func handleL1InfoTreeUpdate(
 	// to this event
 	block, err := cfg.syncer.GetBlock(l.BlockNumber)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	update.ParentHash = block.ParentHash()
 	update.Timestamp = block.Time()
 
-	latestUpdate = update
-
 	if err = hermezDb.WriteL1InfoTreeUpdate(update); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return update, nil
 }
+
+const (
+	injectedBatchLogTrailingBytes        = 24
+	injectedBatchLogTransactionStartByte = 128
+	injectedBatchLastGerStartByte        = 31
+	injectedBatchLastGerEndByte          = 64
+	injectedBatchSequencerStartByte      = 76
+	injectedBatchSequencerEndByte        = 96
+)
 
 func handleInitialSequenceBatches(
 	cfg L1SequencerSyncCfg,
 	db *hermez_db.HermezDb,
 	l ethTypes.Log,
 ) error {
-	// todo: [zkevm] figure out what to store here and how.  We need the tx information from this log for injecting
-	// the initial batch and the associated GER for the first block + timestamp
+	l1Block, err := cfg.syncer.GetBlock(l.BlockNumber)
+	if err != nil {
+		return err
+	}
+
+	// the log appears to have some trailing 24 bytes of all 0s in it.  Not sure why but we can't handle the
+	// TX without trimming these off
+	trailingCutoff := len(l.Data) - injectedBatchLogTrailingBytes
+
+	txData := l.Data[injectedBatchLogTransactionStartByte:trailingCutoff]
+
+	ib := &types.L1InjectedBatch{
+		L1BlockNumber:      l.BlockNumber,
+		Timestamp:          l1Block.Time(),
+		L1BlockHash:        l1Block.Hash(),
+		L1ParentHash:       l1Block.ParentHash(),
+		LastGlobalExitRoot: common.BytesToHash(l.Data[injectedBatchLastGerStartByte:injectedBatchLastGerEndByte]),
+		Sequencer:          common.BytesToAddress(l.Data[injectedBatchSequencerStartByte:injectedBatchSequencerEndByte]),
+		Transaction:        txData,
+	}
+
+	if err = db.WriteL1InjectedBatch(ib); err != nil {
+		return err
+	}
+
 	return nil
 }
 

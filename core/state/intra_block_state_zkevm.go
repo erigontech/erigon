@@ -8,7 +8,6 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common"
-	"github.com/ledgerwatch/erigon/core/types"
 	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 )
 
@@ -37,30 +36,31 @@ func (sdb *IntraBlockState) GetTxCount() (uint64, error) {
 	return counter.GetTxCount()
 }
 
-func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, blockNum uint64, l1InfoRoot, stateRoot *libcommon.Hash) {
+func (sdb *IntraBlockState) PostExecuteStateSet(chainConfig *chain.Config, blockNum uint64, blockInfoRoot *libcommon.Hash) {
 	//ETROG
 	if chainConfig.IsForkID7Etrog(blockNum) {
-		sdb.scalableSetBlockInfoRoot(l1InfoRoot)
+		sdb.scalableSetBlockInfoRoot(blockInfoRoot)
 	}
 }
 
-func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, block *types.Block, stateRoot *libcommon.Hash) {
+func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, stateRoot *libcommon.Hash) {
 	if !sdb.Exist(ADDRESS_SCALABLE_L2) {
 		// create account if not exists
 		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)
 	}
 
-	blockNum := block.Number().Uint64()
 	//save block number
-	sdb.scalableSetBlockNum(blockNum)
+	sdb.scalableSetBlockNum(blockNumber)
 
 	//ETROG
-	if chainConfig.IsForkID7Etrog(blockNum) {
-		//save block timestamp
-		sdb.ScalableSetTimestamp(block.Time())
+	if chainConfig.IsForkID7Etrog(blockNumber) {
+		currentTimestamp := sdb.ScalableGetTimestamp()
+		if blockTimestamp > currentTimestamp {
+			sdb.ScalableSetTimestamp(blockTimestamp)
+		}
 
 		//save prev block hash
-		sdb.scalableSetBlockHash(blockNum-1, stateRoot)
+		sdb.scalableSetBlockHash(blockNumber-1, stateRoot)
 	}
 }
 

@@ -35,12 +35,11 @@ type jobResult struct {
 }
 
 type L1Syncer struct {
-	em IEtherman
-
-	l1ContractAddress common.Address
-	topics            [][]common.Hash
-	blockRange        uint64
-	queryDelay        uint64
+	em                  IEtherman
+	l1ContractAddresses []common.Address
+	topics              [][]common.Hash
+	blockRange          uint64
+	queryDelay          uint64
 
 	latestL1Block uint64
 
@@ -54,10 +53,10 @@ type L1Syncer struct {
 	progressMessageChan chan string
 }
 
-func NewL1Syncer(em IEtherman, l1ContractAddress common.Address, topics [][]common.Hash, blockRange, queryDelay uint64) *L1Syncer {
+func NewL1Syncer(em IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64) *L1Syncer {
 	return &L1Syncer{
 		em:                  em,
-		l1ContractAddress:   l1ContractAddress,
+		l1ContractAddresses: l1ContractAddresses,
 		topics:              topics,
 		blockRange:          blockRange,
 		queryDelay:          queryDelay,
@@ -230,7 +229,7 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 			query := ethereum.FilterQuery{
 				FromBlock: big.NewInt(int64(j.From)),
 				ToBlock:   big.NewInt(int64(j.To)),
-				Addresses: []common.Address{s.l1ContractAddress},
+				Addresses: s.l1ContractAddresses,
 				Topics:    s.topics,
 			}
 
