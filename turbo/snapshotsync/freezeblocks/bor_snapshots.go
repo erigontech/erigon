@@ -430,8 +430,9 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, version uint8, bl
 		word, _ = g.Next(word[:0])
 		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
 			blockCount++
+			fmt.Printf("blockNumBuf=%d, blockNumDiff=%d\n", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum]), binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])-binary.BigEndian.Uint64(blockNumBuf[:]))
 			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
-			fmt.Printf("blockNumBuf: %d\n", binary.BigEndian.Uint64(blockNumBuf[:]))
+			fmt.Printf(",: %d\n", binary.BigEndian.Uint64(blockNumBuf[:]))
 		}
 		if first {
 			baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
