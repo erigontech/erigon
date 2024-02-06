@@ -210,18 +210,18 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
-	sentryControlServer := ethereum.SentryChief()
+	sentryChief := ethereum.SentryChief()
 	initialCycle := false
 
 	for _, b := range chain.Blocks {
-		sentryControlServer.Hd.AddMinedHeader(b.Header())
-		sentryControlServer.Bd.AddToPrefetch(b.Header(), b.RawBody())
+		sentryChief.Hd.AddMinedHeader(b.Header())
+		sentryChief.Bd.AddToPrefetch(b.Header(), b.RawBody())
 	}
 
-	sentryControlServer.Hd.MarkAllVerified()
+	sentryChief.Hd.MarkAllVerified()
 	blockReader, _ := ethereum.BlockIO()
 
-	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryControlServer.UpdateHead)
+	hook := stages.NewHook(ethereum.SentryCtx(), ethereum.ChainDB(), ethereum.Notifications(), ethereum.StagedSync(), blockReader, ethereum.ChainConfig(), logger, sentryChief.UpdateHead)
 	err := stages.StageLoopIteration(ethereum.SentryCtx(), ethereum.ChainDB(), wrap.TxContainer{}, ethereum.StagedSync(), initialCycle, logger, blockReader, hook, false)
 	if err != nil {
 		return err

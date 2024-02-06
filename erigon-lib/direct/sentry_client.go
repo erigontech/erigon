@@ -177,7 +177,7 @@ func (c *SentryClientRemote) PeerCount(ctx context.Context, in *sentry.PeerCount
 	return c.SentryClient.PeerCount(ctx, in)
 }
 
-// Contains implementations of SentryServer, SentryClient, ControlClient, and ControlServer, that may be linked to each other
+// Contains implementations of SentryServer and SentryClient that may be linked to each other
 // SentryClient is linked directly to the SentryServer, for example, so any function call on the instance of the SentryClient
 // cause invocations directly on the corresponding instance of the SentryServer. However, the link between SentryClient and
 // SentryServer is established outside of the constructor. This means that the reference from the SentyClient to the corresponding
