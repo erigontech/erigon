@@ -1559,6 +1559,7 @@ func allSnapshots(ctx context.Context, db kv.RoDB, version uint8, logger log.Log
 				panic(err)
 			}
 
+			defer func(t time.Time) { fmt.Printf("stages.go:1562: %s\n", time.Since(t)) }(time.Now())
 			_allSnapshotsSingleton.LogStat("all")
 			_allBorSnapshotsSingleton.LogStat("all")
 			_ = db.View(context.Background(), func(tx kv.Tx) error {
