@@ -1116,7 +1116,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
-		fmt.Printf("[dbg] EventsByBlock30 blockEventId=%d, borTxHash=%x\n", blockEventId, borTxHash)
+		fmt.Printf("[dbg] EventsByBlock30 blockEventId=%d, offset=%d, borTxHash=%x\n", blockEventId, offset, borTxHash)
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0]) //key
 			v, _ := gg.Next(nil)      //key
