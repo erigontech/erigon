@@ -125,7 +125,7 @@ Loop:
 				}
 			}
 			if !exists {
-				sn = &Segment{segType: snaptype.Headers, version: f.Version, Range: Range{f.From, f.To}}
+				sn = &Segment{segType: snaptype.BeaconBlocks, version: f.Version, Range: Range{f.From, f.To}}
 			}
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {

@@ -169,7 +169,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	s.metadataV2 = &cltypes.Metadata{
 		SeqNumber: localNode.Seq(),
 		Attnets:   0,
-		Syncnets:  new(uint64),
+		Syncnets:  new([1]byte),
 	}
 
 	// Start stream handlers
@@ -367,6 +367,9 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 		agent, err := s.host.Peerstore().Get(p, "AgentVersion")
 		if err == nil {
 			entry.AgentVersion = agent.(string)
+		}
+		if entry.AgentVersion == "" {
+			entry.AgentVersion = "unknown"
 		}
 		out.Peers = append(out.Peers, entry)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -105,7 +106,7 @@ func ClStagesCfg(
 type StageName = string
 
 const (
-	CatchUpEpochs            StageName = "CatchUpEpochs"
+	ForwardSync              StageName = "ForwardSync"
 	CatchUpBlocks            StageName = "CatchUpBlocks"
 	ForkChoice               StageName = "ForkChoice"
 	ListenForForks           StageName = "ListenForForks"
@@ -123,7 +124,7 @@ func MetaCatchingUp(args Args) StageName {
 		return DownloadHistoricalBlocks
 	}
 	if args.seenEpoch < args.targetEpoch {
-		return CatchUpEpochs
+		return ForwardSync
 	}
 	if args.seenSlot < args.targetSlot {
 		return CatchUpBlocks
@@ -142,7 +143,7 @@ digraph {
         label="syncing";
         WaitForPeers;
         CatchUpBlocks;
-        CatchUpEpochs;
+        ForwardSync;
     }
 
     subgraph cluster_3 {
@@ -156,11 +157,11 @@ digraph {
     }
 
     MetaCatchingUp -> WaitForPeers
-    MetaCatchingUp -> CatchUpEpochs
+    MetaCatchingUp -> ForwardSync
     MetaCatchingUp -> CatchUpBlocks
 
     WaitForPeers -> MetaCatchingUp[lhead=cluster_3]
-    CatchUpEpochs -> MetaCatchingUp[lhead=cluster_3]
+    ForwardSync -> MetaCatchingUp[lhead=cluster_3]
     CatchUpBlocks -> MetaCatchingUp[lhead=cluster_3]
     CleanupAndPruning -> MetaCatchingUp[lhead=cluster_3]
     ListenForForks -> MetaCatchingUp[lhead=cluster_3]
@@ -246,7 +247,7 @@ func ConsensusClStages(ctx context.Context,
 					return nil
 				},
 			},
-			CatchUpEpochs: {
+			ForwardSync: {
 				Description: `if we are 1 or more epochs behind, we download in parallel by epoch`,
 				TransitionFunc: func(cfg *Cfg, args Args, err error) string {
 					if x := MetaCatchingUp(args); x != "" {
@@ -255,69 +256,81 @@ func ConsensusClStages(ctx context.Context,
 					return CatchUpBlocks
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-					logger.Info("[Caplin] Downloading epochs from reqresp", "from", args.seenEpoch, "to", args.targetEpoch)
-					currentEpoch := args.seenEpoch
-					blockBatch := []*types.Block{}
 					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
 					defer tx.Rollback()
-				MainLoop:
-					for currentEpoch <= args.targetEpoch+1 {
-						startBlock := currentEpoch * cfg.beaconCfg.SlotsPerEpoch
-						blocks, err := rpcSource.GetRange(ctx, tx, startBlock, cfg.beaconCfg.SlotsPerEpoch)
-						if err != nil {
-							return err
-						}
-						// If we got an empty packet ban the peer
-						if len(blocks.Data) == 0 {
-							cfg.rpc.BanPeer(blocks.Peer)
-							log.Debug("no data received from peer in epoch download")
-							continue MainLoop
-						}
-
-						logger.Info("[Caplin] Epoch downloaded", "epoch", currentEpoch)
-						for _, block := range blocks.Data {
-
+					downloader := network2.NewForwardBeaconDownloader(ctx, cfg.rpc)
+					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
+					var currentSlot atomic.Uint64
+					currentSlot.Store(finalizedCheckpoint.Epoch() * cfg.beaconCfg.SlotsPerEpoch)
+					secsPerLog := 30
+					logTicker := time.NewTicker(time.Duration(secsPerLog) * time.Second)
+					// Always start from the current finalized checkpoint
+					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
+					downloader.SetHighestProcessedSlot(currentSlot.Load())
+					downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed common.Hash, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
+						blockBatch := []*types.Block{}
+						for _, block := range blocks {
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
 								executionPayload := block.Block.Body.ExecutionPayload
 								body := executionPayload.Body()
 								txs, err := types.DecodeTransactions(body.Transactions)
 								if err != nil {
 									log.Warn("bad blocks segment received", "err", err)
-									cfg.rpc.BanPeer(blocks.Peer)
-									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
-									continue MainLoop
+									return highestSlotProcessed, highestBlockRootProcessed, err
 								}
 								parentRoot := &block.Block.ParentRoot
 								header, err := executionPayload.RlpHeader(parentRoot)
 								if err != nil {
 									log.Warn("bad blocks segment received", "err", err)
-									cfg.rpc.BanPeer(blocks.Peer)
-									currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
-									continue MainLoop
+									return highestSlotProcessed, highestBlockRootProcessed, err
 								}
 								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
 							}
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
-								cfg.rpc.BanPeer(blocks.Peer)
-								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
-								continue MainLoop
+								return highestSlotProcessed, highestBlockRootProcessed, err
+							}
+							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
+								if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
+									log.Warn("failed to insert blocks", "err", err)
+								}
+							}
+
+							if highestSlotProcessed < block.Block.Slot {
+								currentSlot.Store(block.Block.Slot)
+								highestSlotProcessed = block.Block.Slot
+								highestBlockRootProcessed, err = block.Block.HashSSZ()
+								if err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
 							}
 						}
-						if len(blockBatch) > 0 {
-							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
-								log.Warn("bad blocks segment received", "err", err)
-								currentEpoch = utils.Max64(args.seenEpoch, currentEpoch-1)
-								blockBatch = blockBatch[:0]
-								continue MainLoop
+						return highestSlotProcessed, highestBlockRootProcessed, nil
+					})
+					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
+					logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
+					prevProgress := currentSlot.Load()
+					for currentSlot.Load()+4 < chainTipSlot {
+						downloader.RequestMore(ctx)
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-logTicker.C:
+							progressMade := chainTipSlot - currentSlot.Load()
+							distFromChainTip := time.Duration(progressMade*cfg.beaconCfg.SecondsPerSlot) * time.Second
+							timeProgress := currentSlot.Load() - prevProgress
+							estimatedTimeRemaining := 999 * time.Hour
+							if timeProgress > 0 {
+								estimatedTimeRemaining = time.Duration(float64(progressMade)/(float64(currentSlot.Load()-prevProgress)/float64(secsPerLog))) * time.Second
 							}
-							blockBatch = blockBatch[:0]
+							prevProgress = currentSlot.Load()
+							logger.Info("[Caplin] Forward Sync", "progress", currentSlot.Load(), "distance-from-chain-tip", distFromChainTip, "estimated-time-remaining", estimatedTimeRemaining)
+						default:
 						}
-						currentEpoch++
 					}
 					return tx.Commit()
 				},
@@ -354,15 +367,17 @@ func ConsensusClStages(ctx context.Context,
 						sourceFunc := v.GetRange
 						go func(source persistence.BlockSource) {
 							if _, ok := source.(*persistence.BeaconRpcSource); ok {
-								time.Sleep(2 * time.Second)
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 							Loop:
 								for {
 									var err error
 									from := args.seenSlot - 2
 									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-									count := (currentSlot - from) + 2
-									if currentSlot <= cfg.forkChoice.HighestSeen() {
+									count := (currentSlot - from) + cfg.beaconCfg.SlotsPerEpoch
+									if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+										return
+									}
+									if currentSlot < cfg.forkChoice.HighestSeen()+2 { // if we are 2 slots behind, let's poll.
 										time.Sleep(100 * time.Millisecond)
 										continue
 									}
