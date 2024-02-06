@@ -47,7 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon/migrations"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -1583,7 +1583,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
-	sentryControlServer, err := sentry_multi_client.NewMultiClient(
+	sentryChief, err := sentry.NewChief(
 		db,
 		"",
 		chainConfig,
@@ -1596,7 +1596,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		blockReader,
 		blockBufferSize,
 		false,
-		nil,
 		maxBlockBroadcastPeers,
 		logger,
 	)
@@ -1617,7 +1616,7 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		recents = bor.Recents
 		signatures = bor.Signatures
 	}
-	stages := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, agg, nil, nil,
+	stages := stages2.NewDefaultStages(context.Background(), db, snapDb, p2p.Config{}, &cfg, sentryChief, notifications, nil, blockReader, blockRetire, agg, nil, nil,
 		heimdallClient, recents, signatures, logger)
 	sync := stagedsync.New(cfg.Sync, stages, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger)
 

@@ -11,12 +11,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -25,6 +24,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	turboNode "github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -210,7 +210,7 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader services.
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *core.ChainPack, logger log.Logger) error {
-	sentryControlServer := ethereum.SentryControlServer()
+	sentryControlServer := ethereum.SentryChief()
 	initialCycle := false
 
 	for _, b := range chain.Blocks {

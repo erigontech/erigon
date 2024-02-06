@@ -102,7 +102,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
-	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
@@ -162,10 +161,10 @@ type Ethereum struct {
 	minedBlocks       chan *types.Block
 
 	// downloader fields
-	sentryCtx      context.Context
-	sentryCancel   context.CancelFunc
-	sentriesClient *sentry_multi_client.MultiClient
-	sentryServers  []*sentry.GrpcServer
+	sentryCtx     context.Context
+	sentryCancel  context.CancelFunc
+	sentryChief   *sentry.Chief
+	sentryServers []*sentry.GrpcServer
 
 	stagedSync         *stagedsync.Sync
 	pipelineStagedSync *stagedsync.Sync
@@ -355,7 +354,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var sentries []direct.SentryClient
 	if len(stack.Config().P2P.SentryAddr) > 0 {
 		for _, addr := range stack.Config().P2P.SentryAddr {
-			sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, addr)
+			sentryClient, err := sentry.GrpcClient(backend.sentryCtx, addr)
 			if err != nil {
 				return nil, err
 			}
@@ -390,7 +389,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		silkwormSentryService := silkworm.NewSentryService(backend.silkworm, settings)
 		backend.silkwormSentryService = &silkwormSentryService
 
-		sentryClient, err := sentry_multi_client.GrpcClient(backend.sentryCtx, apiAddr)
+		sentryClient, err := sentry.GrpcClient(backend.sentryCtx, apiAddr)
 		if err != nil {
 			return nil, err
 		}
@@ -526,11 +525,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		terseLogger := log.New()
 		terseLogger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StderrHandler))
 		// Needs its own notifications to not update RPC daemon and txpool about pending blocks
-		stateSync := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentriesClient,
+		stateSync := stages2.NewInMemoryExecution(backend.sentryCtx, backend.chainDB, config, backend.sentryChief,
 			dirs, notifications, blockReader, blockWriter, backend.agg, backend.silkworm, terseLogger)
 		chainReader := stagedsync.NewChainReaderImpl(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, config.HistoryV3); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, backend.blockWriter, stateSync, backend.sentryChief.Bd, header, body, unwindPoint, headersChain, bodiesChain, config.HistoryV3); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -565,7 +564,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
-	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
+	backend.sentryChief, err = sentry.NewChief(
 		chainKv,
 		stack.Config().NodeName(),
 		chainConfig,
@@ -578,7 +577,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		blockReader,
 		blockBufferSize,
 		stack.Config().SentryLogPeerInfo,
-		backend.forkValidator,
 		maxBlockBroadcastPeers,
 		logger,
 	)
@@ -598,7 +596,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		backend.newTxs = make(chan types2.Announcements, 1024)
 		//defer close(newTxs)
 		backend.txPoolDB, backend.txPool, backend.txPoolFetch, backend.txPoolSend, backend.txPoolGrpcServer, err = txpooluitl.AllComponents(
-			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, backend.chainDB, backend.sentriesClient.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
+			ctx, config.TxPool, kvcache.NewDummy(), backend.newTxs, backend.chainDB, backend.sentryChief.Sentries(), stateDiffClient, misc.Eip1559FeeCalculator, logger,
 		)
 		if err != nil {
 			return nil, err
@@ -729,19 +727,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				// will trigger the staged sync which will require headers and blocks to be available
 				// in their respective cache in the download stage. If not found, it would cause a
 				// liveness issue for the chain.
-				if err := backend.sentriesClient.Hd.AddMinedHeader(b.Header()); err != nil {
+				if err := backend.sentryChief.Hd.AddMinedHeader(b.Header()); err != nil {
 					logger.Error("add mined block to header downloader", "err", err)
 				}
-				backend.sentriesClient.Bd.AddToPrefetch(b.Header(), b.RawBody())
+				backend.sentryChief.Bd.AddToPrefetch(b.Header(), b.RawBody())
 
 				//p2p
-				//backend.sentriesClient.BroadcastNewBlock(context.Background(), b, b.Difficulty())
+				//backend.sentryChief.BroadcastNewBlock(context.Background(), b, b.Difficulty())
 				//rpcdaemon
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastMinedBlock(b); err != nil {
 					logger.Error("txpool rpc mined block broadcast", "err", err)
 				}
 				logger.Trace("BroadcastMinedBlock successful", "number", b.Number(), "GasUsed", b.GasUsed(), "txn count", b.Transactions().Len())
-				backend.sentriesClient.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
+				backend.sentryChief.PropagateNewBlockHashes(ctx, []headerdownload.Announce{
 					{
 						Number: b.NumberU64(),
 						Hash:   b.Hash(),
@@ -752,28 +750,28 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				if err := miningRPC.(*privateapi.MiningServer).BroadcastPendingBlock(b); err != nil {
 					logger.Error("txpool rpc pending block broadcast", "err", err)
 				}
-			case <-backend.sentriesClient.Hd.QuitPoWMining:
+			case <-backend.sentryChief.Hd.QuitPoWMining:
 				return
 			}
 		}
 	}()
 
-	if err := backend.StartMining(context.Background(), backend.chainDB, stateDiffClient, mining, miner, backend.gasPrice, backend.sentriesClient.Hd.QuitPoWMining, tmpdir, logger); err != nil {
+	if err := backend.StartMining(context.Background(), backend.chainDB, stateDiffClient, mining, miner, backend.gasPrice, backend.sentryChief.Hd.QuitPoWMining, tmpdir, logger); err != nil {
 		return nil, err
 	}
 
 	backend.ethBackendRPC, backend.miningRPC, backend.stateChangesClient = ethBackendRPC, miningRPC, stateDiffClient
 
-	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, stack.Config().P2P, config, backend.sentriesClient, backend.notifications, backend.downloaderClient,
+	backend.syncStages = stages2.NewDefaultStages(backend.sentryCtx, backend.chainDB, snapDb, stack.Config().P2P, config, backend.sentryChief, backend.notifications, backend.downloaderClient,
 		blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, heimdallClient, recents, signatures, logger)
 	backend.syncUnwindOrder = stagedsync.DefaultUnwindOrder
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger)
 
-	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.UpdateHead)
+	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentryChief.UpdateHead)
 
 	checkStateRoot := true
-	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, stack.Config().P2P, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
+	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, stack.Config().P2P, backend.sentryChief, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
 	backend.pipelineStagedSync = stagedsync.New(config.Sync, pipelineStages, stagedsync.PipelineUnwindOrder, stagedsync.PipelinePruneOrder, logger)
 	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, config.Sync)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
@@ -782,9 +780,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		logger,
 		chainConfig,
 		executionRpc,
-		backend.sentriesClient.Hd,
-		engine_block_downloader.NewEngineBlockDownloader(ctx, logger, backend.sentriesClient.Hd, executionRpc,
-			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
+		backend.sentryChief.Hd,
+		engine_block_downloader.NewEngineBlockDownloader(ctx, logger, backend.sentryChief.Hd, executionRpc,
+			backend.sentryChief.Bd, backend.sentryChief.BroadcastNewBlock, backend.sentryChief.SendBodyRequest, blockReader,
 			chainKv, chainConfig, tmpdir, config.Sync.BodyDownloadTimeoutSeconds),
 		false,
 		config.Miner.EnabledPOS)
@@ -848,7 +846,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 	var err error
 
 	if config.Genesis.Config.Bor == nil {
-		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
+		s.sentryChief.Hd.StartPoSDownloader(s.sentryCtx, s.sentryChief.SendHeaderRequest, s.sentryChief.Penalize)
 	}
 
 	emptyBadHash := config.BadBlockHash == libcommon.Hash{}
@@ -973,11 +971,11 @@ func (s *Ethereum) StartMining(ctx context.Context, db kv.RwDB, stateDiffClient 
 	var borcfg *bor.Bor
 	if b, ok := s.engine.(*bor.Bor); ok {
 		borcfg = b
-		b.HeaderProgress(s.sentriesClient.Hd)
+		b.HeaderProgress(s.sentryChief.Hd)
 	} else if br, ok := s.engine.(*merge.Merge); ok {
 		if b, ok := br.InnerEngine().(*bor.Bor); ok {
 			borcfg = b
-			b.HeaderProgress(s.sentriesClient.Hd)
+			b.HeaderProgress(s.sentryChief.Hd)
 		}
 	}
 
@@ -1178,7 +1176,7 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
 	s.logger.Trace("sentry", "peer count", sentryPc)
-	for _, sc := range s.sentriesClient.Sentries() {
+	for _, sc := range s.sentryChief.Sentries() {
 		ctx := context.Background()
 		reply, err := sc.PeerCount(ctx, &proto_sentry.PeerCountRequest{})
 		if err != nil {
@@ -1192,13 +1190,13 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 }
 
 func (s *Ethereum) NodesInfo(limit int) (*remote.NodesInfoReply, error) {
-	if limit == 0 || limit > len(s.sentriesClient.Sentries()) {
-		limit = len(s.sentriesClient.Sentries())
+	if limit == 0 || limit > len(s.sentryChief.Sentries()) {
+		limit = len(s.sentryChief.Sentries())
 	}
 
 	nodes := make([]*prototypes.NodeInfoReply, 0, limit)
 	for i := 0; i < limit; i++ {
-		sc := s.sentriesClient.Sentries()[i]
+		sc := s.sentryChief.Sentries()[i]
 
 		nodeInfo, err := sc.NodeInfo(context.Background(), nil)
 		if err != nil {
@@ -1304,10 +1302,10 @@ func setUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 
 func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	var reply remote.PeersReply
-	for _, sentryClient := range s.sentriesClient.Sentries() {
+	for _, sentryClient := range s.sentryChief.Sentries() {
 		peers, err := sentryClient.Peers(ctx, &emptypb.Empty{})
 		if err != nil {
-			return nil, fmt.Errorf("ethereum backend MultiClient.Peers error: %w", err)
+			return nil, fmt.Errorf("ethereum backend Chief.Peers error: %w", err)
 		}
 		reply.Peers = append(reply.Peers, peers.Peers...)
 	}
@@ -1329,10 +1327,10 @@ func (s *Ethereum) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics
 }
 
 func (s *Ethereum) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
-	for _, sentryClient := range s.sentriesClient.Sentries() {
+	for _, sentryClient := range s.sentryChief.Sentries() {
 		_, err := sentryClient.AddPeer(ctx, &proto_sentry.AddPeerRequest{Url: req.Url})
 		if err != nil {
-			return nil, fmt.Errorf("ethereum backend MultiClient.AddPeers error: %w", err)
+			return nil, fmt.Errorf("ethereum backend Chief.AddPeers error: %w", err)
 		}
 	}
 	return &remote.AddPeerReply{Success: true}, nil
@@ -1351,10 +1349,10 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 // Start implements node.Lifecycle, starting all internal goroutines needed by the
 // Ethereum protocol implementation.
 func (s *Ethereum) Start() error {
-	s.sentriesClient.StartStreamLoops(s.sentryCtx)
+	s.sentryChief.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
+	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentryChief.UpdateHead)
 
 	currentTDProvider := func() *big.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)
@@ -1368,7 +1366,7 @@ func (s *Ethereum) Start() error {
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else {
-		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
+		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentryChief.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
 	}
 
 	if s.chainConfig.Bor != nil {
@@ -1412,7 +1410,7 @@ func (s *Ethereum) Stop() error {
 		case <-shutdownDone:
 		}
 	}
-	libcommon.SafeClose(s.sentriesClient.Hd.QuitPoWMining)
+	libcommon.SafeClose(s.sentryChief.Hd.QuitPoWMining)
 	_ = s.engine.Close()
 	if s.waitForStageLoopStop != nil {
 		<-s.waitForStageLoopStop
@@ -1470,8 +1468,8 @@ func (s *Ethereum) SentryCtx() context.Context {
 	return s.sentryCtx
 }
 
-func (s *Ethereum) SentryControlServer() *sentry_multi_client.MultiClient {
-	return s.sentriesClient
+func (s *Ethereum) SentryChief() *sentry.Chief {
+	return s.sentryChief
 }
 func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter

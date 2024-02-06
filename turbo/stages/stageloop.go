@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/membatchwithdb"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon-lib/wrap"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality"
 
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -34,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/p2p"
-	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
@@ -464,7 +464,7 @@ func NewDefaultStages(ctx context.Context,
 	snapDb kv.RwDB,
 	p2pCfg p2p.Config,
 	cfg *ethconfig.Config,
-	controlServer *sentry_multi_client.MultiClient,
+	sentryChief *sentry.Chief,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
@@ -508,19 +508,19 @@ func NewDefaultStages(ctx context.Context,
 	}
 
 	return stagedsync.DefaultStages(ctx,
-		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.HistoryV3, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, silkworm),
-		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator, loopBreakCheck),
-		stagedsync.StageBorHeimdallCfg(db, snapDb, stagedsync.MiningState{}, *controlServer.ChainConfig, heimdallClient, blockReader, controlServer.Hd, controlServer.Penalize, loopBreakCheck, recents, signatures),
-		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, controlServer.ChainConfig, blockWriter),
-		stagedsync.StageBodiesCfg(db, controlServer.Bd, controlServer.SendBodyRequest, controlServer.Penalize, controlServer.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *controlServer.ChainConfig, blockReader, cfg.HistoryV3, blockWriter, loopBreakCheck),
-		stagedsync.StageSendersCfg(db, controlServer.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, controlServer.Hd, loopBreakCheck),
+		stagedsync.StageSnapshotsCfg(db, *sentryChief.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.HistoryV3, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, silkworm),
+		stagedsync.StageHeadersCfg(db, sentryChief.Hd, sentryChief.Bd, *sentryChief.ChainConfig, cfg.Sync, sentryChief.SendHeaderRequest, sentryChief.PropagateNewBlockHashes, sentryChief.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, notifications, forkValidator, loopBreakCheck),
+		stagedsync.StageBorHeimdallCfg(db, snapDb, stagedsync.MiningState{}, *sentryChief.ChainConfig, heimdallClient, blockReader, sentryChief.Hd, sentryChief.Penalize, loopBreakCheck, recents, signatures),
+		stagedsync.StageBlockHashesCfg(db, dirs.Tmp, sentryChief.ChainConfig, blockWriter),
+		stagedsync.StageBodiesCfg(db, sentryChief.Bd, sentryChief.SendBodyRequest, sentryChief.Penalize, sentryChief.BroadcastNewBlock, cfg.Sync.BodyDownloadTimeoutSeconds, *sentryChief.ChainConfig, blockReader, cfg.HistoryV3, blockWriter, loopBreakCheck),
+		stagedsync.StageSendersCfg(db, sentryChief.ChainConfig, false, dirs.Tmp, cfg.Prune, blockReader, sentryChief.Hd, loopBreakCheck),
 		stagedsync.StageExecuteBlocksCfg(
 			db,
 			cfg.Prune,
 			cfg.BatchSize,
 			nil,
-			controlServer.ChainConfig,
-			controlServer.Engine,
+			sentryChief.ChainConfig,
+			sentryChief.Engine,
 			&vm.Config{},
 			notifications.Accumulator,
 			cfg.StateStream,
@@ -528,18 +528,18 @@ func NewDefaultStages(ctx context.Context,
 			cfg.HistoryV3,
 			dirs,
 			blockReader,
-			controlServer.Hd,
+			sentryChief.Hd,
 			cfg.Genesis,
 			cfg.Sync,
 			agg,
 			silkwormForExecutionStage(silkworm, cfg),
 		),
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
-		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
+		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, sentryChief.Hd, cfg.HistoryV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
 		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
-		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
+		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, sentryChief.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
 		runInTestMode)
 }
@@ -548,7 +548,7 @@ func NewPipelineStages(ctx context.Context,
 	db kv.RwDB,
 	cfg *ethconfig.Config,
 	p2pCfg p2p.Config,
-	controlServer *sentry_multi_client.MultiClient,
+	controlServer *sentry.Chief,
 	notifications *shards.Notifications,
 	snapDownloader proto_downloader.DownloaderClient,
 	blockReader services.FullBlockReader,
@@ -655,7 +655,7 @@ func NewPipelineStages(ctx context.Context,
 
 }
 
-func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry_multi_client.MultiClient,
+func NewInMemoryExecution(ctx context.Context, db kv.RwDB, cfg *ethconfig.Config, controlServer *sentry.Chief,
 	dirs datadir.Dirs, notifications *shards.Notifications, blockReader services.FullBlockReader, blockWriter *blockio.BlockWriter, agg *state.AggregatorV3,
 	silkworm *silkworm.Silkworm, logger log.Logger) *stagedsync.Sync {
 	return stagedsync.New(
