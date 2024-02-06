@@ -629,6 +629,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 			return nil, nil, err
 		}
 		if block == nil || block.Version() == clparams.Phase0Version {
+			fmt.Println(slot)
 			continue
 		}
 		currentEpoch := i / r.cfg.SlotsPerEpoch
