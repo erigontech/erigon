@@ -566,7 +566,7 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 }
 
 func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64, currentEpochAttestationsLength, previousEpochAttestationsLength uint64) (*solid.ListSSZ[*solid.PendingAttestation], *solid.ListSSZ[*solid.PendingAttestation], error) {
-	if slot < r.cfg.SlotsPerEpoch {
+	if slot == r.cfg.GenesisSlot {
 		return r.genesisState.CurrentEpochAttestations(), r.genesisState.PreviousEpochAttestations(), nil
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
