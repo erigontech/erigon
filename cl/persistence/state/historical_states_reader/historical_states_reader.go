@@ -617,6 +617,9 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	previousIdxs, err := r.readInitialPreviousParticipatingIndicies(tx, slot, validatorLength, previousActiveIndicies)
+	if err != nil {
+		return nil, nil, err
+	}
 	// trigger the cache for shuffled sets in parallel
 	if err := r.tryCachingEpochsInParallell(tx, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
 		return nil, nil, err
@@ -712,7 +715,7 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 		return out, nil
 	}
 	slotFromPreviousEpoch := slot - r.cfg.SlotsPerEpoch
-	atts, err := state_accessors.ReadCurrentEpochAttestations(tx, r.cfg.RoundSlotToEpoch(slotFromPreviousEpoch), int(r.cfg.PreviousEpochAttestationsLength()))
+	atts, err := state_accessors.ReadCurrentEpochAttestations(tx, r.cfg.RoundSlotToEpoch(slotFromPreviousEpoch), int(r.cfg.CurrentEpochAttestationsLength()))
 	if err != nil {
 		return nil, err
 	}
