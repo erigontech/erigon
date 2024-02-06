@@ -65,9 +65,11 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		indiciesDB,
 		host,
 		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{}, &forkchoice.ForkChoiceStorageMock{}, true,
+		nil, &forkchoice.ForkChoiceStorageMock{}, true,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))
