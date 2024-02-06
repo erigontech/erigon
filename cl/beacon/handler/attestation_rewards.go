@@ -41,7 +41,7 @@ type attestationsRewardsResponse struct {
 	TotalRewards []TotalReward `json:"total_rewards"`
 }
 
-func (a *ApiHandler) getAttestationsRewards(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)

@@ -1,7 +1,11 @@
 package cltypes
 
 import (
+	"encoding/json"
+	"strconv"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 
@@ -10,15 +14,15 @@ import (
 
 type Metadata struct {
 	SeqNumber uint64
-	Attnets   uint64
+	Attnets   [8]byte
 	Syncnets  *[1]byte
 }
 
 func (m *Metadata) EncodeSSZ(buf []byte) ([]byte, error) {
 	if m.Syncnets == nil {
-		return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets)
+		return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:])
 	}
-	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets, m.Syncnets[:])
+	return ssz2.MarshalSSZ(buf, m.SeqNumber, m.Attnets[:], m.Syncnets[:])
 }
 
 func (m *Metadata) EncodingSizeSSZ() (ret int) {
@@ -30,14 +34,29 @@ func (m *Metadata) EncodingSizeSSZ() (ret int) {
 }
 
 func (m *Metadata) DecodeSSZ(buf []byte, _ int) error {
+	if len(buf) < 16 {
+		return ssz.ErrLowBufferSize
+	}
 	m.SeqNumber = ssz.UnmarshalUint64SSZ(buf)
-	m.Attnets = ssz.UnmarshalUint64SSZ(buf[8:])
+	copy(m.Attnets[:], buf[8:])
 	if len(buf) < 17 {
 		return nil
 	}
 	m.Syncnets = new([1]byte)
 	copy(m.Syncnets[:], buf[16:17])
 	return nil
+}
+
+func (m *Metadata) MarshalJSON() ([]byte, error) {
+	out := map[string]interface{}{
+		"seq_number": strconv.FormatUint(m.SeqNumber, 10),
+		"attnets":    hexutility.Bytes(m.Attnets[:]),
+	}
+	if m.Syncnets != nil {
+		out["syncnets"] = hexutility.Bytes(m.Syncnets[:])
+	}
+	// Attnets and syncnets are hex encoded
+	return json.Marshal(out)
 }
 
 // Ping is a test P2P message, used to test out liveness of our peer/signaling disconnection.
