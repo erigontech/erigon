@@ -1165,7 +1165,7 @@ func (r *BlockReader) LastFrozenEventID() uint64 {
 	return lastEventID
 }
 
-func (r *BlockReader) BorIntegrityEventIdNoGap(failFast bool) error {
+func (r *BlockReader) BorIntegrityEventIdNoGap(ctx context.Context, failFast bool) error {
 	if r.borSn == nil {
 		return nil
 	}
@@ -1193,6 +1193,12 @@ func (r *BlockReader) BorIntegrityEventIdNoGap(failFast bool) error {
 				log.Warn(err.Error())
 			}
 			prevEventID = eventID
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 	}
 	return nil

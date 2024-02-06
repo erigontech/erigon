@@ -364,7 +364,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 	if err := integrity.SnapBlocksRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
-	if err := integrity.SnapBorSpanRead(chainDB, blockReader, ctx, false); err != nil {
+	if err := integrity.SnapBorEventsRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
 	return nil
