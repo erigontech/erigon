@@ -368,6 +368,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		fmt.Printf("[dbg] EventLookup(%x): %d, %t, %s\n", search, bn, ok, err)
 		return nil
 	})
+
 	if err := integrity.SnapBorEventsRead(chainDB, blockReader, ctx, false); err != nil {
 		return err
 	}
