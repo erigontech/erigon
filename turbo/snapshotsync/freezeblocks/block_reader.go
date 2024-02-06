@@ -988,6 +988,7 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 }
 
 func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
+	fmt.Printf("[dbg] EventLookup: %x\n", txnHash)
 	n, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
@@ -1039,6 +1040,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
+	fmt.Printf("[dbg] EventsByBlock: %x\n", blockHeight)
 	maxBlockNumInFiles := r.FrozenBorBlocks()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		c, err := tx.Cursor(kv.BorEventNums)
@@ -1180,6 +1182,7 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 }
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	fmt.Printf("[dbg] Span(%d)\n", spanId)
 	var endBlock uint64
 	if spanId > 0 {
 		endBlock = bor.SpanEndBlockNum(spanId)
