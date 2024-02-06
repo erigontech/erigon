@@ -1041,7 +1041,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	fmt.Printf("[dbg] EventsByBlock: %d, maxBlockNumInFiles=%d\n", blockHeight, maxBlockNumInFiles)
+	fmt.Printf("[dbg] EventsByBlock: %d,blockHash=%x, maxBlockNumInFiles=%d\n", blockHeight, hash, maxBlockNumInFiles)
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		fmt.Printf("[dbg] EventsByBlock1: %d\n", blockHeight)
 		c, err := tx.Cursor(kv.BorEventNums)
