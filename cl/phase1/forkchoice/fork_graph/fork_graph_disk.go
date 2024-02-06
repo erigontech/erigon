@@ -205,7 +205,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
-			log.Warn("Could not create light client update", "err", err)
+			log.Debug("Could not create light client update", "err", err)
 		} else {
 			f.newestLightClientUpdate.Store(lightclientUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
