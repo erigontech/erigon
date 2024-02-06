@@ -1093,6 +1093,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	segments := view.Events()
 	var buf []byte
 	result := []rlp.RawValue{}
+	fmt.Printf("[dbg] EventsByBlock01 last: %s, %s\n", segments[len(segments)-1].seg.FileName(), segments[0].seg.FileName())
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
