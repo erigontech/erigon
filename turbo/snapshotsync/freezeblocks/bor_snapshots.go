@@ -426,6 +426,7 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, version uint8, bl
 	word := make([]byte, 0, 4096)
 	var blockCount int
 	var baseEventId uint64
+	var assertEventID, assertPrevEventID uint64
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
@@ -435,7 +436,14 @@ func BorEventsIdx(ctx context.Context, segmentFilePath string, version uint8, bl
 				fmt.Printf("blockNumBuf=%d-%d=%d\n", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum]), binary.BigEndian.Uint64(blockNumBuf[:]), blockNumDiff)
 			}
 			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
+
+			assertEventID = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+			if assertPrevEventID > 0 && assertPrevEventID+1 != assertEventID {
+				fmt.Printf("[dbg] assert event id gap: %d -> %d\n", assertPrevEventID, assertEventID)
+			}
+			assertPrevEventID = assertEventID
 		}
+
 		if first {
 			baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 			first = false
