@@ -454,6 +454,7 @@ func (d *Domain) protectFromHistoryFilesAheadOfDomainFiles(readonly bool) {
 }
 
 func (d *Domain) OpenFolder(readonly bool) error {
+	defer func(t time.Time) { fmt.Printf("domain.go:457: %s, %s\n", d.filenameBase, time.Since(t)) }(time.Now())
 	idx, histFiles, domainFiles, err := d.fileNamesOnDisk()
 	if err != nil {
 		return fmt.Errorf("Domain(%s).OpenFolder: %w", d.filenameBase, err)
