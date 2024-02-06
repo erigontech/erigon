@@ -1041,7 +1041,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	fmt.Printf("[dbg] EventsByBlock: %d,blockHash=%x, maxBlockNumInFiles=%d\n", blockHeight, hash, maxBlockNumInFiles)
+	fmt.Printf("[dbg] EventsByBlock: %d, blockHash=%x, maxBlockNumInFiles=%d\n", blockHeight, hash, maxBlockNumInFiles)
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
 		fmt.Printf("[dbg] EventsByBlock1: %d\n", blockHeight)
 		c, err := tx.Cursor(kv.BorEventNums)
@@ -1119,7 +1119,8 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		fmt.Printf("[dbg] EventsByBlock30 blockEventId=%d, borTxHash=%x\n", blockEventId, borTxHash)
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0]) //key
-			fmt.Printf("[dbg] EventsByBlock3: %s, %d, %x\n", sn.seg.FileName(), len(buf), buf)
+			v, _ := gg.Next(nil)      //key
+			fmt.Printf("[dbg] EventsByBlock3: %s, %d, %x, v=%x\n", sn.seg.FileName(), len(buf), buf, v)
 			if !bytes.HasPrefix(buf, borTxHash[:]) {
 				break
 			}
