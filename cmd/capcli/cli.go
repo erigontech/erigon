@@ -893,6 +893,14 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
+		prevPartIdxs := haveState.PreviousEpochParticipation()
+		wantPartIdxs := wantState.PreviousEpochParticipation()
+		// print the differences
+		for i := 0; i < prevPartIdxs.Length(); i++ {
+			if prevPartIdxs.Get(i) != wantPartIdxs.Get(i) {
+				log.Info("Mismatch", "slot", haveState.Slot(), "index", i, "have", prevPartIdxs.Get(i), "want", wantPartIdxs.Get(i))
+			}
+		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
