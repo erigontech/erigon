@@ -737,6 +737,9 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 		}
 		for _, idx := range indices {
 			for _, flagIndex := range flags {
+				if idx == 35 {
+					fmt.Println("A")
+				}
 				flagParticipation := cltypes.ParticipationFlags(out.Get(int(idx))).Add(int(flagIndex))
 				out.Set(int(idx), byte(flagParticipation))
 			}
