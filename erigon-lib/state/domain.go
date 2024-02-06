@@ -439,7 +439,6 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bo
 func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
 	d.garbageFiles = d.scanStateFiles(names)
-	defer func(t time.Time) { fmt.Printf("domain.go:441: %s, %s\n", d.filenameBase, time.Since(t)) }(time.Now())
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}
