@@ -703,7 +703,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 
 func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uint64) {
 	epoch := slot / r.cfg.SlotsPerEpoch
-	if epoch <= r.cfg.AltairForkEpoch && r.genesisState.Version() < clparams.AltairVersion {
+	if epoch == r.cfg.GenesisEpoch {
 		return epoch, epoch
 	}
 	return epoch, epoch - 1
