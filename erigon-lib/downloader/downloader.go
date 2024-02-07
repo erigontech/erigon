@@ -502,6 +502,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 	complete := map[string]struct{}{}
 
 	uploader, _ := NewRCloneClient(d.logger)
+	uploaderSessions := map[string]*RCloneSession{}
 
 	d.wg.Add(1)
 	go func() {
@@ -617,15 +618,26 @@ func (d *Downloader) mainLoop(silent bool) error {
 					if uploader != nil {
 						peer := t.WebseedPeerConns()[rand.Intn(len(t.WebseedPeerConns()))]
 
-						go func() {
-							defer sem.Release(1)
+						peerUrl := webPeerUrl(peer)
 
-							session, err := uploader.NewSession(d.ctx, d.SnapDir(), webPeerUrl(peer))
+						session, ok := uploaderSessions[peerUrl]
+
+						if !ok {
+							var err error
+
+							session, err = uploader.NewSession(d.ctx, d.SnapDir(), peerUrl)
 
 							if err != nil {
-								d.logger.Error("Can't create web session", "file", t.Info().Name, "err", err)
-								return
+								d.logger.Warn("Can't create web session", "file", t.Info().Name, "err", err)
+								downloadTorrent(t)
+								continue
 							}
+
+							uploaderSessions[peerUrl] = session
+						}
+
+						go func() {
+							defer sem.Release(1)
 
 							if err := session.Download(d.ctx, t.Info().Name); err != nil {
 								d.logger.Error("Web download failed", "file", t.Info().Name, "err", err)
