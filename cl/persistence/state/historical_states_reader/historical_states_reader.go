@@ -649,7 +649,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 					activeIndicies = currentActiveIndicies
 				}
 			} else {
-				if currentEpoch == prevEpoch && currentEpoch != r.cfg.AltairForkEpoch {
+				if currentEpoch == prevEpoch {
 					return true
 				}
 				activeIndicies = previousActiveIndicies
@@ -714,6 +714,7 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 	if slot/r.cfg.SlotsPerEpoch != r.cfg.AltairForkEpoch {
 		return out, nil
 	}
+	fmt.Println("AX")
 	slotFromPreviousEpoch := slot - r.cfg.SlotsPerEpoch
 	atts, err := state_accessors.ReadCurrentEpochAttestations(tx, r.cfg.RoundSlotToEpoch(slotFromPreviousEpoch), int(r.cfg.CurrentEpochAttestationsLength()))
 	if err != nil {
