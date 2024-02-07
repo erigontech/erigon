@@ -74,7 +74,7 @@ func (ml *msgListener) notifyObservers(msg *protosentry.InboundMessage) {
 	}
 }
 
-func (ml *msgListener) statusDataFactory() func() *sentry.StatusData {
+func (ml *msgListener) statusDataFactory() sentrymulticlient.StatusDataFactory {
 	return func() *sentry.StatusData {
 		return &sentry.StatusData{}
 	}
