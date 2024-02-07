@@ -19,11 +19,15 @@ var (
 )
 
 type DataStreamServer struct {
-	stream *datastreamer.StreamServer
+	stream  *datastreamer.StreamServer
+	chainId uint32
 }
 
-func NewDataStreamServer(stream *datastreamer.StreamServer) *DataStreamServer {
-	return &DataStreamServer{stream: stream}
+func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint32) *DataStreamServer {
+	return &DataStreamServer{
+		stream:  stream,
+		chainId: chainId,
+	}
 }
 
 func (srv *DataStreamServer) AddBookmark(t BookmarkType, marker uint64) error {
@@ -32,14 +36,17 @@ func (srv *DataStreamServer) AddBookmark(t BookmarkType, marker uint64) error {
 	return err
 }
 
-func (srv *DataStreamServer) AddBlockStart(block *types2.Block, batchNumber uint64, forkId uint16, ger libcommon.Hash) error {
+func (srv *DataStreamServer) AddBlockStart(block *types2.Block, batchNumber uint64, forkId uint16, ger libcommon.Hash, deltaTimestamp uint32, l1InfoIndex uint32) error {
 	b := &types.StartL2Block{
-		BatchNumber:    batchNumber,
-		L2BlockNumber:  block.NumberU64(),
-		Timestamp:      int64(block.Time()),
-		GlobalExitRoot: ger,
-		Coinbase:       block.Coinbase(),
-		ForkId:         forkId,
+		BatchNumber:     batchNumber,
+		L2BlockNumber:   block.NumberU64(),
+		Timestamp:       int64(block.Time()),
+		DeltaTimestamp:  deltaTimestamp,
+		L1InfoTreeIndex: l1InfoIndex,
+		GlobalExitRoot:  ger,
+		Coinbase:        block.Coinbase(),
+		ForkId:          forkId,
+		ChainId:         srv.chainId,
 	}
 	_, err := srv.stream.AddStreamEntry(1, types.EncodeStartL2Block(b))
 	return err
@@ -62,6 +69,7 @@ func (srv *DataStreamServer) AddGerUpdate(batchNumber uint64, ger libcommon.Hash
 		GlobalExitRoot: ger,
 		Coinbase:       block.Coinbase(),
 		ForkId:         fork,
+		ChainId:        srv.chainId,
 		StateRoot:      block.Root(),
 	}
 

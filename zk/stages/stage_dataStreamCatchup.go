@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
+	eritypes "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/datastream/server"
@@ -20,14 +21,16 @@ import (
 )
 
 type DataStreamCatchupCfg struct {
-	db     kv.RwDB
-	stream *datastreamer.StreamServer
+	db      kv.RwDB
+	stream  *datastreamer.StreamServer
+	chainId uint32
 }
 
-func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB) DataStreamCatchupCfg {
+func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint32) DataStreamCatchupCfg {
 	return DataStreamCatchupCfg{
-		stream: stream,
-		db:     db,
+		stream:  stream,
+		db:      db,
+		chainId: chainId,
 	}
 }
 
@@ -60,8 +63,10 @@ func SpawnStageDataStreamCatchup(
 		defer tx.Rollback()
 	}
 
-	srv := server.NewDataStreamServer(stream)
+	srv := server.NewDataStreamServer(stream, cfg.chainId)
 	reader := hermez_db.NewHermezDbReader(tx)
+
+	var lastBlock *eritypes.Block
 
 	/* find out where we are at in the stream, compare with the DB/stage progress and catchup the entries */
 	header := stream.GetHeader()
@@ -72,6 +77,7 @@ func SpawnStageDataStreamCatchup(
 		if err != nil {
 			return err
 		}
+		lastBlock = genesis
 
 		batch, err := reader.GetBatchNoByL2Block(0)
 		if err != nil {
@@ -84,6 +90,9 @@ func SpawnStageDataStreamCatchup(
 		}
 
 		fork, err := reader.GetForkId(batch)
+		if err != nil {
+			return err
+		}
 
 		err = stream.StartAtomicOp()
 		if err != nil {
@@ -95,7 +104,7 @@ func SpawnStageDataStreamCatchup(
 			return err
 		}
 
-		err = srv.AddBlockStart(genesis, batch, uint16(fork), ger)
+		err = srv.AddBlockStart(genesis, batch, uint16(fork), ger, 0, 0)
 		if err != nil {
 			return err
 		}
@@ -178,7 +187,6 @@ func SpawnStageDataStreamCatchup(
 	// Start on the current batch number + 1
 	currentBatchNumber++
 
-	var currentGER = common.Hash{}
 	logTicker := time.NewTicker(10 * time.Second)
 
 	var currentBlock uint64 = 0
@@ -209,24 +217,13 @@ LOOP:
 		// get the blocks for this batch
 		blockNumbers, ok := batchToBlocks[currentBatchNumber]
 
-		// no block numbers means an empty batch so just skip it
+		// if there are no blocks to process just continue - previously this would check for a GER update in
+		// the pre-etrog world but this isn't possible now because of the l1 info tree indexes, so we just
+		// skip on
 		if !ok || len(blockNumbers) == 0 {
-			// check for a ger update on the batch as it could have one
-			ger, err := reader.GetBatchGlobalExitRoot(currentBatchNumber)
-			if err != nil {
-				return err
-			}
-
-			if ger != nil && ger.GlobalExitRoot != currentGER && ger.GlobalExitRoot != (common.Hash{}) {
-				entry, err = srv.AddGerUpdateFromDb(ger)
-				if err != nil {
-					return err
-				}
-			}
-
+			log.Info(fmt.Sprintf("[%s] found a batch with no blocks during data stream catchup", logPrefix), "batch", currentBatchNumber)
 			skipped = true
 			currentBatchNumber++
-			log.Debug(fmt.Sprintf("[%s]: found batch with no blocks - skipping", logPrefix), "number", currentBatchNumber)
 			continue
 		}
 
@@ -239,14 +236,27 @@ LOOP:
 				return err
 			}
 
-			ger, _, err := reader.GetBlockGlobalExitRoot(blockNumber)
-			if err != nil {
-				return err
-			}
-
 			block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
 			if err != nil {
 				return err
+			}
+			deltaTimestamp := block.Time() - lastBlock.Time()
+			lastBlock = block
+
+			var ger common.Hash
+			l1Index, err := reader.GetBlockL1InfoTreeIndex(blockNumber)
+			if err != nil {
+				return err
+			}
+			if l1Index != 0 {
+				// read the index info itself
+				l1Info, err := reader.GetL1InfoTreeUpdate(l1Index)
+				if err != nil {
+					return err
+				}
+				if l1Info != nil {
+					ger = l1Info.GER
+				}
 			}
 
 			// now write the block and txs
@@ -255,7 +265,7 @@ LOOP:
 				return err
 			}
 
-			err = srv.AddBlockStart(block, currentBatchNumber, uint16(fork), ger)
+			err = srv.AddBlockStart(block, currentBatchNumber, uint16(fork), ger, uint32(deltaTimestamp), uint32(l1Index))
 			if err != nil {
 				return err
 			}
