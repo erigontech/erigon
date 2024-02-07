@@ -87,7 +87,7 @@ func (pm *peerManager) DownloadHeaders(ctx context.Context, start uint64, end ui
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			return pm.msgBroadcaster.GetBlockHeaders66FromPeer(ctx, pid, eth.GetBlockHeadersPacket66{
+			return pm.msgBroadcaster.GetBlockHeaders66(ctx, pid, eth.GetBlockHeadersPacket66{
 				RequestId: reqId,
 				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 					Origin: eth.HashOrNumber{

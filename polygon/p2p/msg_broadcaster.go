@@ -13,7 +13,7 @@ type msgBroadcaster struct {
 	sentry direct.SentryClient
 }
 
-func (mb *msgBroadcaster) GetBlockHeaders66FromPeer(ctx context.Context, pid PeerId, req eth.GetBlockHeadersPacket66) error {
+func (mb *msgBroadcaster) GetBlockHeaders66(ctx context.Context, pid PeerId, req eth.GetBlockHeadersPacket66) error {
 	data, err := rlp.EncodeToBytes(req)
 	if err != nil {
 		return err
