@@ -434,7 +434,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
-		if s.currentState.Slot() == 1600 {
+		if s.currentState.Slot() >= 1601 && s.currentState.Slot() <= 1663 {
 			s.dumpFullBeaconState()
 		}
 		blocksProcessed++
@@ -836,7 +836,7 @@ func (s *Antiquary) dumpFullBeaconState() {
 		return
 	}
 	// just dump it in a.txt like an idiot without afero
-	if err := os.WriteFile("b.txt", b, 0644); err != nil {
+	if err := os.WriteFile(fmt.Sprintf("%d.txt", s.currentState.Slot()), b, 0644); err != nil {
 		s.logger.Error("Failed to write full beacon state", "err", err)
 	}
 }
