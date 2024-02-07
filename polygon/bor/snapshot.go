@@ -134,7 +134,11 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 		logger.Debug("[bor] Snapshot.Apply", "blockNum", parent.Number, "snapNum", snap.Number)
 	}
 
-	for _, header := range headers {
+	for i, header := range headers {
+		if len(headers) > 1000 && i > 0 && i%1000 == 0 {
+			logger.Debug("[bor] Snapshot.Apply", "headerNum", header.Number.Uint64(), "snapNum", snap.Number)
+		}
+
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
 		sprintLen := s.config.CalculateSprintLength(number)
