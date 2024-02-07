@@ -130,6 +130,9 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	}
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
+	if len(headers) > 1000 {
+		logger.Debug("[bor] Snapshot.Apply", "blockNum", parent.Number, "snapNum", snap.Number)
+	}
 
 	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
