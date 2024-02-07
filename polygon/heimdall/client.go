@@ -189,14 +189,14 @@ func (c *Client) FetchLatestSpan(ctx context.Context) (*Span, error) {
 func (c *Client) FetchSpan(ctx context.Context, spanID uint64) (*Span, error) {
 	url, err := spanURL(c.urlString, spanID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 	}
 
 	ctx = withRequestType(ctx, spanRequest)
 
 	response, err := FetchWithRetry[SpanResponse](ctx, c, url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w, spanID=%d", err, spanID)
 	}
 
 	return &response.Result, nil
