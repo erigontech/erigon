@@ -131,12 +131,12 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	}
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
-	if len(headers) > 1000 {
+	if len(headers) > 100_000 {
 		logger.Debug("[bor] Snapshot.Apply", "blockNum", parent.Number, "snapNum", snap.Number)
 	}
 
 	for i, header := range headers {
-		if len(headers) > 1000 && i > 0 && i%1000 == 0 {
+		if len(headers) > 100_000 && i > 0 && i%100_000 == 0 {
 			logger.Debug("[bor] Snapshot.Apply", "headerNum", header.Number.Uint64(), "snapNum", snap.Number, "progress", fmt.Sprintf("%dK/%dK", i/1_000, len(headers)/1_000))
 		}
 
