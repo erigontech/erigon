@@ -700,6 +700,17 @@ func HashContractBytecode(bc string) (string, error) {
 	return hex, err
 }
 
+func ResizeHashTo32BytesByPrefixingWithZeroes(hashValue []byte) []byte {
+	lenDiff := 32 - len(hashValue)
+	if lenDiff > 0 {
+		result := make([]byte, 32)
+		copy(result[lenDiff:], hashValue)
+		return result
+	}
+
+	return hashValue
+}
+
 func binaryStringToUint64(binary string) (uint64, error) {
 	num, err := strconv.ParseUint(binary, 2, 64)
 	if err != nil {

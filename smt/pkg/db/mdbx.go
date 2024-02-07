@@ -236,6 +236,8 @@ func (m *EriDb) GetHashKey(key utils.NodeKey) (utils.NodeKey, error) {
 }
 
 func (m *EriDb) GetCode(codeHash []byte) ([]byte, error) {
+	codeHash = utils.ResizeHashTo32BytesByPrefixingWithZeroes(codeHash)
+
 	data, err := m.tx.GetOne(kv.Code, codeHash)
 	if err != nil {
 		return nil, err
