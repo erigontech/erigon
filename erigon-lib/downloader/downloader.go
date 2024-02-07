@@ -27,6 +27,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -509,10 +510,14 @@ func (d *Downloader) mainLoop(silent bool) error {
 		for {
 			torrents := d.torrentClient.Torrents()
 
-			select {
-			case <-d.ctx.Done():
-				return
-			default:
+			if len(torrents) == 0 {
+				select {
+				case <-d.ctx.Done():
+					return
+				case <-time.After(10 * time.Second):
+				}
+
+				continue
 			}
 
 			if err := sem.Acquire(d.ctx, 1); err != nil {
@@ -600,7 +605,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}(t)
 			}
 
-			for _, t := range availableTorrents(pending) {
+			for _, t := range availableTorrents(d.ctx, pending) {
 				if err := sem.Acquire(d.ctx, 1); err != nil {
 					return
 				}
@@ -612,18 +617,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 					if uploader != nil {
 						peer := t.WebseedPeerConns()[rand.Intn(len(t.WebseedPeerConns()))]
 
-						defer sem.Release(1)
+						go func() {
+							defer sem.Release(1)
 
-						session, err := uploader.NewSession(d.ctx, d.SnapDir(), webPeerUrl(peer))
+							session, err := uploader.NewSession(d.ctx, d.SnapDir(), webPeerUrl(peer))
 
-						if err != nil {
-							d.logger.Error("Can't create web session", "file", t.Info().Name, "err", err)
-							return
-						}
+							if err != nil {
+								d.logger.Error("Can't create web session", "file", t.Info().Name, "err", err)
+								return
+							}
 
-						if err := session.Download(d.ctx, t.Info().Name); err != nil {
-							d.logger.Error("Web download failed", "file", t.Info().Name, "err", err)
-						}
+							if err := session.Download(d.ctx, t.Info().Name); err != nil {
+								d.logger.Error("Web download failed", "file", t.Info().Name, "err", err)
+							}
+						}()
 					} else {
 						downloadTorrent(t)
 					}
@@ -632,12 +639,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				default:
 					sem.Release(1)
 				}
-			}
-
-			select {
-			case <-d.ctx.Done():
-				return
-			case <-time.After(10 * time.Second):
 			}
 		}
 	}()
@@ -703,8 +704,47 @@ func (d *Downloader) mainLoop(silent bool) error {
 	}
 }
 
-func availableTorrents(pending []*torrent.Torrent) []*torrent.Torrent {
-	return nil
+func availableTorrents(ctx context.Context, pending []*torrent.Torrent) []*torrent.Torrent {
+	cases := make([]reflect.SelectCase, 0, len(pending)+2)
+
+	for _, t := range pending {
+		cases = append(cases, reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(t.GotInfo()),
+		})
+	}
+
+	if len(cases) == 0 {
+		return nil
+	}
+
+	cases = append(cases, reflect.SelectCase{
+		Dir:  reflect.SelectRecv,
+		Chan: reflect.ValueOf(ctx.Done()),
+	},
+		reflect.SelectCase{
+			Dir:  reflect.SelectRecv,
+			Chan: reflect.ValueOf(time.After(10 * time.Second)),
+		})
+
+	var available []*torrent.Torrent
+
+	for {
+		chosen, _, _ := reflect.Select(cases)
+
+		switch chosen {
+		case len(pending):
+			return nil
+		case len(pending) + 1:
+			return available
+		default:
+			available = append(available, pending[chosen])
+
+			if len(available) == len(pending) {
+				return available
+			}
+		}
+	}
 }
 
 func (d *Downloader) SnapDir() string { return d.cfg.Dirs.Snap }
