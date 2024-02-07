@@ -42,6 +42,9 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 	if err != nil {
 		return nil, err
 	}
+	if a.syncedData.Syncing() {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
+	}
 	if root == headRoot {
 		s, cn := a.syncedData.HeadState()
 		defer cn()

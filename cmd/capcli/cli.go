@@ -1031,7 +1031,7 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 			return err
 		}
 		if stateRoot != stateRoot2 {
-			return fmt.Errorf("state mismatch at slot %d: got %s, want %s", i, stateRoot2, stateRoot)
+			return fmt.Errorf("state mismatch at slot %d: got %x, want %x", i, stateRoot2, stateRoot)
 		}
 		log.Info("State at slot", "slot", i, "root", stateRoot)
 	}

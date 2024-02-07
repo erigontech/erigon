@@ -63,7 +63,7 @@ func (b *BeaconResponse) MarshalJSON() ([]byte, error) {
 		o["finalized"] = *b.Finalized
 	}
 	if b.Version != nil {
-		o["version"] = *b.Version
+		o["version"] = clparams.ClVersionToString(*b.Version)
 	}
 	if b.ExecutionOptimistic != nil {
 		o["execution_optimistic"] = *b.ExecutionOptimistic
