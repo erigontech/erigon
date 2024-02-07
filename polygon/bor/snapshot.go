@@ -137,7 +137,7 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 
 	for i, header := range headers {
 		if len(headers) > 1000 && i > 0 && i%1000 == 0 {
-			logger.Debug("[bor] Snapshot.Apply", "headerNum", header.Number.Uint64(), "snapNum", snap.Number, "progress", fmt.Sprintf("%d/%d", i, len(headers)))
+			logger.Debug("[bor] Snapshot.Apply", "headerNum", header.Number.Uint64(), "snapNum", snap.Number, "progress", fmt.Sprintf("%dK/%dK", i/1_000, len(headers)/1_000))
 		}
 
 		// Remove any votes on checkpoint blocks
