@@ -50,17 +50,37 @@ func (ml *msgListener) listenInboundMsg(ctx context.Context, name string, msgIds
 		ml.sentry,
 		ml.statusDataFactory(),
 		name,
-		ml.streamFactory(msgIds),
-		sentrymulticlient.MakeInboundMessage,
-		ml.handleInboundMsg,
+		ml.messageStreamFactory(msgIds),
+		ml.inboundMessageFactory(),
+		ml.handleInboundMessageHandler(),
 		nil,
 		ml.logger,
 	)
 }
 
-func (ml *msgListener) handleInboundMsg(_ context.Context, msg *protosentry.InboundMessage, _ direct.SentryClient) error {
-	ml.notifyObservers(msg)
-	return nil
+func (ml *msgListener) statusDataFactory() sentrymulticlient.StatusDataFactory {
+	return func() *sentry.StatusData {
+		return &sentry.StatusData{}
+	}
+}
+
+func (ml *msgListener) messageStreamFactory(ids []protosentry.MessageId) sentrymulticlient.SentryMessageStreamFactory {
+	return func(streamCtx context.Context, sentry direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
+		return sentry.Messages(streamCtx, &protosentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
+	}
+}
+
+func (ml *msgListener) inboundMessageFactory() sentrymulticlient.MessageFactory[*protosentry.InboundMessage] {
+	return func() *protosentry.InboundMessage {
+		return new(protosentry.InboundMessage)
+	}
+}
+
+func (ml *msgListener) handleInboundMessageHandler() sentrymulticlient.InboundMessageHandler[*protosentry.InboundMessage] {
+	return func(_ context.Context, msg *protosentry.InboundMessage, _ direct.SentryClient) error {
+		ml.notifyObservers(msg)
+		return nil
+	}
 }
 
 func (ml *msgListener) notifyObservers(msg *protosentry.InboundMessage) {
@@ -71,17 +91,5 @@ func (ml *msgListener) notifyObservers(msg *protosentry.InboundMessage) {
 
 	for observer := range observers {
 		go observer.Notify(msg)
-	}
-}
-
-func (ml *msgListener) statusDataFactory() sentrymulticlient.StatusDataFactory {
-	return func() *sentry.StatusData {
-		return &sentry.StatusData{}
-	}
-}
-
-func (ml *msgListener) streamFactory(ids []protosentry.MessageId) sentrymulticlient.SentryMessageStreamFactory {
-	return func(streamCtx context.Context, sentry direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
-		return sentry.Messages(streamCtx, &protosentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 }
