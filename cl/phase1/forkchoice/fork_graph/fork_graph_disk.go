@@ -451,7 +451,7 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
-	amountOfPresentCrossedEpochs := 0
+	highestCrossedEpochSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
@@ -459,12 +459,12 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			return true
 		}
 		oldRoots = append(oldRoots, hash)
-		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 {
-			amountOfPresentCrossedEpochs++
+		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
+			highestCrossedEpochSlot = signedBlock.Block.Slot
 		}
 		return true
 	})
-	if amountOfPresentCrossedEpochs == 1 { // otherwise reorgs will fail.
+	if pruneSlot >= highestCrossedEpochSlot {
 		return
 	}
 
