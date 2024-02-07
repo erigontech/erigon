@@ -113,7 +113,7 @@ func fetchAndWriteHeimdallSpan(
 		return 0, err
 	}
 
-	logger.Trace(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanID)
+	logger.Debug(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanID)
 	return spanID, nil
 }
 
