@@ -48,12 +48,10 @@ func NewZKEVMInterpreter(evm VMInterpreter, cfg ZkConfig) *EVMInterpreter {
 		}
 	}
 
-	// TODOSEQ - replace counter manager with a transaction counter collector
-	if sequencer.IsSequencer() {
-		if cfg.CounterCollector == nil {
-			cfg.CounterCollector = NewCounterCollector()
-		}
-
+	// if we're a sequencer and have an active counter collector for the call then we need
+	// to wrap the jump table so that we can process counters as op codes are called within
+	// the EVM
+	if sequencer.IsSequencer() && cfg.CounterCollector != nil {
 		WrapJumpTableWithZkCounters(jt, SimpleCounterOperations(cfg.CounterCollector))
 	}
 

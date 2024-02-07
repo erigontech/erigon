@@ -60,7 +60,7 @@ const (
 	transactionGasLimit = 30000000
 	blockGasLimit       = 30000000
 
-	batchCounterSmtLevel = 80 // todo [zkevm] this should be read from the db
+	totalVirtualCounterSmtLevel = 80 // todo [zkevm] this should be read from the db
 )
 
 var (
@@ -221,7 +221,7 @@ func SpawnSequencingStage(
 		return nil
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(batchCounterSmtLevel)
+	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel)
 
 	// whilst in the 1 batch = 1 block = 1 tx flow we can immediately add in the changeL2BlockTx calculation
 	// as this is the first tx we can skip the overflow check
@@ -434,7 +434,7 @@ func handleInjectedBatch(
 		return nil, nil, errors.New("expected 1 transaction in the injected batch")
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(batchCounterSmtLevel)
+	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel)
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
 	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), txs[0], ibs)
@@ -598,7 +598,7 @@ func attemptAddTransaction(
 	transaction types.Transaction,
 	ibs *state.IntraBlockState,
 ) (*types.Receipt, bool, error) {
-	txCounters := vm.NewTransactionCounter(transaction)
+	txCounters := vm.NewTransactionCounter(transaction, totalVirtualCounterSmtLevel)
 	overflow, err := batchCounters.AddNewTransactionCounters(txCounters)
 	if err != nil {
 		return nil, false, err
@@ -613,7 +613,7 @@ func attemptAddTransaction(
 	// set the counter collector on the config so that we can gather info during the execution
 	cfg.zkVmConfig.CounterCollector = txCounters.ExecutionCounters()
 
-	receipt, _, err := core.ApplyTransaction(
+	receipt, returnData, err := core.ApplyTransaction(
 		cfg.chainConfig,
 		core.GetHashFn(header, getHeader),
 		cfg.engine,
@@ -627,6 +627,11 @@ func attemptAddTransaction(
 		cfg.zkVmConfig.Config,
 		parentHeader.ExcessDataGas,
 		zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
+
+	err = txCounters.ProcessTx(ibs, returnData)
+	if err != nil {
+		return nil, false, err
+	}
 
 	// now that we have executed we can check again for an overflow
 	overflow = batchCounters.CheckForOverflow()

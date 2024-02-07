@@ -65,7 +65,7 @@ func (bcc *BatchCounterCollector) processBatchLevelData() error {
 	}
 
 	// reset the batch processing counters ready to calc the new values
-	bcc.l2DataCollector = NewCounterCollector()
+	bcc.l2DataCollector = NewCounterCollector(bcc.smtLevels)
 
 	batchL2DataSize := (totalRlpLength - len(bcc.transactions)*2) / 2
 	l2Deduction := int(math.Ceil(float64(batchL2DataSize+1) / 136))
@@ -98,14 +98,24 @@ func (bcc *BatchCounterCollector) CombineCollectors() Counters {
 	// combine all the counters we have so far
 	combined := defaultCounters()
 
+	// these counter collectors can be re-used for each new block in the batch as they don't rely on inputs
+	// from the block or transactions themselves
+	changeL2BlockCounter := NewCounterCollector(bcc.smtLevels)
+	changeL2BlockCounter.processChangeL2Block()
+	changeBlockCounters := NewCounterCollector(bcc.smtLevels)
+	changeBlockCounters.decodeChangeL2BlockTx()
+
 	// handling changeL2Block counters for each block in the batch - simulating a call to decodeChangeL2BlockTx from the js
 	for i := 0; i < bcc.blockCount; i++ {
-		combined[S].used += 20
-		combined[S].remaining -= 20
+		for k, v := range changeBlockCounters.counters {
+			combined[k].used += v.used
+			combined[k].remaining -= v.used
+		}
 
-		// simulating 3 calls to _addBatchHashData from the js
-		combined[S].used += 30
-		combined[S].remaining -= 30
+		for k, v := range changeL2BlockCounter.counters {
+			combined[k].used += v.used
+			combined[k].remaining -= v.used
+		}
 	}
 
 	if bcc.l2DataCollector != nil {
@@ -121,6 +131,10 @@ func (bcc *BatchCounterCollector) CombineCollectors() Counters {
 			combined[k].remaining -= v.used
 		}
 		for k, v := range tx.executionCounters.counters {
+			combined[k].used += v.used
+			combined[k].remaining -= v.used
+		}
+		for k, v := range tx.processingCounters.counters {
 			combined[k].used += v.used
 			combined[k].remaining -= v.used
 		}
