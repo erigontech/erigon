@@ -29,11 +29,12 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
@@ -277,18 +278,18 @@ type Sync struct {
 }
 
 // Chains where snapshots are enabled by default
-var ChainsWithSnapshots = map[string]struct{}{
-	networkname.MainnetChainName:    {},
-	networkname.SepoliaChainName:    {},
-	networkname.GoerliChainName:     {},
-	networkname.MumbaiChainName:     {},
-	networkname.AmoyChainName:       {},
-	networkname.BorMainnetChainName: {},
-	networkname.GnosisChainName:     {},
-	networkname.ChiadoChainName:     {},
+var ChainsWithSnapshots = map[libcommon.Hash]struct{}{
+	params.MainnetGenesisHash:    {},
+	params.SepoliaGenesisHash:    {},
+	params.GoerliGenesisHash:     {},
+	params.MumbaiGenesisHash:     {},
+	params.AmoyGenesisHash:       {},
+	params.BorMainnetGenesisHash: {},
+	params.GnosisGenesisHash:     {},
+	params.ChiadoGenesisHash:     {},
 }
 
-func UseSnapshotsByChainName(chain string) bool {
-	_, ok := ChainsWithSnapshots[chain]
+func UseSnapshotsByChain(genesis libcommon.Hash) bool {
+	_, ok := ChainsWithSnapshots[genesis]
 	return ok
 }
