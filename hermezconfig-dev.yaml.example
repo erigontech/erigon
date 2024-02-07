@@ -1,0 +1,25 @@
+datadir : '/Volumes/External/hermez/blueberry'
+chain : "hermez-dev"
+http : true
+private.api.addr : "localhost:9093"
+zkevm.l2-chain-id: 1440
+zkevm.l2-sequencer-rpc-url: "http://34.175.204.255:8123"
+zkevm.l2-datastreamer-url: "http://34.175.204.255:6900"
+zkevm.l1-chain-id: 5
+zkevm.l1-rpc-url: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia?apikey=IkrTRMPAlsjfgTyKz1Xfa5ldS8XSc0PN.En5aU2Gwdxvf3zk2"
+zkevm.l1-polygon-rollup-manager: "0x9fB0B4A5d4d60aaCfa8DC20B8DF5528Ab26848d3"
+zkevm.l1-rollup: "0x31A6ae85297DD0EeBD66D7556941c33Bd41d565C"
+zkevm.l1-matic-contract-address: "0x7cD0BAb63E3FE6a61D902d7bD8795C933A511BF8"
+zkevm.l1-ger-manager-contract-address: "0x76216E45Bdd20022eEcC07999e50228d7829534B"
+zkevm.l1-topic-verification: "0xcb339b570a7f0b25afa7333371ff11192092a0aeace12b671f4c212f2815c6fe"
+zkevm.l1-topic-sequence: "0x303446e6a8cb73c83dff421c0b1d5e5ce0719dab1bff13660fc254e58cc17fce"
+zkevm.l1-block-range: 20000
+zkevm.l1-query-delay: 6000
+zkevm.l1-first-block: 5192000
+zkevm.rpc-ratelimit: 250
+zkevm.data-stream-port: 6900
+zkevm.datastream-version: 2
+zkevm.data-stream-host: "localhost"
+
+externalcl: true
+http.api : ["eth","debug","net","trace","web3","erigon","txpool","zkevm"]

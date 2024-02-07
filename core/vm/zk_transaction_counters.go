@@ -19,10 +19,11 @@ type TransactionCounter struct {
 func NewTransactionCounter(transaction types.Transaction, smtMaxLevel uint32) *TransactionCounter {
 	totalLevel := calculateSmtLevels(smtMaxLevel)
 	tc := &TransactionCounter{
-		transaction:       transaction,
-		rlpCounters:       NewCounterCollector(totalLevel),
-		executionCounters: NewCounterCollector(totalLevel),
-		smtLevels:         totalLevel,
+		transaction:        transaction,
+		rlpCounters:        NewCounterCollector(totalLevel),
+		executionCounters:  NewCounterCollector(totalLevel),
+		processingCounters: NewCounterCollector(totalLevel),
+		smtLevels:          totalLevel,
 	}
 
 	return tc
