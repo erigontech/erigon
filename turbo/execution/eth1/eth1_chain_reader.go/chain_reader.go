@@ -93,7 +93,11 @@ func (c ChainReaderWriterEth1) GetBlockByHash(hash libcommon.Hash) *types.Block 
 	if resp == nil || resp.Body == nil {
 		return nil
 	}
-	body := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
+	body, err := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
+	if err != nil {
+		log.Error("GetBlockByHash failed", "err", err)
+		return nil
+	}
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
 		log.Error("GetBlockByHash failed", "err", err)
@@ -118,7 +122,11 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(number uint64) *types.Block {
 	if resp == nil || resp.Body == nil {
 		return nil
 	}
-	body := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
+	body, err := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
+	if err != nil {
+		log.Error("GetBlockByNumber failed", "err", err)
+		return nil
+	}
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
 		log.Error("GetBlockByNumber failed", "err", err)
@@ -195,7 +203,10 @@ func (c ChainReaderWriterEth1) GetBodiesByHashes(hashes []libcommon.Hash) ([]*ty
 	}
 	ret := make([]*types.RawBody, len(resp.Bodies))
 	for i := range ret {
-		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+		ret[i], err = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+		if err != nil {
+			return nil, err
+		}
 	}
 	return ret, nil
 }
@@ -210,7 +221,10 @@ func (c ChainReaderWriterEth1) GetBodiesByRange(start, count uint64) ([]*types.R
 	}
 	ret := make([]*types.RawBody, len(resp.Bodies))
 	for i := range ret {
-		ret[i] = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+		ret[i], err = eth1_utils.ConvertRawBlockBodyFromRpc(resp.Bodies[i])
+		if err != nil {
+			return nil, err
+		}
 	}
 	return ret, nil
 }

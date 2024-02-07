@@ -76,7 +76,10 @@ func TestBlockRpcConversion(t *testing.T) {
 
 	// body conversions
 	rpcBlock := ConvertBlockToRPC(testBlock)
-	roundTripBody := ConvertRawBlockBodyFromRpc(rpcBlock.Body)
+	roundTripBody, err := ConvertRawBlockBodyFromRpc(rpcBlock.Body)
+	if err != nil {
+		panic(err)
+	}
 	testBlockRaw := testBlock.RawBody()
 	require.Greater(len(testBlockRaw.Transactions), 0)
 	require.Greater(len(testBlockRaw.Uncles), 0)
