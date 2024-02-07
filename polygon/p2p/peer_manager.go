@@ -1,0 +1,111 @@
+package p2p
+
+import (
+	"context"
+	"fmt"
+	"math/rand"
+
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/rlp"
+)
+
+//go:generate mockgen -destination=./peer_manager_mock.go -package=p2p . PeerManager
+type PeerManager interface {
+	MaxPeers() int
+	PeerBlockNumInfos() PeerBlockNumInfos
+	DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
+	Penalize(peerId PeerId)
+}
+
+func NewPeerManager(logger log.Logger, sentry direct.SentryClient) PeerManager {
+	return &peerManager{
+		msgBroadcaster: msgBroadcaster{
+			sentry: sentry,
+		},
+		msgListener: msgListener{
+			logger: logger,
+			sentry: sentry,
+		},
+	}
+}
+
+type peerManager struct {
+	msgBroadcaster msgBroadcaster
+	msgListener    msgListener
+}
+
+func (pm *peerManager) DownloadHeaders(ctx context.Context, start uint64, end uint64, pid PeerId) ([]*types.Header, error) {
+	if start > end {
+		return nil, fmt.Errorf("invalid start and end in DownloadHeaders: start=%d, end=%d", start, end)
+	}
+
+	var headers []*types.Header
+	reqId := rand.Uint64()
+
+	observer := make(chanMsgObserver)
+	pm.msgListener.RegisterBlockHeaders66(observer)
+	defer pm.msgListener.UnregisterBlockHeaders66(observer)
+
+	g, ctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		for {
+			msg := <-observer
+			msgPid := PeerIdFromH512(msg.PeerId)
+			if msgPid != pid {
+				continue
+			}
+
+			var pkt eth.BlockHeadersPacket66
+			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
+				return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
+			}
+
+			if pkt.RequestId != reqId {
+				continue
+			}
+
+			headers = pkt.BlockHeadersPacket
+			break
+		}
+
+		return nil
+	})
+
+	g.Go(func() error {
+		return pm.msgBroadcaster.GetBlockHeaders66FromPeer(ctx, pid, eth.GetBlockHeadersPacket66{
+			RequestId: reqId,
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Origin: eth.HashOrNumber{
+					Number: start,
+				},
+				Amount: end - start + 1,
+			},
+		})
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return headers, nil
+}
+
+func (pm *peerManager) MaxPeers() int {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (pm *peerManager) PeerBlockNumInfos() PeerBlockNumInfos {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (pm *peerManager) Penalize(_ PeerId) {
+	//TODO implement me
+	panic("implement me")
+}
