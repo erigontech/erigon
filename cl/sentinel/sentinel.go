@@ -19,15 +19,18 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handlers"
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
+	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -72,7 +75,6 @@ type Sentinel struct {
 
 	httpApi http.Handler
 
-	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
 	db         persistence.RawBeaconBlockChain
@@ -84,6 +86,8 @@ type Sentinel struct {
 	metrics              bool
 	listenForPeersDoneCh chan struct{}
 	logger               log.Logger
+	forkChoiceReader     forkchoice.ForkChoiceStorageReader
+	pidToEnr             sync.Map
 }
 
 func (s *Sentinel) createLocalNode(
@@ -160,20 +164,14 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	// TODO: Set up proper attestation number
-	s.metadataV2 = &cltypes.Metadata{
-		SeqNumber: localNode.Seq(),
-		Attnets:   0,
-		Syncnets:  new(uint64),
-	}
-
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2, s.cfg.EnableBlocks).Start()
 
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
+	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.handshaker, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
+
 	return net, err
 }
 
@@ -184,14 +182,16 @@ func New(
 	db persistence.RawBeaconBlockChain,
 	indiciesDB kv.RoDB,
 	logger log.Logger,
+	forkChoiceReader forkchoice.ForkChoiceStorageReader,
 ) (*Sentinel, error) {
 	s := &Sentinel{
-		ctx:        ctx,
-		cfg:        cfg,
-		db:         db,
-		indiciesDB: indiciesDB,
-		metrics:    true,
-		logger:     logger,
+		ctx:              ctx,
+		cfg:              cfg,
+		db:               db,
+		indiciesDB:       indiciesDB,
+		metrics:          true,
+		logger:           logger,
+		forkChoiceReader: forkChoiceReader,
 	}
 
 	// Setup discovery
@@ -307,17 +307,109 @@ func (s *Sentinel) String() string {
 }
 
 func (s *Sentinel) HasTooManyPeers() bool {
-	return s.GetPeersCount() >= peers.DefaultMaxPeers
+	active, _, _ := s.GetPeersCount()
+	return active >= peers.DefaultMaxPeers
 }
 
-func (s *Sentinel) GetPeersCount() int {
-	// sub := s.subManager.GetMatchingSubscription(string(BeaconBlockTopic))
+func (s *Sentinel) GetPeersCount() (active int, connected int, disconnected int) {
+	peers := s.host.Network().Peers()
 
-	// if sub == nil {
-	return len(s.host.Network().Peers())
-	// }
+	active = len(peers)
+	for _, p := range peers {
+		if s.host.Network().Connectedness(p) == network.Connected {
+			connected++
+		} else {
+			disconnected++
+		}
+	}
+	disconnected += s.peers.LenBannedPeers()
+	return
+}
 
-	// return len(sub.topic.ListPeers())
+func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
+	peers := s.host.Network().Peers()
+
+	out := &sentinelrpc.PeersInfoResponse{Peers: make([]*sentinelrpc.Peer, 0, len(peers))}
+
+	for _, p := range peers {
+		entry := &sentinelrpc.Peer{}
+		peerInfo := s.host.Network().Peerstore().PeerInfo(p)
+		if len(peerInfo.Addrs) == 0 {
+			continue
+		}
+		entry.Address = peerInfo.Addrs[0].String()
+		entry.Pid = peerInfo.ID.String()
+		entry.State = "connected"
+		if s.host.Network().Connectedness(p) != network.Connected {
+			entry.State = "disconnected"
+		}
+		conns := s.host.Network().ConnsToPeer(p)
+		if len(conns) == 0 {
+			continue
+		}
+		if conns[0].Stat().Direction == network.DirOutbound {
+			entry.Direction = "outbound"
+		} else {
+			entry.Direction = "inbound"
+		}
+		if enr, ok := s.pidToEnr.Load(p); ok {
+			entry.Enr = enr.(string)
+		} else {
+			continue
+		}
+		agent, err := s.host.Peerstore().Get(p, "AgentVersion")
+		if err == nil {
+			entry.AgentVersion = agent.(string)
+		}
+		if entry.AgentVersion == "" {
+			entry.AgentVersion = "unknown"
+		}
+		out.Peers = append(out.Peers, entry)
+	}
+	return out
+}
+
+func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddresses []string, metadata *cltypes.Metadata) {
+	pid = s.host.ID().String()
+	enrStr = s.listener.LocalNode().Node().String()
+	p2pAddresses = make([]string, 0, len(s.host.Addrs()))
+	for _, addr := range s.host.Addrs() {
+		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/%s", addr.String(), pid))
+	}
+	discoveryAddresses = []string{}
+
+	if s.listener.LocalNode().Node().TCP() != 0 {
+		protocol := "ip4"
+		if s.listener.LocalNode().Node().IP().To4() == nil {
+			protocol = "ip6"
+		}
+		port := s.listener.LocalNode().Node().TCP()
+		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/tcp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
+	}
+	if s.listener.LocalNode().Node().UDP() != 0 {
+		protocol := "ip4"
+		if s.listener.LocalNode().Node().IP().To4() == nil {
+			protocol = "ip6"
+		}
+		port := s.listener.LocalNode().Node().UDP()
+		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
+	}
+	subnetField := [8]byte{}
+	syncnetField := [1]byte{}
+	attSubEnr := enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField[:])
+	syncNetEnr := enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, syncnetField[:])
+	if err := s.listener.LocalNode().Node().Load(attSubEnr); err != nil {
+		return
+	}
+	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
+		return
+	}
+	metadata = &cltypes.Metadata{
+		SeqNumber: s.listener.LocalNode().Seq(),
+		Attnets:   subnetField,
+		Syncnets:  &syncnetField,
+	}
+	return
 }
 
 func (s *Sentinel) Host() host.Host {

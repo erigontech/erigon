@@ -57,6 +57,12 @@ func MiningBorHeimdallForward(
 		return err
 	}
 
+	lastStateSyncEventID, _, err := cfg.blockReader.LastEventId(ctx, tx)
+
+	if err != nil {
+		return err
+	}
+
 	lastStateSyncEventID, records, fetchTime, err := fetchRequiredHeimdallStateSyncEventsIfNeeded(
 		ctx,
 		header,
@@ -64,9 +70,7 @@ func MiningBorHeimdallForward(
 		cfg,
 		logPrefix,
 		logger,
-		func() (uint64, error) {
-			return LastStateSyncEventID(tx, cfg.blockReader)
-		},
+		lastStateSyncEventID,
 	)
 	if err != nil {
 		return err

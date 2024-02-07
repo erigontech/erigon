@@ -189,15 +189,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
-		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -248,10 +242,33 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
+		if strings.Contains(err.Error(), "protocols not supported") {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+			s.sentinel.Peers().SetBanStatus(pid, true)
+		}
 		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
 		return nil, err
 	}
 	return resp, nil
+
+}
+
+func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {
+	// call s.sentinel.Identity()
+	pid, enr, p2pAddresses, discoveryAddresses, metadata := s.sentinel.Identity()
+	return &sentinelrpc.IdentityResponse{
+		Pid:                pid,
+		Enr:                enr,
+		P2PAddresses:       p2pAddresses,
+		DiscoveryAddresses: discoveryAddresses,
+		Metadata: &sentinelrpc.Metadata{
+			Seq:      metadata.SeqNumber,
+			Attnets:  fmt.Sprintf("%x", metadata.Attnets),
+			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
+		},
+	}, nil
 
 }
 
@@ -268,10 +285,33 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (
 }
 
 func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
+	count, connected, disconnected := s.sentinel.GetPeersCount()
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
-		Amount: uint64(s.sentinel.GetPeersCount()),
+		Active:       uint64(count),
+		Connected:    uint64(connected),
+		Disconnected: uint64(disconnected),
 	}, nil
+}
+
+func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfoRequest) (*sentinelrpc.PeersInfoResponse, error) {
+	peersInfos := s.sentinel.GetPeersInfos()
+	if r.Direction == nil && r.State == nil {
+		return peersInfos, nil
+	}
+	filtered := &sentinelrpc.PeersInfoResponse{
+		Peers: make([]*sentinelrpc.Peer, 0, len(peersInfos.Peers)),
+	}
+	for _, peer := range peersInfos.Peers {
+		if r.Direction != nil && peer.Direction != *r.Direction {
+			continue
+		}
+		if r.State != nil && peer.State != *r.State {
+			continue
+		}
+		filtered.Peers = append(filtered.Peers, peer)
+	}
+	return filtered, nil
 }
 
 func (s *SentinelServer) ListenToGossip() {

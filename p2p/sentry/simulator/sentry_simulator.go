@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -60,13 +59,13 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		peers[peer.Pubkey()] = peer
 	}
 
-	cfg := snapcfg.KnownCfg(chain, 0)
+	cfg := snapcfg.KnownCfg(chain)
 
 	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:      true,
 		Produce:      false,
 		NoDownloader: true,
-	}, "", cfg.Version, logger)
+	}, "", 0, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
 
@@ -81,7 +80,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		Enabled:      true,
 		Produce:      false,
 		NoDownloader: true,
-	}, snapshotLocation, cfg.Version, logger)
+	}, snapshotLocation, 0, logger)
 
 	if err := activeSnapshots.ReopenFolder(); err != nil {
 		return nil, err
@@ -435,8 +434,8 @@ func (s *server) getHeaderByHash(ctx context.Context, hash common.Hash) (*core_t
 	return s.blockReader.HeaderByHash(ctx, nil, hash)
 }
 
-func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.HeaderSegment) error {
-	fileName := snaptype.SegmentFileName(s.knownSnapshots.Version(), header.From(), header.To(), snaptype.Headers)
+func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segment) error {
+	fileName := snaptype.SegmentFileName(0, header.From(), header.To(), snaptype.Enums.Headers)
 
 	s.logger.Info(fmt.Sprintf("Downloading %s", fileName))
 
@@ -448,6 +447,7 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Heade
 
 	s.logger.Info(fmt.Sprintf("Indexing %s", fileName))
 
-	return freezeblocks.HeadersIdx(ctx,
-		filepath.Join(s.downloader.LocalFsRoot(), fileName), s.knownSnapshots.Version(), header.From(), s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	info, _ := snaptype.ParseFileName(s.downloader.LocalFsRoot(), fileName)
+
+	return freezeblocks.HeadersIdx(ctx, info, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }

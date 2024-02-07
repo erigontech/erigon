@@ -111,3 +111,11 @@ func (*Withdrawal) Clone() clonable.Clonable {
 func (s *SignedContributionAndProof) Clone() clonable.Clonable {
 	return &SignedContributionAndProof{}
 }
+
+func (*Root) Clone() clonable.Clonable {
+	return &Root{}
+}
+
+func (*LightClientUpdatesByRangeRequest) Clone() clonable.Clonable {
+	return &LightClientUpdatesByRangeRequest{}
+}

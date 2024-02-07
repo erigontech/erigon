@@ -100,6 +100,7 @@ func (s *Sentinel) listenForPeers() {
 			log.Error("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
+		s.pidToEnr.Store(peerInfo.ID, node.String())
 
 		// Skip Peer if IP was private.
 		if node.IP().IsPrivate() {

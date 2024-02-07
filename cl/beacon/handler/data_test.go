@@ -1,4 +1,4 @@
-package handler_test
+package handler
 
 import (
 	"embed"
@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacontest"
 	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/log/v3"
@@ -42,7 +44,25 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		}
 	}
 	_, blocks, _, _, postState, handler, _, sm, fcu := setupTestingHandler(c.t, c.v, logger)
+
 	var err error
+
+	lastBlockRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
+	require.NoError(c.t, err)
+
+	if c.v >= clparams.AltairVersion {
+		fcu.LightClientBootstraps[lastBlockRoot], err = lightclient_utils.CreateLightClientBootstrap(postState, blocks[len(blocks)-1])
+		require.NoError(c.t, err)
+		fcu.NewestLCUpdate = cltypes.NewLightClientUpdate(postState.Version())
+		fcu.NewestLCUpdate.NextSyncCommittee = postState.NextSyncCommittee()
+		fcu.NewestLCUpdate.SignatureSlot = 1234
+		fcu.NewestLCUpdate.SyncAggregate = blocks[len(blocks)-1].Block.Body.SyncAggregate
+		fcu.NewestLCUpdate.AttestedHeader, err = lightclient_utils.BlockToLightClientHeader(blocks[len(blocks)-1])
+		require.NoError(c.t, err)
+		fcu.NewestLCUpdate.FinalizedHeader = fcu.NewestLCUpdate.AttestedHeader
+		fcu.LCUpdates[1] = fcu.NewestLCUpdate
+		fcu.LCUpdates[2] = fcu.NewestLCUpdate
+	}
 
 	if c.forkmode == 0 {
 		fcu.HeadVal, err = blocks[len(blocks)-1].Block.HashSSZ()
@@ -87,8 +107,8 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 
 		fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 1)
 		fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 2)
-
 	}
+	sm.OnHeadState(postState)
 
 	return []beacontest.HarnessOption{
 		beacontest.WithTesting(c.t),

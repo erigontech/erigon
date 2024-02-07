@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/spf13/afero"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -151,4 +152,10 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 
 	require.Equal(t, intermediaryState.CurrentSyncCommittee(), currentIntermediarySyncCommittee)
 	require.Equal(t, intermediaryState.NextSyncCommittee(), nextIntermediarySyncCommittee)
+
+	bs, has := store.GetLightClientBootstrap(intermediaryBlockRoot)
+	require.True(t, has)
+	bsRoot, err := bs.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, libcommon.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 }

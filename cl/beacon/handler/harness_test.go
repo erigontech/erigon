@@ -1,4 +1,4 @@
-package handler_test
+package handler
 
 import (
 	"testing"
@@ -23,6 +23,7 @@ func TestHarnessPhase0(t *testing.T) {
 		)...,
 	)
 }
+
 func TestHarnessPhase0Finalized(t *testing.T) {
 	beacontest.Execute(
 		append(
@@ -40,9 +41,21 @@ func TestHarnessBellatrix(t *testing.T) {
 			defaultHarnessOpts(harnessConfig{t: t, v: clparams.BellatrixVersion, finalized: true}),
 			beacontest.WithTestFromFs(Harnesses, "attestation_rewards_bellatrix"),
 			beacontest.WithTestFromFs(Harnesses, "duties_sync_bellatrix"),
+			beacontest.WithTestFromFs(Harnesses, "lightclient"),
+			beacontest.WithTestFromFs(Harnesses, "validators"),
 		)...,
 	)
 }
+
+func TestHarnessCapella(t *testing.T) {
+	beacontest.Execute(
+		append(
+			defaultHarnessOpts(harnessConfig{t: t, v: clparams.CapellaVersion, finalized: true}),
+			beacontest.WithTestFromFs(Harnesses, "expected_withdrawals"),
+		)...,
+	)
+}
+
 func TestHarnessForkChoice(t *testing.T) {
 	beacontest.Execute(
 		append(

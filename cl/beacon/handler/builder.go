@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 )
 
-func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -41,6 +41,9 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWit(w http.ResponseWriter, r 
 	headRoot, _, err := a.forkchoiceStore.GetHead()
 	if err != nil {
 		return nil, err
+	}
+	if a.syncedData.Syncing() {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
 	}
 	if root == headRoot {
 		s, cn := a.syncedData.HeadState()
