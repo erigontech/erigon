@@ -20,10 +20,10 @@ var (
 
 type DataStreamServer struct {
 	stream  *datastreamer.StreamServer
-	chainId uint32
+	chainId uint64
 }
 
-func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint32) *DataStreamServer {
+func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint64) *DataStreamServer {
 	return &DataStreamServer{
 		stream:  stream,
 		chainId: chainId,
@@ -46,7 +46,7 @@ func (srv *DataStreamServer) AddBlockStart(block *types2.Block, batchNumber uint
 		GlobalExitRoot:  ger,
 		Coinbase:        block.Coinbase(),
 		ForkId:          forkId,
-		ChainId:         srv.chainId,
+		ChainId:         uint32(srv.chainId),
 	}
 	_, err := srv.stream.AddStreamEntry(1, types.EncodeStartL2Block(b))
 	return err
@@ -69,7 +69,7 @@ func (srv *DataStreamServer) AddGerUpdate(batchNumber uint64, ger libcommon.Hash
 		GlobalExitRoot: ger,
 		Coinbase:       block.Coinbase(),
 		ForkId:         fork,
-		ChainId:        srv.chainId,
+		ChainId:        uint32(srv.chainId),
 		StateRoot:      block.Root(),
 	}
 

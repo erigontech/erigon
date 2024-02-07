@@ -23,10 +23,10 @@ import (
 type DataStreamCatchupCfg struct {
 	db      kv.RwDB
 	stream  *datastreamer.StreamServer
-	chainId uint32
+	chainId uint64
 }
 
-func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint32) DataStreamCatchupCfg {
+func StageDataStreamCatchupCfg(stream *datastreamer.StreamServer, db kv.RwDB, chainId uint64) DataStreamCatchupCfg {
 	return DataStreamCatchupCfg{
 		stream:  stream,
 		db:      db,
@@ -230,6 +230,14 @@ LOOP:
 		skipped = false
 
 		for _, blockNumber := range blockNumbers {
+			// ensure we have the last block if we haven't set it already
+			if lastBlock == nil {
+				lastBlock, err = rawdb.ReadBlockByNumber(tx, blockNumber-1)
+				if err != nil {
+					return err
+				}
+			}
+
 			currentBlock = blockNumber
 			fork, err := reader.GetForkId(currentBatchNumber)
 			if err != nil {
@@ -285,7 +293,12 @@ LOOP:
 				}
 			}
 
-			err = srv.AddBlockEnd(block.NumberU64(), block.Hash(), block.Root())
+			blockInfoRoot, err := reader.GetBlockInfoRoot(blockNumber)
+			if err != nil {
+				return err
+			}
+
+			err = srv.AddBlockEnd(block.NumberU64(), blockInfoRoot, blockInfoRoot)
 			if err != nil {
 				return err
 			}

@@ -23,6 +23,7 @@ const STATE_ROOTS = "hermez_stateRoots"                            // l2blockno 
 const L1_INFO_TREE_UPDATES = "l1_info_tree_updates"                // index -> L1InfoTreeUpdate
 const BLOCK_L1_INFO_TREE_INDEX = "block_l1_info_tree_index"        // block number -> l1 info tree index
 const L1_INJECTED_BATCHES = "l1_injected_batches"                  // index increasing by 1 -> injected batch for the start of the chain
+const BLOCK_INFO_ROOTS = "block_info_roots"                        // block number -> block info root hash
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -60,6 +61,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		L1_INFO_TREE_UPDATES,
 		BLOCK_L1_INFO_TREE_INDEX,
 		L1_INJECTED_BATCHES,
+		BLOCK_INFO_ROOTS,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -633,4 +635,19 @@ func (db *HermezDb) GetL1InjectedBatch(index uint64) (*types.L1InjectedBatch, er
 		return nil, err
 	}
 	return ib, nil
+}
+
+func (db *HermezDb) WriteBlockInfoRoot(blockNumber uint64, root common.Hash) error {
+	k := Uint64ToBytes(blockNumber)
+	return db.tx.Put(BLOCK_INFO_ROOTS, k, root.Bytes())
+}
+
+func (db *HermezDbReader) GetBlockInfoRoot(blockNumber uint64) (common.Hash, error) {
+	k := Uint64ToBytes(blockNumber)
+	data, err := db.tx.GetOne(BLOCK_INFO_ROOTS, k)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	res := common.BytesToHash(data)
+	return res, nil
 }

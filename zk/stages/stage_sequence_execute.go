@@ -311,7 +311,7 @@ func SpawnSequencingStage(
 		ger = l1TreeUpdate.GER
 	}
 
-	if err := postBlockStateHandling(cfg, ibs, block, ger, l1BlockHash, parentBlock.Hash(), addedTransactions, addedReceipts); err != nil {
+	if err := postBlockStateHandling(cfg, ibs, hermezDb, block, ger, l1BlockHash, parentBlock.Hash(), addedTransactions, addedReceipts); err != nil {
 		return err
 	}
 
@@ -368,7 +368,7 @@ func processInjectedInitialBatch(
 		return err
 	}
 
-	if err := postBlockStateHandling(cfg, ibs, finalBlock, injected.LastGlobalExitRoot, injected.L1ParentHash, parentBlock.Hash(), txns, finalReceipts); err != nil {
+	if err := postBlockStateHandling(cfg, ibs, hermezDb, finalBlock, injected.LastGlobalExitRoot, injected.L1ParentHash, parentBlock.Hash(), txns, finalReceipts); err != nil {
 		return err
 	}
 
@@ -382,6 +382,7 @@ func processInjectedInitialBatch(
 func postBlockStateHandling(
 	cfg SequenceBlockCfg,
 	ibs *state.IntraBlockState,
+	hermezDb *hermez_db.HermezDb,
 	block *types.Block,
 	ger common.Hash,
 	l1BlockHash common.Hash,
@@ -412,7 +413,9 @@ func postBlockStateHandling(
 
 	rootHash := common.BigToHash(root)
 	ibs.PostExecuteStateSet(cfg.chainConfig, block.NumberU64(), &rootHash)
-	return nil
+
+	// store a reference to this block info root against the block number
+	return hermezDb.WriteBlockInfoRoot(block.NumberU64(), rootHash)
 }
 
 func handleInjectedBatch(
