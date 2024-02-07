@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -51,41 +52,51 @@ func (pm *peerManager) DownloadHeaders(ctx context.Context, start uint64, end ui
 	pm.msgListener.RegisterBlockHeaders66(observer)
 	defer pm.msgListener.UnregisterBlockHeaders66(observer)
 
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	g, ctx := errgroup.WithContext(ctx)
+
 	g.Go(func() error {
 		for {
-			msg := <-observer
-			msgPid := PeerIdFromH512(msg.PeerId)
-			if msgPid != pid {
-				continue
-			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case msg := <-observer:
+				msgPid := PeerIdFromH512(msg.PeerId)
+				if msgPid != pid {
+					continue
+				}
 
-			var pkt eth.BlockHeadersPacket66
-			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-				return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
-			}
+				var pkt eth.BlockHeadersPacket66
+				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
+					return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
+				}
 
-			if pkt.RequestId != reqId {
-				continue
-			}
+				if pkt.RequestId != reqId {
+					continue
+				}
 
-			headers = pkt.BlockHeadersPacket
-			break
+				headers = pkt.BlockHeadersPacket
+				return nil
+			}
 		}
-
-		return nil
 	})
 
 	g.Go(func() error {
-		return pm.msgBroadcaster.GetBlockHeaders66FromPeer(ctx, pid, eth.GetBlockHeadersPacket66{
-			RequestId: reqId,
-			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
-				Origin: eth.HashOrNumber{
-					Number: start,
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return pm.msgBroadcaster.GetBlockHeaders66FromPeer(ctx, pid, eth.GetBlockHeadersPacket66{
+				RequestId: reqId,
+				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+					Origin: eth.HashOrNumber{
+						Number: start,
+					},
+					Amount: end - start + 1,
 				},
-				Amount: end - start + 1,
-			},
-		})
+			})
+		}
 	})
 
 	if err := g.Wait(); err != nil {
