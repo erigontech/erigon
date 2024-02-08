@@ -25,8 +25,13 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+const (
+	preForkId7BlockGasLimit  = 30_000_000
+	postForkId7BlockGasLimit = 18446744073709551615
+)
+
 type ErigonDb interface {
-	WriteHeader(batchNo *big.Int, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts uint64) (*ethTypes.Header, error)
+	WriteHeader(batchNo *big.Int, stateRoot, txHash, parentHash common.Hash, coinbase common.Address, ts, gasLimit uint64) (*ethTypes.Header, error)
 	WriteBody(batchNumber *big.Int, headerHash common.Hash, txs []ethTypes.Transaction) error
 }
 
@@ -39,10 +44,11 @@ type HermezDb interface {
 
 	DeleteForkIds(fromBatchNum, toBatchNum uint64) error
 	DeleteBlockBatches(fromBatchNum, toBatchNum uint64) error
-
+	WriteGlobalExitRoot(ger common.Hash) error
+	GetGlobalExitRoot(ger common.Hash) (bool, error)
 	WriteBlockGlobalExitRoot(l2BlockNo uint64, ger common.Hash, l1BlockHash common.Hash) error
 
-	WriteBatchGBatchGlobalExitRoot(batchNumber uint64, ger types.GerUpdate) error
+	WriteBatchGlobalExitRoot(batchNumber uint64, ger types.GerUpdate) error
 }
 
 type BatchesCfg struct {
@@ -142,7 +148,6 @@ func SpawnStageBatches(
 	highestHashableL2BlockNo := uint64(0)
 
 	writeThreadFinished := false
-	lastGer := common.Hash{}
 	lastForkId64, err := stages.GetStageProgress(tx, stages.ForkId)
 	lastForkId := uint16(lastForkId64)
 	if err != nil {
@@ -161,14 +166,9 @@ func SpawnStageBatches(
 		select {
 		case l2Block := <-cfg.dsClient.L2BlockChan:
 			atLeastOneBlockWritten = true
-			zeroHash := common.Hash{}
 			// skip if we already have this block
 			if l2Block.L2BlockNumber < lastBlockHeight+1 {
 				continue
-			}
-			// checks
-			if l2Block.L2BlockNumber != lastBlockHeight+1 {
-				return fmt.Errorf("missing block number. Last block number %d, current %d", lastBlockHeight, l2Block.L2BlockNumber)
 			}
 
 			// update forkid
@@ -182,24 +182,6 @@ func SpawnStageBatches(
 				if err := hermezDb.WriteForkIdBlockOnce(uint64(l2Block.ForkId), l2Block.L2BlockNumber); err != nil {
 					return fmt.Errorf("write fork id block once error: %v", err)
 				}
-			}
-
-			// update GER
-			if l2Block.GlobalExitRoot == zeroHash && l2Block.L2BlockNumber > 0 { // TODO: possibly check l2Block.ForkId < constants.ForkEtrogId7 &&
-				if lastGer == zeroHash {
-					prevGer, _, err := hermezDb.GetBlockGlobalExitRoot(l2Block.L2BlockNumber - 1)
-					if err != nil {
-						return fmt.Errorf("failed to get previous GER, %w", err)
-					}
-					if prevGer == zeroHash {
-						//return fmt.Errorf("there is no previous GER saved")
-						log.Info("no previous GER saved")
-					}
-
-					lastGer = prevGer
-				}
-
-				l2Block.GlobalExitRoot = lastGer
 			}
 
 			// batch boundary - record the highest hashable block number (last block in last full batch)
@@ -234,8 +216,13 @@ func SpawnStageBatches(
 			blocksWritten++
 			progressChan <- blocksWritten
 		case gerUpdate := <-cfg.dsClient.GerUpdatesChan:
+			if gerUpdate.GlobalExitRoot == emptyHash {
+				log.Warn(fmt.Sprintf("[%s] Skipping GER update with empty root", logPrefix))
+				break
+			}
+
 			// NB: we won't get these post Etrog (fork id 7)
-			if err := hermezDb.WriteBatchGBatchGlobalExitRoot(gerUpdate.BatchNumber, gerUpdate); err != nil {
+			if err := hermezDb.WriteBatchGlobalExitRoot(gerUpdate.BatchNumber, gerUpdate); err != nil {
 				return fmt.Errorf("write batch global exit root error: %v", err)
 			}
 		case err := <-errChan:
@@ -420,20 +407,46 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block)
 			return fmt.Errorf("write effective gas price percentage error: %v", err)
 		}
 
-		if err := hermezDb.WriteStateRoot(l2Block.L2BlockNumber, transaction.StateRoot); err != nil {
+		//TODO: temp datastream fix, remove later
+		//works only for Cardona
+		stateRoot := transaction.StateRoot
+		if bn.Uint64() == 59056 {
+			stateRoot = common.HexToHash("0x0c21a98253d5ef5cf77faa5fbbc44e627fd14ec6d410c6e87d40e639e54b41d7")
+		}
+		if err := hermezDb.WriteStateRoot(l2Block.L2BlockNumber, stateRoot); err != nil {
 			return fmt.Errorf("write rpc root error: %v", err)
 		}
 	}
 	txCollection := ethTypes.Transactions(txs)
 	txHash := ethTypes.DeriveSha(txCollection)
-	h, err := eriDb.WriteHeader(bn, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp))
+
+	var gasLimit uint64
+	if l2Block.ForkId < 7 {
+		gasLimit = preForkId7BlockGasLimit
+	} else {
+		gasLimit = postForkId7BlockGasLimit
+	}
+
+	h, err := eriDb.WriteHeader(bn, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
 	if err != nil {
 		return fmt.Errorf("write header error: %v", err)
 	}
 
-	// pre-etrog forkid 7 - store blockno->ger
-	if err := hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot, l2Block.L1BlockHash); err != nil {
-		return fmt.Errorf("write block global exit root error: %v", err)
+	if l2Block.GlobalExitRoot != emptyHash {
+		gerWritten, err := hermezDb.GetGlobalExitRoot(l2Block.GlobalExitRoot)
+		if err != nil {
+			return fmt.Errorf("get global exit root error: %v", err)
+		}
+
+		if !gerWritten {
+			if err := hermezDb.WriteBlockGlobalExitRoot(l2Block.L2BlockNumber, l2Block.GlobalExitRoot, l2Block.L1BlockHash); err != nil {
+				return fmt.Errorf("write block global exit root error: %v", err)
+			}
+
+			if err := hermezDb.WriteGlobalExitRoot(l2Block.GlobalExitRoot); err != nil {
+				return fmt.Errorf("write global exit root error: %v", err)
+			}
+		}
 	}
 
 	if err := eriDb.WriteBody(bn, h.Hash(), txs); err != nil {

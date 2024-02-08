@@ -125,6 +125,16 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 
 	initialBlock := stageProgress + 1
 	eridb := erigon_db.NewErigonDb(tx)
+
+	prevheaderHash, err := rawdb.ReadCanonicalHash(tx, stageProgress)
+	if err != nil {
+		return err
+	}
+	header, err := cfg.blockReader.Header(ctx, tx, prevheaderHash, stageProgress)
+	if err != nil {
+		return err
+	}
+	prevBlockHash := header.Root
 Loop:
 	for blockNum := stageProgress + 1; blockNum <= to; blockNum++ {
 		stageProgress = blockNum
@@ -165,7 +175,7 @@ Loop:
 		if err = updateZkEVMBlockCfg(&cfg, hermezDb, logPrefix); err != nil {
 			return err
 		}
-		if err = executeBlockZk(block, header, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
+		if err = executeBlockZk(block, &prevBlockHash, header, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -233,6 +243,8 @@ Loop:
 			 later.
 		*/
 		headerHash := header.Hash()
+		prevBlockHash = headerHash
+
 		rawdb.WriteHeader(tx, header)
 		err = rawdb.WriteCanonicalHash(tx, headerHash, blockNum)
 		if err != nil {
@@ -300,6 +312,7 @@ Loop:
 
 func executeBlockZk(
 	block *types.Block,
+	prevBlockHash *common.Hash,
 	header *types.Header,
 	tx kv.RwTx,
 	batch ethdb.Database,
@@ -339,7 +352,7 @@ func executeBlockZk(
 	var execRs *core.EphemeralExecResult
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
 
-	execRs, err = core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, tx, roHermezDb)
+	execRs, err = core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, prevBlockHash, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, tx, roHermezDb)
 
 	if err != nil {
 		return err

@@ -424,7 +424,7 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		return nil, err
 	}
 
-	err = batch.CreateBucket(hermez_db.GLOBAL_EXIT_ROOTS)
+	err = batch.CreateBucket(hermez_db.BLOCK_GLOBAL_EXIT_ROOTS)
 	if err != nil {
 		return nil, err
 	}
@@ -741,7 +741,7 @@ func getLatestSequencedBatchNo(tx kv.Tx) (uint64, error) {
 }
 
 func getGlobalExitRoot(tx kv.Tx, l2Block uint64) (common.Hash, error) {
-	d, err := tx.GetOne(hermez_db.GLOBAL_EXIT_ROOTS, hermez_db.Uint64ToBytes(l2Block))
+	d, err := tx.GetOne(hermez_db.BLOCK_GLOBAL_EXIT_ROOTS, hermez_db.Uint64ToBytes(l2Block))
 	if err != nil {
 		return common.Hash{}, err
 	}

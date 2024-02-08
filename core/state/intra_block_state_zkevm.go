@@ -12,12 +12,13 @@ import (
 )
 
 var (
-	LAST_BLOCK_STORAGE_POS      = libcommon.HexToHash("0x0")
-	STATE_ROOT_STORAGE_POS      = libcommon.HexToHash("0x1")
-	TIMESTAMP_STORAGE_POS       = libcommon.HexToHash("0x2")
-	BLOCK_INFO_ROOT_STORAGE_POS = libcommon.HexToHash("0x3")
-	ADDRESS_SCALABLE_L2         = libcommon.HexToAddress("0x000000000000000000000000000000005ca1ab1e")
-	GER_MANAGER_ADDRESS         = libcommon.HexToAddress("0xa40D5f56745a118D0906a34E69aeC8C0Db1cB8fA")
+	LAST_BLOCK_STORAGE_POS       = libcommon.HexToHash("0x0")
+	STATE_ROOT_STORAGE_POS       = libcommon.HexToHash("0x1")
+	TIMESTAMP_STORAGE_POS        = libcommon.HexToHash("0x2")
+	BLOCK_INFO_ROOT_STORAGE_POS  = libcommon.HexToHash("0x3")
+	ADDRESS_SCALABLE_L2          = libcommon.HexToAddress("0x000000000000000000000000000000005ca1ab1e")
+	GER_MANAGER_ADDRESS          = libcommon.HexToAddress("0xa40D5f56745a118D0906a34E69aeC8C0Db1cB8fA")
+	GLOBAL_EXIT_ROOT_STORAGE_POS = libcommon.HexToHash("0x0")
 )
 
 type ReadOnlyHermezDb interface {
@@ -61,6 +62,49 @@ func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockN
 
 		//save prev block hash
 		sdb.scalableSetBlockHash(blockNumber-1, stateRoot)
+	}
+}
+
+func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, stateRoot, blockGer, l1BlockHash *libcommon.Hash, gerUpdates *[]*dstypes.GerUpdate) {
+	if !sdb.Exist(ADDRESS_SCALABLE_L2) {
+		// create account if not exists
+		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)
+	}
+
+	//save block number
+	sdb.scalableSetBlockNum(blockNumber)
+	emptyHash := libcommon.Hash{}
+
+	//ETROG
+	if chainConfig.IsForkID7Etrog(blockNumber) {
+		currentTimestamp := sdb.ScalableGetTimestamp()
+		if blockTimestamp > currentTimestamp {
+			sdb.ScalableSetTimestamp(blockTimestamp)
+		}
+
+		//save prev block hash
+		sdb.scalableSetBlockHash(blockNumber-1, stateRoot)
+
+		//save ger with l1blockhash
+		if blockGer != nil && *blockGer != emptyHash {
+			sdb.WriteGerManagerL1BlockHash(*blockGer, *l1BlockHash)
+		}
+	} else {
+		if blockGer != nil && *blockGer != emptyHash {
+			blockGerUpdate := dstypes.GerUpdate{
+				GlobalExitRoot: *blockGer,
+				Timestamp:      blockTimestamp,
+			}
+			*gerUpdates = append(*gerUpdates, &blockGerUpdate)
+		}
+
+		for _, ger := range *gerUpdates {
+			//save ger
+			if ger != nil {
+				sdb.WriteGlobalExitRootTimestamp(ger.GlobalExitRoot, ger.Timestamp)
+			}
+		}
+
 	}
 }
 
@@ -128,7 +172,7 @@ func (sdb *IntraBlockState) ScalableSetBlockNumberToHash(blockNumber uint64, rod
 
 func (sdb *IntraBlockState) ReadGerManagerL1BlockHash(ger libcommon.Hash) libcommon.Hash {
 	d1 := common.LeftPadBytes(ger.Bytes(), 32)
-	d2 := common.LeftPadBytes(uint256.NewInt(0).Bytes(), 32)
+	d2 := common.LeftPadBytes(GLOBAL_EXIT_ROOT_STORAGE_POS.Bytes(), 32)
 	mapKey := keccak256.Hash(d1, d2)
 	mkh := libcommon.BytesToHash(mapKey)
 	key := uint256.NewInt(0)
@@ -141,10 +185,19 @@ func (sdb *IntraBlockState) ReadGerManagerL1BlockHash(ger libcommon.Hash) libcom
 
 func (sdb *IntraBlockState) WriteGerManagerL1BlockHash(ger, l1BlockHash libcommon.Hash) {
 	d1 := common.LeftPadBytes(ger.Bytes(), 32)
-	d2 := common.LeftPadBytes(uint256.NewInt(0).Bytes(), 32)
+	d2 := common.LeftPadBytes(GLOBAL_EXIT_ROOT_STORAGE_POS.Bytes(), 32)
 	mapKey := keccak256.Hash(d1, d2)
 	mkh := libcommon.BytesToHash(mapKey)
 	val := uint256.NewInt(0).SetBytes(l1BlockHash.Bytes())
+	sdb.SetState(GER_MANAGER_ADDRESS, &mkh, *val)
+}
+
+func (sdb *IntraBlockState) WriteGlobalExitRootTimestamp(ger libcommon.Hash, timestamp uint64) {
+	d1 := common.LeftPadBytes(ger.Bytes(), 32)
+	d2 := common.LeftPadBytes(GLOBAL_EXIT_ROOT_STORAGE_POS.Bytes(), 32)
+	mapKey := keccak256.Hash(d1, d2)
+	mkh := libcommon.BytesToHash(mapKey)
+	val := uint256.NewInt(0).SetUint64(timestamp)
 	sdb.SetState(GER_MANAGER_ADDRESS, &mkh, *val)
 }
 

@@ -12,6 +12,10 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
+const (
+	BlockGasLimit = 18446744073709551615
+)
+
 type BlockInfoTree struct {
 	smt *smt.SMT
 }
@@ -75,7 +79,9 @@ func (b *BlockInfoTree) SetBlockTx(
 	if err != nil {
 		return nil, err
 	}
-	_, err = setCumulativeGasUsed(b.smt, txIndexBig, big.NewInt(int64(cumulativeGasUsed)))
+
+	bigCumulativeGasUsed := big.NewInt(0).SetUint64(cumulativeGasUsed)
+	_, err = setCumulativeGasUsed(b.smt, txIndexBig, bigCumulativeGasUsed)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +123,8 @@ func (b *BlockInfoTree) SetBlockGasUsed(gasUsed uint64) (*big.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := b.smt.InsertKA(key, big.NewInt(int64(gasUsed)))
+	gasUsedBig := big.NewInt(0).SetUint64(gasUsed)
+	resp, err := b.smt.InsertKA(key, gasUsedBig)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +228,9 @@ func setGasLimit(smt *smt.SMT, gasLimit uint64) (*big.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := smt.InsertKA(key, big.NewInt(int64(gasLimit)))
+	gasLimitBig := big.NewInt(0).SetUint64(gasLimit)
+
+	resp, err := smt.InsertKA(key, gasLimitBig)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +243,9 @@ func setBlockNumber(smt *smt.SMT, blockNumber uint64) (*big.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := smt.InsertKA(key, big.NewInt(int64(blockNumber)))
+
+	blockNumberBig := big.NewInt(0).SetUint64(blockNumber)
+	resp, err := smt.InsertKA(key, blockNumberBig)
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +258,9 @@ func setTimestamp(smt *smt.SMT, timestamp uint64) (*big.Int, error) {
 	if err != nil {
 		return nil, err
 	}
-	resp, err := smt.InsertKA(key, big.NewInt(int64(timestamp)))
+	timestampBig := big.NewInt(0).SetUint64(timestamp)
+
+	resp, err := smt.InsertKA(key, timestampBig)
 	if err != nil {
 		return nil, err
 	}

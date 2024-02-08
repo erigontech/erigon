@@ -27,7 +27,7 @@ func (db ErigonDb) WriteHeader(
 	blockNo *big.Int,
 	stateRoot, txHash, parentHash common.Hash,
 	coinbase common.Address,
-	ts uint64,
+	ts, gasLimit uint64,
 ) (*ethTypes.Header, error) {
 	h := &ethTypes.Header{
 		ParentHash: parentHash,
@@ -37,7 +37,7 @@ func (db ErigonDb) WriteHeader(
 		TxHash:     txHash,
 		Difficulty: big.NewInt(0),
 		Number:     blockNo,
-		GasLimit:   30_000_000,
+		GasLimit:   gasLimit,
 		Time:       ts,
 		Extra:      make([]byte, 0),
 	}

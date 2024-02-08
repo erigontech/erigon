@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/erigon/chain"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
-	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -36,15 +35,17 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
-	"github.com/ledgerwatch/erigon/zk/utils"
 )
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
 // writes the result to the provided stateWriter
 func ExecuteBlockEphemerallyZk(
-	chainConfig *chain.Config, vmConfig *vm.Config,
+	chainConfig *chain.Config,
+	vmConfig *vm.Config,
 	blockHashFunc func(n uint64) libcommon.Hash,
-	engine consensus.Engine, block *types.Block,
+	engine consensus.Engine,
+	prevBlockHash *libcommon.Hash,
+	block *types.Block,
 	stateReader state.StateReader,
 	stateWriter state.WriterWithChangeSets,
 	chainReader consensus.ChainHeaderReader,
@@ -57,10 +58,10 @@ func ExecuteBlockEphemerallyZk(
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
-
-	usedGas := new(uint64)
+	blockTransaction := block.Transactions()
+	blockGasLimit := block.GasLimit()
 	gp := new(GasPool)
-	gp.AddGas(block.GasLimit())
+	gp.AddGas(blockGasLimit)
 
 	var (
 		rejectedTxs []*RejectedTx
@@ -78,7 +79,7 @@ func ExecuteBlockEphemerallyZk(
 	}
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, block.Header(), block.Transactions(), block.Uncles(), chainConfig, ibs, excessDataGas); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, header, blockTransaction, block.Uncles(), chainConfig, ibs, excessDataGas); err != nil {
 			return nil, err
 		}
 	}
@@ -87,16 +88,7 @@ func ExecuteBlockEphemerallyZk(
 		misc.ApplyDAOHardFork(ibs)
 	}
 
-	// the state root of the previous block is written into state
-	// this should be fine since we get block 0 from the datastream
-	stateRoot, err := roHermezDb.GetStateRoot(block.NumberU64() - 1)
-	if err != nil {
-		return nil, err
-	}
-
 	blockNum := block.NumberU64()
-
-	gers := []*dstypes.GerUpdate{}
 
 	//[zkevm] - get the last batch number so we can check for empty batches in between it and the new one
 	lastBatchInserted, err := roHermezDb.GetBatchNoByL2Block(blockNum - 1)
@@ -117,60 +109,35 @@ func ExecuteBlockEphemerallyZk(
 		return nil, err
 	}
 
-	if gersInBetween != nil {
-		gers = append(gers, gersInBetween...)
-	}
-
 	blockGer, l1BlockHash, err := roHermezDb.GetBlockGlobalExitRoot(blockNum)
 	if err != nil {
 		return nil, err
 	}
+	blockTime := block.Time()
+	ibs.SyncerPreExecuteStateSet(chainConfig, blockNum, blockTime, prevBlockHash, &blockGer, &l1BlockHash, &gersInBetween)
 
-	blockGerUpdate := dstypes.GerUpdate{
-		GlobalExitRoot: blockGer,
-		Timestamp:      header.Time,
-	}
-	gers = append(gers, &blockGerUpdate)
+	blockInfoTree := blockinfo.NewBlockInfoTree()
+	if chainConfig.IsForkID7Etrog(blockNum) {
+		coinbase := block.Coinbase()
 
-	var emptyHash = libcommon.Hash{0}
-
-	for _, ger := range gers {
-		if ger.GlobalExitRoot == emptyHash {
-			// etrog - if l1blockhash is set, this is an etrog GER
-			if err := utils.WriteGlobalExitRootEtrog(stateWriter, ger.GlobalExitRoot); err != nil {
-				return nil, err
-			}
-		} else {
-			// [zkevm] - add GER if there is one for this batch
-			if err := utils.WriteGlobalExitRoot(stateReader, stateWriter, ger.GlobalExitRoot, ger.Timestamp); err != nil {
-				return nil, err
-			}
+		if err := blockInfoTree.InitBlockHeader(
+			prevBlockHash,
+			&coinbase,
+			blockNum,
+			blockGasLimit,
+			blockTime,
+			&blockGer,
+			&l1BlockHash,
+		); err != nil {
+			return nil, err
 		}
 	}
 
-	// [zkevm] - finished writing global exit root to state
-
-	ibs.PreExecuteStateSet(chainConfig, block.NumberU64(), block.Time(), &stateRoot)
-
-	blockInfoTree := blockinfo.NewBlockInfoTree()
-	parentHash := block.ParentHash()
-	coinbase := block.Coinbase()
-	if err := blockInfoTree.InitBlockHeader(
-		&parentHash,
-		&coinbase,
-		blockNum,
-		block.GasLimit(),
-		block.Time(),
-		&blockGer,
-		&l1BlockHash,
-	); err != nil {
-		return nil, err
-	}
-
 	noop := state.NewNoopWriter()
-	cumulativeGasUsed := uint64(0)
 	logIndex := int64(0)
-	for txIndex, tx := range block.Transactions() {
+	usedGas := new(uint64)
+
+	for txIndex, tx := range blockTransaction {
 		ibs.Prepare(tx.Hash(), block.Hash(), txIndex)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
@@ -182,7 +149,7 @@ func ExecuteBlockEphemerallyZk(
 			writeTrace = true
 		}
 
-		gp.Reset(block.GasLimit())
+		gp.Reset(blockGasLimit)
 
 		effectiveGasPricePercentage, err := roHermezDb.GetEffectiveGasPricePercentage(tx.Hash())
 		if err != nil {
@@ -213,17 +180,18 @@ func ExecuteBlockEphemerallyZk(
 			ibs.ScalableSetSmtRootHash(roHermezDb)
 		}
 
-		//block info tree
-		cumulativeGasUsed += receipt.GasUsed
-		_, err = blockInfoTree.SetBlockTx(
-			txIndex,
-			receipt,
-			logIndex,
-			cumulativeGasUsed,
-			effectiveGasPricePercentage,
-		)
-		if err != nil {
-			return nil, err
+		if chainConfig.IsForkID7Etrog(blockNum) {
+			//block info tree
+			_, err = blockInfoTree.SetBlockTx(
+				txIndex,
+				receipt,
+				logIndex,
+				*usedGas,
+				effectiveGasPricePercentage,
+			)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		// increment logIndex for next turn
@@ -231,12 +199,16 @@ func ExecuteBlockEphemerallyZk(
 		logIndex += int64(len(receipt.Logs))
 	}
 
-	// [zkevm] - set the block info tree root
-	root, err := blockInfoTree.SetBlockGasUsed(cumulativeGasUsed)
-	if err != nil {
-		return nil, err
+	var l1InfoRoot libcommon.Hash
+	if chainConfig.IsForkID7Etrog(blockNum) {
+		// [zkevm] - set the block info tree root
+		root, err := blockInfoTree.SetBlockGasUsed(*usedGas)
+		if err != nil {
+			return nil, err
+		}
+		l1InfoRoot = libcommon.BigToHash(root)
 	}
-	l1InfoRoot := libcommon.BigToHash(root)
+
 	ibs.PostExecuteStateSet(chainConfig, block.NumberU64(), &l1InfoRoot)
 
 	receiptSha := types.DeriveSha(receipts)
@@ -259,7 +231,7 @@ func ExecuteBlockEphemerallyZk(
 		//}
 	}
 	if !vmConfig.ReadOnly {
-		txs := block.Transactions()
+		txs := blockTransaction
 		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, excessDataGas); err != nil {
 			return nil, err
 		}
