@@ -290,7 +290,7 @@ func ConsensusClStages(ctx context.Context,
 								}
 								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
 							}
-							if err := processBlock(tx, block, false, false); err != nil {
+							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								return highestSlotProcessed, highestBlockRootProcessed, err
 							}
