@@ -1,3 +1,5 @@
+//go:build integration
+
 package historical_states_reader_test
 
 import (
