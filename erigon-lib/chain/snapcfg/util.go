@@ -3,7 +3,6 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -144,12 +143,10 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 		v, name, ok := strings.Cut(p.Name, "-")
 
 		if !ok {
-			if strings.HasPrefix(name, "history") || strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "domain") {
-				bestVersions.Set(name, p)
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
 				continue
 			}
-			fmt.Printf("[dbg] skip10: %s\n", p.Name)
-
 			continue
 		}
 
@@ -166,7 +163,6 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 			}
 
 			if !include {
-				fmt.Printf("[dbg] skip11: %s\n", p.Name)
 				continue
 			}
 		}
@@ -174,12 +170,10 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 		version, err := snaptype.ParseVersion(v)
 
 		if err != nil {
-			fmt.Printf("[dbg] skip12: %s\n", p.Name)
 			continue
 		}
 
 		if version < minVersion {
-			fmt.Printf("[dbg] skip13: %s\n", p.Name)
 			continue
 		}
 
