@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -98,8 +97,6 @@ Loop:
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
 				}
-				fmt.Println(responses[0].Block.Slot, responses[len(responses)-1].Block.Slot)
-				fmt.Println(len(responses))
 				atomicResp.Store(responses)
 			}()
 		case <-ctx.Done():
