@@ -64,18 +64,18 @@ func (mr *MockPeerManagerMockRecorder) MaxPeers() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxPeers", reflect.TypeOf((*MockPeerManager)(nil).MaxPeers))
 }
 
-// PeerBlockNumInfos mocks base method.
-func (m *MockPeerManager) PeerBlockNumInfos() PeerBlockNumInfos {
+// PeersSyncProgress mocks base method.
+func (m *MockPeerManager) PeersSyncProgress() PeersSyncProgress {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PeerBlockNumInfos")
-	ret0, _ := ret[0].(PeerBlockNumInfos)
+	ret := m.ctrl.Call(m, "PeersSyncProgress")
+	ret0, _ := ret[0].(PeersSyncProgress)
 	return ret0
 }
 
-// PeerBlockNumInfos indicates an expected call of PeerBlockNumInfos.
-func (mr *MockPeerManagerMockRecorder) PeerBlockNumInfos() *gomock.Call {
+// PeersSyncProgress indicates an expected call of PeersSyncProgress.
+func (mr *MockPeerManagerMockRecorder) PeersSyncProgress() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeerBlockNumInfos", reflect.TypeOf((*MockPeerManager)(nil).PeerBlockNumInfos))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeersSyncProgress", reflect.TypeOf((*MockPeerManager)(nil).PeersSyncProgress))
 }
 
 // Penalize mocks base method.

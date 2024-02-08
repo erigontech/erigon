@@ -12,45 +12,45 @@ import (
 	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 )
 
-type msgListener struct {
+type messageListener struct {
 	logger    log.Logger
 	sentry    direct.SentryClient
-	observers map[protosentry.MessageId]map[msgObserver]struct{}
+	observers map[protosentry.MessageId]map[messageObserver]struct{}
 }
 
-func (ml *msgListener) Listen(ctx context.Context) {
+func (ml *messageListener) Listen(ctx context.Context) {
 	go ml.listenBlockHeaders66(ctx)
 }
 
-func (ml *msgListener) RegisterBlockHeaders66(observer msgObserver) {
+func (ml *messageListener) RegisterBlockHeaders66(observer messageObserver) {
 	msgId := protosentry.MessageId_BLOCK_HEADERS_66
 	if observers, ok := ml.observers[msgId]; ok {
 		observers[observer] = struct{}{}
 	} else {
-		ml.observers[msgId] = map[msgObserver]struct{}{
+		ml.observers[msgId] = map[messageObserver]struct{}{
 			observer: {},
 		}
 	}
 }
 
-func (ml *msgListener) UnregisterBlockHeaders66(observer msgObserver) {
+func (ml *messageListener) UnregisterBlockHeaders66(observer messageObserver) {
 	msgId := protosentry.MessageId_BLOCK_HEADERS_66
 	if observers, ok := ml.observers[msgId]; ok {
 		delete(observers, observer)
 	}
 }
 
-func (ml *msgListener) listenBlockHeaders66(ctx context.Context) {
-	ml.listenInboundMsg(ctx, "BlockHeaders66", protosentry.MessageId_BLOCK_HEADERS_66)
+func (ml *messageListener) listenBlockHeaders66(ctx context.Context) {
+	ml.listenInboundMessage(ctx, "BlockHeaders66", protosentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *msgListener) listenInboundMsg(ctx context.Context, name string, msgIds ...protosentry.MessageId) {
+func (ml *messageListener) listenInboundMessage(ctx context.Context, name string, msgId protosentry.MessageId) {
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
 		ctx,
 		ml.sentry,
 		ml.statusDataFactory(),
 		name,
-		ml.messageStreamFactory(msgIds),
+		ml.messageStreamFactory([]protosentry.MessageId{msgId}),
 		ml.inboundMessageFactory(),
 		ml.handleInboundMessageHandler(),
 		nil,
@@ -58,32 +58,32 @@ func (ml *msgListener) listenInboundMsg(ctx context.Context, name string, msgIds
 	)
 }
 
-func (ml *msgListener) statusDataFactory() sentrymulticlient.StatusDataFactory {
+func (ml *messageListener) statusDataFactory() sentrymulticlient.StatusDataFactory {
 	return func() *sentry.StatusData {
 		return &sentry.StatusData{}
 	}
 }
 
-func (ml *msgListener) messageStreamFactory(ids []protosentry.MessageId) sentrymulticlient.SentryMessageStreamFactory {
+func (ml *messageListener) messageStreamFactory(ids []protosentry.MessageId) sentrymulticlient.SentryMessageStreamFactory {
 	return func(streamCtx context.Context, sentry direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
 		return sentry.Messages(streamCtx, &protosentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 }
 
-func (ml *msgListener) inboundMessageFactory() sentrymulticlient.MessageFactory[*protosentry.InboundMessage] {
+func (ml *messageListener) inboundMessageFactory() sentrymulticlient.MessageFactory[*protosentry.InboundMessage] {
 	return func() *protosentry.InboundMessage {
 		return new(protosentry.InboundMessage)
 	}
 }
 
-func (ml *msgListener) handleInboundMessageHandler() sentrymulticlient.InboundMessageHandler[*protosentry.InboundMessage] {
+func (ml *messageListener) handleInboundMessageHandler() sentrymulticlient.InboundMessageHandler[*protosentry.InboundMessage] {
 	return func(_ context.Context, msg *protosentry.InboundMessage, _ direct.SentryClient) error {
 		ml.notifyObservers(msg)
 		return nil
 	}
 }
 
-func (ml *msgListener) notifyObservers(msg *protosentry.InboundMessage) {
+func (ml *messageListener) notifyObservers(msg *protosentry.InboundMessage) {
 	observers, ok := ml.observers[msg.Id]
 	if !ok {
 		return

@@ -18,17 +18,17 @@ import (
 //go:generate mockgen -destination=./peer_manager_mock.go -package=p2p . PeerManager
 type PeerManager interface {
 	MaxPeers() int
-	PeerBlockNumInfos() PeerBlockNumInfos
+	PeersSyncProgress() PeersSyncProgress
 	DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 	Penalize(peerId PeerId)
 }
 
 func NewPeerManager(logger log.Logger, sentry direct.SentryClient) PeerManager {
 	return &peerManager{
-		msgBroadcaster: msgBroadcaster{
+		msgBroadcaster: messageBroadcaster{
 			sentry: sentry,
 		},
-		msgListener: msgListener{
+		msgListener: messageListener{
 			logger: logger,
 			sentry: sentry,
 		},
@@ -36,8 +36,8 @@ func NewPeerManager(logger log.Logger, sentry direct.SentryClient) PeerManager {
 }
 
 type peerManager struct {
-	msgBroadcaster msgBroadcaster
-	msgListener    msgListener
+	msgBroadcaster messageBroadcaster
+	msgListener    messageListener
 }
 
 func (pm *peerManager) DownloadHeaders(ctx context.Context, start uint64, end uint64, pid PeerId) ([]*types.Header, error) {
@@ -48,7 +48,7 @@ func (pm *peerManager) DownloadHeaders(ctx context.Context, start uint64, end ui
 	var headers []*types.Header
 	reqId := rand.Uint64()
 
-	observer := make(chanMsgObserver)
+	observer := make(chanMessageObserver)
 	pm.msgListener.RegisterBlockHeaders66(observer)
 	defer pm.msgListener.UnregisterBlockHeaders66(observer)
 
@@ -111,7 +111,7 @@ func (pm *peerManager) MaxPeers() int {
 	panic("implement me")
 }
 
-func (pm *peerManager) PeerBlockNumInfos() PeerBlockNumInfos {
+func (pm *peerManager) PeersSyncProgress() PeersSyncProgress {
 	//TODO implement me
 	panic("implement me")
 }

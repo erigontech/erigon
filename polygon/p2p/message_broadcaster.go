@@ -9,11 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-type msgBroadcaster struct {
+type messageBroadcaster struct {
 	sentry direct.SentryClient
 }
 
-func (mb *msgBroadcaster) GetBlockHeaders66(ctx context.Context, pid PeerId, req eth.GetBlockHeadersPacket66) error {
+func (mb *messageBroadcaster) GetBlockHeaders66(ctx context.Context, pid PeerId, req eth.GetBlockHeadersPacket66) error {
 	data, err := rlp.EncodeToBytes(req)
 	if err != nil {
 		return err

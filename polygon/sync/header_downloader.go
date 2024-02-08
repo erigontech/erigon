@@ -77,7 +77,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 	}
 
 	for len(waypoints) > 0 {
-		allPeers := hd.peerManager.PeerBlockNumInfos()
+		allPeers := hd.peerManager.PeersSyncProgress()
 		if len(allPeers) == 0 {
 			hd.logger.Warn(fmt.Sprintf("[%s] zero peers, will try again", headerDownloaderLogPrefix))
 			continue
@@ -90,7 +90,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 				fmt.Sprintf("[%s] can't use any peers to sync, will try again", headerDownloaderLogPrefix),
 				"start", waypoints[0].StartBlock(),
 				"end", waypoints[len(waypoints)-1].EndBlock(),
-				"minPeerBlockNum", allPeers[0].BlockNum,
+				"lowestMaxSeenBlockNum", allPeers[0].MaxSeenBlockNum,
 				"minPeerID", allPeers[0].Id,
 			)
 			continue
@@ -199,16 +199,16 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 }
 
 // choosePeers assumes peers are sorted in ascending order based on block num
-func (hd *HeaderDownloader) choosePeers(peers p2p.PeerBlockNumInfos, waypoints heimdall.Waypoints) p2p.PeerBlockNumInfos {
+func (hd *HeaderDownloader) choosePeers(peers p2p.PeersSyncProgress, waypoints heimdall.Waypoints) p2p.PeersSyncProgress {
 	var peersIdx int
-	chosenPeers := make(p2p.PeerBlockNumInfos, 0, len(peers))
+	chosenPeers := make(p2p.PeersSyncProgress, 0, len(peers))
 	for _, waypoint := range waypoints {
 		if peersIdx >= len(peers) {
 			break
 		}
 
 		peer := peers[peersIdx]
-		if peer.BlockNum >= waypoint.EndBlock().Uint64() {
+		if peer.MaxSeenBlockNum >= waypoint.EndBlock().Uint64() {
 			chosenPeers = append(chosenPeers, peer)
 		}
 

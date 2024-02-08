@@ -65,8 +65,8 @@ type headerDownloaderTest struct {
 	headerDownloader *HeaderDownloader
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...uint64) p2p.PeerBlockNumInfos {
-	peers := make(p2p.PeerBlockNumInfos, count)
+func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...uint64) p2p.PeersSyncProgress {
+	peers := make(p2p.PeersSyncProgress, count)
 	for i := range peers {
 		var blockNum uint64
 		if i < len(blockNums) {
@@ -77,9 +77,9 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...uint64) p2p.Pe
 
 		pidBytes := make([]byte, 64)
 		binary.LittleEndian.PutUint64(pidBytes, uint64(i))
-		peers[i] = &p2p.PeerBlockNumInfo{
-			Id:       p2p.PeerId(pidBytes),
-			BlockNum: blockNum,
+		peers[i] = &p2p.PeerSyncProgress{
+			Id:              p2p.PeerId(pidBytes),
+			MaxSeenBlockNum: blockNum,
 		}
 	}
 
@@ -144,7 +144,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		Return(test.fakeMilestones(4), nil).
 		Times(1)
 	test.peerManager.EXPECT().
-		PeerBlockNumInfos().
+		PeersSyncProgress().
 		Return(test.fakePeers(8)).
 		Times(1)
 	test.peerManager.EXPECT().
@@ -174,7 +174,7 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.peerManager.EXPECT().
-		PeerBlockNumInfos().
+		PeersSyncProgress().
 		Return(test.fakePeers(2)).
 		Times(4)
 	test.peerManager.EXPECT().
@@ -218,7 +218,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.peerManager.EXPECT().
-		PeerBlockNumInfos().
+		PeersSyncProgress().
 		Return(test.fakePeers(3)).
 		Times(3)
 	test.peerManager.EXPECT().
@@ -271,17 +271,17 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 	gomock.InOrder(
 		// first, no peers at all
 		test.peerManager.EXPECT().
-			PeerBlockNumInfos().
+			PeersSyncProgress().
 			Return(nil).
 			Times(1),
 		// second, 2 peers but not synced enough for us to use
 		test.peerManager.EXPECT().
-			PeerBlockNumInfos().
+			PeersSyncProgress().
 			Return(test.fakePeers(2, 0, 0)).
 			Times(1),
 		// then, 2 fully synced peers that we can use
 		test.peerManager.EXPECT().
-			PeerBlockNumInfos().
+			PeersSyncProgress().
 			Return(test.fakePeers(2)).
 			Times(4),
 	)
