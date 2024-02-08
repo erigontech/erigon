@@ -22,23 +22,23 @@ const headerDownloaderLogPrefix = "HeaderDownloader"
 
 func NewHeaderDownloader(
 	logger log.Logger,
-	peerManager p2p.PeerManager,
+	p2pService p2p.Service,
 	heimdall heimdall.Heimdall,
 	verify AccumulatedHeadersVerifier,
 ) *HeaderDownloader {
 	return &HeaderDownloader{
-		logger:      logger,
-		peerManager: peerManager,
-		heimdall:    heimdall,
-		verify:      verify,
+		logger:     logger,
+		p2pService: p2pService,
+		heimdall:   heimdall,
+		verify:     verify,
 	}
 }
 
 type HeaderDownloader struct {
-	logger      log.Logger
-	peerManager p2p.PeerManager
-	heimdall    heimdall.Heimdall
-	verify      AccumulatedHeadersVerifier
+	logger     log.Logger
+	p2pService p2p.Service
+	heimdall   heimdall.Heimdall
+	verify     AccumulatedHeadersVerifier
 }
 
 func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, store CheckpointStore, start uint64) error {
@@ -71,13 +71,13 @@ func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, store M
 
 func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store HeaderStore, waypoints heimdall.Waypoints) error {
 	// waypoint rootHash->[headers part of waypoint]
-	waypointHeadersMemo, err := lru.New[common.Hash, []*types.Header](hd.peerManager.MaxPeers())
+	waypointHeadersMemo, err := lru.New[common.Hash, []*types.Header](hd.p2pService.MaxPeers())
 	if err != nil {
 		return err
 	}
 
 	for len(waypoints) > 0 {
-		allPeers := hd.peerManager.PeersSyncProgress()
+		allPeers := hd.p2pService.PeersSyncProgress()
 		if len(allPeers) == 0 {
 			hd.logger.Warn(fmt.Sprintf("[%s] zero peers, will try again", headerDownloaderLogPrefix))
 			continue
@@ -91,7 +91,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 				"start", waypoints[0].StartBlock(),
 				"end", waypoints[len(waypoints)-1].EndBlock(),
 				"lowestMaxSeenBlockNum", allPeers[0].MaxSeenBlockNum,
-				"minPeerID", allPeers[0].Id,
+				"lowestPeerId", allPeers[0].Id,
 			)
 			continue
 		}
@@ -121,7 +121,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 				}
 
 				start, end := waypoint.StartBlock().Uint64(), waypoint.EndBlock().Uint64()
-				headers, err := hd.peerManager.DownloadHeaders(ctx, start, end, peerId)
+				headers, err := hd.p2pService.DownloadHeaders(ctx, start, end, peerId)
 				if err != nil {
 					hd.logger.Debug(
 						fmt.Sprintf("[%s] issue downloading headers, will try again", headerDownloaderLogPrefix),
@@ -148,7 +148,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 						"peerId", peerId,
 					)
 
-					hd.peerManager.Penalize(peerId)
+					hd.p2pService.Penalize(peerId)
 					return
 				}
 
