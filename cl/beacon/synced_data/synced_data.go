@@ -5,7 +5,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -58,14 +57,7 @@ func (s *SyncedDataManager) Syncing() bool {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.headState == nil {
-		return true
-	}
-
-	headEpoch := utils.GetCurrentEpoch(s.headState.GenesisTime(), s.cfg.SecondsPerSlot, s.cfg.SlotsPerEpoch)
-	// surplusMargin, give it a go if we are within 2 epochs of the head
-	surplusMargin := s.cfg.SlotsPerEpoch * 2
-	return s.headState.Slot()+surplusMargin < headEpoch
+	return s.headState == nil
 }
 
 func (s *SyncedDataManager) HeadSlot() uint64 {

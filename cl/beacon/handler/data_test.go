@@ -1,4 +1,4 @@
-package handler_test
+package handler
 
 import (
 	"embed"
@@ -44,6 +44,7 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 		}
 	}
 	_, blocks, _, _, postState, handler, _, sm, fcu := setupTestingHandler(c.t, c.v, logger)
+
 	var err error
 
 	lastBlockRoot, err := blocks[len(blocks)-1].Block.HashSSZ()
@@ -106,8 +107,8 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 
 		fcu.FinalizedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 1)
 		fcu.JustifiedCheckpointVal = solid.NewCheckpointFromParameters(common.Hash{1, 2, 3}, 2)
-
 	}
+	sm.OnHeadState(postState)
 
 	return []beacontest.HarnessOption{
 		beacontest.WithTesting(c.t),

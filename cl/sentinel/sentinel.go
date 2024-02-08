@@ -75,7 +75,6 @@ type Sentinel struct {
 
 	httpApi http.Handler
 
-	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
 	db         persistence.RawBeaconBlockChain
@@ -165,20 +164,14 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	// TODO: Set up proper attestation number
-	s.metadataV2 = &cltypes.Metadata{
-		SeqNumber: localNode.Seq(),
-		Attnets:   0,
-		Syncnets:  new([1]byte),
-	}
-
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
 
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
+	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.handshaker, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
+
 	return net, err
 }
 
@@ -376,9 +369,9 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 	return out
 }
 
-func (s *Sentinel) Identity() (pid, enr string, p2pAddresses, discoveryAddresses []string, metadata *cltypes.Metadata) {
+func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddresses []string, metadata *cltypes.Metadata) {
 	pid = s.host.ID().String()
-	enr = s.listener.LocalNode().Node().String()
+	enrStr = s.listener.LocalNode().Node().String()
 	p2pAddresses = make([]string, 0, len(s.host.Addrs()))
 	for _, addr := range s.host.Addrs() {
 		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/%s", addr.String(), pid))
@@ -401,7 +394,21 @@ func (s *Sentinel) Identity() (pid, enr string, p2pAddresses, discoveryAddresses
 		port := s.listener.LocalNode().Node().UDP()
 		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
 	}
-	metadata = s.metadataV2
+	subnetField := [8]byte{}
+	syncnetField := [1]byte{}
+	attSubEnr := enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField[:])
+	syncNetEnr := enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, syncnetField[:])
+	if err := s.listener.LocalNode().Node().Load(attSubEnr); err != nil {
+		return
+	}
+	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
+		return
+	}
+	metadata = &cltypes.Metadata{
+		SeqNumber: s.listener.LocalNode().Seq(),
+		Attnets:   subnetField,
+		Syncnets:  &syncnetField,
+	}
 	return
 }
 

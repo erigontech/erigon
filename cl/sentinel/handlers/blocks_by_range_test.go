@@ -62,9 +62,11 @@ func TestBlocksByRootHandler(t *testing.T) {
 		indiciesDB,
 		host,
 		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{}, &forkchoice.ForkChoiceStorageMock{}, true,
+		nil, &forkchoice.ForkChoiceStorageMock{}, true,
 	)
 	c.Start()
 	req := &cltypes.BeaconBlocksByRangeRequest{
