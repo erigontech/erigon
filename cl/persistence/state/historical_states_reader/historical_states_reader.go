@@ -393,8 +393,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
 		return nil, err
 	}
-	fmt.Println("ru64", lenRaw)
-	currentList := makeBigSlice(lenRaw)
+	currentList := make([]byte, lenRaw)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
@@ -425,19 +424,6 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	return currentList, err
 }
 
-// this is stupid but go does not like when MBs are allocated at once and make() would cause a crash
-func makeBigSlice(size uint64) []byte {
-	stepSize := 1024
-	stepBuf := make([]byte, stepSize)
-	var currentList []byte
-	for uint64(cap(currentList)) < size {
-		currentList = currentList[:cap(currentList)]
-		currentList = append(currentList, stepBuf...)
-	}
-	currentList = currentList[:size]
-	return currentList
-}
-
 func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diffBucket string) ([]byte, error) {
 	// Read the file
 	freshDumpSlot := slot - slot%clparams.SlotsPerDump
@@ -455,13 +441,13 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 	}
 	defer zstdReader.Close()
 
-	lenRaw := uint64(0)
-	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
+	lenBuf := make([]byte, 8)
+	if _, err := utils.ReadZSTD(zstdReader, lenBuf); err != nil {
 		return nil, err
 	}
-
-	fmt.Println("rb", lenRaw)
-	currentList := makeBigSlice(lenRaw)
+	lenRaw := binary.LittleEndian.Uint64(lenBuf)
+	fmt.Println(lenRaw, lenBuf)
+	currentList := make([]byte, lenRaw)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
@@ -537,8 +523,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64
 		return err
 	}
 	defer zstdReader.Close()
-	fmt.Println("dump", size*8)
-	currentList := makeBigSlice(uint64(size * 8))
+	currentList := make([]byte, size*8)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
