@@ -33,7 +33,18 @@ func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
 			return false, 0, err
 		}
 
+		// if we have a scenario where the L1 has no verified batches then continue on with the
+		// ones we have access to that have already been downloaded
+		if highestVerifiedBatchNo == 0 {
+			max, err := hermezDb.GetHighestBlockInBatch(highestDownloadedBatchNo)
+			if err != nil {
+				return false, 0, err
+			}
+			return false, max, nil
+		}
+
 		batchToCheck := highestVerifiedBatchNo
+
 		// in that case, we want to check up to the last batch we downloaded
 		// (otherwie we have no blocks to return)
 		if highestDownloadedBatchNo < highestVerifiedBatchNo {
@@ -51,6 +62,9 @@ func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
 			}
 			if max != 0 {
 				break
+			}
+			if batchToCheck == 0 {
+				return false, 0, fmt.Errorf("ran to batch 0 and could not find a verification on L1")
 			}
 			batchToCheck--
 			killSwitch++

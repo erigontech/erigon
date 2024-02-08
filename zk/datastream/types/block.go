@@ -114,10 +114,13 @@ func EncodeStartL2Block(block *StartL2Block) []byte {
 	b = binary.LittleEndian.AppendUint64(b, block.BatchNumber)
 	b = binary.LittleEndian.AppendUint64(b, block.L2BlockNumber)
 	b = binary.LittleEndian.AppendUint64(b, uint64(block.Timestamp))
+	b = binary.LittleEndian.AppendUint32(b, block.DeltaTimestamp)
+	b = binary.LittleEndian.AppendUint32(b, block.L1InfoTreeIndex)
 	b = append(b, block.L1BlockHash.Bytes()...)
 	b = append(b, block.GlobalExitRoot.Bytes()...)
 	b = append(b, block.Coinbase.Bytes()...)
 	b = binary.LittleEndian.AppendUint16(b, block.ForkId)
+	b = binary.LittleEndian.AppendUint32(b, block.ChainId)
 	return b
 }
 
@@ -126,10 +129,13 @@ func EncodeStartL2BlockBigEndian(block *StartL2Block) []byte {
 	b = binary.BigEndian.AppendUint64(b, block.BatchNumber)
 	b = binary.BigEndian.AppendUint64(b, block.L2BlockNumber)
 	b = binary.BigEndian.AppendUint64(b, uint64(block.Timestamp))
+	b = binary.BigEndian.AppendUint32(b, block.DeltaTimestamp)
+	b = binary.BigEndian.AppendUint32(b, block.L1InfoTreeIndex)
 	b = append(b, block.L1BlockHash.Bytes()...)
 	b = append(b, block.GlobalExitRoot.Bytes()...)
 	b = append(b, block.Coinbase.Bytes()...)
 	b = binary.BigEndian.AppendUint16(b, block.ForkId)
+	b = binary.BigEndian.AppendUint32(b, block.ChainId)
 	return b
 }
 

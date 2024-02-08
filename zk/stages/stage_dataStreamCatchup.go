@@ -104,7 +104,7 @@ func SpawnStageDataStreamCatchup(
 			return err
 		}
 
-		err = srv.AddBlockStart(genesis, batch, uint16(fork), ger, 0, 0)
+		err = srv.AddBlockStart(genesis, batch, uint16(fork), ger, 0, 0, common.Hash{})
 		if err != nil {
 			return err
 		}
@@ -252,6 +252,7 @@ LOOP:
 			lastBlock = block
 
 			var ger common.Hash
+			var l1BlockHash common.Hash
 			l1Index, err := reader.GetBlockL1InfoTreeIndex(blockNumber)
 			if err != nil {
 				return err
@@ -264,6 +265,7 @@ LOOP:
 				}
 				if l1Info != nil {
 					ger = l1Info.GER
+					l1BlockHash = l1Info.ParentHash
 				}
 			}
 
@@ -273,7 +275,7 @@ LOOP:
 				return err
 			}
 
-			err = srv.AddBlockStart(block, currentBatchNumber, uint16(fork), ger, uint32(deltaTimestamp), uint32(l1Index))
+			err = srv.AddBlockStart(block, currentBatchNumber, uint16(fork), ger, uint32(deltaTimestamp), uint32(l1Index), l1BlockHash)
 			if err != nil {
 				return err
 			}

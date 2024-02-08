@@ -32,23 +32,24 @@ func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint64) *Dat
 
 func (srv *DataStreamServer) AddBookmark(t BookmarkType, marker uint64) error {
 	bookmark := types.Bookmark{Type: byte(t), From: marker}
-	_, err := srv.stream.AddStreamBookmark(bookmark.Encode())
+	_, err := srv.stream.AddStreamBookmark(bookmark.EncodeBigEndian())
 	return err
 }
 
-func (srv *DataStreamServer) AddBlockStart(block *types2.Block, batchNumber uint64, forkId uint16, ger libcommon.Hash, deltaTimestamp uint32, l1InfoIndex uint32) error {
+func (srv *DataStreamServer) AddBlockStart(block *types2.Block, batchNumber uint64, forkId uint16, ger libcommon.Hash, deltaTimestamp uint32, l1InfoIndex uint32, l1BlockHash libcommon.Hash) error {
 	b := &types.StartL2Block{
 		BatchNumber:     batchNumber,
 		L2BlockNumber:   block.NumberU64(),
 		Timestamp:       int64(block.Time()),
 		DeltaTimestamp:  deltaTimestamp,
 		L1InfoTreeIndex: l1InfoIndex,
+		L1BlockHash:     l1BlockHash,
 		GlobalExitRoot:  ger,
 		Coinbase:        block.Coinbase(),
 		ForkId:          forkId,
 		ChainId:         uint32(srv.chainId),
 	}
-	_, err := srv.stream.AddStreamEntry(1, types.EncodeStartL2Block(b))
+	_, err := srv.stream.AddStreamEntry(1, types.EncodeStartL2BlockBigEndian(b))
 	return err
 }
 
@@ -58,7 +59,7 @@ func (srv *DataStreamServer) AddBlockEnd(blockNumber uint64, blockHash, stateRoo
 		L2Blockhash:   blockHash,
 		StateRoot:     stateRoot,
 	}
-	_, err := srv.stream.AddStreamEntry(3, types.EncodeEndL2Block(end))
+	_, err := srv.stream.AddStreamEntry(3, types.EncodeEndL2BlockBigEndian(end))
 	return err
 }
 
@@ -73,11 +74,11 @@ func (srv *DataStreamServer) AddGerUpdate(batchNumber uint64, ger libcommon.Hash
 		StateRoot:      block.Root(),
 	}
 
-	return srv.stream.AddStreamEntry(EntryTypeUpdateGer, update.EncodeToBytes())
+	return srv.stream.AddStreamEntry(EntryTypeUpdateGer, update.EncodeToBytesBigEndian())
 }
 
 func (srv *DataStreamServer) AddGerUpdateFromDb(ger *types.GerUpdate) (uint64, error) {
-	return srv.stream.AddStreamEntry(EntryTypeUpdateGer, ger.EncodeToBytes())
+	return srv.stream.AddStreamEntry(EntryTypeUpdateGer, ger.EncodeToBytesBigEndian())
 }
 
 func (srv *DataStreamServer) AddTransaction(
@@ -109,5 +110,5 @@ func (srv *DataStreamServer) AddTransaction(
 		Encoded:                     encoded,
 	}
 
-	return srv.stream.AddStreamEntry(EntryTypeL2Tx, types.EncodeL2Transaction(l2Tx))
+	return srv.stream.AddStreamEntry(EntryTypeL2Tx, types.EncodeL2TransactionBigEndian(l2Tx))
 }
