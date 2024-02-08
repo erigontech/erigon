@@ -96,3 +96,13 @@ func RandInt64() (int64, error) {
 	}
 	return n.Int64(), nil
 }
+
+// IsPrime checks if a number is prime using the Miller-Rabin.
+func IsPrime(n uint64) bool {
+	if n <= 1 {
+		return false
+	}
+	// Convert uint64 to *big.Int for the big.Int prime check method.
+	bigN := big.NewInt(0).SetUint64(n)
+	return bigN.ProbablyPrime(0)
+}
