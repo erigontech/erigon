@@ -393,7 +393,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
 		return nil, err
 	}
-	currentList := make([]byte, lenRaw)
+	currentList := makeBigSlice(int(lenRaw))
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
@@ -424,6 +424,17 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	return currentList, err
 }
 
+// this is stupid but go does not like when MBs are allocated at once and make() would cause a crash
+func makeBigSlice(size int) []byte {
+	stepBuf := make([]byte, 1024)
+	var currentList []byte
+	for i := len(currentList); i < int(size); i += 8 {
+		currentList = append(currentList, stepBuf...)
+	}
+	currentList = currentList[:size]
+	return currentList
+}
+
 func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diffBucket string) ([]byte, error) {
 	// Read the file
 	freshDumpSlot := slot - slot%clparams.SlotsPerDump
@@ -445,7 +456,8 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
 		return nil, err
 	}
-	currentList := make([]byte, lenRaw)
+
+	currentList := makeBigSlice(int(lenRaw))
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
@@ -521,7 +533,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64
 		return err
 	}
 	defer zstdReader.Close()
-	currentList := make([]byte, size*8)
+	currentList := makeBigSlice(size * 8)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
