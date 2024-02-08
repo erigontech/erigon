@@ -290,14 +290,9 @@ func ConsensusClStages(ctx context.Context,
 								}
 								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
 							}
-							if err := processBlock(tx, block, false, true); err != nil {
+							if err := processBlock(tx, block, false, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								return highestSlotProcessed, highestBlockRootProcessed, err
-							}
-							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
-								if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
-									log.Warn("failed to insert blocks", "err", err)
-								}
 							}
 
 							if highestSlotProcessed < block.Block.Slot {
@@ -307,6 +302,11 @@ func ConsensusClStages(ctx context.Context,
 								if err != nil {
 									return highestSlotProcessed, highestBlockRootProcessed, err
 								}
+							}
+						}
+						if shouldInsert {
+							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
+								log.Warn("failed to insert blocks", "err", err)
 							}
 						}
 						return highestSlotProcessed, highestBlockRootProcessed, nil
