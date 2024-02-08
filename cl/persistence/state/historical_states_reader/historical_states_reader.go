@@ -393,7 +393,8 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
 		return nil, err
 	}
-	currentList := makeBigSlice(uint64(lenRaw))
+	fmt.Println("ru64", lenRaw)
+	currentList := makeBigSlice(lenRaw)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
 		return nil, err
@@ -459,7 +460,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		return nil, err
 	}
 
-	fmt.Println(lenRaw)
+	fmt.Println("rb", lenRaw)
 	currentList := makeBigSlice(lenRaw)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
@@ -536,6 +537,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64
 		return err
 	}
 	defer zstdReader.Close()
+	fmt.Println("dump", size*8)
 	currentList := makeBigSlice(uint64(size * 8))
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
