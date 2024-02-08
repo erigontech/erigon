@@ -172,6 +172,8 @@ func (r DiscardReason) String() string {
 		return "max number of blobs exceeded"
 	case BlobTxReplace:
 		return "can't replace blob-txn with a non-blob-txn"
+	case BlobPoolOverflow:
+		return "blobs limit in txpool is full"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

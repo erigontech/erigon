@@ -19,7 +19,6 @@ package txpool
 import (
 	"bytes"
 	"context"
-	"runtime"
 
 	// "crypto/rand"
 	"fmt"
@@ -34,7 +33,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
@@ -1080,7 +1078,7 @@ func TestBlobSlots(t *testing.T) {
 	var addr [20]byte
 
 	// Add 1 eth to the user account, as a part of change
-	v := make([]byte, types.EncodeSenderLengthForStorage(0, *uint256.NewInt(10 * common.Ether)))
+	v := make([]byte, types.EncodeSenderLengthForStorage(0, *uint256.NewInt(1 * common.Ether)))
 	types.EncodeSender(0, *uint256.NewInt(1 * common.Ether), v)
 
 	for i := 0; i < 11; i++ {
@@ -1098,16 +1096,11 @@ func TestBlobSlots(t *testing.T) {
 	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
 	assert.NoError(err)
 
-	var m1, m2 runtime.MemStats
-
-	runtime.GC()
-
-	dbg.ReadMemStats(&m1)
 	//Adding 20 blobs from 10 different accounts
 	for i := 0; i < int(cfg.TotalBlobPoolLimit/2); i++ {
 		txSlots := types.TxSlots{}
 		addr[0] = uint8(i + 1)
-		blobTxn := makeBlobTx()
+		blobTxn := makeBlobTx() // makes a txn with 2 blobs
 		blobTxn.IDHash[0] = uint8(2*i + 1)
 		blobTxn.Nonce = 0
 		txSlots.Append(&blobTxn, addr[:], true)
@@ -1118,22 +1111,17 @@ func TestBlobSlots(t *testing.T) {
 		}
 	}
 
-	dbg.ReadMemStats(&m2)
-
 	// Adding another blob tx should reject
 	txSlots := types.TxSlots{}
 	addr[0] = 11
 	blobTxn := makeBlobTx()
 	blobTxn.IDHash[0] = uint8(21)
-	blobTxn.Nonce = 0x0
-	t.Logf("Total blobs in pool %d", pool.totalBlobsInPool.Load())
+	blobTxn.Nonce = 0
 
 	txSlots.Append(&blobTxn, addr[:], true)
 	reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
 	assert.NoError(err)
-	t.Logf("Reasons %v", reasons)
 	for _, reason := range reasons {
-		assert.Equal(txpoolcfg.TooManyBlobs, reason, reason.String())
+		assert.Equal(txpoolcfg.BlobPoolOverflow, reason, reason.String())
 	}
-
 }
