@@ -840,14 +840,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	return backend, nil
 }
 
-func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
+func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
 	ethBackendRPC, miningRPC, stateDiffClient := s.ethBackendRPC, s.miningRPC, s.stateChangesClient
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
 	var err error
 
-	if config.Genesis.Config.Bor == nil {
+	if chainConfig.Bor == nil {
 		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
 	}
 
@@ -903,7 +903,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		}()
 	}
 
-	if config.Genesis.Config.Bor == nil {
+	if chainConfig.Bor == nil {
 		go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 	}
 
