@@ -19,6 +19,7 @@ package txpool
 import (
 	"bytes"
 	"context"
+	"runtime"
 
 	// "crypto/rand"
 	"fmt"
@@ -33,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/u256"
@@ -1047,4 +1049,91 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	}
 	// no announcement because unprocessedRemoteTxs is already empty
 	assert.True(checkAnnouncementEmpty())
+}
+
+func TestBlobSlots(t *testing.T) {
+	assert, require := assert.New(t), require.New(t)
+	ch := make(chan types.Announcements, 5)
+	db, coreDB := memdb.NewTestPoolDB(t), memdb.NewTestDB(t)
+	cfg := txpoolcfg.DefaultConfig
+
+	//Setting limits for blobs in the pool
+	cfg.TotalBlobPoolLimit = 20
+
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ch, coreDB, cfg, sendersCache, *u256.N1, common.Big0, nil, common.Big0, fixedgas.DefaultMaxBlobsPerBlock, nil, log.New())
+	assert.NoError(err)
+	require.True(pool != nil)
+	ctx := context.Background()
+	var stateVersionID uint64 = 0
+
+	h1 := gointerfaces.ConvertHashToH256([32]byte{})
+	change := &remote.StateChangeBatch{
+		StateVersionId:       stateVersionID,
+		PendingBlockBaseFee:  200_000,
+		BlockGasLimit:        1000000,
+		PendingBlobFeePerGas: 100_000,
+		ChangeBatch: []*remote.StateChange{
+			{BlockHeight: 0, BlockHash: h1},
+		},
+	}
+	var addr [20]byte
+
+	// Add 1 eth to the user account, as a part of change
+	v := make([]byte, types.EncodeSenderLengthForStorage(0, *uint256.NewInt(10 * common.Ether)))
+	types.EncodeSender(0, *uint256.NewInt(1 * common.Ether), v)
+
+	for i := 0; i < 11; i++ {
+		addr[0] = uint8(i + 1)
+		change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remote.AccountChange{
+			Action:  remote.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(addr),
+			Data:    v,
+		})
+	}
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	err = pool.OnNewBlock(ctx, change, types.TxSlots{}, types.TxSlots{}, types.TxSlots{}, tx)
+	assert.NoError(err)
+
+	var m1, m2 runtime.MemStats
+
+	runtime.GC()
+
+	dbg.ReadMemStats(&m1)
+	//Adding 20 blobs from 10 different accounts
+	for i := 0; i < int(cfg.TotalBlobPoolLimit/2); i++ {
+		txSlots := types.TxSlots{}
+		addr[0] = uint8(i + 1)
+		blobTxn := makeBlobTx()
+		blobTxn.IDHash[0] = uint8(2*i + 1)
+		blobTxn.Nonce = 0
+		txSlots.Append(&blobTxn, addr[:], true)
+		reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+		assert.NoError(err)
+		for _, reason := range reasons {
+			assert.Equal(txpoolcfg.Success, reason, reason.String())
+		}
+	}
+
+	dbg.ReadMemStats(&m2)
+
+	// Adding another blob tx should reject
+	txSlots := types.TxSlots{}
+	addr[0] = 11
+	blobTxn := makeBlobTx()
+	blobTxn.IDHash[0] = uint8(21)
+	blobTxn.Nonce = 0x0
+	t.Logf("Total blobs in pool %d", pool.totalBlobsInPool.Load())
+
+	txSlots.Append(&blobTxn, addr[:], true)
+	reasons, err := pool.AddLocalTxs(ctx, txSlots, tx)
+	assert.NoError(err)
+	t.Logf("Reasons %v", reasons)
+	for _, reason := range reasons {
+		assert.Equal(txpoolcfg.TooManyBlobs, reason, reason.String())
+	}
+
 }
