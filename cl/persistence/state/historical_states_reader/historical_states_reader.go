@@ -446,7 +446,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		return nil, err
 	}
 	lenRaw := binary.LittleEndian.Uint64(lenBuf)
-	fmt.Println(lenRaw, lenBuf, slot, filePath)
 	currentList := make([]byte, lenRaw)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
@@ -544,7 +543,6 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 	}
 	validatorSetLength := sd.ValidatorLength
 
-	fmt.Println(validatorSetLength)
 	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
 	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
@@ -716,7 +714,6 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 	if slot/r.cfg.SlotsPerEpoch != r.cfg.AltairForkEpoch {
 		return out, nil
 	}
-	fmt.Println("AX")
 	slotFromPreviousEpoch := slot - r.cfg.SlotsPerEpoch
 	atts, err := state_accessors.ReadCurrentEpochAttestations(tx, r.cfg.RoundSlotToEpoch(slotFromPreviousEpoch), int(r.cfg.CurrentEpochAttestationsLength()))
 	if err != nil {
