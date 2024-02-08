@@ -86,3 +86,29 @@ func TestAbsoluteDifference(t *testing.T) {
 	assert.Equal(t, AbsoluteDifference(x1, x2), x1-x2)
 	assert.Equal(t, AbsoluteDifference(x2, x1), x1-x2)
 }
+
+func TestIsPrime(t *testing.T) {
+	tests := []struct {
+		number   uint64
+		expected bool
+	}{
+		{0, false},
+		{1, false},
+		{2, true},
+		{3, true},
+		{4, false},
+		{5, true},
+		{13, true},
+		{25, false},
+		{29, true},
+		{7919, true}, // testing with a larger prime
+		{7920, false},
+		{9223372036854775807, true}, // largest 64-bit prime number
+	}
+
+	for _, test := range tests {
+		if result := IsPrime(test.number); result != test.expected {
+			t.Errorf("IsPrime(%d) = %v, want %v", test.number, result, test.expected)
+		}
+	}
+}
