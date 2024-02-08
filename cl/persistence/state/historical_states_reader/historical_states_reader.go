@@ -430,6 +430,7 @@ func makeBigSlice(size int) []byte {
 	stepBuf := make([]byte, stepSize)
 	var currentList []byte
 	for cap(currentList) < size {
+		currentList = currentList[:cap(currentList)]
 		currentList = append(currentList, stepBuf...)
 	}
 	currentList = currentList[:size]
