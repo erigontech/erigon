@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -68,7 +69,7 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(32) // dont need many
+	count := uint64(64)
 	var atomicResp atomic.Value
 	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
@@ -81,6 +82,7 @@ Loop:
 				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
 					return
 				}
+				// this is so we do not get stuck on a side-fork
 				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-6, count)
 
 				if err != nil {
@@ -93,6 +95,11 @@ Loop:
 					f.rpc.BanPeer(peerId)
 					return
 				}
+				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+					return
+				}
+				fmt.Println(responses[0].Block.Slot, responses[len(responses)-1].Block.Slot)
+				fmt.Println(len(responses))
 				atomicResp.Store(responses)
 			}()
 		case <-ctx.Done():

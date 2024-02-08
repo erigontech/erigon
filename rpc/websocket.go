@@ -58,6 +58,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 		if jwtSecret != nil && !CheckJwtSecret(w, r, jwtSecret) {
 			return
 		}
+
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			logger.Warn("WebSocket upgrade failed", "err", err)
