@@ -79,6 +79,7 @@ func SpawnSequencerInterhashesStage(
 		r.PostState = newRoot.Bytes()
 	}
 	header.ReceiptHash = types.DeriveSha(receipts)
+	header.Bloom = types.CreateBloom(receipts)
 	newHash := header.Hash()
 
 	rawdb.WriteHeader(tx, header)

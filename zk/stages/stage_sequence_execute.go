@@ -206,6 +206,8 @@ func SpawnSequencingStage(
 
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
+	parentRoot := parentBlock.Root()
+	ibs.PreExecuteStateSet(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot)
 
 	// here we have a special case and need to inject in the initial batch on the network before
 	// we can continue accepting transactions from the pool
@@ -236,9 +238,6 @@ func SpawnSequencingStage(
 	if err = hermezDb.WriteBlockL1InfoTreeIndex(nextBlockNum, l1TreeUpdateIndex); err != nil {
 		return err
 	}
-
-	parentRoot := parentBlock.Root()
-	ibs.PreExecuteStateSet(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot)
 
 	// start waiting for a new transaction to arrive
 	ticker := time.NewTicker(10 * time.Second)
@@ -608,6 +607,8 @@ func attemptAddTransaction(
 
 	// set the counter collector on the config so that we can gather info during the execution
 	cfg.zkVmConfig.CounterCollector = txCounters.ExecutionCounters()
+
+	ibs.Prepare(transaction.Hash(), common.Hash{}, 0)
 
 	receipt, returnData, err := core.ApplyTransaction(
 		cfg.chainConfig,
