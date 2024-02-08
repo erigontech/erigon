@@ -426,9 +426,10 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 
 // this is stupid but go does not like when MBs are allocated at once and make() would cause a crash
 func makeBigSlice(size int) []byte {
-	stepBuf := make([]byte, 1024)
+	stepSize := 1024
+	stepBuf := make([]byte, stepSize)
 	var currentList []byte
-	for i := len(currentList); i < int(size); i += 8 {
+	for cap(currentList) < size {
 		currentList = append(currentList, stepBuf...)
 	}
 	currentList = currentList[:size]
