@@ -442,7 +442,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 	defer zstdReader.Close()
 
 	lenBuf := make([]byte, 8)
-	if _, err := utils.ReadZSTD(zstdReader, lenBuf); err != nil {
+	if _, err := file.Read(lenBuf); err != nil {
 		return nil, err
 	}
 	lenRaw := binary.LittleEndian.Uint64(lenBuf)
