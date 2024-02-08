@@ -542,14 +542,15 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 	}
 	validatorSetLength := sd.ValidatorLength
 
-	out := solid.NewValidatorSetWithLength(int(r.cfg.ValidatorRegistryLimit), int(validatorSetLength))
+	out := solid.NewValidatorSet(int(r.cfg.ValidatorRegistryLimit))
 	// Read the static validator field which are hot in memory (this is > 70% of the whole beacon state)
 	r.validatorTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
 		if validatorIndex >= validatorSetLength {
 			return false
 		}
-		currValidator := out.Get(int(validatorIndex))
+		currValidator := solid.NewValidator()
 		validator.ToValidator(currValidator, slot)
+		out.Append(currValidator)
 		return true
 	})
 	// Read the balances
