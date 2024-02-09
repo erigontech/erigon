@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/smt/pkg/blockinfo"
+	txTypes "github.com/ledgerwatch/erigon/zk/tx"
 )
 
 // ExecuteBlockEphemerally runs a block from provided stateReader and
@@ -58,7 +59,7 @@ func ExecuteBlockEphemerallyZk(
 	block.Uncles()
 	ibs := state.New(stateReader)
 	header := block.Header()
-	blockTransaction := block.Transactions()
+	blockTransactions := block.Transactions()
 	blockGasLimit := block.GasLimit()
 	gp := new(GasPool)
 	gp.AddGas(blockGasLimit)
@@ -79,7 +80,7 @@ func ExecuteBlockEphemerallyZk(
 	}
 
 	if !vmConfig.ReadOnly {
-		if err := InitializeBlockExecution(engine, chainReader, header, blockTransaction, block.Uncles(), chainConfig, ibs, excessDataGas); err != nil {
+		if err := InitializeBlockExecution(engine, chainReader, header, blockTransactions, block.Uncles(), chainConfig, ibs, excessDataGas); err != nil {
 			return nil, err
 		}
 	}
@@ -115,7 +116,6 @@ func ExecuteBlockEphemerallyZk(
 	}
 	blockTime := block.Time()
 	ibs.SyncerPreExecuteStateSet(chainConfig, blockNum, blockTime, prevBlockHash, &blockGer, &l1BlockHash, &gersInBetween)
-
 	blockInfoTree := blockinfo.NewBlockInfoTree()
 	if chainConfig.IsForkID7Etrog(blockNum) {
 		coinbase := block.Coinbase()
@@ -137,7 +137,7 @@ func ExecuteBlockEphemerallyZk(
 	logIndex := int64(0)
 	usedGas := new(uint64)
 
-	for txIndex, tx := range blockTransaction {
+	for txIndex, tx := range blockTransactions {
 		ibs.Prepare(tx.Hash(), block.Hash(), txIndex)
 		writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
@@ -180,9 +180,25 @@ func ExecuteBlockEphemerallyZk(
 			ibs.ScalableSetSmtRootHash(roHermezDb)
 		}
 
+		txSender, _ := tx.GetSender()
 		if chainConfig.IsForkID7Etrog(blockNum) {
+			l2TxHash, err := txTypes.ComputeL2TxHash(
+				chainConfig.ChainID,
+				tx.GetValue(),
+				tx.GetPrice(),
+				tx.GetNonce(),
+				tx.GetGas(),
+				tx.GetTo(),
+				&txSender,
+				tx.GetData(),
+			)
+			if err != nil {
+				return nil, err
+			}
+
 			//block info tree
 			_, err = blockInfoTree.SetBlockTx(
+				&l2TxHash,
 				txIndex,
 				receipt,
 				logIndex,
@@ -231,7 +247,7 @@ func ExecuteBlockEphemerallyZk(
 		//}
 	}
 	if !vmConfig.ReadOnly {
-		txs := blockTransaction
+		txs := blockTransactions
 		if _, _, _, err := FinalizeBlockExecution(engine, stateReader, block.Header(), txs, block.Uncles(), stateWriter, chainConfig, ibs, receipts, block.Withdrawals(), chainReader, false, excessDataGas); err != nil {
 			return nil, err
 		}

@@ -65,7 +65,7 @@ func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockN
 	}
 }
 
-func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, stateRoot, blockGer, l1BlockHash *libcommon.Hash, gerUpdates *[]*dstypes.GerUpdate) {
+func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, prevBlockHash, blockGer, l1BlockHash *libcommon.Hash, gerUpdates *[]*dstypes.GerUpdate) {
 	if !sdb.Exist(ADDRESS_SCALABLE_L2) {
 		// create account if not exists
 		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)
@@ -83,7 +83,7 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, 
 		}
 
 		//save prev block hash
-		sdb.scalableSetBlockHash(blockNumber-1, stateRoot)
+		sdb.scalableSetBlockHash(blockNumber-1, prevBlockHash)
 
 		//save ger with l1blockhash
 		if blockGer != nil && *blockGer != emptyHash {

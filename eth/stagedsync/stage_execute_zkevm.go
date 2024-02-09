@@ -243,7 +243,7 @@ Loop:
 			 later.
 		*/
 		headerHash := header.Hash()
-		prevBlockHash = headerHash
+		prevBlockHash = header.Root
 
 		rawdb.WriteHeader(tx, header)
 		err = rawdb.WriteCanonicalHash(tx, headerHash, blockNum)

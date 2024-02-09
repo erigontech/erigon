@@ -8,6 +8,9 @@ import (
 
 	"bytes"
 
+	"regexp"
+	"strings"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -15,8 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/log/v3"
-	"regexp"
-	"strings"
 )
 
 const (
@@ -235,21 +236,26 @@ func rlpFieldsToLegacyTx(fields [][]byte, v, r, s []byte) (tx *types.LegacyTx, e
 	}, nil
 }
 
-const txGasLimit = 30000000
+func ComputeL2TxHash(
+	chainId *big.Int,
+	value, gasPrice *uint256.Int,
+	nonce, txGasLimit uint64,
+	to, from *common.Address,
+	data []byte,
+) (common.Hash, error) {
 
-func ComputeL2TxHash(tx types.LegacyTx) (common.Hash, error) {
 	txType := "01"
-	if tx.GetChainID().Eq(uint256.NewInt(0)) {
+	if chainId != nil && chainId.Cmp(big.NewInt(0)) == 0 {
 		txType = "00"
 	}
 
 	// add txType, nonce, gasPrice and gasLimit
-	noncePart, err := formatL2TxHashParam(tx.GetNonce(), 8)
+	noncePart, err := formatL2TxHashParam(nonce, 8)
 	if err != nil {
 		return common.Hash{}, err
 
 	}
-	gasPricePart, err := formatL2TxHashParam(tx.GetPrice(), 32)
+	gasPricePart, err := formatL2TxHashParam(gasPrice, 32)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -260,26 +266,30 @@ func ComputeL2TxHash(tx types.LegacyTx) (common.Hash, error) {
 	hash := fmt.Sprintf("%s%s%s%s", txType, noncePart, gasPricePart, gasLimitPart)
 
 	// check is deploy
-	if tx.GetTo() == nil || tx.GetTo().Hex() == "0x" {
+	if to == nil || to.Hex() == "0x0000000000000000000000000000000000000000" {
 		hash += "01"
 	} else {
-		toPart, err := formatL2TxHashParam(tx.GetTo().Hex(), 20)
+		toPart, err := formatL2TxHashParam(to.Hex(), 20)
 		if err != nil {
 			return common.Hash{}, err
 		}
 		hash += fmt.Sprintf("00%s", toPart)
 	}
-
 	// add value
-	valuePart, err := formatL2TxHashParam(tx.GetValue(), 32)
+	valuePart, err := formatL2TxHashParam(value, 32)
 	if err != nil {
 		return common.Hash{}, err
 	}
 	hash += valuePart
 
 	// compute data length
-	data := tx.GetData()
-	dataLength := len(data)
+	dataStr := hex.EncodeToHex(data)
+	if len(dataStr) > 1 && dataStr[:2] == "0x" {
+		dataStr = dataStr[2:]
+	}
+
+	//round to ceil
+	dataLength := (len(dataStr) + 1) / 2
 	dataLengthPart, err := formatL2TxHashParam(dataLength, 3)
 	if err != nil {
 		return common.Hash{}, err
@@ -287,7 +297,7 @@ func ComputeL2TxHash(tx types.LegacyTx) (common.Hash, error) {
 	hash += dataLengthPart
 
 	if dataLength > 0 {
-		dataPart, err := formatL2TxHashParam(data, dataLength)
+		dataPart, err := formatL2TxHashParam(dataStr, dataLength)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -295,9 +305,8 @@ func ComputeL2TxHash(tx types.LegacyTx) (common.Hash, error) {
 	}
 
 	// add chainID
-	cid := tx.ChainID
-	if cid != nil {
-		chainIDPart, err := formatL2TxHashParam(cid, 8)
+	if chainId != nil {
+		chainIDPart, err := formatL2TxHashParam(chainId, 8)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -305,11 +314,7 @@ func ComputeL2TxHash(tx types.LegacyTx) (common.Hash, error) {
 	}
 
 	// add from
-	sender, found := tx.GetSender()
-	if !found {
-		return common.Hash{}, fmt.Errorf("sender not found")
-	}
-	fromPart, err := formatL2TxHashParam(sender, 20)
+	fromPart, err := formatL2TxHashParam(from.Hex(), 20)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -364,7 +369,7 @@ func formatL2TxHashParam(param interface{}, paramLength int) (string, error) {
 			paramStr = v.Hex()
 		}
 	case []uint8:
-		paramStr = hex.EncodeToString(v)
+		paramStr = hex.EncodeToHex(v)
 	case common.Address:
 		paramStr = v.Hex()
 	case string:

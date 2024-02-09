@@ -407,13 +407,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block)
 			return fmt.Errorf("write effective gas price percentage error: %v", err)
 		}
 
-		//TODO: temp datastream fix, remove later
-		//works only for Cardona
-		stateRoot := transaction.StateRoot
-		if bn.Uint64() == 59056 {
-			stateRoot = common.HexToHash("0x0c21a98253d5ef5cf77faa5fbbc44e627fd14ec6d410c6e87d40e639e54b41d7")
-		}
-		if err := hermezDb.WriteStateRoot(l2Block.L2BlockNumber, stateRoot); err != nil {
+		if err := hermezDb.WriteStateRoot(l2Block.L2BlockNumber, transaction.StateRoot); err != nil {
 			return fmt.Errorf("write rpc root error: %v", err)
 		}
 	}

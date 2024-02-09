@@ -6,7 +6,10 @@ import (
 	"math/big"
 	"testing"
 
+	zkhex "github.com/ledgerwatch/erigon/zkevm/hex"
+
 	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -160,32 +163,128 @@ func createTx(nonce, gasPrice, gasLimit, from, to, value, data string, chainID u
 	return tx
 }
 
-var testScenarios = map[string]func(t *testing.T){
-	"ZeroNonce": func(t *testing.T) {
-		tx := createTx(
-			"0x00",
-			"0x3b9aca00",
-			"", // fixed using a constant at 30000000
-			"0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
-			"0x1275fbb540c8efc58b812ba83b0d0b8b9917ae98",
-			"0x00",
-			"0x188ec356",
-			1000)
-		expectedHash := "0xf3de9c9f50d72933104d5bb109915d93e4958117de78c9a7d1a58b5c6e4cbb77"
-		actualHash, err := ComputeL2TxHash(tx)
-		if err != nil {
-			t.Fatalf("ComputeL2TxHash returned an error: %v", err)
-		}
-		if actualHash.Hex() != expectedHash {
-			t.Errorf("Expected hash %s, got %s", expectedHash, actualHash.Hex())
-		}
-	},
-}
-
 func TestComputeL2TxHashScenarios(t *testing.T) {
-	for name, scenario := range testScenarios {
-		t.Run(name, scenario)
+	tests := []struct {
+		chainId        *big.Int
+		nonce          uint64
+		gasPrice       *uint256.Int
+		gasLimit       uint64
+		value          *uint256.Int
+		data           string
+		to             libcommon.Address
+		from           libcommon.Address
+		expectedTxHash string
+	}{
+		{
+			chainId:        big.NewInt(1000),
+			nonce:          0,
+			gasPrice:       uint256.NewInt(1000000000),
+			gasLimit:       30000000,
+			value:          uint256.NewInt(0),
+			data:           "0x188ec356",
+			to:             libcommon.HexToAddress("0x1275fbb540c8efc58b812ba83b0d0b8b9917ae98"),
+			from:           libcommon.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			expectedTxHash: "0xf3de9c9f50d72933104d5bb109915d93e4958117de78c9a7d1a58b5c6e4cbb77",
+		},
+		{
+			chainId:        big.NewInt(1700),
+			nonce:          0,
+			gasPrice:       uint256.NewInt(1000000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(0),
+			data:           "0x56d5be740000000000000000000000001275fbb540c8efc58b812ba83b0d0b8b9917ae98",
+			to:             libcommon.HexToAddress("0x005Cf5032B2a844602278b01199ED191A86c93ff"),
+			from:           libcommon.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			expectedTxHash: "0x42e14eabd58bb4f26e928cada9a74081343e9ca0aad0d4f3f4e6254cb3a805ca",
+		},
+		{
+			chainId:        big.NewInt(1700),
+			nonce:          0,
+			gasPrice:       uint256.NewInt(1000000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(0),
+			data:           "0x56d5be740000000000000000000000001275fbb540c8efc58b812ba83b0d0b8b9917ae98",
+			to:             common.HexToAddress("0x0"),
+			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			expectedTxHash: "0x8f9cfb43c0f6bc7ce9f9e43e8761776a2ef9657ccf87318e2487c313d119b8cf",
+		}, {
+			chainId:        big.NewInt(4096),
+			nonce:          0,
+			gasPrice:       uint256.NewInt(1000000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(0),
+			data:           "0x56d5be740000000000000000000000001275fbb540c8efc58b812ba83b0d0b8b9917ae98",
+			to:             common.HexToAddress(""),
+			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			expectedTxHash: "0xe93d9aadf9ec7453204b7f26380472820729cb401e371b473132cc3ea27d2eef",
+		}, {
+			chainId:        big.NewInt(1700),
+			nonce:          0,
+			gasPrice:       uint256.NewInt(1000000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(0),
+			data:           "0x",
+			to:             common.HexToAddress(""),
+			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			expectedTxHash: "0xe8cd2bb2321ae825c970cb1b8ffd3ba6fb28488ca2a8003f9622d07d0cb2b63c",
+		}, {
+			chainId:        big.NewInt(1700),
+			nonce:          0,
+			gasPrice:       uint256.NewInt(1000000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(0),
+			data:           "0x",
+			to:             common.HexToAddress(""),
+			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			expectedTxHash: "0xe8cd2bb2321ae825c970cb1b8ffd3ba6fb28488ca2a8003f9622d07d0cb2b63c",
+		}, {
+			chainId:        big.NewInt(2442),
+			nonce:          50534,
+			gasPrice:       uint256.NewInt(105300000),
+			gasLimit:       30000000,
+			value:          uint256.NewInt(10000000000000),
+			data:           "",
+			to:             common.HexToAddress("0x417a7BA2d8d0060ae6c54fd098590DB854B9C1d5"),
+			from:           common.HexToAddress("0x9AF3049dD15616Fd627A35563B5282bEA5C32E20"),
+			expectedTxHash: "0x26460f7fa46b88e6a383a496e567ba76cb307ccaa82b64fc739bfeebbef8d747",
+		}, {
+			chainId:        big.NewInt(2442),
+			nonce:          50534,
+			gasPrice:       uint256.NewInt(105300000),
+			gasLimit:       21000,
+			value:          uint256.NewInt(10000000000000),
+			data:           "",
+			to:             common.HexToAddress("0x417a7BA2d8d0060ae6c54fd098590DB854B9C1d5"),
+			from:           common.HexToAddress("0x9af3049dd15616fd627a35563b5282bea5c32e20"),
+			expectedTxHash: "0x0a3b9eafc5562a432f25398a849fd2296c717e0d9e90189d1c41e7b6ddcaa3dd",
+		},
 	}
+
+	for i, test := range tests {
+		dataBytes, err := zkhex.DecodeHex(test.data)
+		if err != nil {
+			t.Fatalf("Test %d: unexpected error: %v", i+1, err)
+		}
+		result, err := ComputeL2TxHash(
+			test.chainId,
+			test.value,
+			test.gasPrice,
+			test.nonce,
+			test.gasLimit,
+			&test.to,
+			&test.from,
+			dataBytes,
+		)
+		if err != nil {
+			t.Fatalf("Test %d: unexpected error: %v", i+1, err)
+		}
+
+		resultString := result.Hex()
+		if resultString != test.expectedTxHash {
+			t.Fatalf("Test %d: expected tx hash %s, got %s", i+1, test.expectedTxHash, resultString)
+		}
+	}
+
 }
 
 type testCase struct {

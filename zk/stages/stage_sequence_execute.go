@@ -389,7 +389,9 @@ func postBlockStateHandling(
 	for i := 0; i < len(transactions); i++ {
 		receipt := receipts[i]
 		// todo: how to set the effective gas percentage as a the sequencer
-		_, err := infoTree.SetBlockTx(i, receipt, logIndex, receipt.CumulativeGasUsed, 0)
+		// TODO: calculate l2 tx hash
+		l2TxHash := common.Hash{}
+		_, err := infoTree.SetBlockTx(&l2TxHash, i, receipt, logIndex, receipt.CumulativeGasUsed, 0)
 		if err != nil {
 			return err
 		}
