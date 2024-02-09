@@ -159,7 +159,6 @@ func TestSMT_Create_Benchmark(t *testing.T) {
 			keys = append(keys, k)
 		}
 	}
-	kvMap = nil
 
 	_, err := s.GenerateFromKVBulk("", keys)
 	if err != nil {

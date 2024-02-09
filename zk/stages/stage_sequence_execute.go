@@ -428,6 +428,9 @@ func handleInjectedBatch(
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
 	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), txs[0], ibs)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	return &txs[0], receipt, nil
 }
@@ -550,7 +553,7 @@ func addSenders(
 ) error {
 	signer := types.MakeSigner(cfg.chainConfig, newNum.Uint64())
 	cryptoContext := secp256k1.ContextForThread(1)
-	var senders []common.Address
+	senders := make([]common.Address, 0, len(finalTransactions))
 	for _, transaction := range finalTransactions {
 		from, err := signer.SenderWithContext(cryptoContext, transaction)
 		if err != nil {
@@ -563,7 +566,7 @@ func addSenders(
 }
 
 func extractTransactionsFromSlot(slot types2.TxsRlp) ([]types.Transaction, error) {
-	var transactions []types.Transaction
+	transactions := make([]types.Transaction, 0, len(slot.Txs))
 	reader := bytes.NewReader([]byte{})
 	stream := new(rlp.Stream)
 	for idx, txBytes := range slot.Txs {
@@ -624,6 +627,10 @@ func attemptAddTransaction(
 		cfg.zkVmConfig.Config,
 		parentHeader.ExcessDataGas,
 		zktypes.EFFECTIVE_GAS_PRICE_PERCENTAGE_DISABLED)
+
+	if err != nil {
+		return nil, false, err
+	}
 
 	err = txCounters.ProcessTx(ibs, returnData)
 	if err != nil {

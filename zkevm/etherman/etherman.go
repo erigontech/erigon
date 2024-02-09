@@ -440,7 +440,7 @@ func (etherMan *Client) BuildSequenceBatchesTxData(sender common.Address, sequen
 }
 
 func (etherMan *Client) sequenceBatches(opts bind.TransactOpts, sequences []ethmanTypes.Sequence) (types.Transaction, error) {
-	var batches []polygonzkevm.PolygonZkEVMBatchData
+	batches := make([]polygonzkevm.PolygonZkEVMBatchData, 0, len(sequences))
 	for _, seq := range sequences {
 		batch := polygonzkevm.PolygonZkEVMBatchData{
 			Transactions:       seq.BatchL2Data,

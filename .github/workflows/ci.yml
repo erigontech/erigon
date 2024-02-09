@@ -105,7 +105,7 @@ jobs:
       # check with root permissions, should be cached from previous build
       - name: sudo make docker
         run: sudo DOCKER_TAG=thorax/erigon:ci-$GITHUB_SHA DOCKER_UID=$(id -u) DOCKER_GID=$(id -g) make docker
-  
+
   automated-tests:
     runs-on:
       ubuntu-20.04

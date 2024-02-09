@@ -13,6 +13,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
+	"net/url"
 )
 
 func TrimHexString(s string) string {
@@ -79,7 +80,7 @@ func DumpDb(eridb *db2.EriDb) {
 		fmt.Println(err)
 	}
 	// write to file
-	if err := ioutil.WriteFile("db.json", op, 0644); err != nil {
+	if err := ioutil.WriteFile("db.json", op, 0600); err != nil {
 		fmt.Println(err)
 	}
 }
@@ -98,7 +99,11 @@ func RpcGetHighestTxNo(rpcEndpoint string) (uint64, error) {
 		return 0, err
 	}
 
-	resp, err := http.Post(rpcEndpoint, "application/json", bytes.NewBuffer(jsonData))
+	safeUrl, err := url.Parse(rpcEndpoint)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := http.Post(safeUrl.String(), "application/json", bytes.NewBuffer(jsonData))
 
 	if err != nil {
 		return 0, err

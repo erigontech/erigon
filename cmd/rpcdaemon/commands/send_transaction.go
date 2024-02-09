@@ -34,7 +34,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutility
 
 	// [zkevm] - proxy the request if the chainID is ZK and not a sequencer
 	if api.isZkNonSequencer(chainId) {
-		return api.sendTxZk(api.L2RpcUrl, encodedTx, chainId.Uint64())
+		return api.sendTxZk(api.l2RpcUrl, encodedTx, chainId.Uint64())
 	}
 
 	txn, err := types.DecodeTransaction(rlp.NewStream(bytes.NewReader(encodedTx), uint64(len(encodedTx))))

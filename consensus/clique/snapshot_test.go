@@ -1,3 +1,6 @@
+//go:build notzkevm
+// +build notzkevm
+
 // Copyright 2017 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -23,11 +26,11 @@ import (
 	"sort"
 	"testing"
 
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/consensus/clique"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -416,7 +419,7 @@ func TestClique(t *testing.T) {
 
 			// Assemble a chain of headers from the cast votes
 			config := *params.AllCliqueProtocolChanges
-			config.Clique = &chain.CliqueConfig{
+			config.Clique = &chain2.CliqueConfig{
 				Period: 1,
 				Epoch:  tt.epoch,
 			}

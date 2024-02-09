@@ -395,7 +395,7 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 // writes header, body, forkId and blockBatch
 func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block) error {
 	bn := new(big.Int).SetUint64(l2Block.L2BlockNumber)
-	var txs []ethTypes.Transaction
+	txs := make([]ethTypes.Transaction, 0, len(l2Block.L2Txs))
 	for _, transaction := range l2Block.L2Txs {
 		ltx, _, err := txtype.DecodeTx(transaction.Encoded, transaction.EffectiveGasPricePercentage, l2Block.ForkId)
 		if err != nil {

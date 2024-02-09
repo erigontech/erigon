@@ -16,7 +16,7 @@ const dataStreamUrl = "stream.zkevm-rpc.com:6900"
 // This code downloads headers and blocks from a datastream server.
 func main() {
 	// Create client
-	c := client.NewClient(dataStreamUrl)
+	c := client.NewClient(dataStreamUrl, 0)
 
 	// Start client (connect to the server)
 	defer c.Stop()
@@ -46,10 +46,10 @@ func main() {
 		}
 
 		if dsBlock.L2BlockNumber != expectedDsBlock {
-				missingBlocks = append(missingBlocks, dsBlock.L2BlockNumber)
-				log.Error("Missing blocks: %v", missingBlocks)
-			}
-			expectedDsBlock++
+			missingBlocks = append(missingBlocks, dsBlock.L2BlockNumber)
+			log.Error("Missing blocks: %v", missingBlocks)
+		}
+		expectedDsBlock++
 
 		rpcBlock, _ := utils.GetBlockByHash(dsBlock.L2Blockhash.String())
 		match := matchBlocks(dsBlock, rpcBlock, lastGer)

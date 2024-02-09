@@ -91,9 +91,9 @@ func (l *JSONFileLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64,
 func (l *JSONFileLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
 	json, _ := json.Marshal(l.opContexts)
 
-	err = os.WriteFile("traces/"+l.txHash+".json", json, 0644)
+	writeErr := os.WriteFile("traces/"+l.txHash+".json", json, 0600)
 	if err != nil {
-		log.Error(err)
+		log.Error(writeErr)
 	}
 }
 

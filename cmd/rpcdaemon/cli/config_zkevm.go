@@ -1,8 +1,8 @@
 package cli
 
 import (
-	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"fmt"
+	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
 	"github.com/ledgerwatch/log/v3"
 )
 

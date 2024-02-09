@@ -42,7 +42,7 @@ func WriteGlobalExitRoot(stateReader state.StateReader, stateWriter state.Writer
 	// concat global exit root and global_exit_root_storage_pos
 	rootPlusStorage := append(ger[:], gerb...)
 	globalExitRootPosBytes := keccak256.Hash(rootPlusStorage)
-	gerp := common.BytesToHash(globalExitRootPosBytes[:])
+	gerp := common.BytesToHash(globalExitRootPosBytes)
 
 	addr := common.HexToAddress(ADDRESS_GLOBAL_EXIT_ROOT_MANAGER_L2)
 

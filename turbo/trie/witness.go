@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // WitnessStorage is an interface representing a single
@@ -55,15 +56,15 @@ func NewWitness(operands []WitnessOperator) *Witness {
 }
 
 func (w *Witness) WriteInto(out io.Writer, consolePrint bool) (*BlockWitnessStats, error) {
-	var lines []string
+	var lines strings.Builder
 	statsCollector := NewOperatorMarshaller(out)
 
 	if err := w.Header.WriteTo(statsCollector); err != nil {
 		return nil, err
 	}
 	if consolePrint {
-		lines = append(lines, "start witness...\n")
-		lines = append(lines, fmt.Sprintf("witness-header: %+v\n", w.Header))
+		lines.Write([]byte("start witness...\n"))
+		lines.Write([]byte(fmt.Sprintf("witness-header: %+v\n", w.Header)))
 	}
 
 	for _, op := range w.Operators {
@@ -71,12 +72,12 @@ func (w *Witness) WriteInto(out io.Writer, consolePrint bool) (*BlockWitnessStat
 			return nil, err
 		}
 		if consolePrint {
-			lines = append(lines, fmt.Sprintf("%+v\n", op))
+			lines.Write([]byte(fmt.Sprintf("%+v\n", op)))
 		}
 	}
 
 	if consolePrint {
-		lines = append(lines, "witness end...\n")
+		lines.Write([]byte("end witness...\n"))
 		fmt.Print(lines)
 	}
 

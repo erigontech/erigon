@@ -59,8 +59,8 @@ func SpawnStageDataStreamCatchup(
 		if err != nil {
 			return fmt.Errorf("failed to open tx, %w", err)
 		}
-		createdTx = true
 		defer tx.Rollback()
+		createdTx = true
 	}
 
 	srv := server.NewDataStreamServer(stream, cfg.chainId)
@@ -125,8 +125,8 @@ func SpawnStageDataStreamCatchup(
 
 	// now check if we have any more data to add
 
-	var currentBatchNumber uint64 = 0
-	var currentL2Block uint64 = 0
+	var currentBatchNumber uint64
+	var currentL2Block uint64
 
 	latest, err := stream.GetEntry(header.TotalEntries - 1)
 	if err != nil {

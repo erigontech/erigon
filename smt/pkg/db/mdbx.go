@@ -147,7 +147,7 @@ func (m *EriDb) Insert(key utils.NodeKey, value utils.NodeValue12) error {
 		vals[i] = v
 	}
 
-	vConc := utils.ArrayToScalarBig(vals[:])
+	vConc := utils.ArrayToScalarBig(vals)
 	v := utils.ConvertBigIntToHex(vConc)
 
 	return m.tx.Put(TableSmt, []byte(k), []byte(v))
@@ -181,7 +181,7 @@ func (m *EriDb) InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) er
 		vals[i] = v
 	}
 
-	vConc := utils.ArrayToScalarBig(vals[:])
+	vConc := utils.ArrayToScalarBig(vals)
 	v := utils.ConvertBigIntToHex(vConc)
 
 	return m.tx.Put(TableAccountValues, []byte(k), []byte(v))

@@ -1,3 +1,6 @@
+//go:build notzkevm
+// +build notzkevm
+
 // Copyright 2017 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
@@ -23,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
@@ -127,7 +131,7 @@ func TestSetupGenesis(t *testing.T) {
 			},
 			wantHash:   customghash,
 			wantConfig: customg.Config,
-			wantErr: &chain.ConfigCompatError{
+			wantErr: &chain2.ConfigCompatError{
 				What:         "Homestead fork block",
 				StoredConfig: big.NewInt(2),
 				NewConfig:    big.NewInt(3),

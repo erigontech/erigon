@@ -95,7 +95,7 @@ func CompareValuesString(vlockNum, ts string, ger common.Hash) error {
 	// concat global exit root and global_exit_root_storage_pos
 	rootPlusStorage := append(ger[:], gerb...)
 	globalExitRootPosBytes := keccak256.Hash(rootPlusStorage)
-	gerp := common.BytesToHash(globalExitRootPosBytes[:])
+	gerp := common.BytesToHash(globalExitRootPosBytes)
 	payloadbytecode := RequestData{
 		Method:  "eth_getStorageAt",
 		Params:  []string{"0xa40D5f56745a118D0906a34E69aeC8C0Db1cB8fA", gerp.Hex(), "latest"},

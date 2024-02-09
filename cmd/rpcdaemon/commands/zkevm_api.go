@@ -594,7 +594,6 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 	return buf.Bytes(), nil
 }
 
-// GetBroadcastURI returns the URI of the broadcaster - the trusted sequencer
 func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64) (hexutility.Bytes, error) {
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {

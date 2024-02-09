@@ -147,6 +147,7 @@ func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBl
 		cfg.GasLimit,
 		cfg.Value,
 		false, /* bailout */
+		0,
 	)
 
 	return ret, cfg.State, err
@@ -188,6 +189,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 		input,
 		cfg.GasLimit,
 		cfg.Value,
+		0,
 	)
 	return code, address, leftOverGas, err
 }
@@ -216,6 +218,7 @@ func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64,
 		cfg.GasLimit,
 		cfg.Value,
 		false, /* bailout */
+		0,
 	)
 
 	return ret, leftOverGas, err

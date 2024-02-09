@@ -13,6 +13,8 @@ import (
 	"github.com/iden3/go-iden3-crypto/keccak256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
+	"io"
+	"net/url"
 )
 
 type HTTPResponse struct {
@@ -27,7 +29,7 @@ type RequestData struct {
 }
 
 var block = "0x37D8"
-var url = "https://rpc-debug.internal.zkevm-test.net/"
+var rpcUrl = "https://rpc-debug.internal.zkevm-test.net/"
 var jsonFile = "addrDump.json"
 
 type AccountDump struct {
@@ -78,7 +80,12 @@ func compareValuesString(accountHash, key, value string) {
 		return
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	safeUrl, err := url.Parse(rpcUrl)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+		return
+	}
+	resp, err := http.Post(safeUrl.String(), "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return
@@ -86,7 +93,7 @@ func compareValuesString(accountHash, key, value string) {
 
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	var httpResp HTTPResponse
 	json.Unmarshal(body, &httpResp)
 
@@ -116,7 +123,12 @@ func compareBalance(accountHash, value string) {
 		return
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	safeUrl, err := url.Parse(rpcUrl)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+		return
+	}
+	resp, err := http.Post(safeUrl.String(), "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return
@@ -150,7 +162,12 @@ func compareNonce(accountHash string, value uint64) {
 		return
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	safeUrl, err := url.Parse(rpcUrl)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+		return
+	}
+	resp, err := http.Post(safeUrl.String(), "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return
@@ -158,7 +175,7 @@ func compareNonce(accountHash string, value uint64) {
 
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	var httpResp HTTPResponse
 	json.Unmarshal(body, &httpResp)
 
@@ -187,7 +204,12 @@ func compareCodeHash(accountHash, value string) {
 		return
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonPayload))
+	safeUrl, err := url.Parse(rpcUrl)
+	if err != nil {
+		fmt.Println("Error parsing URL:", err)
+		return
+	}
+	resp, err := http.Post(safeUrl.String(), "application/json", bytes.NewBuffer(jsonPayload))
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return
@@ -195,7 +217,7 @@ func compareCodeHash(accountHash, value string) {
 
 	defer resp.Body.Close()
 
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	var httpResp HTTPResponse
 	json.Unmarshal(body, &httpResp)
 
@@ -203,6 +225,6 @@ func compareCodeHash(accountHash, value string) {
 	commonHash := libcommon.HexToHash(remoteValueDecode).Bytes()
 	value2 := common.Bytes2Hex(keccak256.Hash(commonHash))
 	if value != value2 {
-		fmt.Printf("Nonce ismatch detected for %s. Local: %d, Remote: %d\n", accountHash, value, value2)
+		fmt.Printf("Nonce mismatch detected for %s. Local: %s, Remote: %s\n", accountHash, value, value2)
 	}
 }

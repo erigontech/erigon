@@ -92,10 +92,6 @@ func X1TestnetGenesisBlock() *types.Genesis {
 
 func processAccount(s *smt.SMT, root *big.Int, a *types.GenesisAccount, addr libcommon.Address) (*big.Int, error) {
 
-	if root == nil {
-		root = big.NewInt(0)
-	}
-
 	// store the account balance and nonce
 	r, err := s.SetAccountState(addr.String(), a.Balance, new(big.Int).SetUint64(a.Nonce))
 	if err != nil {
@@ -119,6 +115,9 @@ func processAccount(s *smt.SMT, root *big.Int, a *types.GenesisAccount, addr lib
 	// store the account storage
 	if len(sm) > 0 {
 		r, err = s.SetContractStorage(addr.String(), sm, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return r, nil
 }

@@ -40,7 +40,7 @@ func TestDecodeGerUpdate(t *testing.T) {
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24},
 			expectedResult: GerUpdate{},
-			expectedError:  fmt.Errorf("expected data length: 102, got: 20"),
+			expectedError:  fmt.Errorf("expected data length: 106, got: 20"),
 		},
 	}
 

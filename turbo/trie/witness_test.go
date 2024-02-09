@@ -81,7 +81,7 @@ func TestWitnessSerialization(t *testing.T) {
 
 	var buffer bytes.Buffer
 
-	if _, err := expectedWitness.WriteInto(&buffer); err != nil {
+	if _, err := expectedWitness.WriteInto(&buffer, true); err != nil {
 		t.Error(err)
 	}
 

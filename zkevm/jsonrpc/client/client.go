@@ -84,7 +84,7 @@ func JSONRPCBatchCall(url string, methods []string, parameterGroups ...[]interfa
 		return nil, fmt.Errorf("methods and parameterGroups must have the same length")
 	}
 
-	var batchRequest []types.Request
+	batchRequest := make([]types.Request, 0, len(methods))
 
 	for i, method := range methods {
 		params, err := json.Marshal(parameterGroups[i])

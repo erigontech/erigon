@@ -46,9 +46,6 @@ func StageTxLookupCfg(
 
 func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, ctx context.Context) (err error) {
 	logPrefix := s.LogPrefix()
-	log.Info(fmt.Sprintf("[%s] Skipping", logPrefix))
-	// TODO: abstract
-	return nil
 
 	quitCh := ctx.Done()
 	useExternalTx := tx != nil

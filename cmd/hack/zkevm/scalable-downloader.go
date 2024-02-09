@@ -138,7 +138,7 @@ func worker(ctx context.Context, logPrefix, rpcEndpoint string, id int, jobs <-c
 				log.Error("Error getting hash for txNum", "txNum", txNum, "err", err)
 				continue
 			}
-			results <- map[int64]string{int64(txNum): hash.String()}
+			results <- map[int64]string{txNum: hash.String()}
 
 			atomic.AddInt64(processedTxNum, 1)
 		}

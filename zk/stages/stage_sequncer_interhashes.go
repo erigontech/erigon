@@ -58,8 +58,14 @@ func SpawnSequencerInterhashesStage(
 	var newRoot libcommon.Hash
 	if to == 1 {
 		newRoot, err = regenerateIntermediateHashes(s.LogPrefix(), tx, eridb, smt)
+		if err != nil {
+			return err
+		}
 	} else {
 		newRoot, err = zkIncrementIntermediateHashes(s.LogPrefix(), s, tx, eridb, smt, to, false, nil, ctx.Done())
+		if err != nil {
+			return err
+		}
 	}
 
 	latest, err := rawdb.ReadBlockByNumber(tx, to)
@@ -91,6 +97,9 @@ func SpawnSequencerInterhashesStage(
 	}
 
 	err = rawdb.WriteReceipts(tx, header.Number.Uint64(), receipts)
+	if err != nil {
+		return fmt.Errorf("failed to write receipts: %v", err)
+	}
 
 	err = erigonDb.WriteBody(header.Number, newHash, latest.Transactions())
 	if err != nil {

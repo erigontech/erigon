@@ -83,7 +83,7 @@ func (b *ArgBytes) UnmarshalText(input []byte) error {
 		return nil
 	}
 	aux := make([]byte, len(hh))
-	copy(aux[:], hh[:])
+	copy(aux, hh)
 	*b = aux
 	return nil
 }

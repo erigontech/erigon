@@ -308,7 +308,7 @@ func TestSMT_MultipleInsert2(t *testing.T) {
 }
 
 func printNode(n *SMTResponse) {
-	fmt.Printf(fmt.Sprintf("Root: %s Mode: %s\n", toHex(n.NewRootScalar.ToBigInt()), n.Mode))
+	fmt.Printf("Root: %s Mode: %s\n", toHex(n.NewRootScalar.ToBigInt()), n.Mode)
 }
 
 func toHex(i *big.Int) string {

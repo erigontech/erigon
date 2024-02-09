@@ -215,7 +215,7 @@ func (m *mapmutation) ForEach(bucket string, fromPrefix []byte, walker func(k, v
 	}
 
 	// create an ordered structure to hold our data
-	var keys []string
+	keys := make([]string, 0, len(m.puts[bucket]))
 	values := make(map[string][]byte)
 
 	// otherwise fill the ordered data structure

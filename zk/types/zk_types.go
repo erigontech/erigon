@@ -86,7 +86,7 @@ func (ib *L1InjectedBatch) Marshall() []byte {
 	result = append(result, ib.L1ParentHash[:]...)
 	result = append(result, ib.LastGlobalExitRoot[:]...)
 	result = append(result, ib.Sequencer[:]...)
-	result = append(result, ib.Transaction[:]...)
+	result = append(result, ib.Transaction...)
 	return result
 }
 

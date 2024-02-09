@@ -204,11 +204,18 @@ func runGenesisTestMdbx(tb testing.TB, filename string) {
 	}
 
 	dbi, err := mdbx.NewTemporaryMdbx()
+	if err != nil {
+		tb.Fatal("Failed to open db: ", err)
+	}
 	tx, err := dbi.BeginRw(context.Background())
 	if err != nil {
 		tb.Fatal("Failed to open db: ", err)
 	}
 	sdb := db2.NewEriDb(tx)
+	err = db2.CreateEriDbBuckets(tx)
+	if err != nil {
+		tb.Fatal("Failed to create db buckets: ", err)
+	}
 
 	smt := NewSMT(sdb)
 
@@ -302,10 +309,17 @@ func runTestVectorsMdbx(t *testing.T, filename string) {
 
 func getTempMdbx() (*db2.EriDb, kv.RwDB, error) {
 	dbi, err := mdbx.NewTemporaryMdbx()
+	if err != nil {
+		return nil, nil, err
+	}
 	tx, err := dbi.BeginRw(context.Background())
 	if err != nil {
 		return nil, nil, err
 	}
 	sdb := db2.NewEriDb(tx)
+	err = db2.CreateEriDbBuckets(tx)
+	if err != nil {
+		return nil, nil, err
+	}
 	return sdb, dbi, nil
 }

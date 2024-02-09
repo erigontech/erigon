@@ -47,6 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/txpool/txpooluitl"
 
 	"github.com/0xPolygonHermez/zkevm-data-streamer/datastreamer"
+	log2 "github.com/0xPolygonHermez/zkevm-data-streamer/log"
 	chain2 "github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon/cmd/erigon-el/eth1"
 	stages3 "github.com/ledgerwatch/erigon/cmd/erigon-el/stages"
@@ -72,6 +73,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconsensusconfig"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/ethstats"
@@ -81,7 +83,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/enode"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
@@ -661,7 +662,12 @@ func NewBackend(stack *node.Node, config *ethconfig.Config, logger log.Logger) (
 	// alongside the http server
 	if httpRpcCfg.DataStreamPort > 0 && httpRpcCfg.DataStreamHost != "" {
 		file := stack.Config().Dirs.DataDir + "/data-stream"
-		backend.dataStream, err = datastreamer.NewServer(uint16(httpRpcCfg.DataStreamPort), datastreamer.StreamType(1), file, nil)
+		logConfig := &log2.Config{
+			Environment: "production",
+			Level:       "warn",
+			Outputs:     nil,
+		}
+		backend.dataStream, err = datastreamer.NewServer(uint16(httpRpcCfg.DataStreamPort), uint8(2), 1, datastreamer.StreamType(1), file, logConfig)
 		if err != nil {
 			return nil, err
 		}

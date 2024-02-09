@@ -746,7 +746,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, 
 
 func (tsw *TrieStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashSave(address[:])
-	if err != err {
+	if err != nil {
 		return err
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = nil

@@ -18,10 +18,12 @@ func TestHeaderEntryDecode(t *testing.T) {
 	testCases := []testCase{
 		{
 			name:  "Happy path",
-			input: []byte{101, 0, 0, 0, 29, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
+			input: []byte{101, 0, 0, 0, 38, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
 			expectedResult: HeaderEntry{
 				PacketType:   101,
-				HeadLength:   29,
+				HeadLength:   38,
+				Version:      1,
+				SystemId:     0,
 				StreamType:   StreamType(1),
 				TotalLength:  24,
 				TotalEntries: 64,
@@ -32,7 +34,7 @@ func TestHeaderEntryDecode(t *testing.T) {
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20},
 			expectedResult: HeaderEntry{},
-			expectedError:  fmt.Errorf("invalid header entry binary size. Expected: 29, got: 6"),
+			expectedError:  fmt.Errorf("invalid header entry binary size. Expected: 38, got: 6"),
 		},
 	}
 

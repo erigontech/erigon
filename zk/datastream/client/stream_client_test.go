@@ -42,7 +42,7 @@ func Test_readHeaderEntry(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient("")
+		c := NewClient("", 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -106,7 +106,7 @@ func Test_readResultEntry(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient("")
+		c := NewClient("", 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -175,7 +175,7 @@ func Test_readFileEntry(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("")
+		c := NewClient("", 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -211,12 +211,19 @@ func Test_readFullL2Blocks(t *testing.T) {
 				2, 0, 0, 0, 17, 0, 0, 0, 176, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 176 - bookmark
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
-				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
-				2, 0, 0, 0, 28, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
-				128, 1, 5, 0, 0, 0, 1, 2, 3, 4, 5, // L2Transaction
+				101, 0, 0, 0, 0, 0, 0, 0,
+				12, 0, 0, 0, 0, 0, 0, 0,
+				128, 0, 0, 0, 0, 0, 0, 0,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24,
+				10, 0,
+				2, 0, 0, 0, 60, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
+				128, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 5, 1, 2, 3, 4, 5, // L2Transaction
 				2, 0, 0, 0, 89, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 3 - endL2Block
 				// endL2Block
-				12, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0, 0, 0, 12,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32,
 			},
@@ -236,6 +243,7 @@ func Test_readFullL2Blocks(t *testing.T) {
 							IsValid:                     1,
 							EncodedLength:               5,
 							Encoded:                     []byte{1, 2, 3, 4, 5},
+							StateRoot:                   common.Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10},
 						},
 					},
 				},
@@ -250,12 +258,19 @@ func Test_readFullL2Blocks(t *testing.T) {
 				2, 0, 0, 0, 17, 0, 0, 0, 176, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 176 - bookmark
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
-				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
-				2, 0, 0, 0, 28, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
-				128, 1, 5, 0, 0, 0, 1, 2, 3, 4, 5, // L2Transaction
+				101, 0, 0, 0, 0, 0, 0, 0,
+				12, 0, 0, 0, 0, 0, 0, 0,
+				128, 0, 0, 0, 0, 0, 0, 0,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24,
+				10, 0,
+				2, 0, 0, 0, 60, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
+				128, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 5, 1, 2, 3, 4, 5, // L2Transaction
 				2, 0, 0, 0, 89, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 3 - endL2Block
 				// endL2Block
-				12, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0, 0, 0, 12,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32,
 			},
@@ -275,6 +290,7 @@ func Test_readFullL2Blocks(t *testing.T) {
 							IsValid:                     1,
 							EncodedLength:               5,
 							Encoded:                     []byte{1, 2, 3, 4, 5},
+							StateRoot:                   common.Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10},
 						},
 					},
 				},
@@ -289,12 +305,19 @@ func Test_readFullL2Blocks(t *testing.T) {
 				2, 0, 0, 0, 17, 0, 0, 0, 176, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 176 - bookmark
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
-				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
-				2, 0, 0, 0, 28, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
-				128, 1, 5, 0, 0, 0, 1, 2, 3, 4, 5, // L2Transaction
+				101, 0, 0, 0, 0, 0, 0, 0,
+				12, 0, 0, 0, 0, 0, 0, 0,
+				128, 0, 0, 0, 0, 0, 0, 0,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24,
+				10, 0,
+				2, 0, 0, 0, 60, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
+				128, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 5, 1, 2, 3, 4, 5, // L2Transaction
 				2, 0, 0, 0, 89, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 3 - endL2Block
 				// endL2Block
-				10, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0, 0, 0, 10,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32,
 			},
@@ -317,7 +340,7 @@ func Test_readFullL2Blocks(t *testing.T) {
 			},
 			expectedResult:      nil,
 			expectedEntriesRead: 0,
-			expectedError:       errors.New("failed to read full block: expected StartL2Block, but got type: 2"),
+			expectedError:       errors.New("failed to read full block: expected GerUpdate or Bookmark type, got type: 2"),
 		},
 		{
 			name:        "Unexpected startL1Block in the middle of previous block",
@@ -326,9 +349,16 @@ func Test_readFullL2Blocks(t *testing.T) {
 				2, 0, 0, 0, 17, 0, 0, 0, 176, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 176 - bookmark
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
-				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
-				2, 0, 0, 0, 28, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
-				128, 1, 5, 0, 0, 0, 1, 2, 3, 4, 5, // L2Transaction
+				101, 0, 0, 0, 0, 0, 0, 0,
+				12, 0, 0, 0, 0, 0, 0, 0,
+				128, 0, 0, 0, 0, 0, 0, 0,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24,
+				10, 0,
+				2, 0, 0, 0, 60, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
+				128, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 5, 1, 2, 3, 4, 5, // L2Transaction
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
 				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
@@ -339,7 +369,7 @@ func Test_readFullL2Blocks(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("")
+		c := NewClient("", BigEndianVersion)
 		c.Header.TotalEntries = 3
 		server, conn := net.Pipe()
 		defer server.Close()
@@ -381,32 +411,45 @@ func Test_readFullBlock(t *testing.T) {
 				2, 0, 0, 0, 17, 0, 0, 0, 176, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 176 - bookmark
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
-				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
-				2, 0, 0, 0, 28, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
-				128, 1, 5, 0, 0, 0, 1, 2, 3, 4, 5, // L2Transaction
+				101, 0, 0, 0, 0, 0, 0, 0,
+				12, 0, 0, 0, 0, 0, 0, 0,
+				128, 0, 0, 0, 0, 0, 0, 0,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24,
+				10, 0,
+				2, 0, 0, 0, 60, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
+				128, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 5, 1, 2, 3, 4, 5, // L2Transaction
 				2, 0, 0, 0, 89, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 3 - endL2Block
 				// endL2Block
-				12, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0, 0, 0, 12,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32,
 			},
 			expectedResult: types.FullL2Block{
-				BatchNumber:    101,
-				L2BlockNumber:  12,
-				Timestamp:      128,
-				GlobalExitRoot: [32]byte{10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17},
-				Coinbase:       [20]byte{20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24},
-				ForkId:         10,
-				L2Blockhash:    common.BigToHash(big.NewInt(10)),
-				StateRoot:      common.BigToHash(big.NewInt(32)),
+				BatchNumber:     101,
+				L2BlockNumber:   12,
+				Timestamp:       128,
+				DeltaTimestamp:  0,
+				L1InfoTreeIndex: 0,
+				GlobalExitRoot:  [32]byte{10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17},
+				Coinbase:        [20]byte{20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24},
+				ForkId:          10,
+				ChainId:         0,
+				L1BlockHash:     common.Hash{0},
+				L2Blockhash:     common.BigToHash(big.NewInt(10)),
+				StateRoot:       common.BigToHash(big.NewInt(32)),
 				L2Txs: []types.L2Transaction{
 					{
 						EffectiveGasPricePercentage: 128,
 						IsValid:                     1,
 						EncodedLength:               5,
 						Encoded:                     []byte{1, 2, 3, 4, 5},
+						StateRoot:                   common.Hash{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10},
 					},
 				},
+				ParentHash: common.Hash{},
 			},
 			expectedEntriesRead: 4,
 			expectedError:       nil,
@@ -418,12 +461,19 @@ func Test_readFullBlock(t *testing.T) {
 				2, 0, 0, 0, 17, 0, 0, 0, 176, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 176 - bookmark
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
-				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
-				2, 0, 0, 0, 28, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
-				128, 1, 5, 0, 0, 0, 1, 2, 3, 4, 5, // L2Transaction
+				101, 0, 0, 0, 0, 0, 0, 0,
+				12, 0, 0, 0, 0, 0, 0, 0,
+				128, 0, 0, 0, 0, 0, 0, 0,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24,
+				10, 0,
+				2, 0, 0, 0, 60, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
+				128, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 5, 1, 2, 3, 4, 5, // L2Transaction
 				2, 0, 0, 0, 89, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 3 - endL2Block
 				// endL2Block
-				10, 0, 0, 0, 0, 0, 0, 0,
+				0, 0, 0, 0, 0, 0, 0, 10,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10,
 				0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32,
 			},
@@ -446,7 +496,7 @@ func Test_readFullBlock(t *testing.T) {
 			},
 			expectedResult:      types.FullL2Block{},
 			expectedEntriesRead: 0,
-			expectedError:       errors.New("expected StartL2Block, but got type: 2"),
+			expectedError:       errors.New("expected GerUpdate or Bookmark type, got type: 2"),
 		},
 		{
 			name:        "Unexpected startL1Block in the middle of previous block",
@@ -455,9 +505,16 @@ func Test_readFullBlock(t *testing.T) {
 				2, 0, 0, 0, 17, 0, 0, 0, 176, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 176 - bookmark
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
-				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
-				2, 0, 0, 0, 28, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
-				128, 1, 5, 0, 0, 0, 1, 2, 3, 4, 5, // L2Transaction
+				101, 0, 0, 0, 0, 0, 0, 0,
+				12, 0, 0, 0, 0, 0, 0, 0,
+				128, 0, 0, 0, 0, 0, 0, 0,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17,
+				10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24,
+				10, 0,
+				2, 0, 0, 0, 60, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 2 - l2Transaction
+				128, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 0, 0, 5, 1, 2, 3, 4, 5, // L2Transaction
 				2, 0, 0, 0, 95, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, // fileEntry with entrytype 1 - startL2Block
 				// startL2Block
 				101, 0, 0, 0, 0, 0, 0, 0, 12, 0, 0, 0, 0, 0, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 10, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 20, 21, 22, 23, 24, 10, 0,
@@ -468,7 +525,7 @@ func Test_readFullBlock(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("")
+		c := NewClient("", BigEndianVersion)
 		c.Header.TotalEntries = 3
 		server, conn := net.Pipe()
 		defer server.Close()

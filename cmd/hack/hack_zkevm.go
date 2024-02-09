@@ -24,7 +24,6 @@ func formatBucketKVPair(k, v []byte, bucket string) string {
 	default:
 		return fmt.Sprintf("%x %x", k, v)
 	}
-	return ""
 }
 
 func printBuckets(chaindata, buckets string) {

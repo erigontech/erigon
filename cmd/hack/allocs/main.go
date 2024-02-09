@@ -84,7 +84,7 @@ func main() {
 
 	sb.WriteString("\n}")
 
-	err = os.WriteFile("allocs.json", []byte(sb.String()), 0644)
+	err = os.WriteFile("allocs.json", []byte(sb.String()), 0600)
 	if err != nil {
 		fmt.Println("Error writing to file:", err)
 		os.Exit(1)

@@ -688,6 +688,8 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer tx.Rollback()
+
 	// create buckets
 	if err := hermez_db.CreateHermezBuckets(tx); err != nil {
 		return nil, err

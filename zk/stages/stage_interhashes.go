@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/status-im/keycard-go/hexutils"
+	"net/url"
 )
 
 type ZkInterHashesCfg struct {
@@ -867,7 +868,11 @@ func stateRootByTxNo(txNo *big.Int, l2RpcUrl string) (*libcommon.Hash, error) {
 		return nil, err
 	}
 
-	response, err := http.Post(l2RpcUrl, "application/json", bytes.NewBuffer(requestBytes))
+	safeUrl, err := url.Parse(l2RpcUrl)
+	if err != nil {
+		return nil, err
+	}
+	response, err := http.Post(safeUrl.String(), "application/json", bytes.NewBuffer(requestBytes))
 	if err != nil {
 		return nil, err
 	}

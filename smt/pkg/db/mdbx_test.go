@@ -14,6 +14,8 @@ func TestEriDb(t *testing.T) {
 	dbi, _ := mdbx.NewTemporaryMdbx()
 	tx, _ := dbi.BeginRw(context.Background())
 	db := NewEriDb(tx)
+	err := CreateEriDbBuckets(tx)
+	assert.NoError(t, err)
 
 	// The key and value we're going to test
 	key := utils.NodeKey{1, 2, 3, 4}
@@ -21,7 +23,7 @@ func TestEriDb(t *testing.T) {
 		big.NewInt(7), big.NewInt(8), big.NewInt(9), big.NewInt(10), big.NewInt(11), big.NewInt(12)}
 
 	// Testing Insert method
-	err := db.Insert(key, value)
+	err = db.Insert(key, value)
 	assert.NoError(t, err)
 
 	// Testing Get method
@@ -34,6 +36,8 @@ func TestEriDbBatch(t *testing.T) {
 	dbi, _ := mdbx.NewTemporaryMdbx()
 	tx, _ := dbi.BeginRw(context.Background())
 	db := NewEriDb(tx)
+	err := CreateEriDbBuckets(tx)
+	assert.NoError(t, err)
 
 	// The key and value we're going to test
 	key := utils.NodeKey{1, 2, 3, 4}
@@ -46,7 +50,7 @@ func TestEriDbBatch(t *testing.T) {
 	db.OpenBatch(quit)
 
 	// Inserting a key-value pair within a batch
-	err := db.Insert(key, value)
+	err = db.Insert(key, value)
 	assert.NoError(t, err)
 
 	// Commit the batch
@@ -74,5 +78,6 @@ func TestEriDbBatch(t *testing.T) {
 
 	// Testing Get method after rollback, expecting no value for the altKey
 	val, err := db.Get(altKey)
+	assert.NoError(t, err)
 	assert.Equal(t, utils.NodeValue12{}, val)
 }

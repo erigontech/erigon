@@ -244,6 +244,7 @@ func MockWithEverything(t *testing.T, gspec *types.Genesis, key *ecdsa.PrivateKe
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	_ = db.Update(ctx, func(tx kv.RwTx) error {
 		_, _ = kvcfg.HistoryV3.WriteOnce(tx, cfg.HistoryV3)
+		_ = withHermezDb(tx)
 		return nil
 	})
 

@@ -121,7 +121,7 @@ func (cc *CounterCollector) Counters() Counters {
 	return cc.counters
 }
 
-func WrapJumpTableWithZkCounters(originalTable *JumpTable, counterCalls [256]executionFunc) *JumpTable {
+func WrapJumpTableWithZkCounters(originalTable *JumpTable, counterCalls *[256]executionFunc) *JumpTable {
 	wrapper := func(original, counter executionFunc) executionFunc {
 		return func(p *uint64, i *EVMInterpreter, s *ScopeContext) ([]byte, error) {
 			b, err := counter(p, i, s)
@@ -149,8 +149,8 @@ func WrapJumpTableWithZkCounters(originalTable *JumpTable, counterCalls [256]exe
 	return result
 }
 
-func SimpleCounterOperations(cc *CounterCollector) [256]executionFunc {
-	calls := [256]executionFunc{
+func SimpleCounterOperations(cc *CounterCollector) *[256]executionFunc {
+	calls := &[256]executionFunc{
 		ADD:        cc.opAdd,
 		MUL:        cc.opMul,
 		SUB:        cc.opSub,
@@ -404,8 +404,8 @@ func (cc *CounterCollector) checkBytecodeStartsEF() {
 func (cc *CounterCollector) hashPoseidonLinearFromMemory(memSize int) {
 	cc.Deduct(S, 50)
 	cc.Deduct(B, 1+1)
-	cc.Deduct(P, int(math.Ceil(float64(memSize+1))/56))
-	cc.Deduct(D, int(math.Ceil(float64(memSize+1))/56))
+	cc.Deduct(P, int(float64(memSize+1))/56)
+	cc.Deduct(D, int(float64(memSize+1))/56)
 	cc.divArith()
 	cc.multiCall(cc.hashPoseidonLinearFromMemoryLoop, int(math.Floor(float64(memSize)/32)))
 	cc.mLoadX()

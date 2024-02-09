@@ -59,7 +59,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 			log.Debug("error num < c0 : %d, %d", num, c0)
 			return []types.Transaction{}, txsData, []uint8{}, ErrInvalidData
 		}
-		length := uint64(num - c0)
+		length := num - c0
 		if length > shortRlp { // If rlp is bigger than length 55
 			// n is the length of the rlp data without the header (1 byte) for example "0xf7"
 			if (pos + 1 + num - f7) > txDataLength {
@@ -111,7 +111,7 @@ func DecodeTxs(txsData []byte, forkID uint64) ([]types.Transaction, []byte, []ui
 
 		if forkID >= forkID5 {
 			efficiencyPercentage := txsData[dataStart+rLength+sLength+vLength : endPos]
-			efficiencyPercentages = append(efficiencyPercentages, uint8(efficiencyPercentage[0]))
+			efficiencyPercentages = append(efficiencyPercentages, efficiencyPercentage[0])
 		}
 
 		pos = endPos

@@ -1,4 +1,7 @@
-// Copyright 2015 The go-ethereum Authors
+//go:build notzkevm
+// +build notzkevm
+
+//Copyright 2015 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -27,7 +30,10 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	"context"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/state"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -118,4 +124,13 @@ func TestGenerateChain(t *testing.T) {
 	if fmt.Sprintf("%s", st.GetBalance(addr3)) != "19687500000000001000" { //nolint
 		t.Errorf("wrong balance of addr3: %s", st.GetBalance(addr3))
 	}
+}
+
+func current(kv kv.RwDB) *types.Block {
+	tx, err := kv.BeginRo(context.Background())
+	if err != nil {
+		panic(err)
+	}
+	defer tx.Rollback()
+	return rawdb.ReadCurrentBlock(tx)
 }

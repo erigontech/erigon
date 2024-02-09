@@ -62,7 +62,7 @@ func (b *ArgBytes) UnmarshalText(input []byte) error {
 		return nil
 	}
 	aux := make([]byte, len(hh))
-	copy(aux[:], hh[:])
+	copy(aux, hh)
 	*b = aux
 	return nil
 }
@@ -292,7 +292,7 @@ type Transaction struct {
 // CoreTx returns a geth core type Transaction
 func (t Transaction) CoreTx() types.Transaction {
 	return &types.LegacyTx{
-		types.CommonTx{
+		CommonTx: types.CommonTx{
 			Nonce: uint64(t.Nonce),
 			Gas:   uint64(t.Gas),
 			To:    t.To,
@@ -302,7 +302,7 @@ func (t Transaction) CoreTx() types.Transaction {
 			R:     *(b2i((*big.Int)(&t.R))),
 			S:     *(b2i((*big.Int)(&t.S))),
 		},
-		b2i((*big.Int)(&t.GasPrice)),
+		GasPrice: b2i((*big.Int)(&t.GasPrice)),
 	}
 }
 

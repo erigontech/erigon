@@ -33,9 +33,9 @@ type RequestData struct {
 }
 
 type Config struct {
-	Url      string `yaml: "url"`
-	Username string `yaml: "username"`
-	Pass     string `yaml: "pass"`
+	Url      string `yaml:"url"`
+	Username string `yaml:"username"`
+	Pass     string `yaml:"pass"`
 }
 
 // var localTraceFile = "localOpDump.json"

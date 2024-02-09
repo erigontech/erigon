@@ -65,7 +65,7 @@ func TestDecodePre155Tx(t *testing.T) {
 	pre155 := "0xf86780843b9aca00826163941275fbb540c8efc58b812ba83b0d0b8b9917ae98808464fbb77c1ba0b7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feba0246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed"
 	pre155Bytes, err := hex.DecodeString(pre155[2:])
 	require.NoError(t, err)
-	tx, _, err := DecodeTx(pre155Bytes, forkID4)
+	tx, _, err := DecodeTx(pre155Bytes, 0, forkID4)
 	require.NoError(t, err)
 	v, r, s := tx.RawSignatureValues()
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", tx.GetTo().String())
@@ -82,8 +82,8 @@ func TestDecodePost155Tx(t *testing.T) {
 	post155 := "0xf86780843b9aca00826163941275fbb540c8efc58b812ba83b0d0b8b9917ae98808464fbb77c1ba0b7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feba0246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed"
 	post155Bytes, err := hex.DecodeString(post155[2:])
 	require.NoError(t, err)
-	post155Bytes = append(post155Bytes, 75)
-	tx, pct, err := DecodeTx(post155Bytes, forkID5)
+	//post155Bytes = append(post155Bytes, 75)
+	tx, pct, err := DecodeTx(post155Bytes, 75, forkID5)
 	require.NoError(t, err)
 	v, r, s := tx.RawSignatureValues()
 	assert.Equal(t, "0x1275fbb540c8efC58b812ba83B0D0B8b9917AE98", tx.GetTo().String())
@@ -94,7 +94,7 @@ func TestDecodePost155Tx(t *testing.T) {
 	assert.Equal(t, "64fbb77c", hex.EncodeToString(tx.GetData()))
 	assert.Equal(t, uint64(0), tx.GetNonce())
 	assert.Equal(t, uint256.NewInt(1000000000), tx.GetPrice())
-	assert.Equal(t, pct, 75)
+	assert.Equal(t, pct, uint8(0x4b))
 }
 
 func TestDecodePre155BatchL2DataForkID5(t *testing.T) {
