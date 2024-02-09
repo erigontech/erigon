@@ -455,21 +455,19 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
-	if payloadAttributes != nil {
-		if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-			return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
-		}
-		if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-			return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
-		}
+	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
+	}
+	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+	}
 
-		timestamp := uint64(payloadAttributes.Timestamp)
-		if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
-		if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
-			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
 	if !s.proposing {
@@ -478,7 +476,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	headHeader := s.chainRW.GetHeaderByHash(forkchoiceState.HeadHash)
 
-	timestamp := uint64(payloadAttributes.Timestamp)
 	if headHeader.Time >= timestamp {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
