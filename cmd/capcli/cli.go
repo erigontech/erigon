@@ -801,6 +801,7 @@ type RetrieveHistoricalState struct {
 	outputFolder
 	CompareFile string `help:"compare file" default:""`
 	CompareSlot uint64 `help:"compare slot" default:"0"`
+	Out         string `help:"output file" default:""`
 }
 
 func (r *RetrieveHistoricalState) Run(ctx *Context) error {
@@ -871,6 +872,13 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
 		return err
 	}
+	if r.Out != "" {
+		// create file
+		if err := os.WriteFile(r.Out, enc, 0644); err != nil {
+			return err
+		}
+	}
+
 	hRoot, err = haveState.HashSSZ()
 	if err != nil {
 		return err
