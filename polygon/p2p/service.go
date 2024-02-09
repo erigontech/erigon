@@ -2,10 +2,12 @@ package p2p
 
 import (
 	"context"
+	"math/rand"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -17,19 +19,32 @@ type Service interface {
 	Penalize(peerId PeerId)
 }
 
-func NewService(logger log.Logger, sentry direct.SentryClient) Service {
+func NewService(ctx context.Context, logger log.Logger, sentryClient direct.SentryClient) Service {
+	return newService(ctx, logger, sentryClient, rand.Uint64)
+}
+
+func newService(
+	ctx context.Context,
+	logger log.Logger,
+	sentryClient direct.SentryClient,
+	requestIdGenerator requestIdGenerator,
+) Service {
 	messageListener := &messageListener{
-		logger: logger,
-		sentry: sentry,
+		logger:       logger,
+		sentryClient: sentryClient,
+		observers:    map[sentry.MessageId]map[messageObserver]struct{}{},
 	}
 
+	messageListener.Listen(ctx)
+
 	messageBroadcaster := &messageBroadcaster{
-		sentry: sentry,
+		sentryClient: sentryClient,
 	}
 
 	downloader := &downloader{
 		messageListener:    messageListener,
 		messageBroadcaster: messageBroadcaster,
+		requestIdGenerator: requestIdGenerator,
 	}
 
 	peerManager := &peerManager{}

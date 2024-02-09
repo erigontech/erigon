@@ -10,7 +10,7 @@ import (
 )
 
 type messageBroadcaster struct {
-	sentry direct.SentryClient
+	sentryClient direct.SentryClient
 }
 
 func (mb *messageBroadcaster) GetBlockHeaders66(ctx context.Context, pid PeerId, req eth.GetBlockHeadersPacket66) error {
@@ -19,7 +19,7 @@ func (mb *messageBroadcaster) GetBlockHeaders66(ctx context.Context, pid PeerId,
 		return err
 	}
 
-	_, err = mb.sentry.SendMessageById(ctx, &protosentry.SendMessageByIdRequest{
+	_, err = mb.sentryClient.SendMessageById(ctx, &protosentry.SendMessageByIdRequest{
 		PeerId: pid.H512(),
 		Data: &protosentry.OutboundMessageData{
 			Id:   protosentry.MessageId_GET_BLOCK_HEADERS_66,

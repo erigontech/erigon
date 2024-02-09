@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -76,7 +75,7 @@ func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...uint64) p2p.Pe
 		}
 
 		peers[i] = &p2p.PeerSyncProgress{
-			Id:              hdt.pidFromInt(uint64(i) + 1),
+			Id:              p2p.PeerIdFromUint64(uint64(i) + 1),
 			MaxSeenBlockNum: blockNum,
 		}
 	}
@@ -140,12 +139,6 @@ func (hdt headerDownloaderTest) defaultWriteHeadersMock(capture *[]*types.Header
 		*capture = append(*capture, headers...)
 		return nil
 	}
-}
-
-func (hdt headerDownloaderTest) pidFromInt(i uint64) p2p.PeerId {
-	var pidBytes [64]byte
-	binary.BigEndian.PutUint64(pidBytes[:8], i)
-	return pidBytes
 }
 
 func TestHeaderDownloadUsingMilestones(t *testing.T) {
@@ -244,7 +237,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		// total = 7 (note this also tests caching works)
 		Times(7)
 	test.p2pService.EXPECT().
-		Penalize(gomock.Eq(test.pidFromInt(2))).
+		Penalize(gomock.Eq(p2p.PeerIdFromUint64(2))).
 		Times(1)
 	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
 	gomock.InOrder(

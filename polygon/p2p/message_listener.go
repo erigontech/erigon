@@ -13,9 +13,9 @@ import (
 )
 
 type messageListener struct {
-	logger    log.Logger
-	sentry    direct.SentryClient
-	observers map[protosentry.MessageId]map[messageObserver]struct{}
+	logger       log.Logger
+	sentryClient direct.SentryClient
+	observers    map[protosentry.MessageId]map[messageObserver]struct{}
 }
 
 func (ml *messageListener) Listen(ctx context.Context) {
@@ -47,7 +47,7 @@ func (ml *messageListener) listenBlockHeaders66(ctx context.Context) {
 func (ml *messageListener) listenInboundMessage(ctx context.Context, name string, msgId protosentry.MessageId) {
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
 		ctx,
-		ml.sentry,
+		ml.sentryClient,
 		ml.statusDataFactory(),
 		name,
 		ml.messageStreamFactory([]protosentry.MessageId{msgId}),
