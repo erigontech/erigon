@@ -216,7 +216,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer compressedWriter.Close()
-	// TODO(Giulio2002): also store genesis information and resume from state.
+
 	if s.currentState == nil {
 		// progress is 0 when we are at genesis
 		if progress == 0 {
@@ -477,7 +477,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			s.balances32 = s.balances32[:0]
 			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
-		} else if err := s.antiquateBytesListDiff(ctx, key, prevBalances, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
+		} else if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 			return err
 		}
 		if prevValidatorSetLength != s.currentState.ValidatorLength() || isEpochCrossed {

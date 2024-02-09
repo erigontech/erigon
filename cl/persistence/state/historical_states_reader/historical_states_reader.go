@@ -472,23 +472,15 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 	}
 	defer diffCursor.Close()
 
-	for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(roundedSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
-		if err != nil {
-			return nil, err
-		}
-		if len(k) != 4 {
-			return nil, fmt.Errorf("invalid key %x", k)
-		}
-		if base_encoding.Decode64FromBytes4(k) > slot {
-			return nil, fmt.Errorf("diff not found for slot %d", slot)
-		}
-		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
-		if err != nil {
-			return nil, err
-		}
+	slotDiff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(slot))
+	if err != nil {
+		return nil, err
+	}
+	if slotDiff == nil {
+		return nil, fmt.Errorf("slot diff not found for slot %d", slot)
 	}
 
-	return currentList, err
+	return base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, slotDiff)
 }
 
 func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
