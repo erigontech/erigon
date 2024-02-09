@@ -188,6 +188,11 @@ var (
 		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
 		Value: txpoolcfg.DefaultConfig.BlobSlots,
 	}
+	TxPoolTotalBlobPoolLimit = cli.Uint64Flag{
+		Name:  "txpool.totalblobpoollimit",
+		Usage: "Total limit of number of all blobs in txs within the txpool",
+		Value: txpoolcfg.DefaultConfig.TotalBlobPoolLimit,
+	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
 		Usage: "Maximum number of executable transaction slots for all accounts",
@@ -1376,6 +1381,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
 		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolTotalBlobPoolLimit.Name) {
+		fullCfg.TxPool.TotalBlobPoolLimit = ctx.Uint64(TxPoolTotalBlobPoolLimit.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
 		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)
