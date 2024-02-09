@@ -912,6 +912,7 @@ type ArchiveSanitizer struct {
 	BeaconApiURL string `help:"beacon api url" default:"http://localhost:5555"`
 	IntervalSlot uint64 `help:"interval slot" default:"19"` // odd number so that we can test many potential cases.
 	StartSlot    uint64 `help:"start slot" default:"0"`
+	FaultOut     string `help:"fault out" default:""`
 }
 
 func getHead(beaconApiURL string) (uint64, error) {
@@ -1039,6 +1040,15 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 			return err
 		}
 		if stateRoot != stateRoot2 {
+			if a.FaultOut != "" {
+				enc, err := state.EncodeSSZ(nil)
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(a.FaultOut, enc, 0644); err != nil {
+					return err
+				}
+			}
 			return fmt.Errorf("state mismatch at slot %d: got %x, want %x", i, stateRoot2, stateRoot)
 		}
 		log.Info("State at slot", "slot", i, "root", stateRoot)
