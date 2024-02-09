@@ -3,11 +3,15 @@ package tx
 import (
 	"encoding/hex"
 	"fmt"
+	"math/big"
+	"testing"
+
 	"github.com/holiman/uint256"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestDecodeRandomBatchL2Data(t *testing.T) {
@@ -82,7 +86,6 @@ func TestDecodePost155Tx(t *testing.T) {
 	post155 := "0xf86780843b9aca00826163941275fbb540c8efc58b812ba83b0d0b8b9917ae98808464fbb77c1ba0b7d2a666860f3c6b8f5ef96f86c7ec5562e97fd04c2e10f3755ff3a0456f9feba0246df95217bf9082f84f9e40adb0049c6664a5bb4c9cbe34ab1a73e77bab26ed"
 	post155Bytes, err := hex.DecodeString(post155[2:])
 	require.NoError(t, err)
-	//post155Bytes = append(post155Bytes, 75)
 	tx, pct, err := DecodeTx(post155Bytes, 75, forkID5)
 	require.NoError(t, err)
 	v, r, s := tx.RawSignatureValues()
@@ -126,4 +129,104 @@ func TestDecodePre155BatchL2DataForkID5(t *testing.T) {
 	assert.Equal(t, "15927819", hex.EncodeToString(txs[0].GetData()))
 	assert.Equal(t, uint64(100000), txs[0].GetGas())
 	assert.Equal(t, uint256.NewInt(1000000000), txs[0].GetPrice())
+}
+
+func createTx(nonce, gasPrice, gasLimit, from, to, value, data string, chainID uint64) types.LegacyTx {
+	nonceUint, _ := hexutil.DecodeUint64(nonce)
+	gasPriceInt, _ := uint256.FromHex(gasPrice)
+	gasLimitUint, _ := hexutil.DecodeUint64(gasLimit)
+	valueInt, _ := uint256.FromHex(value)
+	fromAddr := libcommon.HexToAddress(from)
+
+	var toAddress *libcommon.Address
+	if to != "" {
+		addr := libcommon.HexToAddress(to)
+		toAddress = &addr
+	}
+
+	tx := types.LegacyTx{
+		CommonTx: types.CommonTx{
+			ChainID: uint256.NewInt(chainID),
+			Nonce:   nonceUint,
+			Gas:     gasLimitUint,
+			To:      toAddress,
+			Value:   valueInt,
+			Data:    hexutil.MustDecode(data),
+		},
+		GasPrice: gasPriceInt,
+	}
+	tx.SetSender(fromAddr)
+
+	return tx
+}
+
+var testScenarios = map[string]func(t *testing.T){
+	"ZeroNonce": func(t *testing.T) {
+		tx := createTx(
+			"0x00",
+			"0x3b9aca00",
+			"", // fixed using a constant at 30000000
+			"0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
+			"0x1275fbb540c8efc58b812ba83b0d0b8b9917ae98",
+			"0x00",
+			"0x188ec356",
+			1000)
+		expectedHash := "0xf3de9c9f50d72933104d5bb109915d93e4958117de78c9a7d1a58b5c6e4cbb77"
+		actualHash, err := ComputeL2TxHash(tx)
+		if err != nil {
+			t.Fatalf("ComputeL2TxHash returned an error: %v", err)
+		}
+		if actualHash.Hex() != expectedHash {
+			t.Errorf("Expected hash %s, got %s", expectedHash, actualHash.Hex())
+		}
+	},
+}
+
+func TestComputeL2TxHashScenarios(t *testing.T) {
+	for name, scenario := range testScenarios {
+		t.Run(name, scenario)
+	}
+}
+
+type testCase struct {
+	param       interface{}
+	paramLength int
+	expected    string
+	expectError bool
+}
+
+func TestFormatL2TxHashParam(t *testing.T) {
+	cases := map[string]testCase{
+		"int":           {param: 0, paramLength: 8, expected: "0000000000000000", expectError: false},
+		"int64":         {param: int64(123), paramLength: 3, expected: "00007b", expectError: false},
+		"uint":          {param: uint(456), paramLength: 2, expected: "01c8", expectError: false},
+		"string":        {param: "abcdef", paramLength: 4, expected: "00abcdef", expectError: false},
+		"big":           {param: big.NewInt(789), paramLength: 2, expected: "0315", expectError: false},
+		"uint8 slice":   {param: []uint8{0xab, 0xcd, 0xef}, paramLength: 2, expected: "abcdef", expectError: false},
+		"uint8 slice 2": {param: []uint8{24, 142, 195, 86}, paramLength: 4, expected: "188ec356", expectError: false},
+		"hex string":    {param: "0x00", paramLength: 8, expected: "0000000000000000", expectError: false},
+		"more hex":      {param: "0x0186a0", paramLength: 8, expected: "00000000000186a0", expectError: false},
+		"address hex":   {param: "0x1275fbb540c8efc58b812ba83b0d0b8b9917ae98", paramLength: 20, expected: "1275fbb540c8efc58b812ba83b0d0b8b9917ae98", expectError: false},
+		"int 4":         {param: 4, paramLength: 3, expected: "000004", expectError: false},
+		"uint265":       {param: uint256.NewInt(1000), paramLength: 8, expected: "00000000000003e8", expectError: false},
+		"invalid hex":   {param: "0xzz", paramLength: 8, expected: "", expectError: true},
+	}
+
+	for n, tc := range cases {
+		t.Run(n, func(t *testing.T) {
+			result, err := formatL2TxHashParam(tc.param, tc.paramLength)
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected an error for param %v but got none", tc.param)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error for param %v: %v", tc.param, err)
+				}
+				if result != tc.expected {
+					t.Errorf("Expected %v, got %v for param %v", tc.expected, result, tc.param)
+				}
+			}
+		})
+	}
 }
