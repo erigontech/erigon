@@ -434,7 +434,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
-		if s.currentState.Slot() == 1600 {
+		if s.currentState.Slot() == 4293951 {
 			s.dumpFullBeaconState()
 		}
 		blocksProcessed++
