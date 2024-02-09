@@ -450,6 +450,11 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		}
 	}
 
+	// No need for payload building
+	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
+		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
+	}
+
 	if payloadAttributes != nil {
 		if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
 			return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
@@ -465,11 +470,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
 			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 		}
-	}
-
-	// No need for payload building
-	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
-		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
 	if !s.proposing {
