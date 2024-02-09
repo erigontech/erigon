@@ -157,6 +157,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, err
 	}
 
+	if version <= clparams.CapellaVersion {
+		if req.BlobGasUsed != nil {
+			return nil, &rpc.InvalidParamsError{Message: "Unexpected pre-cancun blobGasUsed"}
+		}
+		if req.ExcessBlobGas != nil {
+			return nil, &rpc.InvalidParamsError{Message: "Unexpected pre-cancun excessBlobGas"}
+		}
+	}
+
 	if version >= clparams.DenebVersion {
 		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
