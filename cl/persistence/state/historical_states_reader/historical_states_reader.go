@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
-	"golang.org/x/exp/slices"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -673,23 +672,23 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 			if err != nil {
 				return false
 			}
-			fmt.Println(isCurrentEpoch && currentEpoch != prevEpoch)
+			prevIdxs := isCurrentEpoch && currentEpoch != prevEpoch
 			// apply the flags
 			for _, idx := range attestingIndicies {
-				for flagIndex := range r.cfg.ParticipationWeights() {
+				for _, flagIndex := range participationFlagsIndicies {
 					var flagParticipation cltypes.ParticipationFlags
-					if isCurrentEpoch && currentEpoch != prevEpoch {
+					if prevIdxs {
 						flagParticipation = cltypes.ParticipationFlags(currentIdxs.Get(int(idx)))
 					} else {
 						flagParticipation = cltypes.ParticipationFlags(previousIdxs.Get(int(idx)))
 					}
-					if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || flagParticipation.HasFlag(flagIndex) {
+					if flagParticipation.HasFlag(int(flagIndex)) {
 						continue
 					}
-					if isCurrentEpoch && currentEpoch != prevEpoch {
-						currentIdxs.Set(int(idx), byte(flagParticipation.Add(flagIndex)))
+					if prevIdxs {
+						currentIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 					} else {
-						previousIdxs.Set(int(idx), byte(flagParticipation.Add(flagIndex)))
+						previousIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 					}
 				}
 			}
