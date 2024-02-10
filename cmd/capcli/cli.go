@@ -852,7 +852,6 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 					return err
 				}
 			}
-			fmt.Println("State", len(state.RawBalances())/8, state.ValidatorLength())
 			return fmt.Errorf("state mismatch at slot %d: got %x, want %x", i, stateRoot2, stateRoot)
 		}
 		log.Info("State at slot", "slot", i, "root", stateRoot)

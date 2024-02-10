@@ -414,7 +414,8 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				}
 				s.balances32 = s.balances32[:0]
 				s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
-			} else if slot%s.cfg.SlotsPerEpoch == 0 {
+			}
+			if slot%s.cfg.SlotsPerEpoch == 0 {
 				if err := s.antiquateBytesListDiff(ctx, key, s.balances32, s.currentState.RawBalances(), balances, base_encoding.ComputeCompressedSerializedUint64ListDiff); err != nil {
 					return err
 				}
