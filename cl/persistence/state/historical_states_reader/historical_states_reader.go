@@ -455,7 +455,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 				return nil, fmt.Errorf("invalid key %x", k)
 			}
 			currSlot := base_encoding.Decode64FromBytes4(k)
-			if currSlot == freshDumpSlot || currSlot > freshDumpSlot+clparams.SlotsPerDump {
+			if currSlot <= freshDumpSlot || currSlot > freshDumpSlot+clparams.SlotsPerDump {
 				continue
 			}
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, true)
