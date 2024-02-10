@@ -531,6 +531,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 			}
 		}
 	} else {
+		fmt.Println("begin", freshDumpSlot+clparams.SlotsPerDump, "end", roundedSlot)
 		for i := freshDumpSlot + clparams.SlotsPerDump; i > roundedSlot; i -= r.cfg.SlotsPerEpoch {
 			diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
 			if err != nil {
@@ -539,6 +540,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 			if len(diff) == 0 {
 				continue
 			}
+			fmt.Println("slot", i)
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff, true)
 			if err != nil {
 				return nil, err
