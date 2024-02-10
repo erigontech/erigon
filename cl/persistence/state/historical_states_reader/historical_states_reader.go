@@ -376,11 +376,26 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 
 func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
 	// Read the file
-	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	remainder := slot % clparams.SlotsPerDump
+	freshDumpSlot := slot - remainder
 
-	compressed, err := tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	midpoint := uint64(clparams.SlotsPerDump / 2)
+	var compressed []byte
+	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
+	}
+	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
+	if forward {
+		compressed, err = tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		compressed, err = tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
@@ -411,24 +426,45 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 		return nil, err
 	}
 	defer diffCursor.Close()
-
-	for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
-		if err != nil {
-			return nil, err
+	if forward {
+		for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) <= slot; k, v, err = diffCursor.Next() {
+			if err != nil {
+				return nil, err
+			}
+			if len(k) != 4 {
+				return nil, fmt.Errorf("invalid key %x", k)
+			}
+			currSlot := base_encoding.Decode64FromBytes4(k)
+			if currSlot == freshDumpSlot {
+				continue
+			}
+			if currSlot > slot {
+				return nil, fmt.Errorf("diff not found for slot %d", slot)
+			}
+			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
+			if err != nil {
+				return nil, err
+			}
 		}
-		if len(k) != 4 {
-			return nil, fmt.Errorf("invalid key %x", k)
-		}
-		currSlot := base_encoding.Decode64FromBytes4(k)
-		if currSlot == freshDumpSlot {
-			continue
-		}
-		if currSlot > slot {
-			return nil, fmt.Errorf("diff not found for slot %d", slot)
-		}
-		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
-		if err != nil {
-			return nil, err
+	} else {
+		for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot + clparams.SlotsPerDump)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) > slot; k, v, err = diffCursor.Prev() {
+			if err != nil {
+				return nil, err
+			}
+			if len(k) != 4 {
+				return nil, fmt.Errorf("invalid key %x", k)
+			}
+			currSlot := base_encoding.Decode64FromBytes4(k)
+			if currSlot == freshDumpSlot {
+				continue
+			}
+			if currSlot <= slot {
+				return nil, fmt.Errorf("diff not found for slot %d", slot)
+			}
+			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, true)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -436,17 +472,32 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 }
 
 func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLength, slot uint64, diffBucket, dumpBucket string) ([]byte, error) {
-	// Read the file
-	freshDumpSlot := slot - slot%clparams.SlotsPerDump
+	remainder := slot % clparams.SlotsPerDump
+	freshDumpSlot := slot - remainder
 
 	buffer := buffersPool.Get().(*bytes.Buffer)
 	defer buffersPool.Put(buffer)
 	buffer.Reset()
 
-	compressed, err := tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
+	var compressed []byte
+	currentStageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
 	}
+	midpoint := uint64(clparams.SlotsPerDump / 2)
+	forward := remainder <= midpoint || currentStageProgress <= freshDumpSlot+clparams.SlotsPerDump
+	if forward {
+		compressed, err = tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		compressed, err = tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot+clparams.SlotsPerDump))
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if len(compressed) == 0 {
 		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
 	}
@@ -464,20 +515,37 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 	}
 
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
-	for i := freshDumpSlot; i <= roundedSlot; i += r.cfg.SlotsPerEpoch {
-		if i == freshDumpSlot {
-			continue
+
+	if forward {
+		for i := freshDumpSlot; i <= roundedSlot; i += r.cfg.SlotsPerEpoch {
+			if i == freshDumpSlot {
+				continue
+			}
+			diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
+			if err != nil {
+				return nil, err
+			}
+			if len(diff) == 0 {
+				continue
+			}
+			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff, false)
+			if err != nil {
+				return nil, err
+			}
 		}
-		diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
-		if err != nil {
-			return nil, err
-		}
-		if len(diff) == 0 {
-			continue
-		}
-		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff, false)
-		if err != nil {
-			return nil, err
+	} else {
+		for i := freshDumpSlot + clparams.SlotsPerDump; i > roundedSlot; i -= r.cfg.SlotsPerEpoch {
+			diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
+			if err != nil {
+				return nil, err
+			}
+			if len(diff) == 0 {
+				continue
+			}
+			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff, true)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
