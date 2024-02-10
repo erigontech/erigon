@@ -54,7 +54,6 @@ func TestBlocksByRootHandler(t *testing.T) {
 
 	expBlocks := populateDatabaseWithBlocks(t, store, tx, startSlot, count)
 	tx.Commit()
-	fmt.Println(store.U)
 
 	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
