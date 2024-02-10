@@ -622,7 +622,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	// Read the previous idxs
 	for i := beginSlot; i <= slot; i++ {
 		// Read the block
-		block, err := r.blockReader.ReadBlockBySlot(context.Background(), tx, i)
+		block, err := r.blockReader.ReadBlindedBlockBySlot(context.Background(), tx, i)
 		if err != nil {
 			return nil, nil, err
 		}
