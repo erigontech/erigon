@@ -545,7 +545,6 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 			}
 		}
 	}
-	currentList = currentList[:validatorSetLength*8]
 
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
@@ -563,6 +562,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 	if slotDiff == nil {
 		return nil, fmt.Errorf("slot diff not found for slot %d", slot)
 	}
+	currentList = currentList[:validatorSetLength*8]
 
 	return base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, slotDiff, false)
 }
