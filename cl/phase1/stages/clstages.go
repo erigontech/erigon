@@ -44,7 +44,6 @@ type Cfg struct {
 	state           *state.CachingBeaconState
 	gossipManager   *network2.GossipManager
 	forkChoice      *forkchoice.ForkChoiceStore
-	beaconDB        persistence.BeaconChainDatabase
 	indiciesDB      kv.RwDB
 	tmpdir          string
 	dbConfig        db_config.DatabaseConfiguration
@@ -74,7 +73,6 @@ func ClStagesCfg(
 	executionClient execution_client.ExecutionEngine,
 	gossipManager *network2.GossipManager,
 	forkChoice *forkchoice.ForkChoiceStore,
-	beaconDB persistence.BeaconChainDatabase,
 	indiciesDB kv.RwDB,
 	sn *freezeblocks.CaplinSnapshots,
 	tmpdir string,
@@ -93,7 +91,6 @@ func ClStagesCfg(
 		gossipManager:   gossipManager,
 		forkChoice:      forkChoice,
 		tmpdir:          tmpdir,
-		beaconDB:        beaconDB,
 		indiciesDB:      indiciesDB,
 		dbConfig:        dbConfig,
 		sn:              sn,
@@ -195,7 +192,7 @@ func ConsensusClStages(ctx context.Context,
 			return err
 		}
 		// Write block to database optimistically if we are very behind.
-		return cfg.beaconDB.WriteBlock(ctx, tx, block, false)
+		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -240,7 +237,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -658,6 +655,7 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
+					pruneDistance := uint64(1_000_000)
 					// clean up some old ranges
 					err = gossipSource.PurgeRange(ctx, tx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
 					if err != nil {
@@ -665,10 +663,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					// TODO(Giulio2002): schedule snapshots retirement if needed.
 					if !cfg.backfilling {
-						if err := cfg.beaconDB.PurgeRange(ctx, tx, 1, cfg.forkChoice.HighestSeen()-100_000); err != nil {
-							return err
-						}
-						if err := beacon_indicies.PruneBlockRoots(ctx, tx, 0, cfg.forkChoice.HighestSeen()-100_000); err != nil {
+						if err := beacon_indicies.PruneBlocks(ctx, tx, args.seenSlot-pruneDistance); err != nil {
 							return err
 						}
 					}
