@@ -649,9 +649,9 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 					activeIndicies = currentActiveIndicies
 				}
 			} else {
-				if currentEpoch == prevEpoch {
-					return true
-				}
+				// if currentEpoch == prevEpoch {
+				// 	return true
+				// }
 				activeIndicies = previousActiveIndicies
 			}
 
