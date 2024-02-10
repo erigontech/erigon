@@ -80,7 +80,7 @@ func (c *ConsensusHandlers) beaconBlocksByRangeHandler(s network.Stream) error {
 			return err
 		}
 		written++
-		if written >= uint64(req.Count) {
+		if written >= req.Count {
 			break
 		}
 	}

@@ -259,7 +259,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// Use this as the event slot (it will be incremented by 1 each time we process a block)
 	slot := s.currentState.Slot() + 1
 
-	var prevBalances, prevValSet []byte
+	var prevValSet []byte
 	events := state_accessors.NewStateEvents()
 	slashingOccured := false
 	// var validatorStaticState
@@ -423,8 +423,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			continue
 		}
 		// We now compute the difference between the two balances.
-		prevBalances = prevBalances[:0]
-		prevBalances = append(prevBalances, s.currentState.RawBalances()...)
 		prevValSet = prevValSet[:0]
 		prevValSet = append(prevValSet, s.currentState.RawValidatorSet()...)
 

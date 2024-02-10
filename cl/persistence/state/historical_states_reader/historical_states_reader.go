@@ -144,6 +144,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	if err := balances.DecodeSSZ(balancesBytes, 0); err != nil {
 		return nil, fmt.Errorf("failed to decode validator balances: %w", err)
 	}
+
 	ret.SetBalances(balances)
 
 	validatorSet, err := r.ReadValidatorsForHistoricalState(tx, slot)
@@ -452,7 +453,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		return nil, err
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
-	for i := freshDumpSlot; i < roundedSlot; i += r.cfg.SlotsPerEpoch {
+	for i := freshDumpSlot; i <= roundedSlot; i += r.cfg.SlotsPerEpoch {
 		diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
 		if err != nil {
 			return nil, err
@@ -471,6 +472,9 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 		return nil, err
 	}
 	defer diffCursor.Close()
+	if slot%r.cfg.SlotsPerEpoch == 0 {
+		return currentList, nil
+	}
 
 	slotDiff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(slot))
 	if err != nil {
