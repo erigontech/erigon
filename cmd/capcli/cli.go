@@ -901,6 +901,11 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
+		for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
+			if haveState.PreviousEpochParticipation().Get(i) != wantState.PreviousEpochParticipation().Get(i) {
+				log.Info("Participation mismatch", "index", i, "have", haveState.PreviousEpochParticipation().Get(i), "want", wantState.PreviousEpochParticipation().Get(i))
+			}
+		}
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
@@ -935,7 +940,6 @@ func getHead(beaconApiURL string) (uint64, error) {
 		return 0, fmt.Errorf("no head found")
 	}
 	head := data[0].(map[string]interface{})
-	fmt.Println(head)
 	slotStr, ok := head["slot"].(string)
 	if !ok {
 		return 0, fmt.Errorf("no slot found")
