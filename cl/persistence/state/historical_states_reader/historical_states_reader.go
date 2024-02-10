@@ -673,7 +673,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 			if err != nil {
 				return false
 			}
-			fmt.Println(attestingIndicies)
+			fmt.Println(isCurrentEpoch && currentEpoch != prevEpoch)
 			// apply the flags
 			for _, idx := range attestingIndicies {
 				for flagIndex := range r.cfg.ParticipationWeights() {
