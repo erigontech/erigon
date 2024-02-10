@@ -430,6 +430,9 @@ const (
 	BeaconState = "BeaconState"
 	// [slot] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+
+	EffectiveBalancesDump = "EffectiveBalancesDump"
+	BalancesDump          = "BalancesDump"
 	// [slot] => [attestation list (custom encoding)]
 	Attestetations = "Attestetations"
 
@@ -682,6 +685,8 @@ var ChaindataTables = []string{
 	Eth1DataVotes,
 	IntraRandaoMixes,
 	ActiveValidatorIndicies,
+	EffectiveBalancesDump,
+	BalancesDump,
 }
 
 const (

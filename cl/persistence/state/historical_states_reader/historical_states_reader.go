@@ -3,7 +3,6 @@ package historical_states_reader
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -19,12 +18,15 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
+
+var buffersPool = sync.Pool{
+	New: func() interface{} { return &bytes.Buffer{} },
+}
 
 type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
@@ -135,7 +137,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetEth1Data(slotData.Eth1Data)
 	ret.SetEth1DepositIndex(slotData.Eth1DepositIndex)
 	// Registry (Validators + Balances)
-	balancesBytes, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
+	balancesBytes, err := r.reconstructBalances(tx, slotData.ValidatorLength, slot, kv.ValidatorBalance, kv.BalancesDump)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read validator balances: %w", err)
 	}
@@ -372,30 +374,35 @@ func (r *HistoricalStatesReader) readRandaoMixes(tx kv.Tx, slot uint64, out soli
 	return nil
 }
 
-func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint64, diffBucket string, fileSuffix string) ([]byte, error) {
+func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validatorSetLength, slot uint64, diffBucket string, dumpBucket string) ([]byte, error) {
 	// Read the file
 	freshDumpSlot := slot - slot%clparams.SlotsPerDump
-	_, filePath := clparams.EpochToPaths(freshDumpSlot, r.cfg, fileSuffix)
-	file, err := r.fs.Open(filePath)
+
+	compressed, err := tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	if len(compressed) == 0 {
+		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
+	}
+
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+
+	if _, err := buffer.Write(compressed); err != nil {
+		return nil, err
+	}
 
 	// Read the diff file
-	zstdReader, err := zstd.NewReader(file)
+	zstdReader, err := zstd.NewReader(buffer)
 	if err != nil {
 		return nil, err
 	}
 	defer zstdReader.Close()
 
-	lenRaw := uint64(0)
-	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
-		return nil, err
-	}
-	currentList := make([]byte, lenRaw)
-
-	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
+	currentList := make([]byte, validatorSetLength*8)
+	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
 		return nil, err
 	}
 
@@ -412,7 +419,11 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 		if len(k) != 4 {
 			return nil, fmt.Errorf("invalid key %x", k)
 		}
-		if base_encoding.Decode64FromBytes4(k) > slot {
+		currSlot := base_encoding.Decode64FromBytes4(k)
+		if currSlot == freshDumpSlot {
+			continue
+		}
+		if currSlot > slot {
 			return nil, fmt.Errorf("diff not found for slot %d", slot)
 		}
 		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
@@ -424,35 +435,39 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, slot uint
 	return currentList, err
 }
 
-func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diffBucket string) ([]byte, error) {
+func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLength, slot uint64, diffBucket, dumpBucket string) ([]byte, error) {
 	// Read the file
 	freshDumpSlot := slot - slot%clparams.SlotsPerDump
-	_, filePath := clparams.EpochToPaths(freshDumpSlot, r.cfg, "balances")
-	file, err := r.fs.Open(filePath)
+
+	buffer := buffersPool.Get().(*bytes.Buffer)
+	defer buffersPool.Put(buffer)
+	buffer.Reset()
+
+	compressed, err := tx.GetOne(dumpBucket, base_encoding.Encode64ToBytes4(freshDumpSlot))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-
-	// Read the diff file
-	zstdReader, err := zstd.NewReader(file)
+	if len(compressed) == 0 {
+		return nil, fmt.Errorf("dump not found for slot %d", freshDumpSlot)
+	}
+	if _, err := buffer.Write(compressed); err != nil {
+		return nil, err
+	}
+	zstdReader, err := zstd.NewReader(buffer)
 	if err != nil {
 		return nil, err
 	}
 	defer zstdReader.Close()
-
-	lenBuf := make([]byte, 8)
-	if _, err := file.Read(lenBuf); err != nil {
+	currentList := make([]byte, validatorSetLength*8)
+	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
 		return nil, err
 	}
-	lenRaw := binary.LittleEndian.Uint64(lenBuf)
-	currentList := make([]byte, lenRaw)
 
-	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
-		return nil, err
-	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
 	for i := freshDumpSlot; i <= roundedSlot; i += r.cfg.SlotsPerEpoch {
+		if i == freshDumpSlot {
+			continue
+		}
 		diff, err := tx.GetOne(diffBucket, base_encoding.Encode64ToBytes4(i))
 		if err != nil {
 			return nil, err
@@ -519,7 +534,7 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64
 	defer zstdReader.Close()
 	currentList := make([]byte, size*8)
 
-	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
+	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
 	}
 
@@ -549,7 +564,7 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 	})
 	// Read the balances
 
-	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, slot, kv.ValidatorEffectiveBalance, "effective_balances")
+	bytesEffectiveBalances, err := r.reconstructDiffedUint64List(tx, validatorSetLength, slot, kv.ValidatorEffectiveBalance, kv.EffectiveBalancesDump)
 	if err != nil {
 		return nil, err
 	}
@@ -774,7 +789,7 @@ func (r *HistoricalStatesReader) ReadValidatorsBalances(tx kv.Tx, slot uint64) (
 		return nil, nil
 	}
 
-	balances, err := r.reconstructBalances(tx, slot, kv.ValidatorBalance)
+	balances, err := r.reconstructBalances(tx, sd.ValidatorLength, slot, kv.ValidatorBalance, kv.BalancesDump)
 	if err != nil {
 		return nil, err
 	}

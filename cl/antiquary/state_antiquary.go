@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -194,6 +193,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer stateEvents.Close()
 	activeValidatorIndicies := etl.NewCollector(kv.ActiveValidatorIndicies, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
 	defer activeValidatorIndicies.Close()
+	balancesDumps := etl.NewCollector(kv.BalancesDump, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
+	defer balancesDumps.Close()
+	effectiveBalancesDump := etl.NewCollector(kv.EffectiveBalancesDump, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
+	defer effectiveBalancesDump.Close()
 
 	progress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
@@ -225,7 +228,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				return err
 			}
 			// Collect genesis state if we are at genesis
-			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, currentSyncCommittee, nextSyncCommittee, slashings, epochData, inactivityScoresC, proposers, slotData, stateEvents, changedValidators); err != nil {
+			if err := s.collectGenesisState(ctx, compressedWriter, s.currentState, currentSyncCommittee, nextSyncCommittee, slashings, epochData, inactivityScoresC, proposers, slotData, stateEvents, effectiveBalancesDump, balancesDumps, changedValidators); err != nil {
 				return err
 			}
 		} else {
@@ -370,8 +373,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	first := false
 	blocksBeforeCommit := 100_000
 	blocksProcessed := 0
-	// This tells us that transition and operations do not happen concurrently and access is safe, so we can optimize for GC.
-	// there is optimized custom cache to recycle big GC overhead.
+
 	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
 		slashingOccured = false // Set this to false at the beginning of each slot.
 		key := base_encoding.Encode64ToBytes4(slot)
@@ -404,10 +406,10 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// If we have a missed block, we just skip it.
 		if block == nil {
 			if isDumpSlot {
-				if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
+				if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), commonBuffer, compressedWriter, balancesDumps); err != nil {
 					return err
 				}
-				if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
+				if err := s.antiquateEffectiveBalances(effectiveBalancesDump, slot, s.currentState.RawValidatorSet(), commonBuffer, compressedWriter); err != nil {
 					return err
 				}
 				s.balances32 = s.balances32[:0]
@@ -419,7 +421,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 				s.balances32 = s.balances32[:0]
 				s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
 			}
-
 			continue
 		}
 		// We now compute the difference between the two balances.
@@ -455,16 +456,12 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		events.Reset()
 
 		if isDumpSlot {
-			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), compressedWriter, "balances"); err != nil {
+			if err := s.antiquateField(ctx, slot, s.currentState.RawBalances(), commonBuffer, compressedWriter, balancesDumps); err != nil {
 				return err
 			}
-			if err := s.antiquateEffectiveBalances(ctx, slot, s.currentState.RawValidatorSet(), compressedWriter); err != nil {
+			if err := s.antiquateEffectiveBalances(effectiveBalancesDump, slot, s.currentState.RawValidatorSet(), commonBuffer, compressedWriter); err != nil {
 				return err
 			}
-			// Reset it as we antiquated it.
-			s.balances32 = s.balances32[:0]
-			s.balances32 = append(s.balances32, s.currentState.RawBalances()...)
-			continue
 		}
 
 		// antiquate diffs
@@ -577,9 +574,16 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	if err := stateEvents.Load(rwTx, kv.StateEvents, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
+	if err := effectiveBalancesDump.Load(rwTx, kv.EffectiveBalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
+	if err := balancesDumps.Load(rwTx, kv.BalancesDump, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return err
+	}
 	if err := state_accessors.SetStateProcessingProgress(rwTx, s.currentState.Slot()); err != nil {
 		return err
 	}
+
 	s.validatorsTable.SetSlot(s.currentState.Slot())
 
 	s.validatorsTable.ForEach(func(validatorIndex uint64, validator *state_accessors.StaticValidator) bool {
@@ -610,47 +614,25 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	return nil
 }
 
-func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompressed []byte, compressor *zstd.Encoder, name string) error {
-	folderPath, filePath := clparams.EpochToPaths(slot, s.cfg, name)
-	_ = s.fs.MkdirAll(folderPath, 0o755)
-
-	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer balancesFile.Close()
-	compressor.Reset(balancesFile)
-
-	if err := binary.Write(balancesFile, binary.LittleEndian, uint64(len(uncompressed))); err != nil {
-		return err
-	}
+func (s *Antiquary) antiquateField(ctx context.Context, slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder, collector *etl.Collector) error {
+	buffer.Reset()
+	compressor.Reset(buffer)
 
 	if _, err := compressor.Write(uncompressed); err != nil {
 		return err
 	}
-
 	if err := compressor.Close(); err != nil {
 		return err
 	}
-	return balancesFile.Sync()
+	roundedSlot := slot - (slot % clparams.SlotsPerDump)
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
 }
 
-func (s *Antiquary) antiquateEffectiveBalances(ctx context.Context, slot uint64, uncompressed []byte, compressor *zstd.Encoder) error {
-	folderPath, filePath := clparams.EpochToPaths(slot, s.cfg, "effective_balances")
-	_ = s.fs.MkdirAll(folderPath, 0o755)
+func (s *Antiquary) antiquateEffectiveBalances(collector *etl.Collector, slot uint64, uncompressed []byte, buffer *bytes.Buffer, compressor *zstd.Encoder) error {
+	buffer.Reset()
+	compressor.Reset(buffer)
 
-	balancesFile, err := s.fs.OpenFile(filePath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer balancesFile.Close()
-	compressor.Reset(balancesFile)
 	validatorSetSize := 121
-
-	if err := binary.Write(balancesFile, binary.LittleEndian, uint64((len(uncompressed)/validatorSetSize)*8)); err != nil {
-		return err
-	}
-
 	for i := 0; i < len(uncompressed)/validatorSetSize; i++ {
 		// 80:88
 		if _, err := compressor.Write(uncompressed[i*validatorSetSize+80 : i*validatorSetSize+88]); err != nil {
@@ -661,7 +643,8 @@ func (s *Antiquary) antiquateEffectiveBalances(ctx context.Context, slot uint64,
 	if err := compressor.Close(); err != nil {
 		return err
 	}
-	return balancesFile.Sync()
+	roundedSlot := slot - (slot % clparams.SlotsPerDump)
+	return collector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), common.Copy(buffer.Bytes()))
 }
 
 func (s *Antiquary) antiquateBytesListDiff(ctx context.Context, key []byte, old, new []byte, collector *etl.Collector, diffFn func(w io.Writer, old, new []byte) error) error {
@@ -722,7 +705,7 @@ func getProposerDutiesValue(s *state.CachingBeaconState) []byte {
 	return list
 }
 
-func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, currentSyncCommittee, nextSyncCommittee, slashings, epochData, inactivities, proposersCollector, slotDataCollector, stateEvents *etl.Collector, changedValidators map[uint64]struct{}) error {
+func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.Encoder, state *state.CachingBeaconState, currentSyncCommittee, nextSyncCommittee, slashings, epochData, inactivities, proposersCollector, slotDataCollector, stateEvents, dumpEffectiveBalances, dumpBalances *etl.Collector, changedValidators map[uint64]struct{}) error {
 	var err error
 	slot := state.Slot()
 	epoch := slot / s.cfg.SlotsPerEpoch
@@ -745,13 +728,15 @@ func (s *Antiquary) collectGenesisState(ctx context.Context, compressor *zstd.En
 		return err
 	}
 	roundedSlotToDump := slot - (slot % clparams.SlotsPerDump)
-	if err := s.antiquateField(ctx, roundedSlotToDump, s.currentState.RawBalances(), compressor, "balances"); err != nil {
-		return err
-	}
-	if err := s.antiquateEffectiveBalances(ctx, roundedSlotToDump, s.currentState.RawValidatorSet(), compressor); err != nil {
-		return err
-	}
 	var commonBuffer bytes.Buffer
+
+	if err := s.antiquateField(ctx, roundedSlotToDump, s.currentState.RawBalances(), &commonBuffer, compressor, dumpBalances); err != nil {
+		return err
+	}
+
+	if err := s.antiquateEffectiveBalances(dumpEffectiveBalances, roundedSlotToDump, s.currentState.RawValidatorSet(), &commonBuffer, compressor); err != nil {
+		return err
+	}
 	if err := s.antiquateFullUint64List(slashings, roundedSlotToDump, s.currentState.RawSlashings(), &commonBuffer, compressor); err != nil {
 		return err
 	}
