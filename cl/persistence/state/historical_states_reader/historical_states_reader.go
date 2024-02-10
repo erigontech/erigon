@@ -65,7 +65,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	// If this happens, we need to update our static tables
 	if slot > latestProcessedState || slot > r.validatorTable.Slot() {
-		return nil, fmt.Errorf("slot %d is greater than latest processed state %d", slot, latestProcessedState)
+		return nil, nil
 	}
 
 	if slot == r.genesisState.Slot() {
@@ -457,9 +457,6 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 			currSlot := base_encoding.Decode64FromBytes4(k)
 			if currSlot == freshDumpSlot {
 				continue
-			}
-			if currSlot <= slot {
-				return nil, fmt.Errorf("diff not found for slot %d", slot)
 			}
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, true)
 			if err != nil {
