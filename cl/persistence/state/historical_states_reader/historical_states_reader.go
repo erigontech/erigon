@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
-	"golang.org/x/exp/slices"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -665,26 +664,27 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, i, data, i-data.Slot(), true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, block.Version(), i, data, i-data.Slot(), true)
 			if err != nil {
 				return false
 			}
+			prevIdxs := isCurrentEpoch && currentEpoch != prevEpoch
 			// apply the flags
 			for _, idx := range attestingIndicies {
-				for flagIndex := range r.cfg.ParticipationWeights() {
+				for _, flagIndex := range participationFlagsIndicies {
 					var flagParticipation cltypes.ParticipationFlags
-					if isCurrentEpoch && currentEpoch != prevEpoch {
+					if prevIdxs {
 						flagParticipation = cltypes.ParticipationFlags(currentIdxs.Get(int(idx)))
 					} else {
 						flagParticipation = cltypes.ParticipationFlags(previousIdxs.Get(int(idx)))
 					}
-					if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || flagParticipation.HasFlag(flagIndex) {
+					if flagParticipation.HasFlag(int(flagIndex)) {
 						continue
 					}
-					if isCurrentEpoch && currentEpoch != prevEpoch {
-						currentIdxs.Set(int(idx), byte(flagParticipation.Add(flagIndex)))
+					if prevIdxs {
+						currentIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 					} else {
-						previousIdxs.Set(int(idx), byte(flagParticipation.Add(flagIndex)))
+						previousIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 					}
 				}
 			}
@@ -719,7 +719,7 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 	if err := solid.RangeErr[*solid.PendingAttestation](atts, func(i1 int, pa *solid.PendingAttestation, i2 int) error {
 		attestationData := pa.AttestantionData()
 		mixPosition := ((attestationData.Slot() / r.cfg.SlotsPerEpoch) + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-		flags, err := r.getAttestationParticipationFlagIndicies(tx, altairSlot, attestationData, pa.InclusionDelay(), false)
+		flags, err := r.getAttestationParticipationFlagIndicies(tx, clparams.AltairVersion, altairSlot, attestationData, pa.InclusionDelay(), false)
 		if err != nil {
 			return err
 		}

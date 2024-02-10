@@ -157,6 +157,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		return nil, err
 	}
 
+	if version <= clparams.CapellaVersion {
+		if req.BlobGasUsed != nil {
+			return nil, &rpc.InvalidParamsError{Message: "Unexpected pre-cancun blobGasUsed"}
+		}
+		if req.ExcessBlobGas != nil {
+			return nil, &rpc.InvalidParamsError{Message: "Unexpected pre-cancun excessBlobGas"}
+		}
+	}
+
 	if version >= clparams.DenebVersion {
 		if req.BlobGasUsed == nil || req.ExcessBlobGas == nil || parentBeaconBlockRoot == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blobGasUsed/excessBlobGas/beaconRoot missing"}
@@ -450,26 +459,24 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		}
 	}
 
-	if payloadAttributes != nil {
-		if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
-			return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
-		}
-		if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
-			return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
-		}
-
-		timestamp := uint64(payloadAttributes.Timestamp)
-		if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
-			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
-		if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
-			return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
-		}
-	}
-
 	// No need for payload building
 	if payloadAttributes == nil || status.Status != engine_types.ValidStatus {
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
+	}
+
+	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // Unexpected Beacon Root
+	}
+	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
+		return nil, &engine_helpers.InvalidPayloadAttributesErr // Beacon Root missing
+	}
+
+	timestamp := uint64(payloadAttributes.Timestamp)
+	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 before cancun
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
+	}
+	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // Not V3 after cancun
+		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
 	if !s.proposing {
@@ -478,7 +485,6 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 
 	headHeader := s.chainRW.GetHeaderByHash(forkchoiceState.HeadHash)
 
-	timestamp := uint64(payloadAttributes.Timestamp)
 	if headHeader.Time >= timestamp {
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
