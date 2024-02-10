@@ -668,7 +668,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, i, data, i-data.Slot(), true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, block.Version(), i, data, i-data.Slot(), true)
 			if err != nil {
 				return false
 			}
@@ -724,7 +724,7 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 	if err := solid.RangeErr[*solid.PendingAttestation](atts, func(i1 int, pa *solid.PendingAttestation, i2 int) error {
 		attestationData := pa.AttestantionData()
 		mixPosition := ((attestationData.Slot() / r.cfg.SlotsPerEpoch) + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-		flags, err := r.getAttestationParticipationFlagIndicies(tx, altairSlot, attestationData, pa.InclusionDelay(), false)
+		flags, err := r.getAttestationParticipationFlagIndicies(tx, clparams.AltairVersion, altairSlot, attestationData, pa.InclusionDelay(), false)
 		if err != nil {
 			return err
 		}
