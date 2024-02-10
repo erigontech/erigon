@@ -426,7 +426,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 		if currSlot > slot {
 			return nil, fmt.Errorf("diff not found for slot %d", slot)
 		}
-		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v)
+		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, false)
 		if err != nil {
 			return nil, err
 		}
@@ -475,7 +475,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 		if len(diff) == 0 {
 			continue
 		}
-		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff)
+		currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, diff, false)
 		if err != nil {
 			return nil, err
 		}
@@ -498,7 +498,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 		return nil, fmt.Errorf("slot diff not found for slot %d", slot)
 	}
 
-	return base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, slotDiff)
+	return base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, slotDiff, false)
 }
 
 func (r *HistoricalStatesReader) ReconstructUint64ListDump(tx kv.Tx, slot uint64, bkt string, size int, out solid.Uint64ListSSZ) error {
