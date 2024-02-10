@@ -467,7 +467,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 			}
 		}
 	}
-
+	currentList = currentList[:validatorSetLength*8]
 	return currentList, err
 }
 
@@ -548,6 +548,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 			}
 		}
 	}
+	currentList = currentList[:validatorSetLength*8]
 
 	diffCursor, err := tx.Cursor(diffBucket)
 	if err != nil {
