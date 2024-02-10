@@ -40,7 +40,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, br.chainConfig)
 	if ok {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-		if err := DumpBorBlocks(ctx, blockFrom, blockTo, chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBorBlocks(ctx, blockFrom, blockTo, chainConfig, tmpDir, snapshots, db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBorBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
@@ -53,39 +53,42 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	}
 
 	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
-	logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
-	if len(rangesToMerge) == 0 {
-		return ok, nil
-	}
-	ok = true // have something to merge
-	onMerge := func(r Range) error {
-		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-			notifier.OnNewSnapshot()
+	for _, snapType := range snapshots.Types() {
+		rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(snapType), snapshots.BlocksAvailable())
+		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
+		if len(rangesToMerge) == 0 {
+			return ok, nil
+		}
+		ok = true // have something to merge
+		onMerge := func(r Range) error {
+			if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
+				notifier.OnNewSnapshot()
+			}
+
+			if seedNewSnapshots != nil {
+				downloadRequest := []services.DownloadRequest{
+					services.NewDownloadRequest("", ""),
+				}
+				if err := seedNewSnapshots(downloadRequest); err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 
-		if seedNewSnapshots != nil {
-			downloadRequest := []services.DownloadRequest{
-				services.NewDownloadRequest("", ""),
-			}
-			if err := seedNewSnapshots(downloadRequest); err != nil {
-				return err
-			}
+		err := merger.Merge(ctx, &snapshots.RoSnapshots, snapType, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
+
+		if err != nil {
+			return ok, err
 		}
-		return nil
 	}
 
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, snaptype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-
-	if err != nil {
-		return ok, err
-	}
 	return ok, nil
 }
 
-func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir string, snapshots *BorRoSnapshots, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, chainConfig) {
-		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), tmpDir, snapDir, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
+		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), tmpDir, snapshots, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
@@ -93,14 +96,39 @@ func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *
 	return nil
 }
 
-func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir string, snapshots *BorRoSnapshots, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 
-	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, blockFrom, blockTo),
-		DumpBorEvents, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+	var nextEventId uint64
+
+	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapshots.Dir(), blockFrom, blockTo),
+		DumpBorEvents, func(ctx context.Context) uint64 {
+			if nextEventId == 0 {
+				segs, _ := snapshots.segments.Get(snaptype.BorEvents.Enum())
+
+				segs.PreviousSegment(blockFrom, func(seg *Segment) error {
+					d, err := compress.NewDecompressor(seg.FilePath())
+					if err != nil {
+						return err
+					}
+					defer d.Close()
+
+					lastEventId, _, err := validateEventSequence(d)
+
+					if err == nil && lastEventId != 0 {
+						nextEventId = lastEventId + 1
+					}
+
+					return err
+				})
+			}
+
+			return nextEventId
+		},
+		chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
 
-	if _, err := dumpRange(ctx, snaptype.BorSpans.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err := dumpRange(ctx, snaptype.BorSpans.FileInfo(snapshots.Dir(), blockFrom, blockTo),
 		DumpBorSpans, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
@@ -111,6 +139,7 @@ func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, 
 func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common2.Hash, collect func([]byte) error) error {
 	var blockNumBuf [8]byte
 	var eventIdBuf [8]byte
+
 	txnHash := types.ComputeBorTxHash(blockNum, blockHash)
 	binary.BigEndian.PutUint64(blockNumBuf[:], blockNum)
 	for eventId := startEventId; eventId < endEventId; eventId++ {
@@ -119,6 +148,11 @@ func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint6
 		if err != nil {
 			return err
 		}
+
+		if event == nil {
+			return fmt.Errorf("missing event %d for block %d", eventId, blockNum)
+		}
+
 		snapshotRecord := make([]byte, len(event)+length.Hash+length.BlockNum+8)
 		copy(snapshotRecord, txnHash[:])
 		copy(snapshotRecord[length.Hash:], blockNumBuf[:])
@@ -132,7 +166,7 @@ func dumpBorEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint6
 }
 
 // DumpBorEvents - [from, to)
-func DumpBorEvents(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func DumpBorEvents(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, expectedFirstKey firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
@@ -141,28 +175,45 @@ func DumpBorEvents(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, b
 	var prevBlockNum uint64
 	var startEventId uint64
 	var lastEventId uint64
+	var prevEventId uint64
+
+	if firstKey := expectedFirstKey(ctx); firstKey != 0 {
+		prevEventId = firstKey - 1
+	}
+
 	if err := kv.BigChunks(db, kv.BorEventNums, from, func(tx kv.Tx, blockNumBytes, eventIdBytes []byte) (bool, error) {
 		blockNum := binary.BigEndian.Uint64(blockNumBytes)
 		if first {
 			startEventId = binary.BigEndian.Uint64(eventIdBytes)
+
+			if prevEventId != 0 && startEventId != prevEventId+1 {
+				return false, fmt.Errorf("missing bor event %d at block=%d", prevEventId+1, blockNum)
+			}
+
 			first = false
 			prevBlockNum = blockNum
 		} else if blockNum != prevBlockNum {
 			endEventId := binary.BigEndian.Uint64(eventIdBytes)
 			blockHash, e := rawdb.ReadCanonicalHash(tx, prevBlockNum)
+
 			if e != nil {
 				return false, e
 			}
+
 			if e := dumpBorEventRange(startEventId, endEventId, tx, prevBlockNum, blockHash, collect); e != nil {
 				return false, e
 			}
+
 			startEventId = endEventId
 			prevBlockNum = blockNum
 		}
+
+		lastEventId = startEventId - 1
+
 		if blockNum >= blockTo {
 			return false, nil
 		}
-		lastEventId = binary.BigEndian.Uint64(eventIdBytes)
+
 		select {
 		case <-ctx.Done():
 			return false, ctx.Err()
@@ -231,7 +282,7 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, bl
 	return spanTo, nil
 }
 
-func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, expectedFirstKey firstKeyGetter, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
@@ -248,17 +299,40 @@ func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *b
 	var first bool = true
 	word := make([]byte, 0, 4096)
 	var blockCount int
-	var baseEventId uint64
+	var baseEventId, prevEventId uint64
+
+	if expectedFirstKey != nil {
+		baseEventId = expectedFirstKey(ctx)
+	}
+
 	for g.HasNext() {
 		word, _ = g.Next(word[:0])
 		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
 			blockCount++
 			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
 		}
+
+		eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+
 		if first {
-			baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+			if baseEventId == 0 {
+				baseEventId = eventId
+			} else {
+				if eventId != baseEventId {
+					return fmt.Errorf("unexpected first event id at block %d, got: %d, expected: %d", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum]), baseEventId, eventId)
+				}
+
+			}
+
 			first = false
+		} else {
+			if eventId != prevEventId+1 {
+				return fmt.Errorf("missing bor event %d at block=%d", eventId, binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum]))
+			}
 		}
+
+		prevEventId = eventId
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -285,9 +359,11 @@ RETRY:
 	g.Reset(0)
 	first = true
 	var i, offset, nextPos uint64
+
 	for g.HasNext() {
 		word, nextPos = g.Next(word[:0])
 		i++
+
 		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
 			if err = rs.AddKey(word[:length.Hash], offset); err != nil {
 				return err
@@ -314,6 +390,27 @@ RETRY:
 	}
 
 	return nil
+}
+
+func validateEventSequence(eventsSegment *compress.Decompressor) (lastEventId uint64, eventCount int, err error) {
+	g := eventsSegment.MakeGetter()
+	word := make([]byte, 0, 4096)
+
+	var prevEventId uint64
+
+	for g.HasNext() {
+		eventCount++
+		word, _ := g.Next(word[:0])
+		lastEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+
+		if !(prevEventId == 0 || lastEventId == prevEventId+1) {
+			return 0, 0, fmt.Errorf("missing event id %d for block %d", prevEventId+1, binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum]))
+		}
+
+		prevEventId = lastEventId
+	}
+
+	return lastEventId, eventCount, nil
 }
 
 func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
@@ -397,10 +494,10 @@ func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin
 	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, snaptype.BorSnapshotTypes, segmentsMin, logger)}
 }
 
-func (s *BorRoSnapshots) Ranges() []Range {
+func (s *BorRoSnapshots) Ranges(t snaptype.Type) []Range {
 	view := s.View()
 	defer view.Close()
-	return view.base.Ranges()
+	return view.base.Ranges(t)
 }
 
 // this is one off code to fix an issue in 2.49.x->2.52.x which missed
@@ -489,7 +586,6 @@ type BorView struct {
 
 func (s *BorRoSnapshots) View() *BorView {
 	v := &BorView{base: s.RoSnapshots.View()}
-	v.base.baseSegType = snaptype.BorSpans
 	return v
 }
 

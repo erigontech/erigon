@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -247,6 +246,25 @@ func (s *segments) Segment(blockNum uint64, f func(*Segment) error) (found bool,
 			continue
 		}
 		return true, f(seg)
+	}
+	return false, nil
+}
+
+func (s *segments) PreviousSegment(blockNum uint64, f func(*Segment) error) (found bool, err error) {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	for i, seg := range s.segments {
+		if !(blockNum >= seg.from && blockNum < seg.to) {
+			if i == len(s.segments)-1 {
+				return true, f(s.segments[i])
+			}
+
+			continue
+		}
+
+		if i > 0 {
+			return true, f(s.segments[i-1])
+		}
 	}
 	return false, nil
 }
@@ -486,8 +504,7 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	defer s.unlockSegments()
 
 	s.closeWhatNotInList(fileNames)
-	var segmentsMax uint64
-	var segmentsMaxSet bool
+	segmentsMax := map[snaptype.Enum]uint64{}
 
 	for _, fName := range fileNames {
 		f, ok := snaptype.ParseFileName(s.dir, fName)
@@ -552,16 +569,23 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 		}
 
 		if f.To > 0 {
-			segmentsMax = f.To - 1
-		} else {
-			segmentsMax = 0
+			segmentMax, ok := segmentsMax[f.Type.Enum()]
+			if !ok || f.To-1 > segmentMax {
+				segmentsMax[f.Type.Enum()] = f.To - 1
+			}
 		}
-		segmentsMaxSet = true
 	}
 
-	if segmentsMaxSet {
-		s.segmentsMax.Store(segmentsMax)
+	if len(segmentsMax) > 0 {
+		var min uint64 = math.MaxUint64
+
+		for _, max := range segmentsMax {
+			min = cmp.Min(min, max)
+		}
+
+		s.segmentsMax.Store(min)
 	}
+
 	s.segmentsReady.Store(true)
 	s.idxMax.Store(s.idxAvailability())
 	s.indicesReady.Store(true)
@@ -569,10 +593,10 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	return nil
 }
 
-func (s *RoSnapshots) Ranges() []Range {
+func (s *RoSnapshots) Ranges(t snaptype.Type) []Range {
 	view := s.View()
 	defer view.Close()
-	return view.Ranges()
+	return view.Ranges(t)
 }
 
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
@@ -749,7 +773,7 @@ func (s *RoSnapshots) AddSnapshotsToSilkworm(silkwormInstance *silkworm.Silkworm
 	return nil
 }
 
-func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+func buildIdx(ctx context.Context, sn snaptype.FileInfo, firstKey firstKeyGetter, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//log.Info("[snapshots] build idx", "file", sn.Name())
 	switch sn.Type.Enum() {
 	case snaptype.Enums.Headers:
@@ -765,7 +789,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 			return err
 		}
 	case snaptype.Enums.BorEvents:
-		if err := BorEventsIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
+		if err := BorEventsIdx(ctx, sn, firstKey, tmpDir, p, lvl, logger); err != nil {
 			return err
 		}
 	case snaptype.Enums.BorSpans:
@@ -820,13 +844,43 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 			if hasIdxFile(segment, logger) {
 				continue
 			}
+
 			sn := segment
+			var exptectedFirstKey firstKeyGetter
+
+			if index > 0 {
+				switch t.Enum() {
+				case snaptype.Enums.BorEvents:
+					err := func() error {
+						d, err := compress.NewDecompressor(segments[index-1].Path)
+						if err != nil {
+							return err
+						}
+						defer d.Close()
+
+						lastEventId, _, err := validateEventSequence(d)
+
+						if err != nil {
+							return err
+						}
+
+						exptectedFirstKey = func(_ context.Context) uint64 { return lastEventId + 1 }
+
+						return nil
+					}()
+
+					if err != nil {
+						return nil
+					}
+				}
+			}
+
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
 				defer notifySegmentIndexingFinished(sn.Name())
 				defer ps.Delete(p)
-				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
+				return buildIdx(gCtx, sn, exptectedFirstKey, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
 		}
 	}
@@ -882,23 +936,6 @@ func noGaps(in []snaptype.FileInfo, from uint64) (out []snaptype.FileInfo, missi
 		out = append(out, f)
 	}
 	return out, missingSnapshots
-}
-
-func typeOfSegmentsMustExist(dir string, in []snaptype.FileInfo, types []snaptype.Type) (res []snaptype.FileInfo) {
-MainLoop:
-	for _, f := range in {
-		if f.From == f.To {
-			continue
-		}
-		for _, t := range types {
-			p := filepath.Join(dir, snaptype.SegmentFileName(f.Version, f.From, f.To, t.Enum()))
-			if !dir2.FileExist(p) {
-				continue MainLoop
-			}
-			res = append(res, f)
-		}
-	}
-	return res
 }
 
 // noOverlaps - keep largest ranges and avoid overlap
@@ -997,15 +1034,13 @@ func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnap
 }
 
 func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
-		return typeOfSegmentsMustExist(dir, in, types)
-	}
-
 	list, err := snaptype.Segments(dir)
 
 	if err != nil {
 		return nil, missingSnapshots, err
 	}
+
+	typedSegments := map[snaptype.Enum][]snaptype.FileInfo{}
 
 	for _, segType := range types {
 		{
@@ -1017,9 +1052,27 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 				}
 				l = append(l, f)
 			}
-			l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
-			res = append(res, l...)
+			l, m = noGaps(noOverlaps(l), minBlock)
+			typedSegments[segType.Enum()] = append(typedSegments[segType.Enum()], l...)
 			missingSnapshots = append(missingSnapshots, m...)
+		}
+	}
+
+	var maxBlock uint64 = math.MaxUint64
+
+	for _, segments := range typedSegments {
+		if len(segments) > 0 {
+			if max := segments[len(segments)-1].To; max < maxBlock {
+				maxBlock = max
+			}
+		}
+	}
+
+	for _, segments := range typedSegments {
+		for _, segment := range segments {
+			if segment.To <= maxBlock {
+				res = append(res, segment)
+			}
 		}
 	}
 
@@ -1171,29 +1224,35 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	}
 
 	merger := NewMerger(tmpDir, workers, lvl, db, br.chainConfig, logger)
-	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
-	if len(rangesToMerge) == 0 {
-		return ok, nil
-	}
-	ok = true // have something to merge
-	onMerge := func(r Range) error {
-		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
-			notifier.OnNewSnapshot()
+
+	for _, snapType := range snapshots.Types() {
+		rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(snapType), snapshots.BlocksAvailable())
+
+		if len(rangesToMerge) == 0 {
+			continue
 		}
 
-		if seedNewSnapshots != nil {
-			downloadRequest := []services.DownloadRequest{
-				services.NewDownloadRequest("", ""),
+		onMerge := func(r Range) error {
+			if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
+				notifier.OnNewSnapshot()
 			}
-			if err := seedNewSnapshots(downloadRequest); err != nil {
-				return err
+
+			if seedNewSnapshots != nil {
+				downloadRequest := []services.DownloadRequest{
+					services.NewDownloadRequest("", ""),
+				}
+				if err := seedNewSnapshots(downloadRequest); err != nil {
+					return err
+				}
 			}
+			return nil
 		}
-		return nil
-	}
-	err := merger.Merge(ctx, snapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
-	if err != nil {
-		return ok, err
+
+		err := merger.Merge(ctx, snapshots, snapType, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
+
+		if err != nil {
+			return ok, err
+		}
 	}
 
 	return ok, nil
@@ -1259,14 +1318,15 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 }
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {
+
+	if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
+		minBlockNum = frozen
+	}
+
 	includeBor := br.chainConfig.Bor != nil
 
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
 		for br.blockReader.FrozenBorBlocks() < minBlockNum {
 			haveMore, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 			if err != nil {
@@ -1280,10 +1340,6 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 
 	var blockHaveMore, borHaveMore bool
 	for {
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
 		blockHaveMore, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
@@ -1387,38 +1443,79 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 type firstKeyGetter func(ctx context.Context) uint64
 type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collecter func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
-func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	var lastKeyValue uint64
+func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, expectedFirstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 
-	sn, err := compress.NewCompressor(ctx, "Snapshot "+f.Type.String(), f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
+	lastKeyValue, segmentExists, err := hasSegment(f)
 
 	if err != nil {
 		return lastKeyValue, err
 	}
-	defer sn.Close()
 
-	lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
-		return sn.AddWord(v)
-	}, workers, lvl, logger)
+	if !segmentExists {
+		sn, err := compress.NewCompressor(ctx, "Snapshot "+f.Type.String(), f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
 
-	if err != nil {
-		return lastKeyValue, fmt.Errorf("DumpBodies: %w", err)
+		if err != nil {
+			return lastKeyValue, err
+		}
+		defer sn.Close()
+
+		lastKeyValue, err = dumper(ctx, chainDB, chainConfig, f.From, f.To, expectedFirstKey, func(v []byte) error {
+			return sn.AddWord(v)
+		}, workers, lvl, logger)
+
+		if err != nil {
+			return lastKeyValue, fmt.Errorf("dump range %s %d-%d: %w", f.Type.String(), f.From, f.To, err)
+		}
+
+		ext := filepath.Ext(f.Name())
+		logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.Workers())
+
+		if err := sn.Compress(); err != nil {
+			return lastKeyValue, fmt.Errorf("compress: %w", err)
+		}
 	}
 
-	ext := filepath.Ext(f.Name())
-	logger.Log(lvl, "[snapshots] Compression start", "file", f.Name()[:len(f.Name())-len(ext)], "workers", sn.Workers())
+	if !hasIdxFile(f, logger) {
+		p := &background.Progress{}
 
-	if err := sn.Compress(); err != nil {
-		return lastKeyValue, fmt.Errorf("compress: %w", err)
-	}
-
-	p := &background.Progress{}
-
-	if err := buildIdx(ctx, f, chainConfig, tmpDir, p, lvl, logger); err != nil {
-		return lastKeyValue, err
+		if err := buildIdx(ctx, f, expectedFirstKey, chainConfig, tmpDir, p, lvl, logger); err != nil {
+			return lastKeyValue, err
+		}
 	}
 
 	return lastKeyValue, nil
+}
+
+func hasSegment(sn snaptype.FileInfo) (uint64, bool, error) {
+	d, err := compress.NewDecompressor(sn.Path)
+
+	if err != nil {
+		return 0, false, nil
+	}
+
+	defer d.Close()
+
+	switch sn.Type.Enum() {
+	case snaptype.Enums.Bodies:
+		first, expectedCount, err := txsAmountBasedOnBodiesSnapshots(d, sn.Len()-1)
+
+		if err != nil {
+			return 0, false, err
+		}
+
+		return first + uint64(expectedCount), true, nil
+
+	case snaptype.Enums.BorEvents:
+		lastEventId, _, err := validateEventSequence(d)
+
+		if err != nil {
+			return 0, false, err
+		}
+
+		return lastEventId, true, nil
+	}
+
+	return 0, true, nil
 }
 
 func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
@@ -2141,8 +2238,9 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 	return toMerge
 }
 
-func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snaptype.Enum][]string, error) {
-	toMerge := map[snaptype.Enum][]string{}
+func (m *Merger) filesByRange(snapshots *RoSnapshots, snapType snaptype.Type, from, to uint64) ([]string, error) {
+	var toMerge []string
+
 	view := snapshots.View()
 	defer view.Close()
 
@@ -2151,14 +2249,12 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 			if sn.from < from {
 				continue
 			}
+
 			if sn.to > to {
 				break
 			}
 
-			snapshots.segments.Scan(func(key snaptype.Enum, value *segments) bool {
-				toMerge[key] = append(toMerge[key], view.Segments(key.Type())[i].FilePath())
-				return true
-			})
+			toMerge = append(toMerge, view.Segments(snapType)[i].FilePath())
 		}
 	}
 
@@ -2166,31 +2262,62 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snap
 }
 
 // Merge does merge segments in given ranges
-func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) error {
+func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapType snaptype.Type, mergeRanges []Range, snapDir string, doIndex bool, onMerge func(r Range) error, onDelete func(l []string) error) error {
 	if len(mergeRanges) == 0 {
 		return nil
 	}
+
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
+
 	for _, r := range mergeRanges {
-		toMerge, err := m.filesByRange(snapshots, r.from, r.to)
+		toMerge, err := m.filesByRange(snapshots, snapType, r.from, r.to)
+
 		if err != nil {
 			return err
 		}
 
-		for _, t := range snapTypes {
-			f := t.FileInfo(snapDir, r.from, r.to)
+		f := snapType.FileInfo(snapDir, r.from, r.to)
 
-			if err := m.merge(ctx, toMerge[t.Enum()], f.Path, logEvery); err != nil {
-				return fmt.Errorf("mergeByAppendSegments: %w", err)
-			}
-			if doIndex {
-				p := &background.Progress{}
-				if err := buildIdx(ctx, f, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+		var expectedFirstKey firstKeyGetter
+
+		switch snapType.Enum() {
+		case snaptype.Enums.BorEvents:
+			segs, _ := snapshots.segments.Get(snapType.Enum())
+
+			_, err := segs.PreviousSegment(r.from, func(seg *Segment) error {
+				d, err := compress.NewDecompressor(seg.FilePath())
+				if err != nil {
 					return err
 				}
+				defer d.Close()
+
+				lastEventId, _, err := validateEventSequence(d)
+
+				if err == nil && lastEventId != 0 {
+					expectedFirstKey = func(_ context.Context) uint64 { return lastEventId + 1 }
+				}
+
+				return err
+			})
+
+			if err != nil {
+				return nil
 			}
 		}
+
+		if err := m.merge(ctx, toMerge, f.Path, logEvery); err != nil {
+			return fmt.Errorf("mergeByAppendSegments: %w", err)
+		}
+
+		if doIndex {
+			p := &background.Progress{}
+
+			if err := buildIdx(ctx, f, expectedFirstKey, m.chainConfig, m.tmpDir, p, m.lvl, m.logger); err != nil {
+				return err
+			}
+		}
+
 		if err := snapshots.ReopenFolder(); err != nil {
 			return fmt.Errorf("ReopenSegments: %w", err)
 		}
@@ -2203,18 +2330,19 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 			}
 		}
 
-		for _, t := range snapTypes {
-			if len(toMerge[t.Enum()]) == 0 {
-				continue
-			}
-			if onDelete != nil {
-				if err := onDelete(toMerge[t.Enum()]); err != nil {
-					return err
-				}
-			}
-			removeOldFiles(toMerge[t.Enum()], snapDir)
+		if len(toMerge) == 0 {
+			continue
 		}
+
+		if onDelete != nil {
+			if err := onDelete(toMerge); err != nil {
+				return err
+			}
+		}
+
+		removeOldFiles(toMerge, snapDir)
 	}
+
 	m.logger.Log(m.lvl, "[snapshots] Merge done", "from", mergeRanges[0].from, "to", mergeRanges[0].to)
 	return nil
 }
@@ -2290,13 +2418,12 @@ func removeOldFiles(toDel []string, snapDir string) {
 }
 
 type View struct {
-	s           *RoSnapshots
-	baseSegType snaptype.Type
-	closed      bool
+	s      *RoSnapshots
+	closed bool
 }
 
 func (s *RoSnapshots) View() *View {
-	v := &View{s: s, baseSegType: snaptype.Headers}
+	v := &View{s: s}
 	s.lockSegments()
 	return v
 }
@@ -2332,8 +2459,8 @@ func (v *View) Segment(t snaptype.Type, blockNum uint64) (*Segment, bool) {
 	return nil, false
 }
 
-func (v *View) Ranges() (ranges []Range) {
-	for _, sn := range v.Segments(v.baseSegType) {
+func (v *View) Ranges(t snaptype.Type) (ranges []Range) {
+	for _, sn := range v.Segments(t) {
 		ranges = append(ranges, sn.Range)
 	}
 

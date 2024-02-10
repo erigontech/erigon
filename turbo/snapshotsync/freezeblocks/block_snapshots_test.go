@@ -135,10 +135,12 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, snaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
-		require.NoError(err)
+		for _, snapType := range snaptype.BlockSnapshotTypes {
+			ranges := merger.FindMergeRanges(s.Ranges(snapType), s.SegmentsMax())
+			require.True(len(ranges) > 0)
+			err := merger.Merge(context.Background(), s, snapType, ranges, s.Dir(), false, nil, nil)
+			require.NoError(err)
+		}
 	}
 
 	expectedFileName := snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 0, 500_000, snaptype.Transactions.Enum())
@@ -151,10 +153,12 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, snaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
-		require.NoError(err)
+		for _, snapType := range snaptype.BlockSnapshotTypes {
+			ranges := merger.FindMergeRanges(s.Ranges(snapType), s.SegmentsMax())
+			require.True(len(ranges) == 0)
+			err := merger.Merge(context.Background(), s, snapType, ranges, s.Dir(), false, nil, nil)
+			require.NoError(err)
+		}
 	}
 
 	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 600_000, 700_000, snaptype.Transactions.Enum())
@@ -174,10 +178,12 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) > 0)
-		err := merger.Merge(context.Background(), s, snaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
-		require.NoError(err)
+		for _, snapType := range snaptype.BlockSnapshotTypes {
+			ranges := merger.FindMergeRanges(s.Ranges(snapType), s.SegmentsMax())
+			require.True(len(ranges) > 0)
+			err := merger.Merge(context.Background(), s, snapType, ranges, s.Dir(), false, nil, nil)
+			require.NoError(err)
+		}
 	}
 
 	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, start+100_000, start+200_000, snaptype.Transactions.Enum())
@@ -190,10 +196,12 @@ func TestMergeSnapshots(t *testing.T) {
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)
 		merger.DisableFsync()
-		ranges := merger.FindMergeRanges(s.Ranges(), s.SegmentsMax())
-		require.True(len(ranges) == 0)
-		err := merger.Merge(context.Background(), s, snaptype.BlockSnapshotTypes, ranges, s.Dir(), false, nil, nil)
-		require.NoError(err)
+		for _, snapType := range snaptype.BlockSnapshotTypes {
+			ranges := merger.FindMergeRanges(s.Ranges(snapType), s.SegmentsMax())
+			require.True(len(ranges) == 0)
+			err := merger.Merge(context.Background(), s, snapType, ranges, s.Dir(), false, nil, nil)
+			require.NoError(err)
+		}
 	}
 
 	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, start+600_000, start+700_000, snaptype.Transactions.Enum())

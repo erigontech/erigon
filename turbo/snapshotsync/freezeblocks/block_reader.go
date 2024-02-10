@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-var SpanNotFoundErr = errors.New("span not found")
+var ErrSpanNotFound = errors.New("span not found")
 
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
@@ -1318,7 +1318,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		}
 		if v == nil {
 			err := fmt.Errorf("span %d not found (db), frozenBlocks=%d", spanId, maxBlockNumInFiles)
-			return nil, fmt.Errorf("%w: %w", SpanNotFoundErr, err)
+			return nil, fmt.Errorf("%w: %w", ErrSpanNotFound, err)
 		}
 		return common.Copy(v), nil
 	}
@@ -1350,7 +1350,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		return common.Copy(result), nil
 	}
 	err := fmt.Errorf("span %d not found (snapshots)", spanId)
-	return nil, fmt.Errorf("%w: %w", SpanNotFoundErr, err)
+	return nil, fmt.Errorf("%w: %w", ErrSpanNotFound, err)
 }
 
 func (r *BlockReader) LastSpanId(_ context.Context, tx kv.Tx) (uint64, bool, error) {
