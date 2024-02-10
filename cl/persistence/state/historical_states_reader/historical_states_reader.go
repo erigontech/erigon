@@ -447,6 +447,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 			}
 		}
 	} else {
+		fmt.Println("begin", freshDumpSlot+clparams.SlotsPerDump, "end", slot)
 		for k, v, err := diffCursor.Seek(base_encoding.Encode64ToBytes4(freshDumpSlot + clparams.SlotsPerDump)); err == nil && k != nil && base_encoding.Decode64FromBytes4(k) > slot; k, v, err = diffCursor.Prev() {
 			if err != nil {
 				return nil, err
@@ -455,7 +456,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, validator
 				return nil, fmt.Errorf("invalid key %x", k)
 			}
 			currSlot := base_encoding.Decode64FromBytes4(k)
-			if currSlot <= freshDumpSlot || currSlot > freshDumpSlot+clparams.SlotsPerDump {
+			if currSlot <= slot || currSlot > freshDumpSlot+clparams.SlotsPerDump {
 				continue
 			}
 			currentList, err = base_encoding.ApplyCompressedSerializedUint64ListDiff(currentList, currentList, v, true)
