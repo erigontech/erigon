@@ -205,7 +205,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
-			log.Warn("Could not create light client update", "err", err)
+			log.Debug("Could not create light client update", "err", err)
 		} else {
 			f.newestLightClientUpdate.Store(lightclientUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
@@ -451,6 +451,7 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
+	highestCrossedEpochSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
@@ -458,8 +459,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			return true
 		}
 		oldRoots = append(oldRoots, hash)
+		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
+			highestCrossedEpochSlot = signedBlock.Block.Slot
+		}
 		return true
 	})
+	if pruneSlot >= highestCrossedEpochSlot {
+		return
+	}
 
 	f.lowestAvaiableSlot = pruneSlot + 1
 	for _, root := range oldRoots {
