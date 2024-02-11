@@ -52,6 +52,9 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 
 				var pkt eth.BlockHeadersPacket66
 				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
+					//
+					// TODO check if this is a RLPDecode error and penalize peer?
+					//
 					return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
 				}
 
@@ -60,8 +63,36 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 				}
 
 				//
-				// TODO what sort of validation if any should we do here?
-				//      - check sentry_multi_client & refactor if necessary
+				// TODO what sort of validation if any should we do here? check sentry_multi_client & refactor if necessary
+				// Looks like sentry_multi_client does not actually do any validations
+				// corresponding to the spec at this layer (p2p message processing).
+				//
+				// We should make a decision which of the following validations we want to do here
+				// and which at higher layers.
+				//
+				// From the spec:
+				/*
+					The validity of block headers depends on the context in which they are used. For a single block header,
+					only the validity of the proof-of-work seal (mix-digest, block-nonce) can be verified. When a header is
+					used to extend the client's local chain, or multiple headers are processed in sequence during chain
+					synchronization, the following rules apply:
+
+					- Headers must form a chain where block numbers are consecutive and the parent-hash of each header
+					matches the hash of the preceding header.
+					- When extending the locally-stored chain, implementations must also verify that the values of
+					difficulty, gas-limit and time are within the bounds of protocol rules given in the Yellow Paper.
+					- The gas-used header field must be less than or equal to the gas-limit.
+					- basefee-per-gas must be present in headers after the London hard fork. It must be absent for earlier
+					blocks. This rule was added by EIP-1559.
+					- For PoS blocks after The Merge, ommers-hash must be the empty keccak256 hash since no ommer headers
+					can exist.
+					- withdrawals-root must be present in headers after the Shanghai fork. The field must be absent for
+					blocks before the fork. This rule was added by EIP-4895.
+				*/
+
+				//
+				// TODO also limit on size of message 10MiB and penalize?
+				// TODO should we check for too large of a range for download headers?
 				//
 
 				headers = pkt.BlockHeadersPacket
