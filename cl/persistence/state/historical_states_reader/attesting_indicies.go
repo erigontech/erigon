@@ -108,11 +108,12 @@ func (r *HistoricalStatesReader) readHistoricalBlockRoot(tx kv.Tx, slot, index u
 
 }
 
-func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
+func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.Tx, version clparams.StateVersion, stateSlot uint64, data solid.AttestationData, inclusionDelay uint64, skipAssert bool) ([]uint8, error) {
 	currentCheckpoint, previousCheckpoint, _, err := state_accessors.ReadCheckpoints(tx, r.cfg.RoundSlotToEpoch(stateSlot))
 	if err != nil {
 		return nil, err
 	}
+
 	if currentCheckpoint == nil {
 		currentCheckpoint = r.genesisState.CurrentJustifiedCheckpoint()
 	}
@@ -157,11 +158,15 @@ func (r *HistoricalStatesReader) getAttestationParticipationFlagIndicies(tx kv.T
 	if inclusionDelay <= utils.IntegerSquareRoot(r.cfg.SlotsPerEpoch) {
 		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelySourceFlagIndex)
 	}
-	if matchingTarget && inclusionDelay <= r.cfg.SlotsPerEpoch {
-		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelyTargetFlagIndex)
-	}
+
 	if matchingHead && inclusionDelay == r.cfg.MinAttestationInclusionDelay {
 		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelyHeadFlagIndex)
+	}
+	if version < clparams.DenebVersion && matchingTarget && inclusionDelay <= r.cfg.SlotsPerEpoch {
+		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelyTargetFlagIndex)
+	}
+	if version >= clparams.DenebVersion && matchingTarget {
+		participationFlagIndicies = append(participationFlagIndicies, r.cfg.TimelyTargetFlagIndex)
 	}
 	return participationFlagIndicies, nil
 }
