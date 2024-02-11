@@ -466,7 +466,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		return true
 	})
 	if pruneSlot >= highestCrossedEpochSlot {
-		fmt.Println(pruneSlot, highestCrossedEpochSlot)
 		return
 	}
 
