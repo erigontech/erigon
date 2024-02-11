@@ -140,6 +140,7 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 		}
 
 		if response == nil || response.Result == nil {
+			log.Warn("[dbg] got2")
 			// status 204
 			break
 		}
