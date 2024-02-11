@@ -484,6 +484,11 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 					}
+					if err := cfg.rpc.SetStatus(cfg.forkChoice.FinalizedCheckpoint().BlockRoot(),
+						cfg.forkChoice.FinalizedCheckpoint().Epoch(),
+						headRoot, headSlot); err != nil {
+						logger.Warn("Could not set status", "err", err)
+					}
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return fmt.Errorf("failed to begin transaction: %w", err)
