@@ -245,6 +245,7 @@ func ConsensusClStages(ctx context.Context,
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 					if cfg.prebuffer == nil {
 						cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+						cfg.prebuffer.LogLvl(log.LvlDebug)
 					}
 					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
@@ -287,6 +288,7 @@ func ConsensusClStages(ctx context.Context,
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
 								if cfg.prebuffer == nil {
 									cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+									cfg.prebuffer.LogLvl(log.LvlDebug)
 								}
 								executionPayload := block.Block.Body.ExecutionPayload
 								executionPayloadRoot, err := executionPayload.HashSSZ()
@@ -430,6 +432,7 @@ func ConsensusClStages(ctx context.Context,
 						}
 						cfg.prebuffer.Close()
 						cfg.prebuffer = nil
+
 					}
 
 					logger.Debug("waiting for blocks...",
