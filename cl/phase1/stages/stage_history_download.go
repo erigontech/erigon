@@ -264,7 +264,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		block := types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals)
 		blockBatch = append(blockBatch, block)
 		if len(blockBatch) >= blockBatchMaxSize {
-			if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
+			if err := cfg.engine.InsertBlocks(blockBatch, true); err != nil {
 				return fmt.Errorf("error inserting block during collection: %s", err)
 			}
 			blockBatch = blockBatch[:0]
@@ -274,7 +274,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		return err
 	}
 	if cfg.engine != nil && cfg.engine.SupportInsertion() {
-		if err := cfg.engine.InsertBlocks(blockBatch); err != nil {
+		if err := cfg.engine.InsertBlocks(blockBatch, true); err != nil {
 			return fmt.Errorf("error doing last block insertion during collection: %s", err)
 		}
 	}

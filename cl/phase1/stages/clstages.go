@@ -1,6 +1,7 @@
 package stages
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
@@ -27,6 +30,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
@@ -52,6 +56,7 @@ type Cfg struct {
 	antiquary       *antiquary.Antiquary
 	syncedData      *synced_data.SyncedDataManager
 	emitter         *beaconevents.Emitters
+	prebuffer       *etl.Collector
 
 	hasDownloaded, backfilling bool
 }
@@ -100,6 +105,7 @@ func ClStagesCfg(
 		backfilling:     backfilling,
 		syncedData:      syncedData,
 		emitter:         emitters,
+		prebuffer:       etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 	}
 }
 
@@ -305,8 +311,20 @@ func ConsensusClStages(ctx context.Context,
 							}
 						}
 						if shouldInsert {
-							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
-								log.Warn("failed to insert blocks", "err", err)
+							if cfg.prebuffer == nil {
+								cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+							}
+							var buf bytes.Buffer
+							// prebuffer the blocks
+							for _, block := range blockBatch {
+								buf.Reset()
+								if err := block.EncodeRLP(&buf); err != nil {
+									logger.Warn("failed to encode block", "err", err)
+									continue
+								}
+								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(block.NumberU64(), block.Hash()), common.Copy(buf.Bytes())); err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
 							}
 						}
 						return highestSlotProcessed, highestBlockRootProcessed, nil
@@ -345,6 +363,72 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					totalRequest := args.targetSlot - args.seenSlot
+					readyTimeout := time.NewTimer(10 * time.Second)
+					readyInterval := time.NewTimer(50 * time.Millisecond)
+					defer readyTimeout.Stop()
+				ReadyLoop:
+					for {
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						case <-readyTimeout.C:
+							time.Sleep(10 * time.Second)
+							return nil
+						case <-readyInterval.C:
+							ready, err := cfg.executionClient.Ready()
+							if err != nil {
+								return err
+							}
+							if ready {
+								break ReadyLoop
+							}
+						}
+					}
+
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
+					var b bytes.Buffer
+
+					blocksBatch := []*types.Block{}
+					blocksBatchLimit := 1000
+					if cfg.prebuffer != nil && cfg.executionClient.SupportInsertion() {
+						if err := cfg.prebuffer.Load(tx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+							if len(v) == 0 {
+								return nil
+							}
+							b.Reset()
+							if _, err := b.Write(v); err != nil {
+								return err
+							}
+							stream := rlp.NewStream(&b, 0)
+
+							block := &types.Block{}
+							if err := block.DecodeRLP(stream); err != nil {
+								return err
+							}
+							blocksBatch = append(blocksBatch, block)
+							if len(blocksBatch) >= blocksBatchLimit {
+								if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
+									logger.Warn("failed to insert blocks", "err", err)
+								}
+								blocksBatch = blocksBatch[:0]
+							}
+							return next(k, nil, nil)
+						}, etl.TransformArgs{}); err != nil {
+							return err
+						}
+						if len(blocksBatch) > 0 {
+							if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
+								logger.Warn("failed to insert blocks", "err", err)
+							}
+						}
+						cfg.prebuffer.Close()
+						cfg.prebuffer = nil
+					}
+
 					logger.Debug("waiting for blocks...",
 						"seenSlot", args.seenSlot,
 						"targetSlot", args.targetSlot,
@@ -403,11 +487,6 @@ func ConsensusClStages(ctx context.Context,
 							respCh <- blocks
 						}(v)
 					}
-					tx, err := cfg.indiciesDB.BeginRw(ctx)
-					if err != nil {
-						return err
-					}
-					defer tx.Rollback()
 
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
