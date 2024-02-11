@@ -455,16 +455,18 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
+		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
+			highestCrossedEpochSlot = signedBlock.Block.Slot
+		}
 		if signedBlock.Block.Slot >= pruneSlot {
 			return true
 		}
 		oldRoots = append(oldRoots, hash)
-		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
-			highestCrossedEpochSlot = signedBlock.Block.Slot
-		}
+
 		return true
 	})
 	if pruneSlot >= highestCrossedEpochSlot {
+		fmt.Println(pruneSlot, highestCrossedEpochSlot)
 		return
 	}
 
@@ -479,8 +481,12 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		delete(f.saveStates, root)
 		delete(f.syncCommittees, root)
 		delete(f.blockRewards, root)
-		f.fs.Remove(getBeaconStateFilename(root))
-		f.fs.Remove(getBeaconStateCacheFilename(root))
+		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil {
+			log.Warn("Could not remove beacon state file", "err", err)
+		}
+		if err := f.fs.Remove(getBeaconStateCacheFilename(root)); err != nil {
+			log.Warn("Could not remove beacon state cache file", "err", err)
+		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
