@@ -147,6 +147,7 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 		eventRecords = append(eventRecords, response.Result...)
 
 		if len(response.Result) < stateFetchLimit {
+			log.Warn("[dbg] got1", "len(response.Result)", len(response.Result))
 			break
 		}
 
