@@ -29,7 +29,7 @@ var (
 )
 
 const (
-	stateFetchLimit    = 200
+	stateFetchLimit    = 1000
 	apiHeimdallTimeout = 10 * time.Second
 	retryBackOff       = time.Second
 	maxRetries         = 5
