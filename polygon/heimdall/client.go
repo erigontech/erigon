@@ -31,7 +31,7 @@ var (
 const (
 	stateFetchLimit    = 10
 	apiHeimdallTimeout = 10 * time.Second
-	retryBackOff       = time.Second
+	retryBackOff       = time.Second / 10
 	maxRetries         = 5
 )
 
