@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
@@ -278,27 +277,40 @@ func ConsensusClStages(ctx context.Context,
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
 					downloader.SetHighestProcessedSlot(currentSlot.Load())
 					downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed common.Hash, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
-						blockBatch := []*types.Block{}
 						for _, block := range blocks {
-							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
-								executionPayload := block.Block.Body.ExecutionPayload
-								body := executionPayload.Body()
-								txs, err := types.DecodeTransactions(body.Transactions)
-								if err != nil {
-									log.Warn("bad blocks segment received", "err", err)
-									return highestSlotProcessed, highestBlockRootProcessed, err
-								}
-								parentRoot := &block.Block.ParentRoot
-								header, err := executionPayload.RlpHeader(parentRoot)
-								if err != nil {
-									log.Warn("bad blocks segment received", "err", err)
-									return highestSlotProcessed, highestBlockRootProcessed, err
-								}
-								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
-							}
+
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								return highestSlotProcessed, highestBlockRootProcessed, err
+							}
+							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
+								executionPayload := block.Block.Body.ExecutionPayload
+								executionPayloadRoot, err := executionPayload.HashSSZ()
+								if err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
+								versionByte := byte(block.Version())
+								enc, err := executionPayload.EncodeSSZ(nil)
+								if err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
+								enc = append([]byte{versionByte}, append(block.Block.ParentRoot[:], enc...)...)
+								// body := executionPayload.Body()
+								// txs, err := types.DecodeTransactions(body.Transactions)
+								// if err != nil {
+								// 	log.Warn("bad blocks segment received", "err", err)
+								// 	return highestSlotProcessed, highestBlockRootProcessed, err
+								// }
+								// parentRoot := &block.Block.ParentRoot
+								// header, err := executionPayload.RlpHeader(parentRoot)
+								// if err != nil {
+								// 	log.Warn("bad blocks segment received", "err", err)
+								// 	return highestSlotProcessed, highestBlockRootProcessed, err
+								// }
+								// blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
+								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(executionPayload.BlockNumber, executionPayloadRoot), enc); err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
 							}
 
 							if highestSlotProcessed < block.Block.Slot {
@@ -310,23 +322,7 @@ func ConsensusClStages(ctx context.Context,
 								}
 							}
 						}
-						if shouldInsert {
-							if cfg.prebuffer == nil {
-								cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
-							}
-							var buf bytes.Buffer
-							// prebuffer the blocks
-							for _, block := range blockBatch {
-								buf.Reset()
-								if err := block.EncodeRLP(&buf); err != nil {
-									logger.Warn("failed to encode block", "err", err)
-									continue
-								}
-								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(block.NumberU64(), block.Hash()), common.Copy(buf.Bytes())); err != nil {
-									return highestSlotProcessed, highestBlockRootProcessed, err
-								}
-							}
-						}
+
 						return highestSlotProcessed, highestBlockRootProcessed, nil
 					})
 					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -402,22 +398,30 @@ func ConsensusClStages(ctx context.Context,
 							if len(v) == 0 {
 								return nil
 							}
-							b.Reset()
-							if _, err := b.Write(v); err != nil {
+							version := clparams.StateVersion(v[0])
+							parentRoot := common.BytesToHash(v[1:33])
+							v = v[33:]
+							executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
+							if err := executionPayload.DecodeSSZ(v, int(version)); err != nil {
 								return err
 							}
-							stream := rlp.NewStream(&b, 0)
-
-							block := &types.Block{}
-							if err := block.DecodeRLP(stream); err != nil {
+							body := executionPayload.Body()
+							txs, err := types.DecodeTransactions(body.Transactions)
+							if err != nil {
+								log.Warn("bad blocks segment received", "err", err)
 								return err
 							}
-							blocksBatch = append(blocksBatch, block)
+							header, err := executionPayload.RlpHeader(&parentRoot)
+							if err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								return err
+							}
+							blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
 							if len(blocksBatch) >= blocksBatchLimit {
 								if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
 									logger.Warn("failed to insert blocks", "err", err)
 								}
-								blocksBatch = blocksBatch[:0]
+								blocksBatch = []*types.Block{}
 							}
 							return next(k, nil, nil)
 						}, etl.TransformArgs{}); err != nil {
