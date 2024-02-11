@@ -193,7 +193,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	logger.Debug(
 		fmt.Sprintf("[%s] Fetching state updates from Heimdall", logPrefix),
-		"fromID", from,
+		"fromId", from,
 		"to", to.Format(time.RFC3339),
 	)
 

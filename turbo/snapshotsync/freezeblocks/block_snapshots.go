@@ -1351,9 +1351,13 @@ func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, max
 				return err
 			}
 		}
-		haveMore := blockHaveMore || borHaveMore
-		if !haveMore {
+
+		if !(blockHaveMore || borHaveMore) {
 			break
+		}
+
+		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
+			minBlockNum = frozen
 		}
 	}
 
