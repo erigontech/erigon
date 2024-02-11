@@ -859,7 +859,7 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 			return nil
 		}
 
-		sn, borSn, agg := allSnapshots(ctx, db, 1, logger)
+		sn, borSn, agg := allSnapshots(ctx, db, logger)
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
