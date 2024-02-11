@@ -837,8 +837,10 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 }
 
 func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error {
-	_, _, sync, _, miningState := newSync(ctx, db, nil /* miningConfig */, logger)
+	engine, _, sync, _, miningState := newSync(ctx, db, nil /* miningConfig */, logger)
 	chainConfig := fromdb.ChainConfig(db)
+
+	heimdallClient := engine.(*bor.Bor).HeimdallClient
 
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
@@ -883,9 +885,7 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 		defer sn.Close()
 		defer borSn.Close()
 		defer agg.Close()
-		dirs := datadir.New(datadirCli)
 		blockReader, _ := blocksIO(db, logger)
-		engine, heimdallClient := initConsensusEngine(ctx, chainConfig, dirs.DataDir, db, blockReader, logger)
 		var (
 			snapDb     kv.RwDB
 			recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
@@ -1643,38 +1643,6 @@ func blocksIO(db kv.RoDB, logger log.Logger) (services.FullBlockReader, *blockio
 		_blockWriterSingleton = blockio.NewBlockWriter(histV3)
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
-}
-
-func newDomains(ctx context.Context, db kv.RwDB, logger log.Logger) (consensus.Engine, ethconfig.Config, *freezeblocks.RoSnapshots, *libstate.AggregatorV3) {
-	historyV3, pm := kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
-	//events := shards.NewEvents()
-	genesis := core.GenesisBlockByChainName(chain)
-
-	chainConfig, genesisBlock, genesisErr := core.CommitGenesisBlock(db, genesis, "", logger)
-	_ = genesisBlock // TODO apply if needed here
-
-	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
-		panic(genesisErr)
-	}
-	//logger.Info("Initialised chain configuration", "config", chainConfig)
-
-	var batchSize datasize.ByteSize
-	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
-
-	cfg := ethconfig.Defaults
-	cfg.HistoryV3 = historyV3
-	cfg.Prune = pm
-	cfg.BatchSize = batchSize
-	cfg.DeprecatedTxPool.Disable = true
-	cfg.Genesis = core.GenesisBlockByChainName(chain)
-	cfg.Dirs = datadir.New(datadirCli)
-
-	allSn, _, agg := allSnapshots(ctx, db, snapshotVersion, logger)
-	cfg.Snapshot = allSn.Cfg()
-
-	blockReader, _ := blocksIO(db, logger)
-	engine, _ := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
-	return engine, cfg, allSn, agg
 }
 
 const blockBufferSize = 128
