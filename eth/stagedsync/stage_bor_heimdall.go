@@ -197,7 +197,7 @@ func BorHeimdallForward(
 		select {
 		default:
 		case <-logTimer.C:
-			logger.Info("["+s.LogPrefix()+"] StateSync Progress", "progress", blockNum, "lastSpanID", lastSpanID, "lastStateSyncEventID", lastStateSyncEventID, "total records", eventRecords, "fetch time", fetchTime, "process time", time.Since(processStart))
+			logger.Info("["+s.LogPrefix()+"] StateSync Progress", "progress", blockNum, "lastSpanID", lastSpanID, "lastStateSyncEventID", lastStateSyncEventID, "total records", eventRecords, "fetch time", fetchTime, "process time", time.Since(processStart), "retryCnt", heimdall.RetryCnt)
 		}
 
 		header, err := cfg.blockReader.HeaderByNumber(ctx, tx, blockNum)

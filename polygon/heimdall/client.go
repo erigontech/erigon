@@ -322,6 +322,8 @@ func FetchWithRetry[T any](ctx context.Context, client *Client, url *url.URL) (*
 	return FetchWithRetryEx[T](ctx, client, url, nil)
 }
 
+var RetryCnt int
+
 // FetchWithRetryEx returns data from heimdall with retry
 func FetchWithRetryEx[T any](ctx context.Context, client *Client, url *url.URL, isRecoverableError func(error) bool) (result *T, err error) {
 	attempt := 0
@@ -360,6 +362,7 @@ func FetchWithRetryEx[T any](ctx context.Context, client *Client, url *url.URL, 
 			client.logger.Debug("[bor.heimdall] shutdown detected, terminating request", "path", url.Path, "queryParams", url.RawQuery)
 			return nil, ErrShutdownDetected
 		case <-ticker.C:
+			RetryCnt++
 			// retry
 		}
 	}
