@@ -339,6 +339,7 @@ func FetchWithRetryEx[T any](ctx context.Context, client *Client, url *url.URL, 
 		if err == nil {
 			return result, nil
 		}
+		log.Warn("[dbg] client err", "err", err)
 
 		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
 		// yet in heimdall. E.g. when the hard fork hasn't hit yet but heimdall
