@@ -329,14 +329,19 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 					}
 				} else {
-					versionedCfgLock.Lock()
-					versioned, ok := versionedCfg[fileInfo.Version]
+					versioned := func() *snapcfg.Cfg {
+						versionedCfgLock.Lock()
+						defer versionedCfgLock.Unlock()
 
-					if !ok {
-						versioned = snapcfg.VersionedCfg(cfg.ChainName, fileInfo.Version, fileInfo.Version)
-						versionedCfg[fileInfo.Version] = versioned
-					}
-					versionedCfgLock.Unlock()
+						versioned, ok := versionedCfg[fileInfo.Version]
+
+						if !ok {
+							versioned = snapcfg.VersionedCfg(cfg.ChainName, fileInfo.Version, fileInfo.Version)
+							versionedCfg[fileInfo.Version] = versioned
+						}
+
+						return versioned
+					}()
 
 					hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
 
