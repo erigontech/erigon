@@ -837,6 +837,9 @@ func stageHeaders(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 }
 
 func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	_, _, sync, _, miningState := newSync(ctx, db, nil /* miningConfig */, logger)
+	chainConfig := fromdb.ChainConfig(db)
+
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		if reset {
 			if err := reset2.ResetBorHeimdall(ctx, tx); err != nil {
@@ -844,6 +847,68 @@ func stageBorHeimdall(db kv.RwDB, ctx context.Context, logger log.Logger) error 
 			}
 			return nil
 		}
+		if unwind > 0 {
+			sn, borSn, agg := allSnapshots(ctx, db, 1, logger)
+			defer sn.Close()
+			defer borSn.Close()
+			defer agg.Close()
+
+			stageState := stage(sync, tx, nil, stages.BorHeimdall)
+
+			snapshotsMaxBlock := borSn.BlocksAvailable()
+			if unwind <= snapshotsMaxBlock {
+				return fmt.Errorf("cannot unwind past snapshots max block: %d", snapshotsMaxBlock)
+			}
+
+			if unwind > stageState.BlockNumber {
+				return fmt.Errorf("cannot unwind to a point beyond stage: %d", stageState.BlockNumber)
+			}
+
+			unwindState := sync.NewUnwindState(stages.BorHeimdall, stageState.BlockNumber-unwind, stageState.BlockNumber)
+			cfg := stagedsync.StageBorHeimdallCfg(db, nil, miningState, *chainConfig, nil, nil, nil, nil, nil, nil, nil)
+			if err := stagedsync.BorHeimdallUnwind(unwindState, ctx, stageState, tx, cfg); err != nil {
+				return err
+			}
+
+			stageProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
+			if err != nil {
+				return fmt.Errorf("re-read bor heimdall progress: %w", err)
+			}
+
+			logger.Info("progress", "bor heimdall", stageProgress)
+			return nil
+		}
+
+		sn, borSn, agg := allSnapshots(ctx, db, 1, logger)
+		defer sn.Close()
+		defer borSn.Close()
+		defer agg.Close()
+		dirs := datadir.New(datadirCli)
+		blockReader, _ := blocksIO(db, logger)
+		engine, heimdallClient := initConsensusEngine(ctx, chainConfig, dirs.DataDir, db, blockReader, logger)
+		var (
+			snapDb     kv.RwDB
+			recents    *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
+			signatures *lru.ARCCache[libcommon.Hash, libcommon.Address]
+		)
+		if bor, ok := engine.(*bor.Bor); ok {
+			snapDb = bor.DB
+			recents = bor.Recents
+			signatures = bor.Signatures
+		}
+		cfg := stagedsync.StageBorHeimdallCfg(db, snapDb, miningState, *chainConfig, heimdallClient, blockReader, nil, nil, nil, recents, signatures)
+
+		stageState := stage(sync, tx, nil, stages.BorHeimdall)
+		if err := stagedsync.BorHeimdallForward(stageState, sync, ctx, tx, cfg, logger); err != nil {
+			return err
+		}
+
+		stageProgress, err := stages.GetStageProgress(tx, stages.BorHeimdall)
+		if err != nil {
+			return fmt.Errorf("re-read bor heimdall progress: %w", err)
+		}
+
+		logger.Info("progress", "bor heimdall", stageProgress)
 		return nil
 	})
 }
