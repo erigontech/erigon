@@ -263,7 +263,6 @@ func BorHeimdallForward(
 		if err != nil {
 			return err
 		}
-		log.Info("[dbg] lastStateSyncEventID", "lastStateSyncEventID", lastStateSyncEventID, "blockNum", blockNum)
 
 		eventRecords += records
 		fetchTime += callTime

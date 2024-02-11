@@ -140,7 +140,6 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 		}
 
 		if response == nil || response.Result == nil {
-			log.Warn("[dbg] got2")
 			// status 204
 			break
 		}
@@ -148,7 +147,6 @@ func (c *Client) StateSyncEvents(ctx context.Context, fromID uint64, to int64) (
 		eventRecords = append(eventRecords, response.Result...)
 
 		if len(response.Result) < stateFetchLimit {
-			log.Warn("[dbg] got1", "len(response.Result)", len(response.Result))
 			break
 		}
 
@@ -339,7 +337,6 @@ func FetchWithRetryEx[T any](ctx context.Context, client *Client, url *url.URL, 
 		if err == nil {
 			return result, nil
 		}
-		log.Warn("[dbg] client err", "err", err)
 
 		// 503 (Service Unavailable) is thrown when an endpoint isn't activated
 		// yet in heimdall. E.g. when the hard fork hasn't hit yet but heimdall
