@@ -366,21 +366,24 @@ func ConsensusClStages(ctx context.Context,
 					readyTimeout := time.NewTimer(10 * time.Second)
 					readyInterval := time.NewTimer(50 * time.Millisecond)
 					defer readyTimeout.Stop()
-				ReadyLoop:
-					for {
-						select {
-						case <-ctx.Done():
-							return ctx.Err()
-						case <-readyTimeout.C:
-							time.Sleep(10 * time.Second)
-							return nil
-						case <-readyInterval.C:
-							ready, err := cfg.executionClient.Ready()
-							if err != nil {
-								return err
-							}
-							if ready {
-								break ReadyLoop
+					defer readyInterval.Stop()
+					if cfg.executionClient != nil {
+					ReadyLoop:
+						for { // if the client does not support insertion, then skip
+							select {
+							case <-ctx.Done():
+								return ctx.Err()
+							case <-readyTimeout.C:
+								time.Sleep(10 * time.Second)
+								return nil
+							case <-readyInterval.C:
+								ready, err := cfg.executionClient.Ready()
+								if err != nil {
+									return err
+								}
+								if ready {
+									break ReadyLoop
+								}
 							}
 						}
 					}
@@ -394,7 +397,7 @@ func ConsensusClStages(ctx context.Context,
 
 					blocksBatch := []*types.Block{}
 					blocksBatchLimit := 1000
-					if cfg.prebuffer != nil && cfg.executionClient.SupportInsertion() {
+					if cfg.executionClient != nil && cfg.prebuffer != nil && cfg.executionClient.SupportInsertion() {
 						if err := cfg.prebuffer.Load(tx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 							if len(v) == 0 {
 								return nil
