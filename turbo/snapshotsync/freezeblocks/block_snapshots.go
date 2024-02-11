@@ -2248,18 +2248,16 @@ func (m *Merger) filesByRange(snapshots *RoSnapshots, snapType snaptype.Type, fr
 	view := snapshots.View()
 	defer view.Close()
 
-	if _, first, ok := snapshots.segments.Min(); ok {
-		for i, sn := range first.segments {
-			if sn.from < from {
-				continue
-			}
-
-			if sn.to > to {
-				break
-			}
-
-			toMerge = append(toMerge, view.Segments(snapType)[i].FilePath())
+	for _, sn := range view.Segments(snapType) {
+		if sn.from < from {
+			continue
 		}
+
+		if sn.to > to {
+			break
+		}
+
+		toMerge = append(toMerge, sn.FilePath())
 	}
 
 	return toMerge, nil
@@ -2311,7 +2309,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapType sna
 		}
 
 		if err := m.merge(ctx, toMerge, f.Path, logEvery); err != nil {
-			return fmt.Errorf("mergeByAppendSegments: %w", err)
+			return fmt.Errorf("merge by segment append: %w", err)
 		}
 
 		if doIndex {
@@ -2323,7 +2321,7 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapType sna
 		}
 
 		if err := snapshots.ReopenFolder(); err != nil {
-			return fmt.Errorf("ReopenSegments: %w", err)
+			return fmt.Errorf("reopen segments: %w", err)
 		}
 
 		snapshots.LogStat("merge")
