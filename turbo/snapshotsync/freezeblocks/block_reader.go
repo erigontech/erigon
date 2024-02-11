@@ -1235,7 +1235,6 @@ func (r *BlockReader) LastFrozenSpanID() uint64 {
 }
 
 func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
-	fmt.Printf("[dbg] Span(%d)\n", spanId)
 	var endBlock uint64
 	if spanId > 0 {
 		endBlock = bor.SpanEndBlockNum(spanId)
