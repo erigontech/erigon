@@ -21,7 +21,7 @@ fi
 # enable build tags to cover maximum .go files
 export GOFLAGS="-tags=gorules,linux,tools"
 
-output=$(find "$projectDir" -type 'd' -maxdepth 1 \
+output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     -not -name ".*" \
     -not -name tools \
     -not -name build \

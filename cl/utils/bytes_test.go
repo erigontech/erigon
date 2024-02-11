@@ -12,8 +12,8 @@ import (
 
 func TestSSZSnappy(t *testing.T) {
 	verySussyMessage := &cltypes.Metadata{
-		SeqNumber: 69, // :D
-		Attnets:   96, // :(
+		SeqNumber: 69,          // :D
+		Attnets:   [8]byte{96}, // :(
 	}
 	sussyEncoded, err := utils.EncodeSSZSnappy(verySussyMessage)
 	require.NoError(t, err)

@@ -75,8 +75,10 @@ func TestCreation(t *testing.T) {
 				{15049999, 1656586434, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // Last Arrow Glacier block
 				{15050000, 1656586444, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // First Gray Glacier block
 				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
-				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block
-				{19000000, 1700000000, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // Future Shanghai block (mock)
+				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // First Shanghai block
+				{19428734, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block (approx)
+				{19428735, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block  (approx)
+				{20000000, 1800000000, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
 		// Goerli test cases

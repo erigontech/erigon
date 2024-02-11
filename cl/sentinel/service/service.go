@@ -189,15 +189,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
-		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -248,6 +242,12 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
+		if strings.Contains(err.Error(), "protocols not supported") {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+			s.sentinel.Peers().SetBanStatus(pid, true)
+		}
 		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
 		return nil, err
 	}

@@ -22,6 +22,7 @@ type SlotData struct {
 	// Phase0
 	Eth1Data         *cltypes.Eth1Data
 	Eth1DepositIndex uint64
+	Fork             *cltypes.Fork
 	// Capella
 	NextWithdrawalIndex          uint64
 	NextWithdrawalValidatorIndex uint64
@@ -47,6 +48,7 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 		Eth1DepositIndex:                s.Eth1DepositIndex(),
 		NextWithdrawalIndex:             s.NextWithdrawalIndex(),
 		NextWithdrawalValidatorIndex:    s.NextWithdrawalValidatorIndex(),
+		Fork:                            s.Fork(),
 	}
 }
 
@@ -74,6 +76,7 @@ func (m *SlotData) WriteTo(w io.Writer) error {
 // Deserialize deserializes the state from a byte slice with zstd compression.
 func (m *SlotData) ReadFrom(r io.Reader) error {
 	m.Eth1Data = &cltypes.Eth1Data{}
+	m.Fork = &cltypes.Fork{}
 	var err error
 
 	versionByte := make([]byte, 1)
@@ -97,11 +100,12 @@ func (m *SlotData) ReadFrom(r io.Reader) error {
 	if n != len(buf) {
 		return io.ErrUnexpectedEOF
 	}
+
 	return ssz2.UnmarshalSSZ(buf, int(m.Version), m.getSchema()...)
 }
 
 func (m *SlotData) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
+	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}

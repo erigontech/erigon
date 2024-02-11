@@ -29,6 +29,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -483,55 +484,67 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 func (ii *InvertedIndex) openFiles() error {
 	var err error
 	var invalidFileItems []*filesItem
+	invalidFileItemsLock := sync.Mutex{}
+	g := &errgroup.Group{}
+	g.SetLimit(32)
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-			if item.decompressor == nil {
-				fPath := ii.efFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Debug("[agg] InvertedIndex.openFiles: file does not exists", "f", fName)
-					invalidFileItems = append(invalidFileItems, item)
-					continue
-				}
+			item := item
+			g.Go(func() error {
+				fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
+				if item.decompressor == nil {
+					fPath := ii.efFilePath(fromStep, toStep)
+					if !dir.FileExist(fPath) {
+						_, fName := filepath.Split(fPath)
+						ii.logger.Debug("[agg] InvertedIndex.openFiles: file does not exists", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						return nil
+					}
 
-				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
-					invalidFileItems = append(invalidFileItems, item)
-					// don't interrupt on error. other files may be good. but skip indices open.
-					continue
-				}
-			}
-
-			if item.index == nil {
-				fPath := ii.efAccessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+					if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
 						_, fName := filepath.Split(fPath)
 						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						// don't interrupt on error. other files may be good. but skip indices open.
+						return nil
 					}
 				}
-			}
-			if item.existence == nil && ii.withExistenceIndex {
-				fPath := ii.efExistenceIdxFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
-						ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
+
+				if item.index == nil {
+					fPath := ii.efAccessorFilePath(fromStep, toStep)
+					if dir.FileExist(fPath) {
+						if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+							_, fName := filepath.Split(fPath)
+							ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+							// don't interrupt on error. other files may be good
+						}
 					}
 				}
-			}
+				if item.existence == nil && ii.withExistenceIndex {
+					fPath := ii.efExistenceIdxFilePath(fromStep, toStep)
+					if dir.FileExist(fPath) {
+						if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+							_, fName := filepath.Split(fPath)
+							ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
+							// don't interrupt on error. other files may be good
+						}
+					}
+				}
+				return nil
+			})
 		}
+
 		return true
 	})
+	if err := g.Wait(); err != nil {
+		return err
+	}
 	for _, item := range invalidFileItems {
 		ii.files.Delete(item)
-	}
-	if err != nil {
-		return err
 	}
 
 	ii.reCalcRoFiles()

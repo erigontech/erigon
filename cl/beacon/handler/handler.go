@@ -74,9 +74,9 @@ func (a *ApiHandler) init() {
 			})
 			r.Route("/beacon", func(r chi.Router) {
 				r.Route("/rewards", func(r chi.Router) {
-					r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.getSyncCommitteesRewards))
-					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlockRewards))
-					r.Post("/attestations/{epoch}", beaconhttp.HandleEndpointFunc(a.getAttestationsRewards))
+					r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsSyncCommittees))
+					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconRewardsBlocks))
+					r.Post("/attestations/{epoch}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsAttestations))
 				})
 				r.Route("/headers", func(r chi.Router) {
 					r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
@@ -88,7 +88,7 @@ func (a *ApiHandler) init() {
 					r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.getBlockAttestations))
 					r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.getBlockRoot))
 				})
-				r.Get("/genesis", beaconhttp.HandleEndpointFunc(a.getGenesis))
+				r.Get("/genesis", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconGenesis))
 				r.Get("/blinded_blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlindedBlock))
 				r.Route("/pool", func(r chi.Router) {
 					r.Get("/voluntary_exits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolVoluntaryExits))
@@ -119,9 +119,9 @@ func (a *ApiHandler) init() {
 						r.Get("/validators", http.NotFound)
 						r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
-						r.Get("/validators", beaconhttp.HandleEndpointFunc(a.getAllValidators))
-						r.Get("/validator_balances", beaconhttp.HandleEndpointFunc(a.getAllValidatorsBalances))
-						r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.getSingleValidator))
+						r.Get("/validators", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidators))
+						r.Get("/validator_balances", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconValidatorsBalances))
+						r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 					})
 				})
 			})

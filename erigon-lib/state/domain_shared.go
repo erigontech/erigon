@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -13,7 +14,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/log/v3"
 
 	btree2 "github.com/tidwall/btree"
@@ -457,9 +457,7 @@ func (sd *SharedDomains) updateCommitmentData(prefix []byte, data, prev []byte, 
 
 func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error {
 	addrS := string(addr)
-	sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchAccount)
-	sd.put(kv.AccountsDomain, addrS, nil)
-	if err := sd.accountWriter.DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
+	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
 		return err
 	}
 
@@ -467,9 +465,13 @@ func (sd *SharedDomains) deleteAccount(addr, prev []byte, prevStep uint64) error
 	if err := sd.DomainDel(kv.CodeDomain, addr, nil, nil, prevStep); err != nil {
 		return err
 	}
-	if err := sd.DomainDelPrefix(kv.StorageDomain, addr); err != nil {
+
+	sd.sdCtx.TouchPlainKey(addrS, nil, sd.sdCtx.TouchAccount)
+	sd.put(kv.AccountsDomain, addrS, nil)
+	if err := sd.accountWriter.DeleteWithPrev(addr, nil, prev, prevStep); err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -856,6 +858,7 @@ func (sd *SharedDomains) DomainDelPrefix(domain kv.Domain, prefix []byte) error 
 	if domain != kv.StorageDomain {
 		return fmt.Errorf("DomainDelPrefix: not supported")
 	}
+
 	type tuple struct {
 		k, v []byte
 		step uint64

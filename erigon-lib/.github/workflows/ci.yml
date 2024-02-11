@@ -23,10 +23,10 @@ jobs:
     steps:
       - name: configure Pagefile
         if: matrix.os == 'windows-2022'
-        uses: al-cheb/configure-pagefile-action@v1.3
+        uses: al-cheb/configure-pagefile-action@v1.4
         with:
           minimum-size: 8GB
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0 # fetch git tags for "git describe"

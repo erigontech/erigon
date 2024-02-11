@@ -201,8 +201,8 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
-		headerVerifier: func(hashAccumulator heimdall.Waypoint, headers []*types.Header) error {
-			if hashAccumulator.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
+		headerVerifier: func(waypoint heimdall.Waypoint, headers []*types.Header) error {
+			if waypoint.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid checkpoint")
 			}

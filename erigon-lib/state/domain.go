@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -604,63 +605,75 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 
 func (d *Domain) openFiles() (err error) {
 	invalidFileItems := make([]*filesItem, 0)
+	invalidFileItemsLock := sync.Mutex{}
+	g := &errgroup.Group{}
+	g.SetLimit(32)
 	d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			if item.decompressor == nil {
-				fPath := d.kvFilePath(fromStep, toStep)
-				if !dir.FileExist(fPath) {
-					_, fName := filepath.Split(fPath)
-					d.logger.Debug("[agg] Domain.openFiles: file does not exists", "f", fName)
-					invalidFileItems = append(invalidFileItems, item)
-					continue
+			item := item
+			g.Go(func() error {
+				fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
+				if item.decompressor == nil {
+					fPath := d.kvFilePath(fromStep, toStep)
+					if !dir.FileExist(fPath) {
+						_, fName := filepath.Split(fPath)
+						d.logger.Debug("[agg] Domain.openFiles: file does not exists", "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						return nil
+					}
+
+					if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
+						_, fName := filepath.Split(fPath)
+						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+						invalidFileItemsLock.Lock()
+						invalidFileItems = append(invalidFileItems, item)
+						invalidFileItemsLock.Unlock()
+						// don't interrupt on error. other files may be good. but skip indices open.
+						return nil
+					}
 				}
 
-				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
-					_, fName := filepath.Split(fPath)
-					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
-					invalidFileItems = append(invalidFileItems, item)
-					// don't interrupt on error. other files may be good. but skip indices open.
-					continue
-				}
-			}
-
-			if item.index == nil && !UseBpsTree {
-				fPath := d.kvAccessorFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
-					if item.index, err = recsplit.OpenIndex(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
-						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
+				if item.index == nil && !UseBpsTree {
+					fPath := d.kvAccessorFilePath(fromStep, toStep)
+					if dir.FileExist(fPath) {
+						if item.index, err = recsplit.OpenIndex(fPath); err != nil {
+							_, fName := filepath.Split(fPath)
+							d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+							// don't interrupt on error. other files may be good
+						}
 					}
 				}
-			}
-			if item.bindex == nil {
-				fPath := d.kvBtFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
-					if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.compression); err != nil {
-						_, fName := filepath.Split(fPath)
-						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
+				if item.bindex == nil {
+					fPath := d.kvBtFilePath(fromStep, toStep)
+					if dir.FileExist(fPath) {
+						if item.bindex, err = OpenBtreeIndexWithDecompressor(fPath, DefaultBtreeM, item.decompressor, d.compression); err != nil {
+							_, fName := filepath.Split(fPath)
+							d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+							// don't interrupt on error. other files may be good
+						}
 					}
 				}
-			}
-			if item.existence == nil {
-				fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
-				if dir.FileExist(fPath) {
-					if item.existence, err = OpenExistenceFilter(fPath); err != nil {
-						_, fName := filepath.Split(fPath)
-						d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
-						// don't interrupt on error. other files may be good
+				if item.existence == nil {
+					fPath := d.kvExistenceIdxFilePath(fromStep, toStep)
+					if dir.FileExist(fPath) {
+						if item.existence, err = OpenExistenceFilter(fPath); err != nil {
+							_, fName := filepath.Split(fPath)
+							d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
+							// don't interrupt on error. other files may be good
+						}
 					}
 				}
-			}
+				return nil
+			})
 		}
 		return true
 	})
-	if err != nil {
+	if err := g.Wait(); err != nil {
 		return err
 	}
+
 	for _, item := range invalidFileItems {
 		d.files.Delete(item)
 	}

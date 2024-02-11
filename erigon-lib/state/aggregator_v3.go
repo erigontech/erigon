@@ -234,14 +234,70 @@ func (a *AggregatorV3) OpenFolder(readonly bool) error {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 	eg := &errgroup.Group{}
-	eg.Go(func() error { return a.accounts.OpenFolder(readonly) })
-	eg.Go(func() error { return a.storage.OpenFolder(readonly) })
-	eg.Go(func() error { return a.code.OpenFolder(readonly) })
-	eg.Go(func() error { return a.commitment.OpenFolder(readonly) })
-	eg.Go(func() error { return a.logAddrs.OpenFolder(readonly) })
-	eg.Go(func() error { return a.logTopics.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesFrom.OpenFolder(readonly) })
-	eg.Go(func() error { return a.tracesTo.OpenFolder(readonly) })
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.accounts.OpenFolder(readonly)
+	})
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.storage.OpenFolder(readonly)
+	})
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.code.OpenFolder(readonly)
+	})
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.commitment.OpenFolder(readonly)
+	})
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.logAddrs.OpenFolder(readonly)
+	})
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.logTopics.OpenFolder(readonly)
+	})
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.tracesFrom.OpenFolder(readonly)
+	})
+	eg.Go(func() error {
+		select {
+		case <-a.ctx.Done():
+			return a.ctx.Err()
+		default:
+		}
+		return a.tracesTo.OpenFolder(readonly)
+	})
 	if err := eg.Wait(); err != nil {
 		return err
 	}
