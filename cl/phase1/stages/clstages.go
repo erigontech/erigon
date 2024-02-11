@@ -1,7 +1,6 @@
 package stages
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -389,7 +388,6 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
-					var b bytes.Buffer
 
 					blocksBatch := []*types.Block{}
 					blocksBatchLimit := 1000
