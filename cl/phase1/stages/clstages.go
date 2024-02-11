@@ -283,6 +283,9 @@ func ConsensusClStages(ctx context.Context,
 								return highestSlotProcessed, highestBlockRootProcessed, err
 							}
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
+								if cfg.prebuffer == nil {
+									cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+								}
 								executionPayload := block.Block.Body.ExecutionPayload
 								executionPayloadRoot, err := executionPayload.HashSSZ()
 								if err != nil {
@@ -294,19 +297,7 @@ func ConsensusClStages(ctx context.Context,
 									return highestSlotProcessed, highestBlockRootProcessed, err
 								}
 								enc = append([]byte{versionByte}, append(block.Block.ParentRoot[:], enc...)...)
-								// body := executionPayload.Body()
-								// txs, err := types.DecodeTransactions(body.Transactions)
-								// if err != nil {
-								// 	log.Warn("bad blocks segment received", "err", err)
-								// 	return highestSlotProcessed, highestBlockRootProcessed, err
-								// }
-								// parentRoot := &block.Block.ParentRoot
-								// header, err := executionPayload.RlpHeader(parentRoot)
-								// if err != nil {
-								// 	log.Warn("bad blocks segment received", "err", err)
-								// 	return highestSlotProcessed, highestBlockRootProcessed, err
-								// }
-								// blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
+
 								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(executionPayload.BlockNumber, executionPayloadRoot), enc); err != nil {
 									return highestSlotProcessed, highestBlockRootProcessed, err
 								}
