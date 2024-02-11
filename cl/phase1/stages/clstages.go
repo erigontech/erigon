@@ -381,7 +381,7 @@ func ConsensusClStages(ctx context.Context,
 					defer tx.Rollback()
 
 					blocksBatch := []*types.Block{}
-					blocksBatchLimit := 1000
+					blocksBatchLimit := 10_000
 					if cfg.executionClient != nil && cfg.prebuffer != nil && cfg.executionClient.SupportInsertion() {
 						if err := cfg.prebuffer.Load(tx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 							if len(v) == 0 {
@@ -411,6 +411,7 @@ func ConsensusClStages(ctx context.Context,
 									logger.Warn("failed to insert blocks", "err", err)
 								}
 								blocksBatch = []*types.Block{}
+								logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
 							}
 							return next(k, nil, nil)
 						}, etl.TransformArgs{}); err != nil {
