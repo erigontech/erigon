@@ -556,6 +556,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, validatorSetLengt
 	}
 	defer diffCursor.Close()
 	if slot%r.cfg.SlotsPerEpoch == 0 {
+		currentList = currentList[:validatorSetLength*8]
 		return currentList, nil
 	}
 
