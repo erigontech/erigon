@@ -141,7 +141,6 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 
 	for _, p := range p {
 		v, name, ok := strings.Cut(p.Name, "-")
-
 		if !ok {
 			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
 				bestVersions.Set(p.Name, p)
@@ -151,6 +150,13 @@ func (p Preverified) Versioned(preferredVersion snaptype.Version, minVersion sna
 		}
 
 		parts := strings.Split(name, "-")
+		if len(parts) < 3 {
+			if strings.HasPrefix(p.Name, "domain") || strings.HasPrefix(p.Name, "history") || strings.HasPrefix(p.Name, "idx") {
+				bestVersions.Set(p.Name, p)
+				continue
+			}
+			continue
+		}
 		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		include := false
 
