@@ -480,12 +480,8 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		delete(f.saveStates, root)
 		delete(f.syncCommittees, root)
 		delete(f.blockRewards, root)
-		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil {
-			log.Warn("Could not remove beacon state file", "err", err)
-		}
-		if err := f.fs.Remove(getBeaconStateCacheFilename(root)); err != nil {
-			log.Warn("Could not remove beacon state cache file", "err", err)
-		}
+		f.fs.Remove(getBeaconStateFilename(root))
+		f.fs.Remove(getBeaconStateCacheFilename(root))
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
