@@ -286,6 +286,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	// is no matching version just use the one discovered for the file
 
 	versionedCfg := map[snaptype.Version]*snapcfg.Cfg{}
+	versionedCfgLock := sync.Mutex{}
 
 	snapDir := cfg.Dirs.Snap
 
@@ -328,12 +329,19 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 					}
 				} else {
-					versioned, ok := versionedCfg[fileInfo.Version]
+					versioned := func() *snapcfg.Cfg {
+						versionedCfgLock.Lock()
+						defer versionedCfgLock.Unlock()
 
-					if !ok {
-						versioned = snapcfg.VersionedCfg(cfg.ChainName, fileInfo.Version, fileInfo.Version)
-						versionedCfg[fileInfo.Version] = versioned
-					}
+						versioned, ok := versionedCfg[fileInfo.Version]
+
+						if !ok {
+							versioned = snapcfg.VersionedCfg(cfg.ChainName, fileInfo.Version, fileInfo.Version)
+							versionedCfg[fileInfo.Version] = versioned
+						}
+
+						return versioned
+					}()
 
 					hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
 
