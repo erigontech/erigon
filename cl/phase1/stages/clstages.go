@@ -243,8 +243,10 @@ func ConsensusClStages(ctx context.Context,
 					// This stage is special so use context.Background() TODO(Giulio2002): make the context be passed in
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
-
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, logger), context.Background(), logger); err != nil {
+					if cfg.prebuffer == nil {
+						cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+					}
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.beaconDB, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -386,6 +388,10 @@ func ConsensusClStages(ctx context.Context,
 						if err := cfg.prebuffer.Load(tx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
 							if len(v) == 0 {
 								return nil
+							}
+							v, err = utils.DecompressSnappy(v)
+							if err != nil {
+								return err
 							}
 							version := clparams.StateVersion(v[0])
 							parentRoot := common.BytesToHash(v[1:33])
