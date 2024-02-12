@@ -388,7 +388,10 @@ func ConsensusClStages(ctx context.Context,
 									if len(blocks.Data) == 0 {
 										continue
 									}
-									respCh <- blocks
+									select {
+									case respCh <- blocks:
+									default:
+									}
 								}
 							}
 							blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, totalRequest)
