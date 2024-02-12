@@ -260,7 +260,40 @@ func verifyAgainstLocalBlocks(tx kv.RwTx, hermezDb *hermez_db.HermezDb, logPrefi
 	//     1. verified and node both equal
 	//     2. node behind l1 - verification block is higher than hashed block - use hashed block to find verification block
 	//     3. l1 behind node - verification block is lower than hashed block - use verification block to find hashed block
-	blockToCheck := min(verifiedBlockNo, hashedBlockNo)
+	var blockToCheck uint64
+	if verifiedBlockNo <= hashedBlockNo {
+		blockToCheck = verifiedBlockNo
+	} else {
+		// in this case we need to find the blocknumber that is highest for the last batch
+		// get the batch of the last hashed block
+		hashedBatch, err := hermezDb.GetBatchNoByL2Block(hashedBlockNo)
+		if err != nil {
+			return err
+		}
+
+		if hashedBatch == 0 {
+			log.Warn(fmt.Sprintf("[%s] No batch number found for block %d", logPrefix, hashedBlockNo))
+			return nil
+		}
+
+		// we don't know if this is the latest block in this batch, so check for the previous one
+		// find the higher blocknum for previous batch
+		blockNumbers, err := hermezDb.GetL2BlockNosByBatch(hashedBatch)
+		if err != nil {
+			return err
+		}
+
+		if len(blockNumbers) == 0 {
+			log.Warn(fmt.Sprintf("[%s] No block numbers found for batch %d", logPrefix, hashedBatch))
+			return nil
+		}
+
+		for _, num := range blockNumbers {
+			if num > blockToCheck {
+				blockToCheck = num
+			}
+		}
+	}
 
 	// already checked
 	highestChecked, err := stages.GetStageProgress(tx, stages.VerificationsStateRootCheck)
