@@ -389,14 +389,8 @@ func ConsensusClStages(ctx context.Context,
 									if len(blocks.Data) == 0 {
 										continue
 									}
-									for _, block := range blocks.Data {
-										if block.Block.Slot >= currentSlot {
-											break Loop
-										}
-									}
+									respCh <- blocks
 								}
-								respCh <- blocks
-								return
 							}
 							blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, totalRequest)
 							if err != nil {
@@ -424,7 +418,6 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
-								start := time.Now()
 								if err := processBlock(tx, block, true, true); err != nil {
 									log.Error("bad blocks segment received", "err", err)
 									cfg.rpc.BanPeer(blocks.Peer)
@@ -438,7 +431,6 @@ func ConsensusClStages(ctx context.Context,
 									"block":                common.Hash(blockRoot),
 									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
 								})
-								start = time.Now()
 								// Attestations processing can take some time if they are not cached in properly.
 								go func() {
 									block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {

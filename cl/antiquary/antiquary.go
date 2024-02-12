@@ -2,7 +2,6 @@ package antiquary
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -224,7 +223,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
-	fmt.Println("ppp")
 	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
@@ -240,7 +238,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	fmt.Println(from, to)
 
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
