@@ -1,5 +1,5 @@
 datadir : '/path/to/datadirs/hermez-cardona'
-chain : "hermez-cardona"
+chain : "hermez-cardona-internal"
 http : true
 private.api.addr : "localhost:9092"
 zkevm.l2-chain-id: 2440
