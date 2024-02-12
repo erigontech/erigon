@@ -234,6 +234,14 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	if err := beacon_indicies.PruneBlocks(a.ctx, tx, to); err != nil {
 		return err
 	}
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	fmt.Println(from, to)
+
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -251,10 +259,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 
 	a.validatorsTable.SetSlot(to)
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
-		return err
-	}
-	fmt.Println(from, to)
 	return tx.Commit()
 }
 
