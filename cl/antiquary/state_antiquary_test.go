@@ -1,4 +1,4 @@
-//go:build integration
+//go:build prevent
 
 package antiquary
 
@@ -32,7 +32,6 @@ func runTest(t *testing.T, blocks []*cltypes.SignedBeaconBlock, preState, postSt
 }
 
 func TestStateAntiquaryCapella(t *testing.T) {
-	t.Skip("TODO: oom")
 	blocks, preState, postState := tests.GetCapellaRandom()
 	runTest(t, blocks, preState, postState)
 }

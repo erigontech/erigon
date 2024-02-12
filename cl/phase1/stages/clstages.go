@@ -329,7 +329,12 @@ func ConsensusClStages(ctx context.Context,
 						default:
 						}
 					}
-					return tx.Commit()
+					start := time.Now()
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+					fmt.Println("ForwardSync", time.Since(start))
+					return nil
 				},
 			},
 			CatchUpBlocks: {
@@ -451,7 +456,12 @@ func ConsensusClStages(ctx context.Context,
 							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 						}
 					}
-					return tx.Commit()
+					start := time.Now()
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+					fmt.Println("Tip", time.Since(start))
+					return nil
 				},
 			},
 			ForkChoice: {
@@ -595,7 +605,12 @@ func ConsensusClStages(ctx context.Context,
 						"hash", headRoot, "slot", headSlot,
 						"alloc", common.ByteCount(m.Alloc),
 						"sys", common.ByteCount(m.Sys))
-					return tx.Commit()
+					start = time.Now()
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+					fmt.Println("Fcu", time.Since(start))
+					return nil
 				},
 			},
 			ListenForForks: {
