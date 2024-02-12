@@ -329,11 +329,9 @@ func ConsensusClStages(ctx context.Context,
 						default:
 						}
 					}
-					start := time.Now()
 					if err := tx.Commit(); err != nil {
 						return err
 					}
-					fmt.Println("ForwardSync", time.Since(start))
 					return nil
 				},
 			},
@@ -394,6 +392,7 @@ func ConsensusClStages(ctx context.Context,
 										}
 									}
 								}
+								fmt.Println(len(blocks.Data))
 								respCh <- blocks
 								return
 							}
@@ -402,6 +401,7 @@ func ConsensusClStages(ctx context.Context,
 								errCh <- err
 								return
 							}
+							fmt.Println(len(blocks.Data))
 							respCh <- blocks
 						}(v)
 					}
@@ -456,11 +456,9 @@ func ConsensusClStages(ctx context.Context,
 							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 						}
 					}
-					start := time.Now()
 					if err := tx.Commit(); err != nil {
 						return err
 					}
-					fmt.Println("Tip", time.Since(start))
 					return nil
 				},
 			},
@@ -609,7 +607,6 @@ func ConsensusClStages(ctx context.Context,
 					if err := tx.Commit(); err != nil {
 						return err
 					}
-					fmt.Println("Fcu", time.Since(start))
 					return nil
 				},
 			},
