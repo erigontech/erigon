@@ -443,15 +443,17 @@ func ConsensusClStages(ctx context.Context,
 									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
 								})
 								start = time.Now()
-								block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
-									// emit attestation
-									cfg.emitter.Publish("attestation", a)
-									if err = cfg.forkChoice.OnAttestation(a, true, false); err != nil {
-										log.Debug("bad attestation received", "err", err)
-									}
-									return true
-								})
-								fmt.Println("attestation process time", time.Since(start), block.Block.Slot)
+								go func() {
+									block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
+										// emit attestation
+										cfg.emitter.Publish("attestation", a)
+										if err = cfg.forkChoice.OnAttestation(a, true, false); err != nil {
+											log.Debug("bad attestation received", "err", err)
+										}
+										return true
+									})
+									fmt.Println("attestation process time", time.Since(start), block.Block.Slot)
+								}()
 								// emit the other stuff
 								block.Block.Body.VoluntaryExits.Range(func(index int, value *cltypes.SignedVoluntaryExit, length int) bool {
 									cfg.emitter.Publish("voluntary-exit", value)
