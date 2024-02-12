@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
-	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -77,11 +76,8 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	}
 
 	// Check if blob data is available
-	// If not, this block MAY be queued and subsequently considered when blob data becomes available
-	// *Note*: Extraneous or invalid Blobs (in addition to the expected/referenced valid blobs)
-	// received on the p2p network MUST NOT invalidate a block that is otherwise valid and available
 	if block.Version() >= clparams.DenebVersion {
-		if !isDataAvailable(blockRoot, block.Block.Body.BlobKzgCommitments) {
+		if err := isDataAvailable(blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
 			return fmt.Errorf("OnBlock: data is not available")
 		}
 	}
@@ -229,8 +225,10 @@ func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
 }
 
 func isDataAvailable(blockRoot libcommon.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
-	blobs, proofs := retrieveBlobsAndProofs(blockRoot)
+	//FIXME: retrive Blobs and Proofs and verify them
+	// blobs, proofs := retrieveBlobsAndProofs(blockRoot)
 
-	kzgCtx := libkzg.Ctx()
-	return kzgCtx.VerifyBlobKZGProofBatch(toBlobs(blobs), toComms(*blobKzgCommitments), toProofs(proofs))
+	// kzgCtx := libkzg.Ctx()
+	// return kzgCtx.VerifyBlobKZGProofBatch(toBlobs(blobs), toComms(blobKzgCommitments), toProofs(proofs))
+	return nil
 }
