@@ -117,10 +117,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			"slot", block.Block.Slot,
 		)
 
-		if err := freezer.PutObjectSSZIntoFreezer("signedBeaconBlock", "caplin_core", block.Block.Slot, block, g.recorder); err != nil {
-			return err
-		}
-
 		g.gossipSource.InsertBlock(ctx, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid})
 
 	case gossip.TopicNameSyncCommitteeContributionAndProof:

@@ -361,7 +361,7 @@ func ConsensusClStages(ctx context.Context,
 						sources = append(sources, rpcSource)
 					}
 					// 15 seconds is a good timeout for this
-					ctx, cn := context.WithTimeout(ctx, 15*time.Second)
+					ctx, cn := context.WithTimeout(ctx, 25*time.Second)
 					defer cn()
 
 					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
@@ -401,20 +401,21 @@ func ConsensusClStages(ctx context.Context,
 								}
 							}
 							ticker := time.NewTicker(10 * time.Millisecond)
+							defer ticker.Stop()
 							for {
 								if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 									return
 								}
-								blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, totalRequest)
+								blocks, err := sourceFunc(ctx, nil, args.seenSlot, 12)
 								if err != nil {
 									errCh <- err
 									return
 								}
+								respCh <- blocks
 								select {
 								case <-ctx.Done():
 									return
 								case <-ticker.C:
-									respCh <- blocks
 								}
 
 							}
@@ -438,8 +439,7 @@ func ConsensusClStages(ctx context.Context,
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
 								if err := processBlock(tx, block, true, true); err != nil {
-									log.Error("bad blocks segment received", "err", err)
-									cfg.rpc.BanPeer(blocks.Peer)
+									log.Debug("bad blocks segment received", "err", err)
 									continue MainLoop
 								}
 								// we can ignore this error because the block would not process if the hashssz failed
