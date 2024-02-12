@@ -398,12 +398,24 @@ func ConsensusClStages(ctx context.Context,
 									}
 								}
 							}
-							blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, totalRequest)
-							if err != nil {
-								errCh <- err
-								return
+							ticker := time.NewTicker(10 * time.Millisecond)
+							for {
+								if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+									return
+								}
+								blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, totalRequest)
+								if err != nil {
+									errCh <- err
+									return
+								}
+								select {
+								case <-ctx.Done():
+									return
+								case <-ticker.C:
+									respCh <- blocks
+								}
+
 							}
-							respCh <- blocks
 						}(v)
 					}
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
