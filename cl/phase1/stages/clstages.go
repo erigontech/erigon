@@ -423,6 +423,9 @@ func ConsensusClStages(ctx context.Context,
 								}
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.HashSSZ()
+								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
+									continue
+								}
 								// publish block to event handler
 								cfg.emitter.Publish("block", map[string]any{
 									"slot":                 strconv.Itoa(int(block.Block.Slot)),
