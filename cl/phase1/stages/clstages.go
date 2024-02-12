@@ -386,13 +386,15 @@ func ConsensusClStages(ctx context.Context,
 										errCh <- err
 										return
 									}
+									if len(blocks.Data) == 0 {
+										continue
+									}
 									for _, block := range blocks.Data {
 										if block.Block.Slot >= currentSlot {
 											break Loop
 										}
 									}
 								}
-								fmt.Println(len(blocks.Data))
 								respCh <- blocks
 								return
 							}
@@ -405,11 +407,13 @@ func ConsensusClStages(ctx context.Context,
 							respCh <- blocks
 						}(v)
 					}
+					fmt.Println("X")
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
 					defer tx.Rollback()
+					fmt.Println("Y")
 
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
@@ -417,16 +421,19 @@ func ConsensusClStages(ctx context.Context,
 					for {
 						select {
 						case <-ctx.Done():
+							fmt.Println("tm")
 							return errors.New("timeout waiting for blocks")
 						case err := <-errCh:
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
+								start := time.Now()
 								if err := processBlock(tx, block, true, true); err != nil {
 									log.Error("bad blocks segment received", "err", err)
 									cfg.rpc.BanPeer(blocks.Peer)
 									continue MainLoop
 								}
+								fmt.Println("block process time", time.Since(start), block.Block.Slot)
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.HashSSZ()
 								// publish block to event handler
@@ -435,6 +442,7 @@ func ConsensusClStages(ctx context.Context,
 									"block":                common.Hash(blockRoot),
 									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
 								})
+								start = time.Now()
 								block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 									// emit attestation
 									cfg.emitter.Publish("attestation", a)
@@ -443,6 +451,7 @@ func ConsensusClStages(ctx context.Context,
 									}
 									return true
 								})
+								fmt.Println("attestation process time", time.Since(start), block.Block.Slot)
 								// emit the other stuff
 								block.Block.Body.VoluntaryExits.Range(func(index int, value *cltypes.SignedVoluntaryExit, length int) bool {
 									cfg.emitter.Publish("voluntary-exit", value)

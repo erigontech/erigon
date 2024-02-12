@@ -7,7 +7,6 @@ import (
 	"path"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon"
@@ -66,10 +65,7 @@ func OpenCaplinDatabase(ctx context.Context,
 
 	os.MkdirAll(dbPath, 0700)
 
-	db, err := mdbx.NewMDBX(log.Root()).Path(dataDirIndexer).PageSize(uint64(16 * datasize.KB)).Open(ctx)
-	if err != nil {
-		return nil, err
-	}
+	db := mdbx.MustOpen(dataDirIndexer)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
