@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -807,10 +808,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
-			if ac.CanPrune(tx) {
-				if err = ac.PruneSmallBatches(ctx, time.Hour, tx); err != nil {
-					return err
-				}
+
+			logEvery := time.NewTicker(30 * time.Second)
+			defer logEvery.Stop()
+
+			cc := context.Background()
+			if _, err = ac.Prune(cc, tx, math.MaxUint64, logEvery); err != nil {
+				return err
 			}
 			return err
 		}); err != nil {
@@ -851,10 +855,12 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
-			if ac.CanPrune(tx) {
-				if err = ac.PruneSmallBatches(ctx, time.Hour, tx); err != nil {
-					return err
-				}
+
+			logEvery := time.NewTicker(30 * time.Second)
+			defer logEvery.Stop()
+
+			if _, err = ac.Prune(context.Background(), tx, math.MaxUint64, logEvery); err != nil {
+				return err
 			}
 			return err
 		}); err != nil {
