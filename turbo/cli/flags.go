@@ -242,8 +242,13 @@ var (
 )
 
 func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.Logger) {
+	chainId := cfg.NetworkID
+	if cfg.Genesis != nil {
+		chainId = cfg.Genesis.Config.ChainID.Uint64()
+	}
+
 	mode, err := prune.FromCli(
-		cfg.Genesis.Config.ChainID.Uint64(),
+		chainId,
 		ctx.String(PruneFlag.Name),
 		ctx.Uint64(PruneHistoryFlag.Name),
 		ctx.Uint64(PruneReceiptFlag.Name),
@@ -376,7 +381,12 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 			beforeC = *v
 		}
 
-		mode, err := prune.FromCli(cfg.Genesis.Config.ChainID.Uint64(), *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
+		chainId := cfg.NetworkID
+		if cfg.Genesis != nil {
+			chainId = cfg.Genesis.Config.ChainID.Uint64()
+		}
+
+		mode, err := prune.FromCli(chainId, *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
 		if err != nil {
 			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}

@@ -255,27 +255,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		config.HistoryV3, err = kvcfg.HistoryV3.WriteOnce(tx, config.HistoryV3)
-		if err != nil {
-			return err
-		}
-
-		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
-		if err != nil {
-			return err
-		}
-		// if we are in the incorrect syncmode then we change it to the appropriate one
-		if !isCorrectSync {
-			config.Sync.UseSnapshots = useSnapshots
-			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(config.Genesis.Config.ChainName) && useSnapshots
-		}
-		return nil
+		return err
 	}); err != nil {
 		return nil, err
-	}
-	if !config.Sync.UseSnapshots {
-		if err := downloader.CreateProhibitNewDownloadsFile(dirs.Snap); err != nil {
-			return nil, err
-		}
 	}
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
@@ -321,6 +303,26 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.chainConfig = chainConfig
 	backend.genesisBlock = genesis
 	backend.genesisHash = genesis.Hash()
+
+	if err := chainKv.Update(context.Background(), func(tx kv.RwTx) error {
+		isCorrectSync, useSnapshots, err := snap.EnsureNotChanged(tx, config.Snapshot)
+		if err != nil {
+			return err
+		}
+		// if we are in the incorrect syncmode then we change it to the appropriate one
+		if !isCorrectSync {
+			config.Sync.UseSnapshots = useSnapshots
+			config.Snapshot.Enabled = ethconfig.UseSnapshotsByChainName(chainConfig.ChainName) && useSnapshots
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if !config.Sync.UseSnapshots {
+		if err := downloader.CreateProhibitNewDownloadsFile(dirs.Snap); err != nil {
+			return nil, err
+		}
+	}
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
 
@@ -854,14 +856,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	return backend, nil
 }
 
-func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
+func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
 	ethBackendRPC, miningRPC, stateDiffClient := s.ethBackendRPC, s.miningRPC, s.stateChangesClient
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
 	var err error
 
-	if config.Genesis.Config.Bor == nil {
+	if chainConfig.Bor == nil {
 		s.sentriesClient.Hd.StartPoSDownloader(s.sentryCtx, s.sentriesClient.SendHeaderRequest, s.sentriesClient.Penalize)
 	}
 
@@ -916,7 +918,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error {
 		}()
 	}
 
-	if config.Genesis.Config.Bor == nil {
+	if chainConfig.Bor == nil {
 		go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 	}
 
