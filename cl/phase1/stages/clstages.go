@@ -443,6 +443,7 @@ func ConsensusClStages(ctx context.Context,
 									"execution_optimistic": false, // TODO: i don't know what to put here. i see other places doing false, leaving flase for now
 								})
 								start = time.Now()
+								// Attestations processing can take some time if they are not cached in properly.
 								go func() {
 									block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 										// emit attestation
