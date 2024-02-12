@@ -103,7 +103,7 @@ func (s *CaplinSnapshots) ReopenList(fileNames []string, optimistic bool) error 
 	var segmentsMaxSet bool
 Loop:
 	for _, fName := range fileNames {
-		f, ok := snaptype.ParseFileName(s.dir, fName)
+		f, _, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
 			continue
 		}
@@ -257,7 +257,7 @@ func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*Segment, bool) {
 
 func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot uint64, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
-	f, _ := snaptype.ParseFileName(snapDir, segName)
+	f, _, _ := snaptype.ParseFileName(snapDir, segName)
 
 	sn, err := compress.NewCompressor(ctx, "Snapshot BeaconBlocks", f.Path, tmpDir, compress.MinPatternScore, workers, lvl, logger)
 	if err != nil {

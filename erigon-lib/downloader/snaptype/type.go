@@ -125,7 +125,7 @@ func (s snapType) FileName(version Version, from uint64, to uint64) string {
 }
 
 func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
-	f, _ := ParseFileName(dir, s.FileName(s.versions.Current, from, to))
+	f, _, _ := ParseFileName(dir, s.FileName(s.versions.Current, from, to))
 	return f
 }
 
@@ -242,7 +242,7 @@ func (e Enum) FileName(from uint64, to uint64) string {
 }
 
 func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
-	f, _ := ParseFileName(dir, e.FileName(from, to))
+	f, _, _ := ParseFileName(dir, e.FileName(from, to))
 	return f
 }
 

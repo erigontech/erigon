@@ -187,9 +187,11 @@ func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.R
 			files = fileMap
 		}
 
-		info, ok := snaptype.ParseFileName("", file)
-
-		if !ok || (version != nil && *version != info.Version) {
+		info, isStateFile, ok := snaptype.ParseFileName("", file)
+		if !ok {
+			continue
+		}
+		if !isStateFile && version != nil && *version != info.Version {
 			continue
 		}
 
@@ -236,9 +238,11 @@ func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, v
 			file = fi.Name()
 		}
 
-		info, ok := snaptype.ParseFileName("", file)
-
-		if !ok || (version != nil && *version != info.Version) {
+		info, isStateFile, ok := snaptype.ParseFileName("", file)
+		if !ok {
+			continue
+		}
+		if !isStateFile && version != nil && *version != info.Version {
 			continue
 		}
 
@@ -263,9 +267,11 @@ func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, v
 			file = fi.Name()
 		}
 
-		info, ok := snaptype.ParseFileName("", file)
-
-		if !ok || (version != nil && *version != info.Version) {
+		info, isStateFile, ok := snaptype.ParseFileName("", file)
+		if !ok {
+			continue
+		}
+		if !isStateFile && version != nil && *version != info.Version {
 			continue
 		}
 
