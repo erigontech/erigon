@@ -418,8 +418,8 @@ func ConsensusClStages(ctx context.Context,
 								if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
 									logger.Warn("failed to insert blocks", "err", err)
 								}
-								blocksBatch = []*types.Block{}
 								logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
+								blocksBatch = []*types.Block{}
 							}
 							return next(k, nil, nil)
 						}, etl.TransformArgs{}); err != nil {
