@@ -406,6 +406,7 @@ func ConsensusClStages(ctx context.Context,
 							defer ticker.Stop()
 							for {
 								if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+									fmt.Println("end", args.targetSlot)
 									return
 								}
 								blocks, err := sourceFunc(ctx, nil, args.seenSlot, 12)
