@@ -500,7 +500,7 @@ func (ii *InvertedIndex) openFiles() error {
 						invalidFileItemsLock.Lock()
 						invalidFileItems = append(invalidFileItems, item)
 						invalidFileItemsLock.Unlock()
-						return nil
+						return nil //nolint:nilerr
 					}
 
 					if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
@@ -510,7 +510,7 @@ func (ii *InvertedIndex) openFiles() error {
 						invalidFileItems = append(invalidFileItems, item)
 						invalidFileItemsLock.Unlock()
 						// don't interrupt on error. other files may be good. but skip indices open.
-						return nil
+						return nil //nolint:nilerr
 					}
 				}
 
