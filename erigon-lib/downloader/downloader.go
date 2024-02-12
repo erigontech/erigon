@@ -173,6 +173,11 @@ type snapshotLock struct {
 }
 
 func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
+
+	if !cfg.SnapshotLock {
+		return initSnapshotLock(ctx, cfg, db, logger)
+	}
+
 	snapDir := cfg.Dirs.Snap
 
 	lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
@@ -183,10 +188,6 @@ func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, lo
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-	}
-
-	if !cfg.SnapshotLock {
-		return initSnapshotLock(ctx, cfg, db, logger)
 	}
 
 	var data []byte
