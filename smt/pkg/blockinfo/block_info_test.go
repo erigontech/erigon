@@ -84,6 +84,7 @@ func TestBlockInfoHeader(t *testing.T) {
 
 func TestSetBlockTx(t *testing.T) {
 	tests := []struct {
+		l2TxHash            *common.Hash
 		txIndex             int
 		receipt             ethTypes.Receipt
 		logIndex            int64
@@ -92,7 +93,8 @@ func TestSetBlockTx(t *testing.T) {
 		finalBlockInfoRoot  string
 	}{
 		{
-			txIndex: 0,
+			l2TxHash: &common.Hash{0},
+			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 1,
 				TxHash: common.HexToHash("0xd2a69c7d3c99953bae9d273f2375b2653bd4ec47a05eefc5fc7c041d07fba8a0"),
@@ -126,9 +128,10 @@ func TestSetBlockTx(t *testing.T) {
 			logIndex:            0,
 			cumulativeGasUsed:   26336,
 			effectivePercentage: 255,
-			finalBlockInfoRoot:  "0x763711586b99a8c51ddfb765ff17ad8beb9312b246126d84ff02cea3cfc39828",
+			finalBlockInfoRoot:  "0x0dde47bb5f76e014b6b13de4be07529ef018b454f09f16ef4c9b15a8f9c59d4f",
 		}, {
-			txIndex: 0,
+			l2TxHash: &common.Hash{0},
+			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 0,
 				TxHash: common.HexToHash("0xac65e2fd657a4ee6318cc66cf98b05ae74ce3f0f3982370af951176e7b599c2c"),
@@ -137,9 +140,10 @@ func TestSetBlockTx(t *testing.T) {
 			logIndex:            0,
 			cumulativeGasUsed:   21000,
 			effectivePercentage: 0,
-			finalBlockInfoRoot:  "0xeb85acdbf2dd2d0c9b2637124520b09816065596a2e6f8d8869ffd22850371e4",
+			finalBlockInfoRoot:  "0x20a3ac1075ef9bb2fa88967b2b3075221c32ab3ef3034a9d9c1520adc45100be",
 		}, {
-			txIndex: 0,
+			l2TxHash: &common.Hash{0},
+			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 1,
 				TxHash: common.HexToHash("0xac65e2fd657a4ee6318cc66cf98b05ae74ce3f0f3982370af951176e7b599c2c"),
@@ -148,9 +152,10 @@ func TestSetBlockTx(t *testing.T) {
 			logIndex:            0,
 			cumulativeGasUsed:   21000,
 			effectivePercentage: 255,
-			finalBlockInfoRoot:  "0x4d94273d5028e71194fc29e4e73e1d94a392e65e5cc64ca86a80b3811fd18f51",
+			finalBlockInfoRoot:  "0x3ea32169f0fe8b1c54a8d35cc31f9d14a39537d72dbadd2044822816860cf816",
 		}, {
-			txIndex: 0,
+			l2TxHash: &common.Hash{0},
+			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 1,
 				TxHash: common.HexToHash("0x8f9b0375a6b0f1bd9d54ff499921766828ae8e5314fc44a494736b5c4cc3bb56"),
@@ -159,7 +164,7 @@ func TestSetBlockTx(t *testing.T) {
 			logIndex:            0,
 			cumulativeGasUsed:   10000,
 			effectivePercentage: 255,
-			finalBlockInfoRoot:  "0x42e4e630df29444b15bf553e03354cb4bac013220ca0cea2ea88e8f5efc26131",
+			finalBlockInfoRoot:  "0x668ff5e2a08822a32cb3929c012c0544ff0e14deb560817281184ced14f44edd",
 		},
 	}
 
@@ -167,6 +172,7 @@ func TestSetBlockTx(t *testing.T) {
 		infoTree := NewBlockInfoTree()
 
 		root, err := infoTree.SetBlockTx(
+			test.l2TxHash,
 			test.txIndex,
 			&test.receipt,
 			test.logIndex,
