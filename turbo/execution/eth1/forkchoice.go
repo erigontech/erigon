@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -18,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 type forkchoiceOutcome struct {
@@ -435,7 +435,6 @@ TooBigJumpStep:
 				return err
 			}
 			if pruneTimings := e.executionPipeline.PrintTimings(); len(pruneTimings) > 0 {
-				e.logger.Warn("[dbg]", "pruneLen", len(pruneTimings), "%v", fmt.Sprintf("%+v", pruneTimings))
 				timings = append(timings, pruneTimings...)
 			}
 			commitStart = time.Now()
