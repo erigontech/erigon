@@ -56,10 +56,10 @@ var PrecompiledContractForkID7Etrog = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{3}): &ripemd160hash_zkevm{},
 	libcommon.BytesToAddress([]byte{4}): &dataCopy_zkevm{enabled: true},
 	libcommon.BytesToAddress([]byte{5}): &bigModExp_zkevm{enabled: true, eip2565: true},
-	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul_zkevm{},
-	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul_zkevm{},
-	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul_zkevm{},
-	libcommon.BytesToAddress([]byte{9}): &blake2F_zkevm{},
+	libcommon.BytesToAddress([]byte{6}): &bn256AddIstanbul_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{7}): &bn256ScalarMulIstanbul_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{8}): &bn256PairingIstanbul_zkevm{enabled: true},
+	libcommon.BytesToAddress([]byte{9}): &blake2F_zkevm{enabled: true},
 }
 
 // ECRECOVER implemented as a native contract.
