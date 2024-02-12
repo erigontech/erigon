@@ -449,7 +449,7 @@ func ConsensusClStages(ctx context.Context,
 								}
 								if err := processBlock(tx, block, true, true); err != nil {
 									log.Error("bad blocks segment received", "err", err)
-									continue MainLoop
+									continue
 								}
 
 								// publish block to event handler
