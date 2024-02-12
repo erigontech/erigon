@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/tidwall/btree"
@@ -72,8 +71,6 @@ func (b *BeaconRpcSource) PurgeRange(ctx context.Context, _ kv.Tx, from uint64, 
 var _ BlockSource = (*GossipSource)(nil)
 
 type GossipSource struct {
-	gossip *network.GossipManager
-
 	mu     sync.Mutex
 	blocks *btree.Map[uint64, []*peers.PeeredObject[*cltypes.SignedBeaconBlock]]
 }
@@ -82,9 +79,8 @@ func (*GossipSource) GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peer
 	panic("unimplemented")
 }
 
-func NewGossipSource(ctx context.Context, gossip *network.GossipManager) *GossipSource {
+func NewGossipSource(ctx context.Context) *GossipSource {
 	g := &GossipSource{
-		gossip: gossip,
 		blocks: btree.NewMap[uint64, []*peers.PeeredObject[*cltypes.SignedBeaconBlock]](32),
 	}
 

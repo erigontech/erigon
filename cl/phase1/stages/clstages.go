@@ -51,6 +51,7 @@ type Cfg struct {
 	antiquary       *antiquary.Antiquary
 	syncedData      *synced_data.SyncedDataManager
 	emitter         *beaconevents.Emitters
+	gossipSource    persistence.BlockSource
 
 	hasDownloaded, backfilling bool
 }
@@ -80,6 +81,7 @@ func ClStagesCfg(
 	backfilling bool,
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.Emitters,
+	gossipSource persistence.BlockSource,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -97,6 +99,7 @@ func ClStagesCfg(
 		backfilling:     backfilling,
 		syncedData:      syncedData,
 		emitter:         emitters,
+		gossipSource:    gossipSource,
 	}
 }
 
@@ -182,7 +185,6 @@ func ConsensusClStages(ctx context.Context,
 ) *clstages.StageGraph[*Cfg, Args] {
 
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
-	gossipSource := persistence.NewGossipSource(ctx, cfg.gossipManager)
 	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block, newPayload, fullValidation); err != nil {
 			log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
@@ -352,14 +354,14 @@ func ConsensusClStages(ctx context.Context,
 					)
 					respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock])
 					errCh := make(chan error)
-					sources := []persistence.BlockSource{gossipSource, rpcSource}
+					sources := []persistence.BlockSource{cfg.gossipSource, rpcSource}
 
 					// if we are more than one block behind, we request the rpc source as well
 					if totalRequest > 2 {
 						sources = append(sources, rpcSource)
 					}
 					// 15 seconds is a good timeout for this
-					ctx, cn := context.WithTimeout(ctx, 30*time.Second)
+					ctx, cn := context.WithTimeout(ctx, 15*time.Second)
 					defer cn()
 
 					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
@@ -370,7 +372,7 @@ func ConsensusClStages(ctx context.Context,
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 
 								select {
-								case <-time.After(time.Duration(cfg.beaconCfg.SecondsPerSlot/6) * time.Second):
+								case <-time.After(2 * time.Second):
 								case <-ctx.Done():
 									return
 								}
@@ -654,25 +656,25 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
-					// try to get the current block
-					blocks, err := gossipSource.GetRange(ctx, tx, args.seenSlot, 1)
-					if err != nil {
-						if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-							return nil
-						}
-						return err
-					}
+					// try to get the current block TODO: Completely remove
+					// blocks, err := cfg.gossipSource.GetRange(ctx, tx, args.seenSlot, 1)
+					// if err != nil {
+					// 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					// 		return nil
+					// 	}
+					// 	return err
+					// }
 
-					for _, block := range blocks.Data {
-						err := processBlock(tx, block, true, true)
-						if err != nil {
-							// its okay if block processing fails
-							logger.Warn("extra block failed validation", "err", err)
-							return nil
-						}
-						shouldForkChoiceSinceReorg = true
-						logger.Debug("extra block received", "slot", args.seenSlot)
-					}
+					// for _, block := range blocks.Data {
+					// 	err := processBlock(tx, block, true, true)
+					// 	if err != nil {
+					// 		// its okay if block processing fails
+					// 		logger.Warn("extra block failed validation", "err", err)
+					// 		return nil
+					// 	}
+					// 	shouldForkChoiceSinceReorg = true
+					// 	logger.Debug("extra block received", "slot", args.seenSlot)
+					// }
 					return tx.Commit()
 				},
 			},
@@ -692,7 +694,7 @@ func ConsensusClStages(ctx context.Context,
 					defer tx.Rollback()
 					pruneDistance := uint64(1_000_000)
 					// clean up some old ranges
-					err = gossipSource.PurgeRange(ctx, tx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
+					err = cfg.gossipSource.PurgeRange(ctx, tx, 1, args.seenSlot-cfg.beaconCfg.SlotsPerEpoch*16)
 					if err != nil {
 						return err
 					}

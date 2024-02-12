@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/gossip"
+	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
@@ -31,14 +32,13 @@ type GossipManager struct {
 	beaconConfig  *clparams.BeaconChainConfig
 	genesisConfig *clparams.GenesisConfig
 
-	emitters  *beaconevents.Emitters
-	mu        sync.RWMutex
-	subs      map[int]chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]
-	totalSubs int
+	emitters     *beaconevents.Emitters
+	mu           sync.RWMutex
+	gossipSource *persistence.GossipSource
 }
 
 func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
-	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, recorder freezer.Freezer, emitters *beaconevents.Emitters) *GossipManager {
+	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, recorder freezer.Freezer, emitters *beaconevents.Emitters, gossipSource *persistence.GossipSource) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
 		forkChoice:    forkChoice,
@@ -46,26 +46,8 @@ func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkCho
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		recorder:      recorder,
-		subs:          make(map[int]chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]),
+		gossipSource:  gossipSource,
 	}
-}
-
-// this subscribes to signed beacon blocks..... i wish this was better
-func (g *GossipManager) SubscribeSignedBeaconBlocks(ctx context.Context) <-chan *peers.PeeredObject[*cltypes.SignedBeaconBlock] {
-	// a really big limit because why not....
-	out := make(chan *peers.PeeredObject[*cltypes.SignedBeaconBlock], 512)
-	g.mu.Lock()
-	g.totalSubs++
-	idx := g.totalSubs
-	g.subs[idx] = out
-	g.mu.Unlock()
-	go func() {
-		<-ctx.Done()
-		g.mu.Lock()
-		delete(g.subs, idx)
-		g.mu.Unlock()
-	}()
-	return out
 }
 
 func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManager, l log.Ctx, data *sentinel.GossipData, version int, name string, fn func(T, bool) error) error {
@@ -139,15 +121,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			return err
 		}
 
-		g.mu.RLock()
-		fmt.Println(block.Block.Slot, "block slot")
-		for _, v := range g.subs {
-			select {
-			case v <- &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid}:
-			default:
-			}
-		}
-		g.mu.RUnlock()
+		g.gossipSource.InsertBlock(ctx, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid})
 
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
 		obj := &solid.SignedContributionAndProof{}
@@ -192,6 +166,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			return err
 		}
 	case gossip.TopicNameBeaconAggregateAndProof:
+		return nil
 		if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
 			return err
 		}
