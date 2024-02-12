@@ -988,7 +988,6 @@ func (r *BlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ances
 }
 
 func (r *BlockReader) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
-	fmt.Printf("[dbg] EventLookup: %x\n", txnHash)
 	n, err := rawdb.ReadBorTxLookupEntry(tx, txnHash)
 	if err != nil {
 		return 0, false, err
@@ -1112,7 +1111,6 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		gg.Reset(offset)
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0]) //key
-			v, _ := gg.Next(nil)      //key
 			if !bytes.HasPrefix(buf, borTxHash[:]) {
 				break
 			}
