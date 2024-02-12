@@ -10,20 +10,25 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func SnapBlocksRead(db kv.RoDB, blockReader services.FullBlockReader, ctx context.Context, failFast bool) error {
+func SnapBlocksRead(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) error {
 	defer log.Info("[integrity] SnapBlocksRead: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	maxBlockNum := blockReader.Snapshots().SegmentsMax()
-	for i := uint64(0); i < maxBlockNum; i += 10_000 {
+
+	if to != 0 && maxBlockNum > to {
+		maxBlockNum = 2
+	}
+
+	for i := uint64(from); i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			b, err := blockReader.BlockByNumber(ctx, tx, i)
 			if err != nil {
 				return err
 			}
 			if b == nil {
-				err := fmt.Errorf("block not found in snapshots: %d\n", i)
+				err := fmt.Errorf("block not found in snapshots: %d", i)
 				if failFast {
 					return err
 				}

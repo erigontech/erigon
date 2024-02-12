@@ -1,7 +1,6 @@
 package integrity
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -13,31 +12,43 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader) error {
+func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader, from, to uint64) error {
 	defer log.Info("[integrity] NoGapsInBorEvents: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	snapshots := blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots)
 
-	var first bool = true
 	var prevEventId uint64
 
+	var maxBlockNum uint64
+
+	if to > 0 {
+		maxBlockNum = to
+	} else {
+		maxBlockNum = snapshots.SegmentsMax()
+	}
+
 	for _, eventSegment := range snapshots.View().Events() {
+
+		if from > 0 && eventSegment.From() > from {
+			continue
+		}
+
+		if to > 0 && eventSegment.From() > to {
+			break
+		}
+
 		g := eventSegment.Decompressor.MakeGetter()
 
-		var blockNumBuf [length.BlockNum]byte
 		word := make([]byte, 0, 4096)
 
 		for g.HasNext() {
 			word, _ = g.Next(word[:0])
-			if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
-				copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
-			}
 
 			eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 
-			if eventId != prevEventId+1 {
+			if prevEventId > 0 && eventId != prevEventId+1 {
 				return fmt.Errorf("missing bor event %d at block=%d", eventId, binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum]))
 			}
 
@@ -46,6 +57,8 @@ func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
+			case <-logEvery.C:
+				log.Info("[integrity] NoGapsInBorEvents", "blockNum", fmt.Sprintf("%dK/%dK", binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum])/1000, maxBlockNum/1000))
 			default:
 			}
 		}
