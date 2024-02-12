@@ -359,7 +359,7 @@ func ConsensusClStages(ctx context.Context,
 						sources = append(sources, rpcSource)
 					}
 					// 15 seconds is a good timeout for this
-					ctx, cn := context.WithTimeout(ctx, 15*time.Second)
+					ctx, cn := context.WithTimeout(ctx, 30*time.Second)
 					defer cn()
 
 					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
@@ -368,6 +368,13 @@ func ConsensusClStages(ctx context.Context,
 						go func(source persistence.BlockSource) {
 							if _, ok := source.(*persistence.BeaconRpcSource); ok {
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
+
+								select {
+								case <-time.After(time.Duration(cfg.beaconCfg.SecondsPerSlot/2) * time.Second):
+								case <-ctx.Done():
+									return
+								}
+
 								for {
 									var err error
 									from := args.seenSlot - 2
@@ -376,10 +383,7 @@ func ConsensusClStages(ctx context.Context,
 									if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 										return
 									}
-									if currentSlot < cfg.forkChoice.HighestSeen()+2 { // if we are 2 slots behind, let's poll.
-										time.Sleep(100 * time.Millisecond)
-										continue
-									}
+
 									blocks, err = sourceFunc(ctx, nil, from, count)
 									if err != nil {
 										errCh <- err
