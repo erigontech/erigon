@@ -1041,9 +1041,7 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	fmt.Printf("[dbg] EventsByBlock: %d, blockHash=%x, maxBlockNumInFiles=%d\n", blockHeight, hash, maxBlockNumInFiles)
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		fmt.Printf("[dbg] EventsByBlock1: %d\n", blockHeight)
 		c, err := tx.Cursor(kv.BorEventNums)
 		if err != nil {
 			return nil, err
@@ -1093,22 +1091,18 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	segments := view.Events()
 	var buf []byte
 	result := []rlp.RawValue{}
-	fmt.Printf("[dbg] EventsByBlock01 last: %s, %s\n", segments[len(segments)-1].seg.FileName(), segments[0].seg.FileName())
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 		if sn.from > blockHeight {
-			fmt.Printf("[dbg] EventsByBlock2 skip1: %s, %d\n", sn.seg.FileName(), sn.from)
 			continue
 		}
 		if sn.to <= blockHeight {
 			break
 		}
 		if sn.IdxBorTxnHash == nil {
-			fmt.Printf("[dbg] EventsByBlock2 skip3: %s, %d\n", sn.seg.FileName(), sn.to)
 			continue
 		}
 		if sn.IdxBorTxnHash.KeyCount() == 0 {
-			fmt.Printf("[dbg] EventsByBlock2 skip4: %s, %d\n", sn.seg.FileName(), sn.to)
 			continue
 		}
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
@@ -1116,20 +1110,16 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
-		fmt.Printf("[dbg] EventsByBlock30 baseEventID=%d, blockEventId=%d, offset=%d, borTxHash=%x\n", sn.IdxBorTxnHash.BaseDataID(), blockEventId, offset, borTxHash)
 		for gg.HasNext() {
 			buf, _ = gg.Next(buf[:0]) //key
 			v, _ := gg.Next(nil)      //key
-			fmt.Printf("[dbg] EventsByBlock3: %s, %d, %x, v=%x\n", sn.seg.FileName(), len(buf), buf, v)
 			if !bytes.HasPrefix(buf, borTxHash[:]) {
 				break
 			}
 			buf, _ = gg.Next(buf[:0])
-			fmt.Printf("[dbg] EventsByBlock31: %s, %d, %x\n", sn.seg.FileName(), len(buf), buf)
 			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
 		}
 	}
-	fmt.Printf("[dbg] EventsByBlock4: %d\n", len(result))
 	return result, nil
 }
 
