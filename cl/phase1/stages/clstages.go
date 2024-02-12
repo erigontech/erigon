@@ -363,7 +363,6 @@ func ConsensusClStages(ctx context.Context,
 					// 15 seconds is a good timeout for this
 					ctx, cn := context.WithTimeout(ctx, 25*time.Second)
 					defer cn()
-					fmt.Println("attempt", args.seenSlot, 12)
 
 					// we go ask all the sources and see who gets back to us first. whoever does is the winner!!
 					for _, v := range sources {
