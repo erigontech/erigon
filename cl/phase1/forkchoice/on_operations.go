@@ -38,6 +38,11 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 		return err
 	}
 
+	if s == nil {
+		f.mu.Unlock()
+		return errors.New("OnVoluntaryExit: state is nil")
+	}
+
 	val, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
 		f.mu.Unlock()

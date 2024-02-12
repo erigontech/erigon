@@ -801,6 +801,7 @@ type RetrieveHistoricalState struct {
 	outputFolder
 	CompareFile string `help:"compare file" default:""`
 	CompareSlot uint64 `help:"compare slot" default:"0"`
+	Out         string `help:"output file" default:""`
 }
 
 func (r *RetrieveHistoricalState) Run(ctx *Context) error {
@@ -871,6 +872,13 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := haveState.DecodeSSZ(enc, int(v)); err != nil {
 		return err
 	}
+	if r.Out != "" {
+		// create file
+		if err := os.WriteFile(r.Out, enc, 0644); err != nil {
+			return err
+		}
+	}
+
 	hRoot, err = haveState.HashSSZ()
 	if err != nil {
 		return err
@@ -893,6 +901,11 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	if hRoot != wRoot {
+		// for i := 0; i < haveState.PreviousEpochParticipation().Length(); i++ {
+		// 	if haveState.PreviousEpochParticipation().Get(i) != wantState.PreviousEpochParticipation().Get(i) {
+		// 		log.Info("Participation mismatch", "index", i, "have", haveState.PreviousEpochParticipation().Get(i), "want", wantState.PreviousEpochParticipation().Get(i))
+		// 	}
+		// }
 		return fmt.Errorf("state mismatch: got %s, want %s", libcommon.Hash(hRoot), libcommon.Hash(wRoot))
 	}
 	return nil
@@ -904,6 +917,7 @@ type ArchiveSanitizer struct {
 	BeaconApiURL string `help:"beacon api url" default:"http://localhost:5555"`
 	IntervalSlot uint64 `help:"interval slot" default:"19"` // odd number so that we can test many potential cases.
 	StartSlot    uint64 `help:"start slot" default:"0"`
+	FaultOut     string `help:"fault out" default:""`
 }
 
 func getHead(beaconApiURL string) (uint64, error) {
@@ -926,7 +940,6 @@ func getHead(beaconApiURL string) (uint64, error) {
 		return 0, fmt.Errorf("no head found")
 	}
 	head := data[0].(map[string]interface{})
-	fmt.Println(head)
 	slotStr, ok := head["slot"].(string)
 	if !ok {
 		return 0, fmt.Errorf("no slot found")
@@ -1031,6 +1044,15 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 			return err
 		}
 		if stateRoot != stateRoot2 {
+			if a.FaultOut != "" {
+				enc, err := state.EncodeSSZ(nil)
+				if err != nil {
+					return err
+				}
+				if err := os.WriteFile(a.FaultOut, enc, 0644); err != nil {
+					return err
+				}
+			}
 			return fmt.Errorf("state mismatch at slot %d: got %x, want %x", i, stateRoot2, stateRoot)
 		}
 		log.Info("State at slot", "slot", i, "root", stateRoot)
