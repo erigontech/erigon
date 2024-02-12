@@ -71,9 +71,11 @@ func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) 
 	}
 
 	currentHeader, err := rawdb.ReadHeaderByHash(db, hash)
-
 	if err != nil {
 		return 0, 0, 0, 0, err
+	}
+	if currentHeader == nil {
+		return 0, 0, 0, 0, nil
 	}
 
 	if chainConfig != nil {

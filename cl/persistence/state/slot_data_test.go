@@ -16,6 +16,7 @@ func TestSlotData(t *testing.T) {
 		Eth1DepositIndex:             0,
 		NextWithdrawalIndex:          0,
 		NextWithdrawalValidatorIndex: 0,
+		Fork:                         &cltypes.Fork{Epoch: 12},
 	}
 	var b bytes.Buffer
 	if err := m.WriteTo(&b); err != nil {

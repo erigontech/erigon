@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/spf13/afero"
-	"golang.org/x/exp/slices"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -103,7 +102,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetGenesisTime(r.genesisState.GenesisTime())
 	ret.SetGenesisValidatorsRoot(r.genesisState.GenesisValidatorsRoot())
 	ret.SetSlot(slot)
-	ret.SetFork(epochData.Fork)
+	ret.SetFork(slotData.Fork)
 	// History
 	stateRoots, blockRoots := solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot)), solid.NewHashVector(int(r.cfg.SlotsPerHistoricalRoot))
 	ret.SetLatestBlockHeader(blockHeader)
@@ -441,10 +440,11 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, slot uint64, diff
 	}
 	defer zstdReader.Close()
 
-	lenRaw := uint64(0)
-	if err := binary.Read(file, binary.LittleEndian, &lenRaw); err != nil {
+	lenBuf := make([]byte, 8)
+	if _, err := file.Read(lenBuf); err != nil {
 		return nil, err
 	}
+	lenRaw := binary.LittleEndian.Uint64(lenBuf)
 	currentList := make([]byte, lenRaw)
 
 	if _, err = utils.ReadZSTD(zstdReader, currentList); err != nil {
@@ -548,8 +548,7 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 		if validatorIndex >= validatorSetLength {
 			return false
 		}
-		currValidator := out.Get(int(validatorIndex))
-		validator.ToValidator(currValidator, slot)
+		validator.ToValidator(out.Get(int(validatorIndex)), slot)
 		return true
 	})
 	// Read the balances
@@ -566,7 +565,7 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 }
 
 func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64, currentEpochAttestationsLength, previousEpochAttestationsLength uint64) (*solid.ListSSZ[*solid.PendingAttestation], *solid.ListSSZ[*solid.PendingAttestation], error) {
-	if slot < r.cfg.SlotsPerEpoch {
+	if slot == r.cfg.GenesisSlot {
 		return r.genesisState.CurrentEpochAttestations(), r.genesisState.PreviousEpochAttestations(), nil
 	}
 	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
@@ -616,7 +615,10 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	validatorLength := sd.ValidatorLength
 
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
-	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
+	previousIdxs, err := r.readInitialPreviousParticipatingIndicies(tx, slot, validatorLength, previousActiveIndicies)
+	if err != nil {
+		return nil, nil, err
+	}
 	// trigger the cache for shuffled sets in parallel
 	if err := r.tryCachingEpochsInParallell(tx, [][]uint64{currentActiveIndicies, previousActiveIndicies}, []uint64{epoch, prevEpoch}); err != nil {
 		return nil, nil, err
@@ -628,7 +630,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 		if err != nil {
 			return nil, nil, err
 		}
-		if block == nil {
+		if block == nil || block.Version() == clparams.Phase0Version {
 			continue
 		}
 		currentEpoch := i / r.cfg.SlotsPerEpoch
@@ -666,26 +668,27 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 				return false
 			}
 			var participationFlagsIndicies []uint8
-			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, i, data, i-data.Slot(), true)
+			participationFlagsIndicies, err = r.getAttestationParticipationFlagIndicies(tx, block.Version(), i, data, i-data.Slot(), true)
 			if err != nil {
 				return false
 			}
+			prevIdxs := isCurrentEpoch && currentEpoch != prevEpoch
 			// apply the flags
 			for _, idx := range attestingIndicies {
-				for flagIndex := range r.cfg.ParticipationWeights() {
+				for _, flagIndex := range participationFlagsIndicies {
 					var flagParticipation cltypes.ParticipationFlags
-					if isCurrentEpoch && currentEpoch != prevEpoch {
+					if prevIdxs {
 						flagParticipation = cltypes.ParticipationFlags(currentIdxs.Get(int(idx)))
 					} else {
 						flagParticipation = cltypes.ParticipationFlags(previousIdxs.Get(int(idx)))
 					}
-					if !slices.Contains(participationFlagsIndicies, uint8(flagIndex)) || flagParticipation.HasFlag(flagIndex) {
+					if flagParticipation.HasFlag(int(flagIndex)) {
 						continue
 					}
-					if isCurrentEpoch && currentEpoch != prevEpoch {
-						currentIdxs.Set(int(idx), byte(flagParticipation.Add(flagIndex)))
+					if prevIdxs {
+						currentIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 					} else {
-						previousIdxs.Set(int(idx), byte(flagParticipation.Add(flagIndex)))
+						previousIdxs.Set(int(idx), byte(flagParticipation.Add(int(flagIndex))))
 					}
 				}
 			}
@@ -700,10 +703,49 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 
 func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uint64) {
 	epoch := slot / r.cfg.SlotsPerEpoch
-	if epoch <= r.cfg.AltairForkEpoch && r.genesisState.Version() < clparams.AltairVersion {
+	if epoch == r.cfg.GenesisEpoch {
 		return epoch, epoch
 	}
 	return epoch, epoch - 1
+}
+
+func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.Tx, slot, validatorSetSize uint64, previousActiveIndicies []uint64) (*solid.BitList, error) {
+	out := solid.NewBitList(int(validatorSetSize), int(r.cfg.ValidatorRegistryLimit))
+	if slot/r.cfg.SlotsPerEpoch != r.cfg.AltairForkEpoch {
+		return out, nil
+	}
+	slotFromPreviousEpoch := slot - r.cfg.SlotsPerEpoch
+	atts, err := state_accessors.ReadCurrentEpochAttestations(tx, r.cfg.RoundSlotToEpoch(slotFromPreviousEpoch), int(r.cfg.CurrentEpochAttestationsLength()))
+	if err != nil {
+		return nil, err
+	}
+	altairSlot := r.cfg.AltairForkEpoch * r.cfg.SlotsPerEpoch
+	if err := solid.RangeErr[*solid.PendingAttestation](atts, func(i1 int, pa *solid.PendingAttestation, i2 int) error {
+		attestationData := pa.AttestantionData()
+		mixPosition := ((attestationData.Slot() / r.cfg.SlotsPerEpoch) + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
+		flags, err := r.getAttestationParticipationFlagIndicies(tx, clparams.AltairVersion, altairSlot, attestationData, pa.InclusionDelay(), false)
+		if err != nil {
+			return err
+		}
+		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, attestationData.Slot(), mixPosition)
+		if err != nil {
+			return err
+		}
+		indices, err := r.attestingIndicies(attestationData, pa.AggregationBits(), false, mix, previousActiveIndicies)
+		if err != nil {
+			return err
+		}
+		for _, idx := range indices {
+			for _, flagIndex := range flags {
+				flagParticipation := cltypes.ParticipationFlags(out.Get(int(idx))).Add(int(flagIndex))
+				out.Set(int(idx), byte(flagParticipation))
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdxs [][]uint64, epochs []uint64) error {
