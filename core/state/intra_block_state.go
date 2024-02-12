@@ -655,7 +655,7 @@ func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, add
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		// If ether was sent to account post-selfdestruct it is burnt.
-		if logger != nil && !stateObject.Balance().IsZero() {
+		if logger != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
 			logger.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), evmtypes.BalanceDecreaseSelfdestructBurn)
 		}
 
