@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon/core/types"
@@ -15,12 +16,34 @@ import (
 
 var invalidDownloadHeadersRangeErr = errors.New("invalid download headers range")
 
-type requestIdGenerator func() uint64
+type RequestIdGenerator func() uint64
+
+type Downloader interface {
+	DownloadHeaders(ctx context.Context, start uint64, end uint64, pid PeerId) ([]*types.Header, error)
+}
+
+func NewDownloader(
+	logger log.Logger,
+	messageListener MessageListener,
+	messageBroadcaster MessageBroadcaster,
+	peerManager PeerManager,
+	requestIdGenerator RequestIdGenerator,
+) Downloader {
+	return &downloader{
+		logger:             logger,
+		messageListener:    messageListener,
+		messageBroadcaster: messageBroadcaster,
+		peerManager:        peerManager,
+		requestIdGenerator: requestIdGenerator,
+	}
+}
 
 type downloader struct {
-	messageListener    *messageListener
-	messageBroadcaster *messageBroadcaster
-	requestIdGenerator requestIdGenerator
+	logger             log.Logger
+	messageListener    MessageListener
+	messageBroadcaster MessageBroadcaster
+	peerManager        PeerManager
+	requestIdGenerator RequestIdGenerator
 }
 
 func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint64, pid PeerId) ([]*types.Header, error) {
@@ -52,9 +75,11 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 
 				var pkt eth.BlockHeadersPacket66
 				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-					//
-					// TODO check if this is a RLPDecode error and penalize peer?
-					//
+					if rlp.IsInvalidRLPError(err) {
+						d.logger.Debug("penalizing peer for invalid rlp response", "pid", pid.String())
+						d.peerManager.Penalize(pid)
+					}
+
 					return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
 				}
 

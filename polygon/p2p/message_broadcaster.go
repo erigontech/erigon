@@ -9,6 +9,16 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+type MessageBroadcaster interface {
+	GetBlockHeaders66(ctx context.Context, pid PeerId, req eth.GetBlockHeadersPacket66) error
+}
+
+func NewMessageBroadcaster(sentryClient direct.SentryClient) MessageBroadcaster {
+	return &messageBroadcaster{
+		sentryClient: sentryClient,
+	}
+}
+
 type messageBroadcaster struct {
 	sentryClient direct.SentryClient
 }

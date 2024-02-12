@@ -12,6 +12,20 @@ import (
 	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 )
 
+type MessageListener interface {
+	Listen(ctx context.Context)
+	RegisterBlockHeaders66(observer messageObserver)
+	UnregisterBlockHeaders66(observer messageObserver)
+}
+
+func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) MessageListener {
+	return &messageListener{
+		logger:       logger,
+		sentryClient: sentryClient,
+		observers:    map[protosentry.MessageId]map[messageObserver]struct{}{},
+	}
+}
+
 type messageListener struct {
 	logger       log.Logger
 	sentryClient direct.SentryClient

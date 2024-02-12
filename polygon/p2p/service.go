@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -20,35 +19,20 @@ type Service interface {
 }
 
 func NewService(ctx context.Context, logger log.Logger, sentryClient direct.SentryClient) Service {
-	return newService(ctx, logger, sentryClient, rand.Uint64)
+	return newService(ctx, logger, sentryClient, rand.Uint64, NewPeerManager())
 }
 
 func newService(
 	ctx context.Context,
 	logger log.Logger,
 	sentryClient direct.SentryClient,
-	requestIdGenerator requestIdGenerator,
+	requestIdGenerator RequestIdGenerator,
+	peerManager PeerManager,
 ) Service {
-	messageListener := &messageListener{
-		logger:       logger,
-		sentryClient: sentryClient,
-		observers:    map[sentry.MessageId]map[messageObserver]struct{}{},
-	}
-
+	messageListener := NewMessageListener(logger, sentryClient)
 	messageListener.Listen(ctx)
-
-	messageBroadcaster := &messageBroadcaster{
-		sentryClient: sentryClient,
-	}
-
-	downloader := &downloader{
-		messageListener:    messageListener,
-		messageBroadcaster: messageBroadcaster,
-		requestIdGenerator: requestIdGenerator,
-	}
-
-	peerManager := &peerManager{}
-
+	messageBroadcaster := NewMessageBroadcaster(sentryClient)
+	downloader := NewDownloader(logger, messageListener, messageBroadcaster, peerManager, requestIdGenerator)
 	return &service{
 		downloader:  downloader,
 		peerManager: peerManager,
@@ -56,8 +40,8 @@ func newService(
 }
 
 type service struct {
-	downloader  *downloader
-	peerManager *peerManager
+	downloader  Downloader
+	peerManager PeerManager
 }
 
 func (s service) DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {

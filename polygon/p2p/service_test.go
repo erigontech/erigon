@@ -22,28 +22,63 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
-func newMockRequestGenerator(reqId uint64) requestIdGenerator {
+func newMockRequestGenerator(reqId uint64) RequestIdGenerator {
 	return func() uint64 {
 		return reqId
 	}
 }
 
-func newServiceTest(ctx context.Context, t *testing.T, reqIdGen requestIdGenerator) *serviceTest {
+func messageStreamWg() *sync.WaitGroup {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	return &wg
+}
+
+func newServiceTest(ctx context.Context, t *testing.T, requestIdGenerator RequestIdGenerator) *serviceTest {
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlTrace)
 	sentryClient := direct.NewMockSentryClient(ctrl)
+	peerManager := NewMockPeerManager(ctrl)
 	return &serviceTest{
 		sentryClient: sentryClient,
-		service:      newService(ctx, logger, sentryClient, reqIdGen),
+		peerManager:  peerManager,
+		service:      newService(ctx, logger, sentryClient, requestIdGenerator, peerManager),
 	}
 }
 
 type serviceTest struct {
 	sentryClient *direct.MockSentryClient
+	peerManager  *MockPeerManager
 	service      Service
 }
 
-type sendMessageByIdMock func(context.Context, *sentry.SendMessageByIdRequest, ...grpc.CallOption) (*sentry.SentPeers, error)
+func (st serviceTest) mockSentryDownloadHeadersMessageStream(t *testing.T, msgs []*sentry.InboundMessage, pid PeerId) {
+	wg := messageStreamWg()
+	st.sentryClient.
+		EXPECT().
+		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(st.mockSentryStream(wg, msgs), nil).
+		Times(1)
+	st.sentryClient.
+		EXPECT().
+		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(st.mockSendGetBlockHeaders66(t, wg, pid, sentry.MessageId_GET_BLOCK_HEADERS_66, 1, 3)).
+		Times(1)
+	st.sentryClient.
+		EXPECT().
+		HandShake(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil).
+		Times(1)
+	st.sentryClient.
+		EXPECT().
+		SetStatus(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil).
+		Times(1)
+	st.sentryClient.
+		EXPECT().
+		MarkDisconnected().
+		Times(1)
+}
 
 func (st serviceTest) mockSendGetBlockHeaders66(
 	t *testing.T,
@@ -73,6 +108,8 @@ func (st serviceTest) mockSentryStream(wg *sync.WaitGroup, msgs []*sentry.Inboun
 		msgs: msgs,
 	}
 }
+
+type sendMessageByIdMock func(context.Context, *sentry.SendMessageByIdRequest, ...grpc.CallOption) (*sentry.SentPeers, error)
 
 type mockSentryMessagesStream struct {
 	wg   *sync.WaitGroup
@@ -145,9 +182,7 @@ func newMockBlockHeadersPacket66Bytes(t *testing.T, requestId uint64) []byte {
 
 func TestServiceDownloadHeaders(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	var wg sync.WaitGroup
-	wg.Add(1)
+	t.Cleanup(cancel)
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
 	mockInboundMessages := []*sentry.InboundMessage{
@@ -171,32 +206,8 @@ func TestServiceDownloadHeaders(t *testing.T) {
 			Data:   newMockBlockHeadersPacket66Bytes(t, requestId),
 		},
 	}
-
 	test := newServiceTest(ctx, t, newMockRequestGenerator(requestId))
-	test.sentryClient.
-		EXPECT().
-		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(test.mockSentryStream(&wg, mockInboundMessages), nil).
-		Times(1)
-	test.sentryClient.
-		EXPECT().
-		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(test.mockSendGetBlockHeaders66(t, &wg, peerId, sentry.MessageId_GET_BLOCK_HEADERS_66, 1, 3)).
-		Times(1)
-	test.sentryClient.
-		EXPECT().
-		HandShake(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil).
-		Times(1)
-	test.sentryClient.
-		EXPECT().
-		SetStatus(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil).
-		Times(1)
-	test.sentryClient.
-		EXPECT().
-		MarkDisconnected().
-		Times(1)
+	test.mockSentryDownloadHeadersMessageStream(t, mockInboundMessages, peerId)
 
 	headers, err := test.service.DownloadHeaders(ctx, 1, 3, peerId)
 	require.NoError(t, err)
@@ -207,8 +218,35 @@ func TestServiceDownloadHeaders(t *testing.T) {
 }
 
 func TestServiceInvalidDownloadHeadersRangeErr(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 	test := newServiceTest(ctx, t, newMockRequestGenerator(1))
-	_, err := test.service.DownloadHeaders(ctx, 3, 1, PeerIdFromUint64(1))
+
+	headers, err := test.service.DownloadHeaders(ctx, 3, 1, PeerIdFromUint64(1))
 	require.ErrorIs(t, err, invalidDownloadHeadersRangeErr)
+	require.Nil(t, headers)
+}
+
+func TestServiceDownloadHeadersShouldPenalizePeerWhenInvalidRlpErr(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   []byte{'i', 'n', 'v', 'a', 'l', 'i', 'd', '.', 'r', 'l', 'p'},
+		},
+	}
+	test := newServiceTest(ctx, t, newMockRequestGenerator(requestId))
+	test.mockSentryDownloadHeadersMessageStream(t, mockInboundMessages, peerId)
+	test.peerManager.
+		EXPECT().
+		Penalize(gomock.Eq(peerId)).
+		Times(1)
+
+	headers, err := test.service.DownloadHeaders(ctx, 1, 3, peerId)
+	require.Error(t, err)
+	require.Nil(t, headers)
 }

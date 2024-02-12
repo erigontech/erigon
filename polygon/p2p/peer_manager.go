@@ -1,7 +1,17 @@
 package p2p
 
-type peerManager struct {
+//go:generate mockgen -destination=./peer_manager_mock.go -package=p2p . PeerManager
+type PeerManager interface {
+	MaxPeers() int
+	PeersSyncProgress() PeersSyncProgress
+	Penalize(pid PeerId)
 }
+
+func NewPeerManager() PeerManager {
+	return &peerManager{}
+}
+
+type peerManager struct{}
 
 func (pm *peerManager) MaxPeers() int {
 	//TODO implement me
