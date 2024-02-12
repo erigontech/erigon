@@ -52,7 +52,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 	}
 
 	var headers []*types.Header
-	reqId := d.requestIdGenerator()
+	requestId := d.requestIdGenerator()
 
 	observer := make(chanMessageObserver)
 	d.messageListener.RegisterBlockHeaders66(observer)
@@ -83,7 +83,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 					return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
 				}
 
-				if pkt.RequestId != reqId {
+				if pkt.RequestId != requestId {
 					continue
 				}
 
@@ -132,7 +132,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 			return ctx.Err()
 		default:
 			return d.messageBroadcaster.GetBlockHeaders66(ctx, pid, eth.GetBlockHeadersPacket66{
-				RequestId: reqId,
+				RequestId: requestId,
 				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 					Origin: eth.HashOrNumber{
 						Number: start,
