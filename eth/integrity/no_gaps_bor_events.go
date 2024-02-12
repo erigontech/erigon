@@ -19,8 +19,7 @@ func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader
 
 	snapshots := blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots)
 
-	var prevEventId uint64
-
+	var prevEventId, prevBlock uint64
 	var maxBlockNum uint64
 
 	if to > 0 {
@@ -31,7 +30,7 @@ func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader
 
 	for _, eventSegment := range snapshots.View().Events() {
 
-		if from > 0 && eventSegment.From() > from {
+		if from > 0 && eventSegment.From() < from {
 			continue
 		}
 
@@ -47,12 +46,17 @@ func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader
 			word, _ = g.Next(word[:0])
 
 			eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
-
+			block := binary.BigEndian.Uint64(word[length.Hash : length.Hash+length.BlockNum])
 			if prevEventId > 0 && eventId != prevEventId+1 {
-				return fmt.Errorf("missing bor event %d at block=%d", eventId, binary.BigEndian.Uint64(word[length.Hash:length.Hash+length.BlockNum]))
+				return fmt.Errorf("missing bor event %d at block=%d", eventId, block)
+			}
+
+			if prevEventId == 0 {
+				log.Info("[integrity] checking bor events", "event", eventId, "block", block)
 			}
 
 			prevEventId = eventId
+			prevBlock = block
 
 			select {
 			case <-ctx.Done():
@@ -63,6 +67,8 @@ func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader
 			}
 		}
 	}
+
+	log.Info("[integrity] done checking bor events", "event", prevEventId, "block", prevBlock)
 
 	return nil
 }
