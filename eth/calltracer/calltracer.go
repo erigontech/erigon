@@ -90,7 +90,7 @@ func (ct *CallTracer) OnStorageChange(addr libcommon.Address, k *libcommon.Hash,
 
 func (ct *CallTracer) OnLog(log *types.Log) {}
 
-func (ct *CallTracer) OnNewAccount(addr libcommon.Address) {}
+func (ct *CallTracer) OnNewAccount(addr libcommon.Address, reset bool) {}
 
 func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }

@@ -102,7 +102,7 @@ func (*NoopTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev,
 
 func (*NoopTracer) OnLog(log *types.Log) {}
 
-func (*NoopTracer) OnNewAccount(a libcommon.Address) {}
+func (*NoopTracer) OnNewAccount(a libcommon.Address, reset bool) {}
 
 // GetResult returns an empty json object.
 func (t *NoopTracer) GetResult() (json.RawMessage, error) {

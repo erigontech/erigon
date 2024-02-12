@@ -131,7 +131,7 @@ func (p *Printer) OnLog(l *types.Log) {
 	fmt.Printf("OnLog: l=%s\n", buf)
 }
 
-func (p *Printer) OnNewAccount(a libcommon.Address) {
+func (p *Printer) OnNewAccount(a libcommon.Address, reset bool) {
 	fmt.Printf("OnNewAccount: a=%v\n", a)
 }
 

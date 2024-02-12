@@ -422,7 +422,7 @@ func (ot *opcodeTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, 
 
 func (ot *opcodeTracer) OnLog(log *types.Log) {}
 
-func (ot *opcodeTracer) OnNewAccount(a libcommon.Address) {}
+func (ot *opcodeTracer) OnNewAccount(a libcommon.Address, reset bool) {}
 
 // GetResult returns an empty json object.
 func (ot *opcodeTracer) GetResult() (json.RawMessage, error) {

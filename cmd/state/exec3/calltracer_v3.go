@@ -83,7 +83,7 @@ func (ct *CallTracer) OnStorageChange(a libcommon.Address, k *libcommon.Hash, pr
 
 func (ct *CallTracer) OnLog(log *types.Log) {}
 
-func (ct *CallTracer) OnNewAccount(a libcommon.Address) {}
+func (ct *CallTracer) OnNewAccount(a libcommon.Address, reset bool) {}
 
 // GetResult returns an empty json object.
 func (ct *CallTracer) GetResult() (json.RawMessage, error) {

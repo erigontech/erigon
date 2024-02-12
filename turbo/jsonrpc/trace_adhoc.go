@@ -663,7 +663,7 @@ func (ot *OeTracer) OnStorageChange(addr libcommon.Address, k *libcommon.Hash, p
 
 func (ot *OeTracer) OnLog(log *types.Log) {}
 
-func (ot *OeTracer) OnNewAccount(addr libcommon.Address) {}
+func (ot *OeTracer) OnNewAccount(addr libcommon.Address, reset bool) {}
 
 func (ot *OeTracer) GetResult() (json.RawMessage, error) {
 	return json.RawMessage{}, nil

@@ -51,7 +51,7 @@ type StateLogger interface {
 	OnCodeChange(addr libcommon.Address, prevCodeHash libcommon.Hash, prevCode []byte, codeHash libcommon.Hash, code []byte)
 	OnStorageChange(addr libcommon.Address, slot *libcommon.Hash, prev, new uint256.Int)
 	OnLog(log *types.Log)
-	OnNewAccount(addr libcommon.Address)
+	OnNewAccount(addr libcommon.Address, reset bool)
 }
 
 // SystemAddress - sender address for internal state updates.
@@ -555,6 +555,15 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr libcommon.Address) *stateOb
 func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *stateObject) (newobj *stateObject) {
 	account := new(accounts.Account)
 	var original *accounts.Account
+
+	if sdb.logger != nil {
+		// Precompiled contracts are touched during a call.
+		// Make sure we avoid emitting a new account event for them.
+		if _, ok := sdb.precompiles[addr]; !ok {
+			sdb.logger.OnNewAccount(addr, previous != nil)
+		}
+	}
+
 	if previous == nil {
 		original = &accounts.Account{}
 	} else {
@@ -567,14 +576,6 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 		sdb.journal.append(createObjectChange{account: &addr})
 	} else {
 		sdb.journal.append(resetObjectChange{account: &addr, prev: previous})
-	}
-
-	if sdb.logger != nil {
-		// Precompiled contracts are touched during a call.
-		// Make sure we avoid emitting a new account event for them.
-		if _, ok := sdb.precompiles[addr]; !ok {
-			sdb.logger.OnNewAccount(addr)
-		}
 	}
 
 	newobj.newlyCreated = true
