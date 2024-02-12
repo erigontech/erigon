@@ -372,16 +372,16 @@ func ConsensusClStages(ctx context.Context,
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 
 								select {
-								case <-time.After(2 * time.Second):
+								case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 2):
 								case <-ctx.Done():
 									return
 								}
 
 								for {
 									var err error
-									from := args.seenSlot - 2
+									from := cfg.forkChoice.HighestSeen() - 2
 									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
-									count := (currentSlot - from) + cfg.beaconCfg.SlotsPerEpoch
+									count := (currentSlot - from) + 4
 									if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 										return
 									}
@@ -396,6 +396,8 @@ func ConsensusClStages(ctx context.Context,
 									}
 									select {
 									case respCh <- blocks:
+									case <-ctx.Done():
+										return
 									default:
 									}
 								}
