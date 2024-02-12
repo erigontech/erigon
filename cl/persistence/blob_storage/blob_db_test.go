@@ -19,7 +19,6 @@ func setupTestDB(t *testing.T) *aferoBlobStorage {
 
 func TestBlobWriterAndReader(t *testing.T) {
 	bs := setupTestDB(t)
-
 	sidecar := &cltypes.BlobSidecar{
 		Index: 1,
 		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
@@ -48,7 +47,6 @@ func TestBlobWriterAndReader(t *testing.T) {
 
 func TestRetrieveBlobsAndProofs(t *testing.T) {
 	bs := setupTestDB(t)
-
 	sidecar := &cltypes.BlobSidecar{
 		Index: 1,
 		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
@@ -62,6 +60,7 @@ func TestRetrieveBlobsAndProofs(t *testing.T) {
 		KzgProof:                 libcommon.Bytes48{},
 		CommitmentInclusionProof: solid.NewHashVector(17),
 	}
+
 	blockRoot, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
 	bs.blockRootToSidecar.Store(blockRoot, sidecar)
 

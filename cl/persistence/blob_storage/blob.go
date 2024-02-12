@@ -15,8 +15,6 @@ import (
 	"go.uber.org/zap/buffer"
 )
 
-const MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS = 4096
-
 var bPool = sync.Pool{
 	New: func() interface{} {
 		return &buffer.Buffer{}
@@ -95,7 +93,7 @@ func (a *aferoBlobStorage) BlobReader(blockRoot [32]byte) (*cltypes.BlobSidecar,
 func (a *aferoBlobStorage) PruneBlobs(currentSlot uint64) error {
 	a.blockRootToSidecar.Range(func(key, value interface{}) bool {
 		blobSidecar := value.(*cltypes.BlobSidecar)
-		if blobSidecar.SignedBlockHeader.Header.Slot < currentSlot-MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS {
+		if blobSidecar.SignedBlockHeader.Header.Slot < currentSlot-a.cfg.MinEpochsForBlobsSidecarsRequest {
 			// Remove the sidecar from the map
 			a.blockRootToSidecar.Delete(key)
 
