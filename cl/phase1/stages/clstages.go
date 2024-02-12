@@ -452,8 +452,8 @@ func ConsensusClStages(ctx context.Context,
 										}
 										return true
 									})
-									fmt.Println("attestation process time", time.Since(start), block.Block.Slot)
 								}()
+								fmt.Println("attestation process time", time.Since(start), block.Block.Slot)
 								// emit the other stuff
 								block.Block.Body.VoluntaryExits.Range(func(index int, value *cltypes.SignedVoluntaryExit, length int) bool {
 									cfg.emitter.Publish("voluntary-exit", value)
