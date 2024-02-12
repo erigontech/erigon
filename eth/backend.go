@@ -1483,6 +1483,10 @@ func (s *Ethereum) TxpoolServer() txpool_proto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 
+func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
+	return s.eth1ExecutionServer
+}
+
 // RemoveContents is like os.RemoveAll, but preserve dir itself
 func RemoveContents(dir string) error {
 	d, err := os.Open(dir)
