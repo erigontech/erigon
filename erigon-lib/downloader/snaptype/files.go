@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -100,7 +101,16 @@ func IsCorrectHistoryFileName(name string) bool {
 	return len(parts) == 3
 }
 
-func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
+func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bool) {
+	res, ok = parseFileName(dir, fileName)
+	if ok {
+		return res, false, true
+	}
+	isStateFile := IsStateFile(fileName)
+	return res, isStateFile, isStateFile
+}
+
+func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
@@ -127,6 +137,46 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	}
 
 	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), Type: ft, Ext: ext}, ok
+}
+
+var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
+
+func E3Seedable(name string) bool {
+	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
+	subs := stateFileRegex.FindStringSubmatch(name)
+	if len(subs) != 6 {
+		return false
+	}
+	// Check that it's seedable
+	from, err := strconv.ParseUint(subs[3], 10, 64)
+	if err != nil {
+		return false
+	}
+	to, err := strconv.ParseUint(subs[4], 10, 64)
+	if err != nil {
+		return false
+	}
+	if (to-from)%Erigon3SeedableSteps != 0 {
+		return false
+	}
+	return true
+}
+func IsStateFile(name string) (ok bool) {
+	_, name = filepath.Split(name) // remove absolute path, or `history/` prefixes
+	subs := stateFileRegex.FindStringSubmatch(name)
+	if len(subs) != 6 {
+		return false
+	}
+	// Check that it's seedable
+	_, err := strconv.ParseUint(subs[3], 10, 64)
+	if err != nil {
+		return false
+	}
+	_, err = strconv.ParseUint(subs[4], 10, 64)
+	if err != nil {
+		return false
+	}
+	return true
 }
 
 const Erigon3SeedableSteps = 64
@@ -222,7 +272,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 			continue
 		}
 
-		meta, ok := ParseFileName(dir, f.Name())
+		meta, _, ok := ParseFileName(dir, f.Name())
 		if !ok {
 			continue
 		}

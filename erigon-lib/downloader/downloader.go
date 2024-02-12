@@ -156,7 +156,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		if !discover {
 			return
 		}
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap, lock.Downloads)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
@@ -173,20 +173,20 @@ type snapshotLock struct {
 }
 
 func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
+
+	if !cfg.SnapshotLock {
+		return initSnapshotLock(ctx, cfg, db, logger)
+	}
+
 	snapDir := cfg.Dirs.Snap
 
 	lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
 
 	file, err := os.Open(lockPath)
-
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-	}
-
-	if !cfg.SnapshotLock {
-		return initSnapshotLock(ctx, cfg, db, logger)
 	}
 
 	var data []byte
@@ -252,7 +252,6 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	}
 
 	files, err := seedableFiles(cfg.Dirs, cfg.ChainName)
-
 	if err != nil {
 		return nil, err
 	}
@@ -262,9 +261,9 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	if snapCfg == nil {
 		snapCfg = snapcfg.KnownCfg(cfg.ChainName)
 	}
-	if len(files) == 0 {
-		lock.Downloads = snapCfg.Preverified
-	}
+	//if len(files) == 0 {
+	lock.Downloads = snapCfg.Preverified
+	//}
 
 	// if files exist on disk we assume that the lock file has been removed
 	// or was never present so compare them against the known config to
@@ -285,6 +284,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	// is no matching version just use the one discovered for the file
 
 	versionedCfg := map[snaptype.Version]*snapcfg.Cfg{}
+	versionedCfgLock := sync.Mutex{}
 
 	snapDir := cfg.Dirs.Snap
 
@@ -303,30 +303,43 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 
 		g.Go(func() error {
 			i.Add(1)
-
-			if fileInfo, ok := snaptype.ParseFileName(snapDir, file); ok {
-				if fileInfo.From > snapCfg.ExpectBlocks {
-					return nil
-				}
-
-				if preverified, ok := snapCfg.Preverified.Get(fileInfo.Name()); ok {
-					hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
-
-					if err != nil {
-						return err
-					}
-
+			fileInfo, isStateFile, ok := snaptype.ParseFileName(snapDir, file)
+			if !ok {
+				return nil
+			}
+			if isStateFile {
+				if preverified, ok := snapCfg.Preverified.Get(file); ok {
 					downloadsMutex.Lock()
 					defer downloadsMutex.Unlock()
+					downloadMap.Set(file, preverified)
+				}
+				return nil //TODO: we don't create
+			}
+			if fileInfo.From > snapCfg.ExpectBlocks {
+				return nil
+			}
 
-					if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
-						downloadMap.Set(fileInfo.Name(), preverified)
-					} else {
-						logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
-						// TODO: check if it has an index - if not use the known hash and delete the file
-						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
-					}
+			if preverified, ok := snapCfg.Preverified.Get(fileInfo.Name()); ok {
+				hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
+				if err != nil {
+					return fmt.Errorf("localHashBytes: %w", err)
+				}
+
+				downloadsMutex.Lock()
+				defer downloadsMutex.Unlock()
+
+				if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
+					downloadMap.Set(fileInfo.Name(), preverified)
 				} else {
+					logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+					// TODO: check if it has an index - if not use the known hash and delete the file
+					downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
+				}
+			} else {
+				versioned := func() *snapcfg.Cfg {
+					versionedCfgLock.Lock()
+					defer versionedCfgLock.Unlock()
+
 					versioned, ok := versionedCfg[fileInfo.Version]
 
 					if !ok {
@@ -334,26 +347,28 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 						versionedCfg[fileInfo.Version] = versioned
 					}
 
-					hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
+					return versioned
+				}()
 
-					if err != nil {
-						return err
-					}
+				hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
 
-					downloadsMutex.Lock()
-					defer downloadsMutex.Unlock()
+				if err != nil {
+					return fmt.Errorf("localHashBytes: %w", err)
+				}
 
-					if preverified, ok := versioned.Preverified.Get(fileInfo.Name()); ok {
-						if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
-							downloadMap.Set(preverified.Name, preverified)
-						} else {
-							logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
-							// TODO: check if it has an index - if not use the known hash and delete the file
-							downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
-						}
+				downloadsMutex.Lock()
+				defer downloadsMutex.Unlock()
+
+				if preverified, ok := versioned.Preverified.Get(fileInfo.Name()); ok {
+					if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
+						downloadMap.Set(preverified.Name, preverified)
 					} else {
-						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hex.EncodeToString(hashBytes)})
+						logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+						// TODO: check if it has an index - if not use the known hash and delete the file
+						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 					}
+				} else {
+					downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hex.EncodeToString(hashBytes)})
 				}
 			}
 
@@ -390,11 +405,20 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	maxDownloadBlock, _ := downloads.MaxBlock(0)
 
 	for _, item := range snapCfg.Preverified {
+		fileInfo, isStateFile, ok := snaptype.ParseFileName(snapDir, item.Name)
+		if !ok {
+			continue
+		}
+		if isStateFile {
+			if !downloads.Contains(item.Name, true) {
+				missingItems = append(missingItems, item)
+			}
+			continue
+		}
+
 		if maxDownloadBlock > 0 {
-			if fileInfo, ok := snaptype.ParseFileName(snapDir, item.Name); ok {
-				if fileInfo.From > maxDownloadBlock {
-					missingItems = append(missingItems, item)
-				}
+			if fileInfo.From > maxDownloadBlock {
+				missingItems = append(missingItems, item)
 			}
 		} else {
 			if !downloads.Contains(item.Name, true) {
@@ -404,7 +428,6 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	}
 
 	lock.Downloads = snapcfg.Merge(downloads, missingItems)
-
 	return lock, nil
 }
 
@@ -915,14 +938,16 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 // have .torrent no .seg => get .seg file from .torrent
 // have .seg no .torrent => get .torrent from .seg
 func (d *Downloader) AddNewSeedableFile(ctx context.Context, name string) error {
-	ff, ok := snaptype.ParseFileName("", name)
+	ff, isStateFile, ok := snaptype.ParseFileName("", name)
 	if ok {
-		if !d.cfg.SnapshotConfig.Seedable(ff) {
-			return nil
-		}
-	} else {
-		if !e3seedable(name) {
-			return nil
+		if isStateFile {
+			if !snaptype.E3Seedable(name) {
+				return nil
+			}
+		} else {
+			if !d.cfg.SnapshotConfig.Seedable(ff) {
+				return nil
+			}
 		}
 	}
 
@@ -1015,15 +1040,15 @@ func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
 	}
-	l1, err := seedableSnapshotsBySubDir(dirs.Snap, "idx")
+	l1, err := seedableStateFilesBySubDir(dirs.Snap, "idx")
 	if err != nil {
 		return nil, err
 	}
-	l2, err := seedableSnapshotsBySubDir(dirs.Snap, "history")
+	l2, err := seedableStateFilesBySubDir(dirs.Snap, "history")
 	if err != nil {
 		return nil, err
 	}
-	l3, err := seedableSnapshotsBySubDir(dirs.Snap, "domain")
+	l3, err := seedableStateFilesBySubDir(dirs.Snap, "domain")
 	if err != nil {
 		return nil, err
 	}

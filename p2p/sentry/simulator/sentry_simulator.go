@@ -447,7 +447,7 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segme
 
 	s.logger.Info(fmt.Sprintf("Indexing %s", fileName))
 
-	info, _ := snaptype.ParseFileName(s.downloader.LocalFsRoot(), fileName)
+	info, _, _ := snaptype.ParseFileName(s.downloader.LocalFsRoot(), fileName)
 
 	return freezeblocks.HeadersIdx(ctx, info, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }

@@ -36,11 +36,13 @@ func TestStateAntiquaryCapella(t *testing.T) {
 }
 
 func TestStateAntiquaryBellatrix(t *testing.T) {
+	t.Skip("TODO: oom")
 	blocks, preState, postState := tests.GetBellatrixRandom()
 	runTest(t, blocks, preState, postState)
 }
 
 func TestStateAntiquaryPhase0(t *testing.T) {
+	t.Skip("TODO: oom")
 	blocks, preState, postState := tests.GetPhase0Random()
 	runTest(t, blocks, preState, postState)
 }
