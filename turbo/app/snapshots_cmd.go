@@ -201,7 +201,9 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
-	ctx := cliCtx.Context
+	ctx, cancel := context.WithCancel(cliCtx.Context)
+	defer cancel()
+
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -225,7 +227,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if err := integrity.NoGapsInBorEvents(ctx, blockReader, from, to); err != nil {
+	if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, from, to); err != nil {
 		return err
 	}
 

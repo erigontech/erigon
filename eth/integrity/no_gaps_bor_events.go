@@ -7,19 +7,20 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader, from, to uint64) error {
+func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64) error {
 	defer log.Info("[integrity] NoGapsInBorEvents: done")
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
 	snapshots := blockReader.BorSnapshots().(*freezeblocks.BorRoSnapshots)
 
-	var prevEventId, prevBlock uint64
+	var prevEventId, prevBlock, prevBlockStartId uint64
 	var maxBlockNum uint64
 
 	if to > 0 {
@@ -28,7 +29,10 @@ func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader
 		maxBlockNum = snapshots.SegmentsMax()
 	}
 
-	for _, eventSegment := range snapshots.View().Events() {
+	view := snapshots.View()
+	defer view.Close()
+
+	for _, eventSegment := range view.Events() {
 
 		if from > 0 && eventSegment.From() < from {
 			continue
@@ -53,6 +57,36 @@ func NoGapsInBorEvents(ctx context.Context, blockReader services.FullBlockReader
 
 			if prevEventId == 0 {
 				log.Info("[integrity] checking bor events", "event", eventId, "block", block)
+			}
+
+			if prevBlock != 0 && prevBlock != block {
+				err := db.View(ctx, func(tx kv.Tx) error {
+					header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
+
+					if err != nil {
+						return fmt.Errorf("can't get header for block %d: %w", block, err)
+					}
+
+					events, err := blockReader.EventsByBlock(ctx, tx, header.Hash(), header.Number.Uint64())
+
+					if err != nil {
+						return fmt.Errorf("can't get events for block %d: %w", block, err)
+					}
+
+					if prevBlockStartId != 0 {
+						if len(events) != int(eventId-prevBlockStartId) {
+							return fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
+						}
+					}
+
+					return nil
+				})
+
+				if err != nil {
+					return err
+				}
+
+				prevBlockStartId = eventId
 			}
 
 			prevEventId = eventId
