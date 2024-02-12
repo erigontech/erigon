@@ -140,6 +140,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		}
 
 		g.mu.RLock()
+		fmt.Println(block.Block.Slot, "block slot")
 		for _, v := range g.subs {
 			select {
 			case v <- &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid}:
