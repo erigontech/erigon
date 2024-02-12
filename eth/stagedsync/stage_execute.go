@@ -112,9 +112,6 @@ func StageExecuteBlocksCfg(
 	agg *libstate.AggregatorV3,
 	silkworm *silkworm.Silkworm,
 ) ExecuteBlockCfg {
-	if genesis == nil {
-		panic("assert: nil genesis")
-	}
 	return ExecuteBlockCfg{
 		db:            db,
 		prune:         pm,
