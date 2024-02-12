@@ -196,7 +196,7 @@ func (l *JsonStreamLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 func (l *JsonStreamLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
-func (l *JsonStreamLogger) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (l *JsonStreamLogger) CaptureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
 }
 
 func (l *JsonStreamLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
@@ -231,7 +231,7 @@ func (l *JsonStreamLogger) OnLog(log *types.Log) {}
 
 func (l *JsonStreamLogger) OnNewAccount(a libcommon.Address) {}
 
-func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+func (l *JsonStreamLogger) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 
 // GetResult returns an empty json object.

@@ -95,7 +95,7 @@ func (l *JSONLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, sco
 }
 
 // CaptureEnd is triggered at end of execution.
-func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (l *JSONLogger) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 	type endLog struct {
 		Output  string              `json:"output"`
 		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
@@ -140,7 +140,7 @@ func (l *JSONLogger) OnLog(log *types.Log) {}
 
 func (l *JSONLogger) OnNewAccount(a libcommon.Address) {}
 
-func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 
 // GetResult returns an empty json object.

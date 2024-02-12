@@ -48,9 +48,9 @@ func (ct *CallTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sc
 }
 func (ct *CallTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
-func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (ct *CallTracer) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 }
-func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (ct *CallTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 
 func (ct *CallTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {

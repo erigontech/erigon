@@ -36,7 +36,7 @@ func (t *DefaultTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 func (t *DefaultTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
-func (t *DefaultTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (t *DefaultTracer) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 }
 
 func (t *DefaultTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
@@ -71,7 +71,7 @@ func (t *DefaultTracer) OnLog(log *types.Log) {}
 
 func (t *DefaultTracer) OnNewAccount(addr libcommon.Address) {}
 
-func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 
 func (t *DefaultTracer) GetResult() (json.RawMessage, error) {

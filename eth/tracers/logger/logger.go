@@ -214,7 +214,7 @@ func (l *StructLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, s
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 	l.output = output
 	l.err = err
 	if l.cfg.Debug {
@@ -258,7 +258,7 @@ func (l *StructLogger) OnLog(log *types.Log) {}
 func (l *StructLogger) OnNewAccount(a libcommon.Address) {}
 
 // CaptureExit is called after the internal call finishes to finalize the tracing.
-func (l *StructLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+func (l *StructLogger) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 
 // GetResult returns an empty json object.
@@ -455,7 +455,7 @@ func (t *mdLogger) captureEndOrExit(output []byte, usedGas uint64, err error) {
 		output, usedGas, err)
 }
 
-func (t *mdLogger) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (t *mdLogger) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 	t.captureEndOrExit(output, usedGas, err)
 }
 
@@ -491,7 +491,7 @@ func (t *mdLogger) OnLog(log *types.Log) {}
 
 func (t *mdLogger) OnNewAccount(a libcommon.Address) {}
 
-func (t *mdLogger) CaptureExit(output []byte, usedGas uint64, err error) {
+func (t *mdLogger) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 	t.captureEndOrExit(output, usedGas, err)
 }
 

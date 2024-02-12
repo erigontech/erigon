@@ -81,7 +81,7 @@ func runTrace(tracer tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, c
 	tracer.CaptureTxStart(env, types.NewTransaction(0, libcommon.Address{}, nil, gasLimit, nil, nil))
 	tracer.CaptureStart(contract.Caller(), contract.Address(), false /* precompile */, false /* create */, []byte{}, startGas, value, []byte{} /* code */)
 	ret, err := env.Interpreter().Run(contract, []byte{}, false)
-	tracer.CaptureEnd(ret, startGas-contract.Gas, err)
+	tracer.CaptureEnd(ret, startGas-contract.Gas, err, true)
 	// Rest gas assumes no refund
 	tracer.CaptureTxEnd(&types.Receipt{GasUsed: gasLimit - contract.Gas}, nil)
 	if err != nil {
@@ -213,7 +213,7 @@ func TestNoStepExec(t *testing.T) {
 		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: uint256.NewInt(100)}, &dummyStatedb{}, params.TestChainConfig, vm.Config{Debug: true, Tracer: tracer})
 		tracer.CaptureTxStart(env, types.NewTransaction(0, libcommon.Address{}, new(uint256.Int), 0, new(uint256.Int), nil))
 		tracer.CaptureStart(libcommon.Address{}, libcommon.Address{}, false /* precompile */, false /* create */, []byte{}, 1000, uint256.NewInt(0), []byte{} /* code */)
-		tracer.CaptureEnd(nil, 0, nil)
+		tracer.CaptureEnd(nil, 0, nil, false)
 		ret, err := tracer.GetResult()
 		if err != nil {
 			t.Fatal(err)
@@ -283,7 +283,7 @@ func TestEnterExit(t *testing.T) {
 		Contract: vm.NewContract(&account{}, libcommon.Address{}, uint256.NewInt(0), 0, false /* skipAnalysis */),
 	}
 	tracer.CaptureEnter(vm.CALL, scope.Contract.Caller(), scope.Contract.Address(), false, false, []byte{}, 1000, new(uint256.Int), []byte{})
-	tracer.CaptureExit([]byte{}, 400, nil)
+	tracer.CaptureExit([]byte{}, 400, nil, false)
 
 	have, err := tracer.GetResult()
 	if err != nil {

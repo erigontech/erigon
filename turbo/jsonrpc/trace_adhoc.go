@@ -489,11 +489,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, usedGas uint64, e
 	}
 }
 
-func (ot *OeTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (ot *OeTracer) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 	ot.captureEndOrExit(false /* deep */, output, usedGas, err)
 }
 
-func (ot *OeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (ot *OeTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 	ot.captureEndOrExit(true /* deep */, output, usedGas, err)
 }
 

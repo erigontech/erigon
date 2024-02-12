@@ -223,7 +223,7 @@ func (a *AccessListTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint6
 func (a *AccessListTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
 }
 
-func (a *AccessListTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (a *AccessListTracer) CaptureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
 }
 
 func (a *AccessListTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
@@ -258,7 +258,7 @@ func (a *AccessListTracer) OnLog(log *types.Log) {}
 
 func (a *AccessListTracer) OnNewAccount(addr libcommon.Address) {}
 
-func (a *AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (a *AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 
 // GetResult returns an empty json object.

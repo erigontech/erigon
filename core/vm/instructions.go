@@ -906,7 +906,7 @@ func opSelfdestruct(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext
 	interpreter.evm.IntraBlockState().Selfdestruct(callerAddr)
 	if interpreter.evm.Config().Tracer != nil {
 		interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
-		interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
+		interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil, false)
 	}
 	return nil, errStopToken
 }
@@ -924,7 +924,7 @@ func opSelfdestruct6780(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	interpreter.evm.IntraBlockState().Selfdestruct6780(callerAddr)
 	if interpreter.evm.Config().Tracer != nil {
 		interpreter.cfg.Tracer.CaptureEnter(SELFDESTRUCT, callerAddr, beneficiaryAddr, false /* precompile */, false /* create */, []byte{}, 0, &balance, nil /* code */)
-		interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil)
+		interpreter.cfg.Tracer.CaptureExit([]byte{}, 0, nil, false)
 	}
 	return nil, errStopToken
 }

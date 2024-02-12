@@ -241,11 +241,11 @@ func (ot *opcodeTracer) captureEndOrExit(err error) {
 	}
 }
 
-func (ot *opcodeTracer) CaptureEnd(output []byte, usedGas uint64, err error) {
+func (ot *opcodeTracer) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 	ot.captureEndOrExit(err)
 }
 
-func (ot *opcodeTracer) CaptureExit(output []byte, usedGas uint64, err error) {
+func (ot *opcodeTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 	ot.captureEndOrExit(err)
 	ot.depth--
 }

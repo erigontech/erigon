@@ -297,7 +297,7 @@ func (t *jsTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *jsTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *jsTracer) CaptureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
 	t.ctx["output"] = t.vm.ToValue(output)
 	if err != nil {
 		t.ctx["error"] = t.vm.ToValue(err.Error())
@@ -330,7 +330,7 @@ func (t *jsTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcom
 
 // CaptureExit is called when EVM exits a scope, even if the scope didn't
 // execute any code.
-func (t *jsTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
+func (t *jsTracer) CaptureExit(output []byte, gasUsed uint64, err error, reverted bool) {
 	if !t.traceFrame {
 		return
 	}

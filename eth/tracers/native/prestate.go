@@ -100,7 +100,7 @@ func (t *prestateTracer) CaptureStart(from libcommon.Address, to libcommon.Addre
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
+func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
 	if t.config.DiffMode {
 		return
 	}
