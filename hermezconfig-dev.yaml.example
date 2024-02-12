@@ -4,7 +4,7 @@ http : true
 private.api.addr : "localhost:9093"
 zkevm.l2-chain-id: 1440
 zkevm.l2-sequencer-rpc-url: "http://34.175.204.255:8123"
-zkevm.l2-datastreamer-url: "http://34.175.204.255:6900"
+zkevm.l2-datastreamer-url: "34.175.204.255:6900"
 zkevm.l1-chain-id: 5
 zkevm.l1-rpc-url: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia?apikey=IkrTRMPAlsjfgTyKz1Xfa5ldS8XSc0PN.En5aU2Gwdxvf3zk2"
 zkevm.l1-polygon-rollup-manager: "0x9fB0B4A5d4d60aaCfa8DC20B8DF5528Ab26848d3"

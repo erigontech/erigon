@@ -638,7 +638,7 @@ func (db *HermezDb) WriteL1InjectedBatch(batch *types.L1InjectedBatch) error {
 	return db.tx.Put(L1_INJECTED_BATCHES, k, v)
 }
 
-func (db *HermezDb) GetL1InjectedBatch(index uint64) (*types.L1InjectedBatch, error) {
+func (db *HermezDbReader) GetL1InjectedBatch(index uint64) (*types.L1InjectedBatch, error) {
 	k := Uint64ToBytes(index)
 	v, err := db.tx.GetOne(L1_INJECTED_BATCHES, k)
 	if err != nil {

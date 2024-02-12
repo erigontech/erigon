@@ -142,18 +142,18 @@ func SpawnStageDataStreamCatchup(
 
 	switch latest.Type {
 	case server.EntryTypeUpdateGer:
-		currentBatchNumber = binary.LittleEndian.Uint64(latest.Data[0:8])
+		currentBatchNumber = binary.BigEndian.Uint64(latest.Data[0:8])
 	case server.EntryTypeL2BlockEnd:
-		currentL2Block = binary.LittleEndian.Uint64(latest.Data[0:8])
+		currentL2Block = binary.BigEndian.Uint64(latest.Data[0:8])
 		bookmark := types.Bookmark{
 			Type: types.BookmarkTypeStart,
 			From: currentL2Block,
 		}
-		firstEntry, err := stream.GetFirstEventAfterBookmark(bookmark.Encode())
+		firstEntry, err := stream.GetFirstEventAfterBookmark(bookmark.EncodeBigEndian())
 		if err != nil {
 			return err
 		}
-		currentBatchNumber = binary.LittleEndian.Uint64(firstEntry.Data[0:8])
+		currentBatchNumber = binary.BigEndian.Uint64(firstEntry.Data[0:8])
 	}
 
 	var entry = header.TotalEntries
@@ -253,19 +253,35 @@ LOOP:
 
 			var ger common.Hash
 			var l1BlockHash common.Hash
+
 			l1Index, err := reader.GetBlockL1InfoTreeIndex(blockNumber)
 			if err != nil {
 				return err
 			}
-			if l1Index != 0 {
-				// read the index info itself
-				l1Info, err := reader.GetL1InfoTreeUpdate(l1Index)
+
+			if blockNumber == 1 {
+				// injected batch at the start of the network
+				injected, err := reader.GetL1InjectedBatch(0)
 				if err != nil {
 					return err
 				}
-				if l1Info != nil {
-					ger = l1Info.GER
-					l1BlockHash = l1Info.ParentHash
+				ger = injected.LastGlobalExitRoot
+				l1BlockHash = injected.L1ParentHash
+
+				// block 1 in the stream has a delta timestamp of the block time itself
+				deltaTimestamp = block.Time()
+			} else {
+				// standard behaviour for non-injected or forced batches
+				if l1Index != 0 {
+					// read the index info itself
+					l1Info, err := reader.GetL1InfoTreeUpdate(l1Index)
+					if err != nil {
+						return err
+					}
+					if l1Info != nil {
+						ger = l1Info.GER
+						l1BlockHash = l1Info.ParentHash
+					}
 				}
 			}
 
@@ -295,12 +311,7 @@ LOOP:
 				}
 			}
 
-			blockInfoRoot, err := reader.GetBlockInfoRoot(blockNumber)
-			if err != nil {
-				return err
-			}
-
-			err = srv.AddBlockEnd(block.NumberU64(), blockInfoRoot, blockInfoRoot)
+			err = srv.AddBlockEnd(block.NumberU64(), block.Root(), block.Root())
 			if err != nil {
 				return err
 			}

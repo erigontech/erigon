@@ -73,7 +73,7 @@ func HermezCardonaInternalGenesisBlock() *types.Genesis {
 func HermezLocalDevnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HermezLocalDevnetChainConfig,
-		Timestamp:  1676996964,
+		Timestamp:  1706732232,
 		GasLimit:   0x0,
 		Difficulty: big.NewInt(0x0),
 		Alloc:      readPrealloc("allocs/hermez-dev.json"),
