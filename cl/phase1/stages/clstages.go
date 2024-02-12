@@ -385,7 +385,6 @@ func ConsensusClStages(ctx context.Context,
 									if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 										return
 									}
-									fmt.Println(from, count)
 									blocks, err = sourceFunc(ctx, nil, from, count)
 									if err != nil {
 										errCh <- err
@@ -398,7 +397,7 @@ func ConsensusClStages(ctx context.Context,
 									case respCh <- blocks:
 									case <-ctx.Done():
 										return
-									default:
+									case <-time.After(time.Second): // take a smol pause
 									}
 								}
 							}
