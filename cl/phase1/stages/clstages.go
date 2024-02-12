@@ -393,6 +393,7 @@ func ConsensusClStages(ctx context.Context,
 									if len(blocks.Data) == 0 {
 										continue
 									}
+									fmt.Println(len(blocks.Data))
 									select {
 									case respCh <- blocks:
 									case <-ctx.Done():
