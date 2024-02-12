@@ -407,13 +407,11 @@ func ConsensusClStages(ctx context.Context,
 							respCh <- blocks
 						}(v)
 					}
-					fmt.Println("X")
 					tx, err := cfg.indiciesDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
 					defer tx.Rollback()
-					fmt.Println("Y")
 
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
@@ -421,7 +419,6 @@ func ConsensusClStages(ctx context.Context,
 					for {
 						select {
 						case <-ctx.Done():
-							fmt.Println("tm")
 							return errors.New("timeout waiting for blocks")
 						case err := <-errCh:
 							return err
@@ -433,7 +430,6 @@ func ConsensusClStages(ctx context.Context,
 									cfg.rpc.BanPeer(blocks.Peer)
 									continue MainLoop
 								}
-								fmt.Println("block process time", time.Since(start), block.Block.Slot)
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.HashSSZ()
 								// publish block to event handler
@@ -454,7 +450,6 @@ func ConsensusClStages(ctx context.Context,
 										return true
 									})
 								}()
-								fmt.Println("attestation process time", time.Since(start), block.Block.Slot)
 								// emit the other stuff
 								block.Block.Body.VoluntaryExits.Range(func(index int, value *cltypes.SignedVoluntaryExit, length int) bool {
 									cfg.emitter.Publish("voluntary-exit", value)
