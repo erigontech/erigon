@@ -486,8 +486,6 @@ const (
 	CurrentSyncCommittee       = "CurrentSyncCommittee"
 	HistoricalRoots            = "HistoricalRoots"
 	HistoricalSummaries        = "HistoricalSummaries"
-	CurrentEpochAttestations   = "EpochAttestations"
-	PreviousEpochAttestations  = "PreviousAttestations"
 	Eth1DataVotes              = "Eth1DataVotes"
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
@@ -680,8 +678,6 @@ var ChaindataTables = []string{
 	CurrentSyncCommittee,
 	HistoricalRoots,
 	HistoricalSummaries,
-	CurrentEpochAttestations,
-	PreviousEpochAttestations,
 	Eth1DataVotes,
 	IntraRandaoMixes,
 	ActiveValidatorIndicies,

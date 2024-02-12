@@ -183,10 +183,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer nextSyncCommittee.Close()
 	currentSyncCommittee := etl.NewCollector(kv.CurrentSyncCommittee, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
 	defer currentSyncCommittee.Close()
-	currentEpochAttestations := etl.NewCollector(kv.CurrentEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
-	defer currentEpochAttestations.Close()
-	previousEpochAttestations := etl.NewCollector(kv.PreviousEpochAttestations, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
-	defer previousEpochAttestations.Close()
 	eth1DataVotes := etl.NewCollector(kv.Eth1DataVotes, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
 	defer eth1DataVotes.Close()
 	stateEvents := etl.NewCollector(kv.StateEvents, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
@@ -371,7 +367,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	defer progressTimer.Stop()
 	prevSlot := slot
 	first := false
-	blocksBeforeCommit := 100_000
+	blocksBeforeCommit := 350_000
 	blocksProcessed := 0
 
 	for ; slot < to && blocksProcessed < blocksBeforeCommit; slot++ {
@@ -385,23 +381,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		prevValidatorSetLength := s.currentState.ValidatorLength()
 		prevEpoch := state.Epoch(s.currentState)
-
-		if slot%s.cfg.SlotsPerEpoch == 0 && s.currentState.Version() == clparams.Phase0Version {
-			encoded, err := s.currentState.CurrentEpochAttestations().EncodeSSZ(nil)
-			if err != nil {
-				return err
-			}
-			if err := s.dumpPayload(base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot-1)), encoded, currentEpochAttestations, commonBuffer, compressedWriter); err != nil {
-				return err
-			}
-			encoded, err = s.currentState.PreviousEpochAttestations().EncodeSSZ(nil)
-			if err != nil {
-				return err
-			}
-			if err := s.dumpPayload(base_encoding.Encode64ToBytes4(s.cfg.RoundSlotToEpoch(slot-1)), encoded, previousEpochAttestations, commonBuffer, compressedWriter); err != nil {
-				return err
-			}
-		}
 
 		// If we have a missed block, we just skip it.
 		if block == nil {
@@ -496,7 +475,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 
 	log.Debug("Finished beacon state iteration", "elapsed", time.Since(start))
 
-	log.Log(logLvl, "Stopping Caplin to load states...")
+	log.Log(logLvl, "Stopped Caplin to load states")
 	rwTx, err := s.mainDB.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -556,14 +535,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 
 	if err := currentSyncCommittee.Load(rwTx, kv.CurrentSyncCommittee, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-
-	if err := currentEpochAttestations.Load(rwTx, kv.CurrentEpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
-	}
-
-	if err := previousEpochAttestations.Load(rwTx, kv.PreviousEpochAttestations, loadfunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
 		return err
 	}
 

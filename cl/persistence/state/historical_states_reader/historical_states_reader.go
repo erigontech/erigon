@@ -187,7 +187,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	ret.SetFinalizedCheckpoint(finalizedCheckpoint)
 	// Participation
 	if ret.Version() == clparams.Phase0Version {
-		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot, slotData.CurrentEpochAttestationsLength, slotData.PreviousEpochAttestationsLength)
+		currentAtts, previousAtts, err := r.readPendingEpochs(tx, slot)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read pending attestations: %w", err)
 		}
@@ -642,22 +642,53 @@ func (r *HistoricalStatesReader) ReadValidatorsForHistoricalState(tx kv.Tx, slot
 	return out, nil
 }
 
-func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64, currentEpochAttestationsLength, previousEpochAttestationsLength uint64) (*solid.ListSSZ[*solid.PendingAttestation], *solid.ListSSZ[*solid.PendingAttestation], error) {
+func (r *HistoricalStatesReader) readPendingEpochs(tx kv.Tx, slot uint64) (*solid.ListSSZ[*solid.PendingAttestation], *solid.ListSSZ[*solid.PendingAttestation], error) {
 	if slot == r.cfg.GenesisSlot {
 		return r.genesisState.CurrentEpochAttestations(), r.genesisState.PreviousEpochAttestations(), nil
 	}
-	roundedSlot := r.cfg.RoundSlotToEpoch(slot)
-	// Read the current epoch attestations
-	currentEpochAttestations, err := state_accessors.ReadCurrentEpochAttestations(tx, roundedSlot, int(r.cfg.CurrentEpochAttestationsLength()))
-	if err != nil {
-		return nil, nil, err
+	epoch, prevEpoch := r.computeRelevantEpochs(slot)
+	previousEpochAttestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](int(r.cfg.PreviousEpochAttestationsLength()))
+	currentEpochAttestations := solid.NewDynamicListSSZ[*solid.PendingAttestation](int(r.cfg.CurrentEpochAttestationsLength()))
+	beginSlot := prevEpoch * r.cfg.SlotsPerEpoch
+
+	for i := beginSlot; i <= slot; i++ {
+		// Read the block
+		block, err := r.blockReader.ReadBlindedBlockBySlot(context.Background(), tx, i)
+		if err != nil {
+			return nil, nil, err
+		}
+		if block == nil {
+			continue
+		}
+		currentEpoch := i / r.cfg.SlotsPerEpoch
+		isPreviousPendingAttestations := currentEpoch == prevEpoch
+
+		// Read the participation flags
+		block.Block.Body.Attestations.Range(func(index int, attestation *solid.Attestation, length int) bool {
+			data := attestation.AttestantionData()
+			isCurrentEpoch := data.Target().Epoch() == currentEpoch
+			// skip if it is too far behind
+			if !isCurrentEpoch && isPreviousPendingAttestations {
+				return true
+			}
+			pendingAttestation := solid.NewPendingAttestionFromParameters(
+				attestation.AggregationBits(),
+				data,
+				i-data.Slot(),
+				block.Block.ProposerIndex,
+			)
+
+			if data.Target().Epoch() == epoch {
+				currentEpochAttestations.Append(pendingAttestation)
+			} else {
+				previousEpochAttestations.Append(pendingAttestation)
+			}
+			return true
+		})
+		if err != nil {
+			return nil, nil, err
+		}
 	}
-	previousEpochAttestations, err := state_accessors.ReadPreviousEpochAttestations(tx, roundedSlot, int(r.cfg.PreviousEpochAttestationsLength()))
-	if err != nil {
-		return nil, nil, err
-	}
-	previousEpochAttestations.Truncate(int(previousEpochAttestationsLength))
-	currentEpochAttestations.Truncate(int(currentEpochAttestationsLength))
 	return currentEpochAttestations, previousEpochAttestations, nil
 }
 
@@ -792,8 +823,8 @@ func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.
 	if slot/r.cfg.SlotsPerEpoch != r.cfg.AltairForkEpoch {
 		return out, nil
 	}
-	slotFromPreviousEpoch := slot - r.cfg.SlotsPerEpoch
-	atts, err := state_accessors.ReadCurrentEpochAttestations(tx, r.cfg.RoundSlotToEpoch(slotFromPreviousEpoch), int(r.cfg.CurrentEpochAttestationsLength()))
+
+	atts, _, err := r.readPendingEpochs(tx, (r.cfg.AltairForkEpoch*r.cfg.SlotsPerEpoch)-1)
 	if err != nil {
 		return nil, err
 	}
