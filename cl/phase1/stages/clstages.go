@@ -612,7 +612,6 @@ func ConsensusClStages(ctx context.Context,
 						"hash", headRoot, "slot", headSlot,
 						"alloc", common.ByteCount(m.Alloc),
 						"sys", common.ByteCount(m.Sys))
-					start = time.Now()
 					if err := tx.Commit(); err != nil {
 						return err
 					}
