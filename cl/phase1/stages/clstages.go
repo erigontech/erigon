@@ -368,7 +368,6 @@ func ConsensusClStages(ctx context.Context,
 						go func(source persistence.BlockSource) {
 							if _, ok := source.(*persistence.BeaconRpcSource); ok {
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
-							Loop:
 								for {
 									var err error
 									from := args.seenSlot - 2
@@ -397,7 +396,6 @@ func ConsensusClStages(ctx context.Context,
 								errCh <- err
 								return
 							}
-							fmt.Println(len(blocks.Data))
 							respCh <- blocks
 						}(v)
 					}
