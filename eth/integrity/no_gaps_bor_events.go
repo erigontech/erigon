@@ -73,6 +73,10 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 						return fmt.Errorf("can't get events for block %d: %w", block, err)
 					}
 
+					if header.Number.Uint64() == 46100112 {
+						fmt.Println(46100112, len(events))
+					}
+
 					if prevBlockStartId != 0 {
 						if len(events) != int(eventId-prevBlockStartId) {
 							return fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
