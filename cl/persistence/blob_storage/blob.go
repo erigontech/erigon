@@ -1,6 +1,7 @@
 package blob_storage
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -47,6 +48,7 @@ func rootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainC
 	defer bPool.Put(buffer)
 	buffer.Reset()
 
+	fmt.Fprintf(buffer, "%d/%x.sz", slot/subDivisionFolderSize, root)
 	split := strings.Split(buffer.String(), "/")
 	return split[0], buffer.String()
 }
