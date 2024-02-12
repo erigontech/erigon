@@ -442,15 +442,16 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
-								if err := processBlock(tx, block, true, true); err != nil {
-									log.Debug("bad blocks segment received", "err", err)
-									continue MainLoop
-								}
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.HashSSZ()
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 									continue
 								}
+								if err := processBlock(tx, block, true, true); err != nil {
+									log.Error("bad blocks segment received", "err", err)
+									continue MainLoop
+								}
+
 								// publish block to event handler
 								cfg.emitter.Publish("block", map[string]any{
 									"slot":                 strconv.Itoa(int(block.Block.Slot)),
