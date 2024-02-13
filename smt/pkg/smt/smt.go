@@ -7,13 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 
-	"github.com/TwiN/gocache/v2"
 	"github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
 	"github.com/ledgerwatch/log/v3"
@@ -25,10 +23,13 @@ type DB interface {
 	GetAccountValue(key utils.NodeKey) (utils.NodeValue8, error)
 	InsertAccountValue(key utils.NodeKey, value utils.NodeValue8) error
 	InsertKeySource(key utils.NodeKey, value []byte) error
+	DeleteKeySource(key utils.NodeKey) error
 	GetKeySource(key utils.NodeKey) ([]byte, error)
 	InsertHashKey(key utils.NodeKey, value utils.NodeKey) error
+	DeleteHashKey(key utils.NodeKey) error
 	GetHashKey(key utils.NodeKey) (utils.NodeKey, error)
 	Delete(string) error
+	DeleteByNodeKey(key utils.NodeKey) error
 	GetCode(codeHash []byte) ([]byte, error)
 
 	SetLastRoot(lr *big.Int) error
@@ -46,9 +47,7 @@ type DebuggableDB interface {
 }
 
 type SMT struct {
-	Db                DB
-	Cache             *gocache.Cache
-	CacheHitFrequency map[string]int
+	Db DB
 
 	clearUpMutex sync.Mutex
 }
@@ -64,9 +63,7 @@ func NewSMT(database DB) *SMT {
 	}
 
 	return &SMT{
-		Db:                database,
-		Cache:             gocache.NewCache().WithMaxSize(10000).WithEvictionPolicy(gocache.LeastRecentlyUsed),
-		CacheHitFrequency: make(map[string]int),
+		Db: database,
 	}
 }
 
@@ -130,6 +127,10 @@ func (s *SMT) InsertKA(key utils.NodeKey, value *big.Int) (*SMTResponse, error) 
 	}
 
 	return s.insertSingle(key, *v, [4]uint64{})
+}
+
+func (s *SMT) Insert(key utils.NodeKey, value utils.NodeValue8) (*SMTResponse, error) {
+	return s.insertSingle(key, value, [4]uint64{})
 }
 
 func (s *SMT) InsertStorage(ethAddr string, storage *map[string]string, chm *map[string]*utils.NodeValue8, vhm *map[string][4]uint64, progressChan chan uint64) (*SMTResponse, error) {
@@ -514,12 +515,6 @@ func (s *SMT) insert(k utils.NodeKey, v utils.NodeValue8, newValH [4]uint64, old
 }
 
 func (s *SMT) hashSave(in [8]uint64, capacity, h [4]uint64) ([4]uint64, error) {
-	cacheKey := fmt.Sprintf("%v-%v", in, capacity)
-	if cachedValue, exists := s.Cache.Get(cacheKey); exists {
-		s.CacheHitFrequency[cacheKey]++
-		return cachedValue.([4]uint64), nil
-	}
-
 	var sl []uint64
 	sl = append(sl, in[:]...)
 	sl = append(sl, capacity[:]...)
@@ -532,8 +527,6 @@ func (s *SMT) hashSave(in [8]uint64, capacity, h [4]uint64) ([4]uint64, error) {
 
 	err := s.Db.Insert(h, v)
 
-	s.Cache.Set(cacheKey, h)
-
 	return h, err
 }
 
@@ -544,6 +537,10 @@ func (s *SMT) hashcalcAndSave(in [8]uint64, capacity [4]uint64) ([4]uint64, erro
 	}
 
 	return s.hashSave(in, capacity, h)
+}
+
+func (s *SMT) hashcalc(in [8]uint64, capacity [4]uint64) ([4]uint64, error) {
+	return utils.Hash(in, capacity)
 }
 
 func (s *SMT) getLastRoot() (utils.NodeKey, error) {
@@ -574,33 +571,6 @@ func (s *SMT) PrintTree() {
 			fmt.Println(err)
 		}
 		fmt.Println(string(str))
-	}
-}
-
-func (s *SMT) PrintCacheHitsByFrequency() {
-	type kv struct {
-		Key   string
-		Value int
-	}
-
-	fmt.Println("SMT Cache Hits:")
-
-	var ss []kv
-	for k, v := range s.CacheHitFrequency {
-		if v > 1 {
-			ss = append(ss, kv{k, v})
-		}
-	}
-
-	sort.Slice(ss, func(i, j int) bool {
-		return ss[i].Value > ss[j].Value
-	})
-
-	for i, kv := range ss {
-		if i > 10 {
-			break
-		}
-		fmt.Printf("%s: %d\n", kv.Key, kv.Value)
 	}
 }
 

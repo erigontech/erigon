@@ -198,6 +198,11 @@ func NodeValue12FromBigIntArray(arr []*big.Int) (*NodeValue12, error) {
 	return &nv, nil
 }
 
+func NodeValue8FromBigInt(value *big.Int) (*NodeValue8, error) {
+	x := ScalarToArrayBig(value)
+	return NodeValue8FromBigIntArray(x)
+}
+
 func NodeValue8FromBigIntArray(arr []*big.Int) (*NodeValue8, error) {
 	if len(arr) != 8 {
 		return &NodeValue8{}, fmt.Errorf("invalid array length")
@@ -405,6 +410,20 @@ func ConcatArrays4(a, b [4]uint64) [8]uint64 {
 		result[i+4] = v
 	}
 	return result
+}
+
+func ConcatArrays8AndCapacity(in [8]uint64, capacity [4]uint64) NodeValue12 {
+	var sl []uint64
+	sl = append(sl, in[:]...)
+	sl = append(sl, capacity[:]...)
+
+	v := NodeValue12{}
+	for i, val := range sl {
+		b := new(big.Int)
+		v[i] = b.SetUint64(val)
+	}
+
+	return v
 }
 
 func RemoveKeyBits(k NodeKey, nBits int) NodeKey {

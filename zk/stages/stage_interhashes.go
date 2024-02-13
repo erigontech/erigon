@@ -418,33 +418,9 @@ func zkIncrementIntermediateHashes(logPrefix string, s *stagedsync.StageState, d
 		storageTotal += len(v)
 	}
 
-	total := len(accChanges) + len(codeChanges) + storageTotal
-
-	progressChan, stopProgressPrinter := zk.ProgressPrinter(fmt.Sprintf("[%s] Progress inserting values", logPrefix), uint64(total))
-	// update the tree
-	for addr, acc := range accChanges {
-		if err := updateAccInTree(dbSmt, addr, acc); err != nil {
-			stopProgressPrinter()
-			return trie.EmptyRoot, err
-		}
-		progressChan <- 1
+	if _, _, err := dbSmt.SetStorage(logPrefix, accChanges, codeChanges, storageChanges); err != nil {
+		return trie.EmptyRoot, err
 	}
-
-	for addr, code := range codeChanges {
-		if err := dbSmt.SetContractBytecode(addr.String(), code); err != nil {
-			stopProgressPrinter()
-			return trie.EmptyRoot, err
-		}
-		progressChan <- 1
-	}
-
-	for addr, storage := range storageChanges {
-		if _, err := dbSmt.SetContractStorage(addr.String(), storage, progressChan); err != nil {
-			stopProgressPrinter()
-			return trie.EmptyRoot, err
-		}
-	}
-	stopProgressPrinter()
 
 	log.Info(fmt.Sprintf("[%s] Regeneration trie hashes finished. Commiting batch", logPrefix))
 
@@ -585,7 +561,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 
 		// update the tree
 		for addr, acc := range accChanges {
-			if err := updateAccInTree(dbSmt, addr, acc); err != nil {
+			if err := dbSmt.SetAccountStorage(addr, acc); err != nil {
 				return trie.EmptyRoot, err
 			}
 		}
@@ -605,7 +581,7 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 	}
 
 	for _, k := range accDeletes {
-		if err := updateAccInTree(dbSmt, k, nil); err != nil {
+		if err := dbSmt.SetAccountStorage(k, nil); err != nil {
 			return trie.EmptyRoot, err
 		}
 	}
@@ -624,17 +600,6 @@ func unwindZkSMT(logPrefix string, from, to uint64, db kv.RwTx, checkRoot bool, 
 
 	hash := libcommon.BigToHash(lr)
 	return hash, nil
-}
-
-func updateAccInTree(smt *smt.SMT, addr libcommon.Address, acc *accounts.Account) error {
-	if acc != nil {
-		n := new(big.Int).SetUint64(acc.Nonce)
-		_, err := smt.SetAccountState(addr.String(), acc.Balance.ToBig(), n)
-		return err
-	}
-
-	_, err := smt.SetAccountState(addr.String(), big.NewInt(0), big.NewInt(0))
-	return err
 }
 
 func verifyLastHash(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, checkRoot bool, logPrefix string) error {

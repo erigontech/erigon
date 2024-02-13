@@ -233,12 +233,14 @@ func (s *SMT) GenerateFromKVBulk(logPrefix string, nodeKeys []utils.NodeKey) ([4
 
 	//if the root node has only one branch, that branch should become the root node
 	var pathToDeleteFrom []int
-	if rootNode.node1 == nil {
-		rootNode = *rootNode.node0
-		pathToDeleteFrom = append(pathToDeleteFrom, 0)
-	} else if rootNode.node0 == nil && utils.IsArrayUint64Empty(rootNode.leftHash[:]) {
-		rootNode = *rootNode.node1
-		pathToDeleteFrom = append(pathToDeleteFrom, 1)
+	if len(nodeKeys) == 1 {
+		if rootNode.node1 == nil {
+			rootNode = *rootNode.node0
+			pathToDeleteFrom = append(pathToDeleteFrom, 0)
+		} else if rootNode.node0 == nil && utils.IsArrayUint64Empty(rootNode.leftHash[:]) {
+			rootNode = *rootNode.node1
+			pathToDeleteFrom = append(pathToDeleteFrom, 1)
+		}
 	}
 
 	//if the branch is a leaf, the rkey is the whole key
