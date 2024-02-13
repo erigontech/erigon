@@ -44,7 +44,7 @@ func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chai
 	}
 	engine := api.engine()
 
-	_, _, _, ibs, _, err := transactions.ComputeTxEnv(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
+	_, _, _, ibs, _, err := transactions.ComputeTxEnv_ZkEvm(ctx, engine, block, chainConfig, api._blockReader, tx, 0, api.historyV3(tx))
 	if err != nil {
 		return nil, err
 	}
