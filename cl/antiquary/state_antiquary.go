@@ -148,6 +148,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer tx.Rollback()
+	time.Sleep(10 * time.Second)
 
 	// maps which validators changes
 	changedValidators := make(map[uint64]struct{})
