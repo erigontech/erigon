@@ -48,8 +48,8 @@ type serviceTest struct {
 // test has finished, and so we need to make sure that the SentryReconnectAndPumpStreamLoop loop has been stopped
 // before the test finishes otherwise we will have flaky tests.
 //
-// If changing the behaviour here please run "go test -v count=1000 ./polygon/p2p" and
-// "go test -v -race ./polygon/p2p" to confirm there are no regressions.
+// If changing the behaviour here please run "go test -v -count=1000 ./polygon/p2p" and
+// "go test -v -count=1 -race ./polygon/p2p" to confirm there are no regressions.
 func (st *serviceTest) run(ctx context.Context, f func(t *testing.T)) {
 	st.t.Run("start", func(_ *testing.T) {
 		st.service.Start(ctx)
