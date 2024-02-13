@@ -219,6 +219,7 @@ type TxPool struct {
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
 	blockGasLimit           atomic.Uint64
+	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
@@ -870,11 +871,17 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.Spammer
 	}
-	if !isLocal && p.all.blobCount(txn.SenderID) > p.cfg.BlobSlots {
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(len(txn.BlobHashes))) > p.cfg.BlobSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
 		return txpoolcfg.Spammer
+	}
+	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%x current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+		}
+		return txpoolcfg.BlobPoolOverflow
 	}
 
 	// check nonce and balance
@@ -1400,6 +1407,11 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, "addLocked", p.logger)
+	if mt.Tx.Type == types.BlobTxType {
+		t := p.totalBlobsInPool.Load()
+		p.totalBlobsInPool.Store(t + (uint64(len(mt.Tx.BlobHashes))))
+	}
+
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
 	p.deleteMinedBlobTxn(hashStr)
 	return txpoolcfg.NotSet
@@ -1413,6 +1425,10 @@ func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt, reason, p.logger)
 	p.discardReasonsLRU.Add(hashStr, reason)
+	if mt.Tx.Type == types.BlobTxType {
+		t := p.totalBlobsInPool.Load()
+		p.totalBlobsInPool.Store(t - uint64(len(mt.Tx.BlobHashes)))
+	}
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones

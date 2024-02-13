@@ -329,7 +329,9 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
-
+	if len(stx.BlobVersionedHashes) == 0 {
+		return fmt.Errorf("a blob tx must contain at least one blob")
+	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err

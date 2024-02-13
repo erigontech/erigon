@@ -3,6 +3,7 @@ package fork_graph
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -84,8 +85,7 @@ type forkGraphDisk struct {
 	stateRoots map[libcommon.Hash]libcommon.Hash // set of stateHash -> blockHash
 
 	// current state data
-	currentState          *state.CachingBeaconState
-	currentStateBlockRoot libcommon.Hash
+	currentState *state.CachingBeaconState
 
 	// saveStates are indexed by block index
 	saveStates map[libcommon.Hash]savedStateRecord
@@ -133,10 +133,9 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 		badBlocks:  make(map[libcommon.Hash]struct{}),
 		stateRoots: make(map[libcommon.Hash]libcommon.Hash),
 		// current state data
-		currentState:          anchorState,
-		currentStateBlockRoot: anchorRoot,
-		saveStates:            make(map[libcommon.Hash]savedStateRecord),
-		syncCommittees:        make(map[libcommon.Hash]syncCommittees),
+		currentState:   anchorState,
+		saveStates:     make(map[libcommon.Hash]savedStateRecord),
+		syncCommittees: make(map[libcommon.Hash]syncCommittees),
 		// checkpoints trackers
 		currentJustifiedCheckpoints: make(map[libcommon.Hash]solid.Checkpoint),
 		finalizedCheckpoints:        make(map[libcommon.Hash]solid.Checkpoint),
@@ -183,7 +182,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 	newState, err := f.GetState(block.ParentRoot, false)
 	if err != nil {
-		return nil, InvalidBlock, err
+		return nil, LogisticError, fmt.Errorf("AddChainSegment: %w, parentRoot; %x", err, block.ParentRoot)
 	}
 	if newState == nil {
 		log.Debug("AddChainSegment: missing segment", "block", libcommon.Hash(blockRoot))
@@ -206,7 +205,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
-			log.Warn("Could not create light client update", "err", err)
+			log.Debug("Could not create light client update", "err", err)
 		} else {
 			f.newestLightClientUpdate.Store(lightclientUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
@@ -223,13 +222,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", invalidBlockErr)
 		f.badBlocks[blockRoot] = struct{}{}
-		f.currentStateBlockRoot = libcommon.Hash{}
-		f.currentState, err = f.GetState(block.ParentRoot, true)
-		if err != nil {
-			log.Error("[Caplin] Could not recover from invalid block", "err", err)
-		} else {
-			f.currentStateBlockRoot = block.ParentRoot
-		}
+		f.currentState = nil
 
 		return nil, InvalidBlock, invalidBlockErr
 	}
@@ -282,7 +275,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	if newState.Slot() > f.highestSeen {
 		f.highestSeen = newState.Slot()
 		f.currentState = newState
-		f.currentStateBlockRoot = blockRoot
 	}
 	return newState, Success, nil
 }
@@ -389,12 +381,18 @@ func (f *forkGraphDisk) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.Cac
 }
 
 func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	if f.currentStateBlockRoot == blockRoot {
-		if alwaysCopy {
-			ret, err := f.currentState.Copy()
-			return ret, err
+	if f.currentState != nil {
+		currentStateBlockRoot, err := f.currentState.BlockRoot()
+		if err != nil {
+			return nil, err
 		}
-		return f.currentState, nil
+		if currentStateBlockRoot == blockRoot {
+			if alwaysCopy {
+				ret, err := f.currentState.Copy()
+				return ret, err
+			}
+			return f.currentState, nil
+		}
 	}
 
 	// collect all blocks beetwen greatest extending node path and block.
@@ -453,6 +451,7 @@ func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	pruneSlot -= f.beaconCfg.SlotsPerEpoch * 2
 	oldRoots := make([]libcommon.Hash, 0, f.beaconCfg.SlotsPerEpoch)
+	highestCrossedEpochSlot := uint64(0)
 	f.blocks.Range(func(key, value interface{}) bool {
 		hash := key.(libcommon.Hash)
 		signedBlock := value.(*cltypes.SignedBeaconBlock)
@@ -460,8 +459,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			return true
 		}
 		oldRoots = append(oldRoots, hash)
+		if signedBlock.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 && highestCrossedEpochSlot < signedBlock.Block.Slot {
+			highestCrossedEpochSlot = signedBlock.Block.Slot
+		}
 		return true
 	})
+	if pruneSlot >= highestCrossedEpochSlot {
+		return
+	}
 
 	f.lowestAvaiableSlot = pruneSlot + 1
 	for _, root := range oldRoots {

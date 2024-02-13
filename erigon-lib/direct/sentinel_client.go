@@ -62,6 +62,14 @@ func (s *SentinelClientDirect) PublishGossip(ctx context.Context, in *sentinel.G
 	return s.server.PublishGossip(ctx, in)
 }
 
+func (s *SentinelClientDirect) Identity(ctx context.Context, in *sentinel.EmptyMessage, opts ...grpc.CallOption) (*sentinel.IdentityResponse, error) {
+	return s.server.Identity(ctx, in)
+}
+
+func (s *SentinelClientDirect) PeersInfo(ctx context.Context, in *sentinel.PeersInfoRequest, opts ...grpc.CallOption) (*sentinel.PeersInfoResponse, error) {
+	return s.server.PeersInfo(ctx, in)
+}
+
 // Subscribe gossip part. the only complex section of this bullshit
 
 func (s *SentinelClientDirect) SubscribeGossip(ctx context.Context, in *sentinel.SubscriptionData, opts ...grpc.CallOption) (sentinel.Sentinel_SubscribeGossipClient, error) {

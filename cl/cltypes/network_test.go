@@ -13,7 +13,7 @@ import (
 
 var testMetadata = &cltypes.Metadata{
 	SeqNumber: 99,
-	Attnets:   69,
+	Attnets:   [8]byte{1, 2, 3, 4, 5, 6, 7, 8},
 }
 
 var testPing = &cltypes.Ping{

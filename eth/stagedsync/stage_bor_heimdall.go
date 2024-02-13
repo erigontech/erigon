@@ -290,6 +290,7 @@ func BorHeimdallForward(
 		fetchTime += callTime
 
 		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
+			headNumber = blockNum
 			break
 		}
 	}

@@ -753,7 +753,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CapellaForkVersion:   0x03000000,
 	CapellaForkEpoch:     194048,
 	DenebForkVersion:     0x04000000,
-	DenebForkEpoch:       math.MaxUint64,
+	DenebForkEpoch:       269568,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -946,7 +946,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.DenebForkEpoch = math.MaxUint64
+	cfg.DenebForkEpoch = 889856
+	cfg.DenebForkVersion = 0x04000064
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8

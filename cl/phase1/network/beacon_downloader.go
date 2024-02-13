@@ -2,6 +2,7 @@ package network
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -67,21 +68,54 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 }
 
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
-	count := uint64(16) // dont need many
-	responses, pid, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed+1, count)
-	if err != nil {
-		f.rpc.BanPeer(pid)
-		// Wait a bit in this case (we do not need to be super performant here).
-		time.Sleep(time.Second)
-		return
+	count := uint64(64)
+	var atomicResp atomic.Value
+	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
+	reqInterval := time.NewTicker(300 * time.Millisecond)
+	defer reqInterval.Stop()
+Loop:
+	for {
+		select {
+		case <-reqInterval.C:
+			go func() {
+				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+					return
+				}
+				// this is so we do not get stuck on a side-fork
+				responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, f.highestSlotProcessed-6, count)
+
+				if err != nil {
+					return
+				}
+				if responses == nil {
+					return
+				}
+				if len(responses) == 0 {
+					f.rpc.BanPeer(peerId)
+					return
+				}
+				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+					return
+				}
+				atomicResp.Store(responses)
+			}()
+		case <-ctx.Done():
+			return
+		default:
+			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+				break Loop
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
+
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	var highestBlockRootProcessed libcommon.Hash
 	var highestSlotProcessed uint64
-	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, responses); err != nil {
-		f.rpc.BanPeer(pid)
+	var err error
+	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, atomicResp.Load().([]*cltypes.SignedBeaconBlock)); err != nil {
 		return
 	}
 	f.highestSlotProcessed = highestSlotProcessed

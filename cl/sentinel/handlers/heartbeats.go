@@ -17,6 +17,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/ledgerwatch/erigon/p2p/enr"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
@@ -30,7 +32,7 @@ func (c *ConsensusHandlers) pingHandler(s network.Stream) error {
 		return err
 	}
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
-		Id: c.metadata.SeqNumber,
+		Id: c.me.Seq(),
 	}, SuccessfulResponsePrefix)
 }
 
@@ -40,6 +42,18 @@ func (c *ConsensusHandlers) goodbyeHandler(s network.Stream) error {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
+	gid := &cltypes.Ping{}
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, gid, clparams.Phase0Version); err != nil {
+		return err
+	}
+
+	if gid.Id == 250 { // 250 is the status code for getting banned due to whatever reason
+		v, err := c.host.Peerstore().Get("AgentVersion", peerId)
+		if err == nil {
+			log.Debug("Received goodbye message from peer", "v", v)
+		}
+	}
+
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Ping{
 		Id: 1,
 	}, SuccessfulResponsePrefix)
@@ -51,9 +65,15 @@ func (c *ConsensusHandlers) metadataV1Handler(s network.Stream) error {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
+	subnetField := [8]byte{}
+	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, &subnetField)
+	if err := c.me.Node().Load(attSubEnr); err != nil {
+		return err
+	}
+	//me.Load()
 	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
-		SeqNumber: c.metadata.SeqNumber,
-		Attnets:   c.metadata.Attnets,
+		SeqNumber: c.me.Seq(),
+		Attnets:   subnetField,
 	}, SuccessfulResponsePrefix)
 }
 
@@ -64,7 +84,22 @@ func (c *ConsensusHandlers) metadataV2Handler(s network.Stream) error {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
-	return ssz_snappy.EncodeAndWrite(s, c.metadata, SuccessfulResponsePrefix)
+	subnetField := [8]byte{}
+	syncnetField := [1]byte{}
+	attSubEnr := enr.WithEntry(c.netCfg.AttSubnetKey, &subnetField)
+	syncNetEnr := enr.WithEntry(c.netCfg.SyncCommsSubnetKey, &syncnetField)
+	if err := c.me.Node().Load(attSubEnr); err != nil {
+		return err
+	}
+	if err := c.me.Node().Load(syncNetEnr); err != nil {
+		return err
+	}
+
+	return ssz_snappy.EncodeAndWrite(s, &cltypes.Metadata{
+		SeqNumber: c.me.Seq(),
+		Attnets:   subnetField,
+		Syncnets:  &syncnetField,
+	}, SuccessfulResponsePrefix)
 }
 
 // TODO: Actually respond with proper status
@@ -74,9 +109,6 @@ func (c *ConsensusHandlers) statusHandler(s network.Stream) error {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)
 		return err
 	}
-	status := &cltypes.Status{}
-	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, status, clparams.Phase0Version); err != nil {
-		return err
-	}
-	return ssz_snappy.EncodeAndWrite(s, status, SuccessfulResponsePrefix)
+
+	return ssz_snappy.EncodeAndWrite(s, c.hs.Status(), SuccessfulResponsePrefix)
 }

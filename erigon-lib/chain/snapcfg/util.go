@@ -71,7 +71,6 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 	for _, p := range p {
 		v, name, ok := strings.Cut(p.Name, "-")
-
 		if !ok {
 			continue
 		}
@@ -79,6 +78,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		var preferredVersion, minVersion snaptype.Version
 
 		parts := strings.Split(name, "-")
+		if len(parts) < 3 {
+			continue
+		}
 		typeName, _ := strings.CutSuffix(parts[2], filepath.Ext(parts[2]))
 		include := false
 
@@ -96,7 +98,6 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		version, err := snaptype.ParseVersion(v)
-
 		if err != nil {
 			continue
 		}

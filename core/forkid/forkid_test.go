@@ -75,8 +75,10 @@ func TestCreation(t *testing.T) {
 				{15049999, 1656586434, ID{Hash: checksumToBytes(0x20c327fc), Next: 15050000}},   // Last Arrow Glacier block
 				{15050000, 1656586444, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // First Gray Glacier block
 				{17034869, 1681338443, ID{Hash: checksumToBytes(0xf0afd0e3), Next: 1681338455}}, // Last pre-Shanghai block
-				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // First Shanghai block
-				{19000000, 1700000000, ID{Hash: checksumToBytes(0xdce96c2d), Next: 0}},          // Future Shanghai block (mock)
+				{17034870, 1681338479, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // First Shanghai block
+				{19428734, 1710338123, ID{Hash: checksumToBytes(0xdce96c2d), Next: 1710338135}}, // Last Shanghai block (approx)
+				{19428735, 1710338135, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // First Cancun block  (approx)
+				{20000000, 1800000000, ID{Hash: checksumToBytes(0x9f3d2254), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
 		// Goerli test cases
@@ -133,7 +135,10 @@ func TestCreation(t *testing.T) {
 				{19040000, 1636753580, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // First London block
 				{21735000, 1650443255, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // First GIP-31 block
 				{29242931, 1690889650, ID{Hash: checksumToBytes(0x018479d3), Next: 1690889660}}, // Last pre-Shanghai block
-				{29242932, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 0}},          // First Shanghai block
+				{29242932, 1690889660, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // First Shanghai block
+				{33101363, 1710181815, ID{Hash: checksumToBytes(0x2efe91ba), Next: 1710181820}}, // Last Shanghai block (approx.)
+				{33101364, 1710181820, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // First Cancun block (approx)
+				{40000000, 1800000000, ID{Hash: checksumToBytes(0x1384dfc1), Next: 0}},          // Future Cancun block (mock)
 			},
 		},
 		// Chiado test cases
