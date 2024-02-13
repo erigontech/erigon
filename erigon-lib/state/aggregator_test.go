@@ -548,31 +548,33 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *SharedDomains, txN
 			err := domains.DomainDel(kv.AccountsDomain, key, nil, nil, 0)
 			require.NoError(t, err)
 
-		case r > 66:
-			if !existed {
-				// need to create account because commitment trie requires it (accounts are upper part of trie)
-				buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
-				prev, step, err := domains.LatestAccount(key)
-				require.NoError(t, err)
+		case r > 66 && r <= 80:
+			// need to create account because commitment trie requires it (accounts are upper part of trie)
+			if len(key) > length.Addr {
+				key = key[:length.Addr]
+			}
 
+			prev, step, err := domains.LatestAccount(key)
+			require.NoError(t, err)
+			if prev == nil {
 				usedKeys[string(key)] = struct{}{}
-
+				buf := types.EncodeAccountBytesV3(txNum, uint256.NewInt(txNum*100_000), nil, 0)
 				err = domains.DomainPut(kv.AccountsDomain, key, nil, buf, prev, step)
 				require.NoError(t, err)
 			}
+
+			sk := make([]byte, length.Hash+length.Addr)
+			copy(sk, key)
+
 			for i := 0; i < maxStorageKeys; i++ {
 				loc := generateRandomKeyBytes(rnd, 32)
-				if len(key)+len(loc) >= 52 {
-					key = append(key[0:], append(key, loc...)...)
-					loc = key[20 : 20+32]
-					key = key[:20]
-				}
-				usedKeys[string(append(key, loc...))] = struct{}{}
+				copy(sk[length.Addr:], loc)
+				usedKeys[string(sk)] = struct{}{}
 
-				prev, step, err := domains.DomainGet(kv.StorageDomain, key, loc)
+				prev, step, err := domains.DomainGet(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:])
 				require.NoError(t, err)
 
-				err = domains.DomainPut(kv.StorageDomain, key, loc, uint256.NewInt(txNum).Bytes(), prev, step)
+				err = domains.DomainPut(kv.StorageDomain, sk[:length.Addr], sk[length.Addr:], uint256.NewInt(txNum).Bytes(), prev, step)
 				require.NoError(t, err)
 			}
 
