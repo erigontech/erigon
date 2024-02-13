@@ -257,6 +257,8 @@ type Config struct {
 	SilkwormSentry    bool
 
 	DisableTxPoolGossip bool
+
+	Ots2 bool
 }
 
 type Sync struct {

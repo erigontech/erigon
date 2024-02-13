@@ -37,4 +37,8 @@ const (
 	Ts = 8
 	// Incarnation length of uint64 for contract incarnations
 	Incarnation = 8
+	// Chunk size used in indexes
+	Chunk = 8
+	// Counter size used in paged indexes
+	Counter = 8
 )

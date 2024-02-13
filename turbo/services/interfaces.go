@@ -76,6 +76,9 @@ type TxnReader interface {
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
 	FirstTxnNumNotInSnapshots() uint64
+	TxnByTxId(ctx context.Context, tx kv.Getter, txId uint64) (txn types.Transaction, err error)
+	TxIdByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txid uint64, err error)
+	BaseTxIdForBlock(ctx context.Context, tx kv.Getter, blockNum uint64) (txid uint64, err error)
 }
 
 type HeaderAndCanonicalReader interface {
