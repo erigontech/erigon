@@ -91,3 +91,27 @@ func (mr *MockServiceMockRecorder) Penalize(arg0, arg1 interface{}) *gomock.Call
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Penalize", reflect.TypeOf((*MockService)(nil).Penalize), arg0, arg1)
 }
+
+// Start mocks base method.
+func (m *MockService) Start(arg0 context.Context) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Start", arg0)
+}
+
+// Start indicates an expected call of Start.
+func (mr *MockServiceMockRecorder) Start(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockService)(nil).Start), arg0)
+}
+
+// Stop mocks base method.
+func (m *MockService) Stop() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Stop")
+}
+
+// Stop indicates an expected call of Stop.
+func (mr *MockServiceMockRecorder) Stop() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockService)(nil).Stop))
+}

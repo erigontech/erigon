@@ -14,7 +14,8 @@ import (
 )
 
 type MessageListener interface {
-	Listen(ctx context.Context)
+	Start(ctx context.Context)
+	Stop()
 	RegisterBlockHeaders66(observer messageObserver)
 	UnregisterBlockHeaders66(observer messageObserver)
 }
@@ -28,14 +29,26 @@ func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) Mes
 }
 
 type messageListener struct {
-	logger       log.Logger
-	sentryClient direct.SentryClient
-	observersMu  sync.Mutex
-	observers    map[protosentry.MessageId]map[messageObserver]struct{}
+	once            sync.Once
+	streamCtx       context.Context
+	streamCtxCancel context.CancelFunc
+	logger          log.Logger
+	sentryClient    direct.SentryClient
+	observersMu     sync.Mutex
+	observers       map[protosentry.MessageId]map[messageObserver]struct{}
+	stopWg          sync.WaitGroup
 }
 
-func (ml *messageListener) Listen(ctx context.Context) {
-	go ml.listenBlockHeaders66(ctx)
+func (ml *messageListener) Start(ctx context.Context) {
+	ml.once.Do(func() {
+		ml.streamCtx, ml.streamCtxCancel = context.WithCancel(ctx)
+		go ml.listenBlockHeaders66()
+	})
+}
+
+func (ml *messageListener) Stop() {
+	ml.streamCtxCancel()
+	ml.stopWg.Wait()
 }
 
 func (ml *messageListener) RegisterBlockHeaders66(observer messageObserver) {
@@ -68,13 +81,16 @@ func (ml *messageListener) unregister(observer messageObserver, messageId protos
 	}
 }
 
-func (ml *messageListener) listenBlockHeaders66(ctx context.Context) {
-	ml.listenInboundMessage(ctx, "BlockHeaders66", protosentry.MessageId_BLOCK_HEADERS_66)
+func (ml *messageListener) listenBlockHeaders66() {
+	ml.listenInboundMessage("BlockHeaders66", protosentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *messageListener) listenInboundMessage(ctx context.Context, name string, msgId protosentry.MessageId) {
+func (ml *messageListener) listenInboundMessage(name string, msgId protosentry.MessageId) {
+	ml.stopWg.Add(1)
+	defer ml.stopWg.Done()
+
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
-		ctx,
+		ml.streamCtx,
 		ml.sentryClient,
 		ml.statusDataFactory(),
 		name,
