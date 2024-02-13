@@ -129,18 +129,17 @@ func (a *aferoBlobStorage) getBlobSidecarsForBlockRoot(blockRoot [32]byte) ([]*c
 
 func (a *aferoBlobStorage) retrieveBlobsAndProofs(beaconBlockRoot [32]byte) ([]cltypes.Blob, []libcommon.Bytes48, error) {
 	sidecars, ok := a.blockRootToSidecar.Load(beaconBlockRoot)
-
 	if !ok {
 		return nil, nil, errors.New("block root not found")
 	}
-	var blobs []cltypes.Blob
-	var proofs []libcommon.Bytes48
 
 	sidecarList, ok := sidecars.([]*cltypes.BlobSidecar)
 	if !ok {
 		return nil, nil, errors.New("invalid sidecar type")
 	}
 
+	blobs := make([]cltypes.Blob, 0, len(sidecarList))
+	proofs := make([]libcommon.Bytes48, 0, len(sidecarList))
 	for _, sidecar := range sidecarList {
 		blobs = append(blobs, sidecar.Blob)
 		proofs = append(proofs, sidecar.KzgProof)
