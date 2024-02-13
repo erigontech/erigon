@@ -184,9 +184,10 @@ func (g *GossipManager) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case data := <-operationsCh:
+				l := log.Ctx{}
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", l)
+					log.Debug("[Beacon Gossip] Recoverable Error")
 				}
 			}
 		}
@@ -198,6 +199,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case data := <-blocksCh:
+				l := log.Ctx{}
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
 					log.Debug("[Beacon Gossip] Recoverable Error", l)
