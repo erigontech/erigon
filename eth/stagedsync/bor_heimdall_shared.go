@@ -117,34 +117,14 @@ func fetchAndWriteHeimdallSpan(
 	return spanID, nil
 }
 
-func fetchRequiredHeimdallStateSyncEventsIfNeeded(
-	ctx context.Context,
-	header *types.Header,
-	tx kv.RwTx,
-	cfg BorHeimdallCfg,
-	logPrefix string,
-	logger log.Logger,
-	lastStateSyncEventID uint64,
-) (uint64, int, time.Duration, error) {
-
-	headerNum := header.Number.Uint64()
-	if headerNum%cfg.borConfig.CalculateSprintLength(headerNum) != 0 || headerNum == 0 {
-		// we fetch events only at beginning of each sprint
-		return lastStateSyncEventID, 0, 0, nil
-	}
-
-	return fetchAndWriteHeimdallStateSyncEvents(ctx, header, lastStateSyncEventID, tx, cfg, logPrefix, logger)
-}
-
-func fetchAndWriteHeimdallStateSyncEvents(
+func fetchHeimdallStateSyncEvents(
 	ctx context.Context,
 	header *types.Header,
 	lastStateSyncEventID uint64,
 	tx kv.RwTx,
 	cfg BorHeimdallCfg,
 	logPrefix string,
-	logger log.Logger,
-) (uint64, int, time.Duration, error) {
+	logger log.Logger) (uint64, int, time.Duration, error) {
 	fetchStart := time.Now()
 	config := cfg.borConfig
 	blockReader := cfg.blockReader
@@ -153,21 +133,37 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	stateReceiverABI := cfg.stateReceiverABI
 	// Find out the latest eventId
 	var (
-		from uint64
-		to   time.Time
+		fromId uint64
+		to     time.Time
+		from   time.Time
 	)
 
 	blockNum := header.Number.Uint64()
 
+	if blockNum%config.CalculateSprintLength(blockNum) != 0 || blockNum == 0 {
+		// we fetch events only at beginning of each sprint
+		return lastStateSyncEventID, 0, 0, nil
+	}
+
+	prevHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
+
+	if err != nil {
+		return lastStateSyncEventID, 0, time.Since(fetchStart), err
+	}
+
 	if config.IsIndore(blockNum) {
 		stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
 		to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+		from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
 	} else {
-		pHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
+		to = time.Unix(int64(prevHeader.Time), 0)
+		prevHeader, err := blockReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(prevHeader.Number.Uint64()))
+
 		if err != nil {
 			return lastStateSyncEventID, 0, time.Since(fetchStart), err
 		}
-		to = time.Unix(int64(pHeader.Time), 0)
+
+		from = time.Unix(int64(prevHeader.Time), 0)
 	}
 
 	fetchTo := to
@@ -189,15 +185,16 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	}
 	*/
 
-	from = lastStateSyncEventID + 1
+	fromId = lastStateSyncEventID + 1
 
 	logger.Debug(
 		fmt.Sprintf("[%s] Fetching state updates from Heimdall", logPrefix),
-		"fromId", from,
+		"fromId", fromId,
 		"to", to.Format(time.RFC3339),
 	)
 
-	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, fetchTo, fetchLimit)
+	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, fromId, fetchTo, fetchLimit)
+
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}
@@ -220,19 +217,21 @@ func fetchAndWriteHeimdallStateSyncEvents(
 			continue
 		}
 
-		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID || !eventRecord.Time.Before(to) {
+		if lastStateSyncEventID+1 != eventRecord.ID || eventRecord.ChainID != chainID ||
+			!(eventRecord.Time.After(from) && eventRecord.Time.Before(to)) {
 			return lastStateSyncEventID, i, time.Since(fetchStart), fmt.Errorf(
 				"invalid event record received %s, %s, %s, %s",
 				fmt.Sprintf("blockNum=%d", blockNum),
 				fmt.Sprintf("eventId=%d (exp %d)", eventRecord.ID, lastStateSyncEventID+1),
 				fmt.Sprintf("chainId=%s (exp %s)", eventRecord.ChainID, chainID),
-				fmt.Sprintf("time=%s (exp to %s)", eventRecord.Time, to),
+				fmt.Sprintf("time=%s (exp from %s, to %s)", eventRecord.Time, from, to),
 			)
 		}
 
 		eventRecordWithoutTime := eventRecord.BuildEventRecord()
 
 		recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+
 		if err != nil {
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}
@@ -245,6 +244,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 		var eventIdBuf [8]byte
 		binary.BigEndian.PutUint64(eventIdBuf[:], eventRecord.ID)
+
 		if err = tx.Put(kv.BorEvents, eventIdBuf[:], data); err != nil {
 			return lastStateSyncEventID, i, time.Since(fetchStart), err
 		}

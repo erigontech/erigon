@@ -273,14 +273,14 @@ func BorHeimdallForward(
 
 		var callTime time.Duration
 		var records int
-		lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
+		lastStateSyncEventID, records, callTime, err = fetchHeimdallStateSyncEvents(
 			ctx,
 			header,
+			lastStateSyncEventID,
 			tx,
 			cfg,
 			s.LogPrefix(),
 			logger,
-			lastStateSyncEventID,
 		)
 		if err != nil {
 			return err

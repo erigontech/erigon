@@ -1,8 +1,10 @@
 package bor
 
 import (
+	"bytes"
 	"math/big"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -26,8 +28,19 @@ var (
 func GenesisContractValidatorSetABI() abi.ABI {
 	return validatorSetABI
 }
+
 func GenesisContractStateReceiverABI() abi.ABI {
 	return stateReceiverABI
+}
+
+var methodId []byte = stateReceiverABI.Methods["commitState"].ID
+
+func EventTime(encodedEvent rlp.RawValue) time.Time {
+	if bytes.Equal(methodId, encodedEvent[0:4]) {
+		return time.Unix((&big.Int{}).SetBytes(encodedEvent[4:36]).Int64(), 0)
+	}
+
+	return time.Time{}
 }
 
 type GenesisContracts interface {

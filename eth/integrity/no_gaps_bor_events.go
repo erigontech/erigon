@@ -3,18 +3,50 @@ package integrity
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64) error {
-	defer log.Info("[integrity] NoGapsInBorEvents: done")
+func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64) (err error) {
+	defer log.Info("[integrity] NoGapsInBorEvents: done", "err", err)
+
+	var cc *chain.Config
+
+	err = db.View(ctx, func(tx kv.Tx) error {
+		cc, err = chain.GetConfig(tx, nil)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		err = fmt.Errorf("cant read chain config from db: %w", err)
+		return err
+	}
+
+	if cc.BorJSON == nil {
+		return err
+	}
+
+	config := &borcfg.BorConfig{}
+
+	if err := json.Unmarshal(cc.BorJSON, config); err != nil {
+		err = fmt.Errorf("invalid chain config 'bor' JSON: %w", err)
+		return err
+	}
+
 	logEvery := time.NewTicker(10 * time.Second)
 	defer logEvery.Stop()
 
@@ -51,6 +83,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 			eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 			block := binary.BigEndian.Uint64(word[length.Hash : length.Hash+length.BlockNum])
+
 			if prevEventId > 0 && eventId != prevEventId+1 {
 				return fmt.Errorf("missing bor event %d at block=%d", eventId, block)
 			}
@@ -73,13 +106,17 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 						return fmt.Errorf("can't get events for block %d: %w", block, err)
 					}
 
-					if header.Number.Uint64() == 46100112 {
-						fmt.Println(46100112, len(events))
-					}
-
 					if prevBlockStartId != 0 {
 						if len(events) != int(eventId-prevBlockStartId) {
 							return fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
+						}
+					}
+
+					for i, event := range events {
+						if t := bor.EventTime(event); !checkBlockWindow(ctx, t, config, header, tx, blockReader) {
+							from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
+							fmt.Println(block, i, from, t, to)
+							//return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", t, prevBlockStartId+uint64(i), block, from, to)
 						}
 					}
 
@@ -109,4 +146,14 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 	log.Info("[integrity] done checking bor events", "event", prevEventId, "block", prevBlock)
 
 	return nil
+}
+
+func checkBlockWindow(ctx context.Context, eventTime time.Time, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) bool {
+	from, to, err := bor.CalculateEventWIndow(ctx, config, header, tx, headerReader)
+
+	if err != nil {
+		return false
+	}
+
+	return !(eventTime.Before(from) || eventTime.After(to))
 }
