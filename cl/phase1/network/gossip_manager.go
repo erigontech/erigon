@@ -176,7 +176,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 	}
 	operationsCh := make(chan *sentinel.GossipData, 1<<16)
 	blocksCh := make(chan *sentinel.GossipData, 1<<16)
-	l := log.Ctx{}
 
 	// Start a goroutine that listens for new gossip messages and sends them to the operations processor.
 	go func() {
@@ -187,7 +186,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 			case data := <-operationsCh:
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					l["err"] = err
 					log.Debug("[Beacon Gossip] Recoverable Error", l)
 				}
 			}
@@ -202,7 +200,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 			case data := <-blocksCh:
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					l["err"] = err
 					log.Debug("[Beacon Gossip] Recoverable Error", l)
 				}
 			}
@@ -215,9 +212,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 			log.Warn("[Beacon Gossip] Fatal error receiving gossip", "err", err)
 			break
 		}
-		for k := range l {
-			delete(l, k)
-		}
+
 		if data.Name == gossip.TopicNameBeaconBlock {
 			fmt.Println("Oh Oh")
 			blocksCh <- data
