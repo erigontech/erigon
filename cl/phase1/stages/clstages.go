@@ -409,7 +409,7 @@ func ConsensusClStages(ctx context.Context,
 									fmt.Println("end", args.targetSlot)
 									return
 								}
-								blocks, err := sourceFunc(ctx, nil, args.seenSlot, 12)
+								blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, 11)
 								if err != nil {
 									errCh <- err
 									return
