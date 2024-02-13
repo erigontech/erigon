@@ -18,7 +18,6 @@
 package core
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -104,10 +103,11 @@ func ExecuteBlockEphemerally(
 	var bcLogger BlockchainLogger
 	if vmConfig.Tracer != nil {
 		l, ok := vmConfig.Tracer.(BlockchainLogger)
-		if !ok {
-			return nil, errors.New("only extended tracers are supported for live mode")
+		if ok {
+			bcLogger = l
+		} else {
+			log.Warn("only extended tracers are supported for live mode")
 		}
-		bcLogger = l
 	}
 
 	defer BlockExecutionTimer.UpdateDuration(time.Now())
