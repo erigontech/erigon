@@ -93,7 +93,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 
 	epochData, err := state_accessors.ReadEpochData(tx, roundedSlot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read epoch data: %w", err)
 	}
 	if epochData == nil {
 		return nil, nil
@@ -131,7 +131,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	// Eth1
 	eth1DataVotes := solid.NewStaticListSSZ[*cltypes.Eth1Data](int(r.cfg.Eth1DataVotesLength()), 72)
 	if err := r.readEth1DataVotes(tx, slotData.Eth1DataLength, slot, eth1DataVotes); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read eth1 data votes: %w", err)
 	}
 	ret.SetEth1DataVotes(eth1DataVotes)
 	ret.SetEth1Data(slotData.Eth1Data)
@@ -170,7 +170,7 @@ func (r *HistoricalStatesReader) ReadHistoricalState(ctx context.Context, tx kv.
 	// Finality
 	currentCheckpoint, previousCheckpoint, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, roundedSlot)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to read checkpoints: %w", err)
 	}
 	if currentCheckpoint == nil {
 		currentCheckpoint = r.genesisState.CurrentJustifiedCheckpoint()
