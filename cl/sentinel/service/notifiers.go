@@ -34,6 +34,9 @@ func (g *gossipNotifier) notify(t string, data []byte, pid string) {
 	defer g.mu.Unlock()
 
 	for _, ch := range g.notifiers {
+		if t == gossip.TopicNameBeaconBlock {
+			fmt.Println("XXNX")
+		}
 		ch <- gossipObject{
 			data: data,
 			t:    t,
@@ -62,7 +65,7 @@ func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
 	if len(g.notifiers) >= maxSubscribers {
 		return nil, -1, fmt.Errorf("too many subsribers, try again later")
 	}
-	ch := make(chan gossipObject)
+	ch := make(chan gossipObject, 1024)
 	g.notifiers = append(g.notifiers, ch)
 	return ch, len(g.notifiers) - 1, nil
 }
