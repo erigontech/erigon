@@ -430,7 +430,7 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
-
+					fmt.Println("OI")
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
 				MainLoop:
