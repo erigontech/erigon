@@ -792,9 +792,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		defer ac.Close()
 		sd := libstate.NewSharedDomains(tx, logger)
 		defer sd.Close()
-		if _, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), ""); err != nil {
+		rootHash, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "")
+		if err != nil {
 			return err
 		}
+		logger.Info("Commitment done", "tx", sd.TxNum(), "block", sd.BlockNum(), "root", rootHash)
 		if err := sd.Flush(ctx, tx); err != nil {
 			return err
 		}
@@ -813,9 +815,11 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			defer logEvery.Stop()
 
 			cc := context.Background()
-			if _, err = ac.Prune(cc, tx, math.MaxUint64, logEvery); err != nil {
+			stat, err := ac.Prune(cc, tx, math.MaxUint64, logEvery)
+			if err != nil {
 				return err
 			}
+			logger.Info("prune finished", "stat", stat.String())
 			return err
 		}); err != nil {
 			return err
@@ -851,21 +855,21 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	for i := 0; i < 10; i++ {
-		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
-			ac := agg.MakeContext()
-			defer ac.Close()
+	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		ac := agg.MakeContext()
+		defer ac.Close()
 
-			logEvery := time.NewTicker(30 * time.Second)
-			defer logEvery.Stop()
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
 
-			if _, err = ac.Prune(context.Background(), tx, math.MaxUint64, logEvery); err != nil {
-				return err
-			}
-			return err
-		}); err != nil {
+		stat, err := ac.Prune(context.Background(), tx, math.MaxUint64, logEvery)
+		if err != nil {
 			return err
 		}
+		logger.Info("aftermath prune finished", "stat", stat.String())
+		return err
+	}); err != nil {
+		return err
 	}
 
 	if err = agg.MergeLoop(ctx); err != nil {
