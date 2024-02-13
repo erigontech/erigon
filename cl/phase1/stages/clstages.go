@@ -372,7 +372,7 @@ func ConsensusClStages(ctx context.Context,
 								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 
 								select {
-								case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 2):
+								case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 4):
 								case <-ctx.Done():
 									return
 								}
