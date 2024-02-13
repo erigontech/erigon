@@ -34,8 +34,6 @@ func (g *gossipNotifier) notify(t string, data []byte, pid string) {
 	defer g.mu.Unlock()
 
 	for _, ch := range g.notifiers {
-		if t == gossip.TopicNameBeaconBlock {
-		}
 		ch <- gossipObject{
 			data: data,
 			t:    t,
