@@ -407,7 +407,6 @@ func ConsensusClStages(ctx context.Context,
 							defer ticker.Stop()
 							for {
 								if cfg.forkChoice.HighestSeen() >= args.targetSlot {
-									fmt.Println("end", args.targetSlot)
 									return
 								}
 								blocks, err := sourceFunc(ctx, nil, args.seenSlot+1, 11)
@@ -431,7 +430,6 @@ func ConsensusClStages(ctx context.Context,
 						return err
 					}
 					defer tx.Rollback()
-					fmt.Println("OI")
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
 				MainLoop:
@@ -443,18 +441,15 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
-								fmt.Println("Hey")
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.Block.HashSSZ()
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 									continue
 								}
-								start := time.Now()
 								if err := processBlock(tx, block, true, true); err != nil {
 									log.Error("bad blocks segment received", "err", err)
 									continue
 								}
-								fmt.Println("block", block.Block.Slot, "took", time.Since(start))
 
 								// publish block to event handler
 								cfg.emitter.Publish("block", map[string]any{

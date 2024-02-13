@@ -116,7 +116,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			"peers", count.Active,
 			"slot", block.Block.Slot,
 		)
-		fmt.Println("block slot", block.Block.Slot)
 		g.gossipSource.InsertBlock(ctx, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid})
 
 	case gossip.TopicNameSyncCommitteeContributionAndProof:
@@ -216,7 +215,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 		}
 
 		if data.Name == gossip.TopicNameBeaconBlock {
-			fmt.Println("Oh Oh")
 			blocksCh <- data
 		} else {
 			operationsCh <- data

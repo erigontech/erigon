@@ -35,7 +35,6 @@ func (g *gossipNotifier) notify(t string, data []byte, pid string) {
 
 	for _, ch := range g.notifiers {
 		if t == gossip.TopicNameBeaconBlock {
-			fmt.Println("XXNX")
 		}
 		ch <- gossipObject{
 			data: data,
