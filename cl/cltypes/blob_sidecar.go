@@ -8,13 +8,7 @@ import (
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
 
-const MAX_BLOBS_PER_BLOCK = 4096
 const BRANCH_SIZE = 17
-const (
-	MAX_REQUEST_BLOCKS_DENEB  = 128
-	MAX_REQUEST_BLOB_SIDECARS = MAX_REQUEST_BLOCKS_DENEB * MAX_BLOBS_PER_BLOCK
-	BLOB_SIDECAR_SUBNET_COUNT = 6
-)
 
 type BlobSidecar struct {
 	Index                    uint64                   `json:"index,string"`
@@ -25,10 +19,10 @@ type BlobSidecar struct {
 	CommitmentInclusionProof solid.HashVectorSSZ      `json:"proof"`
 }
 
-func NewBlobSidecar(index uint64, blob Blob, kzgCommitment libcommon.Bytes48, kzgProof libcommon.Bytes48, signedBlockHeader *SignedBeaconBlockHeader, commitmentInclusionProof solid.HashVectorSSZ) *BlobSidecar {
+func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, kzgProof libcommon.Bytes48, signedBlockHeader *SignedBeaconBlockHeader, commitmentInclusionProof solid.HashVectorSSZ) *BlobSidecar {
 	return &BlobSidecar{
 		Index:                    index,
-		Blob:                     blob,
+		Blob:                     *blob,
 		KzgCommitment:            kzgCommitment,
 		KzgProof:                 kzgProof,
 		SignedBlockHeader:        new(SignedBeaconBlockHeader),
@@ -60,7 +54,8 @@ func (b *BlobSidecar) HashSSZ() ([32]byte, error) {
 }
 
 func (b *BlobSidecar) Clone() clonable.Clonable {
-	return NewBlobSidecar(b.Index, b.Blob, b.KzgCommitment, b.KzgProof, b.SignedBlockHeader, b.CommitmentInclusionProof)
+	blob := &Blob{}
+	return NewBlobSidecar(b.Index, blob, b.KzgCommitment, b.KzgProof, b.SignedBlockHeader, b.CommitmentInclusionProof)
 }
 
 func (b *BlobSidecar) getSchema() []interface{} {
