@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"sync"
 
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
@@ -29,6 +30,7 @@ func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) Mes
 type messageListener struct {
 	logger       log.Logger
 	sentryClient direct.SentryClient
+	observersMu  sync.Mutex
 	observers    map[protosentry.MessageId]map[messageObserver]struct{}
 }
 
@@ -37,19 +39,31 @@ func (ml *messageListener) Listen(ctx context.Context) {
 }
 
 func (ml *messageListener) RegisterBlockHeaders66(observer messageObserver) {
-	msgId := protosentry.MessageId_BLOCK_HEADERS_66
-	if observers, ok := ml.observers[msgId]; ok {
+	ml.register(observer, protosentry.MessageId_BLOCK_HEADERS_66)
+}
+
+func (ml *messageListener) UnregisterBlockHeaders66(observer messageObserver) {
+	ml.unregister(observer, protosentry.MessageId_BLOCK_HEADERS_66)
+}
+
+func (ml *messageListener) register(observer messageObserver, messageId protosentry.MessageId) {
+	ml.observersMu.Lock()
+	defer ml.observersMu.Unlock()
+
+	if observers, ok := ml.observers[messageId]; ok {
 		observers[observer] = struct{}{}
 	} else {
-		ml.observers[msgId] = map[messageObserver]struct{}{
+		ml.observers[messageId] = map[messageObserver]struct{}{
 			observer: {},
 		}
 	}
 }
 
-func (ml *messageListener) UnregisterBlockHeaders66(observer messageObserver) {
-	msgId := protosentry.MessageId_BLOCK_HEADERS_66
-	if observers, ok := ml.observers[msgId]; ok {
+func (ml *messageListener) unregister(observer messageObserver, messageId protosentry.MessageId) {
+	ml.observersMu.Lock()
+	defer ml.observersMu.Unlock()
+
+	if observers, ok := ml.observers[messageId]; ok {
 		delete(observers, observer)
 	}
 }
@@ -98,6 +112,9 @@ func (ml *messageListener) handleInboundMessageHandler() sentrymulticlient.Inbou
 }
 
 func (ml *messageListener) notifyObservers(msg *protosentry.InboundMessage) {
+	ml.observersMu.Lock()
+	defer ml.observersMu.Unlock()
+
 	observers, ok := ml.observers[msg.Id]
 	if !ok {
 		return
