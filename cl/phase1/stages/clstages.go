@@ -444,7 +444,7 @@ func ConsensusClStages(ctx context.Context,
 							for _, block := range blocks.Data {
 								fmt.Println("Hey")
 								// we can ignore this error because the block would not process if the hashssz failed
-								blockRoot, _ := block.HashSSZ()
+								blockRoot, _ := block.Block.HashSSZ()
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 									continue
 								}
