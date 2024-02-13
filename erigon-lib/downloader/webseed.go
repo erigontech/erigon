@@ -181,16 +181,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	//TODO:
 	// - what to do if node already synced?
 
-	fileName := func(name string) string {
-		name, _ = strings.CutSuffix(name, filepath.Ext(name))
-		return name
-	}
-
 	for name, tUrls := range urlsByName {
-		if ignore.Contains(fileName(name)) {
-			continue
-		}
-
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
 			continue
