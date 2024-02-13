@@ -65,7 +65,7 @@ func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
 	if len(g.notifiers) >= maxSubscribers {
 		return nil, -1, fmt.Errorf("too many subsribers, try again later")
 	}
-	ch := make(chan gossipObject, 1024)
+	ch := make(chan gossipObject, 1<<16)
 	g.notifiers = append(g.notifiers, ch)
 	return ch, len(g.notifiers) - 1, nil
 }
