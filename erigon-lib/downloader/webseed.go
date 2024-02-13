@@ -179,7 +179,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
 
-	log.Warn("[dbg] trying .torrent from webseed", "name", fmt.Sprintf("%#v", urlsByName))
 	for name, tUrls := range urlsByName {
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
@@ -209,7 +208,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		e.Go(func() error {
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
-				log.Warn("[dbg] got .torrent from webseed", "name", name, "err", err, "url", url)
 				if err != nil {
 					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
 					continue
