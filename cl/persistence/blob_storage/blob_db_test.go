@@ -38,11 +38,11 @@ func TestBlobWriterAndReader(t *testing.T) {
 
 	// Read the sidecar from the storage
 	blockRoot, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
-	readSidecar, err := bs.ReadBlobsByBlockRoot(blockRoot)
+	readSidecars, err := bs.ReadBlobsByBlockRoot(blockRoot)
 	require.NoError(t, err)
 
 	// Check that the read sidecar is the same as the written sidecar
-	require.Equal(t, sidecar, readSidecar)
+	require.Equal(t, []*cltypes.BlobSidecar{sidecar}, readSidecars)
 }
 
 func TestRetrieveBlobsAndProofs(t *testing.T) {
@@ -62,7 +62,7 @@ func TestRetrieveBlobsAndProofs(t *testing.T) {
 	}
 
 	blockRoot, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
-	bs.blockRootToSidecar.Store(blockRoot, sidecar)
+	bs.WriteBlob(sidecar)
 
 	// Call retrieveBlobsAndProofs with the block root of the stored sidecar
 	blobs, proofs, err := bs.retrieveBlobsAndProofs(blockRoot)
