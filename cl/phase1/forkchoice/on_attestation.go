@@ -107,11 +107,7 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 		log.Warn("invalid aggregate and proof")
 		return fmt.Errorf("invalid aggregate and proof")
 	}
-	if err := f.validateOnAttestation(aggregateAndProof.Message.Aggregate, false); err != nil {
-		return err
-	}
-	f.scheduleAttestationForLaterProcessing(aggregateAndProof.Message.Aggregate, false)
-	return nil
+	return f.OnAttestation(aggregateAndProof.Message.Aggregate, false, false)
 }
 
 type attestationJob struct {
