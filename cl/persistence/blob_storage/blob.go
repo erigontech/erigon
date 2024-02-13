@@ -51,7 +51,7 @@ func rootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainC
 	return split[0], buffer.String()
 }
 
-func (a *aferoBlobStorage) BlobWriter(blobSidecar *cltypes.BlobSidecar) error {
+func (a *aferoBlobStorage) WriteBlob(blobSidecar *cltypes.BlobSidecar) error {
 	slot := blobSidecar.SignedBlockHeader.Header.Slot
 	blockRoot, _ := blobSidecar.SignedBlockHeader.Header.HashSSZ()
 
@@ -73,7 +73,7 @@ func (a *aferoBlobStorage) BlobWriter(blobSidecar *cltypes.BlobSidecar) error {
 }
 
 // BlobSidecarReader retrieves a single BlobSidecar by its root
-func (a *aferoBlobStorage) BlobReader(blockRoot [32]byte) (*cltypes.BlobSidecar, error) {
+func (a *aferoBlobStorage) ReadBlobsByBlockRoot(blockRoot [32]byte) (*cltypes.BlobSidecar, error) {
 	blobSidecar, err := a.getBlobSidecarsForBlockRoot(blockRoot)
 	if err != nil {
 		return nil, err

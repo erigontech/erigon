@@ -33,12 +33,12 @@ func TestBlobWriterAndReader(t *testing.T) {
 		CommitmentInclusionProof: solid.NewHashVector(17),
 	}
 
-	err := bs.BlobWriter(sidecar)
+	err := bs.WriteBlob(sidecar)
 	require.NoError(t, err)
 
 	// Read the sidecar from the storage
 	blockRoot, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
-	readSidecar, err := bs.BlobReader(blockRoot)
+	readSidecar, err := bs.ReadBlobsByBlockRoot(blockRoot)
 	require.NoError(t, err)
 
 	// Check that the read sidecar is the same as the written sidecar
