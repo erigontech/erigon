@@ -2154,7 +2154,9 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	dc.MaxStep = max(dc.MaxStep, other.MaxStep)
 	dc.Values += other.Values
 	if dc.History == nil {
-		dc.History = other.History
+		if other.History != nil {
+			dc.History = other.History
+		}
 	} else {
 		dc.History.Accumulate(other.History)
 	}

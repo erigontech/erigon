@@ -796,7 +796,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		if err != nil {
 			return err
 		}
-		logger.Info("Commitment done", "tx", sd.TxNum(), "block", sd.BlockNum(), "root", rootHash)
+		logger.Info("Commitment done", "tx", sd.TxNum(), "block", sd.BlockNum(), "root", fmt.Sprintf("%x", rootHash))
 		if err := sd.Flush(ctx, tx); err != nil {
 			return err
 		}
