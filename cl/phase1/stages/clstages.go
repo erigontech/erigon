@@ -301,6 +301,7 @@ func ConsensusClStages(ctx context.Context,
 									return highestSlotProcessed, highestBlockRootProcessed, err
 								}
 								enc = append([]byte{versionByte}, append(block.Block.ParentRoot[:], enc...)...)
+								enc = utils.CompressSnappy(enc)
 
 								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(executionPayload.BlockNumber, executionPayloadRoot), enc); err != nil {
 									return highestSlotProcessed, highestBlockRootProcessed, err
