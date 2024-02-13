@@ -138,8 +138,6 @@ func (l *JSONLogger) OnStorageChange(a libcommon.Address, k *libcommon.Hash, pre
 
 func (l *JSONLogger) OnLog(log *types.Log) {}
 
-func (l *JSONLogger) OnNewAccount(a libcommon.Address, reset bool) {}
-
 func (l *JSONLogger) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 

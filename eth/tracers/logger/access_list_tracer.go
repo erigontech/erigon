@@ -256,8 +256,6 @@ func (a *AccessListTracer) OnStorageChange(addr libcommon.Address, k *libcommon.
 
 func (a *AccessListTracer) OnLog(log *types.Log) {}
 
-func (a *AccessListTracer) OnNewAccount(addr libcommon.Address, reset bool) {}
-
 func (a *AccessListTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 

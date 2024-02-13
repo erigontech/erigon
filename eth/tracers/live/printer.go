@@ -131,10 +131,6 @@ func (p *Printer) OnLog(l *types.Log) {
 	fmt.Printf("OnLog: l=%s\n", buf)
 }
 
-func (p *Printer) OnNewAccount(a libcommon.Address, reset bool) {
-	fmt.Printf("OnNewAccount: a=%v\n", a)
-}
-
 func (p *Printer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {
 	fmt.Printf("OnGasChange: old=%v, new=%v, diff=%v\n", old, new, new-old)
 }

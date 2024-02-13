@@ -69,8 +69,6 @@ func (t *DefaultTracer) OnStorageChange(addr libcommon.Address, k *libcommon.Has
 
 func (t *DefaultTracer) OnLog(log *types.Log) {}
 
-func (t *DefaultTracer) OnNewAccount(addr libcommon.Address, reset bool) {}
-
 func (t *DefaultTracer) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
 }
 

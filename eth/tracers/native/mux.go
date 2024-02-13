@@ -209,12 +209,6 @@ func (t *muxTracer) OnLog(log *types.Log) {
 	}
 }
 
-func (t *muxTracer) OnNewAccount(a libcommon.Address, reset bool) {
-	for _, t := range t.tracers {
-		t.OnNewAccount(a, reset)
-	}
-}
-
 // Stop terminates execution of the tracer at the first opportune moment.
 func (t *muxTracer) Stop(err error) {
 	for _, t := range t.tracers {
