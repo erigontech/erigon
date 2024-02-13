@@ -116,9 +116,6 @@ func ExecuteBlockEphemerally(
 	ibs.SetLogger(bcLogger)
 	header := block.Header()
 
-	rules := chainConfig.Rules(block.NumberU64(), block.Time())
-	ibs.PrepareBlock(vm.ActivePrecompiles(rules))
-
 	usedGas := new(uint64)
 	usedBlobGas := new(uint64)
 	gp := new(GasPool)

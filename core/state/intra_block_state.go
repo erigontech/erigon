@@ -98,9 +98,6 @@ type IntraBlockState struct {
 	// Transient storage
 	transientStorage transientStorage
 
-	// Enabled precompile contracts
-	precompiles map[libcommon.Address]struct{}
-
 	// Journal of state modifications. This is the backbone of
 	// Snapshot and RevertToSnapshot.
 	journal        *journal
@@ -119,7 +116,6 @@ func New(stateReader StateReader) *IntraBlockState {
 		stateObjectsDirty: map[libcommon.Address]struct{}{},
 		nilAccounts:       map[libcommon.Address]struct{}{},
 		logs:              map[libcommon.Hash][]*types.Log{},
-		precompiles:       make(map[libcommon.Address]struct{}),
 		journal:           newJournal(),
 		accessList:        newAccessList(),
 		transientStorage:  newTransientStorage(),
@@ -557,11 +553,7 @@ func (sdb *IntraBlockState) createObject(addr libcommon.Address, previous *state
 	var original *accounts.Account
 
 	if sdb.logger != nil {
-		// Precompiled contracts are touched during a call.
-		// Make sure we avoid emitting a new account event for them.
-		if _, ok := sdb.precompiles[addr]; !ok {
-			sdb.logger.OnNewAccount(addr, previous != nil)
-		}
+		sdb.logger.OnNewAccount(addr, previous != nil)
 	}
 
 	if previous == nil {
@@ -843,14 +835,6 @@ func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase libcomm
 	}
 	// Reset transient storage at the beginning of transaction execution
 	sdb.transientStorage = newTransientStorage()
-}
-
-// PrepareBlock prepares the statedb for execution of a block. It tracks
-// the addresses of enabled precompiles for debugging purposes.
-func (sdb *IntraBlockState) PrepareBlock(precompiles []libcommon.Address) {
-	for _, addr := range precompiles {
-		sdb.precompiles[addr] = struct{}{}
-	}
 }
 
 // AddAddressToAccessList adds the given address to the access list
