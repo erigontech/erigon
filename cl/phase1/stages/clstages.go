@@ -352,7 +352,7 @@ func ConsensusClStages(ctx context.Context,
 						"targetSlot", args.targetSlot,
 						"requestedSlots", totalRequest,
 					)
-					respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock])
+					respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
 					errCh := make(chan error)
 					sources := []persistence.BlockSource{cfg.gossipSource, rpcSource}
 
