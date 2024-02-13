@@ -1,20 +1,30 @@
 package p2p
 
-//go:generate mockgen -destination=./peer_manager_mock.go -package=p2p . PeerManager
+import (
+	"context"
+
+	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+)
+
 type PeerManager interface {
 	MaxPeers() int
 	PeersSyncProgress() PeersSyncProgress
-	Penalize(pid PeerId)
+	Penalize(ctx context.Context, pid PeerId) error
 }
 
-func NewPeerManager() PeerManager {
-	return &peerManager{}
+func NewPeerManager(sentryClient direct.SentryClient) PeerManager {
+	return &peerManager{
+		sentryClient: sentryClient,
+	}
 }
 
-type peerManager struct{}
+type peerManager struct {
+	sentryClient direct.SentryClient
+}
 
 func (pm *peerManager) MaxPeers() int {
-	//TODO implement me
+	//TODO implement me - should return max peers from p2p config
 	panic("implement me")
 }
 
@@ -23,7 +33,11 @@ func (pm *peerManager) PeersSyncProgress() PeersSyncProgress {
 	panic("implement me")
 }
 
-func (pm *peerManager) Penalize(_ PeerId) {
-	//TODO implement me
-	panic("implement me")
+func (pm *peerManager) Penalize(ctx context.Context, pid PeerId) error {
+	_, err := pm.sentryClient.PenalizePeer(ctx, &sentry.PenalizePeerRequest{
+		PeerId:  pid.H512(),
+		Penalty: sentry.PenaltyKind_Kick,
+	})
+
+	return err
 }

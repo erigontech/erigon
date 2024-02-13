@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -38,17 +39,14 @@ func newServiceTest(ctx context.Context, t *testing.T, requestIdGenerator Reques
 	ctrl := gomock.NewController(t)
 	logger := testlog.Logger(t, log.LvlTrace)
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	peerManager := NewMockPeerManager(ctrl)
 	return &serviceTest{
 		sentryClient: sentryClient,
-		peerManager:  peerManager,
-		service:      newService(ctx, logger, sentryClient, requestIdGenerator, peerManager),
+		service:      newService(ctx, logger, sentryClient, requestIdGenerator),
 	}
 }
 
 type serviceTest struct {
 	sentryClient *direct.MockSentryClient
-	peerManager  *MockPeerManager
 	service      Service
 }
 
@@ -241,9 +239,13 @@ func TestServiceDownloadHeadersShouldPenalizePeerWhenInvalidRlpErr(t *testing.T)
 	}
 	test := newServiceTest(ctx, t, newMockRequestGenerator(requestId))
 	test.mockSentryDownloadHeadersMessageStream(t, mockInboundMessages, peerId)
-	test.peerManager.
+	test.sentryClient.
 		EXPECT().
-		Penalize(gomock.Eq(peerId)).
+		PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, req *sentry.PenalizePeerRequest, _ ...grpc.CallOption) (emptypb.Empty, error) {
+			require.Equal(t, peerId.H512(), req.PeerId)
+			return emptypb.Empty{}, nil
+		}).
 		Times(1)
 
 	headers, err := test.service.DownloadHeaders(ctx, 1, 3, peerId)

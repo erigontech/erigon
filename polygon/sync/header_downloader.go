@@ -148,7 +148,14 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 						"peerId", peerId,
 					)
 
-					hd.p2pService.Penalize(peerId)
+					if err := hd.p2pService.Penalize(ctx, peerId); err != nil {
+						hd.logger.Error(
+							fmt.Sprintf("[%s] failed to penalize peer", headerDownloaderLogPrefix),
+							"peerId", peerId,
+							"err", err,
+						)
+					}
+
 					return
 				}
 

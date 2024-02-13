@@ -237,7 +237,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		// total = 7 (note this also tests caching works)
 		Times(7)
 	test.p2pService.EXPECT().
-		Penalize(gomock.Eq(p2p.PeerIdFromUint64(2))).
+		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
 		Times(1)
 	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
 	gomock.InOrder(

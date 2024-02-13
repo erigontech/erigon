@@ -15,11 +15,11 @@ type Service interface {
 	MaxPeers() int
 	PeersSyncProgress() PeersSyncProgress
 	DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
-	Penalize(peerId PeerId)
+	Penalize(ctx context.Context, peerId PeerId) error
 }
 
 func NewService(ctx context.Context, logger log.Logger, sentryClient direct.SentryClient) Service {
-	return newService(ctx, logger, sentryClient, rand.Uint64, NewPeerManager())
+	return newService(ctx, logger, sentryClient, rand.Uint64)
 }
 
 func newService(
@@ -27,11 +27,11 @@ func newService(
 	logger log.Logger,
 	sentryClient direct.SentryClient,
 	requestIdGenerator RequestIdGenerator,
-	peerManager PeerManager,
 ) Service {
 	messageListener := NewMessageListener(logger, sentryClient)
 	messageListener.Listen(ctx)
 	messageBroadcaster := NewMessageBroadcaster(sentryClient)
+	peerManager := NewPeerManager(sentryClient)
 	downloader := NewDownloader(logger, messageListener, messageBroadcaster, peerManager, requestIdGenerator)
 	return &service{
 		downloader:  downloader,
@@ -52,8 +52,8 @@ func (s service) MaxPeers() int {
 	return s.peerManager.MaxPeers()
 }
 
-func (s service) Penalize(peerId PeerId) {
-	s.peerManager.Penalize(peerId)
+func (s service) Penalize(ctx context.Context, peerId PeerId) error {
+	return s.peerManager.Penalize(ctx, peerId)
 }
 
 func (s service) PeersSyncProgress() PeersSyncProgress {

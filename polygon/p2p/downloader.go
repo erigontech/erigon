@@ -84,7 +84,10 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
 					if rlp.IsInvalidRLPError(err) {
 						d.logger.Debug("penalizing peer for invalid rlp response", "pid", pid.String())
-						d.peerManager.Penalize(pid)
+						penalizeErr := d.peerManager.Penalize(ctx, pid)
+						if penalizeErr != nil {
+							err = fmt.Errorf("%w: %w", penalizeErr, err)
+						}
 					}
 
 					return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
