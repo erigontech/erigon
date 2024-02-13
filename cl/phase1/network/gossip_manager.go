@@ -219,6 +219,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 			delete(l, k)
 		}
 		if data.Name == gossip.TopicNameBeaconBlock {
+			fmt.Println("Oh Oh")
 			blocksCh <- data
 		} else {
 			operationsCh <- data
