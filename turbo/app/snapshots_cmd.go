@@ -227,7 +227,7 @@ func doIntegrity(cliCtx *cli.Context) error {
 		return err
 	}
 
-	if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, from, to); err != nil {
+	if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, from, to, false); err != nil {
 		return err
 	}
 

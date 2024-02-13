@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64) (err error) {
+func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.FullBlockReader, from, to uint64, failFast bool) (err error) {
 	defer log.Info("[integrity] NoGapsInBorEvents: done", "err", err)
 
 	var cc *chain.Config
@@ -85,7 +85,11 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 			block := binary.BigEndian.Uint64(word[length.Hash : length.Hash+length.BlockNum])
 
 			if prevEventId > 0 && eventId != prevEventId+1 {
-				return fmt.Errorf("missing bor event %d at block=%d", eventId, block)
+				if failFast {
+					return fmt.Errorf("missing bor event %d at block=%d", eventId, block)
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: missing bor event", "event", eventId, "block", block)
 			}
 
 			if prevEventId == 0 {
@@ -97,26 +101,41 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 					header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
 
 					if err != nil {
-						return fmt.Errorf("can't get header for block %d: %w", block, err)
+						if failFast {
+							return fmt.Errorf("can't get header for block %d: %w", block, err)
+						}
+
+						log.Error("[integrity] NoGapsInBorEvents: can't get header for block", "block", block, "err", err)
 					}
 
 					events, err := blockReader.EventsByBlock(ctx, tx, header.Hash(), header.Number.Uint64())
 
 					if err != nil {
-						return fmt.Errorf("can't get events for block %d: %w", block, err)
+						if failFast {
+							return fmt.Errorf("can't get events for block %d: %w", block, err)
+						}
+
+						log.Error("[integrity] NoGapsInBorEvents: can't get events for block", "block", block, "err", err)
 					}
 
 					if prevBlockStartId != 0 {
 						if len(events) != int(eventId-prevBlockStartId) {
-							return fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
+							if failFast {
+								return fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
+							}
+
+							log.Error("[integrity] NoGapsInBorEvents: block event mismatch", "block", block, "expected", eventId-prevBlockStartId, "got", len(events))
 						}
 					}
 
 					for i, event := range events {
 						if t := bor.EventTime(event); !checkBlockWindow(ctx, t, config, header, tx, blockReader) {
 							from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
-							fmt.Println(block, i, from, t, to)
-							//return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", t, prevBlockStartId+uint64(i), block, from, to)
+							if failFast {
+								return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", t, prevBlockStartId+uint64(i), block, from, to)
+							}
+
+							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", prevBlockStartId+uint64(i), "time", t, "expected", fmt.Sprintf("%s-%s", from, to))
 						}
 					}
 
