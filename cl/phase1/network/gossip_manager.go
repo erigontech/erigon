@@ -174,8 +174,41 @@ func (g *GossipManager) Start(ctx context.Context) {
 	if err != nil {
 		return
 	}
-
+	operationsCh := make(chan *sentinel.GossipData, 1<<16)
+	blocksCh := make(chan *sentinel.GossipData, 1<<16)
 	l := log.Ctx{}
+
+	// Start a goroutine that listens for new gossip messages and sends them to the operations processor.
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case data := <-operationsCh:
+				err = g.onRecv(ctx, data, l)
+				if err != nil {
+					l["err"] = err
+					log.Debug("[Beacon Gossip] Recoverable Error", l)
+				}
+			}
+		}
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case data := <-blocksCh:
+				err = g.onRecv(ctx, data, l)
+				if err != nil {
+					l["err"] = err
+					log.Debug("[Beacon Gossip] Recoverable Error", l)
+				}
+			}
+		}
+	}()
+
 	for {
 		data, err := subscription.Recv()
 		if err != nil {
@@ -185,10 +218,10 @@ func (g *GossipManager) Start(ctx context.Context) {
 		for k := range l {
 			delete(l, k)
 		}
-		err = g.onRecv(ctx, data, l)
-		if err != nil {
-			l["err"] = err
-			log.Debug("[Beacon Gossip] Recoverable Error", l)
+		if data.Name == gossip.TopicNameBeaconBlock {
+			blocksCh <- data
+		} else {
+			operationsCh <- data
 		}
 	}
 }
