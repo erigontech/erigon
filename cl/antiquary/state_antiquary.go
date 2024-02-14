@@ -200,7 +200,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 	// Go back a little bit
 	if progress > s.cfg.SlotsPerEpoch*2 {
-		progress -= s.cfg.SlotsPerEpoch * 2
+		progress -= s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump
 	} else {
 		progress = 0
 	}
@@ -233,6 +233,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.fs, s.genesisState)
 			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
 			if err != nil {
+				s.currentState = nil
 				return fmt.Errorf("failed to read historical state at slot %d: %w", progress, err)
 			}
 			end := time.Since(start)

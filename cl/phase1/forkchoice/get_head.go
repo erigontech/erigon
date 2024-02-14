@@ -10,11 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
-// GetHead fetches the current head.
-func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
-	return f.getHead()
-}
-
 // accountWeights updates the weights of the validators, given the vote and given an head leaf.
 func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint64, justifedRoot, leaf libcommon.Hash) {
 	curr := leaf
@@ -32,7 +27,7 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 	return
 }
 
-func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
+func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
 	f.mu.RLock()
 	if f.headHash != (libcommon.Hash{}) {
 		f.mu.RUnlock()

@@ -2,7 +2,6 @@ package forkchoice
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/erigon/cl/transition"
 
@@ -102,9 +101,6 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		return state.(*checkpointState), nil
 	}
 
-	start := time.Now()
-	f.mu.RLock()
-	defer f.mu.RUnlock()
 	// If it is not in cache compute it and then put in cache.
 	baseState, err := f.forkGraph.GetState(checkpoint.BlockRoot(), true)
 	if err != nil {
@@ -132,6 +128,5 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 		mixes, baseState.GenesisValidatorsRoot(), baseState.Fork(), baseState.GetTotalActiveBalance(), state.Epoch(baseState.BeaconState))
 	// Cache in memory what we are left with.
 	f.checkpointStates.Store(checkpointComparable(checkpoint), checkpointState)
-	fmt.Println("getCheckpointState", time.Since(start))
 	return checkpointState, nil
 }

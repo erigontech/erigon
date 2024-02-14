@@ -75,15 +75,12 @@ func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
 type forkGraphDisk struct {
 	// Alternate beacon states
 	fs        afero.Fs
-	blocks    sync.Map                    // set of blocks (block root -> block)
-	headers   sync.Map                    // set of headers
-	badBlocks map[libcommon.Hash]struct{} // blocks that are invalid and that leads to automatic fail of extension.
+	blocks    sync.Map // set of blocks (block root -> block)
+	headers   sync.Map // set of headers
+	badBlocks sync.Map // blocks that are invalid and that leads to automatic fail of extension.
 
 	// current state data
 	currentState *state.CachingBeaconState
-
-	// saveStates are indexed by block index
-	saveStates map[libcommon.Hash]savedStateRecord
 
 	// for each block root we also keep track of te equivalent current justified and finalized checkpoints for faster head retrieval.
 	currentJustifiedCheckpoints map[libcommon.Hash]solid.Checkpoint
@@ -125,10 +122,8 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// storage
-		badBlocks: make(map[libcommon.Hash]struct{}),
 		// current state data
 		currentState:   anchorState,
-		saveStates:     make(map[libcommon.Hash]savedStateRecord),
 		syncCommittees: make(map[libcommon.Hash]syncCommittees),
 		// checkpoints trackers
 		currentJustifiedCheckpoints: make(map[libcommon.Hash]solid.Checkpoint),
@@ -164,13 +159,12 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Blocks below anchors are invalid.
 	if block.Slot <= f.anchorSlot {
 		log.Debug("block below anchor slot", "slot", block.Slot, "hash", libcommon.Hash(blockRoot))
-		f.badBlocks[blockRoot] = struct{}{}
+		f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 		return nil, BelowAnchor, nil
 	}
 	// Check if block being process right now was marked as invalid.
-	if _, ok := f.badBlocks[blockRoot]; ok {
+	if _, ok := f.badBlocks.Load(libcommon.Hash(blockRoot)); ok {
 		log.Debug("block has invalid parent", "slot", block.Slot, "hash", libcommon.Hash(blockRoot))
-		f.badBlocks[blockRoot] = struct{}{}
 		return nil, InvalidBlock, nil
 	}
 
@@ -215,7 +209,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 		// Add block to list of invalid blocks
 		log.Debug("Invalid beacon block", "reason", invalidBlockErr)
-		f.badBlocks[blockRoot] = struct{}{}
+		f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 		f.currentState = nil
 
 		return nil, InvalidBlock, invalidBlockErr
@@ -253,7 +247,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err := f.dumpBeaconStateOnDisk(newState, blockRoot); err != nil {
 			return nil, LogisticError, err
 		}
-		f.saveStates[blockRoot] = savedStateRecord{slot: newState.Slot()}
 	}
 
 	// Lastly add checkpoints to caches as well.
@@ -344,7 +337,7 @@ func (f *forkGraphDisk) GetFinalizedCheckpoint(blockRoot libcommon.Hash) (solid.
 }
 
 func (f *forkGraphDisk) MarkHeaderAsInvalid(blockRoot libcommon.Hash) {
-	f.badBlocks[blockRoot] = struct{}{}
+	f.badBlocks.Store(blockRoot, struct{}{})
 }
 
 func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
@@ -370,13 +363,12 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 
 	f.lowestAvaiableSlot = pruneSlot + 1
 	for _, root := range oldRoots {
-		delete(f.badBlocks, root)
+		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
 		f.lightclientBootstraps.Delete(root)
 		delete(f.currentJustifiedCheckpoints, root)
 		delete(f.finalizedCheckpoints, root)
 		f.headers.Delete(root)
-		delete(f.saveStates, root)
 		delete(f.syncCommittees, root)
 		delete(f.blockRewards, root)
 		f.fs.Remove(getBeaconStateFilename(root))

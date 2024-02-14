@@ -26,7 +26,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 		return nil
 	}
 
-	headHash, _, err := f.getHead()
+	headHash, _, err := f.GetHead()
 	if err != nil {
 		return err
 	}
@@ -102,7 +102,7 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return fmt.Errorf("proposee slashing headers are the same")
 	}
 
-	headHash, _, err := f.getHead()
+	headHash, _, err := f.GetHead()
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 	change := signedChange.Message
 
-	headHash, _, err := f.getHead()
+	headHash, _, err := f.GetHead()
 	if err != nil {
 		return err
 	}
@@ -246,7 +246,7 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	next_slot_epoch := f.computeEpochAtSlot(f.Slot() + 1)
-	headHash, _, err := f.getHead()
+	headHash, _, err := f.GetHead()
 	if err != nil {
 		return err
 	}
