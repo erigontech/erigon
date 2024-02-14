@@ -883,6 +883,9 @@ type AggregatorPruneStat struct {
 }
 
 func (as *AggregatorPruneStat) String() string {
+	if as == nil {
+		return ""
+	}
 	names := make([]string, 0)
 	for k := range as.Domains {
 		names = append(names, k)
@@ -927,6 +930,17 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 			as.Indices[k].Accumulate(v)
 		}
 	}
+}
+
+// ResetPruneProgress invalidates all pruning progress.
+// Needed in case of any unwinding or resetting of the DB.
+func (ac *AggregatorV3Context) ResetPruneProgress(rwTx kv.RwTx) error {
+	for _, dc := range []*DomainContext{ac.account, ac.storage, ac.code, ac.commitment} {
+		if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, nil); err != nil {
+			return fmt.Errorf("save domain pruning progress: %s, %w", dc.d.filenameBase, err)
+		}
+	}
+	return nil
 }
 
 func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {

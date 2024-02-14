@@ -162,14 +162,22 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 			defer ct.Close()
 			doms := state.NewSharedDomains(tx, logger)
 			defer doms.Close()
-			blockNum := doms.BlockNum()
-			if blockNum > 0 {
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
+
+			if err := ct.ResetPruneProgress(tx); err != nil {
+				return err
 			}
+
+			// TODO questionable, no writes done, what we are flushing?
+			blockNum := doms.BlockNum()
+			//if blockNum > 0 {
+			//	if err := doms.Flush(ctx, tx); err != nil {
+			//		return err
+			//	}
+			//}
+			// <--- todo
+
 			_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
-			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum())
+			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum(), "filesMinimax", agg.EndTxNumMinimax())
 		}
 
 		return nil
