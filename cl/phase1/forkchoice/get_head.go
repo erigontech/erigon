@@ -7,12 +7,11 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
 // GetHead fetches the current head.
 func (f *ForkChoiceStore) GetHead() (libcommon.Hash, uint64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	return f.getHead()
 }
 
@@ -34,17 +33,25 @@ func (f *ForkChoiceStore) accountWeights(votes, weights map[libcommon.Hash]uint6
 }
 
 func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
+	f.mu.RLock()
 	if f.headHash != (libcommon.Hash{}) {
+		f.mu.RUnlock()
 		return f.headHash, f.headSlot, nil
 	}
-	// Retrieve att
-	f.headHash = f.justifiedCheckpoint.BlockRoot()
-	blocks := f.getFilteredBlockTree(f.headHash)
+	f.mu.RUnlock()
+	// Take write lock here
+
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	// See which validators can be used for attestation score
-	justificationState, err := f.getCheckpointState(f.justifiedCheckpoint)
+	justificationState, err := f.getCheckpointState(justifiedCheckpoint)
 	if err != nil {
 		return libcommon.Hash{}, 0, err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Retrieve att
+	f.headHash = justifiedCheckpoint.BlockRoot()
+	blocks := f.getFilteredBlockTree(f.headHash)
 	// Do a simple scan to determine the fork votes.
 	votes := make(map[libcommon.Hash]uint64)
 	for validatorIndex, message := range f.latestMessages {
@@ -62,14 +69,15 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 		}
 		votes[message.Root] += justificationState.balances[validatorIndex]
 	}
-	if f.proposerBoostRoot != (libcommon.Hash{}) {
+	boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
+	if boostRoot != (libcommon.Hash{}) {
 		boost := justificationState.activeBalance / justificationState.beaconConfig.SlotsPerEpoch
-		votes[f.proposerBoostRoot] += (boost * justificationState.beaconConfig.ProposerScoreBoost) / 100
+		votes[boostRoot] += (boost * justificationState.beaconConfig.ProposerScoreBoost) / 100
 	}
 	// Account for weights on each head fork
 	f.weights = make(map[libcommon.Hash]uint64)
 	for head := range f.headSet {
-		f.accountWeights(votes, f.weights, f.justifiedCheckpoint.BlockRoot(), head)
+		f.accountWeights(votes, f.weights, justifiedCheckpoint.BlockRoot(), head)
 	}
 
 	for {
@@ -90,6 +98,7 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 			f.headSlot = header.Slot
 			return f.headHash, f.headSlot, nil
 		}
+
 		// Average case scenario.
 		if len(children) == 1 {
 			f.headHash = children[0]
@@ -101,7 +110,6 @@ func (f *ForkChoiceStore) getHead() (libcommon.Hash, uint64, error) {
 			childB := children[j]
 			return bytes.Compare(childA[:], childB[:]) < 0
 		})
-
 		// After sorting is done determine best fit.
 		f.headHash = children[0]
 		maxWeight := f.weights[children[0]]
@@ -148,12 +156,14 @@ func (f *ForkChoiceStore) getWeight(root libcommon.Hash, indicies []uint64, stat
 		}
 		attestationScore += state.balances[validatorIndex]
 	}
-	if f.proposerBoostRoot == (libcommon.Hash{}) {
+
+	boostRoot := f.proposerBoostRoot.Load().(libcommon.Hash)
+	if boostRoot == (libcommon.Hash{}) {
 		return attestationScore
 	}
 
 	// Boost is applied if root is an ancestor of proposer_boost_root
-	if f.Ancestor(f.proposerBoostRoot, header.Slot) == root {
+	if f.Ancestor(boostRoot, header.Slot) == root {
 		committeeWeight := state.activeBalance / state.beaconConfig.SlotsPerEpoch
 		attestationScore += (committeeWeight * state.beaconConfig.ProposerScoreBoost) / 100
 	}
@@ -175,6 +185,8 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	if !has {
 		return false
 	}
+	finalizedCheckpoint := f.finalizedCheckpoint.Load().(solid.Checkpoint)
+	justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 	children := f.children(blockRoot)
 	// If there are children iterate down recursively and see which branches are viable.
 	if len(children) > 0 {
@@ -199,8 +211,8 @@ func (f *ForkChoiceStore) getFilterBlockTree(blockRoot libcommon.Hash, blocks ma
 	}
 
 	genesisEpoch := f.beaconCfg.GenesisEpoch
-	if (f.justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(f.justifiedCheckpoint)) &&
-		(f.finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(f.finalizedCheckpoint)) {
+	if (justifiedCheckpoint.Epoch() == genesisEpoch || currentJustifiedCheckpoint.Equal(justifiedCheckpoint)) &&
+		(finalizedCheckpoint.Epoch() == genesisEpoch || finalizedJustifiedCheckpoint.Equal(finalizedCheckpoint)) {
 		blocks[blockRoot] = header
 		return true
 	}

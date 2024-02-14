@@ -186,7 +186,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				l := log.Ctx{}
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error")
+					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 				}
 			}
 		}
@@ -201,7 +201,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				l := log.Ctx{}
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", l)
+					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 				}
 			}
 		}

@@ -25,37 +25,32 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 		f.emitters.Publish("voluntary_exit", voluntaryExit)
 		return nil
 	}
-	f.mu.Lock()
 
 	headHash, _, err := f.getHead()
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 
 	if s == nil {
-		f.mu.Unlock()
 		return errors.New("OnVoluntaryExit: state is nil")
 	}
 
 	val, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 
 	if val.ExitEpoch() != f.beaconCfg.FarFutureEpoch {
-		f.mu.Unlock()
 		return nil
 	}
 
 	pk := val.PublicKey()
-	f.mu.Unlock()
 
 	domainType := f.beaconCfg.DomainVoluntaryExit
 	var domain []byte
@@ -108,15 +103,15 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 	}
 
 	// Take lock as we interact with state.
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	fmt.Println("prp")
 	headHash, _, err := f.getHead()
 	if err != nil {
 		return err
 	}
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
@@ -174,14 +169,13 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 	change := signedChange.Message
 
-	// Take lock as we interact with state.
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
 	headHash, _, err := f.getHead()
 	if err != nil {
 		return err
 	}
+	// Take lock as we interact with state.
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		return err
@@ -253,16 +247,16 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// Take lock as we interact with state.
-	f.mu.Lock()
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	next_slot_epoch := f.computeEpochAtSlot(f.Slot() + 1)
 	headHash, _, err := f.getHead()
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 
@@ -278,10 +272,8 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	genesisValidatorRoot := s.GenesisValidatorsRoot()
 	declaredValidator := s.Validators().Get(int(contribution_and_proof.AggregatorIndex))
 	if contribution.Slot() == f.Slot() {
-		f.mu.Unlock()
 		return nil
 	}
-	f.mu.Unlock()
 
 	if !test {
 		found := false

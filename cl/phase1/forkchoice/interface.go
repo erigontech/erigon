@@ -38,8 +38,6 @@ type ForkChoiceStorageReader interface {
 	BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool)
 	TotalActiveBalance(root libcommon.Hash) (uint64, bool)
 
-	GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error)
-	GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	ForkNodes() []ForkNode
 	Synced() bool
 	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)

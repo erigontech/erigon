@@ -18,7 +18,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
-	"golang.org/x/exp/slices"
 )
 
 type syncCommittees struct {
@@ -80,10 +79,6 @@ type forkGraphDisk struct {
 	headers   sync.Map                    // set of headers
 	badBlocks map[libcommon.Hash]struct{} // blocks that are invalid and that leads to automatic fail of extension.
 
-	// TODO: this leaks, but it isn't a big deal since it's only ~24 bytes per block.
-	// the dirty solution is to just make it an LRU with max size of like 128 epochs or something probably?
-	stateRoots map[libcommon.Hash]libcommon.Hash // set of stateHash -> blockHash
-
 	// current state data
 	currentState *state.CachingBeaconState
 
@@ -130,8 +125,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// storage
-		badBlocks:  make(map[libcommon.Hash]struct{}),
-		stateRoots: make(map[libcommon.Hash]libcommon.Hash),
+		badBlocks: make(map[libcommon.Hash]struct{}),
 		// current state data
 		currentState:   anchorState,
 		saveStates:     make(map[libcommon.Hash]savedStateRecord),
@@ -255,13 +249,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		BodyRoot:      bodyRoot,
 	})
 
-	// add the state root
-	stateRoot, err := newState.HashSSZ()
-	if err != nil {
-		return nil, LogisticError, err
-	}
-	f.stateRoots[stateRoot] = blockRoot
-
 	if newState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		if err := f.dumpBeaconStateOnDisk(newState, blockRoot); err != nil {
 			return nil, LogisticError, err
@@ -296,92 +283,8 @@ func (f *forkGraphDisk) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaco
 	return obj.(*cltypes.SignedBeaconBlock), true
 }
 
-// GetStateAtSlot is for getting a state based off the slot number
-// NOTE: all this does is call GetStateAtSlot using the stateRoots index and existing blocks.
-func (f *forkGraphDisk) GetStateAtStateRoot(root libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	blockRoot, ok := f.stateRoots[root]
-	if !ok {
-		return nil, ErrStateNotFound
-	}
-	blockSlot, ok := f.getBlock(blockRoot)
-	if !ok {
-		return nil, ErrStateNotFound
-	}
-	return f.GetStateAtSlot(blockSlot.Block.Slot, alwaysCopy)
-
-}
-
-// GetStateAtSlot is for getting a state based off the slot number
-// TODO: this is rather inefficient. we could create indices that make it faster
-func (f *forkGraphDisk) GetStateAtSlot(slot uint64, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	// fast path for if the slot is the current slot
-	if f.currentState.Slot() == slot {
-		// always copy.
-		if alwaysCopy {
-			ret, err := f.currentState.Copy()
-			return ret, err
-		}
-		return f.currentState, nil
-	}
-	// if the slot requested is larger than the current slot, we know it is not found, so another fast path
-	if slot > f.currentState.Slot() {
-		return nil, ErrStateNotFound
-	}
-	if len(f.saveStates) == 0 {
-		return nil, ErrStateNotFound
-	}
-	bestSlot := uint64(0)
-	startHash := libcommon.Hash{}
-	// iterate over all savestates. there should be less than 10 of these, so this should be safe.
-	for blockHash, v := range f.saveStates {
-		// make sure the slot is smaller than the target slot
-		// (equality case caught by short circuit)
-		// and that the slot is larger than the current best found starting slot
-		if v.slot < slot && v.slot > bestSlot {
-			bestSlot = v.slot
-			startHash = blockHash
-		}
-	}
-	// no snapshot old enough to honor this request :(
-	if bestSlot == 0 {
-		return nil, ErrStateNotFound
-	}
-	copyReferencedState, err := f.readBeaconStateFromDisk(startHash)
-	if err != nil {
-		return nil, err
-	}
-	// cache lied? return state not found
-	if copyReferencedState == nil {
-		return nil, ErrStateNotFound
-	}
-
-	// what we need to do is grab every block in our block store that is between the target slot and the current slot
-	// this is linear time from the distance to our last snapshot.
-	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
-	f.blocks.Range(func(key, value interface{}) bool {
-		block := value.(*cltypes.SignedBeaconBlock)
-		if block.Block.Slot <= f.currentState.Slot() && block.Block.Slot >= slot {
-			blocksInTheWay = append(blocksInTheWay, block)
-		}
-		return true
-	})
-
-	// sort the slots from low to high
-	slices.SortStableFunc(blocksInTheWay, func(a, b *cltypes.SignedBeaconBlock) int {
-		return int(a.Block.Slot) - int(b.Block.Slot)
-	})
-
-	// Traverse the blocks from top to bottom.
-	for _, block := range blocksInTheWay {
-		if err := transition.TransitionState(copyReferencedState, block, nil, false); err != nil {
-			return nil, err
-		}
-	}
-	return copyReferencedState, nil
-}
-
 func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	if f.currentState != nil {
+	if f.currentState != nil && !alwaysCopy {
 		currentStateBlockRoot, err := f.currentState.BlockRoot()
 		if err != nil {
 			return nil, err
