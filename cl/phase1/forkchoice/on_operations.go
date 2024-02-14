@@ -102,14 +102,13 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return fmt.Errorf("proposee slashing headers are the same")
 	}
 
-	// Take lock as we interact with state.
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	fmt.Println("prp")
 	headHash, _, err := f.getHead()
 	if err != nil {
 		return err
 	}
+	// Take lock as we interact with state.
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		return err
@@ -246,15 +245,16 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 		return fmt.Errorf("contribution has no participants")
 	}
 
-	// Take lock as we interact with state.
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
 	next_slot_epoch := f.computeEpochAtSlot(f.Slot() + 1)
 	headHash, _, err := f.getHead()
 	if err != nil {
 		return err
 	}
+
+	// Take lock as we interact with state.
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
 	s, err := f.forkGraph.GetState(headHash, false)
 	if err != nil {
 		return err
