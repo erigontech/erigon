@@ -20,26 +20,6 @@ func HermezMainnetGenesisBlock() *types.Genesis {
 	}
 }
 
-func HermezTestnetGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params.HermezTestnetChainConfig,
-		Timestamp:  1677601932,
-		GasLimit:   0x0,
-		Difficulty: big.NewInt(0x0),
-		Alloc:      readPrealloc("allocs/hermez-testnet.json"),
-	}
-}
-
-func HermezBlueberryGenesisBlock() *types.Genesis {
-	return &types.Genesis{
-		Config:     params.HermezBlueberryChainConfig,
-		Timestamp:  1676996964,
-		GasLimit:   0x0,
-		Difficulty: big.NewInt(0x0),
-		Alloc:      readPrealloc("allocs/hermez-blueberry.json"),
-	}
-}
-
 func HermezEtrogGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HermezEtrogChainConfig,

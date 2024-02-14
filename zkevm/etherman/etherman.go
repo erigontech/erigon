@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/ethclient"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/zk/zkchainconfig"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/matic"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevm"
 	"github.com/ledgerwatch/erigon/zkevm/etherman/smartcontracts/polygonzkevmglobalexitroot"
@@ -156,9 +157,13 @@ func NewClient(cfg Config) (*Client, error) {
 
 	l1Conf := params.MainnetChainConfig
 	l2Conf := params.HermezMainnetChainConfig
-	if cfg.L1ChainID == 5 {
-		l1Conf = params.GoerliChainConfig
-		l2Conf = params.HermezTestnetChainConfig
+
+	// l2s using sepolia l1
+	if cfg.L1ChainID == params.SepoliaChainConfig.ChainID.Uint64() {
+		l1Conf = params.SepoliaChainConfig
+		l2Conf = params.ChainConfigByChainName(zkchainconfig.GetChainName(cfg.L2ChainID))
+	} else {
+		panic(fmt.Sprintf("L1 chain ID %d not supported", cfg.L1ChainID))
 	}
 
 	return &Client{

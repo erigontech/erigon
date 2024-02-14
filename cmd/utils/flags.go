@@ -430,7 +430,7 @@ var (
 	DatastreamVersionFlag = cli.IntFlag{
 		Name:  "zkevm.datastream-version",
 		Usage: "Stream version indicator 1: PreBigEndian, 2: BigEndian.",
-		Value: 1,
+		Value: 2,
 	}
 	DataStreamPort = cli.UintFlag{
 		Name:  "zkevm.data-stream-port",

@@ -8,6 +8,7 @@ import (
 type Config struct {
 	URL       string `mapstructure:"URL"`
 	L1ChainID uint64 `mapstructure:"L1ChainID"`
+	L2ChainID uint64 `mapstructure:"L2ChainID"`
 
 	PoEAddr                   common.Address `mapstructure:"PoEAddr"`
 	MaticAddr                 common.Address `mapstructure:"MaticAddr"`

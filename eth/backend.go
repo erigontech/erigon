@@ -814,6 +814,7 @@ func newEtherMan(cfg *ethconfig.Zk) *etherman.Client {
 	ethmanConf := etherman.Config{
 		URL:                       cfg.L1RpcUrl,
 		L1ChainID:                 cfg.L1ChainId,
+		L2ChainID:                 cfg.L2ChainId,
 		PoEAddr:                   cfg.L1PolygonRollupManager,
 		MaticAddr:                 cfg.L1MaticContractAddress,
 		GlobalExitRootManagerAddr: cfg.L1GERManagerContractAddress,

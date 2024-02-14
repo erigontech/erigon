@@ -651,10 +651,6 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return HermezMainnetGenesisBlock()
 	case networkname.HermezLocalDevnetChainName:
 		return HermezLocalDevnetGenesisBlock()
-	case networkname.HermezTestnetChainName:
-		return HermezTestnetGenesisBlock()
-	case networkname.HermezBlueberryChainName:
-		return HermezBlueberryGenesisBlock()
 	case networkname.HermezEtrogChainName:
 		return HermezEtrogGenesisBlock()
 	case networkname.HermezCardonaChainName:

@@ -1,4 +1,4 @@
-datadir : '/Volumes/External/hermez/blueberry'
+datadir : '/Volumes/External/hermez/dev'
 chain : "hermez-dev"
 http : true
 private.api.addr : "localhost:9093"

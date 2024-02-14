@@ -3,8 +3,6 @@ package networkname
 const (
 	HermezMainnetChainName         = "hermez-mainnet"
 	HermezLocalDevnetChainName     = "hermez-dev"
-	HermezTestnetChainName         = "hermez-testnet"
-	HermezBlueberryChainName       = "hermez-blueberry"
 	HermezCardonaChainName         = "hermez-cardona"
 	HermezCardonaInternalChainName = "hermez-cardona-internal"
 	X1TestnetChainName             = "x1-testnet"
@@ -14,8 +12,6 @@ const (
 var Zkevm = []string{
 	HermezMainnetChainName,
 	HermezLocalDevnetChainName,
-	HermezTestnetChainName,
-	HermezBlueberryChainName,
 	HermezEtrogChainName,
 	HermezCardonaChainName,
 	HermezCardonaInternalChainName,

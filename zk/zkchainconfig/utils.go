@@ -1,14 +1,23 @@
 package zkchainconfig
 
+import "github.com/ledgerwatch/erigon/params/networkname"
+
 var chainIds = []uint64{
 	195,    // x1-testnet
 	1101,   // mainnet
-	1440,   // devnet
-	1442,   // testnet
 	2440,   // cardona internal
 	2442,   // cardona
 	10010,  //etrog testnet
 	999999, // local devnet
+}
+
+var chainIdToName = map[uint64]string{
+	195:    networkname.X1TestnetChainName,
+	1101:   networkname.HermezMainnetChainName,
+	2440:   networkname.HermezCardonaInternalChainName,
+	2442:   networkname.HermezCardonaChainName,
+	10010:  networkname.HermezEtrogChainName,
+	999999: networkname.HermezLocalDevnetChainName,
 }
 
 func IsZk(chainId uint64) bool {
@@ -18,6 +27,10 @@ func IsZk(chainId uint64) bool {
 		}
 	}
 	return false
+}
+
+func GetChainName(chainId uint64) string {
+	return chainIdToName[chainId]
 }
 
 func IsTestnet(chainId uint64) bool {
