@@ -46,20 +46,21 @@ const logIntervalTime = 30 * time.Second
 
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector *etl.Collector, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:            genesisCfg,
-		beaconCfg:             beaconCfg,
-		downloader:            downloader,
-		startingRoot:          startingRoot,
-		tmpdir:                tmpdir,
-		startingSlot:          startinSlot,
-		waitForAllRoutines:    waitForAllRoutines,
-		logger:                logger,
-		backfilling:           backfilling,
-		indiciesDB:            indiciesDB,
-		antiquary:             antiquary,
-		engine:                engine,
-		sn:                    sn,
-		backfillingThrottling: backfillingThrottling,
+		genesisCfg:               genesisCfg,
+		beaconCfg:                beaconCfg,
+		downloader:               downloader,
+		startingRoot:             startingRoot,
+		tmpdir:                   tmpdir,
+		startingSlot:             startinSlot,
+		waitForAllRoutines:       waitForAllRoutines,
+		logger:                   logger,
+		backfilling:              backfilling,
+		indiciesDB:               indiciesDB,
+		antiquary:                antiquary,
+		engine:                   engine,
+		sn:                       sn,
+		backfillingThrottling:    backfillingThrottling,
+		executionBlocksCollector: executionBlocksCollector,
 	}
 }
 
