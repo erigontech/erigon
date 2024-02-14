@@ -265,6 +265,7 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error 
 	}
 	retryInterval := time.NewTicker(retryTimeout)
 	defer retryInterval.Stop()
+
 	for response.Result == execution.ExecutionStatus_Busy {
 		select {
 		case <-retryInterval.C:
@@ -273,8 +274,26 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error 
 				return err
 			}
 		case <-c.ctx.Done():
-			return context.Canceled
+			return c.ctx.Err()
 		}
+	}
+	if response.Result != execution.ExecutionStatus_Success {
+		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
+	}
+	return nil
+}
+
+func (c ChainReaderWriterEth1) InsertBlocks(blocks []*types.Block) error {
+	request := &execution.InsertBlocksRequest{
+		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
+	}
+	response, err := c.executionModule.InsertBlocks(c.ctx, request)
+	if err != nil {
+		return err
+	}
+
+	if response.Result == execution.ExecutionStatus_Busy {
+		return context.DeadlineExceeded
 	}
 	if response.Result != execution.ExecutionStatus_Success {
 		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())

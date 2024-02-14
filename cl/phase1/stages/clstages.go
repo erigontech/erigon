@@ -11,7 +11,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
@@ -51,6 +53,7 @@ type Cfg struct {
 	antiquary       *antiquary.Antiquary
 	syncedData      *synced_data.SyncedDataManager
 	emitter         *beaconevents.Emitters
+	prebuffer       *etl.Collector
 	gossipSource    persistence.BlockSource
 
 	hasDownloaded, backfilling bool
@@ -99,6 +102,7 @@ func ClStagesCfg(
 		backfilling:     backfilling,
 		syncedData:      syncedData,
 		emitter:         emitters,
+		prebuffer:       etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 		gossipSource:    gossipSource,
 	}
 }
@@ -239,7 +243,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -271,27 +275,33 @@ func ConsensusClStages(ctx context.Context,
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
 					downloader.SetHighestProcessedSlot(currentSlot.Load())
 					downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed common.Hash, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
-						blockBatch := []*types.Block{}
 						for _, block := range blocks {
-							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
-								executionPayload := block.Block.Body.ExecutionPayload
-								body := executionPayload.Body()
-								txs, err := types.DecodeTransactions(body.Transactions)
-								if err != nil {
-									log.Warn("bad blocks segment received", "err", err)
-									return highestSlotProcessed, highestBlockRootProcessed, err
-								}
-								parentRoot := &block.Block.ParentRoot
-								header, err := executionPayload.RlpHeader(parentRoot)
-								if err != nil {
-									log.Warn("bad blocks segment received", "err", err)
-									return highestSlotProcessed, highestBlockRootProcessed, err
-								}
-								blockBatch = append(blockBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
-							}
+
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								return highestSlotProcessed, highestBlockRootProcessed, err
+							}
+							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
+								if cfg.prebuffer == nil {
+									cfg.prebuffer = etl.NewCollector("Caplin-blocks", cfg.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+									cfg.prebuffer.LogLvl(log.LvlDebug)
+								}
+								executionPayload := block.Block.Body.ExecutionPayload
+								executionPayloadRoot, err := executionPayload.HashSSZ()
+								if err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
+								versionByte := byte(block.Version())
+								enc, err := executionPayload.EncodeSSZ(nil)
+								if err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
+								enc = append([]byte{versionByte}, append(block.Block.ParentRoot[:], enc...)...)
+								enc = utils.CompressSnappy(enc)
+
+								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(executionPayload.BlockNumber, executionPayloadRoot), enc); err != nil {
+									return highestSlotProcessed, highestBlockRootProcessed, err
+								}
 							}
 
 							if highestSlotProcessed < block.Block.Slot {
@@ -303,11 +313,7 @@ func ConsensusClStages(ctx context.Context,
 								}
 							}
 						}
-						if shouldInsert {
-							if err := cfg.executionClient.InsertBlocks(blockBatch); err != nil {
-								log.Warn("failed to insert blocks", "err", err)
-							}
-						}
+
 						return highestSlotProcessed, highestBlockRootProcessed, nil
 					})
 					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -347,6 +353,88 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					totalRequest := args.targetSlot - args.seenSlot
+					readyTimeout := time.NewTimer(10 * time.Second)
+					readyInterval := time.NewTimer(50 * time.Millisecond)
+					defer readyTimeout.Stop()
+					defer readyInterval.Stop()
+					if cfg.executionClient != nil {
+					ReadyLoop:
+						for { // if the client does not support insertion, then skip
+							select {
+							case <-ctx.Done():
+								return ctx.Err()
+							case <-readyTimeout.C:
+								time.Sleep(10 * time.Second)
+								return nil
+							case <-readyInterval.C:
+								ready, err := cfg.executionClient.Ready()
+								if err != nil {
+									return err
+								}
+								if ready {
+									break ReadyLoop
+								}
+							}
+						}
+					}
+
+					tx, err := cfg.indiciesDB.BeginRw(ctx)
+					if err != nil {
+						return err
+					}
+					defer tx.Rollback()
+
+					blocksBatch := []*types.Block{}
+					blocksBatchLimit := 10_000
+					if cfg.executionClient != nil && cfg.prebuffer != nil && cfg.executionClient.SupportInsertion() {
+						if err := cfg.prebuffer.Load(tx, kv.Headers, func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
+							if len(v) == 0 {
+								return nil
+							}
+							v, err = utils.DecompressSnappy(v)
+							if err != nil {
+								return err
+							}
+							version := clparams.StateVersion(v[0])
+							parentRoot := common.BytesToHash(v[1:33])
+							v = v[33:]
+							executionPayload := cltypes.NewEth1Block(version, cfg.beaconCfg)
+							if err := executionPayload.DecodeSSZ(v, int(version)); err != nil {
+								return err
+							}
+							body := executionPayload.Body()
+							txs, err := types.DecodeTransactions(body.Transactions)
+							if err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								return err
+							}
+							header, err := executionPayload.RlpHeader(&parentRoot)
+							if err != nil {
+								log.Warn("bad blocks segment received", "err", err)
+								return err
+							}
+							blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
+							if len(blocksBatch) >= blocksBatchLimit {
+								if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
+									logger.Warn("failed to insert blocks", "err", err)
+								}
+								logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
+								blocksBatch = []*types.Block{}
+							}
+							return next(k, nil, nil)
+						}, etl.TransformArgs{}); err != nil {
+							return err
+						}
+						if len(blocksBatch) > 0 {
+							if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
+								logger.Warn("failed to insert blocks", "err", err)
+							}
+						}
+						cfg.prebuffer.Close()
+						cfg.prebuffer = nil
+
+					}
+
 					logger.Debug("waiting for blocks...",
 						"seenSlot", args.seenSlot,
 						"targetSlot", args.targetSlot,
@@ -423,11 +511,6 @@ func ConsensusClStages(ctx context.Context,
 							}
 						}(v)
 					}
-					tx, err := cfg.indiciesDB.BeginRw(ctx)
-					if err != nil {
-						return err
-					}
-					defer tx.Rollback()
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
 				MainLoop:
