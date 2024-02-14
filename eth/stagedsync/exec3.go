@@ -157,7 +157,7 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	if initialCycle {
-		if _, ok := engine.(*aura.AuRa); ok {
+		if _, ok := engine.(*aura.AuRa); ok { //gnosis collate eating too much RAM, will add ETL later
 			agg.SetCollateAndBuildWorkers(1)
 		} else {
 			agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
