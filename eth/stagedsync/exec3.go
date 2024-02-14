@@ -160,7 +160,7 @@ func ExecV3(ctx context.Context,
 		if _, ok := engine.(*aura.AuRa); ok { //gnosis collate eating too much RAM, will add ETL later
 			agg.SetCollateAndBuildWorkers(1)
 		} else {
-			agg.SetCollateAndBuildWorkers(2)
+			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
 		}
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
