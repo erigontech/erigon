@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -18,8 +17,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	listenAddrHost := "127.0.0.1"
 
 	ctx := context.Background()
-	db, _, f, _, _ := loadChain(t)
-	raw := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
+	db, _, _, _, _, reader := loadChain(t)
 	genesisConfig, networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	bcfg := *beaconConfig
 
@@ -36,7 +34,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, raw, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, reader, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel1.Stop()
 
@@ -51,7 +49,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Port:          7077,
 		EnableBlocks:  true,
 		TCPPort:       9123,
-	}, raw, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, reader, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel2.Stop()
 

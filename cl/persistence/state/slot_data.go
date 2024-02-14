@@ -15,10 +15,8 @@ type SlotData struct {
 	// Block Header and Execution Headers can be retrieved from block snapshots
 	Version clparams.StateVersion
 	// Lengths
-	ValidatorLength                 uint64
-	Eth1DataLength                  uint64
-	PreviousEpochAttestationsLength uint64
-	CurrentEpochAttestationsLength  uint64
+	ValidatorLength uint64
+	Eth1DataLength  uint64
 	// Phase0
 	Eth1Data         *cltypes.Eth1Data
 	Eth1DepositIndex uint64
@@ -39,16 +37,15 @@ func SlotDataFromBeaconState(s *state.CachingBeaconState) *SlotData {
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
 	return &SlotData{
-		ValidatorLength:                 uint64(s.ValidatorLength()),
-		Eth1DataLength:                  uint64(s.Eth1DataVotes().Len()),
-		PreviousEpochAttestationsLength: uint64(s.PreviousEpochAttestations().Len()),
-		CurrentEpochAttestationsLength:  uint64(s.CurrentEpochAttestations().Len()),
-		Version:                         s.Version(),
-		Eth1Data:                        s.Eth1Data(),
-		Eth1DepositIndex:                s.Eth1DepositIndex(),
-		NextWithdrawalIndex:             s.NextWithdrawalIndex(),
-		NextWithdrawalValidatorIndex:    s.NextWithdrawalValidatorIndex(),
-		Fork:                            s.Fork(),
+		ValidatorLength: uint64(s.ValidatorLength()),
+		Eth1DataLength:  uint64(s.Eth1DataVotes().Len()),
+
+		Version:                      s.Version(),
+		Eth1Data:                     s.Eth1Data(),
+		Eth1DepositIndex:             s.Eth1DepositIndex(),
+		NextWithdrawalIndex:          s.NextWithdrawalIndex(),
+		NextWithdrawalValidatorIndex: s.NextWithdrawalValidatorIndex(),
+		Fork:                         s.Fork(),
 	}
 }
 
@@ -105,7 +102,7 @@ func (m *SlotData) ReadFrom(r io.Reader) error {
 }
 
 func (m *SlotData) getSchema() []interface{} {
-	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.PreviousEpochAttestationsLength, &m.CurrentEpochAttestationsLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
+	schema := []interface{}{m.Eth1Data, m.Fork, &m.Eth1DepositIndex, &m.ValidatorLength, &m.Eth1DataLength, &m.AttestationsRewards, &m.SyncAggregateRewards, &m.ProposerSlashings, &m.AttesterSlashings}
 	if m.Version >= clparams.CapellaVersion {
 		schema = append(schema, &m.NextWithdrawalIndex, &m.NextWithdrawalValidatorIndex)
 	}

@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
-	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 // make a sync.pool of compressors (zstd)
@@ -183,10 +182,9 @@ func ComputeCompressedSerializedEffectiveBalancesDiff(w io.Writer, old, new []by
 	*plainBufferPtr = plainBuffer[:0]
 
 	return compressor.Close()
-
 }
 
-func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]byte, error) {
+func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, reverse bool) ([]byte, error) {
 	out = out[:0]
 
 	buffer := bufferPool.Get().(*bytes.Buffer)
@@ -212,7 +210,7 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 	temp := make([]byte, 8)
 	currIndex := 0
 	for i := 0; i < int(length); i++ {
-		n, err := utils.ReadZSTD(decompressor, temp[:4])
+		n, err := io.ReadFull(decompressor, temp[:4])
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
@@ -221,7 +219,7 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 		}
 		entry.count = binary.BigEndian.Uint32(temp[:4])
 
-		n, err = utils.ReadZSTD(decompressor, temp)
+		n, err = io.ReadFull(decompressor, temp)
 		if err != nil && !errors.Is(err, io.EOF) {
 			return nil, err
 		}
@@ -230,13 +228,17 @@ func ApplyCompressedSerializedUint64ListDiff(old, out []byte, diff []byte) ([]by
 		}
 		entry.val = binary.BigEndian.Uint64(temp)
 		for j := 0; j < int(entry.count); j++ {
-			if currIndex+8 > len(old) {
+			if currIndex+8 > len(in) {
 				// Append the remaining new bytes that were not in the old slice
 				out = binary.LittleEndian.AppendUint64(out, entry.val)
 				currIndex += 8
 				continue
 			}
-			out = binary.LittleEndian.AppendUint64(out, binary.LittleEndian.Uint64(old[currIndex:currIndex+8])+entry.val)
+			if !reverse {
+				out = binary.LittleEndian.AppendUint64(out, binary.LittleEndian.Uint64(in[currIndex:currIndex+8])+entry.val)
+			} else {
+				out = binary.LittleEndian.AppendUint64(out, binary.LittleEndian.Uint64(in[currIndex:currIndex+8])-entry.val)
+			}
 			currIndex += 8
 		}
 	}
