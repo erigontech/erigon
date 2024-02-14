@@ -319,8 +319,10 @@ func (f *ForkChoiceStore) AnchorSlot() uint64 {
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot libcommon.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	if !alwaysCopy {
+		f.mu.RLock()
+		defer f.mu.RUnlock()
+	}
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
 }
 

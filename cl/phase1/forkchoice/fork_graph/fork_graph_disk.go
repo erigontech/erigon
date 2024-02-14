@@ -290,10 +290,6 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 			return nil, err
 		}
 		if currentStateBlockRoot == blockRoot {
-			if alwaysCopy {
-				ret, err := f.currentState.Copy()
-				return ret, err
-			}
 			return f.currentState, nil
 		}
 	}
