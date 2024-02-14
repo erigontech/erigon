@@ -1626,7 +1626,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.ForcePartialCommit = ctx.Bool(ForcePartialCommitFlag.Name)
 
-	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(ctx.String(ChainFlag.Name))
+	chain := ctx.String(ChainFlag.Name) // mainnet by default
+	if ctx.IsSet(NetworkIdFlag.Name) {
+		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
+		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
+			chain = "" // don't default to mainnet if NetworkID != 1
+		}
+	} else {
+		cfg.NetworkID = params.NetworkIDByChainName(chain)
+	}
+
+	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
 	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli
 		cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
 	}
@@ -1653,7 +1663,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		logger.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-		chain := ctx.String(ChainFlag.Name)
 		webseedsList := libcommon.CliString2Array(ctx.String(WebSeedsFlag.Name))
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
@@ -1689,9 +1698,6 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
-	if ctx.IsSet(NetworkIdFlag.Name) {
-		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-	}
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
@@ -1714,9 +1720,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			cfg.EthDiscoveryURLs = libcommon.CliString2Array(urls)
 		}
 	}
-	// Override any default configs for hard coded networks.
-	chain := ctx.String(ChainFlag.Name)
 
+	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
 		genesis := core.GenesisBlockByChainName(chain)
@@ -1726,19 +1731,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			return
 		}
 		cfg.Genesis = genesis
-		if !ctx.IsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = params.NetworkIDByChainName(chain)
-		}
 		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
 	case networkname.DevChainName:
-		if !ctx.IsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = params.NetworkIDByChainName(chain)
-		}
-
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
 		if developer == (libcommon.Address{}) {

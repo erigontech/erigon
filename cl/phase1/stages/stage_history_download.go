@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
-	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -34,35 +34,32 @@ type StageHistoryReconstructionCfg struct {
 	waitForAllRoutines       bool
 	startingSlot             uint64
 	tmpdir                   string
-	db                       persistence.BeaconChainDatabase
 	indiciesDB               kv.RwDB
 	engine                   execution_client.ExecutionEngine
 	antiquary                *antiquary.Antiquary
 	logger                   log.Logger
-	backfillingThrottling    time.Duration
 	executionBlocksCollector *etl.Collector
+	backfillingThrottling    time.Duration
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, db persistence.BeaconChainDatabase, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector *etl.Collector, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector *etl.Collector, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
-		genesisCfg:               genesisCfg,
-		beaconCfg:                beaconCfg,
-		downloader:               downloader,
-		startingRoot:             startingRoot,
-		tmpdir:                   tmpdir,
-		startingSlot:             startinSlot,
-		waitForAllRoutines:       waitForAllRoutines,
-		logger:                   logger,
-		backfilling:              backfilling,
-		indiciesDB:               indiciesDB,
-		antiquary:                antiquary,
-		db:                       db,
-		engine:                   engine,
-		sn:                       sn,
-		backfillingThrottling:    backfillingThrottling,
-		executionBlocksCollector: executionBlocksCollector,
+		genesisCfg:            genesisCfg,
+		beaconCfg:             beaconCfg,
+		downloader:            downloader,
+		startingRoot:          startingRoot,
+		tmpdir:                tmpdir,
+		startingSlot:          startinSlot,
+		waitForAllRoutines:    waitForAllRoutines,
+		logger:                logger,
+		backfilling:           backfilling,
+		indiciesDB:            indiciesDB,
+		antiquary:             antiquary,
+		engine:                engine,
+		sn:                    sn,
+		backfillingThrottling: backfillingThrottling,
 	}
 }
 
@@ -106,7 +103,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 		slot := blk.Block.Slot
 		if destinationSlot <= blk.Block.Slot {
-			if err := cfg.db.WriteBlock(ctx, tx, blk, true); err != nil {
+			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
