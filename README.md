@@ -93,24 +93,18 @@ NB: `--externalcl` flag is removed in upstream erigon so beware of re-using comm
 
 ## Networks
 
-| Network Name        | Chain ID | ForkID | Genesis File | RPC URL | Rootchain  | Smart Contract Address |
-|---------------------|----------|--------|--------------|---------|------------|------------------------|
-| zkEVM Mainnet       | 1101     | 5      | [Link](https://hackmd.io/bpmxb5QaSFafV0nB4i-KZA) | [Mainnet RPC](https://zkevm-rpc.com/) | Ethereum Mainnet | `0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2` |
-| zkEVM Public Testnet| 1442     | 5      | [Link](https://hackmd.io/Ug9pB613SvevJgnXRC4YJA) | [Testnet RPC](https://rpc.public.zkevm-test.net/) | Goerli | `0xa997cfD539E703921fD1e3Cf25b4c241a27a4c7A` |
+| Network Name  | Chain ID | ForkID | Genesis File | RPC URL                                          | Rootchain        | Rollup Address                               |
+|---------------|----------|--------|--------------|--------------------------------------------------|------------------|----------------------------------------------|
+| zkEVM Mainnet | 1101     | 7      | [Link](https://hackmd.io/bpmxb5QaSFafV0nB4i-KZA) | [Mainnet RPC](https://zkevm-rpc.com/)            | Ethereum Mainnet | `0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2` |
+| zkEVM Cardona | 2442     | 7      | [Link](https://hackmd.io/Ug9pB613SvevJgnXRC4YJA) | [Cardona RPC](https://rpc.cardona.zkevm-rpc.com/) | Sepolia          | `0x32d33D5137a7cFFb54c5Bf8371172bcEc5f310ff` |
 
 ***
 
 ## Additional Resources
 
 - Block Explorers:
-  - Testnet: [PolygonScan Testnet](https://testnet-zkevm.polygonscan.com/)
   - Mainnet: [PolygonScan Mainnet](https://zkevm.polygonscan.com/)
-
-***
-## Funding for Testing
-
-Use the Goerli faucet to obtain ETH for testing: [Goerli Faucet](https://goerlifaucet.com). Transfer ETH to L2 using the bridge contract page. ENS is not supported on the L2.
-<br><br>
+  - Cardona: [PolygonScan Cardona](https://cardona-zkevm.polygonscan.com/)
 
 ***
 
