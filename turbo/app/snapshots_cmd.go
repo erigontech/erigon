@@ -815,6 +815,10 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			defer logEvery.Stop()
 
 			cc := context.Background()
+			err = ac.ResetPruneProgress(tx) // reset previous prune progress to make it a "clean run"
+			if err != nil {
+				return err
+			}
 			stat, err := ac.Prune(cc, tx, math.MaxUint64, logEvery)
 			if err != nil {
 				return err
