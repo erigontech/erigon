@@ -16,6 +16,8 @@
 
 package diagnostics
 
+import "github.com/shirou/gopsutil/v3/process"
+
 type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics
 }
@@ -71,6 +73,10 @@ type SnapshotSegmentIndexingStatistics struct {
 
 type SnapshotSegmentIndexingFinishedUpdate struct {
 	SegmentName string `json:"segmentName"`
+}
+
+type MemUsage struct {
+	stats process.MemoryMapsStat `json:"stats"`
 }
 
 func (ti SnapshotDownloadStatistics) Type() Type {
