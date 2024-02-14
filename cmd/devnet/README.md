@@ -9,7 +9,7 @@ The devnet code performs 3 main functions:
 * It allows for the specification of a series of scenarios which will be run against the nodes on that internal network
 * It can optionally run a `support` connection which allows the nodes on the network to be connected to the Erigon diagnostic system
 
-The specification of both nodes and scenarios for the devenet is done by specifying configuration objects.  These objects are currently build in code using go `structs` but are capable of being read as configuration.
+The specification of both nodes and scenarios for the devnet is done by specifying configuration objects.  These objects are currently built in code using go `structs` but are capable of being read as configuration.
 
 ## Devnet runtime start-up
 
@@ -23,8 +23,8 @@ The devnet runs as a single `go` process which can be started with the following
 | metrics | N | false | Enable metrics collection and reporting from devnet nodes |
 | metrics.node | N | 0 | At the moment only one node on the network can produce metrics.  This value specifies index of the node in the cluster to attach to |
 | metrics.port | N | 6060 | The network port of the node to connect to for gather ing metrics |
-| diagnostics.url | N | | URL of the diagnostics system provided by the support team, include unique session PIN, if this is specified the devnet will start a `support` tunnel and connect to the diagnostics platform to provide metrics from the specified node on the devnet | 
-| insecure | N | false | Used if `diagnostics.url` is set to allow communication with diagnostics system using self-signed TLS certificates |
+| diagnostics.addr | N | | Address of the diagnostics system provided by the support team, include unique session PIN, if this is specified the devnet will start a `support` tunnel and connect to the diagnostics platform to provide metrics from the specified node on the devnet | 
+| insecure | N | false | Used if `diagnostics.addr` is set to allow communication with diagnostics system
 
 ## Network Configuration
 
@@ -85,7 +85,7 @@ func init() {
 	)
 }
 ```
-Each step method will be called with a `context.Context` as its initial argument. This context provides access to the underlying devnet - so the sptep handler can use it for processing.
+Each step method will be called with a `context.Context` as its initial argument. This context provides access to the underlying devnet - so the step handler can use it for processing.
 
 ```go
 func PingErigonRpc(ctx context.Context) error {

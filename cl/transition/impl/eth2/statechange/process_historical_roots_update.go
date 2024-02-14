@@ -37,7 +37,7 @@ func ProcessHistoricalRootsUpdate(s abstract.BeaconState) error {
 			StateSummaryRoot: stateRootsLeaf,
 		})
 	} else {
-		historicalRoot := utils.Keccak256(blockRootsLeaf[:], stateRootsLeaf[:])
+		historicalRoot := utils.Sha256(blockRootsLeaf[:], stateRootsLeaf[:])
 		s.AddHistoricalRoot(historicalRoot)
 	}
 

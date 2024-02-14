@@ -12,7 +12,7 @@ import (
 
 type BlockSource interface {
 	GetRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error)
-	PurgeRange(ctx context.Context, tx kv.RwTx, from uint64, count uint64) error
+	PurgeRange(ctx context.Context, tx kv.Tx, from uint64, count uint64) error
 	GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error)
 }
 

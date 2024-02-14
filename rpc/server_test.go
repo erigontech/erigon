@@ -34,7 +34,7 @@ import (
 
 func TestServerRegisterName(t *testing.T) {
 	logger := log.New()
-	server := NewServer(50, false /* traceRequests */, true, logger)
+	server := NewServer(50, false /* traceRequests */, true, logger, 100)
 	service := new(testService)
 
 	if err := server.RegisterName("test", service); err != nil {

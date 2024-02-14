@@ -4,10 +4,6 @@ import (
 	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/crypto"
-	"github.com/ledgerwatch/erigon/p2p/enode"
-	"github.com/ledgerwatch/erigon/params"
 	"math/big"
 	"net"
 	"path/filepath"
@@ -16,6 +12,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
+	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 type NodeArgs struct {
@@ -41,7 +41,7 @@ type NodeArgs struct {
 	HttpCorsDomain            string `arg:"--http.corsdomain" json:"http.corsdomain"`
 	AuthRpcPort               int    `arg:"--authrpc.port" default:"8551" json:"authrpc.port"`
 	AuthRpcVHosts             string `arg:"--authrpc.vhosts" json:"authrpc.vhosts"`
-	WSPort                    int    `arg:"-" default:"8546" json:"-"` // flag not defined
+	WSPort                    int    `arg:"--ws.port" default:"8546" json:"ws.port"`
 	GRPCPort                  int    `arg:"-" default:"8547" json:"-"` // flag not defined
 	TCPPort                   int    `arg:"-" default:"8548" json:"-"` // flag not defined
 	Metrics                   bool   `arg:"--metrics" flag:"" default:"false" json:"metrics"`
@@ -49,7 +49,7 @@ type NodeArgs struct {
 	MetricsAddr               string `arg:"--metrics.addr" json:"metrics.addr,omitempty"`
 	StaticPeers               string `arg:"--staticpeers" json:"staticpeers,omitempty"`
 	WithoutHeimdall           bool   `arg:"--bor.withoutheimdall" flag:"" default:"false" json:"bor.withoutheimdall,omitempty"`
-	HeimdallGRpc              string `arg:"--bor.heimdallgRPC" json:"bor.heimdallgRPC,omitempty"`
+	HeimdallURL               string `arg:"--bor.heimdall" json:"bor.heimdall,omitempty"`
 	WithHeimdallMilestones    bool   `arg:"--bor.milestone" json:"bor.milestone"`
 	VMDebug                   bool   `arg:"--vmdebug" flag:"" default:"false" json:"dmdebug"`
 
@@ -126,10 +126,16 @@ func (node *NodeArgs) GetEnodeURL() string {
 	return enode.NewV4(&node.NodeKey.PublicKey, net.ParseIP("127.0.0.1"), port, port).URLv4()
 }
 
+func (node *NodeArgs) EnableMetrics(port int) {
+	node.Metrics = true
+	node.MetricsPort = port
+}
+
 type BlockProducer struct {
 	NodeArgs
 	Mine            bool   `arg:"--mine" flag:"true"`
 	Etherbase       string `arg:"--miner.etherbase"`
+	GasLimit        int    `arg:"--miner.gaslimit"`
 	DevPeriod       int    `arg:"--dev.period"`
 	BorPeriod       int    `arg:"--bor.period"`
 	BorMinBlockSize int    `arg:"--bor.minblocksize"`
@@ -176,18 +182,18 @@ func (n *BlockProducer) IsBlockProducer() bool {
 	return true
 }
 
-type NonBlockProducer struct {
+type BlockConsumer struct {
 	NodeArgs
 	HttpApi     string `arg:"--http.api" default:"admin,eth,debug,net,trace,web3,erigon,txpool" json:"http.api"`
 	TorrentPort string `arg:"--torrent.port" default:"42070" json:"torrent.port"`
 	NoDiscover  string `arg:"--nodiscover" flag:"" default:"true" json:"nodiscover"`
 }
 
-func (n *NonBlockProducer) IsBlockProducer() bool {
+func (n *BlockConsumer) IsBlockProducer() bool {
 	return false
 }
 
-func (n *NonBlockProducer) Account() *accounts.Account {
+func (n *BlockConsumer) Account() *accounts.Account {
 	return nil
 }
 

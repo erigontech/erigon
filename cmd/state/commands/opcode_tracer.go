@@ -260,7 +260,7 @@ func (ot *opcodeTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, 
 	}
 
 	pc16 := uint16(pc)
-	currentTxHash := ot.env.TxContext().TxHash
+	currentTxHash := ot.env.TxHash
 	currentTxDepth := opDepth - 1
 
 	ls := len(ot.stack)
@@ -471,7 +471,7 @@ func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, num
 		}
 		return nil
 	})
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot, Debug: true}

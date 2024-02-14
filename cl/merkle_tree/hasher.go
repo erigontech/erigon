@@ -86,7 +86,7 @@ func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, er
 		}
 
 		lengthRoot := Uint64Root(transactionLength)
-		leaves[i] = utils.Keccak256(transactionsBaseRoot[:], lengthRoot[:])
+		leaves[i] = utils.Sha256(transactionsBaseRoot[:], lengthRoot[:])
 	}
 	transactionsBaseRoot, err := MerkleizeVector(leaves, 1048576)
 	if err != nil {
@@ -95,5 +95,5 @@ func (m *merkleHasher) transactionsListRoot(transactions [][]byte) ([32]byte, er
 
 	countRoot := Uint64Root(txCount)
 
-	return utils.Keccak256(transactionsBaseRoot[:], countRoot[:]), nil
+	return utils.Sha256(transactionsBaseRoot[:], countRoot[:]), nil
 }

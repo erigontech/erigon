@@ -34,6 +34,7 @@ import (
 
 // Tests that positional lookup metadata can be stored and retrieved.
 func TestLookupStorage(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name                 string
 		writeTxLookupEntries func(kv.Putter, *types.Block)
@@ -48,7 +49,9 @@ func TestLookupStorage(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := mock.Mock(t)
 			br := m.BlockReader
 			tx, err := m.DB.BeginRw(m.Ctx)

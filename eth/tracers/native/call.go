@@ -22,11 +22,12 @@ import (
 	"math/big"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
 	"github.com/holiman/uint256"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
@@ -142,7 +143,7 @@ func (t *callTracer) CaptureStart(from libcommon.Address, to libcommon.Address, 
 		From:  from,
 		To:    to,
 		Input: libcommon.CopyBytes(input),
-		Gas:   gas,
+		Gas:   t.gasLimit, // gas has intrinsicGas already subtracted
 	}
 	if value != nil {
 		t.callstack[0].Value = value.ToBig()

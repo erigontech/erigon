@@ -1,87 +1,173 @@
 package metrics
 
 import (
-	"time"
-
-	vm "github.com/VictoriaMetrics/metrics"
-	"github.com/prometheus/client_golang/prometheus"
-	dto "github.com/prometheus/client_model/go"
+	"fmt"
 )
 
-const UsePrometheusClient = false
-
-type Summary interface {
-	UpdateDuration(time.Time)
-}
-
-type Counter interface {
-	Inc()
-	Dec()
-	Add(n int)
-	Set(n uint64)
-	Get() uint64
-}
-
-type intCounter struct {
-	prometheus.Gauge
-}
-
-func (c intCounter) Add(n int) {
-	c.Gauge.Add(float64(n))
-}
-
-func (c intCounter) Set(n uint64) {
-	c.Gauge.Set(float64(n))
-}
-
-func (c intCounter) Get() uint64 {
-	var m dto.Metric
-	c.Gauge.Write(&m)
-	return uint64(m.GetGauge().GetValue())
-}
-
-func GetOrCreateCounter(s string, isGauge ...bool) Counter {
-	if UsePrometheusClient {
-		counter := defaultSet.GetOrCreateGauge(s)
-		return intCounter{counter}
-	} else {
-		if counter := DefaultRegistry.Get(s); counter != nil {
-			if counter, ok := counter.(Counter); ok {
-				return counter
-			}
-		}
-
-		counter := vm.GetOrCreateCounter(s, isGauge...)
-		DefaultRegistry.Register(s, counter)
-		vm.GetDefaultSet().UnregisterMetric(s)
-		return counter
+// NewCounter registers and returns new counter with the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned counter is safe to use from concurrent goroutines.
+func NewCounter(name string) Counter {
+	c, err := defaultSet.NewCounter(name)
+	if err != nil {
+		panic(fmt.Errorf("could not create new counter: %w", err))
 	}
+
+	return &counter{c}
 }
 
-func GetOrCreateGaugeFunc(s string, f func() float64) prometheus.GaugeFunc {
-	return defaultSet.GetOrCreateGaugeFunc(s, f)
-}
-
-type summary struct {
-	prometheus.Summary
-}
-
-func (sm summary) UpdateDuration(startTime time.Time) {
-	sm.Observe(time.Since(startTime).Seconds())
-}
-
-func GetOrCreateSummary(s string) Summary {
-	if UsePrometheusClient {
-		s := defaultSet.GetOrCreateSummary(s)
-		return summary{s}
-	} else {
-		summary := vm.GetOrCreateSummary(s)
-		DefaultRegistry.Register(s, summary)
-		vm.GetDefaultSet().UnregisterMetric(s)
-		return summary
+// GetOrCreateCounter returns registered counter with the given name
+// or creates new counter if the registry doesn't contain counter with
+// the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned counter is safe to use from concurrent goroutines.
+//
+// Performance tip: prefer NewCounter instead of GetOrCreateCounter.
+func GetOrCreateCounter(name string) Counter {
+	c, err := defaultSet.GetOrCreateCounter(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new counter: %w", err))
 	}
+
+	return &counter{c}
 }
 
-func GetOrCreateHistogram(s string) prometheus.Histogram {
-	return defaultSet.GetOrCreateHistogram(s)
+// NewGauge registers and returns gauge with the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned gauge is safe to use from concurrent goroutines.
+func NewGauge(name string) Gauge {
+	g, err := defaultSet.NewGauge(name)
+	if err != nil {
+		panic(fmt.Errorf("could not create new gauge: %w", err))
+	}
+
+	return &gauge{g}
+}
+
+// GetOrCreateGauge returns registered gauge with the given name
+// or creates new gauge if the registry doesn't contain gauge with
+// the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned gauge is safe to use from concurrent goroutines.
+//
+// Performance tip: prefer NewGauge instead of GetOrCreateGauge.
+func GetOrCreateGauge(name string) Gauge {
+	g, err := defaultSet.GetOrCreateGauge(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new gauge: %w", err))
+	}
+
+	return &gauge{g}
+}
+
+// NewSummary creates and returns new summary with the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned summary is safe to use from concurrent goroutines.
+func NewSummary(name string) Summary {
+	s, err := defaultSet.NewSummary(name)
+	if err != nil {
+		panic(fmt.Errorf("could not create new summary: %w", err))
+	}
+
+	return &summary{s}
+}
+
+// GetOrCreateSummary returns registered summary with the given name
+// or creates new summary if the registry doesn't contain summary with
+// the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned summary is safe to use from concurrent goroutines.
+//
+// Performance tip: prefer NewSummary instead of GetOrCreateSummary.
+func GetOrCreateSummary(name string) Summary {
+	s, err := defaultSet.GetOrCreateSummary(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new summary: %w", err))
+	}
+
+	return &summary{s}
+}
+
+// NewHistogram creates and returns new histogram with the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned histogram is safe to use from concurrent goroutines.
+func NewHistogram(name string) Histogram {
+	h, err := defaultSet.NewHistogram(name)
+	if err != nil {
+		panic(fmt.Errorf("could not create new histogram: %w", err))
+	}
+
+	return &histogram{h}
+}
+
+// GetOrCreateHistogram returns registered histogram with the given name
+// or creates new histogram if the registry doesn't contain histogram with
+// the given name.
+//
+// name must be valid Prometheus-compatible metric with possible labels.
+// For instance,
+//
+//   - foo
+//   - foo{bar="baz"}
+//   - foo{bar="baz",aaa="b"}
+//
+// The returned histogram is safe to use from concurrent goroutines.
+//
+// Performance tip: prefer NewHistogram instead of GetOrCreateHistogram.
+func GetOrCreateHistogram(name string) Histogram {
+	h, err := defaultSet.GetOrCreateHistogram(name)
+	if err != nil {
+		panic(fmt.Errorf("could not get or create new histogram: %w", err))
+	}
+
+	return &histogram{h}
 }

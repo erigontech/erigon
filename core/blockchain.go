@@ -18,21 +18,20 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/metrics"
-
+	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
@@ -40,11 +39,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
 var (
-	BlockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
+	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 )
 
 type SyncMode string
@@ -110,7 +110,7 @@ func ExecuteBlockEphemerally(
 		}
 	}
 
-	defer BlockExecutionTimer.UpdateDuration(time.Now())
+	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
 	ibs.SetLogger(bcLogger)
@@ -139,8 +139,9 @@ func ExecuteBlockEphemerally(
 		return nil, err
 	}
 
+	includedTxs = make(types.Transactions, 0, block.Transactions().Len())
+	receipts = make(types.Receipts, 0, block.Transactions().Len())
 	noop := state.NewNoopWriter()
-	//fmt.Printf("====txs processing start: %d====\n", block.NumberU64())
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
 		writeTrace := false
@@ -175,6 +176,10 @@ func ExecuteBlockEphemerally(
 
 	receiptSha := types.DeriveSha(receipts)
 	if !vmConfig.StatelessExec && chainConfig.IsByzantium(header.Number.Uint64()) && !vmConfig.NoReceipts && receiptSha != block.ReceiptHash() {
+		if dbg.LogHashMismatchReason() {
+			logReceipts(receipts, includedTxs, chainConfig, header, logger)
+		}
+
 		return nil, fmt.Errorf("mismatched receipt headers for block %d (%s != %s)", block.NumberU64(), receiptSha.Hex(), block.ReceiptHash().Hex())
 	}
 
@@ -234,6 +239,34 @@ func ExecuteBlockEphemerally(
 	}
 
 	return execRs, nil
+}
+
+func logReceipts(receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {
+	if len(receipts) == 0 {
+		// no-op, can happen if vmConfig.NoReceipts=true or vmConfig.StatelessExec=true
+		return
+	}
+
+	// note we do not return errors from this func since this is a debug-only
+	// informative feature that is best-effort and should not interfere with execution
+	if len(receipts) != len(txns) {
+		logger.Error("receipts and txns sizes differ", "receiptsLen", receipts.Len(), "txnsLen", txns.Len())
+		return
+	}
+
+	marshalled := make([]map[string]interface{}, len(receipts))
+	for i, receipt := range receipts {
+		txn := txns[i]
+		marshalled = append(marshalled, ethutils.MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true))
+	}
+
+	result, err := json.Marshal(marshalled)
+	if err != nil {
+		logger.Error("marshalling error when logging receipts", "err", err)
+		return
+	}
+
+	logger.Info("marshalled receipts", "result", string(result))
 }
 
 func rlpHash(x interface{}) (h libcommon.Hash) {

@@ -120,10 +120,12 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 }
 
 func runCmd(ctx *cli.Context) error {
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	//glogger := log.NewGlogHandler(log.StreamHandler(os.Stderr, log.TerminalFormat(false)))
-	//glogger.Verbosity(log.Lvl(ctx.GlobalInt(VerbosityFlag.Name)))
-	//log.Root().SetHandler(glogger)
+	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
+	if machineFriendlyOutput {
+		log.Root().SetHandler(log.DiscardHandler())
+	} else {
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	}
 	logconfig := &logger.LogConfig{
 		DisableMemory:     ctx.Bool(DisableMemoryFlag.Name),
 		DisableStack:      ctx.Bool(DisableStackFlag.Name),
@@ -141,7 +143,7 @@ func runCmd(ctx *cli.Context) error {
 		receiver      = libcommon.BytesToAddress([]byte("receiver"))
 		genesisConfig *types.Genesis
 	)
-	if ctx.Bool(MachineFlag.Name) {
+	if machineFriendlyOutput {
 		tracer = logger.NewJSONLogger(logconfig, os.Stdout)
 	} else if ctx.Bool(DebugFlag.Name) {
 		debugLogger = logger.NewStructLogger(logconfig)
@@ -153,7 +155,7 @@ func runCmd(ctx *cli.Context) error {
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.String(GenesisFlag.Name))
-		core.MustCommitGenesis(gen, db, "", tracer)
+		core.MustCommitGenesis(gen, db, "", log.Root(), nil)
 		genesisConfig = gen
 		chainConfig = gen.Config
 	} else {

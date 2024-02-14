@@ -135,6 +135,7 @@ func testTwoOperandOp(t *testing.T, tests []TwoOperandTestcase, opFn executionFu
 }
 
 func TestByteOp(t *testing.T) {
+	t.Parallel()
 	tests := []TwoOperandTestcase{
 		{"ABCDEF0908070605040302010000000000000000000000000000000000000000", "00", "AB"},
 		{"ABCDEF0908070605040302010000000000000000000000000000000000000000", "01", "CD"},
@@ -149,6 +150,7 @@ func TestByteOp(t *testing.T) {
 }
 
 func TestSHL(t *testing.T) {
+	t.Parallel()
 	// Testcases from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-145.md#shl-shift-left
 	tests := []TwoOperandTestcase{
 		{"0000000000000000000000000000000000000000000000000000000000000001", "01", "0000000000000000000000000000000000000000000000000000000000000002"},
@@ -166,6 +168,7 @@ func TestSHL(t *testing.T) {
 }
 
 func TestSHR(t *testing.T) {
+	t.Parallel()
 	// Testcases from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-145.md#shr-logical-shift-right
 	tests := []TwoOperandTestcase{
 		{"0000000000000000000000000000000000000000000000000000000000000001", "00", "0000000000000000000000000000000000000000000000000000000000000001"},
@@ -184,6 +187,7 @@ func TestSHR(t *testing.T) {
 }
 
 func TestSAR(t *testing.T) {
+	t.Parallel()
 	// Testcases from https://github.com/ethereum/EIPs/blob/master/EIPS/eip-145.md#sar-arithmetic-shift-right
 	tests := []TwoOperandTestcase{
 		{"0000000000000000000000000000000000000000000000000000000000000001", "00", "0000000000000000000000000000000000000000000000000000000000000001"},
@@ -208,6 +212,7 @@ func TestSAR(t *testing.T) {
 }
 
 func TestAddMod(t *testing.T) {
+	t.Parallel()
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
@@ -283,6 +288,7 @@ func TestAddMod(t *testing.T) {
 
 // TestJsonTestcases runs through all the testcases defined as json-files
 func TestJsonTestcases(t *testing.T) {
+	t.Parallel()
 	for name := range twoOpMethods {
 		data, err := os.ReadFile(fmt.Sprintf("testdata/testcases_%v.json", name))
 		if err != nil {
@@ -529,6 +535,7 @@ func BenchmarkOpIsZero(b *testing.B) {
 }
 
 func TestOpMstore(t *testing.T) {
+	t.Parallel()
 	var (
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, params.TestChainConfig, Config{})
 		stack          = stack.New()
@@ -574,6 +581,7 @@ func BenchmarkOpMstore(bench *testing.B) {
 }
 
 func TestOpTstore(t *testing.T) {
+	t.Parallel()
 	var (
 		state          = state.New(nil)
 		env            = NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, state, params.TestChainConfig, Config{})
@@ -632,6 +640,7 @@ func BenchmarkOpKeccak256(bench *testing.B) {
 }
 
 func TestCreate2Addreses(t *testing.T) {
+	t.Parallel()
 	type testcase struct {
 		origin   string
 		salt     string
@@ -706,6 +715,7 @@ func TestCreate2Addreses(t *testing.T) {
 }
 
 func TestOpMCopy(t *testing.T) {
+	t.Parallel()
 	// Test cases from https://eips.ethereum.org/EIPS/eip-5656#test-cases
 	for i, tc := range []struct {
 		dst, src, len string

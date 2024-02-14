@@ -31,7 +31,7 @@ func (t *testProvider) StartDiagnostics(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			diagnostics.Send(ctx, testInfo{count})
+			diagnostics.Send(testInfo{count})
 			count++
 		}
 	}
@@ -42,6 +42,25 @@ func TestProviderRegistration(t *testing.T) {
 	// diagnostics provider
 	provider := &testProvider{}
 	diagnostics.RegisterProvider(provider, diagnostics.TypeOf(testInfo{}), log.Root())
+
+	// diagnostics receiver
+	ctx, ch, cancel := diagnostics.Context[testInfo](context.Background(), 1)
+	diagnostics.StartProviders(ctx, diagnostics.TypeOf(testInfo{}), log.Root())
+
+	for info := range ch {
+		if info.count == 3 {
+			cancel()
+		}
+	}
+}
+
+func TestDelayedProviderRegistration(t *testing.T) {
+
+	time.AfterFunc(1*time.Second, func() {
+		// diagnostics provider
+		provider := &testProvider{}
+		diagnostics.RegisterProvider(provider, diagnostics.TypeOf(testInfo{}), log.Root())
+	})
 
 	// diagnostics receiver
 	ctx, ch, cancel := diagnostics.Context[testInfo](context.Background(), 1)
@@ -68,7 +87,7 @@ func TestProviderFuncRegistration(t *testing.T) {
 			case <-ctx.Done():
 				return nil
 			case <-timer.C:
-				diagnostics.Send(ctx, testInfo{count})
+				diagnostics.Send(testInfo{count})
 				count++
 			}
 		}

@@ -161,6 +161,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var stat os.FileInfo
 	if stat, err = d.f.Stat(); err != nil {
 		return nil, err
@@ -346,6 +347,10 @@ func (d *Decompressor) ModTime() time.Time {
 	return d.modTime
 }
 
+func (d *Decompressor) IsOpen() bool {
+	return d != nil && d.f != nil
+}
+
 func (d *Decompressor) Close() {
 	if d.f != nil {
 		if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
@@ -393,7 +398,7 @@ func (d *Decompressor) EnableMadvNormal() *Decompressor {
 	_ = mmap.MadviseNormal(d.mmapHandle1)
 	return d
 }
-func (d *Decompressor) EnableWillNeed() *Decompressor {
+func (d *Decompressor) EnableMadvWillNeed() *Decompressor {
 	if d == nil || d.mmapHandle1 == nil {
 		return d
 	}

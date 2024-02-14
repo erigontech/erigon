@@ -11,6 +11,7 @@ import (
 )
 
 func TestCreateBodyDownload(t *testing.T) {
+	t.Parallel()
 	m := mock.Mock(t)
 	tx, err := m.DB.BeginRo(m.Ctx)
 	require.NoError(t, err)

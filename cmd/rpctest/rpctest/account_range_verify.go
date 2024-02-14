@@ -122,11 +122,13 @@ func CompareAccountRange(logger log.Logger, erigonURL, gethURL, tmpDataDir, geth
 		log.Error(err.Error())
 		return
 	}
+	defer tgTx.Rollback()
 	gethTx, err := gethKV.BeginRo(context.Background())
 	if err != nil {
 		log.Error(err.Error())
 		return
 	}
+	defer gethTx.Rollback()
 	tgCursor, err := tgTx.Cursor(kv.E2AccountsHistory)
 	if err != nil {
 		log.Error(err.Error())

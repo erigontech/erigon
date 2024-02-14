@@ -42,7 +42,7 @@ func (s *Sentinel) msgId(pmsg *pubsubpb.Message) string {
 		combinedData = append(combinedData, topicLenBytes...)
 		combinedData = append(combinedData, topic...)
 		combinedData = append(combinedData, pmsg.Data...)
-		h := utils.Keccak256(combinedData)
+		h := utils.Sha256(combinedData)
 		return string(h[:20])
 	}
 	totalLength := len(s.cfg.NetworkConfig.MessageDomainValidSnappy) +
@@ -55,6 +55,6 @@ func (s *Sentinel) msgId(pmsg *pubsubpb.Message) string {
 	combinedData = append(combinedData, topicLenBytes...)
 	combinedData = append(combinedData, topic...)
 	combinedData = append(combinedData, decodedData...)
-	h := utils.Keccak256(combinedData)
+	h := utils.Sha256(combinedData)
 	return string(h[:20])
 }

@@ -159,3 +159,8 @@ func (l *ListSSZ[T]) Clear() {
 	l.list = nil
 	l.root = libcommon.Hash{}
 }
+
+func (l *ListSSZ[T]) Truncate(length int) {
+	l.list = l.list[:length]
+	l.root = libcommon.Hash{}
+}

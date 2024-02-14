@@ -25,10 +25,14 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-
-	"github.com/ledgerwatch/erigon/cl/clparams"
+	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -39,11 +43,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
-	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	common2 "github.com/ledgerwatch/erigon/common"
@@ -59,6 +60,7 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/p2p/netutil"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 // These are all the command line flags we support.
@@ -95,7 +97,7 @@ var (
 	}
 	ChainFlag = cli.StringFlag{
 		Name:  "chain",
-		Usage: "Name of the testnet to join",
+		Usage: "name of the network to join",
 		Value: networkname.MainnetChainName,
 	}
 	IdentityFlag = cli.StringFlag{
@@ -140,12 +142,18 @@ var (
 	}
 	InternalConsensusFlag = cli.BoolFlag{
 		Name:  "internalcl",
-		Usage: "enables internal consensus",
+		Usage: "Enables internal consensus",
 	}
 	// Transaction pool settings
 	TxPoolDisableFlag = cli.BoolFlag{
 		Name:  "txpool.disable",
-		Usage: "experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+		Usage: "Experimental external pool and block producer, see ./cmd/txpool/readme.md for more info. Disabling internal txpool and block producer.",
+		Value: false,
+	}
+	TxPoolGossipDisableFlag = cli.BoolFlag{
+		Name:  "txpool.gossip.disable",
+		Usage: "Disabling p2p gossip of txs. Any txs received by p2p - will be dropped. Some networks like 'Optimism execution engine'/'Optimistic Rollup' - using it to protect against MEV attacks",
+		Value: txpoolcfg.DefaultConfig.NoGossip,
 	}
 	TxPoolLocalsFlag = cli.StringFlag{
 		Name:  "txpool.locals",
@@ -179,6 +187,11 @@ var (
 		Name:  "txpool.blobslots",
 		Usage: "Max allowed total number of blobs (within type-3 txs) per account",
 		Value: txpoolcfg.DefaultConfig.BlobSlots,
+	}
+	TxPoolTotalBlobPoolLimit = cli.Uint64Flag{
+		Name:  "txpool.totalblobpoollimit",
+		Usage: "Total limit of number of all blobs in txs within the txpool",
+		Value: txpoolcfg.DefaultConfig.TotalBlobPoolLimit,
 	}
 	TxPoolGlobalSlotsFlag = cli.Uint64Flag{
 		Name:  "txpool.globalslots",
@@ -394,7 +407,7 @@ var (
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
 		Usage: "Does limit amount of parallel db reads. Default: equal to GOMAXPROCS (or number of CPU)",
-		Value: cmp.Min(cmp.Max(10, runtime.GOMAXPROCS(-1)*16), 9_000),
+		Value: cmp.Min(cmp.Max(10, runtime.GOMAXPROCS(-1)*64), 9_000),
 	}
 	RpcAccessListFlag = cli.StringFlag{
 		Name:  "rpc.accessList",
@@ -413,7 +426,7 @@ var (
 
 	TxpoolApiAddrFlag = cli.StringFlag{
 		Name:  "txpool.api.addr",
-		Usage: "txpool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
+		Usage: "TxPool api network address, for example: 127.0.0.1:9090 (default: use value of --private.api.addr)",
 	}
 
 	TraceMaxtracesFlag = cli.UintFlag{
@@ -487,6 +500,15 @@ var (
 		Name:  "rpc.allow-unprotected-txs",
 		Usage: "Allow for unprotected (non-EIP155 signed) transactions to be submitted via RPC",
 	}
+	// Careful! Because we must rewind the hash state
+	// and re-compute the state trie, the further back in time the request, the more
+	// computationally intensive the operation becomes.
+	// The current default has been chosen arbitrarily as 'useful' without likely being overly computationally intense.
+	RpcMaxGetProofRewindBlockCount = cli.IntFlag{
+		Name:  "rpc.maxgetproofrewindblockcount.limit",
+		Usage: "Max GetProof rewind block count",
+		Value: 100_000,
+	}
 	StateCacheFlag = cli.StringFlag{
 		Name:  "state.cache",
 		Value: "0MB",
@@ -521,7 +543,7 @@ var (
 	}
 	SentryAddrFlag = cli.StringFlag{
 		Name:  "sentry.api.addr",
-		Usage: "comma separated sentry addresses '<host>:<port>,<host>:<port>'",
+		Usage: "Comma separated sentry addresses '<host>:<port>,<host>:<port>'",
 	}
 	SentryLogPeerInfoFlag = cli.BoolFlag{
 		Name:  "sentry.log-peer-info",
@@ -557,14 +579,14 @@ var (
 	NATFlag = cli.StringFlag{
 		Name: "nat",
 		Usage: `NAT port mapping mechanism (any|none|upnp|pmp|stun|extip:<IP>)
-			 "" or "none"         default - do not nat
-			 "extip:77.12.33.4"   will assume the local machine is reachable on the given IP
-			 "any"                uses the first auto-detected mechanism
-			 "upnp"               uses the Universal Plug and Play protocol
-			 "pmp"                uses NAT-PMP with an auto-detected gateway address
-			 "pmp:192.168.0.1"    uses NAT-PMP with the given gateway address
-			 "stun"               uses STUN to detect an external IP using a default server
-			 "stun:<server>"      uses STUN to detect an external IP using the given server (host:port)
+			 "" or "none"         Default - do not nat
+			 "extip:77.12.33.4"   Will assume the local machine is reachable on the given IP
+			 "any"                Uses the first auto-detected mechanism
+			 "upnp"               Uses the Universal Plug and Play protocol
+			 "pmp"                Uses NAT-PMP with an auto-detected gateway address
+			 "pmp:192.168.0.1"    Uses NAT-PMP with the given gateway address
+			 "stun"               Uses STUN to detect an external IP using a default server
+			 "stun:<server>"      Uses STUN to detect an external IP using the given server (host:port)
 `,
 		Value: "",
 	}
@@ -631,27 +653,27 @@ var (
 	}
 	HistoryV3Flag = cli.BoolFlag{
 		Name:  "experimental.history.v3",
-		Usage: "(also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
+		Usage: "(Also known as Erigon3) Not recommended yet: Can't change this flag after node creation. New DB and Snapshots format of history allows: parallel blocks execution, get state as of given transaction without executing whole block.",
 	}
 
 	CliqueSnapshotCheckpointIntervalFlag = cli.UintFlag{
 		Name:  "clique.checkpoint",
-		Usage: "number of blocks after which to save the vote snapshot to the database",
+		Usage: "Number of blocks after which to save the vote snapshot to the database",
 		Value: 10,
 	}
 	CliqueSnapshotInmemorySnapshotsFlag = cli.IntFlag{
 		Name:  "clique.snapshots",
-		Usage: "number of recent vote snapshots to keep in memory",
+		Usage: "Number of recent vote snapshots to keep in memory",
 		Value: 1024,
 	}
 	CliqueSnapshotInmemorySignaturesFlag = cli.IntFlag{
 		Name:  "clique.signatures",
-		Usage: "number of recent block signatures to keep in memory",
+		Usage: "Number of recent block signatures to keep in memory",
 		Value: 16384,
 	}
 	CliqueDataDirFlag = flags.DirectoryFlag{
 		Name:  "clique.datadir",
-		Usage: "a path to clique db folder",
+		Usage: "Path to clique db folder",
 		Value: "",
 	}
 
@@ -671,17 +693,17 @@ var (
 	TorrentDownloadRateFlag = cli.StringFlag{
 		Name:  "torrent.download.rate",
 		Value: "16mb",
-		Usage: "bytes per second, example: 32mb",
+		Usage: "Bytes per second, example: 32mb",
 	}
 	TorrentUploadRateFlag = cli.StringFlag{
 		Name:  "torrent.upload.rate",
 		Value: "4mb",
-		Usage: "bytes per second, example: 32mb",
+		Usage: "Bytes per second, example: 32mb",
 	}
 	TorrentDownloadSlotsFlag = cli.IntFlag{
 		Name:  "torrent.download.slots",
 		Value: 3,
-		Usage: "amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
+		Usage: "Amount of files to download in parallel. If network has enough seeders 1-3 slot enough, if network has lack of seeders increase to 5-7 (too big value will slow down everything).",
 	}
 	TorrentStaticPeersFlag = cli.StringFlag{
 		Name:  "torrent.staticpeers",
@@ -690,37 +712,37 @@ var (
 	}
 	NoDownloaderFlag = cli.BoolFlag{
 		Name:  "no-downloader",
-		Usage: "to disable downloader component",
+		Usage: "Disables downloader component",
 	}
 	DownloaderVerifyFlag = cli.BoolFlag{
 		Name:  "downloader.verify",
-		Usage: "verify snapshots on startup. it will not report founded problems but just re-download broken pieces",
+		Usage: "Verify snapshots on startup. It will not report problems found, but re-download broken pieces.",
 	}
 	DisableIPV6 = cli.BoolFlag{
 		Name:  "downloader.disable.ipv6",
-		Usage: "Turns off ipv6 for the downlaoder",
+		Usage: "Turns off ipv6 for the downloader",
 		Value: false,
 	}
 
 	DisableIPV4 = cli.BoolFlag{
 		Name:  "downloader.disable.ipv4",
-		Usage: "Turn off ipv4 for the downloader",
+		Usage: "Turns off ipv4 for the downloader",
 		Value: false,
 	}
 	TorrentPortFlag = cli.IntFlag{
 		Name:  "torrent.port",
 		Value: 42069,
-		Usage: "port to listen and serve BitTorrent protocol",
+		Usage: "Port to listen and serve BitTorrent protocol",
 	}
 	TorrentMaxPeersFlag = cli.IntFlag{
 		Name:  "torrent.maxpeers",
 		Value: 100,
-		Usage: "unused parameter (reserved for future use)",
+		Usage: "Unused parameter (reserved for future use)",
 	}
 	TorrentConnsPerFileFlag = cli.IntFlag{
 		Name:  "torrent.conns.perfile",
 		Value: 10,
-		Usage: "connections per file",
+		Usage: "Number of connections per file",
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
@@ -729,8 +751,8 @@ var (
 	}
 	DbSizeLimitFlag = cli.StringFlag{
 		Name:  "db.size.limit",
-		Usage: "runtime limit of chandata db size. you can change value of this flag at any time",
-		Value: (3 * datasize.TB).String(),
+		Usage: "Runtime limit of chaindata db size. You can change value of this flag at any time.",
+		Value: (12 * datasize.TB).String(),
 	}
 	ForcePartialCommitFlag = cli.BoolFlag{
 		Name:  "force.partial.commit",
@@ -743,16 +765,16 @@ var (
 		Usage: "Enabling grpc health check",
 	}
 
+	WebSeedsFlag = cli.StringFlag{
+		Name:  "webseed",
+		Usage: "Comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
+		Value: "",
+	}
+
 	HeimdallURLFlag = cli.StringFlag{
 		Name:  "bor.heimdall",
 		Usage: "URL of Heimdall service",
 		Value: "http://localhost:1317",
-	}
-
-	WebSeedsFlag = cli.StringFlag{
-		Name:  "webseed",
-		Usage: "comma-separated URL's, holding metadata about network-support infrastructure (like S3 buckets with snapshots, bootnodes, etc...)",
-		Value: "",
 	}
 
 	// WithoutHeimdallFlag no heimdall (for testing purpose)
@@ -777,18 +799,12 @@ var (
 		Value: true,
 	}
 
-	// HeimdallgRPCAddressFlag flag for heimdall gRPC address
-	HeimdallgRPCAddressFlag = cli.StringFlag{
-		Name:  "bor.heimdallgRPC",
-		Usage: "Address of Heimdall gRPC service",
-		Value: "",
-	}
-
 	ConfigFlag = cli.StringFlag{
 		Name:  "config",
 		Usage: "Sets erigon flags from YAML/TOML file",
 		Value: "",
 	}
+
 	LightClientDiscoveryAddrFlag = cli.StringFlag{
 		Name:  "lightclient.discovery.addr",
 		Usage: "Address for lightclient DISCV5 protocol",
@@ -804,6 +820,7 @@ var (
 		Usage: "TCP Port for lightclient DISCV5 protocol",
 		Value: 4001,
 	}
+
 	SentinelAddrFlag = cli.StringFlag{
 		Name:  "sentinel.addr",
 		Usage: "Address for sentinel",
@@ -822,8 +839,8 @@ var (
 	}
 
 	DiagnosticsURLFlag = cli.StringFlag{
-		Name:  "diagnostics.url",
-		Usage: "URL of the diagnostics system provided by the support team",
+		Name:  "diagnostics.addr",
+		Usage: "Address of the diagnostics system provided by the support team",
 	}
 
 	DiagnosticsInsecureFlag = cli.BoolFlag{
@@ -836,11 +853,6 @@ var (
 		Usage: "Comma separated list of support session ids to connect to",
 	}
 
-	SilkwormPathFlag = cli.StringFlag{
-		Name:  "silkworm.path",
-		Usage: "Path to the Silkworm library",
-		Value: "",
-	}
 	SilkwormExecutionFlag = cli.BoolFlag{
 		Name:  "silkworm.exec",
 		Usage: "Enable Silkworm block execution",
@@ -852,6 +864,72 @@ var (
 	SilkwormSentryFlag = cli.BoolFlag{
 		Name:  "silkworm.sentry",
 		Usage: "Enable embedded Silkworm Sentry service",
+	}
+
+	BeaconAPIFlag = cli.BoolFlag{
+		Name:  "beacon.api",
+		Usage: "Enable beacon API",
+		Value: false,
+	}
+	BeaconApiProtocolFlag = cli.StringFlag{
+		Name:  "beacon.api.protocol",
+		Usage: "Protocol for beacon API",
+		Value: "tcp",
+	}
+	BeaconApiReadTimeoutFlag = cli.Uint64Flag{
+		Name:  "beacon.api.read.timeout",
+		Usage: "Sets the seconds for a read time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiWriteTimeoutFlag = cli.Uint64Flag{
+		Name:  "beacon.api.write.timeout",
+		Usage: "Sets the seconds for a write time out in the beacon api",
+		Value: 5,
+	}
+	BeaconApiIdleTimeoutFlag = cli.Uint64Flag{
+		Name:  "beacon.api.ide.timeout",
+		Usage: "Sets the seconds for a write time out in the beacon api",
+		Value: 25,
+	}
+	BeaconApiAddrFlag = cli.StringFlag{
+		Name:  "beacon.api.addr",
+		Usage: "sets the host to listen for beacon api requests",
+		Value: "localhost",
+	}
+	BeaconApiPortFlag = cli.UintFlag{
+		Name:  "beacon.api.port",
+		Usage: "sets the port to listen for beacon api requests",
+		Value: 5555,
+	}
+	RPCSlowFlag = cli.DurationFlag{
+		Name:  "rpc.slow",
+		Usage: "Print in logs RPC requests slower than given threshold: 100ms, 1s, 1m. Exluded methods: " + strings.Join(rpccfg.SlowLogBlackList, ","),
+		Value: 0,
+	}
+	CaplinBackfillingFlag = cli.BoolFlag{
+		Name:  "caplin.backfilling",
+		Usage: "sets whether backfilling is enabled for caplin",
+		Value: false,
+	}
+	CaplinArchiveFlag = cli.BoolFlag{
+		Name:  "caplin.archive",
+		Usage: "enables archival node in caplin (Experimental, does not work)",
+		Value: false,
+	}
+	BeaconApiAllowCredentialsFlag = cli.BoolFlag{
+		Name:  "beacon.api.cors.allow-credentials",
+		Usage: "set the cors' allow credentials",
+		Value: false,
+	}
+	BeaconApiAllowMethodsFlag = cli.StringSliceFlag{
+		Name:  "beacon.api.cors.allow-methods",
+		Usage: "set the cors' allow methods",
+		Value: cli.NewStringSlice("GET", "POST", "PUT", "DELETE", "OPTIONS"),
+	}
+	BeaconApiAllowOriginsFlag = cli.StringSliceFlag{
+		Name:  "beacon.api.cors.allow-origins",
+		Usage: "set the cors' allow origins",
+		Value: cli.NewStringSlice(),
 	}
 )
 
@@ -1273,7 +1351,7 @@ func setGPOCobra(f *pflag.FlagSet, cfg *gaspricecfg.Config) {
 
 func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	cfg := &fullCfg.DeprecatedTxPool
-	if ctx.IsSet(TxPoolDisableFlag.Name) {
+	if ctx.IsSet(TxPoolDisableFlag.Name) || TxPoolDisableFlag.Value {
 		cfg.Disable = true
 	}
 	if ctx.IsSet(TxPoolLocalsFlag.Name) {
@@ -1303,6 +1381,9 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	}
 	if ctx.IsSet(TxPoolBlobSlotsFlag.Name) {
 		fullCfg.TxPool.BlobSlots = ctx.Uint64(TxPoolBlobSlotsFlag.Name)
+	}
+	if ctx.IsSet(TxPoolTotalBlobPoolLimit.Name) {
+		fullCfg.TxPool.TotalBlobPoolLimit = ctx.Uint64(TxPoolTotalBlobPoolLimit.Name)
 	}
 	if ctx.IsSet(TxPoolGlobalSlotsFlag.Name) {
 		cfg.GlobalSlots = ctx.Uint64(TxPoolGlobalSlotsFlag.Name)
@@ -1419,7 +1500,6 @@ func setClique(ctx *cli.Context, cfg *params.ConsensusSnapshotConfig, datadir st
 func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
-	cfg.HeimdallgRPCAddress = ctx.String(HeimdallgRPCAddressFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
 }
 
@@ -1473,11 +1553,25 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 }
 
+func setBeaconAPI(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.BeaconRouter.Active = ctx.Bool(BeaconAPIFlag.Name)
+	cfg.BeaconRouter.Protocol = ctx.String(BeaconApiProtocolFlag.Name)
+	cfg.BeaconRouter.Address = fmt.Sprintf("%s:%d", ctx.String(BeaconApiAddrFlag.Name), ctx.Int(BeaconApiPortFlag.Name))
+	cfg.BeaconRouter.ReadTimeTimeout = time.Duration(ctx.Uint64(BeaconApiReadTimeoutFlag.Name)) * time.Second
+	cfg.BeaconRouter.WriteTimeout = time.Duration(ctx.Uint64(BeaconApiWriteTimeoutFlag.Name)) * time.Second
+	cfg.BeaconRouter.IdleTimeout = time.Duration(ctx.Uint64(BeaconApiIdleTimeoutFlag.Name)) * time.Second
+	cfg.BeaconRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
+	cfg.BeaconRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
+	cfg.BeaconRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
+}
+
+func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
+	cfg.CaplinConfig.Backfilling = ctx.Bool(CaplinBackfillingFlag.Name) || ctx.Bool(CaplinArchiveFlag.Name)
+	cfg.CaplinConfig.Archive = ctx.Bool(CaplinArchiveFlag.Name)
+}
+
 func setSilkworm(ctx *cli.Context, cfg *ethconfig.Config) {
-	cfg.SilkwormPath = ctx.String(SilkwormPathFlag.Name)
-	if ctx.IsSet(SilkwormExecutionFlag.Name) {
-		cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
-	}
+	cfg.SilkwormExecution = ctx.Bool(SilkwormExecutionFlag.Name)
 	cfg.SilkwormRpcDaemon = ctx.Bool(SilkwormRpcDaemonFlag.Name)
 	cfg.SilkwormSentry = ctx.Bool(SilkwormSentryFlag.Name)
 }
@@ -1532,7 +1626,17 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	cfg.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.ForcePartialCommit = ctx.Bool(ForcePartialCommitFlag.Name)
 
-	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(ctx.String(ChainFlag.Name))
+	chain := ctx.String(ChainFlag.Name) // mainnet by default
+	if ctx.IsSet(NetworkIdFlag.Name) {
+		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
+		if cfg.NetworkID != 1 && !ctx.IsSet(ChainFlag.Name) {
+			chain = "" // don't default to mainnet if NetworkID != 1
+		}
+	} else {
+		cfg.NetworkID = params.NetworkIDByChainName(chain)
+	}
+
+	cfg.Sync.UseSnapshots = ethconfig.UseSnapshotsByChainName(chain)
 	if ctx.IsSet(SnapshotFlag.Name) { //force override default by cli
 		cfg.Sync.UseSnapshots = ctx.Bool(SnapshotFlag.Name)
 	}
@@ -1559,12 +1663,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 		logger.Info("torrent verbosity", "level", lvl.LogString())
 		version := "erigon: " + params.VersionWithCommit(params.GitCommit)
-		chain := ctx.String(ChainFlag.Name)
 		webseedsList := libcommon.CliString2Array(ctx.String(WebSeedsFlag.Name))
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
 		}
-		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name), webseedsList, chain)
+		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name), webseedsList, chain, true)
 		if err != nil {
 			panic(err)
 		}
@@ -1590,12 +1693,11 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 	setWhitelist(ctx, cfg)
 	setBorConfig(ctx, cfg)
 	setSilkworm(ctx, cfg)
+	setBeaconAPI(ctx, cfg)
+	setCaplin(ctx, cfg)
 
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 	cfg.HistoryV3 = ctx.Bool(HistoryV3Flag.Name)
-	if ctx.IsSet(NetworkIdFlag.Name) {
-		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-	}
 
 	if ctx.IsSet(RPCGlobalGasCapFlag.Name) {
 		cfg.RPCGasCap = ctx.Uint64(RPCGlobalGasCapFlag.Name)
@@ -1618,9 +1720,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			cfg.EthDiscoveryURLs = libcommon.CliString2Array(urls)
 		}
 	}
-	// Override any default configs for hard coded networks.
-	chain := ctx.String(ChainFlag.Name)
 
+	// Override any default configs for hard coded networks.
 	switch chain {
 	default:
 		genesis := core.GenesisBlockByChainName(chain)
@@ -1630,19 +1731,12 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 			return
 		}
 		cfg.Genesis = genesis
-		if !ctx.IsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = params.NetworkIDByChainName(chain)
-		}
 		SetDNSDiscoveryDefaults(cfg, *genesisHash)
 	case "":
 		if cfg.NetworkID == 1 {
 			SetDNSDiscoveryDefaults(cfg, params.MainnetGenesisHash)
 		}
 	case networkname.DevChainName:
-		if !ctx.IsSet(NetworkIdFlag.Name) {
-			cfg.NetworkID = params.NetworkIDByChainName(chain)
-		}
-
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
 		if developer == (libcommon.Address{}) {
@@ -1669,6 +1763,10 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 
 	if ctx.IsSet(TrustedSetupFile.Name) {
 		libkzg.SetTrustedSetupFilePath(ctx.String(TrustedSetupFile.Name))
+	}
+
+	if ctx.IsSet(TxPoolGossipDisableFlag.Name) {
+		cfg.DisableTxPoolGossip = ctx.Bool(TxPoolGossipDisableFlag.Name)
 	}
 }
 

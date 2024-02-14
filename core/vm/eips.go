@@ -217,7 +217,7 @@ func opTstore(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]b
 
 // opBaseFee implements BASEFEE opcode
 func opBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	baseFee := interpreter.evm.Context().BaseFee
+	baseFee := interpreter.evm.Context.BaseFee
 	callContext.Stack.Push(baseFee)
 	return nil, nil
 }
@@ -260,8 +260,8 @@ func enable4844(jt *JumpTable) {
 // opBlobHash implements the BLOBHASH opcode
 func opBlobHash(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
 	idx := scope.Stack.Peek()
-	if idx.LtUint64(uint64(len(interpreter.evm.TxContext().BlobHashes))) {
-		hash := interpreter.evm.TxContext().BlobHashes[idx.Uint64()]
+	if idx.LtUint64(uint64(len(interpreter.evm.BlobHashes))) {
+		hash := interpreter.evm.BlobHashes[idx.Uint64()]
 		idx.SetBytes(hash.Bytes())
 	} else {
 		idx.Clear()
@@ -308,7 +308,7 @@ func enable6780(jt *JumpTable) {
 
 // opBlobBaseFee implements the BLOBBASEFEE opcode
 func opBlobBaseFee(pc *uint64, interpreter *EVMInterpreter, callContext *ScopeContext) ([]byte, error) {
-	excessBlobGas := interpreter.evm.Context().ExcessBlobGas
+	excessBlobGas := interpreter.evm.Context.ExcessBlobGas
 	blobBaseFee, err := misc.GetBlobGasPrice(interpreter.evm.ChainConfig(), *excessBlobGas)
 	if err != nil {
 		return nil, err

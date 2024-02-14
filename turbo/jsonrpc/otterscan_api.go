@@ -4,15 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
-	"sync"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
+	hexutil2 "github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
+	"github.com/ledgerwatch/erigon/eth/ethutils"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -333,14 +334,14 @@ func (api *OtterscanAPIImpl) searchTransactionsBeforeV3(tx kv.TemporalTx, ctx co
 		if err != nil {
 			return nil, err
 		}
-		rpcTx := newRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
+		rpcTx := NewRPCTransaction(txn, blockHash, blockNum, uint64(txIndex), header.BaseFee)
 		txs = append(txs, rpcTx)
 		receipt := &types.Receipt{
 			Type: txn.Type(), CumulativeGasUsed: res.UsedGas,
 			TransactionIndex: uint(txIndex),
 			BlockNumber:      header.Number, BlockHash: blockHash, Logs: rawLogs,
 		}
-		mReceipt := marshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
+		mReceipt := ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true)
 		mReceipt["timestamp"] = header.Time
 		receipts = append(receipts, mReceipt)
 
@@ -443,8 +444,6 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 }
 
 func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Address, chainConfig *chain.Config, pageSize, resultCount uint16, callFromToProvider BlockProvider) ([]*TransactionsWithReceipts, bool, error) {
-	var wg sync.WaitGroup
-
 	// Estimate the common case of user address having at most 1 interaction/block and
 	// trace N := remaining page matches as number of blocks to trace concurrently.
 	// TODO: this is not optimimal for big contract addresses; implement some better heuristics.
@@ -453,7 +452,11 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 	totalBlocksTraced := 0
 	hasMore := true
 
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(1024) // we don't want limit much here, but protecting from infinity attack
 	for i := 0; i < int(estBlocksToTrace); i++ {
+		i := i // we will pass it to goroutine
+
 		var nextBlock uint64
 		var err error
 		nextBlock, hasMore, err = callFromToProvider()
@@ -465,11 +468,19 @@ func (api *OtterscanAPIImpl) traceBlocks(ctx context.Context, addr common.Addres
 			break
 		}
 
-		wg.Add(1)
 		totalBlocksTraced++
-		go api.searchTraceBlock(ctx, &wg, addr, chainConfig, i, nextBlock, results)
+
+		eg.Go(func() error {
+			// don't return error from searchTraceBlock - to avoid 1 block fail impact to other blocks
+			// if return error - `errgroup` will interrupt all other goroutines
+			// but passing `ctx` - then user still can cancel request
+			api.searchTraceBlock(ctx, addr, chainConfig, i, nextBlock, results)
+			return nil
+		})
 	}
-	wg.Wait()
+	if err := eg.Wait(); err != nil {
+		return nil, false, err
+	}
 
 	return results[:totalBlocksTraced], hasMore, nil
 }
@@ -593,7 +604,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	result := make([]map[string]interface{}, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := marshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true)
+		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true)
 		marshalledRcpt["logs"] = nil
 		marshalledRcpt["logsBloom"] = nil
 		result = append(result, marshalledRcpt)

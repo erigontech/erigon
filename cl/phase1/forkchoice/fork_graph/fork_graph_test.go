@@ -2,7 +2,6 @@ package fork_graph
 
 import (
 	_ "embed"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -41,7 +40,6 @@ func TestForkGraphInDisk(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, status, InvalidBlock)
 	// Save current state hash
-	fmt.Println("ASADCS")
 	_, status, err = graph.AddChainSegment(blockB, true)
 	require.NoError(t, err)
 	require.Equal(t, status, Success)

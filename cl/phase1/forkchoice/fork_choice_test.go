@@ -3,15 +3,20 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/spf13/afero"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -51,7 +56,8 @@ func TestForkChoiceBasic(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
+	emitters := beaconevents.NewEmitters()
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -89,7 +95,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headSlot, uint64(3))
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// lastly do attestation
-	require.NoError(t, store.OnAttestation(testAttestation, false))
+	require.NoError(t, store.OnAttestation(testAttestation, false, false))
 	// Try processing a voluntary exit
 	err = store.OnVoluntaryExit(&cltypes.SignedVoluntaryExit{
 		VoluntaryExit: &cltypes.VoluntaryExit{
@@ -106,4 +112,50 @@ func TestForkChoiceBasic(t *testing.T) {
 	}, true)
 	require.NoError(t, err)
 	require.Equal(t, len(pool.VoluntaryExistsPool.Raw()), 1)
+}
+
+func TestForkChoiceChainBellatrix(t *testing.T) {
+	blocks, anchorState, _ := tests.GetBellatrixRandom()
+
+	intermediaryState, err := anchorState.Copy()
+	require.NoError(t, err)
+
+	intermediaryBlockRoot := blocks[0].Block.ParentRoot
+	for i := 0; i < 35; i++ {
+		require.NoError(t, transition.TransitionState(intermediaryState, blocks[i], nil, false))
+		intermediaryBlockRoot, err = blocks[i].Block.HashSSZ()
+		require.NoError(t, err)
+	}
+	// Initialize forkchoice store
+	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
+	emitters := beaconevents.NewEmitters()
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
+	store.OnTick(2000)
+	require.NoError(t, err)
+	for _, block := range blocks {
+		require.NoError(t, store.OnBlock(block, false, true))
+	}
+	root1, err := blocks[20].Block.HashSSZ()
+	require.NoError(t, err)
+
+	rewards, ok := store.BlockRewards(libcommon.Hash(root1))
+	require.True(t, ok)
+	require.Equal(t, rewards.Attestations, uint64(0x511ad))
+	// test randao mix
+	mixes := solid.NewHashVector(int(clparams.MainnetBeaconConfig.EpochsPerHistoricalVector))
+	require.True(t, store.RandaoMixes(intermediaryBlockRoot, mixes))
+	for i := 0; i < mixes.Length(); i++ {
+		require.Equal(t, mixes.Get(i), intermediaryState.RandaoMixes().Get(i), fmt.Sprintf("mixes mismatch at index %d, have: %x, expected: %x", i, mixes.Get(i), intermediaryState.RandaoMixes().Get(i)))
+	}
+	currentIntermediarySyncCommittee, nextIntermediarySyncCommittee, ok := store.GetSyncCommittees(intermediaryBlockRoot)
+	require.True(t, ok)
+
+	require.Equal(t, intermediaryState.CurrentSyncCommittee(), currentIntermediarySyncCommittee)
+	require.Equal(t, intermediaryState.NextSyncCommittee(), nextIntermediarySyncCommittee)
+
+	bs, has := store.GetLightClientBootstrap(intermediaryBlockRoot)
+	require.True(t, has)
+	bsRoot, err := bs.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, libcommon.Hash(bsRoot), common.HexToHash("0x58a3f366bcefe6c30fb3a6506bed726f9a51bb272c77a8a3ed88c34435d44cb7"))
 }

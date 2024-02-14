@@ -55,7 +55,7 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 	// Prepare output slice.
 	responsePacket := []*cltypes.SignedBeaconBlock{}
 
-	ctx, cn := context.WithTimeout(ctx, time.Second*time.Duration(16+30*count))
+	ctx, cn := context.WithTimeout(ctx, time.Second*2)
 	defer cn()
 	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
 		Data:  reqData,
@@ -143,7 +143,7 @@ func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, co
 
 // SendBeaconBlocksByRootReq retrieves blocks by root from beacon chain.
 func (b *BeaconRpcP2P) SendBeaconBlocksByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedBeaconBlock, string, error) {
-	var req solid.HashListSSZ = solid.NewHashList(69696969)
+	var req solid.HashListSSZ = solid.NewHashList(69696969) // The number is used for hashing, it is innofensive here.
 	for _, root := range roots {
 		req.Append(root)
 	}
@@ -161,7 +161,7 @@ func (b *BeaconRpcP2P) Peers() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return amount.Amount, nil
+	return amount.Active, nil
 }
 
 func (b *BeaconRpcP2P) SetStatus(finalizedRoot libcommon.Hash, finalizedEpoch uint64, headRoot libcommon.Hash, headSlot uint64) error {
@@ -186,7 +186,7 @@ func (b *BeaconRpcP2P) PropagateBlock(block *cltypes.SignedBeaconBlock) error {
 	}
 	_, err = b.sentinel.PublishGossip(b.ctx, &sentinel.GossipData{
 		Data: encoded,
-		Type: sentinel.GossipType_BeaconBlockGossipType,
+		Name: "beacon_block",
 	})
 	return err
 }

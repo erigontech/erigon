@@ -1,13 +1,12 @@
 package devnet
 
 import (
-	context "context"
+	"context"
 	"math/big"
 	"regexp"
 	"sync"
 
 	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 )
 
 type Devnet []*Network
@@ -22,12 +21,12 @@ func (f NetworkSelectorFunc) Test(ctx context.Context, network *Network) bool {
 	return f(ctx, network)
 }
 
-func (d Devnet) Start(ctx *cli.Context, logger log.Logger) (Context, error) {
+func (d Devnet) Start(logger log.Logger) (Context, error) {
 	var wg sync.WaitGroup
 
 	errors := make(chan error, len(d))
 
-	runCtx := WithDevnet(context.Background(), ctx, d, logger)
+	runCtx := WithDevnet(context.Background(), d, logger)
 
 	for _, network := range d {
 		wg.Add(1)

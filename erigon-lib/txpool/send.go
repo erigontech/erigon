@@ -70,7 +70,7 @@ func (f *Send) notifyTests() {
 }
 
 // Broadcast given RLPs to random peers
-func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
+func (f *Send) BroadcastPooledTxs(rlps [][]byte, maxPeers uint64) (txSentTo []int) {
 	defer f.notifyTests()
 	if len(rlps) == 0 {
 		return
@@ -94,7 +94,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 							Id:   sentry.MessageId_TRANSACTIONS_66,
 							Data: txsData,
 						},
-						MaxPeers: 100,
+						MaxPeers: maxPeers,
 					}
 				}
 				peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, txs66)
@@ -114,7 +114,7 @@ func (f *Send) BroadcastPooledTxs(rlps [][]byte) (txSentTo []int) {
 	return
 }
 
-func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Hashes) (hashSentTo []int) {
+func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Hashes, maxPeers uint64) (hashSentTo []int) {
 	defer f.notifyTests()
 	hashSentTo = make([]int, len(types))
 	if len(types) == 0 {
@@ -149,11 +149,14 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 			switch sentryClient.Protocol() {
 			case direct.ETH66, direct.ETH67:
 				if i > prevI {
-					req := &sentry.OutboundMessageData{
-						Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
-						Data: iData,
+					req := &sentry.SendMessageToRandomPeersRequest{
+						Data: &sentry.OutboundMessageData{
+							Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_66,
+							Data: iData,
+						},
+						MaxPeers: maxPeers,
 					}
-					peers, err := sentryClient.SendMessageToAll(f.ctx, req, &grpc.EmptyCallOption{})
+					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, req)
 					if err != nil {
 						f.logger.Debug("[txpool.send] AnnouncePooledTxs", "err", err)
 					}
@@ -166,11 +169,14 @@ func (f *Send) AnnouncePooledTxs(types []byte, sizes []uint32, hashes types2.Has
 			case direct.ETH68:
 
 				if j > prevJ {
-					req := &sentry.OutboundMessageData{
-						Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
-						Data: jData,
+					req := &sentry.SendMessageToRandomPeersRequest{
+						Data: &sentry.OutboundMessageData{
+							Id:   sentry.MessageId_NEW_POOLED_TRANSACTION_HASHES_68,
+							Data: jData,
+						},
+						MaxPeers: maxPeers,
 					}
-					peers, err := sentryClient.SendMessageToAll(f.ctx, req, &grpc.EmptyCallOption{})
+					peers, err := sentryClient.SendMessageToRandomPeers(f.ctx, req)
 					if err != nil {
 						f.logger.Debug("[txpool.send] AnnouncePooledTxs68", "err", err)
 					}

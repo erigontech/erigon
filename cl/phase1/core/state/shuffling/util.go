@@ -3,6 +3,7 @@ package shuffling
 import (
 	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/common/eth2shuffle"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -49,7 +50,7 @@ func ComputeShuffledIndex(conf *clparams.BeaconChainConfig, ind, ind_count uint6
 func ComputeShuffledIndexPreInputs(conf *clparams.BeaconChainConfig, seed [32]byte) [][32]byte {
 	ret := make([][32]byte, conf.ShuffleRoundCount)
 	for i := range ret {
-		ret[i] = utils.Keccak256(append(seed[:], byte(i)))
+		ret[i] = utils.Sha256(append(seed[:], byte(i)))
 	}
 	return ret
 }
@@ -59,19 +60,18 @@ func GetSeed(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, epoch ui
 	binary.LittleEndian.PutUint64(epochByteArray, epoch)
 	input := append(domain[:], epochByteArray...)
 	input = append(input, mix[:]...)
-	return utils.Keccak256(input)
+	return utils.Sha256(input)
 }
 
-func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, indicies []uint64, slot uint64) []uint64 {
-	shuffledIndicies := make([]uint64, len(indicies))
-	copy(shuffledIndicies, indicies)
-	hashFunc := utils.OptimizedKeccak256NotThreadSafe()
+func ComputeShuffledIndicies(beaconConfig *clparams.BeaconChainConfig, mix common.Hash, out, indicies []uint64, slot uint64) []uint64 {
+	copy(out, indicies)
+	hashFunc := utils.OptimizedSha256NotThreadSafe()
 	epoch := slot / beaconConfig.SlotsPerEpoch
 	seed := GetSeed(beaconConfig, mix, epoch, beaconConfig.DomainBeaconAttester)
 	eth2ShuffleHashFunc := func(data []byte) []byte {
 		hashed := hashFunc(data)
 		return hashed[:]
 	}
-	eth2shuffle.UnshuffleList(eth2ShuffleHashFunc, shuffledIndicies, uint8(beaconConfig.ShuffleRoundCount), seed)
-	return shuffledIndicies
+	eth2shuffle.UnshuffleList(eth2ShuffleHashFunc, out, uint8(beaconConfig.ShuffleRoundCount), seed)
+	return out
 }

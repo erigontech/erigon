@@ -36,11 +36,11 @@ type PeerResponse struct {
 	Protocols     map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
 }
 
-func SetupPeersAccess(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
+func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
 	metricsMux.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writePeers(w, ctx, node)
+		writePeers(w, ctxclient, node)
 	})
 }
 

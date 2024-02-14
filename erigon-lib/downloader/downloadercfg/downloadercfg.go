@@ -17,9 +17,9 @@
 package downloadercfg
 
 import (
-	"io/ioutil"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -29,6 +29,7 @@ import (
 	lg "github.com/anacrolix/log"
 	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
@@ -50,8 +51,10 @@ type Cfg struct {
 
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
-	WebSeedS3Tokens                 []string
+	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
+	AddTorrentsFromDisk             bool
+	SnapshotLock                    bool
 	ChainName                       string
 
 	Dirs datadir.Dirs
@@ -89,7 +92,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string) (*Cfg, error) {
+func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots bool) (*Cfg, error) {
 	torrentConfig := Default()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
@@ -151,34 +154,50 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	webseedUrlsOrFiles := webseeds
 	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
 	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
-	webseedS3Providers := make([]string, 0, len(webseedUrlsOrFiles))
 	for _, webseed := range webseedUrlsOrFiles {
-		if strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
-			webseedS3Providers = append(webseedS3Providers, webseed)
-			continue
-		}
-		uri, err := url.ParseRequestURI(webseed)
-		if err != nil {
-			if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
-				webseedFileProviders = append(webseedFileProviders, webseed)
+		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
+			uri, err := url.ParseRequestURI(webseed)
+			if err != nil {
+				if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
+					webseedFileProviders = append(webseedFileProviders, webseed)
+				}
+				continue
 			}
+			webseedHttpProviders = append(webseedHttpProviders, uri)
 			continue
 		}
-		webseedHttpProviders = append(webseedHttpProviders, uri)
+
+		if strings.HasPrefix(webseed, "v1:") {
+			withoutVerisonPrefix := webseed[3:]
+			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
+				continue
+			}
+			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
+			if err != nil {
+				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVerisonPrefix)
+				continue
+			}
+			webseedHttpProviders = append(webseedHttpProviders, uri)
+		} else {
+			continue
+		}
 	}
 	localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
 	if dir.FileExist(localCfgFile) {
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
+
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
+		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders,
+		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
+		SnapshotConfig: snapcfg.KnownCfg(chainName),
 	}, nil
 }
 
 func getIpv6Enabled() bool {
 	if runtime.GOOS == "linux" {
-		file, err := ioutil.ReadFile("/sys/module/ipv6/parameters/disable")
+		file, err := os.ReadFile("/sys/module/ipv6/parameters/disable")
 		if err != nil {
 			log.Warn("could not read /sys/module/ipv6/parameters/disable for ipv6 detection")
 			return false

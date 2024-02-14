@@ -21,6 +21,7 @@ import (
 )
 
 func TestCompiler(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input, output string
 	}{

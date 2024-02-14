@@ -107,7 +107,7 @@ func TestHTTPRespBodyUnlimited(t *testing.T) {
 	logger := log.New()
 	const respLength = maxRequestContentLength * 3
 
-	s := NewServer(50, false /* traceRequests */, true, logger)
+	s := NewServer(50, false /* traceRequests */, true, logger, 100)
 	defer s.Stop()
 	if err := s.RegisterName("test", largeRespService{respLength}); err != nil {
 		t.Fatal(err)

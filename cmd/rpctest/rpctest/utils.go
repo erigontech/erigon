@@ -231,7 +231,7 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 	return nil
 }
 
-func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult) error {
+func requestAndCompare(request string, methodName string, errCtx string, reqGen *RequestGenerator, needCompare bool, rec *bufio.Writer, errs *bufio.Writer, channel chan CallResult, insertOnlyIfSuccess bool) error {
 	recording := rec != nil
 	res := reqGen.Erigon2(methodName, request)
 	if res.Err != nil {
@@ -242,9 +242,6 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 		if !needCompare && channel == nil {
 			return fmt.Errorf("error invoking %s (Erigon): %d %s", methodName, errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
-	}
-	if channel != nil {
-		channel <- res
 	}
 	if needCompare {
 		resg := reqGen.Geth2(methodName, request)
@@ -279,7 +276,14 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 		} else {
 			return compareErrors(errVal, errValg, methodName, errCtx, errs)
 		}
+	} else {
+		if channel != nil {
+			if insertOnlyIfSuccess == false || (insertOnlyIfSuccess && errVal == nil) {
+				channel <- res
+			}
+		}
 	}
+
 	if recording {
 		fmt.Fprintf(rec, "%s\n%s\n\n", request, res.Response)
 	}
@@ -651,4 +655,186 @@ func setRoutes(erigonUrl, gethURL string) {
 	routes = make(map[string]string)
 	routes[Erigon] = erigonUrl
 	routes[Geth] = gethURL
+}
+
+func compareBlockTransactions(b, bg *OtsBlockTransactions) bool {
+	r := b.Result
+	rg := bg.Result
+	if r.FullBlock.Difficulty.ToInt().Cmp(rg.FullBlock.Difficulty.ToInt()) != 0 {
+		fmt.Printf("Different Difficulty  %d %d\n", r.FullBlock.Difficulty.ToInt(), rg.FullBlock.Difficulty.ToInt())
+		return false
+	}
+	if r.FullBlock.ExtraData != rg.FullBlock.ExtraData {
+		fmt.Printf("Different ExtraData  %s %s\n", r.FullBlock.ExtraData, rg.FullBlock.ExtraData)
+		return false
+	}
+	if r.FullBlock.GasLimit.ToInt().Cmp(rg.FullBlock.GasLimit.ToInt()) != 0 {
+		fmt.Printf("Different GasLimit  %d %d\n", r.FullBlock.GasLimit.ToInt(), rg.FullBlock.GasLimit.ToInt())
+		return false
+	}
+	if r.FullBlock.GasUsed.ToInt().Cmp(rg.FullBlock.GasUsed.ToInt()) != 0 {
+		fmt.Printf("Different GasUsed  %d %d\n", r.FullBlock.GasUsed.ToInt(), rg.FullBlock.GasUsed.ToInt())
+		return false
+	}
+	if r.FullBlock.Hash.String() != rg.FullBlock.Hash.String() {
+		fmt.Printf("Different Hash  %s %s\n", r.FullBlock.Hash.String(), rg.FullBlock.Hash.String())
+		return false
+	}
+	if r.FullBlock.Bloom != rg.FullBlock.Bloom {
+		fmt.Printf("Different Bloom  %s %s\n", r.FullBlock.Bloom, rg.FullBlock.Bloom)
+		return false
+	}
+	if r.FullBlock.Miner != rg.FullBlock.Miner {
+		fmt.Printf("Different Miner  %x %x\n", r.FullBlock.Miner, rg.FullBlock.Miner)
+		return false
+	}
+	if r.FullBlock.MixHash != rg.FullBlock.MixHash {
+		fmt.Printf("Different MixHash  %s %s\n", r.FullBlock.MixHash, rg.FullBlock.MixHash)
+		return false
+	}
+	if r.FullBlock.Nonce != rg.FullBlock.Nonce {
+		fmt.Printf("Different Nonce  %s %s\n", r.FullBlock.Nonce, rg.FullBlock.Nonce)
+		return false
+	}
+	if r.FullBlock.Number.ToInt().Cmp(rg.FullBlock.Number.ToInt()) != 0 {
+		fmt.Printf("Different Number  %d %d\n", r.FullBlock.Number.ToInt(), rg.FullBlock.Number.ToInt())
+		return false
+	}
+	if r.FullBlock.ParentHash != rg.FullBlock.ParentHash {
+		fmt.Printf("Different ParentHash  %s %s\n", r.FullBlock.ParentHash, rg.FullBlock.ParentHash)
+		return false
+	}
+	if r.FullBlock.ReceiptsRoot != rg.FullBlock.ReceiptsRoot {
+		fmt.Printf("Different ReceiptsRoot  %s %s\n", r.FullBlock.ReceiptsRoot, rg.FullBlock.ReceiptsRoot)
+		return false
+	}
+	if r.FullBlock.Sha3Uncles != rg.FullBlock.Sha3Uncles {
+		fmt.Printf("Different Sha3Uncles  %s %s\n", r.FullBlock.Sha3Uncles, rg.FullBlock.Sha3Uncles)
+		return false
+	}
+	if r.FullBlock.Size.ToInt().Cmp(rg.FullBlock.Size.ToInt()) != 0 {
+		fmt.Printf("Different Size  %d %d\n", r.FullBlock.Size.ToInt(), rg.FullBlock.Size.ToInt())
+		return false
+	}
+	if r.FullBlock.StateRoot != rg.FullBlock.StateRoot {
+		fmt.Printf("Different StateRoot  %s %s\n", r.FullBlock.StateRoot, rg.FullBlock.StateRoot)
+		return false
+	}
+	if r.FullBlock.Timestamp != rg.FullBlock.Timestamp {
+		fmt.Printf("Different Timestamp  %s %s\n", r.FullBlock.Timestamp, rg.FullBlock.Timestamp)
+		return false
+	}
+	if len(r.FullBlock.Transactions) != len(rg.FullBlock.Transactions) {
+		fmt.Printf("Num of txs different: %d %d\n", len(r.FullBlock.Transactions), len(rg.FullBlock.Transactions))
+		return false
+	}
+	for i, uncle := range r.FullBlock.Uncles {
+		if uncle != rg.FullBlock.Uncles[i] {
+			fmt.Printf("Uncles %d different: %x %x\n", i, uncle, rg.FullBlock.Uncles[i])
+			return false
+		}
+	}
+	for i, tx := range r.FullBlock.Transactions {
+		txg := rg.FullBlock.Transactions[i]
+		if tx.From != txg.From {
+			fmt.Printf("Tx %d different From: %x %x\n", i, tx.From, txg.From)
+			return false
+		}
+		if (tx.To == nil && txg.To != nil) || (tx.To != nil && txg.To == nil) {
+			fmt.Printf("Tx %d different To nilness: %t %t\n", i, tx.To == nil, txg.To == nil)
+			return false
+		}
+		if tx.To != nil && txg.To != nil && *tx.To != *txg.To {
+			fmt.Printf("Tx %d different To: %x %x\n", i, *tx.To, *txg.To)
+			return false
+		}
+		if tx.Hash != txg.Hash {
+			fmt.Printf("Tx %d different Hash: %s %s\n", i, tx.Hash, txg.Hash)
+			return false
+		}
+		if tx.BlockHash.String() != txg.BlockHash.String() {
+			fmt.Printf("Tx %d different BlockHash: %s %s\n", i, tx.BlockHash.String(), txg.BlockHash.String())
+			return false
+		}
+		if tx.BlockNumber.String() != txg.BlockNumber.String() {
+			fmt.Printf("Tx %d different TransactionHash: %s %s\n", i, tx.BlockNumber.String(), txg.BlockNumber.String())
+			return false
+		}
+		if tx.Gas.ToInt().Cmp(txg.Gas.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Gas: %d %d\n", i, tx.Gas.ToInt(), txg.Gas.ToInt())
+			return false
+		}
+		if tx.GasPrice.ToInt().Cmp(txg.GasPrice.ToInt()) != 0 {
+			fmt.Printf("Tx %d different GasPrice: %d %d\n", i, tx.GasPrice.ToInt(), txg.GasPrice.ToInt())
+			return false
+		}
+		if tx.Input.String() != txg.Input.String() {
+			fmt.Printf("Tx %d different Input: %s %s\n", i, tx.Input.String(), txg.Input.String())
+			return false
+		}
+		if tx.TransactionIndex.String() != txg.TransactionIndex.String() {
+			fmt.Printf("Tx %d different TransactionIndex: %s %s\n", i, tx.TransactionIndex.String(), txg.TransactionIndex.String())
+			return false
+		}
+		if tx.Value.ToInt().Cmp(txg.Value.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Value: %d %d\n", i, tx.Value.ToInt(), txg.Value.ToInt())
+			return false
+		}
+		if tx.Type.ToInt().Cmp(txg.Type.ToInt()) != 0 {
+			fmt.Printf("Tx %d different Type: %d %d\n", i, tx.Type.ToInt(), txg.Type.ToInt())
+			return false
+		}
+		if tx.ChainId.ToInt().Cmp(txg.ChainId.ToInt()) != 0 {
+			fmt.Printf("Tx %d different ChainId: %d %d\n", i, tx.ChainId.ToInt(), txg.ChainId.ToInt())
+			return false
+		}
+	}
+	for i, rcp := range r.Receipts {
+		rcpg := rg.Receipts[i]
+		if rcp.From != rcpg.From {
+			fmt.Printf("Receipt %d different From: %x %x\n", i, rcp.From, rcpg.From)
+			return false
+		}
+		if (rcp.To == nil && rcpg.To != nil) || (rcp.To != nil && rcpg.To == nil) {
+			fmt.Printf("Receipt %d different To nilness: %t %t\n", i, rcp.To == nil, rcpg.To == nil)
+			return false
+		}
+		if rcp.To != nil && rcpg.To != nil && *rcp.To != *rcpg.To {
+			fmt.Printf("Receipt %d different To: %x %x\n", i, *rcp.To, *rcpg.To)
+			return false
+		}
+		if rcp.BlockHash != rcpg.BlockHash {
+			fmt.Printf("Receipt %d different Hash: %s %s\n", i, rcp.BlockHash, rcpg.BlockHash)
+			return false
+		}
+		if rcp.ContractAddress != rcpg.ContractAddress {
+			fmt.Printf("Receipt %d different ContractAddress: %s %s\n", i, rcp.ContractAddress, rcpg.ContractAddress)
+			return false
+		}
+		if rcp.CumulativeGasUsed.ToInt().Cmp(rcpg.CumulativeGasUsed.ToInt()) != 0 {
+			fmt.Printf("Receipt %d different CumulativeGasUsed: %d %d\n", i, rcp.CumulativeGasUsed.ToInt(), rcpg.CumulativeGasUsed.ToInt())
+			return false
+		}
+		if rcp.EffectiveGasPrice.ToInt().Cmp(rcpg.EffectiveGasPrice.ToInt()) != 0 {
+			fmt.Printf("Receipt %d different EffectiveGasPrice: %d %d\n", i, rcp.EffectiveGasPrice.ToInt(), rcpg.EffectiveGasPrice.ToInt())
+			return false
+		}
+		if rcp.GasUsed.ToInt().Cmp(rcpg.GasUsed.ToInt()) != 0 {
+			fmt.Printf("Receipt %d different GasUsed: %d %d\n", i, rcp.GasUsed.ToInt(), rcpg.GasUsed.ToInt())
+			return false
+		}
+		if rcp.TransactionHash != rcpg.TransactionHash {
+			fmt.Printf("Receipt %d different TransactionHash: %s %s\n", i, rcp.TransactionHash, rcpg.TransactionHash)
+			return false
+		}
+		if rcp.BlockHash.String() != rcpg.BlockHash.String() {
+			fmt.Printf("Receipt %d different TransactionHash: %s %s\n", i, rcp.BlockHash.String(), rcpg.BlockHash.String())
+			return false
+		}
+		if rcp.BlockNumber.String() != rcpg.BlockNumber.String() {
+			fmt.Printf("Receipt %d different TransactionHash: %s %s\n", i, rcp.BlockNumber.String(), rcpg.BlockNumber.String())
+			return false
+		}
+	}
+	return true
 }

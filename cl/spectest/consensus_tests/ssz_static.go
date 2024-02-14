@@ -57,7 +57,6 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		require.NoError(t, err)
 		require.EqualValues(t, expectedRoot, haveRoot)
 		// Cannot test it without a config.
-		// TODO: parse and use config
 		if isBeaconState {
 			return nil
 		}
@@ -67,7 +66,8 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		// Now let it do the encoding in snapshot format
 		if blk, ok := object.(*cltypes.SignedBeaconBlock); ok {
 			var b bytes.Buffer
-			require.NoError(t, snapshot_format.WriteBlockForSnapshot(blk, &b))
+			_, err := snapshot_format.WriteBlockForSnapshot(&b, blk, nil)
+			require.NoError(t, err)
 			var br snapshot_format.MockBlockReader
 			if blk.Version() >= clparams.BellatrixVersion {
 				br = snapshot_format.MockBlockReader{Block: blk.Block.Body.ExecutionPayload}

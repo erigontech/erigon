@@ -86,8 +86,8 @@ func (cfg Config) withDefaults(defaultReplyTimeout time.Duration) Config {
 }
 
 // ListenUDP starts listening for discovery packets on the given UDP socket.
-func ListenUDP(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
-	return ListenV4(ctx, c, ln, cfg)
+func ListenUDP(ctx context.Context, protocol string, c UDPConn, ln *enode.LocalNode, cfg Config) (*UDPv4, error) {
+	return ListenV4(ctx, protocol, c, ln, cfg)
 }
 
 // ReadPacket is a packet that couldn't be handled. Those packets are sent to the unhandled
@@ -95,4 +95,9 @@ func ListenUDP(ctx context.Context, c UDPConn, ln *enode.LocalNode, cfg Config) 
 type ReadPacket struct {
 	Data []byte
 	Addr *net.UDPAddr
+}
+
+type UnhandledPacket struct {
+	ReadPacket
+	Reason error
 }

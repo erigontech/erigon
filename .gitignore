@@ -94,3 +94,9 @@ jwt.hex
 *__debug_bin*
 yarn.lock
 node_modules
+
+/config.toml
+/config.yaml
+/config.yml
+
+vendor

@@ -32,78 +32,23 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-type Type int
-
-const (
-	Headers Type = iota
-	Bodies
-	Transactions
-	BorEvents
-	BorSpans
-	NumberOfTypes
-	BeaconBlocks
-)
-
-var BorSnapshotTypes = []Type{BorEvents, BorSpans}
-
-func (ft Type) String() string {
-	switch ft {
-	case Headers:
-		return "headers"
-	case Bodies:
-		return "bodies"
-	case Transactions:
-		return "transactions"
-	case BorEvents:
-		return "borevents"
-	case BorSpans:
-		return "borspans"
-	case BeaconBlocks:
-		return "beaconblocks"
-	default:
-		panic(fmt.Sprintf("unknown file type: %d", ft))
-	}
-}
-
-func ParseFileType(s string) (Type, bool) {
-	switch s {
-	case "headers":
-		return Headers, true
-	case "bodies":
-		return Bodies, true
-	case "transactions":
-		return Transactions, true
-	case "borevents":
-		return BorEvents, true
-	case "borspans":
-		return BorSpans, true
-	case "beaconblocks":
-		return BeaconBlocks, true
-	default:
-		return NumberOfTypes, false
-	}
-}
-
-type IdxType string
-
-const (
-	Transactions2Block IdxType = "transactions-to-block"
-)
-
-func (it IdxType) String() string { return string(it) }
-
-var BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
-
 var (
 	ErrInvalidFileName = fmt.Errorf("invalid compressed file name")
 )
 
-func FileName(from, to uint64, fileType string) string {
-	return fmt.Sprintf("v1-%06d-%06d-%s", from/1_000, to/1_000, fileType)
+func FileName(version Version, from, to uint64, fileType string) string {
+	return fmt.Sprintf("v%d-%06d-%06d-%s", version, from/1_000, to/1_000, fileType)
 }
-func SegmentFileName(from, to uint64, t Type) string   { return FileName(from, to, t.String()) + ".seg" }
-func DatFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".dat" }
-func IdxFileName(from, to uint64, fType string) string { return FileName(from, to, fType) + ".idx" }
+
+func SegmentFileName(version Version, from, to uint64, t Enum) string {
+	return FileName(version, from, to, t.String()) + ".seg"
+}
+func DatFileName(version Version, from, to uint64, fType string) string {
+	return FileName(version, from, to, fType) + ".dat"
+}
+func IdxFileName(version Version, from, to uint64, fType string) string {
+	return FileName(version, from, to, fType) + ".idx"
+}
 
 func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	for _, f := range in {
@@ -112,9 +57,32 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 		}
 		out = append(out, f)
 	}
+
+	slices.SortFunc(out, func(a, b FileInfo) int {
+		if cmp := strings.Compare(a.Type.String(), b.Type.String()); cmp != 0 {
+			return cmp
+		}
+
+		switch {
+		case a.From > b.From:
+			return +1
+		case b.From > a.From:
+			return -1
+		}
+
+		switch {
+		case a.To > b.To:
+			return +1
+		case b.To > a.To:
+			return -1
+		}
+
+		return int(a.Version) - int(b.Version)
+	})
+
 	return out
 }
-func FilesWithExt(dir, expectExt string) ([]FileInfo, error) {
+func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
 	files, err := ParseDir(dir)
 	if err != nil {
 		return nil, err
@@ -139,8 +107,12 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if len(parts) < 4 {
 		return res, ok
 	}
-	version := parts[0]
-	_ = version
+
+	version, err := ParseVersion(parts[0])
+	if err != nil {
+		return
+	}
+
 	from, err := strconv.ParseUint(parts[1], 10, 64)
 	if err != nil {
 		return
@@ -153,7 +125,8 @@ func ParseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if !ok {
 		return res, ok
 	}
-	return FileInfo{From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), T: ft, Ext: ext}, ok
+
+	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), Type: ft, Ext: ext}, ok
 }
 
 const Erigon3SeedableSteps = 32
@@ -164,26 +137,50 @@ const Erigon3SeedableSteps = 32
 //   - avoiding having too much files:
 //     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
 //     less files - means small files will be removed after merge (no peers for this files).
-const Erigon2RecentMergeLimit = 100_000 //nolint
-const Erigon2MergeLimit = 500_000
+const Erigon2OldMergeLimit = 500_000
+const Erigon2MergeLimit = 100_000
 const Erigon2MinSegmentSize = 1_000
+
+var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	Version   uint8
+	Version   Version
 	From, To  uint64
 	Path, Ext string
-	T         Type
+	Type      Type
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
-func (f FileInfo) Seedable() bool {
-	return f.To-f.From == Erigon2MergeLimit || f.To-f.From == Erigon2RecentMergeLimit
-}
-func (f FileInfo) NeedTorrentFile() bool { return f.Seedable() && !f.TorrentFileExists() }
 
-func IdxFiles(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".idx") }
-func Segments(dir string) (res []FileInfo, err error) { return FilesWithExt(dir, ".seg") }
+func (f FileInfo) Name() string {
+	return fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
+}
+func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
+func (f FileInfo) Len() uint64 { return f.To - f.From }
+
+func (f FileInfo) As(t Type) FileInfo {
+	as := FileInfo{
+		Version: f.Version,
+		From:    f.From,
+		To:      f.To,
+		Ext:     f.Ext,
+		Type:    t,
+	}
+
+	as.Path = filepath.Join(f.Dir(), as.Name())
+
+	return as
+}
+
+func IdxFiles(dir string) (res []FileInfo, err error) {
+	return FilesWithExt(dir, ".idx")
+}
+
+func Segments(dir string) (res []FileInfo, err error) {
+	return FilesWithExt(dir, ".seg")
+}
+
 func TmpFiles(dir string) (res []string, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
@@ -192,6 +189,7 @@ func TmpFiles(dir string) (res []string, err error) {
 		}
 		return nil, err
 	}
+
 	for _, f := range files {
 		if f.IsDir() || len(f.Name()) < 3 {
 			continue
@@ -199,6 +197,7 @@ func TmpFiles(dir string) (res []string, err error) {
 		if filepath.Ext(f.Name()) != ".tmp" {
 			continue
 		}
+
 		res = append(res, filepath.Join(dir, f.Name()))
 	}
 	return res, nil
@@ -213,6 +212,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		}
 		return nil, err
 	}
+
 	for _, f := range files {
 		fileInfo, err := f.Info()
 		if err != nil {
@@ -238,8 +238,8 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 		if i.To != j.To {
 			return cmp.Compare(i.To, j.To)
 		}
-		if i.T != j.T {
-			return cmp.Compare(i.T, j.T)
+		if i.Type.Enum() != j.Type.Enum() {
+			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
 		}
 		return cmp.Compare(i.Ext, j.Ext)
 	})

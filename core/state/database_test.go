@@ -438,6 +438,7 @@ func TestCreate2Polymorth(t *testing.T) {
 }
 
 func TestReorgOverSelfDestruct(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -586,6 +587,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 }
 
 func TestReorgOverStateChange(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -734,6 +736,7 @@ func (b BucketsStats) Size() uint64 {
 }
 
 func TestCreateOnExistingStorage(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -824,6 +827,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 }
 
 func TestReproduceCrash(t *testing.T) {
+	t.Parallel()
 	// This example was taken from Ropsten contract that used to cause a crash
 	// it is created in the block 598915 and then there are 3 transactions modifying
 	// its storage in the same block:
@@ -865,6 +869,7 @@ func TestReproduceCrash(t *testing.T) {
 	}
 }
 func TestEip2200Gas(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -960,6 +965,7 @@ func TestEip2200Gas(t *testing.T) {
 
 // Create contract, drop trie, reload trie from disk and add block with contract call
 func TestWrongIncarnation(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1072,6 +1078,7 @@ func TestWrongIncarnation(t *testing.T) {
 
 // create acc, deploy to it contract, reorg to state without contract
 func TestWrongIncarnation2(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1221,6 +1228,7 @@ func TestWrongIncarnation2(t *testing.T) {
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
+	t.Parallel()
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	_, tx := memdb.NewTestTx(t)
@@ -1258,6 +1266,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 // TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
 func TestCacheCodeSizeSeparately(t *testing.T) {
+	t.Parallel()
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	//root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
@@ -1290,6 +1299,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 // TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
+	t.Parallel()
 	t.Skip("switch to TG state readers/writers")
 	contract := libcommon.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 	root := libcommon.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
@@ -1332,6 +1342,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 }
 
 func TestRecreateAndRewind(t *testing.T) {
+	t.Parallel()
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1531,6 +1542,7 @@ func TestRecreateAndRewind(t *testing.T) {
 
 }
 func TestTxLookupUnwind(t *testing.T) {
+	t.Parallel()
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		address = crypto.PubkeyToAddress(key.PublicKey)

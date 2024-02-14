@@ -20,6 +20,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolBlobPriceBumpFlag,
 	&utils.TxPoolAccountSlotsFlag,
 	&utils.TxPoolBlobSlotsFlag,
+	&utils.TxPoolTotalBlobPoolLimit,
 	&utils.TxPoolGlobalSlotsFlag,
 	&utils.TxPoolGlobalBaseFeeSlotsFlag,
 	&utils.TxPoolAccountQueueFlag,
@@ -63,6 +64,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.HTTPVirtualHostsFlag,
 	&utils.AuthRpcVirtualHostsFlag,
 	&utils.HTTPApiFlag,
+	&utils.WSPortFlag,
 	&utils.WSEnabledFlag,
 	&utils.WsCompressionFlag,
 	&utils.HTTPTraceFlag,
@@ -76,6 +78,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RpcBatchLimit,
 	&utils.RpcReturnDataLimit,
 	&utils.AllowUnprotectedTxs,
+	&utils.RpcMaxGetProofRewindBlockCount,
 	&utils.RPCGlobalTxFeeCapFlag,
 	&utils.TxpoolApiAddrFlag,
 	&utils.TraceMaxtracesFlag,
@@ -147,14 +150,11 @@ var DefaultFlags = []cli.Flag{
 	&utils.HeimdallURLFlag,
 	&utils.WebSeedsFlag,
 	&utils.WithoutHeimdallFlag,
-	&utils.HeimdallgRPCAddressFlag,
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideCancunFlag,
-
-	&utils.ConfigFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,
@@ -164,10 +164,29 @@ var DefaultFlags = []cli.Flag{
 
 	&utils.OtsSearchMaxCapFlag,
 
-	&utils.SilkwormPathFlag,
 	&utils.SilkwormExecutionFlag,
 	&utils.SilkwormRpcDaemonFlag,
 	&utils.SilkwormSentryFlag,
 
+	&utils.BeaconAPIFlag,
+	&utils.BeaconApiAddrFlag,
+	&utils.BeaconApiAllowMethodsFlag,
+	&utils.BeaconApiAllowOriginsFlag,
+	&utils.BeaconApiAllowCredentialsFlag,
+	&utils.BeaconApiPortFlag,
+	&utils.BeaconApiReadTimeoutFlag,
+	&utils.BeaconApiWriteTimeoutFlag,
+	&utils.BeaconApiProtocolFlag,
+	&utils.BeaconApiIdleTimeoutFlag,
+
+	&utils.CaplinBackfillingFlag,
+	&utils.CaplinArchiveFlag,
+
 	&utils.TrustedSetupFile,
+	&utils.RPCSlowFlag,
+
+	&utils.TxPoolGossipDisableFlag,
+	&SyncLoopBlockLimitFlag,
+	&SyncLoopBreakAfterFlag,
+	&SyncLoopPruneLimitFlag,
 }

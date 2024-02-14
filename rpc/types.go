@@ -20,11 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math"
 	"math/big"
 	"strconv"
 	"strings"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -61,7 +62,7 @@ type ServerCodec interface {
 // jsonWriter can write JSON messages to its underlying connection.
 // Implementations must be safe for concurrent use.
 type jsonWriter interface {
-	writeJSON(context.Context, interface{}) error
+	WriteJSON(context.Context, interface{}) error
 	// Closed returns a channel which is closed when the connection is closed.
 	closed() <-chan interface{}
 	// RemoteAddr returns the peer address of the connection.
@@ -198,6 +199,8 @@ func AsBlockNumber(no interface{}) BlockNumber {
 		return no
 	case *BlockNumber:
 		return *no
+	case int:
+		return BlockNumber(no)
 	case int64:
 		return BlockNumber(no)
 	case uint64:

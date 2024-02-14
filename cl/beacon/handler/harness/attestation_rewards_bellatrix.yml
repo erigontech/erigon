@@ -1,0 +1,31 @@
+vars:
+  finalized_epoch: "99999999"
+  justified_slot: "160"
+  justified_epoch: "4"
+tests:
+  ## blocks
+  - name: all validators
+    expect:
+      file: "attestations_1"
+      fs: td
+    actual:
+      handler: i
+      method: post
+      path: /eth/v1/beacon/rewards/attestations/{{.Vars.justified_epoch}}
+  - name: two validators
+    expect:
+      file: "attestations_2"
+      fs: td
+    actual:
+      handler: i
+      method: post
+      path: /eth/v1/beacon/rewards/attestations/{{.Vars.justified_epoch}}
+      body:
+        data: ["1","4"]
+  - name: not found
+    actual:
+      handler: i
+      method: post
+      path: /eth/v1/beacon/rewards/attestations/{{.Vars.finalized_epoch}}
+    compare:
+      expr: "actual_code == 404"

@@ -38,6 +38,8 @@ var emptyCodeHash = crypto.Keccak256Hash(nil)
 func (evm *EVM) precompile(addr libcommon.Address) (PrecompiledContract, bool) {
 	var precompiles map[libcommon.Address]PrecompiledContract
 	switch {
+	case evm.chainRules.IsNapoli:
+		precompiles = PrecompiledContractsNapoli
 	case evm.chainRules.IsCancun:
 		precompiles = PrecompiledContractsCancun
 	case evm.chainRules.IsBerlin:
@@ -69,8 +71,8 @@ func run(evm *EVM, contract *Contract, input []byte, readOnly bool) ([]byte, err
 // The EVM should never be reused and is not thread safe.
 type EVM struct {
 	// Context provides auxiliary blockchain related information
-	context   evmtypes.BlockContext
-	txContext evmtypes.TxContext
+	Context evmtypes.BlockContext
+	evmtypes.TxContext
 	// IntraBlockState gives access to the underlying state
 	intraBlockState evmtypes.IntraBlockState
 
@@ -97,8 +99,8 @@ type EVM struct {
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmtypes.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
 	evm := &EVM{
-		context:         blockCtx,
-		txContext:       txCtx,
+		Context:         blockCtx,
+		TxContext:       txCtx,
 		intraBlockState: state,
 		config:          vmConfig,
 		chainConfig:     chainConfig,
@@ -113,7 +115,7 @@ func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, state evmt
 // Reset resets the EVM with a new transaction context.Reset
 // This is not threadsafe and should only be done very cautiously.
 func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
-	evm.txContext = txCtx
+	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 
 	// ensure the evm is reset to be used again
@@ -121,8 +123,8 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState) {
 }
 
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs evmtypes.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
-	evm.context = blockCtx
-	evm.txContext = txCtx
+	evm.Context = blockCtx
+	evm.TxContext = txCtx
 	evm.intraBlockState = ibs
 	evm.config = vmConfig
 	evm.chainRules = chainRules
@@ -195,7 +197,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	}
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance
-		if !value.IsZero() && !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
+		if !value.IsZero() && !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 			if !bailout {
 				return nil, gas, ErrInsufficientBalance
 			}
@@ -212,7 +214,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			}
 			evm.intraBlockState.CreateAccount(addr, false)
 		}
-		evm.context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
+		evm.Context.Transfer(evm.intraBlockState, caller.Address(), addr, value, bailout)
 	} else if typ == STATICCALL {
 		// We do an AddBalance of zero here, just in order to trigger a touch.
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
@@ -335,7 +337,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		err = ErrDepth
 		return nil, libcommon.Address{}, gas, err
 	}
-	if !evm.context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
+	if !evm.Context.CanTransfer(evm.intraBlockState, caller.Address(), value) {
 		err = ErrInsufficientBalance
 		return nil, libcommon.Address{}, gas, err
 	}
@@ -367,7 +369,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if evm.chainRules.IsSpuriousDragon {
 		evm.intraBlockState.SetNonce(address, 1)
 	}
-	evm.context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
+	evm.Context.Transfer(evm.intraBlockState, caller.Address(), address, value, false /* bailout */)
 
 	// Initialise a new contract and set the code that is to be used by the EVM.
 	// The contract is a scoped environment for this execution context only.
@@ -457,16 +459,6 @@ func (evm *EVM) ChainConfig() *chain.Config {
 // ChainRules returns the environment's chain rules
 func (evm *EVM) ChainRules() *chain.Rules {
 	return evm.chainRules
-}
-
-// Context returns the EVM's BlockContext
-func (evm *EVM) Context() evmtypes.BlockContext {
-	return evm.context
-}
-
-// TxContext returns the EVM's TxContext
-func (evm *EVM) TxContext() evmtypes.TxContext {
-	return evm.txContext
 }
 
 // IntraBlockState returns the EVM's IntraBlockState

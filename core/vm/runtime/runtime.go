@@ -133,7 +133,7 @@ func Execute(code, input []byte, cfg *Config, bn uint64) ([]byte, *state.IntraBl
 		address = libcommon.BytesToAddress([]byte("contract"))
 		vmenv   = NewEnv(cfg)
 		sender  = vm.AccountRef(cfg.Origin)
-		rules   = cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time)
+		rules   = vmenv.ChainRules()
 	)
 	if cfg.EVMConfig.Tracer != nil {
 		cfg.EVMConfig.Tracer.CaptureTxStart(vmenv, types.NewTransaction(0, address, cfg.Value, cfg.GasLimit, cfg.GasPrice, input))
@@ -180,7 +180,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, libcommon.Addres
 	var (
 		vmenv  = NewEnv(cfg)
 		sender = vm.AccountRef(cfg.Origin)
-		rules  = cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time)
+		rules  = vmenv.ChainRules()
 	)
 	if cfg.EVMConfig.Tracer != nil {
 		cfg.EVMConfig.Tracer.CaptureTxStart(vmenv, types.NewContractCreation(0, cfg.Value, cfg.GasLimit, cfg.GasPrice, input))
@@ -210,12 +210,10 @@ func Call(address libcommon.Address, input []byte, cfg *Config) ([]byte, uint64,
 
 	sender := cfg.State.GetOrNewStateObject(cfg.Origin)
 	statedb := cfg.State
-	rules := cfg.ChainConfig.Rules(vmenv.Context().BlockNumber, vmenv.Context().Time)
-
+	rules := vmenv.ChainRules()
 	if cfg.EVMConfig.Tracer != nil {
 		cfg.EVMConfig.Tracer.CaptureTxStart(vmenv, types.NewTransaction(0, address, cfg.Value, cfg.GasLimit, cfg.GasPrice, input))
 	}
-
 	statedb.Prepare(rules, cfg.Origin, cfg.Coinbase, &address, vm.ActivePrecompiles(rules), nil)
 
 	// Call the code with the given configuration.

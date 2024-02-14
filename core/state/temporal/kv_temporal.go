@@ -105,7 +105,7 @@ func (db *DB) Agg() *state.AggregatorV3 { return db.agg }
 func (db *DB) InternalDB() kv.RwDB      { return db.RwDB }
 
 func (db *DB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
-	kvTx, err := db.RwDB.BeginRo(ctx)
+	kvTx, err := db.RwDB.BeginRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, err
 	}

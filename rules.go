@@ -33,6 +33,8 @@ func txDeferRollback(m dsl.Matcher) {
 		`$tx, $err = $db.BeginRw($ctx); $chk; $rollback`,
 		`$tx, $err := $db.Begin($ctx); $chk; $rollback`,
 		`$tx, $err = $db.Begin($ctx); $chk; $rollback`,
+		`$tx, $err := $db.BeginRo($ctx); $chk; $rollback`,
+		`$tx, $err = $db.BeginRo($ctx); $chk; $rollback`,
 	).
 		Where(!m["rollback"].Text.Matches(`defer .*\.Rollback()`)).
 		//At(m["rollback"]).
@@ -73,7 +75,7 @@ func mismatchingUnlock(m dsl.Matcher) {
 	m.Match(`$mu.Lock(); defer $mu.$unlock()`).
 		Where(m["unlock"].Text == "RUnlock").
 		At(m["unlock"]).
-		Report(`maybe $2mu.Unlock() was intended?
+		Report(`maybe $mu.Unlock() was intended?
 			Rules are in ./rules.go file.`)
 
 	m.Match(`$mu.RLock(); defer $mu.$unlock()`).

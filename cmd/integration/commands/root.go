@@ -61,10 +61,11 @@ func RootCommand() *cobra.Command {
 func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 	const ThreadsLimit = 9_000
 	limiterB := semaphore.NewWeighted(ThreadsLimit)
-	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB).Accede()
-	//if label == kv.ChainDB {
-	//	opts = opts.MapSize(8 * datasize.TB)
-	//}
+	opts := kv2.NewMDBX(log.New()).Path(path).Label(label).RoTxsLimiter(limiterB)
+	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
+	// to read all options from DB, instead of overriding them
+	opts = opts.Accede()
+
 	if databaseVerbosity != -1 {
 		opts = opts.DBVerbosity(kv.DBVerbosityLvl(databaseVerbosity))
 	}
@@ -72,10 +73,6 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 }
 
 func openDB(opts kv2.MdbxOpts, applyMigrations bool, logger log.Logger) (kv.RwDB, error) {
-	// integration tool don't intent to create db, then easiest way to open db - it's pass mdbx.Accede flag, which allow
-	// to read all options from DB, instead of overriding them
-	opts = opts.Accede()
-
 	db := opts.MustOpen()
 	if applyMigrations {
 		migrator := migrations.NewMigrator(opts.GetLabel())

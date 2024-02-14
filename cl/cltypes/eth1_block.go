@@ -22,18 +22,18 @@ type Eth1Block struct {
 	ReceiptsRoot  libcommon.Hash    `json:"receipts_root"`
 	LogsBloom     types.Bloom       `json:"logs_bloom"`
 	PrevRandao    libcommon.Hash    `json:"prev_randao"`
-	BlockNumber   uint64            `json:"block_number"`
-	GasLimit      uint64            `json:"gas_limit"`
-	GasUsed       uint64            `json:"gas_used"`
-	Time          uint64            `json:"timestamp"`
+	BlockNumber   uint64            `json:"block_number,string"`
+	GasLimit      uint64            `json:"gas_limit,string"`
+	GasUsed       uint64            `json:"gas_used,string"`
+	Time          uint64            `json:"timestamp,string"`
 	Extra         *solid.ExtraData  `json:"extra_data"`
 	BaseFeePerGas libcommon.Hash    `json:"base_fee_per_gas"`
 	// Extra fields
 	BlockHash     libcommon.Hash              `json:"block_hash"`
 	Transactions  *solid.TransactionsSSZ      `json:"transactions"`
 	Withdrawals   *solid.ListSSZ[*Withdrawal] `json:"withdrawals,omitempty"`
-	BlobGasUsed   uint64                      `json:"blob_gas_used,omitempty"`
-	ExcessBlobGas uint64                      `json:"excess_blob_gas,omitempty"`
+	BlobGasUsed   uint64                      `json:"blob_gas_used,omitempty,string"`
+	ExcessBlobGas uint64                      `json:"excess_blob_gas,omitempty,string"`
 	// internals
 	version   clparams.StateVersion
 	beaconCfg *clparams.BeaconChainConfig
@@ -94,8 +94,11 @@ func (*Eth1Block) Static() bool {
 func (b *Eth1Block) PayloadHeader() (*Eth1Header, error) {
 	var err error
 	var transactionsRoot, withdrawalsRoot libcommon.Hash
-	if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
-		return nil, err
+	// Corner case: before TTD this is 0, since all fields are 0, a 0 hash check will suffice.
+	if b.BlockHash != (libcommon.Hash{}) {
+		if transactionsRoot, err = b.Transactions.HashSSZ(); err != nil {
+			return nil, err
+		}
 	}
 	if b.version >= clparams.CapellaVersion {
 		withdrawalsRoot, err = b.Withdrawals.HashSSZ()
@@ -189,7 +192,7 @@ func (b *Eth1Block) getSchema() []interface{} {
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
-func (b *Eth1Block) RlpHeader() (*types.Header, error) {
+func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error) {
 	// Reverse the order of the bytes in the BaseFeePerGas array and convert it to a big integer.
 	reversedBaseFeePerGas := libcommon.Copy(b.BaseFeePerGas[:])
 	for i, j := 0, len(reversedBaseFeePerGas)-1; i < j; i, j = i+1, j-1 {
@@ -208,25 +211,29 @@ func (b *Eth1Block) RlpHeader() (*types.Header, error) {
 		})
 		*withdrawalsHash = types.DeriveSha(types.Withdrawals(withdrawals))
 	}
+	if b.version < clparams.DenebVersion {
+		parentRoot = nil
+	}
 
 	header := &types.Header{
-		ParentHash:      b.ParentHash,
-		UncleHash:       types.EmptyUncleHash,
-		Coinbase:        b.FeeRecipient,
-		Root:            b.StateRoot,
-		TxHash:          types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
-		ReceiptHash:     b.ReceiptsRoot,
-		Bloom:           b.LogsBloom,
-		Difficulty:      merge.ProofOfStakeDifficulty,
-		Number:          big.NewInt(int64(b.BlockNumber)),
-		GasLimit:        b.GasLimit,
-		GasUsed:         b.GasUsed,
-		Time:            b.Time,
-		Extra:           b.Extra.Bytes(),
-		MixDigest:       b.PrevRandao,
-		Nonce:           merge.ProofOfStakeNonce,
-		BaseFee:         baseFee,
-		WithdrawalsHash: withdrawalsHash,
+		ParentHash:            b.ParentHash,
+		UncleHash:             types.EmptyUncleHash,
+		Coinbase:              b.FeeRecipient,
+		Root:                  b.StateRoot,
+		TxHash:                types.DeriveSha(types.BinaryTransactions(b.Transactions.UnderlyngReference())),
+		ReceiptHash:           b.ReceiptsRoot,
+		Bloom:                 b.LogsBloom,
+		Difficulty:            merge.ProofOfStakeDifficulty,
+		Number:                big.NewInt(int64(b.BlockNumber)),
+		GasLimit:              b.GasLimit,
+		GasUsed:               b.GasUsed,
+		Time:                  b.Time,
+		Extra:                 b.Extra.Bytes(),
+		MixDigest:             b.PrevRandao,
+		Nonce:                 merge.ProofOfStakeNonce,
+		BaseFee:               baseFee,
+		WithdrawalsHash:       withdrawalsHash,
+		ParentBeaconBlockRoot: parentRoot,
 	}
 
 	if b.version >= clparams.DenebVersion {

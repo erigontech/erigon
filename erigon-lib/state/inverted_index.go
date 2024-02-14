@@ -1386,7 +1386,7 @@ func (ii *InvertedIndex) prune(ctx context.Context, txFrom, txTo, limit uint64, 
 
 			select {
 			case <-logEvery.C:
-				ii.logger.Info("[snapshots] prune history", "name", ii.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8]))
+				ii.logger.Info("[snapshots] prune history", "name", ii.filenameBase, "to_step", fmt.Sprintf("%.2f", float64(txTo)/float64(ii.aggregationStep)), "prefix", fmt.Sprintf("%x", key[:8])) //nolint
 			default:
 			}
 		}
@@ -1425,7 +1425,7 @@ func (ii *InvertedIndex) EnableReadAhead() *InvertedIndex {
 func (ii *InvertedIndex) EnableMadvWillNeed() *InvertedIndex {
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			item.decompressor.EnableWillNeed()
+			item.decompressor.EnableMadvWillNeed()
 			if item.index != nil {
 				item.index.EnableWillNeed()
 			}

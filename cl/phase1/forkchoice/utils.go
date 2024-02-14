@@ -22,9 +22,9 @@ func (f *ForkChoiceStore) updateCheckpoints(justifiedCheckpoint, finalizedCheckp
 		f.justifiedCheckpoint = justifiedCheckpoint
 	}
 	if finalizedCheckpoint.Epoch() > f.finalizedCheckpoint.Epoch() {
+		f.emitters.Publish("finalized_checkpoint", finalizedCheckpoint)
 		f.onNewFinalized(finalizedCheckpoint)
 		f.finalizedCheckpoint = finalizedCheckpoint
-
 	}
 }
 
@@ -41,6 +41,7 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	for k, children := range f.childrens {
 		if children.parentSlot <= newFinalized.Epoch()*f.beaconCfg.SlotsPerEpoch {
 			delete(f.childrens, k)
+			delete(f.headSet, k)
 			continue
 		}
 	}
@@ -60,6 +61,10 @@ func (f *ForkChoiceStore) updateUnrealizedCheckpoints(justifiedCheckpoint, final
 // computeEpochAtSlot calculates the epoch at a given slot number.
 func (f *ForkChoiceStore) computeEpochAtSlot(slot uint64) uint64 {
 	return slot / f.beaconCfg.SlotsPerEpoch
+}
+
+func (f *ForkChoiceStore) computeSyncPeriod(epoch uint64) uint64 {
+	return epoch / f.beaconCfg.EpochsPerSyncCommitteePeriod
 }
 
 // computeStartSlotAtEpoch calculates the starting slot of a given epoch.

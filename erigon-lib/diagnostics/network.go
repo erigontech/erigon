@@ -16,8 +16,6 @@
 
 package diagnostics
 
-import "reflect"
-
 func (p PeerStatistics) Type() Type {
-	return Type(reflect.TypeOf(p))
+	return TypeOf(p)
 }

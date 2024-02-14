@@ -132,12 +132,18 @@ func (it *lookup) startQueries() bool {
 	return it.queries > 0
 }
 
+type ctxKey int
+
+const (
+	ckNoSlowdown ctxKey = iota
+)
+
 func disableLookupSlowdown(ctx context.Context) context.Context {
-	return context.WithValue(ctx, "p2p.discover.lookup.noSlowdown", true)
+	return context.WithValue(ctx, ckNoSlowdown, true)
 }
 
 func isDisabledLookupSlowdown(ctx context.Context) bool {
-	return ctx.Value("p2p.discover.lookup.noSlowdown") != nil
+	return ctx.Value(ckNoSlowdown) != nil
 }
 
 func (it *lookup) slowdown() {
@@ -155,6 +161,7 @@ func (it *lookup) slowdown() {
 func (it *lookup) query(n *node, reply chan<- []*node) {
 	fails := it.tab.db.FindFails(n.ID(), n.IP())
 	r, err := it.queryfunc(n)
+
 	if err == errClosed {
 		// Avoid recording failures on shutdown.
 		reply <- nil
@@ -180,6 +187,7 @@ func (it *lookup) query(n *node, reply chan<- []*node) {
 	for _, n := range r {
 		it.tab.addSeenNode(n)
 	}
+
 	reply <- r
 }
 

@@ -34,7 +34,6 @@ type BlockHeaderProcessor interface {
 	ProcessRandao(s abstract.BeaconState, randao [96]byte, proposerIndex uint64) error
 	ProcessEth1Data(state abstract.BeaconState, eth1Data *cltypes.Eth1Data) error
 	ProcessSyncAggregate(s abstract.BeaconState, sync *cltypes.SyncAggregate) error
-	VerifyKzgCommitmentsAgainstTransactions(transactions *solid.TransactionsSSZ, kzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) (bool, error)
 }
 
 type BlockOperationProcessor interface {

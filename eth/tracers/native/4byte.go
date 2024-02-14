@@ -82,7 +82,7 @@ func (t *fourByteTracer) store(id []byte, size int) {
 }
 
 func (t *fourByteTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
-	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
+	rules := env.ChainRules()
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 

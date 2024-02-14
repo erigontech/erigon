@@ -41,8 +41,8 @@ jobs:
       - name: Install deps
         if: matrix.os == 'windows-2022'
         run: |
-          choco upgrade mingw -y --no-progress --version 11.2.0.07112021
-          choco install cmake -y --no-progress --version 3.23.1
+          choco upgrade mingw -y --no-progress --version 13.2.0
+          choco install cmake -y --no-progress --version 3.27.8
 
       - name: Lint
         if: matrix.os == 'ubuntu-20.04'

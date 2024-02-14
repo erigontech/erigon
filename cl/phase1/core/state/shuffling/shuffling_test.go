@@ -2,8 +2,9 @@ package shuffling_test
 
 import (
 	_ "embed"
-	"github.com/ledgerwatch/erigon-lib/common/eth2shuffle"
 	"testing"
+
+	"github.com/ledgerwatch/erigon-lib/common/eth2shuffle"
 
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/raw"
@@ -15,7 +16,7 @@ import (
 )
 
 func BenchmarkLambdaShuffledIndex(b *testing.B) {
-	keccakOptimized := utils.OptimizedKeccak256()
+	keccakOptimized := utils.OptimizedSha256NotThreadSafe()
 	eth2ShuffleHash := func(data []byte) []byte {
 		hashed := keccakOptimized(data)
 		return hashed[:]
@@ -30,7 +31,7 @@ func BenchmarkLambdaShuffledIndex(b *testing.B) {
 // Faster by ~40%, the effects of it will be felt mostly on computation of the proposer index.
 func BenchmarkErigonShuffledIndex(b *testing.B) {
 	s := state.New(&clparams.MainnetBeaconConfig)
-	keccakOptimized := utils.OptimizedKeccak256NotThreadSafe()
+	keccakOptimized := utils.OptimizedSha256NotThreadSafe()
 
 	seed := [32]byte{2, 35, 6}
 	preInputs := shuffling.ComputeShuffledIndexPreInputs(s.BeaconConfig(), seed)

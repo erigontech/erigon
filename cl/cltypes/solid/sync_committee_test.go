@@ -10,7 +10,7 @@ import (
 
 func TestSyncCommittee(t *testing.T) {
 	// Test NewSyncCommitteeFromParameters
-	committee := make([][48]byte, 512)
+	committee := make([]libcommon.Bytes48, 512)
 	aggregatePublicKey := [48]byte{1, 2, 3} // Example aggregate public key
 	syncCommittee := NewSyncCommitteeFromParameters(committee, aggregatePublicKey)
 	assert.NotNil(t, syncCommittee)
@@ -20,7 +20,7 @@ func TestSyncCommittee(t *testing.T) {
 	assert.Equal(t, committee, gotCommittee)
 
 	// Test SetCommittee
-	newCommittee := make([][48]byte, 512)
+	newCommittee := make([]libcommon.Bytes48, 512)
 	for i := 0; i < 512; i++ {
 		copy(newCommittee[i][:], []byte{byte(i)})
 	}
@@ -30,13 +30,13 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test AggregatePublicKey
 	gotAggregatePublicKey := syncCommittee.AggregatePublicKey()
-	assert.Equal(t, aggregatePublicKey, gotAggregatePublicKey)
+	assert.Equal(t, libcommon.Bytes48(aggregatePublicKey), gotAggregatePublicKey)
 
 	// Test SetAggregatePublicKey
 	newAggregatePublicKey := [48]byte{4, 5, 6} // Example new aggregate public key
 	syncCommittee.SetAggregatePublicKey(newAggregatePublicKey)
 	updatedAggregatePublicKey := syncCommittee.AggregatePublicKey()
-	assert.Equal(t, newAggregatePublicKey, updatedAggregatePublicKey)
+	assert.Equal(t, libcommon.Bytes48(newAggregatePublicKey), updatedAggregatePublicKey)
 
 	// Test EncodingSizeSSZ
 	expectedEncodingSize := syncCommitteeSize
@@ -72,4 +72,20 @@ func TestSyncCommittee(t *testing.T) {
 
 	// Test Static
 	assert.True(t, syncCommittee.Static())
+}
+
+func TestSyncCommitteeJson(t *testing.T) {
+	// Test MarshalJSON and UnmarshalJSON
+	committee := make([]libcommon.Bytes48, 512)
+	for i := 0; i < 512; i++ {
+		copy(committee[i][:], []byte{byte(i)})
+	}
+	aggregatePublicKey := [48]byte{1, 2, 3} // Example aggregate public key
+	syncCommittee := NewSyncCommitteeFromParameters(committee, aggregatePublicKey)
+	encodedData, err := syncCommittee.MarshalJSON()
+	assert.NoError(t, err)
+	decodedSyncCommittee := &SyncCommittee{}
+	err = decodedSyncCommittee.UnmarshalJSON(encodedData)
+	assert.NoError(t, err)
+	assert.Equal(t, syncCommittee, decodedSyncCommittee)
 }

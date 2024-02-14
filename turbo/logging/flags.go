@@ -32,7 +32,10 @@ var (
 		Usage: "Set the log level for console logs",
 		Value: log.LvlInfo.String(),
 	}
-
+	LogDirDisableFlag = cli.BoolFlag{
+		Name:  "log.dir.disable",
+		Usage: "disable disk logging",
+	}
 	LogDirPathFlag = cli.StringFlag{
 		Name:  "log.dir.path",
 		Usage: "Path to store user and error logs to disk",
@@ -56,6 +59,7 @@ var Flags = []cli.Flag{
 	&LogDirJsonFlag,
 	&LogVerbosityFlag,
 	&LogConsoleVerbosityFlag,
+	&LogDirDisableFlag,
 	&LogDirPathFlag,
 	&LogDirPrefixFlag,
 	&LogDirVerbosityFlag,

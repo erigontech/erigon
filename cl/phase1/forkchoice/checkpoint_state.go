@@ -69,7 +69,7 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 	// Add the post-anchor public keys as surplus
 	for i := len(anchorPublicKeys) / length.Bytes48; i < len(validatorSet); i++ {
 		pos := i - len(anchorPublicKeys)/length.Bytes48
-		copy(publicKeys[pos*length.Bytes48:], validatorSet[i].PublicKeyBytes())
+		copy(publicKeys[pos*length.Bytes48:(pos+1)*length.Bytes48], validatorSet[i].PublicKeyBytes())
 	}
 
 	mixes := solid.NewHashVector(randaoMixesLength)
@@ -94,7 +94,8 @@ func newCheckpointState(beaconConfig *clparams.BeaconChainConfig, anchorPublicKe
 	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
 		beaconConfig.EpochsPerHistoricalVector
 	activeIndicies := c.getActiveIndicies(epoch)
-	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
+	c.shuffledSet = make([]uint64, len(activeIndicies))
+	c.shuffledSet = shuffling.ComputeShuffledIndicies(c.beaconConfig, c.randaoMixes.Get(int(mixPosition)), c.shuffledSet, activeIndicies, epoch*beaconConfig.SlotsPerEpoch)
 	return c
 }
 
@@ -165,11 +166,11 @@ func (c *checkpointState) isValidIndexedAttestation(att *cltypes.IndexedAttestat
 
 	pks := [][]byte{}
 	inds.Range(func(_ int, v uint64, _ int) bool {
-		if v < uint64(len(c.anchorPublicKeys)) {
+		if v < uint64(len(c.anchorPublicKeys))/length.Bytes48 {
 			pks = append(pks, c.anchorPublicKeys[v*length.Bytes48:(v+1)*length.Bytes48])
 		} else {
 			offset := uint64(len(c.anchorPublicKeys) / length.Bytes48)
-			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:])
+			pks = append(pks, c.publicKeys[(v-offset)*length.Bytes48:(v-offset+1)*length.Bytes48])
 		}
 		return true
 	})

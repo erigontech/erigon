@@ -77,7 +77,7 @@ contract RootReceiver {
         // verify receipt inclusion
         require(
             MerklePatriciaProof.verify(receipt.toBytes(), branchMaskBytes, payload.getReceiptProof(), receiptRoot),
-            "FxRootTunnel: INVALID_RECEIPT_PROOF"
+            "RootTunnel: INVALID_RECEIPT_PROOF"
         );
 
         // verify checkpoint inclusion

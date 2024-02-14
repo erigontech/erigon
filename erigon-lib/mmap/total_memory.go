@@ -1,9 +1,10 @@
 package mmap
 
 import (
+	"runtime/debug"
+
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/pbnjay/memory"
-	"runtime/debug"
 )
 
 func TotalMemory() uint64 {

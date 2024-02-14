@@ -127,6 +127,7 @@ func (c *Compressor) Close() {
 }
 
 func (c *Compressor) SetTrace(trace bool) { c.trace = trace }
+func (c *Compressor) Workers() int        { return c.workers }
 
 func (c *Compressor) Count() int { return int(c.wordsCount) }
 

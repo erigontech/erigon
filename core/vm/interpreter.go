@@ -128,6 +128,8 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 		jt = &pragueInstructionSet
 	case evm.ChainRules().IsCancun:
 		jt = &cancunInstructionSet
+	case evm.ChainRules().IsNapoli:
+		jt = &napoliInstructionSet
 	case evm.ChainRules().IsShanghai:
 		jt = &shanghaiInstructionSet
 	case evm.ChainRules().IsLondon:
@@ -293,11 +295,15 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			if err != nil || !contract.UseGas(dynamicCost, in.cfg.Tracer, GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
+			// Do tracing before memory expansion
+			if in.cfg.Tracer != nil {
+				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
+				logged = true
+			}
 			if memorySize > 0 {
 				mem.Resize(memorySize)
 			}
-		}
-		if in.cfg.Tracer != nil {
+		} else if in.cfg.Tracer != nil {
 			in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, GasChangeCallOpCode)
 			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err)) //nolint:errcheck
 			logged = true

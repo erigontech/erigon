@@ -18,12 +18,13 @@ import (
 // These objects are stored in the main account trie.
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
-	Initialised bool
-	Nonce       uint64
-	Balance     uint256.Int
-	Root        libcommon.Hash // merkle root of the storage trie
-	CodeHash    libcommon.Hash // hash of the bytecode
-	Incarnation uint64
+	Initialised     bool
+	Nonce           uint64
+	Balance         uint256.Int
+	Root            libcommon.Hash // merkle root of the storage trie
+	CodeHash        libcommon.Hash // hash of the bytecode
+	Incarnation     uint64
+	PrevIncarnation uint64
 }
 
 const (

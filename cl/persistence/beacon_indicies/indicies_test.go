@@ -140,3 +140,35 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	require.Equal(t, headerRoot, blockRoot)
 
 }
+
+func TestWriteExecutionBlockNumber(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, _ := db.BeginRw(context.Background())
+	defer tx.Rollback()
+
+	tHash := libcommon.HexToHash("0x2")
+	require.NoError(t, WriteExecutionBlockNumber(tx, tHash, 1))
+	require.NoError(t, WriteExecutionBlockNumber(tx, tHash, 2))
+	require.NoError(t, WriteExecutionBlockNumber(tx, tHash, 3))
+
+	// Try to retrieve the block's slot by its blockRoot and verify
+	blockNumber, err := ReadExecutionBlockNumber(tx, tHash)
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), *blockNumber)
+}
+
+func TestWriteExecutionBlockHash(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, _ := db.BeginRw(context.Background())
+	defer tx.Rollback()
+
+	tHash := libcommon.HexToHash("0x2")
+	tHash2 := libcommon.HexToHash("0x3")
+	require.NoError(t, WriteExecutionBlockHash(tx, tHash, tHash2))
+	// Try to retrieve the block's slot by its blockRoot and verify
+	tHash3, err := ReadExecutionBlockHash(tx, tHash)
+	require.NoError(t, err)
+	require.Equal(t, tHash2, tHash3)
+}

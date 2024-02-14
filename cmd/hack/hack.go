@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/big"
 	"net/http"
 	_ "net/http/pprof" //nolint:gosec
@@ -18,6 +17,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/holiman/uint256"
@@ -138,7 +139,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
@@ -538,7 +539,7 @@ func extractBodies(datadir string) error {
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,
-	}, filepath.Join(datadir, "snapshots"), log.New())
+	}, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.ReopenFolder()
 
 	/* method Iterate was removed, need re-implement

@@ -85,7 +85,7 @@ func NewServer(ctx context.Context, flags CommandFlags, logger log.Logger) (*Ser
 }
 
 func makeLocalNode(ctx context.Context, nodeDBPath string, privateKey *ecdsa.PrivateKey, chain string, logger log.Logger) (*enode.LocalNode, error) {
-	db, err := enode.OpenDB(ctx, nodeDBPath, "")
+	db, err := enode.OpenDB(ctx, nodeDBPath, "", logger)
 	if err != nil {
 		return nil, err
 	}
@@ -183,5 +183,5 @@ func (server *Server) Listen(ctx context.Context) (*discover.UDPv4, error) {
 
 	server.logger.Debug("Discovery UDP listener is up", "addr", realAddr)
 
-	return discover.ListenV4(ctx, conn, server.localNode, server.discConfig)
+	return discover.ListenV4(ctx, "any", conn, server.localNode, server.discConfig)
 }

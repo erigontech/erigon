@@ -13,12 +13,12 @@ func TestKeccak256(t *testing.T) {
 		[]byte("extra2"),
 	}
 
-	expectedHash := utils.Keccak256(data, extras...)
-	hashFunc := utils.OptimizedKeccak256()
+	expectedHash := utils.Sha256(data, extras...)
+	hashFunc := utils.OptimizedSha256NotThreadSafe()
 	expectedOptimizedHash := hashFunc(data, extras...)
 
 	// Test Keccak256 function
-	hash := utils.Keccak256(data, extras...)
+	hash := utils.Sha256(data, extras...)
 	if hash != expectedHash {
 		t.Errorf("Keccak256 returned an incorrect hash. Expected: %x, Got: %x", expectedHash, hash)
 	}
@@ -37,12 +37,12 @@ func TestOptimizedKeccak256NotThreadSafe(t *testing.T) {
 		[]byte("extra2"),
 	}
 
-	expectedHash := utils.Keccak256(data, extras...)
-	hashFunc := utils.OptimizedKeccak256NotThreadSafe()
+	expectedHash := utils.Sha256(data, extras...)
+	hashFunc := utils.OptimizedSha256NotThreadSafe()
 	expectedOptimizedHash := hashFunc(data, extras...)
 
 	// Test OptimizedKeccak256NotThreadSafe function
-	hash := utils.Keccak256(data, extras...)
+	hash := utils.Sha256(data, extras...)
 	if hash != expectedHash {
 		t.Errorf("Keccak256 returned an incorrect hash. Expected: %x, Got: %x", expectedHash, hash)
 	}

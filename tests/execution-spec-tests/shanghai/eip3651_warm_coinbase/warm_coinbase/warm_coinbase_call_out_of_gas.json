@@ -1,7 +1,8 @@
 {
-    "000-fork=Shanghai-CALL-sufficient_gas-opcode_call": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-CALL-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -50,6 +51,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x930113249ffc16e5a595b74595e77efd6d745aa9fdd3cfd6f1e51de7526a96ee"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -121,9 +123,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Shanghai-CALL-insufficient_gas-opcode_call": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-CALL-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -172,6 +175,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x8d76768914bc77bc0f96702a0e5d83730efa3bea9571a35c6be616766eda239b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -241,9 +245,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Shanghai-CALLCODE-sufficient_gas-opcode_callcode": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-CALLCODE-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -292,6 +297,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xf11ee3dbb4e30ff6210e49d6fe476b01b0092e688112dcaee301b9b567e0c5c9"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -363,9 +369,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Shanghai-CALLCODE-insufficient_gas-opcode_callcode": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-CALLCODE-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -414,6 +421,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x480af2f7a3b072cb25b6b75d8e16c5b50f1334923cec044c0d7d79c81c1df668"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -483,9 +491,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Shanghai-DELEGATECALL-sufficient_gas-opcode_delegatecall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-DELEGATECALL-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -534,6 +543,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0x70cb69ebecabe020b5b9ccc2632190da8ec73efa6b8736f42c219e526b460b5b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -605,9 +615,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Shanghai-DELEGATECALL-insufficient_gas-opcode_delegatecall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-DELEGATECALL-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -656,6 +667,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xaa902ef3e346240531ffe945c29c90ffbc9e1b2b78fd5fee6e7e5be303cf325d"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -725,9 +737,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Shanghai-STATICCALL-sufficient_gas-opcode_staticcall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-STATICCALL-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -776,6 +789,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xd34b20df6f84866be1538ef63bc24c4245285d767076a5761c3e4226b769a696"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -847,9 +861,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Shanghai-STATICCALL-insufficient_gas-opcode_staticcall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Shanghai-blockchain_test-STATICCALL-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -898,6 +913,7 @@
                     "withdrawalsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
                     "hash": "0xfc7d5f602e984e39ee41beb5a9d874f4ca1f40cfe4414e5a0ebf10f08c5ca218"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -967,9 +983,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "008-fork=Cancun-CALL-sufficient_gas-opcode_call": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-CALL-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1024,6 +1041,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x31b6a0f4435780dac3d971d85262f87a646c1e63bf28a6e5e17720de780db5f7"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1109,9 +1127,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "009-fork=Cancun-CALL-insufficient_gas-opcode_call": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-CALL-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1166,6 +1185,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x45da26f2ff374b5bddf1658302c0ac59408827c7b3722d014e25eba007299100"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1249,9 +1269,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "010-fork=Cancun-CALLCODE-sufficient_gas-opcode_callcode": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-CALLCODE-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1306,6 +1327,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x323b30aa0ee65147699bead76b3b57b5281e5fa632ab9c5fd4bf092616d3aa8a"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1391,9 +1413,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "011-fork=Cancun-CALLCODE-insufficient_gas-opcode_callcode": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-CALLCODE-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1448,6 +1471,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x29f943c7a8bf38bb055fe242de05617ca193108c54a2d6f1fd6d766afa20db01"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1531,9 +1555,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "012-fork=Cancun-DELEGATECALL-sufficient_gas-opcode_delegatecall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-DELEGATECALL-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1588,6 +1613,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x28fcac19e464677c3931472f71a2ed98fda1c92d2475b2082bc5fd27fe7f78ac"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1673,9 +1699,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "013-fork=Cancun-DELEGATECALL-insufficient_gas-opcode_delegatecall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-DELEGATECALL-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1730,6 +1757,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x7f2f9082bcaf90017d5304d6dd17fe273aafd13f6eb4ed24b8956b0adcf05ea4"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1813,9 +1841,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "014-fork=Cancun-STATICCALL-sufficient_gas-opcode_staticcall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-STATICCALL-sufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -1870,6 +1899,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x057a7313de6bda962ded75212a2be5fe11abc7db5c414be642b58adc24b25740"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",
@@ -1955,9 +1985,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "015-fork=Cancun-STATICCALL-insufficient_gas-opcode_staticcall": {
+    "tests/shanghai/eip3651_warm_coinbase/test_warm_coinbase.py::test_warm_coinbase_call_out_of_gas[fork_Cancun-blockchain_test-STATICCALL-insufficient_gas]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3651.md",
             "reference-spec-version": "d94c694c6f12291bb6626669c3e8587eef3adff1"
         },
@@ -2012,6 +2043,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x1ec209fb2a3da2edf0ddb848fc12efe9e7de50ea7ff999f17c0ac2cddce5f7a5"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x00",

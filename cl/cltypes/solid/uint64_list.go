@@ -42,6 +42,10 @@ func (arr *uint64ListSSZ) Clear() {
 	arr.u.Clear()
 }
 
+func (arr *uint64ListSSZ) Bytes() []byte {
+	return arr.u.u[:arr.u.l*8]
+}
+
 func (arr *uint64ListSSZ) CopyTo(target IterableSSZ[uint64]) {
 	if c, ok := target.(*uint64ListSSZ); ok {
 		arr.u.CopyTo(c.u)

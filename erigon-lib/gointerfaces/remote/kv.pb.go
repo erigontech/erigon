@@ -125,7 +125,7 @@ const (
 	Action_STORAGE     Action = 0 // Change only in the storage
 	Action_UPSERT      Action = 1 // Change of balance or nonce (and optionally storage)
 	Action_CODE        Action = 2 // Change of code (and optionally storage)
-	Action_UPSERT_CODE Action = 3 // Change in (balance or nonce) and code (and optinally storage)
+	Action_UPSERT_CODE Action = 3 // Change in (balance or nonce) and code (and optionally storage)
 	Action_REMOVE      Action = 4 // Account is deleted
 )
 
@@ -308,7 +308,7 @@ type Pair struct {
 	V        []byte `protobuf:"bytes,2,opt,name=v,proto3" json:"v,omitempty"`
 	CursorId uint32 `protobuf:"varint,3,opt,name=cursor_id,json=cursorId,proto3" json:"cursor_id,omitempty"` // send once after new cursor open
 	ViewId   uint64 `protobuf:"varint,4,opt,name=view_id,json=viewId,proto3" json:"view_id,omitempty"`       // return once after tx open. mdbx's tx.ViewID() - id of write transaction in db
-	TxId     uint64 `protobuf:"varint,5,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"`             // return once after tx open. internal identifier - use it in other methods - to achieve consistant DB view (to read data from same DB tx on server).
+	TxId     uint64 `protobuf:"varint,5,opt,name=tx_id,json=txId,proto3" json:"tx_id,omitempty"`             // return once after tx open. internal identifier - use it in other methods - to achieve consistent DB view (to read data from same DB tx on server).
 }
 
 func (x *Pair) Reset() {

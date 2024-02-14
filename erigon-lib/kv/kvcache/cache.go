@@ -13,6 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+
 package kvcache
 
 import (
@@ -26,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/c2h5oh/datasize"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/crypto/sha3"
@@ -35,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
 type CacheValidationResult struct {
@@ -100,19 +101,19 @@ type CacheView interface {
 //   - changes in Non-Canonical View SHOULD NOT reflect in stateEvict
 type Coherent struct {
 	hasher               hash.Hash
-	codeEvictLen         *metrics.Counter
-	codeKeys             *metrics.Counter
-	keys                 *metrics.Counter
-	evict                *metrics.Counter
+	codeEvictLen         metrics.Gauge
+	codeKeys             metrics.Gauge
+	keys                 metrics.Gauge
+	evict                metrics.Gauge
 	latestStateView      *CoherentRoot
-	codeMiss             *metrics.Counter
-	timeout              *metrics.Counter
-	hits                 *metrics.Counter
-	codeHits             *metrics.Counter
+	codeMiss             metrics.Counter
+	timeout              metrics.Counter
+	hits                 metrics.Counter
+	codeHits             metrics.Counter
 	roots                map[uint64]*CoherentRoot
 	stateEvict           *ThreadSafeEvictionList
 	codeEvict            *ThreadSafeEvictionList
-	miss                 *metrics.Counter
+	miss                 metrics.Counter
 	cfg                  CoherentConfig
 	latestStateVersionID uint64
 	lock                 sync.Mutex
@@ -187,12 +188,12 @@ func New(cfg CoherentConfig) *Coherent {
 		miss:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		hits:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
 		timeout:      metrics.GetOrCreateCounter(fmt.Sprintf(`cache_timeout_total{name="%s"}`, cfg.MetricsLabel)),
-		keys:         metrics.GetOrCreateCounter(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		evict:        metrics.GetOrCreateCounter(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
+		keys:         metrics.GetOrCreateGauge(fmt.Sprintf(`cache_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		evict:        metrics.GetOrCreateGauge(fmt.Sprintf(`cache_list_total{name="%s"}`, cfg.MetricsLabel)),
 		codeMiss:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="miss",name="%s"}`, cfg.MetricsLabel)),
 		codeHits:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_total{result="hit",name="%s"}`, cfg.MetricsLabel)),
-		codeKeys:     metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
-		codeEvictLen: metrics.GetOrCreateCounter(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
+		codeKeys:     metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_keys_total{name="%s"}`, cfg.MetricsLabel)),
+		codeEvictLen: metrics.GetOrCreateGauge(fmt.Sprintf(`cache_code_list_total{name="%s"}`, cfg.MetricsLabel)),
 	}
 }
 
@@ -260,10 +261,10 @@ func (c *Coherent) advanceRoot(stateVersionID uint64) (r *CoherentRoot) {
 	c.latestStateVersionID = stateVersionID
 	c.latestStateView = r
 
-	c.keys.Set(uint64(c.latestStateView.cache.Len()))
-	c.codeKeys.Set(uint64(c.latestStateView.codeCache.Len()))
-	c.evict.Set(uint64(c.stateEvict.Len()))
-	c.codeEvictLen.Set(uint64(c.codeEvict.Len()))
+	c.keys.SetInt(c.latestStateView.cache.Len())
+	c.codeKeys.SetInt(c.latestStateView.codeCache.Len())
+	c.evict.SetInt(c.stateEvict.Len())
+	c.codeEvictLen.SetInt(c.codeEvict.Len())
 	return r
 }
 

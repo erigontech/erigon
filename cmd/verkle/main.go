@@ -5,9 +5,10 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cl/utils"
 	"os"
 	"time"
+
+	"github.com/ledgerwatch/erigon/cl/utils"
 
 	"github.com/c2h5oh/datasize"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -323,7 +324,7 @@ func dump_acc_preimages(ctx context.Context, cfg optionsCfg) error {
 		if _, err := file.Write(k); err != nil {
 			return err
 		}
-		addressHash := utils.Keccak256(k)
+		addressHash := utils.Sha256(k)
 
 		if _, err := file.Write(addressHash[:]); err != nil {
 			return err
@@ -389,7 +390,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 			}
 			currentAddress = libcommon.BytesToAddress(k)
 			currentIncarnation = acc.Incarnation
-			addressHash = utils.Keccak256(currentAddress[:])
+			addressHash = utils.Sha256(currentAddress[:])
 		} else {
 			address := libcommon.BytesToAddress(k[:20])
 			if address != currentAddress {
@@ -398,7 +399,7 @@ func dump_storage_preimages(ctx context.Context, cfg optionsCfg, logger log.Logg
 			if binary.BigEndian.Uint64(k[20:]) != currentIncarnation {
 				continue
 			}
-			storageHash := utils.Keccak256(k[28:])
+			storageHash := utils.Sha256(k[28:])
 			buf.Write(k[28:])
 			buf.Write(storageHash[:])
 		}

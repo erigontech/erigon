@@ -3,10 +3,11 @@ package rpctest
 import (
 	"encoding/base64"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/valyala/fastjson"
 
@@ -58,7 +59,12 @@ func (g *RequestGenerator) traceBlockByHash(hash string) string {
 	return fmt.Sprintf(template, hash, g.reqID)
 }
 
-func (g *RequestGenerator) traceTransaction(hash string) string {
+func (g *RequestGenerator) debugTraceBlockByNumber(blockNum uint64) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_traceBlockByNumber","params":[%d],"id":%d}`
+	return fmt.Sprintf(template, blockNum, g.reqID)
+}
+
+func (g *RequestGenerator) debugTraceTransaction(hash string) string {
 	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 	return fmt.Sprintf(template, hash, g.reqID)
 }
@@ -230,6 +236,28 @@ func (g *RequestGenerator) ethCall(from libcommon.Address, to *libcommon.Address
 	return sb.String()
 }
 
+func (g *RequestGenerator) ethCreateAccessList(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes, bn uint64) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_createAccessList", "params": [{"from":"0x%x"`, from)
+	if to != nil {
+		fmt.Fprintf(&sb, `,"to":"0x%x"`, *to)
+	}
+	if gas != nil {
+		fmt.Fprintf(&sb, `,"gas":"%s"`, gas)
+	}
+	if gasPrice != nil {
+		fmt.Fprintf(&sb, `,"gasPrice":"%s"`, gasPrice)
+	}
+	if len(data) > 0 {
+		fmt.Fprintf(&sb, `,"data":"%s"`, data)
+	}
+	if value != nil {
+		fmt.Fprintf(&sb, `,"value":"%s"`, value)
+	}
+	fmt.Fprintf(&sb, `},"0x%x"], "id":%d}`, bn, g.reqID)
+	return sb.String()
+}
+
 func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.Address, gas *hexutil.Big, gasPrice *hexutil.Big, value *hexutil.Big, data hexutility.Bytes) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{ "jsonrpc": "2.0", "method": "eth_call", "params": [{"from":"0x%x"`, from)
@@ -250,6 +278,11 @@ func (g *RequestGenerator) ethCallLatest(from libcommon.Address, to *libcommon.A
 	}
 	fmt.Fprintf(&sb, `},"latest"], "id":%d}`, g.reqID)
 	return sb.String()
+}
+
+func (g *RequestGenerator) otsGetBlockTransactions(block_number uint64, page_number uint64, page_size uint64) string {
+	const template = `{"id":1,"jsonrpc":"2.0","method":"ots_getBlockTransactions","params":[%d, %d, %d]}`
+	return fmt.Sprintf(template, block_number, page_number, page_size)
 }
 
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {

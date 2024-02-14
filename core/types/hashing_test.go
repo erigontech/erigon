@@ -24,6 +24,7 @@ func genTransactions(n uint64) Transactions {
 }
 
 func TestEncodeUint(t *testing.T) {
+	t.Parallel()
 	for i := 0; i < 64000; i++ {
 		bbOld := bytes.NewBuffer(make([]byte, 10))
 		bbNew := bytes.NewBuffer(make([]byte, 10))
@@ -41,6 +42,7 @@ func TestEncodeUint(t *testing.T) {
 }
 
 func TestDeriveSha(t *testing.T) {
+	t.Parallel()
 	tests := []DerivableList{
 		Transactions{},
 		genTransactions(1),

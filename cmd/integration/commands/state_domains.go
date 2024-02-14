@@ -5,11 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/metrics"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"

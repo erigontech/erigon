@@ -75,3 +75,15 @@ func TestValidatorSetTest(t *testing.T) {
 
 	require.Equal(t, firstHash, secondHash)
 }
+
+func TestMarshalUnmarshalJson(t *testing.T) {
+	validator := NewValidatorFromParameters(
+		[48]byte{1, 2, 3}, [32]byte{4, 5, 6}, 7, true, 8, 9, 10, 11,
+	)
+	encoded, err := validator.MarshalJSON()
+	require.NoError(t, err)
+	decoded := NewValidator()
+	err = decoded.UnmarshalJSON(encoded)
+	require.NoError(t, err)
+	assert.Equal(t, validator, decoded)
+}

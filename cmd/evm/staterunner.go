@@ -57,8 +57,12 @@ type StatetestResult struct {
 }
 
 func stateTestCmd(ctx *cli.Context) error {
-	// Configure the go-ethereum logger
-	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
+	if machineFriendlyOutput {
+		log.Root().SetHandler(log.DiscardHandler())
+	} else {
+		log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	}
 
 	// Configure the EVM logger
 	config := &logger.LogConfig{
@@ -70,7 +74,7 @@ func stateTestCmd(ctx *cli.Context) error {
 	cfg := vm.Config{
 		Debug: ctx.Bool(DebugFlag.Name) || ctx.Bool(MachineFlag.Name),
 	}
-	if ctx.Bool(MachineFlag.Name) {
+	if machineFriendlyOutput {
 		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr)
 	} else if ctx.Bool(DebugFlag.Name) {
 		cfg.Tracer = logger.NewStructLogger(config)

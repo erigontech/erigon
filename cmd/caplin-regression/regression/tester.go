@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	solid2 "github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -44,7 +45,8 @@ func (r *RegressionTester) Run(name string, fn func(*forkchoice.ForkChoiceStore,
 	if err != nil {
 		return err
 	}
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(state, afero.NewMemMapFs()))
+	emitter := beaconevents.NewEmitters()
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), state, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(state, afero.NewMemMapFs()), emitter)
 	if err != nil {
 		return err
 	}
@@ -88,7 +90,7 @@ func TestRegressionWithValidation(store *forkchoice.ForkChoiceStore, block *clty
 		return err
 	}
 	block.Block.Body.Attestations.Range(func(index int, value *solid2.Attestation, length int) bool {
-		store.OnAttestation(value, true)
+		store.OnAttestation(value, true, true)
 		return true
 	})
 	return nil

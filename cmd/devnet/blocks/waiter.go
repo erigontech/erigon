@@ -132,7 +132,7 @@ func (c *blockWaiter) receive(ctx context.Context, node devnet.Node, headers cha
 		default:
 		}
 
-		block, err := node.GetBlockByNumber(rpc.AsBlockNumber(header.Number), true)
+		block, err := node.GetBlockByNumber(ctx, rpc.AsBlockNumber(header.Number), true)
 
 		if err != nil {
 			c.logger.Error("Block waiter failed to get block", "err", err)

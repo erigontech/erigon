@@ -5,10 +5,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -43,9 +44,10 @@ type SendersCfg struct {
 	chainConfig     *chain.Config
 	hd              *headerdownload.HeaderDownload
 	blockReader     services.FullBlockReader
+	loopBreakCheck  func(int) bool
 }
 
-func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload) SendersCfg {
+func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpdir string, prune prune.Mode, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, loopBreakCheck func(int) bool) SendersCfg {
 	const sendersBatchSize = 10000
 	const sendersBlockSize = 4096
 
@@ -61,8 +63,8 @@ func StageSendersCfg(db kv.RwDB, chainCfg *chain.Config, badBlockHalt bool, tmpd
 		chainConfig:     chainCfg,
 		prune:           prune,
 		hd:              hd,
-
-		blockReader: blockReader,
+		blockReader:     blockReader,
+		loopBreakCheck:  loopBreakCheck,
 	}
 }
 
@@ -194,6 +196,10 @@ Loop:
 		blockHash := libcommon.BytesToHash(v)
 
 		if blockNumber > to {
+			break
+		}
+
+		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNumber-startFrom)) {
 			break
 		}
 

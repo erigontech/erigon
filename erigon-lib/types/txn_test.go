@@ -154,10 +154,10 @@ func TestDedupHashes(t *testing.T) {
 
 	h = toHashes()
 	c = h.DedupCopy()
-	assert.Equal(0, h.Len())
-	assert.Equal(0, c.Len())
-	assert.Equal(0, len(h))
-	assert.Equal(0, len(c))
+	assert.Zero(h.Len())
+	assert.Zero(c.Len())
+	assert.Zero(len(h))
+	assert.Zero(len(c))
 
 	h = toHashes(1, 2, 3, 4)
 	c = h.DedupCopy()

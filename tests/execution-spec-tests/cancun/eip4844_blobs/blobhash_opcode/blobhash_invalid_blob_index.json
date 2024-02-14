@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun-scenario=invalid_calls": {
+    "tests/cancun/eip4844_blobs/test_blobhash_opcode.py::test_blobhash_invalid_blob_index[fork_Cancun-blockchain_test-scenario_invalid_calls]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-4844.md",
             "reference-spec-version": "f0eb6a364aaf5ccb43516fa2c269a54fb881ecfd"
         },

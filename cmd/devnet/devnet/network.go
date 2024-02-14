@@ -3,7 +3,6 @@ package devnet
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"math/big"
 	"os"
 	"reflect"
@@ -11,8 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ledgerwatch/erigon/cmd/utils"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon/cmd/devnet/args"
+	devnet_args "github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
@@ -33,7 +34,7 @@ type Network struct {
 	Snapshots          bool
 	Nodes              []Node
 	Services           []Service
-	Alloc              types.GenesisAlloc
+	Genesis            *types.Genesis
 	BorStateSyncDelay  time.Duration
 	BorPeriod          time.Duration
 	BorMinBlockSize    int
@@ -41,6 +42,9 @@ type Network struct {
 	wg                 sync.WaitGroup
 	peers              []string
 	namedNodes         map[string]Node
+
+	// max number of blocks to look for a transaction in
+	MaxNumberOfEmptyBlockChecks int
 }
 
 func (nw *Network) ChainID() *big.Int {
@@ -60,7 +64,7 @@ func (nw *Network) Start(ctx context.Context) error {
 		}
 	}
 
-	baseNode := args.NodeArgs{
+	baseNode := devnet_args.NodeArgs{
 		DataDir:        nw.DataDir,
 		Chain:          nw.Chain,
 		Port:           nw.BasePort,
@@ -75,22 +79,13 @@ func (nw *Network) Start(ctx context.Context) error {
 		baseNode.WithHeimdallMilestones = utils.WithHeimdallMilestones.Value
 	}
 
-	cliCtx := CliContext(ctx)
-
-	metricsEnabled := cliCtx.Bool("metrics")
-	metricsNode := cliCtx.Int("metrics.node")
 	nw.namedNodes = map[string]Node{}
 
 	for i, nodeArgs := range nw.Nodes {
 		{
-			base := baseNode
-			if metricsEnabled && metricsNode == i {
-				base.Metrics = true
-				base.MetricsPort = cliCtx.Int("metrics.port")
-			}
-			base.StaticPeers = strings.Join(nw.peers, ",")
+			baseNode.StaticPeers = strings.Join(nw.peers, ",")
 
-			err := nodeArgs.Configure(base, i)
+			err := nodeArgs.Configure(baseNode, i)
 			if err != nil {
 				nw.Stop()
 				return err
@@ -145,12 +140,16 @@ func (nw *Network) createNode(nodeArgs Node) (Node, error) {
 	}
 
 	if n.IsBlockProducer() {
-		if nw.Alloc == nil {
-			nw.Alloc = types.GenesisAlloc{
+		if nw.Genesis == nil {
+			nw.Genesis = &types.Genesis{}
+		}
+
+		if nw.Genesis.Alloc == nil {
+			nw.Genesis.Alloc = types.GenesisAlloc{
 				n.Account().Address: types.GenesisAccount{Balance: blockProducerFunds},
 			}
 		} else {
-			nw.Alloc[n.Account().Address] = types.GenesisAccount{Balance: blockProducerFunds}
+			nw.Genesis.Alloc[n.Account().Address] = types.GenesisAccount{Balance: blockProducerFunds}
 		}
 	}
 
@@ -182,7 +181,7 @@ func (nw *Network) startNode(n Node) error {
 
 	node := n.(*devnetNode)
 
-	args, err := args.AsArgs(node.nodeArgs)
+	args, err := devnet_args.AsArgs(node.nodeArgs)
 	if err != nil {
 		return err
 	}

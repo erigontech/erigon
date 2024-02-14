@@ -19,6 +19,7 @@ package logger
 import (
 	"encoding/json"
 	"math/big"
+	"sort"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -99,6 +100,10 @@ func (al accessList) equal(other accessList) bool {
 	return true
 }
 
+func (al accessList) Equal(other accessList) bool {
+	return al.equal(other)
+}
+
 // accesslist converts the accesslist to a types2.AccessList.
 func (al accessList) accessList() types2.AccessList {
 	acl := make(types2.AccessList, 0, len(al))
@@ -108,6 +113,25 @@ func (al accessList) accessList() types2.AccessList {
 			tuple.StorageKeys = append(tuple.StorageKeys, slot)
 		}
 		acl = append(acl, tuple)
+	}
+	return acl
+}
+
+// accesslist converts the accesslist to a types2.AccessList.
+func (al accessList) accessListSorted() types2.AccessList {
+	acl := make(types2.AccessList, 0, len(al))
+	for addr, slots := range al {
+		storageKeys := make([]libcommon.Hash, 0, len(slots))
+		for slot := range slots {
+			storageKeys = append(storageKeys, slot)
+		}
+		sort.Slice(storageKeys, func(i, j int) bool {
+			return storageKeys[i].String() < storageKeys[j].String()
+		})
+		acl = append(acl, types2.AccessTuple{
+			Address:     addr,
+			StorageKeys: storageKeys,
+		})
 	}
 	return acl
 }
@@ -271,6 +295,11 @@ func (a *AccessListTracer) Stop(err error) {
 // AccessList returns the current accesslist maintained by the tracer.
 func (a *AccessListTracer) AccessList() types2.AccessList {
 	return a.list.accessList()
+}
+
+// AccessList returns the current accesslist maintained by the tracer.
+func (a *AccessListTracer) AccessListSorted() types2.AccessList {
+	return a.list.accessListSorted()
 }
 
 // CreatedContracts returns the set of all addresses of contracts created during tx execution.

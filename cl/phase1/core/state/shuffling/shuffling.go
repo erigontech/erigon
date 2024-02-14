@@ -19,7 +19,7 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 	input := make([]byte, 40)
 	preInputs := ComputeShuffledIndexPreInputs(b.BeaconConfig(), seed)
 	for {
-		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, utils.Keccak256)
+		shuffled, err := ComputeShuffledIndex(b.BeaconConfig(), i%total, total, seed, preInputs, utils.Sha256)
 		if err != nil {
 			return 0, err
 		}
@@ -29,7 +29,7 @@ func ComputeProposerIndex(b *raw.BeaconState, indices []uint64, seed [32]byte) (
 		}
 		copy(input, seed[:])
 		binary.LittleEndian.PutUint64(input[32:], i/32)
-		randomByte := uint64(utils.Keccak256(input)[i%32])
+		randomByte := uint64(utils.Sha256(input)[i%32])
 		validator, err := b.ValidatorForValidatorIndex(int(candidateIndex))
 		if err != nil {
 			return 0, err

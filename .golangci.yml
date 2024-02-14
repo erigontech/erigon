@@ -25,7 +25,10 @@ linters:
     - errorlint #TODO: enable me
     - errchkjson #TODO: enable me
     - unused #TODO: enable me
+    - testifylint #TODO: enable me
+    - perfsprint #TODO: enable me
     - gocheckcompilerdirectives
+    - protogetter
   enable:
     - unconvert
     #    - predeclared #TODO: enable me
@@ -124,6 +127,7 @@ issues:
         - unused
         - deadcode
         - gocritic
+        - perfsprint
     - path: hack\.go
       linters:
         - gosec

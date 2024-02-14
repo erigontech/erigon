@@ -13,6 +13,7 @@ import (
 )
 
 func TestInterpreterReadonly(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})
 
@@ -118,6 +119,7 @@ func TestInterpreterReadonly(t *testing.T) {
 }
 
 func TestReadonlyBasicCases(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		testName          string
 		readonlySliceTest []bool
@@ -267,6 +269,7 @@ func TestReadonlyBasicCases(t *testing.T) {
 			}
 
 			t.Run(testcase.testName+evmsTestcase.suffix, func(t *testing.T) {
+				t.Parallel()
 				readonlySliceTest := testcase.readonlySliceTest
 
 				env := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, &dummyStatedb{}, params.TestChainConfig, Config{})

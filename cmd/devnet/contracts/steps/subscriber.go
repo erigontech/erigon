@@ -3,8 +3,9 @@ package contracts_steps
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	ethereum "github.com/ledgerwatch/erigon"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -61,7 +62,7 @@ func DeployAndCallLogSubscriber(ctx context.Context, deployer string) (*libcommo
 
 	blockNum := txToBlockMap[eventHash]
 
-	block, err := node.GetBlockByNumber(rpc.AsBlockNumber(blockNum), true)
+	block, err := node.GetBlockByNumber(ctx, rpc.AsBlockNumber(blockNum), true)
 
 	if err != nil {
 		return nil, err

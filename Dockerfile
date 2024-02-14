@@ -1,5 +1,5 @@
 # syntax = docker/dockerfile:1.2
-FROM docker.io/library/golang:1.20-alpine3.17 AS builder
+FROM docker.io/library/golang:1.21-alpine3.17 AS builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 
@@ -15,10 +15,10 @@ ADD . .
 RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/tmp/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    make all
+    make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
 
 
-FROM docker.io/library/golang:1.20-alpine3.17 AS tools-builder
+FROM docker.io/library/golang:1.21-alpine3.17 AS tools-builder
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 WORKDIR /app
 

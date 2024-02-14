@@ -221,10 +221,10 @@ func (t *jsTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 	db := &dbObj{ibs: env.IntraBlockState(), vm: t.vm, toBig: t.toBig, toBuf: t.toBuf, fromBuf: t.fromBuf}
 	t.dbValue = db.setupObject()
 	// Update list of precompiles based on current block
-	rules := env.ChainConfig().Rules(env.Context().BlockNumber, env.Context().Time)
+	rules := env.ChainRules()
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
-	t.ctx["block"] = t.vm.ToValue(t.env.Context().BlockNumber)
-	t.ctx["gasPrice"] = t.vm.ToValue(t.env.TxContext().GasPrice.ToBig())
+	t.ctx["block"] = t.vm.ToValue(t.env.Context.BlockNumber)
+	t.ctx["gasPrice"] = t.vm.ToValue(t.env.TxContext.GasPrice.ToBig())
 }
 
 // CaptureTxEnd implements the Tracer interface and is invoked at the end of

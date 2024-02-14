@@ -55,7 +55,7 @@ func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
@@ -108,7 +108,7 @@ func StateRoot(ctx context.Context, genesis *types.Genesis, blockNum uint64, dat
 	if rwTx, err = db.BeginRw(ctx); err != nil {
 		return err
 	}
-	_, genesisIbs, err4 := core.GenesisToBlock(genesis, "", nil)
+	_, genesisIbs, err4 := core.GenesisToBlock(genesis, "", logger, nil)
 	if err4 != nil {
 		return err4
 	}

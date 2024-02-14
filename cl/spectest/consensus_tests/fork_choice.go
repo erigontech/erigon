@@ -3,11 +3,13 @@ package consensus_tests
 import (
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/erigon/spectest"
 	"io/fs"
 	"testing"
 
+	"github.com/ledgerwatch/erigon/spectest"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -155,8 +157,10 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()))
+	emitters := beaconevents.NewEmitters()
+	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
 	require.NoError(t, err)
+	forkStore.SetSynced(true)
 
 	var steps []ForkChoiceStep
 	err = spectest.ReadYml(root, "steps.yaml", &steps)
@@ -194,7 +198,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			att := &solid.Attestation{}
 			err := spectest.ReadSsz(root, c.Version(), step.GetAttestation()+".ssz_snappy", att)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnAttestation(att, false)
+			err = forkStore.OnAttestation(att, false, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {

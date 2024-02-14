@@ -25,10 +25,14 @@ func NewHashList(c int) HashListSSZ {
 	}
 }
 
+func (arr *hashList) Bytes() []byte {
+	return arr.u[:arr.l*length.Hash]
+}
+
 func (arr *hashList) MarshalJSON() ([]byte, error) {
 	list := make([]libcommon.Hash, arr.l)
 	for i := 0; i < arr.l; i++ {
-		list[0] = arr.Get(i)
+		list[i] = arr.Get(i)
 	}
 	return json.Marshal(list)
 }
@@ -153,7 +157,7 @@ func (h *hashList) HashSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(h.l))
-	return utils.Keccak256(baseRoot[:], lengthRoot[:]), nil
+	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
 }
 
 func (h *hashList) Range(fn func(int, libcommon.Hash, int) bool) {

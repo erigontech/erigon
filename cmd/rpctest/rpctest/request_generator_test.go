@@ -168,7 +168,7 @@ func TestRequestGenerator_traceTransaction(t *testing.T) {
 
 	for _, testCase := range testCases {
 		reqGen := MockRequestGenerator(testCase.reqId)
-		got := reqGen.traceTransaction(testCase.hash)
+		got := reqGen.debugTraceTransaction(testCase.hash)
 		require.EqualValues(t, testCase.expected, got)
 	}
 }

@@ -26,6 +26,7 @@ import (
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		code  []byte
 		exp   uint64

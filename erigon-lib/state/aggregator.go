@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/VictoriaMetrics/metrics"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
@@ -39,6 +38,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
 // StepsInBiggestFile - files of this size are completely frozen/immutable.
@@ -46,22 +46,22 @@ import (
 const StepsInBiggestFile = 32
 
 var (
-	mxCurrentTx                = metrics.GetOrCreateCounter("domain_tx_processed")
-	mxCurrentBlock             = metrics.GetOrCreateCounter("domain_block_current")
-	mxRunningMerges            = metrics.GetOrCreateCounter("domain_running_merges")
-	mxRunningCollations        = metrics.GetOrCreateCounter("domain_running_collations")
+	mxCurrentTx                = metrics.GetOrCreateGauge("domain_tx_processed")
+	mxCurrentBlock             = metrics.GetOrCreateGauge("domain_block_current")
+	mxRunningMerges            = metrics.GetOrCreateGauge("domain_running_merges")
+	mxRunningCollations        = metrics.GetOrCreateGauge("domain_running_collations")
 	mxCollateTook              = metrics.GetOrCreateHistogram("domain_collate_took")
 	mxPruneTook                = metrics.GetOrCreateHistogram("domain_prune_took")
 	mxPruneHistTook            = metrics.GetOrCreateHistogram("domain_prune_hist_took")
-	mxPruningProgress          = metrics.GetOrCreateCounter("domain_pruning_progress")
-	mxCollationSize            = metrics.GetOrCreateCounter("domain_collation_size")
-	mxCollationSizeHist        = metrics.GetOrCreateCounter("domain_collation_hist_size")
+	mxPruningProgress          = metrics.GetOrCreateGauge("domain_pruning_progress")
+	mxCollationSize            = metrics.GetOrCreateGauge("domain_collation_size")
+	mxCollationSizeHist        = metrics.GetOrCreateGauge("domain_collation_hist_size")
 	mxPruneSize                = metrics.GetOrCreateCounter("domain_prune_size")
 	mxBuildTook                = metrics.GetOrCreateSummary("domain_build_files_took")
-	mxStepCurrent              = metrics.GetOrCreateCounter("domain_step_current")
+	mxStepCurrent              = metrics.GetOrCreateGauge("domain_step_current")
 	mxStepTook                 = metrics.GetOrCreateHistogram("domain_step_took")
 	mxCommitmentKeys           = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxCommitmentRunning        = metrics.GetOrCreateCounter("domain_running_commitment")
+	mxCommitmentRunning        = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook           = metrics.GetOrCreateSummary("domain_commitment_took")
 	mxCommitmentWriteTook      = metrics.GetOrCreateHistogram("domain_commitment_write_took")
 	mxCommitmentUpdates        = metrics.GetOrCreateCounter("domain_commitment_updates")
@@ -304,7 +304,7 @@ func (a *Aggregator) SetTx(tx kv.RwTx) {
 }
 
 func (a *Aggregator) SetTxNum(txNum uint64) {
-	mxCurrentTx.Set(txNum)
+	mxCurrentTx.SetUint64(txNum)
 
 	a.txNum = txNum
 	a.accounts.SetTxNum(txNum)
@@ -319,7 +319,7 @@ func (a *Aggregator) SetTxNum(txNum uint64) {
 
 func (a *Aggregator) SetBlockNum(blockNum uint64) {
 	a.blockNum = blockNum
-	mxCurrentBlock.Set(blockNum)
+	mxCurrentBlock.SetUint64(blockNum)
 }
 
 func (a *Aggregator) SetWorkers(i int) {
@@ -442,10 +442,10 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		start := time.Now()
 		collation, err := d.collateStream(ctx, step, txFrom, txTo, d.tx)
 		mxRunningCollations.Dec()
-		mxCollateTook.UpdateDuration(start)
+		mxCollateTook.ObserveDuration(start)
 
 		//mxCollationSize.Set(uint64(collation.valuesComp.Count()))
-		mxCollationSizeHist.Set(uint64(collation.historyComp.Count()))
+		mxCollationSizeHist.SetInt(collation.historyComp.Count())
 
 		if err != nil {
 			collation.Close()
@@ -481,8 +481,8 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		mxPruningProgress.Dec()
 		mxPruningProgress.Dec()
 
-		mxPruneTook.Update(d.stats.LastPruneTook.Seconds())
-		mxPruneHistTook.Update(d.stats.LastPruneHistTook.Seconds())
+		mxPruneTook.Observe(d.stats.LastPruneTook.Seconds())
+		mxPruneHistTook.Observe(d.stats.LastPruneHistTook.Seconds())
 	}
 
 	// when domain files are build and db is pruned, we can merge them
@@ -503,7 +503,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		start := time.Now()
 		collation, err := d.collate(ctx, step*a.aggregationStep, (step+1)*a.aggregationStep, d.tx)
 		mxRunningCollations.Dec()
-		mxCollateTook.UpdateDuration(start)
+		mxCollateTook.ObserveDuration(start)
 
 		if err != nil {
 			return fmt.Errorf("index collation %q has failed: %w", d.filenameBase, err)
@@ -523,7 +523,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 			}
 
 			mxRunningMerges.Dec()
-			mxBuildTook.UpdateDuration(start)
+			mxBuildTook.ObserveDuration(start)
 
 			d.integrateFiles(sf, step*a.aggregationStep, (step+1)*a.aggregationStep)
 
@@ -547,7 +547,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		if err := d.prune(ctx, txFrom, txTo, math.MaxUint64, logEvery); err != nil {
 			return err
 		}
-		mxPruneTook.UpdateDuration(startPrune)
+		mxPruneTook.ObserveDuration(startPrune)
 		mxPruningProgress.Dec()
 	}
 
@@ -565,7 +565,7 @@ func (a *Aggregator) aggregate(ctx context.Context, step uint64) error {
 		"range", fmt.Sprintf("%.2fM-%.2fM", float64(txFrom)/10e5, float64(txTo)/10e5),
 		"took", time.Since(stepStartedAt))
 
-	mxStepTook.UpdateDuration(stepStartedAt)
+	mxStepTook.ObserveDuration(stepStartedAt)
 
 	return nil
 }
@@ -601,7 +601,7 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, maxEndTxNum uint64, work
 	closeAll = false
 
 	for _, s := range []DomainStats{a.accounts.stats, a.code.stats, a.storage.stats} {
-		mxBuildTook.Update(s.LastFileBuildingTook.Seconds())
+		mxBuildTook.Observe(s.LastFileBuildingTook.Seconds())
 	}
 
 	a.logger.Info("[stat] finished merge step",
@@ -854,10 +854,10 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 		saveStateAfter = false
 	}
 
-	mxCommitmentKeys.Add(int(a.commitment.comKeys))
-	mxCommitmentTook.Update(a.commitment.comTook.Seconds())
+	mxCommitmentKeys.AddUint64(a.commitment.comKeys)
+	mxCommitmentTook.Observe(a.commitment.comTook.Seconds())
 
-	defer func(t time.Time) { mxCommitmentWriteTook.UpdateDuration(t) }(time.Now())
+	defer func(t time.Time) { mxCommitmentWriteTook.ObserveDuration(t) }(time.Now())
 
 	for pref, update := range branchNodeUpdates {
 		prefix := []byte(pref)
@@ -893,7 +893,7 @@ func (a *Aggregator) ComputeCommitment(saveStateAfter, trace bool) (rootHash []b
 	return rootHash, nil
 }
 
-// Provides channel which receives commitment hash each time aggregation is occured
+// AggregatedRoots Provides channel which receives commitment hash each time aggregation is occured
 func (a *Aggregator) AggregatedRoots() chan [length.Hash]byte {
 	return a.stepDoneNotice
 }
@@ -926,7 +926,7 @@ func (a *Aggregator) FinishTx() (err error) {
 		return err
 	}
 	step := a.txNum / a.aggregationStep
-	mxStepCurrent.Set(step)
+	mxStepCurrent.SetUint64(step)
 
 	if step == 0 {
 		a.notifyAggregated(rootHash)
@@ -1292,7 +1292,7 @@ func DecodeAccountBytes(enc []byte) (nonce uint64, balance *uint256.Int, hash []
 }
 
 func EncodeAccountBytes(nonce uint64, balance *uint256.Int, hash []byte, incarnation uint64) []byte {
-	l := int(1)
+	l := 1
 	if nonce > 0 {
 		l += common.BitLenToByteLen(bits.Len64(nonce))
 	}

@@ -2,7 +2,6 @@ package sentry_multi_client
 
 import (
 	"context"
-	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"math/rand"
 
 	"github.com/holiman/uint256"
@@ -12,6 +11,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"

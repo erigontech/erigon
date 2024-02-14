@@ -16,6 +16,7 @@ import (
 )
 
 func TestFiltersDeadlock_Test(t *testing.T) {
+	t.Parallel()
 	logger := log.New()
 	f := rpchelper.New(context.TODO(), nil, nil, nil, func() {}, logger)
 	crit := filters.FilterCriteria{

@@ -19,6 +19,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"path"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
@@ -29,11 +30,17 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
+type CaplinConfig struct {
+	Backfilling bool
+	Archive     bool
+}
+
 type NetworkType int
 
 const (
 	MainnetNetwork NetworkType = 1
 	GoerliNetwork  NetworkType = 5
+	HoleskyNetwork NetworkType = 17000
 	SepoliaNetwork NetworkType = 11155111
 	GnosisNetwork  NetworkType = 100
 	ChiadoNetwork  NetworkType = 10200
@@ -45,6 +52,11 @@ const (
 	MaxChunkSize   uint64        = 1 << 20 // 1 MiB
 	ReqTimeout     time.Duration = 10 * time.Second
 	RespTimeout    time.Duration = 15 * time.Second
+)
+
+const (
+	SubDivisionFolderSize = 10_000
+	SlotsPerDump          = 1024
 )
 
 var (
@@ -93,6 +105,14 @@ var (
 		"enr:-Ly4QCGeYvTCNOGKi0mKRUd45rLj96b4pH98qG7B9TCUGXGpHZALtaL2-XfjASQyhbCqENccI4PGXVqYTIehNT9KJMQgh2F0dG5ldHOI__________-EZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhIuQrVSJc2VjcDI1NmsxoQP9iDchx2PGl3JyJ29B9fhLCvVMN6n23pPAIIeFV-sHOIhzeW5jbmV0cw-DdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QAtr21x5Ps7HYhdZkIBRBgcBkvlIfEel1YNjtFWf4cV3au2LgBGICz9PtEs9-p2HUl_eME8m1WImxTxSB3AkCMwBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANHhOeJc2VjcDI1NmsxoQNLp1QPV8-pyMCohOtj6xGtSBM_GtVTqzlbvNsCF4ezkYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
 		"enr:-Ly4QLgn8Bx6faigkKUGZQvd1HDToV2FAxZIiENK-lczruzQb90qJK-4E65ADly0s4__dQOW7IkLMW7ZAyJy2vtiLy8Bh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAxNnBDAgAAb___________gmlkgnY0gmlwhANFIw2Jc2VjcDI1NmsxoQMa-fWEy9UJHfOl_lix3wdY5qust78sHAqZnWwEiyqKgYhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+	}...)
+	HoleskyBootstrapNodes = append(MainnetBootstrapNodes, []string{
+		"enr:-Ku4QFo-9q73SspYI8cac_4kTX7yF800VXqJW4Lj3HkIkb5CMqFLxciNHePmMt4XdJzHvhrCC5ADI4D_GkAsxGJRLnQBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQORcM6e19T1T9gi7jxEZjk_sjVLGFscUNqAY9obgZaxbIN1ZHCCIyk",
+		"enr:-Ku4QPG7F72mbKx3gEQEx07wpYYusGDh-ni6SNkLvOS-hhN-BxIggN7tKlmalb0L5JPoAfqD-akTZ-gX06hFeBEz4WoBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpAhnTT-AQFwAP__________gmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQKLVXFOhp2uX6jeT0DvvDpPcU8FWMjQdR4wMuORMhpX24N1ZHCCIyk",
+		"enr:-LK4QPxe-mDiSOtEB_Y82ozvxn9aQM07Ui8A-vQHNgYGMMthfsfOabaaTHhhJHFCBQQVRjBww_A5bM1rf8MlkJU_l68Eh2F0dG5ldHOIAADAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhLKAiOmJc2VjcDI1NmsxoQJu6T9pclPObAzEVQ53DpVQqjadmVxdTLL-J3h9NFoCeIN0Y3CCIyiDdWRwgiMo",
+		"enr:-Ly4QGbOw4xNel5EhmDsJJ-QhC9XycWtsetnWoZ0uRy381GHdHsNHJiCwDTOkb3S1Ade0SFQkWJX_pgb3g8Jfh93rvMBh2F0dG5ldHOIAAAAAAAAAACEZXRoMpBpt9l0BAFwAAABAAAAAAAAgmlkgnY0gmlwhJK-DYCJc2VjcDI1NmsxoQOxKv9sv3zKF8GDewgFGGHKP5HCZZpPpTrwl9eXKAWGxIhzeW5jbmV0cwCDdGNwgiMog3VkcIIjKA",
+		"enr:-LS4QG0uV4qvcpJ-HFDJRGBmnlD3TJo7yc4jwK8iP7iKaTlfQ5kZvIDspLMJhk7j9KapuL9yyHaZmwTEZqr10k9XumyCEcmHYXR0bmV0c4gAAAAABgAAAIRldGgykGm32XQEAXAAAAEAAAAAAACCaWSCdjSCaXCErK4j-YlzZWNwMjU2azGhAgfWRBEJlb7gAhXIB5ePmjj2b8io0UpEenq1Kl9cxStJg3RjcIIjKIN1ZHCCIyg",
+		"enr:-Le4QLoE1wFHSlGcm48a9ZESb_MRLqPPu6G0vHqu4MaUcQNDHS69tsy-zkN0K6pglyzX8m24mkb-LtBcbjAYdP1uxm4BhGV0aDKQabfZdAQBcAAAAQAAAAAAAIJpZIJ2NIJpcIQ5gR6Wg2lwNpAgAUHQBwEQAAAAAAAAADR-iXNlY3AyNTZrMaEDPMSNdcL92uNIyCsS177Z6KTXlbZakQqxv3aQcWawNXeDdWRwgiMohHVkcDaCI4I",
 	}...)
 )
 
@@ -225,6 +245,26 @@ var NetworkConfigs map[NetworkType]NetworkConfig = map[NetworkType]NetworkConfig
 		ContractDeploymentBlock:         155530,
 		BootNodes:                       ChiadoBootstrapNodes,
 	},
+
+	HoleskyNetwork: {
+		GossipMaxSize:                   1 << 20, // 1 MiB
+		GossipMaxSizeBellatrix:          10485760,
+		MaxChunkSize:                    1 << 20, // 1 MiB
+		AttestationSubnetCount:          64,
+		AttestationPropagationSlotRange: 32,
+		MaxRequestBlocks:                1 << 10, // 1024
+		TtfbTimeout:                     ReqTimeout,
+		RespTimeout:                     RespTimeout,
+		MaximumGossipClockDisparity:     500 * time.Millisecond,
+		MessageDomainInvalidSnappy:      [4]byte{00, 00, 00, 00},
+		MessageDomainValidSnappy:        [4]byte{01, 00, 00, 00},
+		Eth2key:                         "eth2",
+		AttSubnetKey:                    "attnets",
+		SyncCommsSubnetKey:              "syncnets",
+		MinimumPeersInSubnetSearch:      20,
+		ContractDeploymentBlock:         155530,
+		BootNodes:                       HoleskyBootstrapNodes,
+	},
 }
 
 var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig{
@@ -248,6 +288,10 @@ var GenesisConfigs map[NetworkType]GenesisConfig = map[NetworkType]GenesisConfig
 		GenesisValidatorRoot: libcommon.HexToHash("9d642dac73058fbf39c0ae41ab1e34e4d889043cb199851ded7095bc99eb4c1e"),
 		GenesisTime:          1665396300,
 	},
+	HoleskyNetwork: {
+		GenesisValidatorRoot: libcommon.HexToHash("9143aa7c615a7f7115e2b6aac319c03529df8242ae705fba9df39b79c59fa8b1"),
+		GenesisTime:          1695902400,
+	},
 }
 
 // Trusted checkpoint sync endpoints: https://eth-clients.github.io/checkpoint-sync-endpoints/
@@ -266,9 +310,9 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://prater-checkpoint-sync.stakely.io/eth/v2/debug/beacon/states/finalized",
 	},
 	SepoliaNetwork: {
-		"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
-		// "https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
-		// "https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
+		//"https://beaconstate-sepolia.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		"https://sepolia.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
 		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
@@ -276,6 +320,12 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 	},
 	ChiadoNetwork: {
 		"https://checkpoint.chiadochain.net/eth/v2/debug/beacon/states/finalized",
+	},
+	HoleskyNetwork: {
+		"https://holesky.beaconstate.ethstaker.cc/eth/v2/debug/beacon/states/finalized",
+		"https://beaconstate-holesky.chainsafe.io/eth/v2/debug/beacon/states/finalized",
+		"https://holesky.beaconstate.info/eth/v2/debug/beacon/states/finalized",
+		"https://checkpoint-sync.holesky.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 }
 
@@ -297,20 +347,21 @@ type BeaconChainConfig struct {
 	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH"`   // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
 
 	// Misc constants.
-	PresetBase                     string `yaml:"PRESET_BASE" spec:"true"`                        // PresetBase represents the underlying spec preset this config is based on.
-	ConfigName                     string `yaml:"CONFIG_NAME" spec:"true"`                        // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
-	TargetCommitteeSize            uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true"`              // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
-	MaxValidatorsPerCommittee      uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true"`       // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
-	MaxCommitteesPerSlot           uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true"`            // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
-	MinPerEpochChurnLimit          uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true"`          // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
-	ChurnLimitQuotient             uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true"`               // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
-	ShuffleRoundCount              uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true"`                // ShuffleRoundCount is used for retrieving the permuted index.
-	MinGenesisActiveValidatorCount uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true"` // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
-	MinGenesisTime                 uint64 `yaml:"MIN_GENESIS_TIME" spec:"true"`                   // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
-	TargetAggregatorsPerCommittee  uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true"`   // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
-	HysteresisQuotient             uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true"`                // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
-	HysteresisDownwardMultiplier   uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true"`     // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
-	HysteresisUpwardMultiplier     uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true"`       // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
+	PresetBase                      string `yaml:"PRESET_BASE" spec:"true"`                          // PresetBase represents the underlying spec preset this config is based on.
+	ConfigName                      string `yaml:"CONFIG_NAME" spec:"true"`                          // ConfigName for allowing an easy human-readable way of knowing what chain is being used.
+	TargetCommitteeSize             uint64 `yaml:"TARGET_COMMITTEE_SIZE" spec:"true"`                // TargetCommitteeSize is the number of validators in a committee when the chain is healthy.
+	MaxValidatorsPerCommittee       uint64 `yaml:"MAX_VALIDATORS_PER_COMMITTEE" spec:"true"`         // MaxValidatorsPerCommittee defines the upper bound of the size of a committee.
+	MaxCommitteesPerSlot            uint64 `yaml:"MAX_COMMITTEES_PER_SLOT" spec:"true"`              // MaxCommitteesPerSlot defines the max amount of committee in a single slot.
+	MinPerEpochChurnLimit           uint64 `yaml:"MIN_PER_EPOCH_CHURN_LIMIT" spec:"true"`            // MinPerEpochChurnLimit is the minimum amount of churn allotted for validator rotations.
+	ChurnLimitQuotient              uint64 `yaml:"CHURN_LIMIT_QUOTIENT" spec:"true"`                 // ChurnLimitQuotient is used to determine the limit of how many validators can rotate per epoch.
+	MaxPerEpochActivationChurnLimit uint64 `yaml:"MAX_PER_EPOCH_ACTIVATION_CHURN_LIMIT" spec:"true"` // MaxPerEpochActivationChurnLimit defines the maximum amount of churn allowed in one epoch from deneb.
+	ShuffleRoundCount               uint64 `yaml:"SHUFFLE_ROUND_COUNT" spec:"true"`                  // ShuffleRoundCount is used for retrieving the permuted index.
+	MinGenesisActiveValidatorCount  uint64 `yaml:"MIN_GENESIS_ACTIVE_VALIDATOR_COUNT" spec:"true"`   // MinGenesisActiveValidatorCount defines how many validator deposits needed to kick off beacon chain.
+	MinGenesisTime                  uint64 `yaml:"MIN_GENESIS_TIME" spec:"true"`                     // MinGenesisTime is the time that needed to pass before kicking off beacon chain.
+	TargetAggregatorsPerCommittee   uint64 `yaml:"TARGET_AGGREGATORS_PER_COMMITTEE" spec:"true"`     // TargetAggregatorsPerCommittee defines the number of aggregators inside one committee.
+	HysteresisQuotient              uint64 `yaml:"HYSTERESIS_QUOTIENT" spec:"true"`                  // HysteresisQuotient defines the hysteresis quotient for effective balance calculations.
+	HysteresisDownwardMultiplier    uint64 `yaml:"HYSTERESIS_DOWNWARD_MULTIPLIER" spec:"true"`       // HysteresisDownwardMultiplier defines the hysteresis downward multiplier for effective balance calculations.
+	HysteresisUpwardMultiplier      uint64 `yaml:"HYSTERESIS_UPWARD_MULTIPLIER" spec:"true"`         // HysteresisUpwardMultiplier defines the hysteresis upward multiplier for effective balance calculations.
 
 	// Gwei value constants.
 	MinDepositAmount          uint64 `yaml:"MIN_DEPOSIT_AMOUNT" spec:"true"`          // MinDepositAmount is the minimum amount of Gwei a validator can send to the deposit contract at once (lower amounts will be reverted).
@@ -482,6 +533,28 @@ type BeaconChainConfig struct {
 	// Mev-boost circuit breaker
 	MaxBuilderConsecutiveMissedSlots uint64 // MaxBuilderConsecutiveMissedSlots defines the number of consecutive skip slot to fallback from using relay/builder to local execution engine for block construction.
 	MaxBuilderEpochMissedSlots       uint64 // MaxBuilderEpochMissedSlots is defines the number of total skip slot (per epoch rolling windows) to fallback from using relay/builder to local execution engine for block construction.
+
+	MaxBlobGasPerBlock           uint64 // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
+	MaxBlobsPerBlock             uint64 // MaxBlobsPerBlock defines the maximum number of blobs per block.
+	MaxRequestLightClientUpdates uint64 // MaxRequestLightClientUpdates defines the maximum number of light client updates per request.
+}
+
+func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
+	return slot - (slot % b.SlotsPerEpoch)
+}
+
+func (b *BeaconChainConfig) RoundSlotToSyncCommitteePeriod(slot uint64) uint64 {
+	slotsPerSyncCommitteePeriod := b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod
+	return slot - (slot % slotsPerSyncCommitteePeriod)
+}
+
+func (b *BeaconChainConfig) SyncCommitteePeriod(slot uint64) uint64 {
+	return slot / (b.SlotsPerEpoch * b.EpochsPerSyncCommitteePeriod)
+}
+
+func (b *BeaconChainConfig) RoundSlotToVotePeriod(slot uint64) uint64 {
+	p := b.SlotsPerEpoch * b.EpochsPerEth1VotingPeriod
+	return slot - (slot % p)
 }
 
 func (b *BeaconChainConfig) GetCurrentStateVersion(epoch uint64) StateVersion {
@@ -544,18 +617,19 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	GenesisDelay:             604800, // 1 week.
 
 	// Misc constant.
-	TargetCommitteeSize:            128,
-	MaxValidatorsPerCommittee:      2048,
-	MaxCommitteesPerSlot:           64,
-	MinPerEpochChurnLimit:          4,
-	ChurnLimitQuotient:             1 << 16,
-	ShuffleRoundCount:              90,
-	MinGenesisActiveValidatorCount: 16384,
-	MinGenesisTime:                 1606824000, // Dec 1, 2020, 12pm UTC.
-	TargetAggregatorsPerCommittee:  16,
-	HysteresisQuotient:             4,
-	HysteresisDownwardMultiplier:   1,
-	HysteresisUpwardMultiplier:     5,
+	TargetCommitteeSize:             128,
+	MaxValidatorsPerCommittee:       2048,
+	MaxCommitteesPerSlot:            64,
+	MinPerEpochChurnLimit:           4,
+	ChurnLimitQuotient:              1 << 16,
+	MaxPerEpochActivationChurnLimit: 8,
+	ShuffleRoundCount:               90,
+	MinGenesisActiveValidatorCount:  16384,
+	MinGenesisTime:                  1606824000, // Dec 1, 2020, 12pm UTC.
+	TargetAggregatorsPerCommittee:   16,
+	HysteresisQuotient:              4,
+	HysteresisDownwardMultiplier:    1,
+	HysteresisUpwardMultiplier:      5,
 
 	// Gwei value constants.
 	MinDepositAmount:          1 * 1e9,
@@ -679,7 +753,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	CapellaForkVersion:   0x03000000,
 	CapellaForkEpoch:     194048,
 	DenebForkVersion:     0x04000000,
-	DenebForkEpoch:       math.MaxUint64,
+	DenebForkEpoch:       269568,
 
 	// New values introduced in Altair hard fork 1.
 	// Participation flag indices.
@@ -726,6 +800,10 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	// Mevboost circuit breaker
 	MaxBuilderConsecutiveMissedSlots: 3,
 	MaxBuilderEpochMissedSlots:       8,
+
+	MaxBlobGasPerBlock:           786432,
+	MaxBlobsPerBlock:             6,
+	MaxRequestLightClientUpdates: 128,
 }
 
 func mainnetConfig() BeaconChainConfig {
@@ -774,6 +852,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x90000071
 	cfg.CapellaForkEpoch = 56832
 	cfg.CapellaForkVersion = 0x90000072
+	cfg.DenebForkEpoch = 132608
+	cfg.DenebForkVersion = 0x90000073
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 	cfg.InitializeForkSchedule()
@@ -795,11 +875,51 @@ func goerliConfig() BeaconChainConfig {
 	cfg.BellatrixForkVersion = 0x02001020
 	cfg.CapellaForkEpoch = 162304
 	cfg.CapellaForkVersion = 0x03001020
-	cfg.DenebForkVersion = 0x40001020
+	cfg.DenebForkEpoch = 231680
+	cfg.DenebForkVersion = 0x04001020
 	cfg.TerminalTotalDifficulty = "10790000"
 	cfg.DepositContractAddress = "0xff50ed3d0ec03aC01D4C79aAd74928BFF48a7b2b"
 	cfg.InitializeForkSchedule()
 	return cfg
+}
+
+func holeskyConfig() BeaconChainConfig {
+	cfg := MainnetBeaconConfig
+	cfg.ConfigName = "holesky"
+	cfg.MinGenesisActiveValidatorCount = 16384
+	cfg.MinGenesisTime = 1695902100
+	cfg.GenesisForkVersion = 0x01017000
+	cfg.GenesisDelay = 300
+	cfg.SecondsPerSlot = 12
+	cfg.Eth1FollowDistance = 2048
+	cfg.DepositChainID = uint64(HoleskyNetwork)
+	cfg.DepositNetworkID = uint64(HoleskyNetwork)
+
+	cfg.AltairForkEpoch = 0
+	cfg.AltairForkVersion = 0x02017000
+	cfg.BellatrixForkEpoch = 0
+	cfg.BellatrixForkVersion = 0x03017000
+	cfg.CapellaForkEpoch = 256
+	cfg.CapellaForkVersion = 0x04017000
+	cfg.DenebForkEpoch = 29696
+	cfg.DenebForkVersion = 0x05017000
+	cfg.TerminalTotalDifficulty = "0"
+	cfg.TerminalBlockHash = [32]byte{}
+	cfg.TerminalBlockHashActivationEpoch = math.MaxUint64
+	cfg.DepositContractAddress = "0x4242424242424242424242424242424242424242"
+	cfg.BaseRewardFactor = 64
+	cfg.SlotsPerEpoch = 32
+	cfg.EpochsPerSyncCommitteePeriod = 256
+	cfg.InactivityScoreBias = 4
+	cfg.InactivityScoreRecoveryRate = 16
+	cfg.EjectionBalance = 28000000000
+	cfg.MinPerEpochChurnLimit = 4
+	cfg.ChurnLimitQuotient = 1 << 16
+	cfg.ProposerScoreBoost = 40
+
+	cfg.InitializeForkSchedule()
+	return cfg
+
 }
 
 func gnosisConfig() BeaconChainConfig {
@@ -851,13 +971,15 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.AltairForkVersion = 0x0100006f
 	cfg.BellatrixForkEpoch = 180
 	cfg.BellatrixForkVersion = 0x0200006f
+	cfg.CapellaForkEpoch = 244224
+	cfg.CapellaForkVersion = 0x0300006f
+	cfg.DenebForkEpoch = 516608
+	cfg.DenebForkVersion = 0x0400006f
 	cfg.TerminalTotalDifficulty = "231707791542740786049188744689299064356246512"
 	cfg.DepositContractAddress = "0xb97036A26259B7147018913bD58a774cf91acf25"
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.CapellaForkEpoch = math.MaxUint64
-	cfg.DenebForkEpoch = math.MaxUint64
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -901,6 +1023,7 @@ var BeaconConfigs map[NetworkType]BeaconChainConfig = map[NetworkType]BeaconChai
 	MainnetNetwork: mainnetConfig(),
 	SepoliaNetwork: sepoliaConfig(),
 	GoerliNetwork:  goerliConfig(),
+	HoleskyNetwork: holeskyConfig(),
 	GnosisNetwork:  gnosisConfig(),
 	ChiadoNetwork:  chiadoConfig(),
 }
@@ -941,6 +1064,22 @@ func (b *BeaconChainConfig) GetForkVersionByVersion(v StateVersion) uint32 {
 	panic("invalid version")
 }
 
+func (b *BeaconChainConfig) GetForkEpochByVersion(v StateVersion) uint64 {
+	switch v {
+	case Phase0Version:
+		return 0
+	case AltairVersion:
+		return b.AltairForkEpoch
+	case BellatrixVersion:
+		return b.BellatrixForkEpoch
+	case CapellaVersion:
+		return b.CapellaForkEpoch
+	case DenebVersion:
+		return b.DenebForkEpoch
+	}
+	panic("invalid version")
+}
+
 func GetConfigsByNetwork(net NetworkType) (*GenesisConfig, *NetworkConfig, *BeaconChainConfig) {
 	networkConfig := NetworkConfigs[net]
 	genesisConfig := GenesisConfigs[net]
@@ -965,6 +1104,9 @@ func GetConfigsByNetworkName(net string) (*GenesisConfig, *NetworkConfig, *Beaco
 	case networkname.ChiadoChainName:
 		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(ChiadoNetwork)
 		return genesisCfg, networkCfg, beaconCfg, ChiadoNetwork, nil
+	case networkname.HoleskyChainName:
+		genesisCfg, networkCfg, beaconCfg := GetConfigsByNetwork(HoleskyNetwork)
+		return genesisCfg, networkCfg, beaconCfg, HoleskyNetwork, nil
 	default:
 		return nil, nil, nil, MainnetNetwork, fmt.Errorf("chain not found")
 	}
@@ -994,6 +1136,7 @@ func GetCheckpointSyncEndpoint(net NetworkType) string {
 func EmbeddedSupported(id uint64) bool {
 	return id == 1 ||
 		id == 5 ||
+		id == 17000 ||
 		id == 11155111 ||
 		id == 100 // ||
 	//id == 10200
@@ -1003,4 +1146,13 @@ func EmbeddedSupported(id uint64) bool {
 // (sufficient number of light-client peers) as to be enabled by default
 func EmbeddedEnabledByDefault(id uint64) bool {
 	return id == 1 || id == 5 || id == 11155111
+}
+
+func SupportBackfilling(networkId uint64) bool {
+	return networkId == uint64(MainnetNetwork) || networkId == uint64(SepoliaNetwork)
+}
+
+func EpochToPaths(slot uint64, config *BeaconChainConfig, suffix string) (string, string) {
+	folderPath := path.Clean(fmt.Sprintf("%d", slot/SubDivisionFolderSize))
+	return folderPath, path.Clean(fmt.Sprintf("%s/%d.%s.sz", folderPath, slot, suffix))
 }

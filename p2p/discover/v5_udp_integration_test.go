@@ -15,7 +15,7 @@ import (
 
 // This test checks that pending calls are re-sent when a handshake happens.
 func TestUDPv5_callResend(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
@@ -56,7 +56,7 @@ func TestUDPv5_callResend(t *testing.T) {
 
 // This test checks that calls with n replies may take up to n * respTimeout.
 func TestUDPv5_callTimeoutReset(t *testing.T) {
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS != "linux" {
 		t.Skip("fix me on win please")
 	}
 	t.Parallel()
