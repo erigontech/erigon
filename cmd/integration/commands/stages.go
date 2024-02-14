@@ -210,7 +210,7 @@ var cmdStageTrie = &cobra.Command{
 }
 
 var cmdStagePatriciaTrie = &cobra.Command{
-	Use:   "stage_trie3",
+	Use:   "rebuild_trie3_files",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")

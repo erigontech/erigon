@@ -781,29 +781,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("Compute commitment")
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if casted, ok := tx.(kv.CanWarmupDB); ok {
-			if err := casted.WarmupDB(false); err != nil {
-				return err
-			}
-		}
-		ac := agg.MakeContext()
-		defer ac.Close()
-		sd := libstate.NewSharedDomains(tx, logger)
-		defer sd.Close()
-		rootHash, err := sd.ComputeCommitment(ctx, true, sd.BlockNum(), "")
-		if err != nil {
-			return err
-		}
-		logger.Info("Commitment done", "tx", sd.TxNum(), "block", sd.BlockNum(), "root", fmt.Sprintf("%x", rootHash))
-		if err := sd.Flush(ctx, tx); err != nil {
-			return err
-		}
-		return err
-	}); err != nil {
-		return err
-	}
 
 	logger.Info("Prune state history")
 	for i := 0; i < 1; i++ {
