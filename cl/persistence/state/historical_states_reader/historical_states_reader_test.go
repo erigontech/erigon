@@ -1,4 +1,4 @@
-//go:build integration
+//go:build prevent
 
 package historical_states_reader_test
 

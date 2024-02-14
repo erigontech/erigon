@@ -99,7 +99,7 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 					slot = s.currentState.Slot()
 				}
 				s.logger.Error("Failed to increment beacon state", "err", err, "slot", slot)
-				return
+				time.Sleep(5 * time.Second)
 			}
 
 		case <-ctx.Done():
@@ -148,7 +148,6 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 	defer tx.Rollback()
-	time.Sleep(10 * time.Second)
 
 	// maps which validators changes
 	changedValidators := make(map[uint64]struct{})
