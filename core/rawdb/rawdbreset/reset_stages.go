@@ -167,16 +167,7 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 				return err
 			}
 
-			// TODO questionable, no writes done, what we are flushing?
-			blockNum := doms.BlockNum()
-			//if blockNum > 0 {
-			//	if err := doms.Flush(ctx, tx); err != nil {
-			//		return err
-			//	}
-			//}
-			// <--- todo
-
-			_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
+			_ = stages.SaveStageProgress(tx, stages.Execution, doms.BlockNum())
 			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum(), "filesMinimax", agg.EndTxNumMinimax())
 		}
 
