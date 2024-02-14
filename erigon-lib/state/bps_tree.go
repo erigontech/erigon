@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
@@ -40,7 +41,7 @@ type BpsTree struct {
 	mx      [][]Node
 	M       uint64
 	trace   bool
-	naccess uint64
+	naccess atomic.Uint64
 
 	dataLookupFunc dataLookupFunc
 	keyCmpFunc     keyCmpFunc
@@ -167,7 +168,7 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 		for l < r {
 			m = (l + r) >> 1
 			n = row[m]
-			b.naccess++
+			b.naccess.Add(1)
 
 			if b.trace {
 				fmt.Printf("bs[%d][%d] i=%d %x\n", d, m, n.di, n.prefix)
@@ -210,9 +211,9 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 	}
 	defer func() {
 		if b.trace {
-			fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess)
+			fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess.Load())
 		}
-		b.naccess = 0
+		b.naccess.Store(0)
 	}()
 
 	n, dl, dr := b.bs(key)
@@ -229,7 +230,7 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 		if err != nil {
 			return nil, 0, false, err
 		}
-		b.naccess++
+		b.naccess.Add(1)
 		if b.trace {
 			fmt.Printf("lr %x [%d %d]\n", skey, l, r)
 		}
@@ -274,9 +275,9 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 	}
 	defer func() {
 		if b.trace {
-			fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess)
+			fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess.Load())
 		}
-		b.naccess = 0
+		b.naccess.Store(0)
 	}()
 
 	n, dl, dr := b.bs(key)
@@ -291,7 +292,7 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		if err != nil {
 			return nil, false, 0, err
 		}
-		b.naccess++
+		b.naccess.Add(1)
 		if b.trace {
 			fmt.Printf("lr [%d %d]\n", l, r)
 		}
