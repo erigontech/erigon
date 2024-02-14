@@ -881,11 +881,6 @@ Loop:
 					t4 = time.Since(tt)
 				}
 
-				//prune before flush (maybe during batch exec was created new files)
-				if err := applyTx.(state2.HasAggCtx).AggCtx().(*state2.AggregatorV3Context).Prune(ctx, applyTx); err != nil {
-					return err
-				}
-
 				tt = time.Now()
 				if ok, err := flushAndCheckCommitmentV3(ctx, b.HeaderNoCopy(), applyTx, doms, cfg, execStage, stageProgress, parallel, logger, u, inMemExec); err != nil {
 					return err
