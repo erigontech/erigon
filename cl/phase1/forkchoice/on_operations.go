@@ -8,7 +8,6 @@ import (
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/pool"
@@ -227,127 +226,9 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 		f.emitters.Publish("contribution_and_proof", signedChange)
 		return nil
 	}
-	// https://github.com/ethereum/consensus-specs/blob/dev/specs/altair/p2p-interface.md#sync_committee_contribution_and_proof
-	contribution_and_proof := signedChange.Message
-	contribution := contribution_and_proof.Contribution
+	// TODO: implement the validation logic for the handler
 
-	if contribution.SubcommitteeIndex() < f.beaconCfg.SyncCommitteeSubnetCount {
-		return fmt.Errorf("subcommitte index not in allowed range")
-	}
-	found := false
-	for _, v := range contribution.AggregationBits() {
-		if v != 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("contribution has no participants")
-	}
-
-	next_slot_epoch := f.computeEpochAtSlot(f.Slot() + 1)
-	headHash, _, err := f.GetHead()
-	if err != nil {
-		return err
-	}
-
-	// Take lock as we interact with state.
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-
-	s, err := f.forkGraph.GetState(headHash, false)
-	if err != nil {
-		return err
-	}
-
-	var sync_committee *solid.SyncCommittee
-	if f.computeSyncPeriod(f.computeEpochAtSlot(f.Slot())) == f.computeSyncPeriod(next_slot_epoch) {
-		sync_committee = s.CurrentSyncCommittee()
-	} else {
-		sync_committee = s.NextSyncCommittee()
-	}
-	sync_subcommitte_size := f.beaconCfg.SyncCommitteeSize / f.beaconCfg.SyncCommitteeSubnetCount
-	idx := contribution.SubcommitteeIndex() * sync_subcommitte_size
-	syncSubcommitteePubkeys := sync_committee.GetCommittee()[idx : idx+sync_subcommitte_size]
-	genesisValidatorRoot := s.GenesisValidatorsRoot()
-	declaredValidator := s.Validators().Get(int(contribution_and_proof.AggregatorIndex))
-	if contribution.Slot() == f.Slot() {
-		return nil
-	}
-
-	if !test {
-		found := false
-		for _, v := range syncSubcommitteePubkeys {
-			if v == declaredValidator.PublicKey() {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("aggregator validator index not in subcommittee")
-		}
-		// validate the contributionAndProof
-		committeeSignatureDomain, err := fork.ComputeDomain(f.beaconCfg.DomainContributionAndProof[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
-		if err != nil {
-			return err
-		}
-		// signing root
-		signedRootContributionAndProof, err := fork.ComputeSigningRoot(signedChange.Message, committeeSignatureDomain)
-		if err != nil {
-			return err
-		}
-		validContributionAndProof, err := bls.Verify(signedChange.Signature[:], signedRootContributionAndProof[:], declaredValidator.PublicKeyBytes())
-		if err != nil {
-			return err
-		}
-		if !validContributionAndProof {
-			return fmt.Errorf("invalid contribution signature signature")
-		}
-		// done validation contributionAndProof
-
-		// validate the contribution
-		contributionSignatureDomain, err := fork.ComputeDomain(f.beaconCfg.DomainSyncCommittee[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
-		if err != nil {
-			return err
-		}
-		// signing root
-		signedRootContribution, err := fork.ComputeSigningRoot(signedChange.Message, contributionSignatureDomain)
-		if err != nil {
-			return err
-		}
-		contibutionSig := contribution.Signature()
-		validContribution, err := bls.Verify(contibutionSig[:], signedRootContribution[:], declaredValidator.PublicKeyBytes())
-		if err != nil {
-			return err
-		}
-		if !validContribution {
-			return fmt.Errorf("invalid contribution signature signature")
-		}
-		// done validate the contribution
-
-		// validate the selection proof
-		selectionProofDomain, err := fork.ComputeDomain(f.beaconCfg.DomainSyncCommitteeSelectionProof[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
-		if err != nil {
-			return err
-		}
-		signedRootSelectionProof, err := fork.ComputeSigningRoot(&cltypes.SyncAggregatorSelectionData{
-			Slot:              contribution.Slot(),
-			SubcommitteeIndex: contribution.SubcommitteeIndex(),
-		}, selectionProofDomain)
-		if err != nil {
-			return err
-		}
-		validSelectionProof, err := bls.Verify(contribution_and_proof.SelectionProof[:], signedRootSelectionProof[:], declaredValidator.PublicKeyBytes())
-		if err != nil {
-			return err
-		}
-		if !validSelectionProof {
-			return fmt.Errorf("invalid contribution signature signature")
-		}
-		// done validation selection proof
-
-	}
-
+	// Insert in the pool
 	f.operationsPool.SignedContributionAndProofPool.Insert(signedChange.Signature, signedChange)
 
 	// emit contribution_and_proof
