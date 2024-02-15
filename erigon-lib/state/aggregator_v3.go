@@ -1204,7 +1204,9 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.logAddrs {
 		g.Go(func() error {
 			var err error
-			fmt.Printf("[dbg] logAddrs: %t, %t\n", files.logAddrs == nil, r.logAddrs)
+			for i, j := range files.logAddrs {
+				fmt.Printf("[dbg] logAddrs: %d, %+v, %t\n", i, j, r.logAddrs)
+			}
 			mf.logAddrs, err = ac.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
 			if err != nil {
 				return err
