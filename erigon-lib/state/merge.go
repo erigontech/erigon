@@ -1187,7 +1187,9 @@ func (dc *DomainContext) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *f
 			if item.isSubsetOf(mergedDomain) {
 				outs = append(outs, item)
 			}
-			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
+			// File is Garbage means:
+			//   - it is old (before current merge range)
+			//   - it has cover file (bigger one) and bigger file is indexed/visible now - using `DomainContext` here
 			if item.isBefore(mergedDomain) && dc.hasCoverFile(item) {
 				outs = append(outs, item)
 			}
