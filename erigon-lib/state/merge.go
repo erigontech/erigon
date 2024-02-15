@@ -1233,7 +1233,6 @@ func (dc *DomainContext) garbage(merged *filesItem) (outs []*filesItem) {
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
 			if item.isBefore(merged) && dc.hasCoverFile(item) {
-				fmt.Printf("[dbg] gc dom: %s\n", item.decompressor.FileName1)
 				outs = append(outs, item)
 			}
 		}
@@ -1259,7 +1258,6 @@ func (hc *HistoryContext) garbage(merged *filesItem) (outs []*filesItem) {
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
 			if item.isBefore(merged) && hc.hasCoverFile(item) {
-				fmt.Printf("[dbg] gc hist: %s\n", item.decompressor.FileName1)
 				outs = append(outs, item)
 			}
 		}
