@@ -1262,7 +1262,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if err == nil {
 		closeFiles = false
 	}
-	//fmt.Printf("[snapshots] merge done %s\n", r.String())
+	fmt.Printf("[dbg] merge done %s\n", r.String())
 	return mf, err
 }
 
@@ -1279,24 +1279,24 @@ func (ac *AggregatorV3Context) integrateMergedFiles(outs SelectedStaticFilesV3, 
 	ac.a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
 	ac.a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
 	ac.a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
-	ac.cleanAfterNewFreeze(in)
+	ac.cleanAfterMerge(in)
 	return frozen
 }
-func (ac *AggregatorV3Context) cleanAfterNewFreeze(in MergedFilesV3) {
+func (ac *AggregatorV3Context) cleanAfterMerge(in MergedFilesV3) {
 	for id, d := range ac.d {
-		d.cleanAfterFreeze(in.d[id], in.dHist[id], in.dIdx[id])
+		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 	}
 	if in.logAddrs != nil && in.logAddrs.frozen {
-		ac.logAddrs.cleanAfterFreeze(in.logAddrs)
+		ac.logAddrs.cleanAfterMerge(in.logAddrs)
 	}
 	if in.logTopics != nil && in.logTopics.frozen {
-		ac.logTopics.cleanAfterFreeze(in.logTopics)
+		ac.logTopics.cleanAfterMerge(in.logTopics)
 	}
 	if in.tracesFrom != nil && in.tracesFrom.frozen {
-		ac.tracesFrom.cleanAfterFreeze(in.tracesFrom)
+		ac.tracesFrom.cleanAfterMerge(in.tracesFrom)
 	}
 	if in.tracesTo != nil && in.tracesTo.frozen {
-		ac.tracesTo.cleanAfterFreeze(in.tracesTo)
+		ac.tracesTo.cleanAfterMerge(in.tracesTo)
 	}
 }
 

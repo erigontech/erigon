@@ -251,36 +251,7 @@ func (ii *InvertedIndex) scanStateFiles(fileNames []string) (garbageFiles []*fil
 			continue
 		}
 
-		addNewFile := true
-		/*
-			var subSets []*filesItem
-			ii.files.Walk(func(items []*filesItem) bool {
-				for _, item := range items {
-					if item.isSubsetOf(newFile) {
-						fmt.Printf("skip is subset %s.%d-%d.ef of %s.%d-%d.ef\n", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep, ii.filenameBase, newFile.startTxNum/ii.aggregationStep, newFile.endTxNum/ii.aggregationStep)
-						subSets = append(subSets, item)
-						continue
-					}
-
-					if newFile.isSubsetOf(item) {
-						//if item.frozen {
-						//fmt.Printf("skip2 is subperset %s.%d-%d.ef of %s.%d-%d.ef, %t, %t\n", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep, ii.filenameBase, newFile.startTxNum/ii.aggregationStep, newFile.endTxNum/ii.aggregationStep, item.frozen, newFile.frozen)
-						//addNewFile = false
-						//garbageFiles = append(garbageFiles, newFile)
-						//}
-						return false
-					}
-				}
-				return true
-			})
-		*/
-
-		//for _, subSet := range subSets {
-		//	ii.files.Delete(subSet)
-		//}
-		if addNewFile && newFile != nil {
-			ii.files.Set(newFile)
-		}
+		ii.files.Set(newFile)
 	}
 	return garbageFiles
 }

@@ -1128,10 +1128,8 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 	h.reCalcRoFiles()
 }
 
-func (dc *DomainContext) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem) {
-	if mergedHist != nil && mergedHist.frozen {
-		dc.hc.cleanAfterFreeze(mergedHist, mergedIdx)
-	}
+func (dc *DomainContext) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *filesItem) {
+	dc.hc.cleanAfterMerge(mergedHist, mergedIdx)
 	if mergedDomain == nil {
 		return
 	}
@@ -1144,22 +1142,22 @@ func (dc *DomainContext) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *f
 		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
 			if dc.d.filenameBase == traceFileLife && out.decompressor != nil {
-				dc.d.logger.Info(fmt.Sprintf("[agg] cleanAfterFreeze remove: %s\n", out.decompressor.FileName()))
+				dc.d.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s\n", out.decompressor.FileName()))
 			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
 		} else {
 			if dc.d.filenameBase == traceFileLife && out.decompressor != nil {
-				dc.d.logger.Warn(fmt.Sprintf("[agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
+				dc.d.logger.Warn(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
 			}
 		}
 	}
 }
 
-// cleanAfterFreeze - sometime inverted_index may be already merged, but history not yet. and power-off happening.
+// cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (hc *HistoryContext) cleanAfterFreeze(merged, mergedIdx *filesItem) {
+func (hc *HistoryContext) cleanAfterMerge(merged, mergedIdx *filesItem) {
 	if merged == nil {
 		return
 	}
@@ -1171,19 +1169,26 @@ func (hc *HistoryContext) cleanAfterFreeze(merged, mergedIdx *filesItem) {
 		if out == nil {
 			panic("must not happen: " + hc.h.filenameBase)
 		}
+		hc.h.files.Delete(out)
 		out.canDelete.Store(true)
 
 		// if it has no readers (invisible even for us) - it's safe to remove file right here
 		if out.refcount.Load() == 0 {
+			if hc.h.filenameBase == traceFileLife && out.decompressor != nil {
+				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s\n", out.decompressor.FileName()))
+			}
 			out.closeFilesAndRemove()
+		} else {
+			if hc.h.filenameBase == traceFileLife && out.decompressor != nil {
+				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s\n", out.decompressor.FileName()))
+			}
 		}
-		hc.h.files.Delete(out)
 	}
-	hc.ic.cleanAfterFreeze(mergedIdx)
+	hc.ic.cleanAfterMerge(mergedIdx)
 }
 
-// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (ic *InvertedIndexContext) cleanAfterFreeze(merged *filesItem) {
+// cleanAfterMerge - mark all small files before `f` as `canDelete=true`
+func (ic *InvertedIndexContext) cleanAfterMerge(merged *filesItem) {
 	if merged == nil {
 		return
 	}
@@ -1195,21 +1200,29 @@ func (ic *InvertedIndexContext) cleanAfterFreeze(merged *filesItem) {
 		if out == nil {
 			panic("must not happen: " + ic.ii.filenameBase)
 		}
+		ic.ii.files.Delete(out)
 		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
+			if ic.ii.filenameBase == traceFileLife && out.decompressor != nil {
+				ic.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s\n", out.decompressor.FileName()))
+			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
+		} else {
+			if ic.ii.filenameBase == traceFileLife && out.decompressor != nil {
+				ic.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s\n", out.decompressor.FileName()))
+			}
 		}
-		ic.ii.files.Delete(out)
 	}
 }
 
+// garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
 func (dc *DomainContext) garbage(merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}
 	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
+	// AggContext doesn't have such files, only Agg.files does
 	dc.d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
@@ -1220,6 +1233,7 @@ func (dc *DomainContext) garbage(merged *filesItem) (outs []*filesItem) {
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
 			if item.isBefore(merged) && dc.hasCoverFile(item) {
+				fmt.Printf("[dbg] gc dom: %s\n", item.decompressor.FileName1)
 				outs = append(outs, item)
 			}
 		}
@@ -1227,12 +1241,14 @@ func (dc *DomainContext) garbage(merged *filesItem) (outs []*filesItem) {
 	})
 	return outs
 }
+
+// garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
 func (hc *HistoryContext) garbage(merged *filesItem) (outs []*filesItem) {
 	if merged == nil {
 		return
 	}
 	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
+	// AggContext doesn't have such files, only Agg.files does
 	hc.h.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
@@ -1243,6 +1259,7 @@ func (hc *HistoryContext) garbage(merged *filesItem) (outs []*filesItem) {
 			}
 			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
 			if item.isBefore(merged) && hc.hasCoverFile(item) {
+				fmt.Printf("[dbg] gc hist: %s\n", item.decompressor.FileName1)
 				outs = append(outs, item)
 			}
 		}
@@ -1256,7 +1273,7 @@ func (ic *InvertedIndexContext) garbage(merged *filesItem) (outs []*filesItem) {
 		return
 	}
 	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
+	// AggContext doesn't have such files, only Agg.files does
 	ic.ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
 			if item.frozen {
