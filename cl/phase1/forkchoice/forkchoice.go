@@ -502,3 +502,7 @@ func (f *ForkChoiceStore) NewestLightClientUpdate() *cltypes.LightClientUpdate {
 func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
 	return f.forkGraph.GetLightClientUpdate(period)
 }
+
+func (f *ForkChoiceStore) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	return f.forkGraph.GetHeader(blockRoot)
+}

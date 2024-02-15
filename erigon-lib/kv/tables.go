@@ -442,6 +442,9 @@ const (
 	BeaconState = "BeaconState"
 	// [slot] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+
+	EffectiveBalancesDump = "EffectiveBalancesDump"
+	BalancesDump          = "BalancesDump"
 	// [slot] => [attestation list (custom encoding)]
 	Attestetations = "Attestetations"
 
@@ -495,8 +498,6 @@ const (
 	CurrentSyncCommittee       = "CurrentSyncCommittee"
 	HistoricalRoots            = "HistoricalRoots"
 	HistoricalSummaries        = "HistoricalSummaries"
-	CurrentEpochAttestations   = "EpochAttestations"
-	PreviousEpochAttestations  = "PreviousAttestations"
 	Eth1DataVotes              = "Eth1DataVotes"
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
@@ -697,11 +698,11 @@ var ChaindataTables = []string{
 	CurrentSyncCommittee,
 	HistoricalRoots,
 	HistoricalSummaries,
-	CurrentEpochAttestations,
-	PreviousEpochAttestations,
 	Eth1DataVotes,
 	IntraRandaoMixes,
 	ActiveValidatorIndicies,
+	EffectiveBalancesDump,
+	BalancesDump,
 }
 
 const (

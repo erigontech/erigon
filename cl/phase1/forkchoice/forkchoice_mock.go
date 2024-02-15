@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -249,4 +250,8 @@ func (f *ForkChoiceStorageMock) NewestLightClientUpdate() *cltypes.LightClientUp
 
 func (f *ForkChoiceStorageMock) GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool) {
 	return f.LCUpdates[period], f.LCUpdates[period] != nil
+}
+
+func (f *ForkChoiceStorageMock) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	panic("implement me")
 }
