@@ -1015,7 +1015,6 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 		min = txNum
 	}
 	if txNum := a.d[kv.CommitmentDomain].endTxNumMinimax(); txNum < min {
-		fmt.Printf("[dbg] commitment min: %d, %d\n", txNum/a.aggregationStep, min/a.aggregationStep)
 		min = txNum
 	}
 	if txNum := a.logAddrs.endTxNumMinimax(); txNum < min {
