@@ -36,10 +36,15 @@ func TestDiff64(t *testing.T) {
 	require.NoError(t, err)
 
 	out := b.Bytes()
-	new2, err := ApplyCompressedSerializedUint64ListDiff(old, nil, out)
+	new2, err := ApplyCompressedSerializedUint64ListDiff(old, nil, out, false)
 	require.NoError(t, err)
 
 	require.Equal(t, new, new2)
+
+	new3, err := ApplyCompressedSerializedUint64ListDiff(new2, nil, out, true)
+	require.NoError(t, err)
+
+	require.Equal(t, old, new3[:len(old)])
 }
 
 func TestDiff64Effective(t *testing.T) {
@@ -67,7 +72,7 @@ func TestDiff64Effective(t *testing.T) {
 	require.NoError(t, err)
 
 	out := b.Bytes()
-	new2, err := ApplyCompressedSerializedUint64ListDiff(previous, nil, out)
+	new2, err := ApplyCompressedSerializedUint64ListDiff(previous, nil, out, false)
 	require.NoError(t, err)
 
 	require.Equal(t, new2, expected)
