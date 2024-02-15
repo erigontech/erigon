@@ -142,7 +142,7 @@ func NewHeimdall(
 	return heimdall
 }
 
-func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
+func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 	h.Lock()
 	defer h.Unlock()
 
@@ -152,8 +152,9 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, err
 	}
 
 	var nextSpan = heimdall.Span{
-		Id:      heimdall.SpanId(spanID),
-		ChainID: h.chainConfig.ChainID.String(),
+		Id:           heimdall.SpanId(spanID),
+		ValidatorSet: *h.validatorSet,
+		ChainID:      h.chainConfig.ChainID.String(),
 	}
 
 	if h.currentSpan == nil || spanID == 0 {
@@ -170,20 +171,21 @@ func (h *Heimdall) Span(ctx context.Context, spanID uint64) (*heimdall.Span, err
 
 	// TODO we should use a subset here - see: https://wiki.polygon.technology/docs/pos/bor/
 
-	selectedProducers := make([]valset.Validator, len(h.validatorSet.Validators))
+	nextSpan.SelectedProducers = make([]valset.Validator, len(h.validatorSet.Validators))
 
 	for i, v := range h.validatorSet.Validators {
-		selectedProducers[i] = *v
+		nextSpan.SelectedProducers[i] = *v
 	}
-
-	nextSpan.ValidatorSet = *h.validatorSet
-	nextSpan.SelectedProducers = selectedProducers
 
 	h.currentSpan = &nextSpan
 
 	h.spans[h.currentSpan.Id] = h.currentSpan
 
 	return h.currentSpan, nil
+}
+
+func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
+	return nil, fmt.Errorf("TODO")
 }
 
 func (h *Heimdall) currentSprintLength() int {
@@ -226,14 +228,6 @@ func (h *Heimdall) FetchLastNoAckMilestone(ctx context.Context) (string, error) 
 
 func (h *Heimdall) FetchMilestoneID(ctx context.Context, milestoneID string) error {
 	return fmt.Errorf("TODO")
-}
-
-func (h *Heimdall) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
-}
-
-func (h *Heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
-	return nil, fmt.Errorf("TODO")
 }
 
 func (h *Heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {

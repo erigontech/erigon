@@ -14,7 +14,6 @@ import (
 type EpochData struct {
 	TotalActiveBalance          uint64
 	JustificationBits           *cltypes.JustificationBits
-	Fork                        *cltypes.Fork
 	CurrentJustifiedCheckpoint  solid.Checkpoint
 	PreviousJustifiedCheckpoint solid.Checkpoint
 	FinalizedCheckpoint         solid.Checkpoint
@@ -27,7 +26,6 @@ func EpochDataFromBeaconState(s *state.CachingBeaconState) *EpochData {
 	jj := s.JustificationBits()
 	copy(justificationCopy[:], jj[:])
 	return &EpochData{
-		Fork:                        s.Fork(),
 		JustificationBits:           justificationCopy,
 		TotalActiveBalance:          s.GetTotalActiveBalance(),
 		CurrentJustifiedCheckpoint:  s.CurrentJustifiedCheckpoint(),
@@ -56,7 +54,6 @@ func (m *EpochData) WriteTo(w io.Writer) error {
 // Deserialize deserializes the state from a byte slice with zstd compression.
 func (m *EpochData) ReadFrom(r io.Reader) error {
 	m.JustificationBits = &cltypes.JustificationBits{}
-	m.Fork = &cltypes.Fork{}
 	m.FinalizedCheckpoint = solid.NewCheckpoint()
 	m.CurrentJustifiedCheckpoint = solid.NewCheckpoint()
 	m.PreviousJustifiedCheckpoint = solid.NewCheckpoint()
@@ -73,5 +70,5 @@ func (m *EpochData) ReadFrom(r io.Reader) error {
 }
 
 func (m *EpochData) getSchema() []interface{} {
-	return []interface{}{&m.TotalActiveBalance, m.JustificationBits, m.Fork, m.CurrentJustifiedCheckpoint, m.PreviousJustifiedCheckpoint, m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
+	return []interface{}{&m.TotalActiveBalance, m.JustificationBits, m.CurrentJustifiedCheckpoint, m.PreviousJustifiedCheckpoint, m.FinalizedCheckpoint, &m.HistoricalSummariesLength, &m.HistoricalRootsLength}
 }

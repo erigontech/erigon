@@ -184,7 +184,7 @@ func checkValidValidatorId(s string) (bool, error) {
 	return false, nil
 }
 
-func (a *ApiHandler) getAllValidators(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -308,7 +308,7 @@ func parseQueryValidatorIndicies(tx kv.Tx, ids []string) ([]uint64, error) {
 	return filterIndicies, nil
 }
 
-func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -375,7 +375,7 @@ func (a *ApiHandler) getSingleValidator(w http.ResponseWriter, r *http.Request) 
 	return responseValidator(validatorIndex, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
-func (a *ApiHandler) getAllValidatorsBalances(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -482,6 +482,9 @@ func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListS
 	var err error
 	if validators.Length() <= int(idx) {
 		return newBeaconResponse([]int{}).WithFinalized(finalized), nil
+	}
+	if idx >= uint64(validators.Length()) {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found"))
 	}
 
 	v := validators.Get(int(idx))

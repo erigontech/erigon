@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
@@ -38,7 +37,7 @@ type ApiHandler struct {
 	randaoMixesPool sync.Pool
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, source persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string) *ApiHandler {
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string) *ApiHandler {
 	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
 		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 	}}, sentinel: sentinel, version: version}
@@ -61,6 +60,10 @@ func (a *ApiHandler) init() {
 			r.Route("/node", func(r chi.Router) {
 				r.Get("/health", a.GetEthV1NodeHealth)
 				r.Get("/version", a.GetEthV1NodeVersion)
+				r.Get("/peer_count", a.GetEthV1NodePeerCount)
+				r.Get("/peers", a.GetEthV1NodePeersInfos)
+				r.Get("/peers/{peer_id}", a.GetEthV1NodePeerInfos)
+				r.Get("/identity", a.GetEthV1NodeIdentity)
 			})
 			r.Get("/debug/fork_choice", a.GetEthV1DebugBeaconForkChoice)
 			r.Route("/config", func(r chi.Router) {
@@ -70,9 +73,9 @@ func (a *ApiHandler) init() {
 			})
 			r.Route("/beacon", func(r chi.Router) {
 				r.Route("/rewards", func(r chi.Router) {
-					r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.getSyncCommitteesRewards))
-					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlockRewards))
-					r.Post("/attestations/{epoch}", beaconhttp.HandleEndpointFunc(a.getAttestationsRewards))
+					r.Post("/sync_committee/{block_id}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsSyncCommittees))
+					r.Get("/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconRewardsBlocks))
+					r.Post("/attestations/{epoch}", beaconhttp.HandleEndpointFunc(a.PostEthV1BeaconRewardsAttestations))
 				})
 				r.Route("/headers", func(r chi.Router) {
 					r.Get("/", beaconhttp.HandleEndpointFunc(a.getHeaders))
@@ -84,7 +87,7 @@ func (a *ApiHandler) init() {
 					r.Get("/{block_id}/attestations", beaconhttp.HandleEndpointFunc(a.getBlockAttestations))
 					r.Get("/{block_id}/root", beaconhttp.HandleEndpointFunc(a.getBlockRoot))
 				})
-				r.Get("/genesis", beaconhttp.HandleEndpointFunc(a.getGenesis))
+				r.Get("/genesis", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconGenesis))
 				r.Get("/blinded_blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.getBlindedBlock))
 				r.Route("/pool", func(r chi.Router) {
 					r.Get("/voluntary_exits", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconPoolVoluntaryExits))
@@ -115,9 +118,9 @@ func (a *ApiHandler) init() {
 						r.Get("/validators", http.NotFound)
 						r.Get("/root", beaconhttp.HandleEndpointFunc(a.getStateRoot))
 						r.Get("/fork", beaconhttp.HandleEndpointFunc(a.getStateFork))
-						r.Get("/validators", beaconhttp.HandleEndpointFunc(a.getAllValidators))
-						r.Get("/validator_balances", beaconhttp.HandleEndpointFunc(a.getAllValidatorsBalances))
-						r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.getSingleValidator))
+						r.Get("/validators", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidators))
+						r.Get("/validator_balances", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconValidatorsBalances))
+						r.Get("/validators/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconStatesValidator))
 					})
 				})
 			})

@@ -363,8 +363,8 @@ const (
 	BorEvents      = "BorEvents"                 // event_id -> event_payload
 	BorEventNums   = "BorEventNums"              // block_num -> event_id (first event_id in that block)
 	BorSpans       = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorMilestones  = "BorMilestones"             // milestone_id -> checkpoint (in JSON encoding)
 	BorCheckpoints = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
-	BorMilestones  = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -430,6 +430,9 @@ const (
 	BeaconState = "BeaconState"
 	// [slot] => [signature + block without execution payload]
 	BeaconBlocks = "BeaconBlock"
+
+	EffectiveBalancesDump = "EffectiveBalancesDump"
+	BalancesDump          = "BalancesDump"
 	// [slot] => [attestation list (custom encoding)]
 	Attestetations = "Attestetations"
 
@@ -483,8 +486,6 @@ const (
 	CurrentSyncCommittee       = "CurrentSyncCommittee"
 	HistoricalRoots            = "HistoricalRoots"
 	HistoricalSummaries        = "HistoricalSummaries"
-	CurrentEpochAttestations   = "EpochAttestations"
-	PreviousEpochAttestations  = "PreviousAttestations"
 	Eth1DataVotes              = "Eth1DataVotes"
 
 	IntraRandaoMixes = "IntraRandaoMixes" // [validator_index+slot] => [randao_mix]
@@ -591,8 +592,8 @@ var ChaindataTables = []string{
 	BorEvents,
 	BorEventNums,
 	BorSpans,
-	BorCheckpoints,
 	BorMilestones,
+	BorCheckpoints,
 	TblAccountKeys,
 	TblAccountVals,
 	TblAccountHistoryKeys,
@@ -677,11 +678,11 @@ var ChaindataTables = []string{
 	CurrentSyncCommittee,
 	HistoricalRoots,
 	HistoricalSummaries,
-	CurrentEpochAttestations,
-	PreviousEpochAttestations,
 	Eth1DataVotes,
 	IntraRandaoMixes,
 	ActiveValidatorIndicies,
+	EffectiveBalancesDump,
+	BalancesDump,
 }
 
 const (

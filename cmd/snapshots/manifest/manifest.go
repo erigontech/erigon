@@ -132,10 +132,10 @@ func manifest(cliCtx *cli.Context, command string) error {
 
 	logger.Debug("Starting manifest " + command)
 
-	var version *uint8
+	var version *snaptype.Version
 
 	if val := cliCtx.Int(VersionFlag.Name); val != 0 {
-		v := uint8(val)
+		v := snaptype.Version(val)
 		version = &v
 	}
 
@@ -163,7 +163,7 @@ func listManifest(ctx context.Context, srcSession *downloader.RCloneSession, out
 	return nil
 }
 
-func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.RCloneSession, version *uint8) error {
+func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.RCloneSession, version *snaptype.Version) error {
 	entities, err := srcSession.ReadRemoteDir(ctx, true)
 
 	if err != nil {
@@ -218,7 +218,7 @@ func updateManifest(ctx context.Context, tmpDir string, srcSession *downloader.R
 	return srcSession.Upload(ctx, manifestFile)
 }
 
-func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, version *uint8, out *os.File) error {
+func verifyManifest(ctx context.Context, srcSession *downloader.RCloneSession, version *snaptype.Version, out *os.File) error {
 	manifestEntries, err := DownloadManifest(ctx, srcSession)
 
 	if err != nil {

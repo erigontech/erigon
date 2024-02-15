@@ -45,7 +45,7 @@ func (s *StageGraph[CONFIG, ARGUMENTS]) StartWithStage(ctx context.Context, star
 		err := <-errch
 		dur := time.Since(start)
 		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || err.Error() == "timeout waiting for blocks" {
 				lg.Debug("error executing clstage", "err", err)
 			} else {
 				lg.Warn("error executing clstage", "err", err)

@@ -66,9 +66,11 @@ func TestLightClientOptimistic(t *testing.T) {
 		indiciesDB,
 		host,
 		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{}, f, true,
+		nil, f, true,
 	)
 	c.Start()
 
@@ -133,9 +135,11 @@ func TestLightClientFinality(t *testing.T) {
 		indiciesDB,
 		host,
 		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{}, f, true,
+		nil, f, true,
 	)
 	c.Start()
 
@@ -207,9 +211,11 @@ func TestLightClientBootstrap(t *testing.T) {
 		indiciesDB,
 		host,
 		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{}, f, true,
+		nil, f, true,
 	)
 	c.Start()
 
@@ -287,9 +293,11 @@ func TestLightClientUpdates(t *testing.T) {
 		indiciesDB,
 		host,
 		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
 		beaconCfg,
 		genesisCfg,
-		&cltypes.Metadata{}, f, true,
+		nil, f, true,
 	)
 	c.Start()
 

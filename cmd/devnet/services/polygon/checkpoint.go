@@ -185,7 +185,7 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 		}
 	}
 
-	if header.Number.Cmp(h.pendingCheckpoint.Fields.EndBlock) < 0 {
+	if header.Number.Cmp(h.pendingCheckpoint.EndBlock()) < 0 {
 		return nil
 	}
 

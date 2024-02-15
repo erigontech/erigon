@@ -48,10 +48,11 @@ func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, httpProviders []*url.URL, diskProviders []string) {
 	log.Debug("[snapshots] webseed providers", "http", len(httpProviders), "disk", len(diskProviders))
 	list := make([]snaptype.WebSeedsFromProvider, 0, len(httpProviders)+len(diskProviders))
+
 	for _, webSeedProviderURL := range httpProviders {
 		select {
 		case <-ctx.Done():
-			break
+			return
 		default:
 		}
 		response, err := d.callHttpProvider(ctx, webSeedProviderURL)
@@ -173,15 +174,13 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	if len(d.TorrentUrls()) == 0 {
 		return
 	}
-	if d.torrentFiles.newDownloadsAreProhibited() {
-		return
-	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
 	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
 	//TODO:
 	// - what to do if node already synced?
+
 	for name, tUrls := range urlsByName {
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
@@ -199,12 +198,11 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
 				if err := d.torrentFiles.Create(tPath, res); err != nil {
-					d.logger.Debug("[snapshots] saveTorrent", "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
 					continue
 				}
 				return nil
@@ -256,13 +254,7 @@ func validateTorrentBytes(fileName string, b []byte, whitelist snapcfg.Preverifi
 }
 
 func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
-	fileName = strings.TrimSuffix(fileName, ".torrent")
-	for i := 0; i < len(whitelist); i++ {
-		if whitelist[i].Name == fileName {
-			return true
-		}
-	}
-	return false
+	return whitelist.Contains(strings.TrimSuffix(fileName, ".torrent"))
 }
 
 func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {

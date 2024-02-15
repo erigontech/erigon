@@ -60,16 +60,15 @@ import (
 )
 
 var (
-	action          = flag.String("action", "", "action to execute")
-	cpuprofile      = flag.String("cpuprofile", "", "write cpu profile `file`")
-	block           = flag.Int("block", 1, "specifies a block number for operation")
-	blockTotal      = flag.Int("blocktotal", 1, "specifies a total amount of blocks to process (will offset from head block if <= 0)")
-	account         = flag.String("account", "0x", "specifies account to investigate")
-	name            = flag.String("name", "", "name to add to the file names")
-	chaindata       = flag.String("chaindata", "chaindata", "path to the chaindata database file")
-	bucket          = flag.String("bucket", "", "bucket in the database")
-	hash            = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
-	shapshotVersion = flag.Uint("stapshots.version", 1, "specifies the snapshot file version")
+	action     = flag.String("action", "", "action to execute")
+	cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
+	block      = flag.Int("block", 1, "specifies a block number for operation")
+	blockTotal = flag.Int("blocktotal", 1, "specifies a total amount of blocks to process (will offset from head block if <= 0)")
+	account    = flag.String("account", "0x", "specifies account to investigate")
+	name       = flag.String("name", "", "name to add to the file names")
+	chaindata  = flag.String("chaindata", "chaindata", "path to the chaindata database file")
+	bucket     = flag.String("bucket", "", "bucket in the database")
+	hash       = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
 )
 
 func dbSlice(chaindata string, bucket string, prefix []byte) {
@@ -93,10 +92,10 @@ func dbSlice(chaindata string, bucket string, prefix []byte) {
 }
 
 // Searches 1000 blocks from the given one to try to find the one with the given state root hash
-func testBlockHashes(chaindata string, snapshotVersion uint8, block int, stateRoot libcommon.Hash) {
+func testBlockHashes(chaindata string, block int, stateRoot libcommon.Hash) {
 	ethDb := mdbx.MustOpen(chaindata)
 	defer ethDb.Close()
-	br, _ := blocksIO(ethDb, snapshotVersion)
+	br, _ := blocksIO(ethDb)
 	tool.Check(ethDb.View(context.Background(), func(tx kv.Tx) error {
 		blocksToSearch := 10000000
 		for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
@@ -132,7 +131,7 @@ func printCurrentBlockNumber(chaindata string) {
 	})
 }
 
-func blocksIO(db kv.RoDB, snapshotVersion uint8) (services.FullBlockReader, *blockio.BlockWriter) {
+func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	var histV3 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
@@ -140,15 +139,15 @@ func blocksIO(db kv.RoDB, snapshotVersion uint8) (services.FullBlockReader, *blo
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", snapshotVersion, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
 
-func printTxHashes(chaindata string, snapshotVersion uint8, block uint64) error {
+func printTxHashes(chaindata string, block uint64) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	br, _ := blocksIO(db, snapshotVersion)
+	br, _ := blocksIO(db)
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		for b := block; b < block+1; b++ {
 			block, _ := br.BlockByNumber(context.Background(), tx, b)
@@ -460,10 +459,10 @@ func getBlockTotal(tx kv.Tx, blockFrom uint64, blockTotalOrOffset int64) uint64 
 	return 1
 }
 
-func extractHashes(chaindata string, snapshotVersion uint8, blockStep uint64, blockTotalOrOffset int64, name string) error {
+func extractHashes(chaindata string, blockStep uint64, blockTotalOrOffset int64, name string) error {
 	db := mdbx.MustOpen(chaindata)
 	defer db.Close()
-	br, _ := blocksIO(db, snapshotVersion)
+	br, _ := blocksIO(db)
 
 	f, err := os.Create(fmt.Sprintf("preverified_hashes_%s.go", name))
 	if err != nil {
@@ -535,12 +534,12 @@ func extractHeaders(chaindata string, block uint64, blockTotalOrOffset int64) er
 	return nil
 }
 
-func extractBodies(datadir string, snapshotVersion uint8) error {
+func extractBodies(datadir string) error {
 	snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 		Enabled:    true,
 		KeepBlocks: true,
 		Produce:    false,
-	}, filepath.Join(datadir, "snapshots"), snapshotVersion, log.New())
+	}, filepath.Join(datadir, "snapshots"), 0, log.New())
 	snaps.ReopenFolder()
 
 	/* method Iterate was removed, need re-implement
@@ -579,7 +578,7 @@ func extractBodies(datadir string, snapshotVersion uint8) error {
 	*/
 	db := mdbx.MustOpen(filepath.Join(datadir, "chaindata"))
 	defer db.Close()
-	br, _ := blocksIO(db, snapshotVersion)
+	br, _ := blocksIO(db)
 
 	tx, err := db.BeginRo(context.Background())
 	if err != nil {
@@ -1025,7 +1024,7 @@ func scanReceipts3(chaindata string, block uint64) error {
 	return nil
 }
 
-func scanReceipts2(chaindata string, snapshotVersion uint8) error {
+func scanReceipts2(chaindata string) error {
 	f, err := os.Create("receipts.txt")
 	if err != nil {
 		return err
@@ -1039,7 +1038,7 @@ func scanReceipts2(chaindata string, snapshotVersion uint8) error {
 	if err != nil {
 		return err
 	}
-	br, _ := blocksIO(dbdb, snapshotVersion)
+	br, _ := blocksIO(dbdb)
 
 	defer tx.Rollback()
 	blockNum, err := historyv2.AvailableFrom(tx)
@@ -1388,7 +1387,7 @@ func main() {
 		flow.TestGenCfg()
 
 	case "testBlockHashes":
-		testBlockHashes(*chaindata, uint8(*shapshotVersion), *block, libcommon.HexToHash(*hash))
+		testBlockHashes(*chaindata, *block, libcommon.HexToHash(*hash))
 
 	case "readAccount":
 		if err := readAccount(*chaindata, libcommon.HexToAddress(*account)); err != nil {
@@ -1426,7 +1425,7 @@ func main() {
 		err = extractHeaders(*chaindata, uint64(*block), int64(*blockTotal))
 
 	case "extractHashes":
-		err = extractHashes(*chaindata, uint8(*shapshotVersion), uint64(*block), int64(*blockTotal), *name)
+		err = extractHashes(*chaindata, uint64(*block), int64(*blockTotal), *name)
 
 	case "defrag":
 		err = hackdb.Defrag()
@@ -1435,13 +1434,13 @@ func main() {
 		err = hackdb.TextInfo(*chaindata, &strings.Builder{})
 
 	case "extractBodies":
-		err = extractBodies(*chaindata, uint8(*shapshotVersion))
+		err = extractBodies(*chaindata)
 
 	case "repairCurrent":
 		repairCurrent()
 
 	case "printTxHashes":
-		printTxHashes(*chaindata, uint8(*shapshotVersion), uint64(*block))
+		printTxHashes(*chaindata, uint64(*block))
 
 	case "snapSizes":
 		err = snapSizes(*chaindata)
@@ -1468,7 +1467,7 @@ func main() {
 		err = scanTxs(*chaindata)
 
 	case "scanReceipts2":
-		err = scanReceipts2(*chaindata, uint8(*shapshotVersion))
+		err = scanReceipts2(*chaindata)
 
 	case "scanReceipts3":
 		err = scanReceipts3(*chaindata, uint64(*block))
