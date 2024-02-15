@@ -1062,7 +1062,7 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (hc *HistoryContext) canPruneUntil(tx kv.Tx) (can bool, txTo uint64) {
+func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx := hc.ic.CanPruneFrom(tx)
 	maxIdxTx := hc.ic.highestTxNum(tx)
 	//defer func() {
@@ -1076,6 +1076,10 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx) (can bool, txTo uint64) {
 		}
 		txTo = maxIdxTx - hc.h.keepTxInDB // bound pruning
 	} else {
+		canPruneIdx := hc.ic.CanPruneUntil(tx, untilTx)
+		if !canPruneIdx {
+			return false, 0
+		}
 		txTo = hc.maxTxNumInFiles(false)
 	}
 	return minIdxTx < txTo, txTo
@@ -1089,7 +1093,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx) (can bool, txTo uint64) {
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPruneUntil(rwTx), txFrom, txTo)
 	if !forced {
-		can, untilTx := hc.canPruneUntil(rwTx)
+		can, untilTx := hc.canPruneUntil(rwTx, txTo)
 		if !can {
 			return nil, nil
 		}

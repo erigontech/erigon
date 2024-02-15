@@ -702,19 +702,19 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 	)
 }
 
-func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
+func (ac *AggregatorV3Context) CanPrune(tx kv.Tx, untilTx uint64) bool {
 	if dbg.NoPrune() {
 		return false
 	}
 	for _, d := range ac.d {
-		if d.CanPruneUntil(tx) {
+		if d.CanPruneUntil(tx, untilTx) {
 			return true
 		}
 	}
-	return ac.logAddrs.CanPrune(tx) ||
-		ac.logTopics.CanPrune(tx) ||
-		ac.tracesFrom.CanPrune(tx) ||
-		ac.tracesTo.CanPrune(tx)
+	return ac.logAddrs.CanPruneUntil(tx, untilTx) ||
+		ac.logTopics.CanPruneUntil(tx, untilTx) ||
+		ac.tracesFrom.CanPruneUntil(tx, untilTx) ||
+		ac.tracesTo.CanPruneUntil(tx, untilTx)
 }
 
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
@@ -769,7 +769,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return err
 		}
-		if stat == nil || !ac.CanPrune(tx) {
+		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
 				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
@@ -891,7 +891,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		step = (txTo - 1) / ac.a.StepSize()
 	}
 
-	if txFrom == txTo || !ac.CanPrune(tx) {
+	if txFrom == txTo || !ac.CanPrune(tx, txTo) {
 		return nil, nil
 	}
 
