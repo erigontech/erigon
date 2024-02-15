@@ -2,31 +2,34 @@ package cltypes
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
+
+var _ ssz2.SizedObjectSSZ = (*ContributionAndProof)(nil)
+var _ ssz2.SizedObjectSSZ = (*Contribution)(nil)
 
 /*
  * ContributionAndProof contains the index of the aggregator, the attestation
  * to be aggregated and the BLS signature of the attestation.
  */
 type ContributionAndProof struct {
-	AggregatorIndex uint64              `json:"aggregator_index,string"`
-	SelectionProof  libcommon.Bytes96   `json:"selection_proof"`
-	Contribution    *solid.Contribution `json:"contribution"`
+	AggregatorIndex uint64            `json:"aggregator_index,string"`
+	Contribution    *Contribution     `json:"contribution"`
+	SelectionProof  libcommon.Bytes96 `json:"selection_proof"`
 }
 
 func (a *ContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
-	return ssz2.MarshalSSZ(dst, a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
+	return ssz2.MarshalSSZ(dst, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
 func (a *ContributionAndProof) Static() bool {
-	return false
+	return true
 }
 
 func (a *ContributionAndProof) DecodeSSZ(buf []byte, version int) error {
-	a.Contribution = new(solid.Contribution)
+	a.Contribution = new(Contribution)
 	return ssz2.UnmarshalSSZ(buf, version, &a.AggregatorIndex, a.Contribution, a.SelectionProof[:])
 }
 
@@ -49,6 +52,7 @@ func (a *SignedContributionAndProof) EncodeSSZ(dst []byte) ([]byte, error) {
 
 func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 	a.Message = new(ContributionAndProof)
+	a.Message.Contribution = new(Contribution)
 	return ssz2.UnmarshalSSZ(buf, version, a.Message, a.Signature[:])
 }
 
@@ -58,6 +62,39 @@ func (a *SignedContributionAndProof) EncodingSizeSSZ() int {
 
 func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
+}
+
+var syncCommitteeAggregationBitsSize = 8
+
+type Contribution struct {
+	Slot              uint64           `json:"slot,string"`
+	BeaconBlockRoot   libcommon.Hash   `json:"beacon_block_root"`
+	SubcommitteeIndex uint64           `json:"subcommittee_index,string"`
+	AggregationBits   hexutility.Bytes `json:"aggregation_bits"`
+}
+
+func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
+	if len(a.AggregationBits) == 0 {
+		a.AggregationBits = make([]byte, syncCommitteeAggregationBitsSize)
+	}
+	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
+}
+
+func (a *Contribution) Static() bool {
+	return true
+}
+
+func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
+	a.AggregationBits = make([]byte, syncCommitteeAggregationBitsSize)
+	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
+}
+
+func (a *Contribution) EncodingSizeSSZ() int {
+	return 72 + len(a.AggregationBits)
+}
+
+func (a *Contribution) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(&a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
 }
 
 /*

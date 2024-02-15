@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -117,15 +116,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			"slot", block.Block.Slot,
 		)
 		g.gossipSource.InsertBlock(ctx, &peers.PeeredObject[*cltypes.SignedBeaconBlock]{Data: block, Peer: data.Peer.Pid})
-
-	case gossip.TopicNameSyncCommitteeContributionAndProof:
-		obj := &solid.SignedContributionAndProof{}
-		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
-			g.sentinel.BanPeer(ctx, data.Peer)
-			l["at"] = "decoding signed contribution and proof"
-			return err
-		}
-		g.emitters.Publish("contribution_and_proof", obj)
 	case gossip.TopicNameLightClientFinalityUpdate:
 		obj := &cltypes.LightClientFinalityUpdate{}
 		if err := obj.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
@@ -140,7 +130,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			l["at"] = "decoding lc optimistic update"
 			return err
 		}
-	case gossip.TopicNameContributionAndProof:
+	case gossip.TopicNameSyncCommitteeContributionAndProof:
 		if err := operationsContract[*cltypes.SignedContributionAndProof](ctx, g, l, data, int(version), "contribution and proof", g.forkChoice.OnSignedContributionAndProof); err != nil {
 			return err
 		}
@@ -186,7 +176,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				l := log.Ctx{}
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error")
+					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 				}
 			}
 		}
@@ -201,7 +191,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				l := log.Ctx{}
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", l)
+					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 				}
 			}
 		}
