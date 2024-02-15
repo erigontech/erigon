@@ -1287,16 +1287,16 @@ func (ac *AggregatorV3Context) cleanAfterNewFreeze(in MergedFilesV3) {
 		d.cleanAfterFreeze(in.d[id], in.dHist[id], in.dIdx[id])
 	}
 	if in.logAddrs != nil && in.logAddrs.frozen {
-		ac.a.logAddrs.cleanAfterFreeze(in.logAddrs)
+		ac.logAddrs.cleanAfterFreeze(in.logAddrs)
 	}
 	if in.logTopics != nil && in.logTopics.frozen {
-		ac.a.logTopics.cleanAfterFreeze(in.logTopics)
+		ac.logTopics.cleanAfterFreeze(in.logTopics)
 	}
 	if in.tracesFrom != nil && in.tracesFrom.frozen {
-		ac.a.tracesFrom.cleanAfterFreeze(in.tracesFrom)
+		ac.tracesFrom.cleanAfterFreeze(in.tracesFrom)
 	}
 	if in.tracesTo != nil && in.tracesTo.frozen {
-		ac.a.tracesTo.cleanAfterFreeze(in.tracesTo)
+		ac.tracesTo.cleanAfterFreeze(in.tracesTo)
 	}
 }
 
