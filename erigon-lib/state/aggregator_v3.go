@@ -1261,7 +1261,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if err == nil {
 		closeFiles = false
 	}
-	fmt.Printf("[dbg] merge done %s\n", r.String())
+	//fmt.Printf("[dbg] merge done %s\n", r.String())
 	return mf, err
 }
 
