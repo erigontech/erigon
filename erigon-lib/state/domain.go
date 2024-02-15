@@ -246,9 +246,11 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
+// isSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
 }
+func (i *filesItem) isBefore(j *filesItem) bool { return i.endTxNum <= j.startTxNum }
 
 func filesItemLess(i, j *filesItem) bool {
 	if i.endTxNum == j.endTxNum {
