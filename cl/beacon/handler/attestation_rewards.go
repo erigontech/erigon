@@ -14,7 +14,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -99,17 +98,39 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 			if blockRoot == (libcommon.Hash{}) {
 				continue
 			}
-			s, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+			if version == clparams.Phase0Version {
+				return nil, beaconhttp.NewEndpointError(http.StatusHTTPVersionNotSupported, fmt.Errorf("phase0 state is not supported when there is no antiquation"))
+			}
+			validatorSet, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
 			if err != nil {
 				return nil, err
 			}
-			if s == nil {
-				continue
+			if validatorSet == nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no validator set found for this epoch"))
 			}
-			if s.Version() == clparams.Phase0Version {
-				return nil, beaconhttp.NewEndpointError(http.StatusHTTPVersionNotSupported, fmt.Errorf("phase0 state is not supported when there is no antiquation"))
+
+			inactivityScores, err := a.forkchoiceStore.GetInactivitiesScores(blockRoot)
+			if err != nil {
+				return nil, err
 			}
-			return a.computeAttestationsRewardsForAltair(s.ValidatorSet(), s.InactivityScores(), s.PreviousEpochParticipation(), state.InactivityLeaking(s), filterIndicies, epoch)
+			if inactivityScores == nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no inactivity scores found for this epoch"))
+			}
+
+			prevPartecipation, err := a.forkchoiceStore.GetPreviousPartecipationIndicies(blockRoot)
+			if err != nil {
+				return nil, err
+			}
+			if prevPartecipation == nil {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no previous partecipation found for this epoch"))
+			}
+
+			ok, finalizedCheckpoint, _, _ := a.forkchoiceStore.GetFinalityCheckpoints(blockRoot)
+			if !ok {
+				return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no finalized checkpoint found for this epoch"))
+			}
+
+			return a.computeAttestationsRewardsForAltair(validatorSet, inactivityScores, prevPartecipation, a.isInactivityLeaking(epoch, finalizedCheckpoint), filterIndicies, epoch)
 		}
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
 	}

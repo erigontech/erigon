@@ -213,3 +213,19 @@ func (f *ForkChoiceStorageMock) GetLightClientUpdate(period uint64) (*cltypes.Li
 func (f *ForkChoiceStorageMock) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
 	panic("implement me")
 }
+
+func (f *ForkChoiceStorageMock) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
+	panic("implement me")
+}

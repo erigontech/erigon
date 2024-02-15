@@ -468,3 +468,19 @@ func (f *ForkChoiceStore) GetLightClientUpdate(period uint64) (*cltypes.LightCli
 func (f *ForkChoiceStore) GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool) {
 	return f.forkGraph.GetHeader(blockRoot)
 }
+
+func (f *ForkChoiceStore) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+	return f.forkGraph.GetBalances(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+	return f.forkGraph.GetInactivitiesScores(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	return f.forkGraph.GetPreviousPartecipationIndicies(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
+	return f.forkGraph.GetValidatorSet(blockRoot)
+}

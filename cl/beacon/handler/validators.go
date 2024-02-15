@@ -242,11 +242,8 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
-	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if state == nil {
+
+	if *slot < a.forkchoiceStore.LowestAvaiableSlot() {
 		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
 		if err != nil {
 			return nil, err
@@ -257,7 +254,21 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidators(w http.ResponseWriter, r *ht
 		}
 		return responseValidators(filterIndicies, statusFilters, stateEpoch, balances, validatorSet, true)
 	}
-	return responseValidators(filterIndicies, statusFilters, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
+	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if balances == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("balances not found"))
+	}
+	validators, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if validators == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found"))
+	}
+	return responseValidators(filterIndicies, statusFilters, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
 func parseQueryValidatorIndex(tx kv.Tx, id string) (uint64, error) {
@@ -355,11 +366,8 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
-	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if state == nil {
+
+	if *slot < a.forkchoiceStore.LowestAvaiableSlot() {
 		validatorSet, err := a.stateReader.ReadValidatorsForHistoricalState(tx, *slot)
 		if err != nil {
 			return nil, err
@@ -370,7 +378,21 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		}
 		return responseValidator(validatorIndex, stateEpoch, balances, validatorSet, true)
 	}
-	return responseValidator(validatorIndex, stateEpoch, state.Balances(), state.Validators(), *slot <= a.forkchoiceStore.FinalizedSlot())
+	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if balances == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("balances not found"))
+	}
+	validators, err := a.forkchoiceStore.GetValidatorSet(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if validators == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found"))
+	}
+	return responseValidator(validatorIndex, stateEpoch, balances, validators, *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
 func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -421,18 +443,22 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("state not found"))
 	}
 	stateEpoch := *slot / a.beaconChainCfg.SlotsPerEpoch
-	state, err := a.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
-	if err != nil {
-		return nil, err
-	}
-	if state == nil {
+
+	if *slot < a.forkchoiceStore.LowestAvaiableSlot() {
 		balances, err := a.stateReader.ReadValidatorsBalances(tx, *slot)
 		if err != nil {
 			return nil, err
 		}
 		return responseValidatorsBalances(filterIndicies, stateEpoch, balances, true)
 	}
-	return responseValidatorsBalances(filterIndicies, stateEpoch, state.Balances(), *slot <= a.forkchoiceStore.FinalizedSlot())
+	balances, err := a.forkchoiceStore.GetBalances(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if balances == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found"))
+	}
+	return responseValidatorsBalances(filterIndicies, stateEpoch, balances, *slot <= a.forkchoiceStore.FinalizedSlot())
 }
 
 type directString string
