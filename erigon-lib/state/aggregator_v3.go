@@ -1239,7 +1239,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	for id := range ac.d {
 		id := id
 		if r.d[id].any() {
-			log.Info(fmt.Sprintf("[snapshots] merge: %s", r.d[id].String()))
+			log.Info(fmt.Sprintf("[snapshots] merge %q: %s", id, r.d[id].String()))
 			g.Go(func() (err error) {
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], ac.a.ps)
 				return err
@@ -1279,7 +1279,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if err == nil {
 		closeFiles = false
 	}
-	//fmt.Printf("[snapshots] merge done %s\n", r.String())
+	fmt.Printf("[snapshots] merge done %s\n", r.String())
 	return mf, err
 }
 
