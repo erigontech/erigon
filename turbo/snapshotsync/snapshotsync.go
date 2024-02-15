@@ -270,6 +270,7 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
 			"progress", fmt.Sprintf("%.2f%% %s/%s", progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+			// TODO: "downloading", stats.Downloading,
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
 			"download", common.ByteCount(stats.DownloadRate)+"/s",

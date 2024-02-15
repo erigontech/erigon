@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
@@ -24,8 +25,10 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -57,9 +60,11 @@ import (
 
 // Downloader - component which downloading historical files. Can use BitTorrent, or other protocols
 type Downloader struct {
-	db                kv.RwDB
-	pieceCompletionDB storage.PieceCompletion
-	torrentClient     *torrent.Client
+	db                  kv.RwDB
+	pieceCompletionDB   storage.PieceCompletion
+	torrentClient       *torrent.Client
+	webDownloadClient   *RCloneClient
+	webDownloadSessions map[string]*RCloneSession
 
 	cfg *downloadercfg.Cfg
 
@@ -76,14 +81,23 @@ type Downloader struct {
 	logger    log.Logger
 	verbosity log.Lvl
 
-	torrentFiles *TorrentFiles
-	snapshotLock *snapshotLock
+	torrentFiles    *TorrentFiles
+	snapshotLock    *snapshotLock
+	webDownloadInfo map[string]webDownloadInfo
+}
+
+type webDownloadInfo struct {
+	url     *url.URL
+	length  int64
+	torrent *torrent.Torrent
 }
 
 type AggStats struct {
 	MetadataReady, FilesTotal int32
+	LastMetadatUpdate         *time.Time
 	PeersUnique               int32
 	ConnectionsTotal          uint64
+	Downloading               int32
 
 	Completed bool
 	Progress  float32
@@ -119,17 +133,19 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	}
 
 	d := &Downloader{
-		cfg:               cfg,
-		db:                db,
-		pieceCompletionDB: c,
-		folder:            m,
-		torrentClient:     torrentClient,
-		statsLock:         &sync.RWMutex{},
-		webseeds:          &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: lock.Downloads},
-		logger:            logger,
-		verbosity:         verbosity,
-		torrentFiles:      &TorrentFiles{dir: cfg.Dirs.Snap},
-		snapshotLock:      lock,
+		cfg:                 cfg,
+		db:                  db,
+		pieceCompletionDB:   c,
+		folder:              m,
+		torrentClient:       torrentClient,
+		statsLock:           &sync.RWMutex{},
+		webseeds:            &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: lock.Downloads},
+		logger:              logger,
+		verbosity:           verbosity,
+		torrentFiles:        &TorrentFiles{dir: cfg.Dirs.Snap},
+		snapshotLock:        lock,
+		webDownloadInfo:     map[string]webDownloadInfo{},
+		webDownloadSessions: map[string]*RCloneSession{},
 	}
 
 	d.webseeds.torrentFiles = d.torrentFiles
@@ -505,17 +521,26 @@ func (d *Downloader) MainLoopInBackground(silent bool) {
 	}()
 }
 
+type webDownloadStatus struct {
+	name   string
+	length int64
+	spec   *torrent.TorrentSpec
+	err    error
+}
+
 func (d *Downloader) mainLoop(silent bool) error {
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
-	complete := map[string]struct{}{}
-
-	uploader, _ := NewRCloneClient(d.logger)
-	uploaderSessions := map[string]*RCloneSession{}
+	d.webDownloadClient, _ = NewRCloneClient(d.logger)
 
 	d.wg.Add(1)
 	go func() {
 		defer d.wg.Done()
+
+		complete := map[string]struct{}{}
+		downloading := map[string]struct{}{}
+
+		webDownloadComplete := make(chan webDownloadStatus)
 
 		for {
 			torrents := d.torrentClient.Torrents()
@@ -528,10 +553,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 
 				continue
-			}
-
-			if err := sem.Acquire(d.ctx, 1); err != nil {
-				return
 			}
 
 			var pending []*torrent.Torrent
@@ -562,16 +583,49 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 
 					if err := d.db.Update(d.ctx,
-						torrentInfoUpdater(t.Info().Name, nil, t.Info(), t.Complete.Bool())); err != nil {
+						torrentInfoUpdater(t.Info().Name, nil, t.Info().Length, t.Complete.Bool())); err != nil {
 						d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
 					}
 
+					delete(downloading, t.Name())
 					complete[t.Name()] = struct{}{}
+					continue
+				}
+
+				select {
+				case status := <-webDownloadComplete:
+					delete(downloading, status.name)
+
+					if status.spec != nil {
+						t, _, err := d.torrentClient.AddTorrentSpec(status.spec)
+
+						if err != nil {
+							d.logger.Warn("Can't re-add spec after download", "file", status.name, "err", err)
+						}
+
+						if status.err != nil {
+							if err := d.db.Update(d.ctx,
+								torrentInfoUpdater(status.name, status.spec.InfoHash.Bytes(), status.length, true)); err != nil {
+								d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
+							}
+
+							complete[status.name] = struct{}{}
+						}
+					}
+
+				default:
+				}
+
+				if _, ok := downloading[t.Name()]; ok {
 					continue
 				}
 
 				pending = append(pending, t)
 			}
+
+			d.statsLock.Lock()
+			d.stats.Downloading = int32(len(downloading))
+			d.statsLock.Unlock()
 
 			downloadTorrent := func(t *torrent.Torrent) {
 				t.AllowDataDownload()
@@ -580,6 +634,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 					return
 				case <-t.GotInfo():
 				}
+
+				downloading[t.Name()] = struct{}{}
 
 				t.DownloadAll()
 				d.wg.Add(1)
@@ -615,8 +671,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}(t)
 			}
 
-			for _, t := range availableTorrents(d.ctx, pending) {
+			available := availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-len(downloading))
+
+			if len(available) < d.cfg.DownloadSlots-len(downloading) && len(d.webDownloadInfo) > 0 {
+				for _, webDownload := range d.webDownloadInfo {
+					available = append(available, webDownload.torrent)
+					if len(available) == d.cfg.DownloadSlots-len(downloading) {
+						break
+					}
+				}
+			}
+
+			for _, t := range available {
 				if err := sem.Acquire(d.ctx, 1); err != nil {
+					d.logger.Warn("Failed to acquire download semaphore", "err", err)
 					return
 				}
 
@@ -624,41 +692,76 @@ func (d *Downloader) mainLoop(silent bool) error {
 				case len(t.PeerConns()) > 0:
 					downloadTorrent(t)
 				case len(t.WebseedPeerConns()) > 0:
-					if uploader != nil {
+					if d.webDownloadClient != nil {
 						peer := t.WebseedPeerConns()[rand.Intn(len(t.WebseedPeerConns()))]
 
 						peerUrl := webPeerUrl(peer)
 
-						session, ok := uploaderSessions[peerUrl]
-
-						if !ok {
-							var err error
-
-							session, err = uploader.NewSession(d.ctx, d.SnapDir(), peerUrl)
-
-							if err != nil {
-								d.logger.Warn("Can't create web session", "file", t.Info().Name, "err", err)
+						if session, err := d.webDownload(peerUrl, t, nil, webDownloadComplete, sem); err != nil {
+							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
+							if session == nil {
 								downloadTorrent(t)
-								continue
 							}
 
-							uploaderSessions[peerUrl] = session
+							continue
 						}
 
-						go func() {
-							defer sem.Release(1)
-
-							if err := session.Download(d.ctx, t.Info().Name); err != nil {
-								d.logger.Error("Web download failed", "file", t.Info().Name, "err", err)
-							}
-						}()
+						downloading[t.Name()] = struct{}{}
 					} else {
 						downloadTorrent(t)
 					}
-				// TODO: if there are no available peers and we have a rclone session - check the
-				// availible destinations for the file
 				default:
+					if d.webDownloadClient != nil {
+						if webDownload, ok := d.webDownloadInfo[t.Name()]; ok {
+							peerUrl, _ := path.Split(webDownload.url.String())
+							d.webDownload(peerUrl, t, &webDownload, webDownloadComplete, sem)
+							downloading[t.Name()] = struct{}{}
+							continue
+						}
+					}
+
 					sem.Release(1)
+				}
+			}
+
+			d.statsLock.Lock()
+			lastMetadatUpdate := d.stats.LastMetadatUpdate
+			d.statsLock.Unlock()
+
+			if lastMetadatUpdate != nil &&
+				((len(available) == 0 && time.Since(*lastMetadatUpdate) > 30*time.Second) ||
+					time.Since(*lastMetadatUpdate) > 5*time.Minute) {
+
+				for _, t := range d.torrentClient.Torrents() {
+					if t.Info() == nil {
+						if _, ok := d.webDownloadInfo[t.Name()]; !ok {
+							for _, webseed := range d.cfg.WebSeedUrls {
+								downloadUrl := webseed.JoinPath(t.Name())
+								if headRequest, err := http.NewRequestWithContext(d.ctx, "HEAD", downloadUrl.String(), nil); err == nil {
+									if response, err := http.DefaultClient.Do(headRequest); err == nil {
+										if response.StatusCode == http.StatusOK {
+											d.statsLock.Lock()
+											d.webDownloadInfo[t.Name()] = webDownloadInfo{
+												url:     downloadUrl,
+												length:  response.ContentLength,
+												torrent: t,
+											}
+											d.statsLock.Unlock()
+											break
+										}
+									}
+								}
+							}
+
+							if _, ok := d.webDownloadInfo[t.Name()]; !ok {
+								d.logger.Warn("Meta data missing for torrent", "name", t.Name(), "hash", t.InfoHash().HexString())
+							}
+						}
+					} else {
+						d.statsLock.Lock()
+						delete(d.webDownloadInfo, t.Name())
+						d.statsLock.Unlock()
+					}
 				}
 			}
 		}
@@ -707,6 +810,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			d.logger.Info("[snapshots] Downloading",
 				"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+				"downloading", stats.Downloading,
 				"download", common.ByteCount(stats.DownloadRate)+"/s",
 				"upload", common.ByteCount(stats.UploadRate)+"/s",
 				"peers", stats.PeersUnique,
@@ -725,7 +829,90 @@ func (d *Downloader) mainLoop(silent bool) error {
 	}
 }
 
-func availableTorrents(ctx context.Context, pending []*torrent.Torrent) []*torrent.Torrent {
+func (d *Downloader) webDownload(peerUrl string, t *torrent.Torrent, i *webDownloadInfo, statusChan chan webDownloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
+	session, ok := d.webDownloadSessions[peerUrl]
+
+	if !ok {
+		var err error
+		session, err = d.webDownloadClient.NewSession(d.ctx, d.SnapDir(), peerUrl)
+
+		if err != nil {
+			return nil, err
+		}
+
+		d.webDownloadSessions[peerUrl] = session
+	}
+
+	name := t.Name()
+	mi := t.Metainfo()
+	infoHash := t.InfoHash()
+
+	var length int64
+
+	if i != nil {
+		length = i.length
+	} else {
+		length = t.Length()
+	}
+
+	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})
+	spec, err := torrent.TorrentSpecFromMagnetUri(magnet.String())
+
+	if err != nil {
+		return session, fmt.Errorf("can't get torrent spec for %s from info: %w", t.Info().Name, err)
+	}
+
+	spec.ChunkSize = downloadercfg.DefaultNetworkChunkSize
+	spec.DisallowDataDownload = true
+
+	t.Drop()
+
+	go func() {
+		defer sem.Release(1)
+
+		err := session.Download(d.ctx, name)
+
+		if err != nil {
+			d.logger.Error("Web download failed", "file", name, "err", err)
+		}
+
+		info, _ := snaptype.ParseFileName(d.SnapDir(), name)
+
+		localHash, err := localHashBytes(d.ctx, info, nil, d.logger)
+
+		if err == nil {
+			if !bytes.Equal(infoHash.Bytes(), localHash) {
+				err = fmt.Errorf("hash mismatch: expected: 0x%x, got: 0x%x", infoHash.Bytes(), localHash)
+				d.logger.Error("Web download failed", "file", name, "err", err)
+				if ferr := os.Remove(info.Path); ferr != nil {
+					d.logger.Warn("Couldn't remove invalid file", "file", name, "path", info.Path, "err", err)
+				}
+			}
+		} else {
+			d.logger.Error("Web download failed", "file", name, "err", err)
+		}
+
+		statusChan <- webDownloadStatus{
+			name:   name,
+			length: length,
+			spec:   spec,
+			err:    err,
+		}
+	}()
+
+	return session, nil
+}
+
+func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots int) []*torrent.Torrent {
+	if slots == 0 {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(10 * time.Second):
+			return nil
+		}
+	}
+
 	cases := make([]reflect.SelectCase, 0, len(pending)+2)
 
 	for _, t := range pending {
@@ -751,19 +938,22 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent) []*torre
 	var available []*torrent.Torrent
 
 	for {
-		chosen, _, _ := reflect.Select(cases)
+		selected, _, _ := reflect.Select(cases)
 
-		switch chosen {
-		case len(pending):
+		switch selected {
+		case len(cases) - 2:
 			return nil
-		case len(pending) + 1:
+		case len(cases) - 1:
 			return available
 		default:
-			available = append(available, pending[chosen])
+			available = append(available, pending[selected])
 
-			if len(available) == len(pending) {
+			if len(available) == slots {
 				return available
 			}
+
+			pending = append(pending[:selected], pending[selected+1:]...)
+			cases = append(cases[:selected], cases[selected+1:]...)
 		}
 	}
 }
@@ -804,6 +994,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	stats.BytesDownload = uint64(connStats.BytesReadUsefulIntendedData.Int64())
 	stats.BytesUpload = uint64(connStats.BytesWrittenData.Int64())
 
+	lastMetadataReady := stats.MetadataReady
+
 	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
 
 	var zeroProgress []string
@@ -821,25 +1013,34 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	for _, t := range torrents {
 		torrentComplete := t.Complete.Bool()
 
-		select {
-		case <-t.GotInfo():
+		if t.Info() != nil {
 			stats.MetadataReady++
 
 			// call methods once - to reduce internal mutex contention
 			peersOfThisFile := t.PeerConns()
 			weebseedPeersOfThisFile := t.WebseedPeerConns()
-			bytesCompleted := t.Stats().BytesReadData
+
+			bytesRead := t.Stats().BytesReadData
 			tLen := t.Length()
+
+			var bytesCompleted int64
+
+			if torrentComplete {
+				bytesCompleted = t.Length()
+			} else {
+				bytesCompleted = bytesRead.Int64()
+			}
+
 			torrentName := t.Name()
 
 			for _, peer := range peersOfThisFile {
 				stats.ConnectionsTotal++
 				peers[peer.PeerID] = struct{}{}
 			}
-			stats.BytesCompleted += uint64(bytesCompleted.Int64())
+			stats.BytesCompleted += uint64(bytesCompleted)
 			stats.BytesTotal += uint64(tLen)
 
-			progress := float32(float64(100) * (float64(bytesCompleted.Int64()) / float64(tLen)))
+			progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 			if progress == 0 {
 				zeroProgress = append(zeroProgress, torrentName)
 			}
@@ -856,28 +1057,97 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			diagnostics.Send(diagnostics.SegmentDownloadStatistics{
 				Name:            torrentName,
 				TotalBytes:      uint64(tLen),
-				DownloadedBytes: uint64(bytesCompleted.Int64()),
+				DownloadedBytes: uint64(bytesCompleted),
 				Webseeds:        webseeds,
 				Peers:           peers,
 			})
-
-		default:
-			noMetadata = append(noMetadata, t.Name())
-
+		} else {
 			if info, err := d.torrentInfo(t.Name()); err != nil {
 				if info.Completed != nil && info.Completed.Before(time.Now()) {
 					if info.Length != nil {
 						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+							stats.MetadataReady++
 							torrentComplete = fi.Size() == *info.Length
 							stats.BytesCompleted += uint64(*info.Length)
 							stats.BytesTotal += uint64(*info.Length)
 						}
 					}
 				}
+			} else if _, ok := d.webDownloadInfo[t.Name()]; ok {
+				stats.MetadataReady++
+			} else {
+				noMetadata = append(noMetadata, t.Name())
 			}
 		}
 
 		stats.Completed = stats.Completed && torrentComplete
+	}
+
+	var webTransfers int32
+
+	if d.webDownloadClient != nil {
+		webStats, _ := d.webDownloadClient.Stats(d.ctx)
+
+		if webStats != nil {
+			if len(webStats.Transferring) != 0 && stats.Completed {
+				stats.Completed = false
+			}
+
+			for _, transfer := range webStats.Transferring {
+				stats.MetadataReady++
+				webTransfers++
+
+				bytesCompleted := transfer.Bytes
+				tLen := transfer.Size
+				transferName := transfer.Name
+
+				if bytesCompleted > tLen {
+					bytesCompleted = tLen
+				}
+
+				stats.BytesCompleted += bytesCompleted
+				stats.BytesTotal += tLen
+
+				stats.BytesDownload += bytesCompleted
+
+				if transfer.Percentage == 0 {
+					zeroProgress = append(zeroProgress, transferName)
+				}
+
+				var seeds []diagnostics.SegmentPeer
+				var webseedRates []interface{}
+				if peerUrl, err := url.Parse(transfer.Group); err == nil {
+					rate := uint64(transfer.SpeedAvg)
+					seeds = []diagnostics.SegmentPeer{
+						diagnostics.SegmentPeer{
+							Url:          peerUrl.Host,
+							DownloadRate: rate,
+						}}
+
+					if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
+						webseedRates = []interface{}{strings.TrimSuffix(shortUrl, "/"), fmt.Sprintf("%s/s", common.ByteCount(rate))}
+					}
+				}
+
+				// more detailed statistic: download rate of each peer (for each file)
+				if transfer.Percentage != 0 {
+					d.logger.Log(d.verbosity, "[snapshots] progress", "file", transferName, "progress", fmt.Sprintf("%.2f%%", float32(transfer.Percentage)), "webseeds", 1)
+					d.logger.Log(d.verbosity, "[snapshots] web peers", webseedRates...)
+				}
+
+				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+					Name:            transferName,
+					TotalBytes:      uint64(tLen),
+					DownloadedBytes: bytesCompleted,
+					Webseeds:        seeds,
+				})
+			}
+		}
+	}
+
+	if lastMetadataReady != stats.MetadataReady {
+		now := time.Now()
+		stats.LastMetadatUpdate = &now
 	}
 
 	if len(noMetadata) > 0 {
@@ -907,7 +1177,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 	stats.PeersUnique = int32(len(peers))
-	stats.FilesTotal = int32(len(torrents))
+	stats.FilesTotal = int32(len(torrents)) + webTransfers
 
 	d.stats = stats
 }
@@ -937,7 +1207,8 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 }
 
 func webPeerUrl(peer *torrent.Peer) string {
-	return strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\"")
+	root, _ := path.Split(strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\""))
+	return strings.TrimSuffix(root, "/")
 }
 
 func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diagnostics.SegmentPeer) {

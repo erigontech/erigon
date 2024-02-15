@@ -359,7 +359,7 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool())); err != nil {
+		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, t.Complete.Bool())); err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
@@ -369,7 +369,7 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	select {
 	case <-t.GotInfo():
 		t.AddWebSeeds(ts.Webseeds)
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info(), t.Complete.Bool())); err != nil {
+		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info().Length, t.Complete.Bool())); err != nil {
 			return nil, false, fmt.Errorf("update torrent info %s: %w", ts.DisplayName, err)
 		}
 	default:
@@ -378,13 +378,13 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 			return nil, false, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
 		}
 
-		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool()))
+		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, t.Complete.Bool()))
 	}
 
 	return t, true, nil
 }
 
-func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Info, completed bool) func(tx kv.RwTx) error {
+func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completed bool) func(tx kv.RwTx) error {
 	return func(tx kv.RwTx) error {
 		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileName))
 
@@ -404,8 +404,7 @@ func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Inf
 			info.Completed = nil
 		}
 
-		if fileInfo != nil {
-			length := fileInfo.Length
+		if length > 0 {
 			info.Length = &length
 		}
 
