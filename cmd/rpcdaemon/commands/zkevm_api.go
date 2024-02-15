@@ -537,12 +537,15 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		if err != nil {
 			return nil, err
 		}
+		emptyHash := libcommon.Hash{}
 
-		blockGerUpdate := dstypes.GerUpdate{
-			GlobalExitRoot: blockGer,
-			Timestamp:      block.Header().Time,
+		if blockGer != emptyHash {
+			blockGerUpdate := dstypes.GerUpdate{
+				GlobalExitRoot: blockGer,
+				Timestamp:      block.Header().Time,
+			}
+			gers = append(gers, &blockGerUpdate)
 		}
-		gers = append(gers, &blockGerUpdate)
 
 		for _, ger := range gers {
 			// [zkevm] - add GER if there is one for this batch
