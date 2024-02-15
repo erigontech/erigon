@@ -1162,6 +1162,9 @@ type MergedFilesV3 struct {
 
 func (mf MergedFilesV3) FrozenList() (frozen []string) {
 	for id, d := range mf.d {
+		if d == nil {
+			continue
+		}
 		frozen = append(frozen, d.decompressor.FileName())
 
 		if mf.dHist[id] != nil && mf.dHist[id].frozen {
