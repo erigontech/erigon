@@ -174,7 +174,7 @@ func (cc *ExecutionClientRpc) SupportInsertion() bool {
 	return false
 }
 
-func (cc *ExecutionClientRpc) InsertBlocks([]*types.Block) error {
+func (cc *ExecutionClientRpc) InsertBlocks([]*types.Block, bool) error {
 	panic("unimplemented")
 }
 

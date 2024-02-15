@@ -1165,7 +1165,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			continue
 		}
 		if sn.to <= blockHeight {
-			continue
+			break
 		}
 
 		idxBorTxnHash := sn.Index()

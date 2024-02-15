@@ -1164,6 +1164,12 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 }
 
 func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
+
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.snapshots()
 
@@ -1226,7 +1232,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	}
 
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
-		br.logger.Info("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
+		br.logger.Trace("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 		if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
 			return err
 		}
@@ -1234,7 +1240,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
-			br.logger.Info("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
+			br.logger.Trace("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
 			if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
 				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) }); err != nil {
 				return err
@@ -1244,8 +1250,6 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 
 	return nil
 }
-
-const blockRetireAllowedWeight int64 = 1
 
 func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) {
 	if maxBlockNum > br.maxScheduledBlock.Load() {

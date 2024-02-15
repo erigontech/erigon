@@ -23,7 +23,6 @@ import (
 type TxTask struct {
 	TxNum           uint64
 	BlockNum        uint64
-	BlockRoot       libcommon.Hash
 	Rules           *chain.Rules
 	Header          *types.Header
 	Txs             types.Transactions
@@ -63,6 +62,17 @@ type TxTask struct {
 	// Need investigate if we can pass here - only limited amount of receipts
 	// And remove this field if possible - because it will make problems for parallel-execution
 	BlockReceipts types.Receipts
+}
+
+func (t *TxTask) Reset() {
+	t.BalanceIncreaseSet = nil
+	returnReadList(t.ReadLists)
+	t.ReadLists = nil
+	returnWriteList(t.WriteLists)
+	t.WriteLists = nil
+	t.Logs = nil
+	t.TraceFroms = nil
+	t.TraceTos = nil
 }
 
 // TxTaskQueue non-thread-safe priority-queue
@@ -130,9 +140,9 @@ func (q *QueueWithRetry) Len() (l int) { return q.RetriesLen() + len(q.newTasks)
 // Expecting already-ordered tasks.
 func (q *QueueWithRetry) Add(ctx context.Context, t *TxTask) {
 	select {
-	case q.newTasks <- t:
 	case <-ctx.Done():
 		return
+	case q.newTasks <- t:
 	}
 }
 
@@ -255,9 +265,9 @@ func NewResultsQueue(newTasksLimit, queueLimit int) *ResultsQueue {
 // Add result of execution. May block when internal channel is full
 func (q *ResultsQueue) Add(ctx context.Context, task *TxTask) error {
 	select {
-	case q.resultCh <- task: // Needs to have outside of the lock
 	case <-ctx.Done():
 		return ctx.Err()
+	case q.resultCh <- task: // Needs to have outside of the lock
 	}
 	return nil
 }

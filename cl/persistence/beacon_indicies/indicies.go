@@ -1,15 +1,39 @@
 package beacon_indicies
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"sync"
 
+	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
+	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	_ "modernc.org/sqlite"
 )
+
+// make a buffer pool
+var bufferPool = &sync.Pool{
+	New: func() interface{} {
+		return new(bytes.Buffer)
+	},
+}
+
+// make a zstd writer pool
+var zstdWriterPool = &sync.Pool{
+	New: func() interface{} {
+		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		if err != nil {
+			panic(err)
+		}
+		return encoder
+	},
+}
 
 func WriteHighestFinalized(tx kv.RwTx, slot uint64) error {
 	return tx.Put(kv.HighestFinalized, kv.HighestFinalizedKey, base_encoding.Encode64ToBytes4(slot))
@@ -258,6 +282,93 @@ func ReadBeaconBlockRootsInSlotRange(ctx context.Context, tx kv.Tx, fromSlot, co
 		slots = append(slots, base_encoding.Decode64FromBytes4(k))
 	}
 	return blockRoots, slots, err
+}
+
+func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock) error {
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+	// take a buffer and encoder
+	buf := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(buf)
+	encoder := zstdWriterPool.Get().(*zstd.Encoder)
+	defer zstdWriterPool.Put(encoder)
+	buf.Reset()
+	encoder.Reset(buf)
+	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)
+	if err != nil {
+		return err
+	}
+	if err := encoder.Flush(); err != nil {
+		return err
+	}
+	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), libcommon.Copy(buf.Bytes())); err != nil {
+		return err
+	}
+	return nil
+}
+
+func WriteBeaconBlockAndIndicies(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeaconBlock, canonical bool) error {
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
+	}
+
+	if err := WriteBeaconBlock(ctx, tx, block); err != nil {
+		return err
+	}
+
+	bodyRoot, err := block.Block.Body.HashSSZ()
+	if err != nil {
+		return err
+	}
+	if block.Version() >= clparams.BellatrixVersion {
+		if err := WriteExecutionBlockNumber(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockNumber); err != nil {
+			return err
+		}
+		if err := WriteExecutionBlockHash(tx, blockRoot, block.Block.Body.ExecutionPayload.BlockHash); err != nil {
+			return err
+		}
+	}
+
+	if err := WriteBeaconBlockHeaderAndIndicies(ctx, tx, &cltypes.SignedBeaconBlockHeader{
+		Signature: block.Signature,
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:          block.Block.Slot,
+			ParentRoot:    block.Block.ParentRoot,
+			ProposerIndex: block.Block.ProposerIndex,
+			Root:          block.Block.StateRoot,
+			BodyRoot:      bodyRoot,
+		},
+	}, canonical); err != nil {
+		return err
+	}
+	return nil
+}
+
+func PruneBlocks(ctx context.Context, tx kv.RwTx, to uint64) error {
+	cursor, err := tx.RwCursor(kv.BeaconBlocks)
+	if err != nil {
+		return err
+	}
+	for k, _, err := cursor.First(); err == nil && k != nil; k, _, err = cursor.Prev() {
+		if len(k) != 40 {
+			continue
+		}
+		slot, err := dbutils.DecodeBlockNumber(k[:8])
+		if err != nil {
+			return err
+		}
+		if slot >= to {
+			break
+		}
+		if err := cursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+	return nil
+
 }
 
 func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot libcommon.Hash) (*cltypes.SignedBeaconBlockHeader, bool, error) {
