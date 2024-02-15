@@ -91,7 +91,7 @@ func (c *RCloneClient) start(logger log.Logger) error {
 		ctx, cancel := context.WithCancel(context.Background())
 
 		addr := fmt.Sprintf("127.0.0.1:%d", p)
-		c.rclone = exec.CommandContext(ctx, rclone, "rcd", "--rc-addr", addr, "--rc-no-auth")
+		c.rclone = exec.CommandContext(ctx, rclone, "rcd", "--rc-addr", addr, "--rc-no-auth", "--multi-thread-streams", "1")
 		c.rcloneUrl = "http://" + addr
 		c.rcloneSession = &http.Client{} // no timeout - we're doing sync calls
 
