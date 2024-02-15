@@ -449,6 +449,9 @@ func (a *ApiHandler) GetEthV1BeaconValidatorsBalances(w http.ResponseWriter, r *
 		if err != nil {
 			return nil, err
 		}
+		if balances == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validators not found, node may node be running in archivial node"))
+		}
 		return responseValidatorsBalances(filterIndicies, stateEpoch, balances, true)
 	}
 	balances, err := a.forkchoiceStore.GetBalances(blockRoot)

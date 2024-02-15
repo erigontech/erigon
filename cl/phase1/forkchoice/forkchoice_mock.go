@@ -229,3 +229,7 @@ func (f *ForkChoiceStorageMock) GetPreviousPartecipationIndicies(blockRoot libco
 func (f *ForkChoiceStorageMock) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
 	panic("implement me")
 }
+
+func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	panic("implement me")
+}

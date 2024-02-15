@@ -99,6 +99,7 @@ type forkGraphDisk struct {
 	validatorSetStorage     *diffstorage.ChainDiffStorage
 	inactivityScoresStorage *diffstorage.ChainDiffStorage
 	previousIndicies        sync.Map
+	currentIndicies         sync.Map
 
 	// configurations
 	beaconCfg   *clparams.BeaconChainConfig
@@ -237,6 +238,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	}
 	if block.Version() != clparams.Phase0Version {
 		f.previousIndicies.Store(libcommon.Hash(blockRoot), libcommon.Copy(newState.RawPreviousEpochParticipation()))
+		f.currentIndicies.Store(libcommon.Hash(blockRoot), libcommon.Copy(newState.RawCurrentEpochParticipation()))
 	}
 	// update diff storages.
 	f.balancesStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevDumpBalances, newState.RawBalances(), epochCross)
@@ -413,6 +415,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.validatorSetStorage.Delete(root)
 		f.inactivityScoresStorage.Delete(root)
 		f.previousIndicies.Delete(root)
+		f.currentIndicies.Delete(root)
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
@@ -488,6 +491,18 @@ func (f *forkGraphDisk) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.U
 
 func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
 	b, ok := f.previousIndicies.Load(blockRoot)
+	if !ok {
+		return nil, nil
+	}
+	if len(b.([]byte)) == 0 {
+		return nil, nil
+	}
+	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	return out, out.DecodeSSZ(b.([]byte), 0)
+}
+
+func (f *forkGraphDisk) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	b, ok := f.currentIndicies.Load(blockRoot)
 	if !ok {
 		return nil, nil
 	}

@@ -35,6 +35,9 @@ type ApiHandler struct {
 
 	// pools
 	randaoMixesPool sync.Pool
+
+	// caches
+	lighthouseInclusionCache sync.Map
 }
 
 func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string) *ApiHandler {
@@ -51,8 +54,11 @@ func (a *ApiHandler) Init() {
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
-	// This is the set of apis for validation + otterscan
-	// otterscn specific ones are commented as such
+
+	r.Route("/lighthouse", func(r chi.Router) {
+		r.Get("/validator_inclusion/{epoch}/global", beaconhttp.HandleEndpointFunc(a.GetLighthouseValidatorInclusionGlobal))
+		r.Get("/validator_inclusion/{epoch}/{validator_id}", beaconhttp.HandleEndpointFunc(a.GetLighthouseValidatorInclusion))
+	})
 	r.Route("/eth", func(r chi.Router) {
 		r.Route("/v1", func(r chi.Router) {
 			r.Get("/builder/states/{state_id}/expected_withdrawals", beaconhttp.HandleEndpointFunc(a.GetEth1V1BuilderStatesExpectedWithdrawals))

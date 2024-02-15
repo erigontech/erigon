@@ -484,3 +484,7 @@ func (f *ForkChoiceStore) GetPreviousPartecipationIndicies(blockRoot libcommon.H
 func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
 	return f.forkGraph.GetValidatorSet(blockRoot)
 }
+
+func (f *ForkChoiceStore) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	return f.forkGraph.GetCurrentPartecipationIndicies(blockRoot)
+}
