@@ -7,7 +7,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/tidwall/btree"
@@ -72,64 +71,40 @@ func (b *BeaconRpcSource) PurgeRange(ctx context.Context, _ kv.Tx, from uint64, 
 var _ BlockSource = (*GossipSource)(nil)
 
 type GossipSource struct {
-	gossip       *network.GossipManager
-	gossipBlocks <-chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]
-
 	mu     sync.Mutex
-	blocks *btree.Map[uint64, chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]]
+	blocks *btree.Map[uint64, []*peers.PeeredObject[*cltypes.SignedBeaconBlock]]
 }
 
 func (*GossipSource) GetBlock(ctx context.Context, tx kv.Tx, slot uint64) (*peers.PeeredObject[*cltypes.SignedBeaconBlock], error) {
 	panic("unimplemented")
 }
 
-func NewGossipSource(ctx context.Context, gossip *network.GossipManager) *GossipSource {
+func NewGossipSource(ctx context.Context) *GossipSource {
 	g := &GossipSource{
-		gossip:       gossip,
-		gossipBlocks: gossip.SubscribeSignedBeaconBlocks(ctx),
-		blocks:       btree.NewMap[uint64, chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]](32),
+		blocks: btree.NewMap[uint64, []*peers.PeeredObject[*cltypes.SignedBeaconBlock]](32),
 	}
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case recv := <-g.gossipBlocks:
-				ch := g.grabOrCreate(ctx, recv.Data.Block.Slot)
-				select {
-				case ch <- recv:
-				default:
-				}
-			}
-		}
-	}()
+
 	return g
 }
 
-func (b *GossipSource) grabOrCreate(ctx context.Context, id uint64) chan *peers.PeeredObject[*cltypes.SignedBeaconBlock] {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	ch, ok := b.blocks.Get(id)
+func (b *GossipSource) InsertBlock(ctx context.Context, block *peers.PeeredObject[*cltypes.SignedBeaconBlock]) {
+	current, ok := b.blocks.Get(block.Data.Block.Slot)
 	if !ok {
-		ch = make(chan *peers.PeeredObject[*cltypes.SignedBeaconBlock], 3)
-		b.blocks.Set(id, ch)
+		current = make([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, 1)
 	}
-	// if there are ever more than 512 blocks, clear the last 256 blocks
-	if b.blocks.Len() > 512 {
-		b.purgeRange(ctx, nil, 0, id-256)
-	}
-	return ch
+	current = append(current, block)
+	b.blocks.Set(block.Data.Block.Slot, current)
 }
+
 func (b *GossipSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	out := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}
 	for i := from; i < from+count; i++ {
-		ch := b.grabOrCreate(ctx, i)
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case item := <-ch:
-			out.Data = append(out.Data, item.Data)
-			out.Peer = item.Peer
+		current, ok := b.blocks.Get(i)
+		if !ok {
+			continue
+		}
+		for _, v := range current {
+			out.Data = append(out.Data, v.Data)
 		}
 	}
 	return out, nil
@@ -147,7 +122,7 @@ func (b *GossipSource) purgeRange(ctx context.Context, _ kv.Tx, from uint64, cou
 		initSize = 256
 	}
 	xs := make([]uint64, 0, initSize)
-	b.blocks.Ascend(from, func(key uint64, value chan *peers.PeeredObject[*cltypes.SignedBeaconBlock]) bool {
+	b.blocks.Ascend(from, func(key uint64, value []*peers.PeeredObject[*cltypes.SignedBeaconBlock]) bool {
 		if key >= from+count {
 			return false
 		}

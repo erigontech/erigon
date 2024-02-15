@@ -45,6 +45,7 @@ type ForkChoiceStorageReader interface {
 	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
 }
 
 type ForkChoiceStorageWriter interface {

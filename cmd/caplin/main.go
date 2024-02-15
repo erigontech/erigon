@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -116,8 +115,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			Root: cfg.RecordDir,
 		}
 	}
-	rawBeaconBlockChainDb, _ := persistence.AferoRawBeaconBlockChainFromOsPath(cfg.BeaconCfg, cfg.Dirs.CaplinHistory)
-	historyDB, indiciesDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, rawBeaconBlockChainDb, cfg.Dirs.CaplinIndexing, executionEngine, false)
+	indiciesDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.Dirs.CaplinIndexing, executionEngine, false)
 	if err != nil {
 		return err
 	}
@@ -137,5 +135,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		AllowedOrigins:   cfg.AllowedOrigins,
 		AllowedMethods:   cfg.AllowedMethods,
 		AllowCredentials: cfg.AllowCredentials,
-	}, nil, nil, false, false, historyDB, indiciesDB, nil, blockSnapBuildSema)
+	}, nil, nil, false, false, indiciesDB, nil, blockSnapBuildSema)
 }

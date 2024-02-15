@@ -97,8 +97,7 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 	}
 	f.mu.Unlock()
 
-	activeIndicies := targetState.getActiveIndicies(epoch)
-	activeIndiciesLength := uint64(len(activeIndicies))
+	activeIndiciesLength := uint64(len(targetState.shuffledSet))
 
 	count := targetState.committeeCount(epoch, activeIndiciesLength) * f.beaconCfg.SlotsPerEpoch
 	start := (activeIndiciesLength * committeeIndex) / count

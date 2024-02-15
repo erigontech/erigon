@@ -12,7 +12,6 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -34,7 +33,6 @@ type Antiquary struct {
 	snReader        freezeblocks.BeaconSnapshotReader
 	snBuildSema     *semaphore.Weighted // semaphore for building only one type (blocks, caplin, v3) at a time
 	ctx             context.Context
-	beaconDB        persistence.BlockSource
 	backfilled      *atomic.Bool
 	cfg             *clparams.BeaconChainConfig
 	states, blocks  bool
@@ -46,7 +44,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, beaconDB persistence.BlockSource, logger log.Logger, states, blocks bool, fs afero.Fs, snBuildSema *semaphore.Weighted) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks bool, fs afero.Fs, snBuildSema *semaphore.Weighted) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
@@ -55,7 +53,6 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 		downloader:      downloader,
 		logger:          logger,
 		sn:              sn,
-		beaconDB:        beaconDB,
 		ctx:             ctx,
 		backfilled:      backfilled,
 		cfg:             cfg,
@@ -158,7 +155,7 @@ func (a *Antiquary) Loop() error {
 
 	frozenSlots := a.sn.BlocksAvailable()
 	if frozenSlots != 0 {
-		if err := a.beaconDB.PurgeRange(a.ctx, tx, 0, frozenSlots); err != nil {
+		if err := beacon_indicies.PruneBlocks(a.ctx, tx, frozenSlots); err != nil {
 			return err
 		}
 	}
@@ -238,19 +235,25 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 	}
 
 	log.Info("[Antiquary]: Antiquating", "from", from, "to", to)
-	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, a.beaconDB, from, to, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
+	if err := freezeblocks.DumpBeaconBlocks(a.ctx, a.mainDB, from, to, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
-
-	roTx, err := a.mainDB.BeginRo(a.ctx)
+	tx, err := a.mainDB.BeginRw(a.ctx)
 	if err != nil {
 		return err
 	}
-	defer roTx.Rollback()
-	if err := a.beaconDB.PurgeRange(a.ctx, roTx, from, to-from-1); err != nil {
+	defer tx.Rollback()
+
+	if err := beacon_indicies.PruneBlocks(a.ctx, tx, to); err != nil {
 		return err
 	}
-	roTx.Rollback()
+	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -267,15 +270,7 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		log.Warn("[Antiquary]: Failed to add items to bittorent", "err", err)
 	}
 
-	tx, err := a.mainDB.BeginRw(a.ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	a.validatorsTable.SetSlot(to)
-	if err := beacon_indicies.WriteLastBeaconSnapshot(tx, to-1); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 
