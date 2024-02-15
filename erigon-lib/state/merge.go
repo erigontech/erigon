@@ -27,17 +27,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (d *Domain) endTxNumMinimax() uint64 {
@@ -425,6 +424,9 @@ func (ic *InvertedIndexContext) staticFilesInRange(startTxNum, endTxNum uint64) 
 	for _, f := range files {
 		if f == nil {
 			panic("must not happen")
+		}
+		if f.decompressor == nil {
+			panic("must not happen12")
 		}
 	}
 
@@ -1167,52 +1169,69 @@ func (ic *InvertedIndexContext) frozenTo() uint64 {
 	return 0
 }
 
-func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem) {
+func (dc *DomainContext) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem) {
 	if mergedHist != nil && mergedHist.frozen {
-		d.History.cleanAfterFreeze(mergedHist.endTxNum)
+		dc.d.History.cleanAfterFreeze(mergedHist, mergedIdx)
 	}
 	if mergedDomain == nil {
 		return
 	}
 	var outs []*filesItem
-	mergedFrom, mergedTo := mergedDomain.startTxNum, mergedDomain.endTxNum
 	// `kill -9` may leave some garbage
 	// but it may be useful for merges, until merge `frozen` file
-	d.files.Walk(func(items []*filesItem) bool {
+	dc.d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.startTxNum > mergedFrom && item.endTxNum < mergedTo {
+			if item.frozen {
+				continue
+			}
+			if item.isSubsetOf(mergedDomain) {
 				outs = append(outs, item)
 			}
-			//TODO: domain doesn't have .frozen flag. Somehow need delete all earlier sub-sets, but keep largest one.
+			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
+			//if item.isBefore(mergedDomain) && dc.hasCoverFile(item) {
+			//	outs = append(outs, item)
+			//}
 		}
 		return true
 	})
 
 	for _, out := range outs {
 		if out == nil {
-			panic("must not happen: " + d.filenameBase)
+			panic("must not happen: " + dc.d.filenameBase)
 		}
-		d.files.Delete(out)
+		dc.d.files.Delete(out)
 		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
-			if d.filenameBase == traceFileLife && out.decompressor != nil {
-				d.logger.Info(fmt.Sprintf("[agg] cleanAfterFreeze remove: %s\n", out.decompressor.FileName()))
+			if dc.d.filenameBase == traceFileLife && out.decompressor != nil {
+				dc.d.logger.Info(fmt.Sprintf("[agg] cleanAfterFreeze remove: %s\n", out.decompressor.FileName()))
 			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
 		} else {
-			if d.filenameBase == traceFileLife && out.decompressor != nil {
-				d.logger.Warn(fmt.Sprintf("[agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
+			if dc.d.filenameBase == traceFileLife && out.decompressor != nil {
+				dc.d.logger.Warn(fmt.Sprintf("[agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
 			}
 		}
 	}
 }
 
+func (dc *DomainContext) hasCoverFile(item *filesItem) bool {
+	for _, f := range dc.files {
+		if item.isSubsetOf(f.src) {
+			return true
+		}
+	}
+	return false
+}
+
 // cleanAfterFreeze - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (h *History) cleanAfterFreeze(frozenTo uint64) {
-	if frozenTo == 0 {
+func (h *History) cleanAfterFreeze(merged, mergedIdx *filesItem) {
+	if merged == nil {
+		return
+	}
+	if merged.endTxNum == 0 {
 		return
 	}
 	//if h.filenameBase == "accounts" {
@@ -1223,10 +1242,15 @@ func (h *History) cleanAfterFreeze(frozenTo uint64) {
 	// but it may be useful for merges, until merge `frozen` file
 	h.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.frozen || item.endTxNum > frozenTo {
+			if item.frozen {
 				continue
 			}
-			outs = append(outs, item)
+			if item.isSubsetOf(merged) {
+				outs = append(outs, item)
+			}
+			if item.isBefore(merged) { //garbage after prev merges
+				outs = append(outs, item)
+			}
 		}
 		return true
 	})
@@ -1253,12 +1277,15 @@ func (h *History) cleanAfterFreeze(frozenTo uint64) {
 		}
 		h.files.Delete(out)
 	}
-	h.InvertedIndex.cleanAfterFreeze(frozenTo)
+	h.InvertedIndex.cleanAfterFreeze(mergedIdx)
 }
 
 // cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
-	if frozenTo == 0 {
+func (ii *InvertedIndex) cleanAfterFreeze(merged *filesItem) {
+	if merged == nil {
+		return
+	}
+	if merged.endTxNum == 0 {
 		return
 	}
 	var outs []*filesItem
@@ -1266,10 +1293,15 @@ func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
 	// but it may be useful for merges, until merge `frozen` file
 	ii.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.frozen || item.endTxNum > frozenTo {
+			if item.frozen {
 				continue
 			}
-			outs = append(outs, item)
+			if item.isSubsetOf(merged) {
+				outs = append(outs, item)
+			}
+			if item.isBefore(merged) { //garbage after prev merges
+				outs = append(outs, item)
+			}
 		}
 		return true
 	})

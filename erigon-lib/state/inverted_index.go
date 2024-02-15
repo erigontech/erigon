@@ -1817,9 +1817,11 @@ func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uin
 	if asserts && ii.withExistenceIndex && sf.existence == nil {
 		panic(fmt.Errorf("assert: no existence index: %s", sf.decomp.FileName()))
 	}
+	if sf.decomp == nil {
+		panic(fmt.Sprintf("m? %s", ii.filenameBase))
+	}
 
 	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
-
 	fi := newFilesItem(txNumFrom, txNumTo, ii.aggregationStep)
 	fi.decompressor = sf.decomp
 	fi.index = sf.index

@@ -581,6 +581,7 @@ Loop:
 func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, err error) {
 	a.logger.Debug("[agg] merge", "collate_workers", a.collateAndBuildWorkers, "merge_workers", a.mergeWorkers, "compress_workers", a.d[kv.AccountsDomain].compressWorkers)
 
+	//TODO: each domain merge - must create own `ac` to free disk space earlier
 	ac := a.MakeContext()
 	defer ac.Close()
 	mxRunningMerges.Inc()
@@ -1096,7 +1097,6 @@ func (ac *AggregatorV3Context) staticFilesInRange(r RangesV3) (sf SelectedStatic
 	for id := range ac.d {
 		if r.d[id].any() {
 			sf.d[id], sf.dIdx[id], sf.dHist[id], sf.dI[id] = ac.d[id].staticFilesInRange(r.d[id])
-
 		}
 	}
 	if r.logAddrs {
@@ -1195,7 +1195,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				if err != nil {
 					return err
 				}
-				ac.a.integrateMergedDomainFiles(ac.a.d[id], files.d[id], files.dIdx[id], files.dHist[id], mf.d[id], mf.dIdx[id], mf.dHist[id])
+				ac.a.integrateMergedDomainFiles(ac.d[id], files.d[id], files.dIdx[id], files.dHist[id], mf.d[id], mf.dIdx[id], mf.dHist[id])
 				return nil
 			})
 		}
@@ -1204,9 +1204,6 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.logAddrs {
 		g.Go(func() error {
 			var err error
-			for i, j := range files.logAddrs {
-				fmt.Printf("[dbg] logAddrs: %d, %+v, %t\n", i, j, r.logAddrs)
-			}
 			mf.logAddrs, err = ac.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
 			if err != nil {
 				return err
@@ -1262,33 +1259,16 @@ func (a *AggregatorV3) integrateMergedIdxFiles(idx *InvertedIndex, outs []*files
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
 	idx.integrateMergedFiles(outs, in)
-	idx.cleanAfterFreeze(in.endTxNum)
+	idx.cleanAfterFreeze(in)
 }
-func (a *AggregatorV3) integrateMergedDomainFiles(d *Domain, valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
+func (a *AggregatorV3) integrateMergedDomainFiles(dc *DomainContext, valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
-	d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-	d.cleanAfterFreeze(valuesIn, historyIn, indexIn)
+	dc.d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+	dc.cleanAfterFreeze(valuesIn, historyIn, indexIn)
 	return
-}
-func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
-	for id, d := range a.d {
-		d.cleanAfterFreeze(in.d[id], in.dHist[id], in.dIdx[id])
-	}
-	if in.logAddrs != nil && in.logAddrs.frozen {
-		a.logAddrs.cleanAfterFreeze(in.logAddrs.endTxNum)
-	}
-	if in.logTopics != nil && in.logTopics.frozen {
-		a.logTopics.cleanAfterFreeze(in.logTopics.endTxNum)
-	}
-	if in.tracesFrom != nil && in.tracesFrom.frozen {
-		a.tracesFrom.cleanAfterFreeze(in.tracesFrom.endTxNum)
-	}
-	if in.tracesTo != nil && in.tracesTo.frozen {
-		a.tracesTo.cleanAfterFreeze(in.tracesTo.endTxNum)
-	}
 }
 
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
