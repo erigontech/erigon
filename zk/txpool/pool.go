@@ -292,6 +292,11 @@ type TxPool struct {
 	blockGasLimit           atomic.Uint64
 	shanghaiTime            *big.Int
 	isPostShanghai          atomic.Bool
+
+	// we cannot be in a flushing state whilst getting transactions from the pool, so we have this mutex which is
+	// exposed publicly so anything wanting to get "best" transactions can ensure a flush isn't happening and
+	// vice versa
+	flushMtx *sync.Mutex
 }
 
 func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
@@ -333,6 +338,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteTxs:    &types.TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		shanghaiTime:            shanghaiTime,
+		flushMtx:                &sync.Mutex{},
 	}, nil
 }
 
@@ -1070,6 +1076,14 @@ func (p *TxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) {
 	return p.all.nonce(senderID)
 }
 
+func (p *TxPool) LockFlusher() {
+	p.flushMtx.Lock()
+}
+
+func (p *TxPool) UnlockFlusher() {
+	p.flushMtx.Unlock()
+}
+
 // removeMined - apply new highest block (or batch of blocks)
 //
 // 1. New best block arrives, which potentially changes the balance and the nonce of some senders.
@@ -1208,7 +1222,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 	for {
 		select {
 		case <-ctx.Done():
+			p.LockFlusher()
 			_, _ = p.flush(ctx, db)
+			p.UnlockFlusher()
 			return
 		case <-logEvery.C:
 			p.logStats()
@@ -1228,7 +1244,9 @@ func MainLoop(ctx context.Context, db kv.RwDB, coreDB kv.RoDB, p *TxPool, newTxs
 		case <-commitEvery.C:
 			if db != nil && p.Started() {
 				t := time.Now()
+				p.LockFlusher()
 				written, err := p.flush(ctx, db)
+				p.UnlockFlusher()
 				if err != nil {
 					log.Error("[txpool] flush is local history", "err", err)
 					continue

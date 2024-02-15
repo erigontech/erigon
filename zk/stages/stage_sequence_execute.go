@@ -262,6 +262,7 @@ func SpawnSequencingStage(
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
 		default:
+			cfg.txPool.LockFlusher()
 			if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
 				slots := types2.TxsRlp{}
 				_, count, err := cfg.txPool.YieldBest(1, &slots, poolTx, executionAt, blockGasLimit, yielded)
@@ -299,6 +300,7 @@ func SpawnSequencingStage(
 			}); err != nil {
 				log.Error(fmt.Sprintf("error loading txpool view: %v", err))
 			}
+			cfg.txPool.UnlockFlusher()
 		}
 	}
 
