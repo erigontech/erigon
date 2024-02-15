@@ -870,7 +870,10 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 // ResetPruneProgress invalidates all pruning progress.
 // Needed in case of any unwinding or resetting of the DB.
 func (ac *AggregatorV3Context) ResetPruneProgress(rwTx kv.RwTx) error {
-	for _, dc := range []*DomainContext{ac.account, ac.storage, ac.code, ac.commitment} {
+	for _, dc := range ac.d {
+		if dc == nil {
+			continue
+		}
 		if err := SaveExecV3PruneProgress(rwTx, dc.d.keysTable, nil); err != nil {
 			return fmt.Errorf("save domain pruning progress: %s, %w", dc.d.filenameBase, err)
 		}
