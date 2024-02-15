@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"io/fs"
 	"math/big"
 	"math/rand"
@@ -465,7 +466,7 @@ func randomAccount(t *testing.T) (*accounts.Account, libcommon.Address) {
 }
 
 func TestCommit(t *testing.T) {
-	t.Skip()
+	//t.Skip()
 	aggStep := uint64(100)
 
 	ctx := context.Background()
@@ -483,35 +484,54 @@ func TestCommit(t *testing.T) {
 	domains := state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 
-	//buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 0)
+	buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 0)
 
-	//addr1 := common.Hex2Bytes("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9")
 	addr2 := libcommon.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
 	loc1 := libcommon.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
+	//addr1 := libcommon.Hex2Bytes("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9")
 	//err = domains.UpdateAccountData(addr2, buf, nil)
 	//require.NoError(t, err)
 
-	for i := 1; i < 3; i++ {
-		ad := libcommon.CopyBytes(addr2)
-		ad[0] = byte(i)
+	//for i := 1; i < 3; i++ {
+	ad := libcommon.CopyBytes(addr2)
+	//ad[0] = byte(i)
 
-		//err = domains.UpdateAccountData(ad, buf, nil)
-		//require.NoError(t, err)
-		//
-		err = domains.DomainPut(kv.StorageDomain, ad, loc1, []byte("0401"), nil, 0)
-		require.NoError(t, err)
-	}
+	err = domains.DomainPut(kv.AccountsDomain, ad, nil, buf, nil, 0)
+	require.NoError(t, err)
+	_ = loc1
+
+	err = domains.DomainPut(kv.StorageDomain, ad, loc1, []byte("0401"), nil, 0)
+	require.NoError(t, err)
+
+	loc1[0] = 0x01
+	err = domains.DomainPut(kv.StorageDomain, ad, loc1, []byte("0401"), nil, 0)
+	require.NoError(t, err)
+	//}
 
 	//err = domains.WriteAccountStorage(addr2, loc1, []byte("0401"), nil)
 	//require.NoError(t, err)
 
+	domains.SetTrace(true)
 	domainsHash, err := domains.ComputeCommitment(ctx, true, domains.BlockNum(), "")
 	require.NoError(t, err)
 	err = domains.Flush(ctx, tx)
 	require.NoError(t, err)
 
+	it, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).DomainRangeLatest(tx, kv.StorageDomain, nil, nil, -1)
+	if err != nil {
+		panic(err)
+	}
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("SSTORAGE %x: %x\n", k, v)
+	}
+	fmt.Printf("storage iter done\n")
+
 	core.GenerateTrace = true
-	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true, false)
+	oldHash, err := core.CalcHashRootForTests(tx, &types.Header{Number: big.NewInt(1)}, true, true)
 	require.NoError(t, err)
 
 	t.Logf("old hash %x\n", oldHash)
