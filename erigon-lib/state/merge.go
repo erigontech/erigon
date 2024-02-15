@@ -1142,7 +1142,7 @@ func (dc *DomainContext) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *fi
 		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
 			if dc.d.filenameBase == traceFileLife && out.decompressor != nil {
-				dc.d.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s\n", out.decompressor.FileName()))
+				dc.d.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
 			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
@@ -1175,12 +1175,12 @@ func (hc *HistoryContext) cleanAfterMerge(merged, mergedIdx *filesItem) {
 		// if it has no readers (invisible even for us) - it's safe to remove file right here
 		if out.refcount.Load() == 0 {
 			if hc.h.filenameBase == traceFileLife && out.decompressor != nil {
-				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s\n", out.decompressor.FileName()))
+				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
 			}
 			out.closeFilesAndRemove()
 		} else {
 			if hc.h.filenameBase == traceFileLife && out.decompressor != nil {
-				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s\n", out.decompressor.FileName()))
+				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s", out.decompressor.FileName()))
 			}
 		}
 	}
@@ -1204,7 +1204,7 @@ func (ic *InvertedIndexContext) cleanAfterMerge(merged *filesItem) {
 		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
 			if ic.ii.filenameBase == traceFileLife && out.decompressor != nil {
-				ic.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s\n", out.decompressor.FileName()))
+				ic.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
 			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
