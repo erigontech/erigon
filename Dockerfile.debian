@@ -16,7 +16,6 @@ RUN --mount=type=cache,target=/root/.cache \
     --mount=type=cache,target=/go/pkg/mod \
     make all
 
-
 FROM docker.io/library/golang:1.19-alpine3.16 AS tools-builder
 
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
@@ -75,6 +74,8 @@ COPY --from=builder /app/build/bin/sentry /usr/local/bin/sentry
 COPY --from=builder /app/build/bin/state /usr/local/bin/state
 COPY --from=builder /app/build/bin/txpool /usr/local/bin/txpool
 COPY --from=builder /app/build/bin/verkle /usr/local/bin/verkle
+
+COPY --from=builder /go/pkg/mod /go/pkg/mod
 
 EXPOSE 8545 \
        8551 \
