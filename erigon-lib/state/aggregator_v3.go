@@ -770,12 +770,12 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	for {
 		stat, err := ac.Prune(context.Background(), tx, pruneLimit, aggLogEvery)
 		if err != nil {
-			log.Warn("[snapshots] PruneSmallBatches", "err", err)
+			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return err
 		}
 		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
-				log.Info("[snapshots] PruneSmallBatches", "took", time.Since(started).String(), "stat", fstat)
+				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
 			return nil
 		}
@@ -783,7 +783,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 
 		select {
 		case <-logEvery.C:
-			ac.a.logger.Info("[snapshots] pruning",
+			ac.a.logger.Info("[snapshots] pruning state",
 				"until timeout", time.Until(started.Add(timeout)).String(),
 				"aggregatedStep", (ac.maxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
@@ -1239,7 +1239,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	for id := range ac.d {
 		id := id
 		if r.d[id].any() {
-			log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
+			log.Info(fmt.Sprintf("[snapshots] merge: %s", r.d[id].String()))
 			g.Go(func() (err error) {
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], ac.a.ps)
 				return err

@@ -782,25 +782,12 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Prune state history")
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 10000; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			logEvery := time.NewTicker(30 * time.Second)
-			defer logEvery.Stop()
-
-			cc := context.Background()
-			err = ac.ResetPruneProgress(tx) // reset previous prune progress to make it a "clean run"
-			if err != nil {
-				return err
-			}
-			stat, err := ac.Prune(cc, tx, math.MaxUint64, logEvery)
-			if err != nil {
-				return err
-			}
-			logger.Info("prune finished", "stat", stat.String())
-			return err
+			return ac.PruneSmallBatches(context.Background(), time.Minute, tx)
 		}); err != nil {
 			return err
 		}
@@ -851,6 +838,16 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
+	for i := 0; i < 10000; i++ {
+		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+			ac := agg.MakeContext()
+			defer ac.Close()
+
+			return ac.PruneSmallBatches(context.Background(), time.Minute, tx)
+		}); err != nil {
+			return err
+		}
+	}
 
 	if err = agg.MergeLoop(ctx); err != nil {
 		return err
@@ -869,7 +866,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-	logger.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
