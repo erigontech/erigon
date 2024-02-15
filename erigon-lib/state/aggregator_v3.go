@@ -482,24 +482,9 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 		txFrom        = a.FirstTxNumOfStep(step)
 		txTo          = a.FirstTxNumOfStep(step + 1)
 		stepStartedAt = time.Now()
-
-		static          AggV3StaticFiles
-		closeCollations = true
-		collListMu      = sync.Mutex{}
-		collations      = make([]Collation, 0)
 	)
 
 	defer logEvery.Stop()
-	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcMaxTxNum()
-	defer func() {
-		if !closeCollations {
-			return
-		}
-		for _, c := range collations {
-			c.Close()
-		}
-	}()
 
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(a.collateAndBuildWorkers)
@@ -517,9 +502,6 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 			}); err != nil {
 				return fmt.Errorf("domain collation %q has failed: %w", d.filenameBase, err)
 			}
-			collListMu.Lock()
-			collations = append(collations, collation)
-			collListMu.Unlock()
 
 			sf, err := d.buildFiles(ctx, step, collation, a.ps)
 			collation.Close()
@@ -528,15 +510,10 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 				return err
 			}
 
-			dd, err := kv.String2Domain(d.filenameBase)
-			if err != nil {
-				return err
-			}
-			static.d[dd] = sf
+			a.integrateDomainFiles(d, sf, txFrom, txTo)
 			return nil
 		})
 	}
-	closeCollations = false
 
 	// indices are built concurrently
 	for _, d := range []*InvertedIndex{a.logTopics, a.logAddrs, a.tracesFrom, a.tracesTo} {
@@ -558,29 +535,15 @@ func (a *AggregatorV3) buildFiles(ctx context.Context, step uint64) error {
 				sf.CleanupOnError()
 				return err
 			}
-
-			switch d.indexKeysTable {
-			case kv.TblLogTopicsKeys:
-				static.logTopics = sf
-			case kv.TblLogAddressKeys:
-				static.logAddrs = sf
-			case kv.TblTracesFromKeys:
-				static.tracesFrom = sf
-			case kv.TblTracesToKeys:
-				static.tracesTo = sf
-			default:
-				panic("unknown index " + d.indexKeysTable)
-			}
+			a.integrateIdxFiles(d, sf, txFrom, txTo)
 			return nil
 		})
 	}
 
 	if err := g.Wait(); err != nil {
-		static.CleanupOnError()
 		return fmt.Errorf("domain collate-build: %w", err)
 	}
 	mxStepTook.ObserveDuration(stepStartedAt)
-	a.integrateFiles(static, txFrom, txTo)
 	a.logger.Info("[snapshots] aggregated", "step", step, "took", time.Since(stepStartedAt))
 
 	return nil
@@ -667,19 +630,21 @@ func (a *AggregatorV3) MergeLoop(ctx context.Context) error {
 	}
 }
 
-func (a *AggregatorV3) integrateFiles(sf AggV3StaticFiles, txNumFrom, txNumTo uint64) {
+func (a *AggregatorV3) integrateIdxFiles(idx *InvertedIndex, sf InvertedFiles, txNumFrom, txNumTo uint64) {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
 
-	for id, d := range a.d {
-		d.integrateFiles(sf.d[id], txNumFrom, txNumTo)
-	}
-	a.logAddrs.integrateFiles(sf.logAddrs, txNumFrom, txNumTo)
-	a.logTopics.integrateFiles(sf.logTopics, txNumFrom, txNumTo)
-	a.tracesFrom.integrateFiles(sf.tracesFrom, txNumFrom, txNumTo)
-	a.tracesTo.integrateFiles(sf.tracesTo, txNumFrom, txNumTo)
+	idx.integrateFiles(sf, txNumFrom, txNumTo)
+}
+func (a *AggregatorV3) integrateDomainFiles(d *Domain, sf StaticFiles, txNumFrom, txNumTo uint64) {
+	a.filesMutationLock.Lock()
+	defer a.filesMutationLock.Unlock()
+	defer a.needSaveFilesListInDB.Store(true)
+	defer a.recalcMaxTxNum()
+
+	d.integrateFiles(sf, txNumFrom, txNumTo)
 }
 
 func (a *AggregatorV3) HasNewFrozenFiles() bool {
