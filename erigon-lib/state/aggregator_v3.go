@@ -1286,18 +1286,10 @@ func (ac *AggregatorV3Context) cleanAfterMerge(in MergedFilesV3) {
 	for id, d := range ac.d {
 		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 	}
-	if in.logAddrs != nil && in.logAddrs.frozen {
-		ac.logAddrs.cleanAfterMerge(in.logAddrs)
-	}
-	if in.logTopics != nil && in.logTopics.frozen {
-		ac.logTopics.cleanAfterMerge(in.logTopics)
-	}
-	if in.tracesFrom != nil && in.tracesFrom.frozen {
-		ac.tracesFrom.cleanAfterMerge(in.tracesFrom)
-	}
-	if in.tracesTo != nil && in.tracesTo.frozen {
-		ac.tracesTo.cleanAfterMerge(in.tracesTo)
-	}
+	ac.logAddrs.cleanAfterMerge(in.logAddrs)
+	ac.logTopics.cleanAfterMerge(in.logTopics)
+	ac.tracesFrom.cleanAfterMerge(in.tracesFrom)
+	ac.tracesTo.cleanAfterMerge(in.tracesTo)
 }
 
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
