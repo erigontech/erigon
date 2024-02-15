@@ -155,14 +155,17 @@ func NewClient(cfg Config) (*Client, error) {
 
 	gProviders := []ethereum.GasPricer{ethClient}
 
-	l1Conf := params.MainnetChainConfig
-	l2Conf := params.HermezMainnetChainConfig
+	var l1Conf *chain.Config
+	var l2Conf *chain.Config
 
-	// l2s using sepolia l1
-	if cfg.L1ChainID == params.SepoliaChainConfig.ChainID.Uint64() {
+	switch cfg.L1ChainID {
+	case params.MainnetChainConfig.ChainID.Uint64():
+		l1Conf = params.MainnetChainConfig
+		l2Conf = params.HermezMainnetChainConfig
+	case params.SepoliaChainConfig.ChainID.Uint64():
 		l1Conf = params.SepoliaChainConfig
 		l2Conf = params.ChainConfigByChainName(zkchainconfig.GetChainName(cfg.L2ChainID))
-	} else {
+	default:
 		panic(fmt.Sprintf("L1 chain ID %d not supported", cfg.L1ChainID))
 	}
 
