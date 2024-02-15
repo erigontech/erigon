@@ -2503,41 +2503,31 @@ func (sf SelectedStaticFiles) Close() {
 }
 
 type MergedFiles struct {
-	accounts                      *filesItem
-	accountsIdx, accountsHist     *filesItem
-	storage                       *filesItem
-	storageIdx, storageHist       *filesItem
-	code                          *filesItem
-	codeIdx, codeHist             *filesItem
-	commitment                    *filesItem
-	commitmentIdx, commitmentHist *filesItem
+	d     [kv.DomainLen]*filesItem
+	dHist [kv.DomainLen]*filesItem
+	dIdx  [kv.DomainLen]*filesItem
 }
 
 func (mf MergedFiles) FillV3(m *MergedFilesV3) MergedFiles {
-	mf.accounts, mf.accountsIdx, mf.accountsHist = m.accounts, m.accountsIdx, m.accountsHist
-	mf.storage, mf.storageIdx, mf.storageHist = m.storage, m.storageIdx, m.storageHist
-	mf.code, mf.codeIdx, mf.codeHist = m.code, m.codeIdx, m.codeHist
-	mf.commitment, mf.commitmentIdx, mf.commitmentHist = m.commitment, m.commitmentIdx, m.commitmentHist
+	for id := range m.d {
+		mf.d[id], mf.dHist[id], mf.dIdx[id] = m.d[id], m.dHist[id], m.dIdx[id]
+	}
 	return mf
 }
 
 func (mf MergedFiles) Close() {
-	for _, item := range []*filesItem{
-		mf.accounts, mf.accountsIdx, mf.accountsHist,
-		mf.storage, mf.storageIdx, mf.storageHist,
-		mf.code, mf.codeIdx, mf.codeHist,
-		mf.commitment, mf.commitmentIdx, mf.commitmentHist,
-		//mf.logAddrs, mf.logTopics, mf.tracesFrom, mf.tracesTo,
-	} {
-		if item != nil {
-			if item.decompressor != nil {
-				item.decompressor.Close()
-			}
-			if item.decompressor != nil {
-				item.index.Close()
-			}
-			if item.bindex != nil {
-				item.bindex.Close()
+	for id := range mf.d {
+		for _, item := range []*filesItem{mf.d[id], mf.dHist[id], mf.dIdx[id]} {
+			if item != nil {
+				if item.decompressor != nil {
+					item.decompressor.Close()
+				}
+				if item.decompressor != nil {
+					item.index.Close()
+				}
+				if item.bindex != nil {
+					item.bindex.Close()
+				}
 			}
 		}
 	}

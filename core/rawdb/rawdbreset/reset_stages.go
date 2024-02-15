@@ -196,6 +196,7 @@ var Tables = map[stages.SyncStage][]string{
 	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
 	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
 	stages.StorageHistoryIndex: {kv.E2StorageHistory},
+	stages.CustomTrace:         {},
 	stages.Finish:              {},
 }
 var stateBuckets = []string{

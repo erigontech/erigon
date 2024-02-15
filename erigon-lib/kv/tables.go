@@ -397,6 +397,12 @@ const (
 	TblCommitmentHistoryVals = "CommitmentHistoryVals"
 	TblCommitmentIdx         = "CommitmentIdx"
 
+	//TblGasUsedKeys        = "GasUsedKeys"
+	//TblGasUsedVals        = "GasUsedVals"
+	//TblGasUsedHistoryKeys = "GasUsedHistoryKeys"
+	//TblGasUsedHistoryVals = "GasUsedHistoryVals"
+	//TblGasUsedIdx         = "GasUsedIdx"
+
 	TblLogAddressKeys = "LogAddressKeys"
 	TblLogAddressIdx  = "LogAddressIdx"
 	TblLogTopicsKeys  = "LogTopicsKeys"
@@ -624,6 +630,12 @@ var ChaindataTables = []string{
 	TblCommitmentHistoryVals,
 	TblCommitmentIdx,
 
+	//TblGasUsedKeys,
+	//TblGasUsedVals,
+	//TblGasUsedHistoryKeys,
+	//TblGasUsedHistoryVals,
+	//TblGasUsedIdx,
+
 	TblLogAddressKeys,
 	TblLogAddressIdx,
 	TblLogTopicsKeys,
@@ -790,21 +802,26 @@ var ChaindataTablesCfg = TableCfg{
 	TblCommitmentHistoryKeys: {Flags: DupSort},
 	TblCommitmentHistoryVals: {Flags: DupSort},
 	TblCommitmentIdx:         {Flags: DupSort},
-	TblLogAddressKeys:        {Flags: DupSort},
-	TblLogAddressIdx:         {Flags: DupSort},
-	TblLogTopicsKeys:         {Flags: DupSort},
-	TblLogTopicsIdx:          {Flags: DupSort},
-	TblTracesFromKeys:        {Flags: DupSort},
-	TblTracesFromIdx:         {Flags: DupSort},
-	TblTracesToKeys:          {Flags: DupSort},
-	TblTracesToIdx:           {Flags: DupSort},
-	TblPruningProgress:       {Flags: DupSort},
-	RAccountKeys:             {Flags: DupSort},
-	RAccountIdx:              {Flags: DupSort},
-	RStorageKeys:             {Flags: DupSort},
-	RStorageIdx:              {Flags: DupSort},
-	RCodeKeys:                {Flags: DupSort},
-	RCodeIdx:                 {Flags: DupSort},
+	//TblGasUsedKeys:           {Flags: DupSort},
+	//TblGasUsedHistoryKeys:    {Flags: DupSort},
+	//TblGasUsedHistoryVals:    {Flags: DupSort},
+	//TblGasUsedIdx:            {Flags: DupSort},
+	TblLogAddressKeys:  {Flags: DupSort},
+	TblLogAddressIdx:   {Flags: DupSort},
+	TblLogTopicsKeys:   {Flags: DupSort},
+	TblLogTopicsIdx:    {Flags: DupSort},
+	TblTracesFromKeys:  {Flags: DupSort},
+	TblTracesFromIdx:   {Flags: DupSort},
+	TblTracesToKeys:    {Flags: DupSort},
+	TblTracesToIdx:     {Flags: DupSort},
+	TblPruningProgress: {Flags: DupSort},
+
+	RAccountKeys: {Flags: DupSort},
+	RAccountIdx:  {Flags: DupSort},
+	RStorageKeys: {Flags: DupSort},
+	RStorageIdx:  {Flags: DupSort},
+	RCodeKeys:    {Flags: DupSort},
+	RCodeIdx:     {Flags: DupSort},
 }
 
 var BorTablesCfg = TableCfg{
@@ -903,10 +920,13 @@ func reinit() {
 // Temporal
 
 const (
-	AccountsDomain   Domain = "AccountsDomain"
-	StorageDomain    Domain = "StorageDomain"
-	CodeDomain       Domain = "CodeDomain"
-	CommitmentDomain Domain = "CommitmentDomain"
+	AccountsDomain   Domain = 0
+	StorageDomain    Domain = 1
+	CodeDomain       Domain = 2
+	CommitmentDomain Domain = 3
+	//GasUsedDomain    Domain = 4
+
+	DomainLen Domain = 4
 )
 
 const (
@@ -914,6 +934,7 @@ const (
 	StorageHistory    History = "StorageHistory"
 	CodeHistory       History = "CodeHistory"
 	CommitmentHistory History = "CommitmentHistory"
+	GasUsedHistory    History = "GasUsedHistory"
 )
 
 const (
@@ -921,9 +942,44 @@ const (
 	StorageHistoryIdx    InvertedIdx = "StorageHistoryIdx"
 	CodeHistoryIdx       InvertedIdx = "CodeHistoryIdx"
 	CommitmentHistoryIdx InvertedIdx = "CommitmentHistoryIdx"
+	GasusedHistoryIdx    InvertedIdx = "GasUsedHistoryIdx"
 
 	LogTopicIdx   InvertedIdx = "LogTopicIdx"
 	LogAddrIdx    InvertedIdx = "LogAddrIdx"
 	TracesFromIdx InvertedIdx = "TracesFromIdx"
 	TracesToIdx   InvertedIdx = "TracesToIdx"
 )
+
+func (d Domain) String() string {
+	switch d {
+	case AccountsDomain:
+		return "accounts"
+	case StorageDomain:
+		return "storage"
+	case CodeDomain:
+		return "code"
+	case CommitmentDomain:
+		return "commitment"
+	//case GasUsedDomain:
+	//	return "gasused"
+	default:
+		return "unknown domain"
+	}
+}
+
+func String2Domain(in string) (Domain, error) {
+	switch in {
+	case "accounts":
+		return AccountsDomain, nil
+	case "storage":
+		return StorageDomain, nil
+	case "code":
+		return CodeDomain, nil
+	case "commitment":
+		return CommitmentDomain, nil
+	//case "gasused":
+	//	return GasUsedDomain, nil
+	default:
+		return 0, fmt.Errorf("unknown history name: %s", in)
+	}
+}
