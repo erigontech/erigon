@@ -484,10 +484,12 @@ func TestCommit(t *testing.T) {
 	domains := state.NewSharedDomains(tx, log.New())
 	defer domains.Close()
 
-	buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 0)
+	buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 1)
 
 	addr2 := libcommon.Hex2Bytes("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e")
 	loc1 := libcommon.Hex2Bytes("24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed")
+	loc3 := libcommon.Hex2Bytes("ed6f77b07d7e5b5f61ccd6e7f0f581304d9bf73ac3633ee9515397e7f501faed")
+	loc4 := libcommon.Hex2Bytes("e0b959bbc0455e4830370a3e8bced575e6e99495091c005fc3dad637cdf6e0ca")
 	//addr1 := libcommon.Hex2Bytes("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9")
 	//err = domains.UpdateAccountData(addr2, buf, nil)
 	//require.NoError(t, err)
@@ -503,8 +505,14 @@ func TestCommit(t *testing.T) {
 	err = domains.DomainPut(kv.StorageDomain, ad, loc1, []byte("0401"), nil, 0)
 	require.NoError(t, err)
 
-	loc1[0] = 0x01
-	err = domains.DomainPut(kv.StorageDomain, ad, loc1, []byte("0401"), nil, 0)
+	loc2 := libcommon.CopyBytes(loc1)
+	loc2[0] = byte(0x01)
+	err = domains.DomainPut(kv.StorageDomain, ad, loc2, []byte("0401"), nil, 0)
+	require.NoError(t, err)
+
+	err = domains.DomainPut(kv.StorageDomain, ad, loc3, []byte("0401"), nil, 0)
+	require.NoError(t, err)
+	err = domains.DomainPut(kv.StorageDomain, ad, loc4, []byte("0401"), nil, 0)
 	require.NoError(t, err)
 	//}
 
