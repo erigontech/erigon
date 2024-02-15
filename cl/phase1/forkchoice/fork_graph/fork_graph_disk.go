@@ -241,8 +241,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// update diff storages.
 	f.balancesStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevDumpBalances, newState.RawBalances(), epochCross)
 	f.validatorSetStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevValidatorSetDump, newState.RawValidatorSet(), epochCross)
-	f.inactivityScoresStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevInactivityScores, newState.RawInactivityScores(), epochCross)
-
+	if block.Version() != clparams.Phase0Version {
+		f.inactivityScoresStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevInactivityScores, newState.RawInactivityScores(), epochCross)
+	}
 	f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
 
 	f.syncCommittees.Store(libcommon.Hash(blockRoot), syncCommittees{
