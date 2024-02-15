@@ -156,7 +156,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		if !discover {
 			return
 		}
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap, lock.Downloads)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
