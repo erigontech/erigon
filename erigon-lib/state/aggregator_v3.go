@@ -612,7 +612,6 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 			in.Close()
 		}
 	}()
-	a.integrateMergedFiles(outs, in)
 	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil
@@ -1185,12 +1184,19 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	}()
 
 	for id := range ac.d {
+		if ac.d[id] == nil {
+			continue
+		}
 		id := id
 		if r.d[id].any() {
 			log.Info(fmt.Sprintf("[snapshots] merge: %s", r.String()))
 			g.Go(func() (err error) {
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], ac.a.ps)
-				return err
+				if err != nil {
+					return err
+				}
+				ac.a.integrateMergedDomainFiles(ac.a.d[id], files.d[id], files.dIdx[id], files.dHist[id], mf.d[id], mf.dIdx[id], mf.dHist[id])
+				return nil
 			})
 		}
 	}
@@ -1198,29 +1204,46 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if r.logAddrs {
 		g.Go(func() error {
 			var err error
+			fmt.Printf("[dbg] logAddrs: %t, %t\n", files.logAddrs == nil, r.logAddrs)
 			mf.logAddrs, err = ac.logAddrs.mergeFiles(ctx, files.logAddrs, r.logAddrsStartTxNum, r.logAddrsEndTxNum, ac.a.ps)
-			return err
+			if err != nil {
+				return err
+			}
+			ac.a.integrateMergedIdxFiles(ac.a.logAddrs, files.logAddrs, mf.logAddrs)
+			return nil
 		})
 	}
 	if r.logTopics {
 		g.Go(func() error {
 			var err error
 			mf.logTopics, err = ac.logTopics.mergeFiles(ctx, files.logTopics, r.logTopicsStartTxNum, r.logTopicsEndTxNum, ac.a.ps)
-			return err
+			if err != nil {
+				return err
+			}
+			ac.a.integrateMergedIdxFiles(ac.a.logTopics, files.logTopics, mf.logTopics)
+			return nil
 		})
 	}
 	if r.tracesFrom {
 		g.Go(func() error {
 			var err error
 			mf.tracesFrom, err = ac.tracesFrom.mergeFiles(ctx, files.tracesFrom, r.tracesFromStartTxNum, r.tracesFromEndTxNum, ac.a.ps)
-			return err
+			if err != nil {
+				return err
+			}
+			ac.a.integrateMergedIdxFiles(ac.a.tracesFrom, files.tracesFrom, mf.tracesFrom)
+			return nil
 		})
 	}
 	if r.tracesTo {
 		g.Go(func() error {
 			var err error
 			mf.tracesTo, err = ac.tracesTo.mergeFiles(ctx, files.tracesTo, r.tracesToStartTxNum, r.tracesToEndTxNum, ac.a.ps)
-			return err
+			if err != nil {
+				return err
+			}
+			ac.a.integrateMergedIdxFiles(ac.a.tracesTo, files.tracesTo, mf.tracesTo)
+			return nil
 		})
 	}
 	err := g.Wait()
@@ -1231,21 +1254,22 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	return mf, err
 }
 
-func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+func (a *AggregatorV3) integrateMergedIdxFiles(idx *InvertedIndex, outs []*filesItem, in *filesItem) {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
-
-	for id, d := range a.d {
-		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
-	}
-	a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)
-	a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
-	a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
-	a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
-	a.cleanAfterNewFreeze(in)
-	return frozen
+	idx.integrateMergedFiles(outs, in)
+	idx.cleanAfterFreeze(in.endTxNum)
+}
+func (a *AggregatorV3) integrateMergedDomainFiles(d *Domain, valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
+	a.filesMutationLock.Lock()
+	defer a.filesMutationLock.Unlock()
+	defer a.needSaveFilesListInDB.Store(true)
+	defer a.recalcMaxTxNum()
+	d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
+	d.cleanAfterFreeze(valuesIn, historyIn, indexIn)
+	return
 }
 func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
 	for id, d := range a.d {
