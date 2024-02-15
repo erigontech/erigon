@@ -703,7 +703,18 @@ func (ac *AggregatorV3Context) maxTxNumInDomainFiles(cold bool) uint64 {
 }
 
 func (ac *AggregatorV3Context) CanPrune(tx kv.Tx) bool {
-	return ac.somethingToPrune(tx)
+	if dbg.NoPrune() {
+		return false
+	}
+	for _, d := range ac.d {
+		if d.CanPruneUntil(tx) {
+			return true
+		}
+	}
+	return ac.logAddrs.CanPrune(tx) ||
+		ac.logTopics.CanPrune(tx) ||
+		ac.tracesFrom.CanPrune(tx) ||
+		ac.tracesTo.CanPrune(tx)
 }
 
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
@@ -737,21 +748,6 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 	return blockNumWithCommitment, true, nil
 }
 
-func (ac *AggregatorV3Context) somethingToPrune(tx kv.Tx) bool {
-	if dbg.NoPrune() {
-		return false
-	}
-	for _, d := range ac.d {
-		if d.CanPruneUntil(tx) {
-			return true
-		}
-	}
-	return ac.logAddrs.CanPrune(tx) ||
-		ac.logTopics.CanPrune(tx) ||
-		ac.tracesFrom.CanPrune(tx) ||
-		ac.tracesTo.CanPrune(tx)
-}
-
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
 func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
@@ -773,7 +769,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return err
 		}
-		if stat == nil {
+		if stat == nil || !ac.CanPrune(tx) {
 			if fstat := fullStat.String(); fstat != "" {
 				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
@@ -895,7 +891,7 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 		step = (txTo - 1) / ac.a.StepSize()
 	}
 
-	if txFrom == txTo || !ac.somethingToPrune(tx) {
+	if txFrom == txTo || !ac.CanPrune(tx) {
 		return nil, nil
 	}
 
@@ -1239,7 +1235,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	for id := range ac.d {
 		id := id
 		if r.d[id].any() {
-			log.Info(fmt.Sprintf("[snapshots] merge %q: %s", kv.Domain(id).String(), r.d[id].String()))
+			ac.a.logger.Info(fmt.Sprintf("[snapshots] merge %q: %s", kv.Domain(id).String(), r.d[id].String()))
 			g.Go(func() (err error) {
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], ac.a.ps)
 				return err
@@ -1279,7 +1275,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if err == nil {
 		closeFiles = false
 	}
-	fmt.Printf("[snapshots] merge done %s\n", r.String())
+	ac.a.logger.Info("[snapshots] merge done", "r", r.String())
 	return mf, err
 }
 
