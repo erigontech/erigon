@@ -870,13 +870,17 @@ func (d *Downloader) webDownload(peerUrl string, t *torrent.Torrent, i *webDownl
 	go func() {
 		defer sem.Release(1)
 
+		info, _ := snaptype.ParseFileName(d.SnapDir(), name)
+
+		if err := os.Remove(info.Path); err != nil {
+			d.logger.Warn("Couldn't remove previous file before download", "file", name, "path", info.Path, "err", err)
+		}
+
 		err := session.Download(d.ctx, name)
 
 		if err != nil {
 			d.logger.Error("Web download failed", "file", name, "err", err)
 		}
-
-		info, _ := snaptype.ParseFileName(d.SnapDir(), name)
 
 		localHash, err := localHashBytes(d.ctx, info, nil, d.logger)
 
