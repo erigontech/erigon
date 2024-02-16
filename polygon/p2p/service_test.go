@@ -86,7 +86,7 @@ func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(msgs []*sent
 	st.sentryClient.
 		EXPECT().
 		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(st.mockSentryStream(&wg, msgs), nil).
+		Return(st.mockSentryInboundMessageStream(&wg, msgs), nil).
 		AnyTimes()
 	st.sentryClient.
 		EXPECT().
@@ -107,51 +107,66 @@ func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(msgs []*sent
 		EXPECT().
 		MarkDisconnected().
 		AnyTimes()
+	st.sentryClient.
+		EXPECT().
+		PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(st.mockSentryPeerEventsStream(), nil).
+		AnyTimes()
 }
 
-func (st *serviceTest) mockSentryStream(wg *sync.WaitGroup, msgs []*sentry.InboundMessage) sentry.Sentry_MessagesClient {
-	return &mockSentryMessagesStream{
+func (st *serviceTest) mockSentryInboundMessageStream(wg *sync.WaitGroup, msgs []*sentry.InboundMessage) sentry.Sentry_MessagesClient {
+	return &mockSentryMessagesStream[*sentry.InboundMessage]{
 		wg:   wg,
 		msgs: msgs,
 	}
 }
 
-type mockSentryMessagesStream struct {
+func (st *serviceTest) mockSentryPeerEventsStream() sentry.Sentry_PeerEventsClient {
+	return &mockSentryMessagesStream[*sentry.PeerEvent]{}
+}
+
+type mockSentryMessagesStream[M any] struct {
 	wg   *sync.WaitGroup
 	msgs []*sentry.InboundMessage
 }
 
-func (s *mockSentryMessagesStream) Recv() (*sentry.InboundMessage, error) {
+func (s *mockSentryMessagesStream[M]) Recv() (M, error) {
+	var nilValue M
+	return nilValue, nil
+}
+
+func (s *mockSentryMessagesStream[M]) Header() (metadata.MD, error) {
 	return nil, nil
 }
 
-func (s *mockSentryMessagesStream) Header() (metadata.MD, error) {
-	return nil, nil
-}
-
-func (s *mockSentryMessagesStream) Trailer() metadata.MD {
+func (s *mockSentryMessagesStream[M]) Trailer() metadata.MD {
 	return nil
 }
 
-func (s *mockSentryMessagesStream) CloseSend() error {
+func (s *mockSentryMessagesStream[M]) CloseSend() error {
 	return nil
 }
 
-func (s *mockSentryMessagesStream) Context() context.Context {
+func (s *mockSentryMessagesStream[M]) Context() context.Context {
 	return context.Background()
 }
 
-func (s *mockSentryMessagesStream) SendMsg(_ any) error {
+func (s *mockSentryMessagesStream[M]) SendMsg(_ any) error {
 	return nil
 }
 
-func (s *mockSentryMessagesStream) RecvMsg(msg any) error {
+func (s *mockSentryMessagesStream[M]) RecvMsg(msg any) error {
 	// wait for something external to happen before stream is allowed to produce values
 	s.wg.Wait()
 
 	if len(s.msgs) == 0 {
 		return nil
 	}
+
+	//
+	// TODO make it work with PeerEvent and InboundMessage
+	// TODO fix go test -race
+	//
 
 	inboundMsg, ok := msg.(*sentry.InboundMessage)
 	if !ok {

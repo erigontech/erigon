@@ -26,6 +26,7 @@ func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) Mes
 		logger:                  logger,
 		sentryClient:            sentryClient,
 		inboundMessageObservers: map[sentry.MessageId]map[MessageObserver[*sentry.InboundMessage]]struct{}{},
+		peerEventObservers:      map[MessageObserver[*sentry.PeerEvent]]struct{}{},
 	}
 }
 
@@ -44,6 +45,10 @@ type messageListener struct {
 func (ml *messageListener) Start(ctx context.Context) {
 	ml.once.Do(func() {
 		ml.streamCtx, ml.streamCtxCancel = context.WithCancel(ctx)
+		// note we add to wg outside spawned goroutine to avoid race condition in tests
+		// between Start and Stop (WaitGroup is reused before previous Wait has returned err)
+		// remember to increment count of wg if adding a new "listen" goroutine
+		ml.stopWg.Add(2)
 		go ml.listenBlockHeaders66()
 		go ml.listenPeerEvents()
 	})
@@ -109,7 +114,6 @@ func (ml *messageListener) listenBlockHeaders66() {
 }
 
 func (ml *messageListener) listenInboundMessage(name string, msgId sentry.MessageId) {
-	ml.stopWg.Add(1)
 	defer ml.stopWg.Done()
 
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
@@ -165,7 +169,6 @@ func (ml *messageListener) notifyInboundMessageObservers(msg *sentry.InboundMess
 }
 
 func (ml *messageListener) listenPeerEvents() {
-	ml.stopWg.Add(1)
 	defer ml.stopWg.Done()
 
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
