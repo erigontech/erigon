@@ -93,7 +93,7 @@ type ForkChoiceStore struct {
 	weights     map[libcommon.Hash]uint64
 	headSet     map[libcommon.Hash]struct{}
 	// childrens
-	childrens map[libcommon.Hash]childrens
+	childrens sync.Map
 
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies []byte
@@ -216,7 +216,6 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		operationsPool:       operationsPool,
 		anchorPublicKeys:     anchorPublicKeys,
 		beaconCfg:            anchorState.BeaconConfig(),
-		childrens:            make(map[libcommon.Hash]childrens),
 		preverifiedSizes:     preverifiedSizes,
 		finalityCheckpoints:  finalityCheckpoints,
 		totalActiveBalances:  totalActiveBalances,
@@ -245,25 +244,26 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 }
 
 func (f *ForkChoiceStore) children(parent libcommon.Hash) []libcommon.Hash {
-	children, ok := f.childrens[parent]
+	children, ok := f.childrens.Load(parent)
 	if !ok {
 		return nil
 	}
-	return children.childrenHashes
+	return children.(childrens).childrenHashes
 }
 
 // updateChildren adds a new child to the parent node hash.
 func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child libcommon.Hash) {
-	c, ok := f.childrens[parent]
-	if !ok {
-		c = childrens{}
+	cI, ok := f.childrens.Load(parent)
+	var c childrens
+	if ok {
+		c = cI.(childrens)
 	}
 	c.parentSlot = parentSlot // can be innacurate.
 	if slices.Contains(c.childrenHashes, child) {
 		return
 	}
 	c.childrenHashes = append(c.childrenHashes, child)
-	f.childrens[parent] = c
+	f.childrens.Store(parent, c)
 }
 
 // Time returns current time

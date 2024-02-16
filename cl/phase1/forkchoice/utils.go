@@ -39,13 +39,13 @@ func (f *ForkChoiceStore) onNewFinalized(newFinalized solid.Checkpoint) {
 	})
 
 	// get rid of children
-	for k, children := range f.childrens {
-		if children.parentSlot <= newFinalized.Epoch()*f.beaconCfg.SlotsPerEpoch {
-			delete(f.childrens, k)
-			delete(f.headSet, k)
-			continue
+	f.childrens.Range(func(k, v any) bool {
+		if v.(childrens).parentSlot <= newFinalized.Epoch()*f.beaconCfg.SlotsPerEpoch {
+			f.childrens.Delete(k)
+			delete(f.headSet, k.(libcommon.Hash))
 		}
-	}
+		return true
+	})
 	f.forkGraph.Prune(newFinalized.Epoch() * f.beaconCfg.SlotsPerEpoch)
 }
 

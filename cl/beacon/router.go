@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
@@ -48,7 +49,9 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {
+			start := time.Now()
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
+			log.Debug("[Beacon API] Request", "method", r.Method, "path", r.URL.Path, "time", time.Since(start))
 		}
 	})
 
