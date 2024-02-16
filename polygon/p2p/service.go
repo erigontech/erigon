@@ -34,7 +34,7 @@ func newService(
 ) Service {
 	peerTracker := NewPeerTracker()
 	messageListener := NewMessageListener(logger, sentryClient)
-	messageListener.RegisterBlockHeaders66(NewBlockNumPresenceObserver(peerTracker))
+	messageListener.RegisterBlockHeaders66Observer(NewBlockNumPresenceObserver(peerTracker))
 	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
 	messageBroadcaster := NewMessageBroadcaster(sentryClient)
 	peerPenalizer := NewPeerPenalizer(sentryClient)
@@ -42,8 +42,9 @@ func newService(
 	return &service{
 		config:          config,
 		downloader:      downloader,
-		peerPenalizer:   peerPenalizer,
 		messageListener: messageListener,
+		peerPenalizer:   peerPenalizer,
+		peerTracker:     peerTracker,
 	}
 }
 

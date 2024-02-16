@@ -120,7 +120,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 				var pkt eth.BlockHeadersPacket66
 				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
 					if rlp.IsInvalidRLPError(err) {
-						d.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId.String())
+						d.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
 						penalizeErr := d.peerPenalizer.Penalize(ctx, peerId)
 						if penalizeErr != nil {
 							err = fmt.Errorf("%w: %w", penalizeErr, err)
