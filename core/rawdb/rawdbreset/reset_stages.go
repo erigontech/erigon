@@ -163,12 +163,12 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 			doms := state.NewSharedDomains(tx, logger)
 			defer doms.Close()
 
-			if err := ct.ResetPruneProgress(tx); err != nil {
-				return err
-			}
-
 			_ = stages.SaveStageProgress(tx, stages.Execution, doms.BlockNum())
-			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum(), "filesMinimax", agg.EndTxNumMinimax())
+			mxs := agg.EndTxNumMinimax() / agg.StepSize()
+			if mxs > 0 {
+				mxs--
+			}
+			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum(), "maxStepInFiles", mxs)
 		}
 
 		return nil
