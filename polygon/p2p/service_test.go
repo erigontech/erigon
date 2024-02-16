@@ -19,6 +19,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
+	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
@@ -30,7 +31,7 @@ func newServiceTest(t *testing.T, requestIdGenerator RequestIdGenerator) *servic
 	return &serviceTest{
 		t:            t,
 		sentryClient: sentryClient,
-		service:      newService(logger, sentryClient, requestIdGenerator),
+		service:      newService(p2p.Config{}, logger, sentryClient, requestIdGenerator),
 	}
 }
 

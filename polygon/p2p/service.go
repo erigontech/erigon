@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/p2p"
 )
 
 //go:generate mockgen -destination=./service_mock.go -package=p2p . Service
@@ -21,16 +22,22 @@ type Service interface {
 	Penalize(ctx context.Context, peerId PeerId) error
 }
 
-func NewService(logger log.Logger, sentryClient direct.SentryClient) Service {
-	return newService(logger, sentryClient, rand.Uint64)
+func NewService(config p2p.Config, logger log.Logger, sentryClient direct.SentryClient) Service {
+	return newService(config, logger, sentryClient, rand.Uint64)
 }
 
-func newService(logger log.Logger, sentryClient direct.SentryClient, requestIdGenerator RequestIdGenerator) Service {
+func newService(
+	config p2p.Config,
+	logger log.Logger,
+	sentryClient direct.SentryClient,
+	requestIdGenerator RequestIdGenerator,
+) Service {
 	messageListener := NewMessageListener(logger, sentryClient)
 	messageBroadcaster := NewMessageBroadcaster(sentryClient)
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	downloader := NewDownloader(logger, messageListener, messageBroadcaster, peerPenalizer, requestIdGenerator)
 	return &service{
+		config:          config,
 		downloader:      downloader,
 		messageListener: messageListener,
 		peerPenalizer:   peerPenalizer,
@@ -39,6 +46,7 @@ func newService(logger log.Logger, sentryClient direct.SentryClient, requestIdGe
 
 type service struct {
 	once            sync.Once
+	config          p2p.Config
 	downloader      Downloader
 	messageListener MessageListener
 	peerPenalizer   PeerPenalizer
@@ -54,13 +62,12 @@ func (s *service) Stop() {
 	s.messageListener.Stop()
 }
 
-func (s *service) DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
-	return s.downloader.DownloadHeaders(ctx, start, end, peerId)
+func (s *service) MaxPeers() int {
+	return s.config.MaxPeers
 }
 
-func (s *service) MaxPeers() int {
-	// TODO return from p2p.Config
-	return 0
+func (s *service) DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+	return s.downloader.DownloadHeaders(ctx, start, end, peerId)
 }
 
 func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
