@@ -29,14 +29,14 @@ func NewDownloader(
 	logger log.Logger,
 	messageListener MessageListener,
 	messageBroadcaster MessageBroadcaster,
-	peerManager PeerManager,
+	peerPenalizer PeerPenalizer,
 	requestIdGenerator RequestIdGenerator,
 ) Downloader {
 	return &downloader{
 		logger:             logger,
 		messageListener:    messageListener,
 		messageBroadcaster: messageBroadcaster,
-		peerManager:        peerManager,
+		peerPenalizer:      peerPenalizer,
 		requestIdGenerator: requestIdGenerator,
 	}
 }
@@ -45,7 +45,7 @@ type downloader struct {
 	logger             log.Logger
 	messageListener    MessageListener
 	messageBroadcaster MessageBroadcaster
-	peerManager        PeerManager
+	peerPenalizer      PeerPenalizer
 	requestIdGenerator RequestIdGenerator
 }
 
@@ -85,7 +85,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
 					if rlp.IsInvalidRLPError(err) {
 						d.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
-						penalizeErr := d.peerManager.Penalize(ctx, peerId)
+						penalizeErr := d.peerPenalizer.Penalize(ctx, peerId)
 						if penalizeErr != nil {
 							err = fmt.Errorf("%w: %w", penalizeErr, err)
 						}

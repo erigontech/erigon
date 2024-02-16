@@ -28,20 +28,20 @@ func NewService(logger log.Logger, sentryClient direct.SentryClient) Service {
 func newService(logger log.Logger, sentryClient direct.SentryClient, requestIdGenerator RequestIdGenerator) Service {
 	messageListener := NewMessageListener(logger, sentryClient)
 	messageBroadcaster := NewMessageBroadcaster(sentryClient)
-	peerManager := NewPeerManager(sentryClient)
-	downloader := NewDownloader(logger, messageListener, messageBroadcaster, peerManager, requestIdGenerator)
+	peerPenalizer := NewPeerPenalizer(sentryClient)
+	downloader := NewDownloader(logger, messageListener, messageBroadcaster, peerPenalizer, requestIdGenerator)
 	return &service{
 		downloader:      downloader,
-		peerManager:     peerManager,
 		messageListener: messageListener,
+		peerPenalizer:   peerPenalizer,
 	}
 }
 
 type service struct {
 	once            sync.Once
 	downloader      Downloader
-	peerManager     PeerManager
 	messageListener MessageListener
+	peerPenalizer   PeerPenalizer
 }
 
 func (s *service) Start(ctx context.Context) {
@@ -59,13 +59,15 @@ func (s *service) DownloadHeaders(ctx context.Context, start uint64, end uint64,
 }
 
 func (s *service) MaxPeers() int {
-	return s.peerManager.MaxPeers()
+	// TODO return from p2p.Config
+	return 0
 }
 
 func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
-	return s.peerManager.Penalize(ctx, peerId)
+	return s.peerPenalizer.Penalize(ctx, peerId)
 }
 
 func (s *service) PeersSyncProgress() PeersSyncProgress {
-	return s.peerManager.PeersSyncProgress()
+	// TODO implement peer tracker
+	return nil
 }
