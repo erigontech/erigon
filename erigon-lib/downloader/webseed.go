@@ -20,8 +20,6 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/pelletier/go-toml/v2"
 )
 
 // WebSeeds - allow use HTTP-based infrastrucutre to support Bittorrent network
@@ -209,12 +207,11 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
 				if err := d.torrentFiles.Create(tPath, res); err != nil {
-					d.logger.Debug("[snapshots] saveTorrent", "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
 					continue
 				}
 				return nil

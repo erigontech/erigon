@@ -191,7 +191,6 @@ func ConsensusClStages(ctx context.Context,
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block, newPayload, fullValidation); err != nil {
-			log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
 			return err
 		}
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
@@ -528,7 +527,7 @@ func ConsensusClStages(ctx context.Context,
 									continue
 								}
 								if err := processBlock(tx, block, true, true); err != nil {
-									log.Error("bad blocks segment received", "err", err)
+									log.Debug("bad blocks segment received", "err", err)
 									continue
 								}
 
