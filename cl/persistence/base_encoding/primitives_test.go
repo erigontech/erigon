@@ -77,3 +77,28 @@ func TestDiff64Effective(t *testing.T) {
 
 	require.Equal(t, new2, expected)
 }
+
+func TestDiffValidators(t *testing.T) {
+	vals := 3
+	old := make([]byte, vals*121)
+	new := make([]byte, 121*(vals+1))
+	inc := 1
+	for i := 0; i < vals*121; i++ {
+		if i%9 == 0 {
+			inc++
+		}
+		old[i] = byte(i)
+		new[i] = byte(i + inc)
+	}
+
+	var b bytes.Buffer
+
+	err := ComputeCompressedSerializedValidatorSetListDiff(&b, old, new)
+	require.NoError(t, err)
+
+	out := b.Bytes()
+	new2, err := ApplyCompressedSerializedValidatorListDiff(old, nil, out, false)
+	require.NoError(t, err)
+
+	require.Equal(t, new, new2)
+}

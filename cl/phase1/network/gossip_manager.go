@@ -151,9 +151,10 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			return err
 		}
 	case gossip.TopicNameBeaconAggregateAndProof:
-		if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
-			return err
-		}
+		return nil
+		// if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
+		// 	return err
+		// } Uncomment when fixed.
 	}
 	return nil
 }

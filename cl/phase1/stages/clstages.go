@@ -521,6 +521,10 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
+								if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
+									time.Sleep(time.Millisecond)
+									continue
+								}
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.Block.HashSSZ()
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
