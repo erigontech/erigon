@@ -20,6 +20,7 @@ by default.
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
+    + [Caplin (Internal Consensus Layer)](#caplin)
 
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
@@ -27,6 +28,7 @@ by default.
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
+    + [Internal Consensus Layer](#caplin)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -302,6 +304,26 @@ More information can be found [here](https://github.com/ethereum/execution-apis/
 Once Erigon is running, you need to point your CL client to `<erigon address>:8551`,
 where `<erigon address>` is either `localhost` or the IP address of the device running Erigon, and also point to the JWT
 secret path created by Erigon.
+
+### Caplin
+
+Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is: 
+
+* provide better stability
+* Validation of the chain
+* Stay in sync
+* keep the execution of blocks on chain tip
+* serve the  Beacon API using a fast and compact data model alongside low CPU and memory usage.
+
+ The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it.  For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the Engine API.
+
+#### Caplin's Usage.
+
+Caplin can be enabled through the `--internalcl` flag. from that point on, an external Consensus Layer will not be need anymore.
+
+Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive` flag.
+In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
+e.g: `--beacon.api=beacon,builder,config,debug,events,node,validator,rewards,lighthouse` will enable all endpoints. **NOTE: Caplin is not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead to a 6 GB higher RAM usage.
 
 ### Multiple Instances / One Machine
 
