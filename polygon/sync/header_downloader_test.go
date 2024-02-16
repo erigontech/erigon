@@ -138,7 +138,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		Return(test.fakeMilestones(4), nil).
 		Times(1)
 	test.p2pService.EXPECT().
-		ListPeersMayHave(gomock.Any()).
+		ListPeersMayHaveBlockNum(gomock.Any()).
 		Return(test.fakePeers(8)).
 		Times(1)
 	test.p2pService.EXPECT().
@@ -168,7 +168,7 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
-		ListPeersMayHave(gomock.Any()).
+		ListPeersMayHaveBlockNum(gomock.Any()).
 		Return(test.fakePeers(2)).
 		Times(4)
 	test.p2pService.EXPECT().
@@ -212,7 +212,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
-		ListPeersMayHave(gomock.Any()).
+		ListPeersMayHaveBlockNum(gomock.Any()).
 		Return(test.fakePeers(3)).
 		Times(3)
 	test.p2pService.EXPECT().
@@ -265,12 +265,12 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 	gomock.InOrder(
 		// first time, no peers at all
 		test.p2pService.EXPECT().
-			ListPeersMayHave(gomock.Any()).
+			ListPeersMayHaveBlockNum(gomock.Any()).
 			Return(nil).
 			Times(1),
 		// second time, 2 peers that we can use
 		test.p2pService.EXPECT().
-			ListPeersMayHave(gomock.Any()).
+			ListPeersMayHaveBlockNum(gomock.Any()).
 			Return(test.fakePeers(2)).
 			Times(4),
 	)

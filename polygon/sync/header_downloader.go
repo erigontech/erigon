@@ -92,7 +92,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 
 	for len(waypoints) > 0 {
 		endBlockNum := waypoints[len(waypoints)-1].EndBlock()
-		peers := hd.p2pService.ListPeersMayHave(endBlockNum.Uint64())
+		peers := hd.p2pService.ListPeersMayHaveBlockNum(endBlockNum.Uint64())
 		if len(peers) == 0 {
 			hd.logger.Warn(
 				fmt.Sprintf("[%s] can't use any peers to sync, will try again", headerDownloaderLogPrefix),

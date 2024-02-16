@@ -50,6 +50,10 @@ func (ml *messageListener) Start(ctx context.Context) {
 func (ml *messageListener) Stop() {
 	ml.streamCtxCancel()
 	ml.stopWg.Wait()
+
+	ml.inboundMessageObserversMu.Lock()
+	defer ml.inboundMessageObserversMu.Unlock()
+	ml.inboundMessageObservers = nil
 }
 
 func (ml *messageListener) RegisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage]) {

@@ -17,7 +17,7 @@ type Service interface {
 	Start(ctx context.Context)
 	Stop()
 	MaxPeers() int
-	ListPeersMayHave(blockNum uint64) []PeerId
+	ListPeersMayHaveBlockNum(blockNum uint64) []PeerId
 	DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 	Penalize(ctx context.Context, peerId PeerId) error
 }
@@ -32,10 +32,13 @@ func newService(
 	sentryClient direct.SentryClient,
 	requestIdGenerator RequestIdGenerator,
 ) Service {
+	peerTracker := NewPeerTracker()
 	messageListener := NewMessageListener(logger, sentryClient)
+	messageListener.RegisterBlockHeaders66(NewBlockNumPresenceObserver(peerTracker))
+	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
 	messageBroadcaster := NewMessageBroadcaster(sentryClient)
 	peerPenalizer := NewPeerPenalizer(sentryClient)
-	downloader := NewDownloader(logger, messageListener, messageBroadcaster, peerPenalizer, requestIdGenerator)
+	downloader := NewTrackingDownloader(logger, messageListener, messageBroadcaster, peerPenalizer, requestIdGenerator, peerTracker)
 	return &service{
 		config:          config,
 		downloader:      downloader,
@@ -75,6 +78,6 @@ func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
 	return s.peerPenalizer.Penalize(ctx, peerId)
 }
 
-func (s *service) ListPeersMayHave(blockNum uint64) []PeerId {
-	return s.peerTracker.ListPeersMayHave(blockNum)
+func (s *service) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
+	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
 }

@@ -9,17 +9,14 @@ import (
 )
 
 type PeerTracker interface {
-	Start()
-	Stop()
-	ListPeersMayHave(blockNum uint64) []PeerId
+	ListPeersMayHaveBlockNum(blockNum uint64) []PeerId
 	BlockNumPresent(peerId PeerId, blockNum uint64)
 	BlockNumMissing(peerId PeerId, blockNum uint64)
 	PeerDisconnected(peerId PeerId)
 }
 
-func newPeerTracker(messageListener MessageListener) PeerTracker {
+func NewPeerTracker() PeerTracker {
 	return &peerTracker{
-		messageListener:    messageListener,
 		peerSyncProgresses: map[PeerId]*peerSyncProgress{},
 	}
 }
@@ -33,40 +30,13 @@ type peerTracker struct {
 	blockNumPresenceObserver messageObserver[*sentry.InboundMessage]
 }
 
-func (pt *peerTracker) Start() {
-	pt.once.Do(func() {
-		pt.peerEventObserver = &peerEventObserver{
-			pt: pt,
-		}
-
-		pt.blockNumPresenceObserver = &blockNumPresenceObserver{
-			pt: pt,
-		}
-
-		pt.messageListener.RegisterPeerEventObserver(pt.peerEventObserver)
-		pt.messageListener.RegisterBlockHeaders66(pt.blockNumPresenceObserver)
-	})
-}
-
-func (pt *peerTracker) Stop() {
-	if pt.blockNumPresenceObserver != nil {
-		pt.messageListener.UnregisterBlockHeaders66(pt.blockNumPresenceObserver)
-		pt.blockNumPresenceObserver = nil
-	}
-
-	if pt.peerEventObserver != nil {
-		pt.messageListener.UnregisterPeerEventObserver(pt.peerEventObserver)
-		pt.peerEventObserver = nil
-	}
-}
-
-func (pt *peerTracker) ListPeersMayHave(blockNum uint64) []PeerId {
+func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
 	var peerIds []PeerId
 	for _, peerSyncProgress := range pt.peerSyncProgresses {
-		if peerSyncProgress.peerMayHave(blockNum) {
+		if peerSyncProgress.peerMayHaveBlockNum(blockNum) {
 			peerIds = append(peerIds, peerSyncProgress.peerId)
 		}
 	}
@@ -105,8 +75,14 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId PeerId, update func(psp *pe
 	update(peerSyncProgress)
 }
 
+func NewBlockNumPresenceObserver(peerTracker PeerTracker) messageObserver[*sentry.InboundMessage] {
+	return &blockNumPresenceObserver{
+		peerTracker: peerTracker,
+	}
+}
+
 type blockNumPresenceObserver struct {
-	pt PeerTracker
+	peerTracker PeerTracker
 }
 
 func (bnpo *blockNumPresenceObserver) Notify(msg *sentry.InboundMessage) {
@@ -118,17 +94,23 @@ func (bnpo *blockNumPresenceObserver) Notify(msg *sentry.InboundMessage) {
 
 		headers := pkt.BlockHeadersPacket
 		if len(headers) > 0 {
-			bnpo.pt.BlockNumPresent(PeerIdFromH512(msg.PeerId), headers[len(headers)-1].Number.Uint64())
+			bnpo.peerTracker.BlockNumPresent(PeerIdFromH512(msg.PeerId), headers[len(headers)-1].Number.Uint64())
 		}
 	}
 }
 
+func NewPeerEventObserver(peerTracker PeerTracker) messageObserver[*sentry.PeerEvent] {
+	return &peerEventObserver{
+		peerTracker: peerTracker,
+	}
+}
+
 type peerEventObserver struct {
-	pt PeerTracker
+	peerTracker PeerTracker
 }
 
 func (peo *peerEventObserver) Notify(msg *sentry.PeerEvent) {
 	if msg.EventId == sentry.PeerEvent_Disconnect {
-		peo.pt.PeerDisconnected(PeerIdFromH512(msg.PeerId))
+		peo.peerTracker.PeerDisconnected(PeerIdFromH512(msg.PeerId))
 	}
 }

@@ -17,7 +17,10 @@ import (
 
 const reqRespTimeout = 5 * time.Second
 
-var invalidDownloadHeadersRangeErr = errors.New("invalid download headers range")
+var (
+	invalidDownloadHeadersRangeErr       = errors.New("invalid download headers range")
+	incompleteDownloadHeadersResponseErr = errors.New("incomplete download headers response")
+)
 
 type RequestIdGenerator func() uint64
 
@@ -31,10 +34,11 @@ func NewTrackingDownloader(
 	messageBroadcaster MessageBroadcaster,
 	peerPenalizer PeerPenalizer,
 	requestIdGenerator RequestIdGenerator,
+	peerTracker PeerTracker,
 ) Downloader {
 	return &trackingDownloader{
 		Downloader:  NewDownloader(logger, messageListener, messageBroadcaster, peerPenalizer, requestIdGenerator),
-		peerTracker: newPeerTracker(),
+		peerTracker: peerTracker,
 	}
 }
 
@@ -46,7 +50,11 @@ type trackingDownloader struct {
 func (td *trackingDownloader) DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
 	res, err := td.Downloader.DownloadHeaders(ctx, start, end, peerId)
 	if err != nil {
-		// TODO
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, incompleteDownloadHeadersResponseErr) {
+			td.peerTracker.BlockNumMissing(peerId, start)
+		}
+
+		return nil, err
 	}
 
 	return res, nil
@@ -83,6 +91,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 
 	var headers []*types.Header
 	requestId := d.requestIdGenerator()
+	amount := end - start + 1
 
 	observer := make(chanMessageObserver[*sentry.InboundMessage])
 	d.messageListener.RegisterBlockHeaders66(observer)
@@ -142,7 +151,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 					Origin: eth.HashOrNumber{
 						Number: start,
 					},
-					Amount: end - start + 1,
+					Amount: amount,
 				},
 			})
 		}
@@ -150,6 +159,15 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+
+	if uint64(len(headers)) != amount {
+		return nil, fmt.Errorf(
+			"%w: requested=%d, received=%d",
+			incompleteDownloadHeadersResponseErr,
+			amount,
+			len(headers),
+		)
 	}
 
 	return headers, nil

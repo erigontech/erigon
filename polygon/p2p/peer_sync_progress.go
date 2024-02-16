@@ -29,7 +29,7 @@ func (psp *peerSyncProgress) blockNumMissing(blockNum uint64) {
 	}
 }
 
-func (psp *peerSyncProgress) peerMayHave(blockNum uint64) bool {
+func (psp *peerSyncProgress) peerMayHaveBlockNum(blockNum uint64) bool {
 	if psp.maxSeenBlockNum >= blockNum {
 		return true
 	}

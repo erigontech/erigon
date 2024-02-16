@@ -50,18 +50,18 @@ func (mr *MockServiceMockRecorder) DownloadHeaders(arg0, arg1, arg2, arg3 interf
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadHeaders", reflect.TypeOf((*MockService)(nil).DownloadHeaders), arg0, arg1, arg2, arg3)
 }
 
-// ListPeersMayHave mocks base method.
-func (m *MockService) ListPeersMayHave(arg0 uint64) []PeerId {
+// ListPeersMayHaveBlockNum mocks base method.
+func (m *MockService) ListPeersMayHaveBlockNum(arg0 uint64) []PeerId {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListPeersMayHave", arg0)
+	ret := m.ctrl.Call(m, "ListPeersMayHaveBlockNum", arg0)
 	ret0, _ := ret[0].([]PeerId)
 	return ret0
 }
 
-// ListPeersMayHave indicates an expected call of ListPeersMayHave.
-func (mr *MockServiceMockRecorder) ListPeersMayHave(arg0 interface{}) *gomock.Call {
+// ListPeersMayHaveBlockNum indicates an expected call of ListPeersMayHaveBlockNum.
+func (mr *MockServiceMockRecorder) ListPeersMayHaveBlockNum(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPeersMayHave", reflect.TypeOf((*MockService)(nil).ListPeersMayHave), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPeersMayHaveBlockNum", reflect.TypeOf((*MockService)(nil).ListPeersMayHaveBlockNum), arg0)
 }
 
 // MaxPeers mocks base method.
