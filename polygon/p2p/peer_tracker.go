@@ -26,8 +26,8 @@ type peerTracker struct {
 	messageListener          MessageListener
 	mu                       sync.Mutex
 	peerSyncProgresses       map[PeerId]*peerSyncProgress
-	peerEventObserver        messageObserver[*sentry.PeerEvent]
-	blockNumPresenceObserver messageObserver[*sentry.InboundMessage]
+	peerEventObserver        MessageObserver[*sentry.PeerEvent]
+	blockNumPresenceObserver MessageObserver[*sentry.InboundMessage]
 }
 
 func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
@@ -75,7 +75,7 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId PeerId, update func(psp *pe
 	update(peerSyncProgress)
 }
 
-func NewBlockNumPresenceObserver(peerTracker PeerTracker) messageObserver[*sentry.InboundMessage] {
+func NewBlockNumPresenceObserver(peerTracker PeerTracker) MessageObserver[*sentry.InboundMessage] {
 	return &blockNumPresenceObserver{
 		peerTracker: peerTracker,
 	}
@@ -99,7 +99,7 @@ func (bnpo *blockNumPresenceObserver) Notify(msg *sentry.InboundMessage) {
 	}
 }
 
-func NewPeerEventObserver(peerTracker PeerTracker) messageObserver[*sentry.PeerEvent] {
+func NewPeerEventObserver(peerTracker PeerTracker) MessageObserver[*sentry.PeerEvent] {
 	return &peerEventObserver{
 		peerTracker: peerTracker,
 	}

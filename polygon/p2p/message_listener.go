@@ -15,17 +15,17 @@ import (
 type MessageListener interface {
 	Start(ctx context.Context)
 	Stop()
-	RegisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage])
-	UnregisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage])
-	RegisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent])
-	UnregisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent])
+	RegisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage])
+	UnregisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage])
+	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent])
+	UnregisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent])
 }
 
 func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) MessageListener {
 	return &messageListener{
 		logger:                  logger,
 		sentryClient:            sentryClient,
-		inboundMessageObservers: map[sentry.MessageId]map[messageObserver[*sentry.InboundMessage]]struct{}{},
+		inboundMessageObservers: map[sentry.MessageId]map[MessageObserver[*sentry.InboundMessage]]struct{}{},
 	}
 }
 
@@ -36,7 +36,7 @@ type messageListener struct {
 	logger                    log.Logger
 	sentryClient              direct.SentryClient
 	inboundMessageObserversMu sync.Mutex
-	inboundMessageObservers   map[sentry.MessageId]map[messageObserver[*sentry.InboundMessage]]struct{}
+	inboundMessageObservers   map[sentry.MessageId]map[MessageObserver[*sentry.InboundMessage]]struct{}
 	stopWg                    sync.WaitGroup
 }
 
@@ -56,36 +56,36 @@ func (ml *messageListener) Stop() {
 	ml.inboundMessageObservers = nil
 }
 
-func (ml *messageListener) RegisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage]) {
+func (ml *messageListener) RegisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage]) {
 	ml.register(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *messageListener) UnregisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage]) {
+func (ml *messageListener) UnregisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage]) {
 	ml.unregister(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *messageListener) RegisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent]) {
+func (ml *messageListener) RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) {
 	// TODO
 }
 
-func (ml *messageListener) UnregisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent]) {
+func (ml *messageListener) UnregisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) {
 	// TODO
 }
 
-func (ml *messageListener) register(observer messageObserver[*sentry.InboundMessage], messageId sentry.MessageId) {
+func (ml *messageListener) register(observer MessageObserver[*sentry.InboundMessage], messageId sentry.MessageId) {
 	ml.inboundMessageObserversMu.Lock()
 	defer ml.inboundMessageObserversMu.Unlock()
 
 	if observers, ok := ml.inboundMessageObservers[messageId]; ok {
 		observers[observer] = struct{}{}
 	} else {
-		ml.inboundMessageObservers[messageId] = map[messageObserver[*sentry.InboundMessage]]struct{}{
+		ml.inboundMessageObservers[messageId] = map[MessageObserver[*sentry.InboundMessage]]struct{}{
 			observer: {},
 		}
 	}
 }
 
-func (ml *messageListener) unregister(observer messageObserver[*sentry.InboundMessage], messageId sentry.MessageId) {
+func (ml *messageListener) unregister(observer MessageObserver[*sentry.InboundMessage], messageId sentry.MessageId) {
 	ml.inboundMessageObserversMu.Lock()
 	defer ml.inboundMessageObserversMu.Unlock()
 
