@@ -56,6 +56,19 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
+	rcfg := beacon_router_configuration.RouterConfiguration{
+		Protocol:         cfg.BeaconProtocol,
+		Address:          cfg.BeaconAddr,
+		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
+		WriteTimeout:     cfg.BeaconApiWriteTimeout,
+		IdleTimeout:      cfg.BeaconApiWriteTimeout,
+		AllowedOrigins:   cfg.AllowedOrigins,
+		AllowedMethods:   cfg.AllowedMethods,
+		AllowCredentials: cfg.AllowCredentials,
+	}
+	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
+		return err
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
@@ -123,15 +136,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon_router_configuration.RouterConfiguration{
-		Protocol:         cfg.BeaconProtocol,
-		Address:          cfg.BeaconAddr,
-		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
-		WriteTimeout:     cfg.BeaconApiWriteTimeout,
-		IdleTimeout:      cfg.BeaconApiWriteTimeout,
-		Active:           !cfg.NoBeaconApi,
-		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   cfg.AllowedMethods,
-		AllowCredentials: cfg.AllowCredentials,
-	}, nil, nil, false, false, indiciesDB, nil)
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, rcfg, nil, nil, false, false, indiciesDB, nil)
 }
