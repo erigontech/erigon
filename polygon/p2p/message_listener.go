@@ -17,6 +17,8 @@ type MessageListener interface {
 	Stop()
 	RegisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage])
 	UnregisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage])
+	RegisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent])
+	UnregisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent])
 }
 
 func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) MessageListener {
@@ -56,6 +58,14 @@ func (ml *messageListener) RegisterBlockHeaders66(observer messageObserver[*sent
 
 func (ml *messageListener) UnregisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage]) {
 	ml.unregister(observer, sentry.MessageId_BLOCK_HEADERS_66)
+}
+
+func (ml *messageListener) RegisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent]) {
+	// TODO
+}
+
+func (ml *messageListener) UnregisterPeerEventObserver(observer messageObserver[*sentry.PeerEvent]) {
+	// TODO
 }
 
 func (ml *messageListener) register(observer messageObserver[*sentry.InboundMessage], messageId sentry.MessageId) {
