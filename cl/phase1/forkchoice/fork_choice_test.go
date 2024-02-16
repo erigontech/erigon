@@ -130,7 +130,9 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	// Initialize forkchoice store
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+		Beacon: true,
+	}), emitters)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {
