@@ -52,8 +52,10 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
 		}
-		body := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
-
+		body, err := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
+		}
 		parentTd := common.Big0
 		height := header.Number.Uint64()
 		if height > 0 {

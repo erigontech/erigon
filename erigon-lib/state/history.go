@@ -196,29 +196,7 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 		if _, has := h.files.Get(newFile); has {
 			continue
 		}
-
-		addNewFile := true
-		var subSets []*filesItem
-		h.files.Walk(func(items []*filesItem) bool {
-			for _, item := range items {
-				if item.isSubsetOf(newFile) {
-					subSets = append(subSets, item)
-					continue
-				}
-
-				if newFile.isSubsetOf(item) {
-					if item.frozen {
-						addNewFile = false
-						garbageFiles = append(garbageFiles, newFile)
-					}
-					continue
-				}
-			}
-			return true
-		})
-		if addNewFile {
-			h.files.Set(newFile)
-		}
+		h.files.Set(newFile)
 	}
 	return garbageFiles
 }

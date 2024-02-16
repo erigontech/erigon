@@ -270,7 +270,6 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 		log.Warn("[Antiquary]: Failed to add items to bittorent", "err", err)
 	}
 
-	a.validatorsTable.SetSlot(to)
 	return tx.Commit()
 }
 

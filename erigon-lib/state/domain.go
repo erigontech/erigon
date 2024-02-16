@@ -246,9 +246,11 @@ func newFilesItem(startTxNum, endTxNum, stepSize uint64) *filesItem {
 	return &filesItem{startTxNum: startTxNum, endTxNum: endTxNum, frozen: frozen}
 }
 
+// isSubsetOf - when `j` covers `i` but not equal `i`
 func (i *filesItem) isSubsetOf(j *filesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
 }
+func (i *filesItem) isBefore(j *filesItem) bool { return i.endTxNum <= j.startTxNum }
 
 func filesItemLess(i, j *filesItem) bool {
 	if i.endTxNum == j.endTxNum {
@@ -564,41 +566,10 @@ func (d *Domain) scanStateFiles(fileNames []string) (garbageFiles []*filesItem) 
 		var newFile = newFilesItem(startTxNum, endTxNum, d.aggregationStep)
 		newFile.frozen = false
 
-		//for _, ext := range d.integrityFileExtensions {
-		//	requiredFile := fmt.Sprintf("%s.%d-%d.%s", d.filenameBase, startStep, endStep, ext)
-		//	if !dir.FileExist(filepath.Join(d.dir, requiredFile)) {
-		//		d.logger.Debug(fmt.Sprintf("[snapshots] skip %s because %s doesn't exists", name, requiredFile))
-		//		garbageFiles = append(garbageFiles, newFile)
-		//		continue Loop
-		//	}
-		//}
-
 		if _, has := d.files.Get(newFile); has {
 			continue
 		}
-
-		addNewFile := true
-		var subSets []*filesItem
-		d.files.Walk(func(items []*filesItem) bool {
-			for _, item := range items {
-				if item.isSubsetOf(newFile) {
-					subSets = append(subSets, item)
-					continue
-				}
-
-				if newFile.isSubsetOf(item) {
-					if item.frozen {
-						addNewFile = false
-						garbageFiles = append(garbageFiles, newFile)
-					}
-					continue
-				}
-			}
-			return true
-		})
-		if addNewFile {
-			d.files.Set(newFile)
-		}
+		d.files.Set(newFile)
 	}
 	return garbageFiles
 }
