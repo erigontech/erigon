@@ -55,9 +55,9 @@ jobs:
 
       - name: Install golangci-lint
         if: runner.os == 'Linux'
-        uses: golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v4
         with:
-          version: v1.55.2
+          version: v1.56.1
           skip-build-cache: true
           args: --help
 

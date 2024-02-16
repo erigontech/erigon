@@ -70,8 +70,11 @@ func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) InsertBlocks(blks []*types.Block) error {
-	return cc.chainRW.InsertBlocksAndWait(blks)
+func (cc *ExecutionClientDirect) InsertBlocks(blks []*types.Block, wait bool) error {
+	if !wait {
+		return cc.chainRW.InsertBlocksAndWait(blks)
+	}
+	return cc.chainRW.InsertBlocks(blks)
 }
 
 func (cc *ExecutionClientDirect) InsertBlock(blk *types.Block) error {

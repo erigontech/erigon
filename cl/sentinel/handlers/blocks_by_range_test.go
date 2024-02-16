@@ -10,10 +10,10 @@ import (
 
 	"github.com/golang/snappy"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
@@ -43,8 +43,8 @@ func TestBlocksByRootHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool()
-	beaconDB, indiciesDB := setupStore(t)
-	store := persistence.NewBeaconChainDatabaseFilesystem(beaconDB, nil, &clparams.MainnetBeaconConfig)
+	_, indiciesDB := setupStore(t)
+	store := tests.NewMockBlockReader()
 
 	tx, _ := indiciesDB.BeginRw(ctx)
 
@@ -58,7 +58,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 	genesisCfg, _, beaconCfg := clparams.GetConfigsByNetwork(1)
 	c := NewConsensusHandlers(
 		ctx,
-		beaconDB,
+		store,
 		indiciesDB,
 		host,
 		peersPool,

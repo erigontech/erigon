@@ -29,10 +29,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -77,7 +77,8 @@ type Sentinel struct {
 
 	handshaker *handshake.HandShaker
 
-	db         persistence.RawBeaconBlockChain
+	blockReader freezeblocks.BeaconSnapshotReader
+
 	indiciesDB kv.RoDB
 
 	discoverConfig       discover.Config
@@ -170,7 +171,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 	if err != nil {
 		return nil, err
 	}
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.handshaker, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
+	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.handshaker, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
 
 	return net, err
 }
@@ -179,7 +180,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
-	db persistence.RawBeaconBlockChain,
+	blockReader freezeblocks.BeaconSnapshotReader,
 	indiciesDB kv.RoDB,
 	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
@@ -187,7 +188,7 @@ func New(
 	s := &Sentinel{
 		ctx:              ctx,
 		cfg:              cfg,
-		db:               db,
+		blockReader:      blockReader,
 		indiciesDB:       indiciesDB,
 		metrics:          true,
 		logger:           logger,
