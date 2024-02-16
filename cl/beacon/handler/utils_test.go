@@ -72,7 +72,6 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Debug:      true,
 			Events:     true,
 			Validator:  true,
-			Rewards:    true,
 			Lighthouse: true,
 		}, nil)
 	h.Init()
