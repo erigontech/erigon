@@ -1075,7 +1075,11 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		if !can {
 			return nil, nil
 		}
-		txTo = min(untilTx, txTo)
+		if hc.h.dontProduceFiles {
+			txTo = untilTx
+		} else {
+			txTo = min(untilTx, txTo)
+		}
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 
