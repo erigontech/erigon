@@ -1,4 +1,4 @@
-datadir : '/path/to/datadirs/hermez-cardona'
+datadir : '/path/to/datadirs/hermez-cardona-internal'
 chain : "hermez-cardona-internal"
 http : true
 private.api.addr : "localhost:9092"
@@ -8,7 +8,7 @@ zkevm.l2-datastreamer-url: "datastream.internal.zkevm-rpc.com:6900"
 zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: "https://rpc.sepolia.org"
 zkevm.l1-polygon-rollup-manager: "0xE2EF6215aDc132Df6913C8DD16487aBF118d1764"
-zkevm.l1-rollup: "0xE2EF6215aDc132Df6913C8DD16487aBF118d1764"
+zkevm.l1-rollup: "0x89BA0Ed947a88fe43c22Ae305C0713eC8a7Eb361"
 zkevm.l1-matic-contract-address: "0xbA59560D9B3a697745695A01144536514afE0e2B"
 zkevm.l1-ger-manager-contract-address: "0x2968D6d736178f8FE7393CC33C87f29D9C287e78"
 zkevm.l1-topic-verification: "0xcb339b570a7f0b25afa7333371ff11192092a0aeace12b671f4c212f2815c6fe"
