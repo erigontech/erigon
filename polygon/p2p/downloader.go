@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -56,7 +57,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 	var headers []*types.Header
 	requestId := d.requestIdGenerator()
 
-	observer := make(chanMessageObserver)
+	observer := make(chanMessageObserver[*sentry.InboundMessage])
 	d.messageListener.RegisterBlockHeaders66(observer)
 	defer d.messageListener.UnregisterBlockHeaders66(observer)
 
