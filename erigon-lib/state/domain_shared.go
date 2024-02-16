@@ -531,6 +531,10 @@ func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
 }
 
+func (sd *SharedDomains) SetTrace(b bool) {
+	sd.trace = b
+}
+
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
 	return sd.sdCtx.ComputeCommitment(ctx, saveStateAfter, blockNum, logPrefix)
 }
