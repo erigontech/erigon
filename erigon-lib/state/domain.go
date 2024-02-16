@@ -2073,14 +2073,17 @@ func (dc *DomainContext) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
 // checks if there is anything to prune in DOMAIN tables.
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
-func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxPrunableStep uint64) {
+func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
 	if m := dc.maxTxNumInDomainFiles(false); m > 0 {
-		maxPrunableStep = (m - 1) / dc.d.aggregationStep
+		maxStepToPrune = (m - 1) / dc.d.aggregationStep
 	}
-	untilStep := (untilTx - 1) / dc.d.aggregationStep
+	var untilStep uint64
+	if untilTx > 0 {
+		untilStep = (untilTx - 1) / dc.d.aggregationStep
+	}
 	sm := dc.smallestStepForPruning(tx)
-	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxPrunableStep)
-	return sm <= maxPrunableStep && sm < untilStep && untilStep <= maxPrunableStep, maxPrunableStep
+	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxStepToPrune)
+	return sm <= maxStepToPrune && sm <= untilStep && untilStep <= maxStepToPrune, maxStepToPrune
 }
 
 func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
