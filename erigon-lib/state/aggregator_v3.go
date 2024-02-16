@@ -649,7 +649,7 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 			in.Close()
 		}
 	}()
-	a.integrateMergedFiles(outs, in)
+	ac.integrateMergedFiles(outs, in)
 	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil
@@ -1015,7 +1015,6 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 		min = txNum
 	}
 	if txNum := a.d[kv.CommitmentDomain].endTxNumMinimax(); txNum < min {
-		fmt.Printf("[dbg] commitment min: %d, %d\n", txNum/a.aggregationStep, min/a.aggregationStep)
 		min = txNum
 	}
 	if txNum := a.logAddrs.endTxNumMinimax(); txNum < min {
@@ -1262,42 +1261,34 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if err == nil {
 		closeFiles = false
 	}
-	//fmt.Printf("[snapshots] merge done %s\n", r.String())
+	//fmt.Printf("[dbg] merge done %s\n", r.String())
 	return mf, err
 }
 
-func (a *AggregatorV3) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
-	a.filesMutationLock.Lock()
-	defer a.filesMutationLock.Unlock()
-	defer a.needSaveFilesListInDB.Store(true)
-	defer a.recalcMaxTxNum()
+func (ac *AggregatorV3Context) integrateMergedFiles(outs SelectedStaticFilesV3, in MergedFilesV3) (frozen []string) {
+	ac.a.filesMutationLock.Lock()
+	defer ac.a.filesMutationLock.Unlock()
+	defer ac.a.needSaveFilesListInDB.Store(true)
+	defer ac.a.recalcMaxTxNum()
 
-	for id, d := range a.d {
+	for id, d := range ac.a.d {
 		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
 	}
-	a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)
-	a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
-	a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
-	a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
-	a.cleanAfterNewFreeze(in)
+	ac.a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)
+	ac.a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
+	ac.a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
+	ac.a.tracesTo.integrateMergedFiles(outs.tracesTo, in.tracesTo)
+	ac.cleanAfterMerge(in)
 	return frozen
 }
-func (a *AggregatorV3) cleanAfterNewFreeze(in MergedFilesV3) {
-	for id, d := range a.d {
-		d.cleanAfterFreeze(in.d[id], in.dHist[id], in.dIdx[id])
+func (ac *AggregatorV3Context) cleanAfterMerge(in MergedFilesV3) {
+	for id, d := range ac.d {
+		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
 	}
-	if in.logAddrs != nil && in.logAddrs.frozen {
-		a.logAddrs.cleanAfterFreeze(in.logAddrs.endTxNum)
-	}
-	if in.logTopics != nil && in.logTopics.frozen {
-		a.logTopics.cleanAfterFreeze(in.logTopics.endTxNum)
-	}
-	if in.tracesFrom != nil && in.tracesFrom.frozen {
-		a.tracesFrom.cleanAfterFreeze(in.tracesFrom.endTxNum)
-	}
-	if in.tracesTo != nil && in.tracesTo.frozen {
-		a.tracesTo.cleanAfterFreeze(in.tracesTo.endTxNum)
-	}
+	ac.logAddrs.cleanAfterMerge(in.logAddrs)
+	ac.logTopics.cleanAfterMerge(in.logTopics)
+	ac.tracesFrom.cleanAfterMerge(in.tracesFrom)
+	ac.tracesTo.cleanAfterMerge(in.tracesTo)
 }
 
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots

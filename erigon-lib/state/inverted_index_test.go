@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -585,4 +586,28 @@ func TestCtxFiles(t *testing.T) {
 
 	require.Equal(t, 480, int(roFiles[2].startTxNum))
 	require.Equal(t, 512, int(roFiles[2].endTxNum))
+}
+
+func TestIsSubset(t *testing.T) {
+	assert := assert.New(t)
+	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.True((&filesItem{startTxNum: 1, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 3}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 2, endTxNum: 3}).isSubsetOf(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isSubsetOf(&filesItem{startTxNum: 1, endTxNum: 2}))
+}
+
+func TestIsBefore(t *testing.T) {
+	assert := assert.New(t)
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 1, endTxNum: 2}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 3}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 2, endTxNum: 3}).isBefore(&filesItem{startTxNum: 0, endTxNum: 2}))
+	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 1, endTxNum: 2}))
+	assert.False((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 1, endTxNum: 2}))
+	assert.True((&filesItem{startTxNum: 0, endTxNum: 1}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
+	assert.True((&filesItem{startTxNum: 0, endTxNum: 2}).isBefore(&filesItem{startTxNum: 2, endTxNum: 4}))
 }
