@@ -119,7 +119,7 @@ func (ml *messageListener) inboundMessageFactory() sentrymulticlient.MessageFact
 	}
 }
 
-func (ml *messageListener) inboundMessageHandler() sentrymulticlient.InboundMessageHandler[*sentry.InboundMessage] {
+func (ml *messageListener) inboundMessageHandler() sentrymulticlient.MessageHandler[*sentry.InboundMessage] {
 	return func(_ context.Context, msg *sentry.InboundMessage, _ direct.SentryClient) error {
 		ml.notifyInboundMessageObservers(msg)
 		return nil

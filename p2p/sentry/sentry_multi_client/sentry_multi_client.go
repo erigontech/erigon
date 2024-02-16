@@ -45,11 +45,11 @@ import (
 )
 
 type (
-	SentryMessageStream          grpc.ClientStream
-	SentryMessageStreamFactory   func(context.Context, direct.SentryClient) (SentryMessageStream, error)
-	StatusDataFactory            func() *proto_sentry.StatusData
-	MessageFactory[T any]        func() T
-	InboundMessageHandler[T any] func(context.Context, T, direct.SentryClient) error
+	SentryMessageStream        grpc.ClientStream
+	SentryMessageStreamFactory func(context.Context, direct.SentryClient) (SentryMessageStream, error)
+	StatusDataFactory          func() *proto_sentry.StatusData
+	MessageFactory[T any]      func() T
+	MessageHandler[T any]      func(context.Context, T, direct.SentryClient) error
 )
 
 // StartStreamLoops starts message processing loops for all sentries.
@@ -140,7 +140,7 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 	streamName string,
 	streamFactory SentryMessageStreamFactory,
 	messageFactory MessageFactory[TMessage],
-	handleInboundMessage InboundMessageHandler[TMessage],
+	handleInboundMessage MessageHandler[TMessage],
 	wg *sync.WaitGroup,
 	logger log.Logger,
 ) {
@@ -198,7 +198,7 @@ func pumpStreamLoop[TMessage interface{}](
 	streamName string,
 	streamFactory SentryMessageStreamFactory,
 	messageFactory MessageFactory[TMessage],
-	handleInboundMessage InboundMessageHandler[TMessage],
+	handleInboundMessage MessageHandler[TMessage],
 	wg *sync.WaitGroup,
 	logger log.Logger,
 ) (err error) {
