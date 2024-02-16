@@ -57,9 +57,9 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 	var headers []*types.Header
 	requestId := d.requestIdGenerator()
 
-	observer := make(chanMessageObserver[*sentry.InboundMessage])
-	d.messageListener.RegisterBlockHeaders66(observer)
-	defer d.messageListener.UnregisterBlockHeaders66(observer)
+	observer := make(ChanMessageObserver[*sentry.InboundMessage])
+	d.messageListener.RegisterBlockHeaders66Observer(observer)
+	defer d.messageListener.UnregisterBlockHeaders66Observer(observer)
 
 	ctx, cancel := context.WithTimeout(ctx, reqRespTimeout)
 	defer cancel()
