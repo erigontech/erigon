@@ -26,7 +26,6 @@ type RouterConfiguration struct {
 	Events     bool
 	Node       bool
 	Validator  bool
-	Rewards    bool
 	Lighthouse bool
 }
 
@@ -50,8 +49,6 @@ func (r *RouterConfiguration) UnwrapEndpointsList(l []string) error {
 			r.Node = true
 		case "validator":
 			r.Validator = true
-		case "rewards":
-			r.Rewards = true
 		case "lighthouse":
 			r.Lighthouse = true
 		default:
@@ -63,7 +60,6 @@ func (r *RouterConfiguration) UnwrapEndpointsList(l []string) error {
 			r.Events = false
 			r.Node = false
 			r.Validator = false
-			r.Rewards = false
 			r.Lighthouse = false
 			return fmt.Errorf("unknown endpoint for beacon.api: %s. known endpoints: beacon, builder, config, debug, events, node, validator, rewards, lighthouse", v)
 		}

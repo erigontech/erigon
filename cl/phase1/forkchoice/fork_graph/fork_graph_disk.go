@@ -224,7 +224,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
 	var prevDumpBalances, prevValidatorSetDump, prevInactivityScores []byte
 	epochCross := newState.Slot()/f.beaconCfg.SlotsPerEpoch != block.Slot/f.beaconCfg.SlotsPerEpoch
-	if (f.rcfg.Rewards || f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse) && !epochCross {
+	if (f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse) && !epochCross {
 		prevDumpBalances = libcommon.Copy(newState.RawBalances())
 		prevValidatorSetDump = libcommon.Copy(newState.RawValidatorSet())
 		prevInactivityScores = libcommon.Copy(newState.RawInactivityScores())
@@ -239,16 +239,14 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, InvalidBlock, invalidBlockErr
 	}
 
-	if f.rcfg.Rewards || f.rcfg.Lighthouse {
+	// update diff storages.
+	if f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse {
 		if block.Version() != clparams.Phase0Version {
 			f.currentIndicies.Store(libcommon.Hash(blockRoot), libcommon.Copy(newState.RawCurrentEpochParticipation()))
 			f.previousIndicies.Store(libcommon.Hash(blockRoot), libcommon.Copy(newState.RawPreviousEpochParticipation()))
 			f.inactivityScoresStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevInactivityScores, newState.RawInactivityScores(), epochCross)
 		}
 		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
-	}
-	// update diff storages.
-	if f.rcfg.Rewards || f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse {
 		f.balancesStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevDumpBalances, newState.RawBalances(), epochCross)
 		f.validatorSetStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevValidatorSetDump, newState.RawValidatorSet(), epochCross)
 
