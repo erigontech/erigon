@@ -76,7 +76,6 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(headSlot)
 	headEpoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch > headEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("epoch is in the future"))
