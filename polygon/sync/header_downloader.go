@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sort"
 	"sync"
 	"time"
 
@@ -18,7 +17,10 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
-const headerDownloaderLogPrefix = "HeaderDownloader"
+const (
+	headerDownloaderLogPrefix     = "HeaderDownloader"
+	notEnoughPeersBackOffDuration = time.Minute
+)
 
 func NewHeaderDownloader(
 	logger log.Logger,
@@ -26,19 +28,31 @@ func NewHeaderDownloader(
 	heimdall heimdall.Heimdall,
 	verify AccumulatedHeadersVerifier,
 ) *HeaderDownloader {
+	return newHeaderDownloader(logger, p2pService, heimdall, verify, notEnoughPeersBackOffDuration)
+}
+
+func newHeaderDownloader(
+	logger log.Logger,
+	p2pService p2p.Service,
+	heimdall heimdall.Heimdall,
+	verify AccumulatedHeadersVerifier,
+	notEnoughPeersBackOffDuration time.Duration,
+) *HeaderDownloader {
 	return &HeaderDownloader{
-		logger:     logger,
-		p2pService: p2pService,
-		heimdall:   heimdall,
-		verify:     verify,
+		logger:                        logger,
+		p2pService:                    p2pService,
+		heimdall:                      heimdall,
+		verify:                        verify,
+		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
 	}
 }
 
 type HeaderDownloader struct {
-	logger     log.Logger
-	p2pService p2p.Service
-	heimdall   heimdall.Heimdall
-	verify     AccumulatedHeadersVerifier
+	logger                        log.Logger
+	p2pService                    p2p.Service
+	heimdall                      heimdall.Heimdall
+	verify                        AccumulatedHeadersVerifier
+	notEnoughPeersBackOffDuration time.Duration
 }
 
 func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, store CheckpointStore, start uint64) error {
@@ -77,31 +91,31 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 	}
 
 	for len(waypoints) > 0 {
-		allPeers := hd.p2pService.PeersSyncProgress()
-		if len(allPeers) == 0 {
-			hd.logger.Warn(fmt.Sprintf("[%s] zero peers, will try again", headerDownloaderLogPrefix))
-			continue
-		}
-
-		sort.Sort(allPeers) // sort by block num in asc order
-		peers := hd.choosePeers(allPeers, waypoints)
+		endBlockNum := waypoints[len(waypoints)-1].EndBlock()
+		peers := hd.p2pService.ListPeersMayHave(endBlockNum.Uint64())
 		if len(peers) == 0 {
 			hd.logger.Warn(
 				fmt.Sprintf("[%s] can't use any peers to sync, will try again", headerDownloaderLogPrefix),
 				"start", waypoints[0].StartBlock(),
-				"end", waypoints[len(waypoints)-1].EndBlock(),
-				"lowestMaxSeenBlockNum", allPeers[0].MaxSeenBlockNum,
-				"lowestPeerId", allPeers[0].Id,
+				"end", endBlockNum,
+				"sleepSeconds", hd.notEnoughPeersBackOffDuration.Seconds(),
 			)
+
+			time.Sleep(hd.notEnoughPeersBackOffDuration)
 			continue
 		}
 
 		peerCount := len(peers)
-		waypointsBatch := waypoints[:peerCount]
+		waypointsBatch := waypoints
+		if len(waypointsBatch) > peerCount {
+			waypointsBatch = waypointsBatch[:peerCount]
+		}
+
 		hd.logger.Info(
 			fmt.Sprintf("[%s] downloading headers", headerDownloaderLogPrefix),
-			"start", waypointsBatch[0].StartBlock(),
-			"end", waypointsBatch[len(waypointsBatch)-1].EndBlock(),
+			"waypointsBatchLength", len(waypointsBatch),
+			"startBlockNum", waypointsBatch[0].StartBlock(),
+			"endBlockNum", waypointsBatch[len(waypointsBatch)-1].EndBlock(),
 			"kind", reflect.TypeOf(waypointsBatch[0]),
 			"peerCount", peerCount,
 		)
@@ -161,7 +175,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 
 				waypointHeadersMemo.Add(waypoint.RootHash(), headers)
 				headerBatches[i] = headers
-			}(i, waypoint, peers[i].Id)
+			}(i, waypoint, peers[i])
 		}
 
 		wg.Wait()
@@ -203,24 +217,4 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 	}
 
 	return nil
-}
-
-// choosePeers assumes peers are sorted in ascending order based on block num
-func (hd *HeaderDownloader) choosePeers(peers p2p.PeersSyncProgress, waypoints heimdall.Waypoints) p2p.PeersSyncProgress {
-	var peersIdx int
-	chosenPeers := make(p2p.PeersSyncProgress, 0, len(peers))
-	for _, waypoint := range waypoints {
-		if peersIdx >= len(peers) {
-			break
-		}
-
-		peer := peers[peersIdx]
-		if peer.MaxSeenBlockNum >= waypoint.EndBlock().Uint64() {
-			chosenPeers = append(chosenPeers, peer)
-		}
-
-		peersIdx++
-	}
-
-	return chosenPeers
 }

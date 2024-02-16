@@ -8,15 +8,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 )
 
-func PeerIdFromH512(pid *types.H512) PeerId {
-	return gointerfaces.ConvertH512ToHash(pid)
+func PeerIdFromH512(peerId *types.H512) PeerId {
+	return gointerfaces.ConvertH512ToHash(peerId)
 }
 
 // PeerIdFromUint64 is useful for testing and that is its main intended purpose
-func PeerIdFromUint64(pid uint64) PeerId {
-	var pidBytes [64]byte
-	binary.BigEndian.PutUint64(pidBytes[:8], pid)
-	return pidBytes
+func PeerIdFromUint64(peerId uint64) PeerId {
+	var peerIdBytes [64]byte
+	binary.BigEndian.PutUint64(peerIdBytes[:8], peerId)
+	return peerIdBytes
 }
 
 type PeerId [64]byte
