@@ -867,6 +867,7 @@ type BenchmarkNode struct {
 	OutCSV   string `help:"output csv" default:""`
 	Accept   string `help:"accept" default:"application/json"`
 	Head     bool   `help:"head" default:"false"`
+	Method   string `help:"method" default:"GET"`
 }
 
 func (b *BenchmarkNode) Run(ctx *Context) error {
@@ -916,8 +917,8 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 	return nil
 }
 
-func timeRequest(uri, accept string) (time.Duration, error) {
-	req, err := http.NewRequest(http.MethodGet, uri, nil)
+func timeRequest(uri, accept, method string) (time.Duration, error) {
+	req, err := http.NewRequest(method, uri, nil)
 	if err != nil {
 		return 0, err
 	}
