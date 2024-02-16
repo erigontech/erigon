@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 )
 
@@ -24,7 +23,7 @@ func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) Mes
 	return &messageListener{
 		logger:                  logger,
 		sentryClient:            sentryClient,
-		inboundMessageObservers: map[protosentry.MessageId]map[messageObserver[*sentry.InboundMessage]]struct{}{},
+		inboundMessageObservers: map[sentry.MessageId]map[messageObserver[*sentry.InboundMessage]]struct{}{},
 	}
 }
 
@@ -35,7 +34,7 @@ type messageListener struct {
 	logger                    log.Logger
 	sentryClient              direct.SentryClient
 	inboundMessageObserversMu sync.Mutex
-	inboundMessageObservers   map[protosentry.MessageId]map[messageObserver[*sentry.InboundMessage]]struct{}
+	inboundMessageObservers   map[sentry.MessageId]map[messageObserver[*sentry.InboundMessage]]struct{}
 	stopWg                    sync.WaitGroup
 }
 
@@ -52,14 +51,14 @@ func (ml *messageListener) Stop() {
 }
 
 func (ml *messageListener) RegisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage]) {
-	ml.register(observer, protosentry.MessageId_BLOCK_HEADERS_66)
+	ml.register(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
 func (ml *messageListener) UnregisterBlockHeaders66(observer messageObserver[*sentry.InboundMessage]) {
-	ml.unregister(observer, protosentry.MessageId_BLOCK_HEADERS_66)
+	ml.unregister(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *messageListener) register(observer messageObserver[*sentry.InboundMessage], messageId protosentry.MessageId) {
+func (ml *messageListener) register(observer messageObserver[*sentry.InboundMessage], messageId sentry.MessageId) {
 	ml.inboundMessageObserversMu.Lock()
 	defer ml.inboundMessageObserversMu.Unlock()
 
@@ -72,7 +71,7 @@ func (ml *messageListener) register(observer messageObserver[*sentry.InboundMess
 	}
 }
 
-func (ml *messageListener) unregister(observer messageObserver[*sentry.InboundMessage], messageId protosentry.MessageId) {
+func (ml *messageListener) unregister(observer messageObserver[*sentry.InboundMessage], messageId sentry.MessageId) {
 	ml.inboundMessageObserversMu.Lock()
 	defer ml.inboundMessageObserversMu.Unlock()
 
@@ -82,10 +81,10 @@ func (ml *messageListener) unregister(observer messageObserver[*sentry.InboundMe
 }
 
 func (ml *messageListener) listenBlockHeaders66() {
-	ml.listenInboundMessage("BlockHeaders66", protosentry.MessageId_BLOCK_HEADERS_66)
+	ml.listenInboundMessage("BlockHeaders66", sentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *messageListener) listenInboundMessage(name string, msgId protosentry.MessageId) {
+func (ml *messageListener) listenInboundMessage(name string, msgId sentry.MessageId) {
 	ml.stopWg.Add(1)
 	defer ml.stopWg.Done()
 
@@ -94,7 +93,7 @@ func (ml *messageListener) listenInboundMessage(name string, msgId protosentry.M
 		ml.sentryClient,
 		ml.statusDataFactory(),
 		name,
-		ml.messageStreamFactory([]protosentry.MessageId{msgId}),
+		ml.messageStreamFactory([]sentry.MessageId{msgId}),
 		ml.inboundMessageFactory(),
 		ml.handleInboundMessageHandler(),
 		nil,
@@ -108,26 +107,26 @@ func (ml *messageListener) statusDataFactory() sentrymulticlient.StatusDataFacto
 	}
 }
 
-func (ml *messageListener) messageStreamFactory(ids []protosentry.MessageId) sentrymulticlient.SentryMessageStreamFactory {
-	return func(streamCtx context.Context, sentry direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
-		return sentry.Messages(streamCtx, &protosentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
+func (ml *messageListener) messageStreamFactory(ids []sentry.MessageId) sentrymulticlient.SentryMessageStreamFactory {
+	return func(streamCtx context.Context, sentryClient direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
+		return sentryClient.Messages(streamCtx, &sentry.MessagesRequest{Ids: ids}, grpc.WaitForReady(true))
 	}
 }
 
-func (ml *messageListener) inboundMessageFactory() sentrymulticlient.MessageFactory[*protosentry.InboundMessage] {
-	return func() *protosentry.InboundMessage {
-		return new(protosentry.InboundMessage)
+func (ml *messageListener) inboundMessageFactory() sentrymulticlient.MessageFactory[*sentry.InboundMessage] {
+	return func() *sentry.InboundMessage {
+		return new(sentry.InboundMessage)
 	}
 }
 
-func (ml *messageListener) handleInboundMessageHandler() sentrymulticlient.InboundMessageHandler[*protosentry.InboundMessage] {
-	return func(_ context.Context, msg *protosentry.InboundMessage, _ direct.SentryClient) error {
+func (ml *messageListener) handleInboundMessageHandler() sentrymulticlient.InboundMessageHandler[*sentry.InboundMessage] {
+	return func(_ context.Context, msg *sentry.InboundMessage, _ direct.SentryClient) error {
 		ml.notifyInboundMessageObservers(msg)
 		return nil
 	}
 }
 
-func (ml *messageListener) notifyInboundMessageObservers(msg *protosentry.InboundMessage) {
+func (ml *messageListener) notifyInboundMessageObservers(msg *sentry.InboundMessage) {
 	ml.inboundMessageObserversMu.Lock()
 	defer ml.inboundMessageObserversMu.Unlock()
 
