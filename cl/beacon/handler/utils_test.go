@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -63,7 +64,16 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		syncedData,
 		statesReader,
 		nil,
-		"test-version")
+		"test-version", &beacon_router_configuration.RouterConfiguration{
+			Beacon:     true,
+			Node:       true,
+			Builder:    true,
+			Config:     true,
+			Debug:      true,
+			Events:     true,
+			Validator:  true,
+			Lighthouse: true,
+		}, nil)
 	h.Init()
 	return
 }

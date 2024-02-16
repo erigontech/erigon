@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -57,7 +58,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -129,7 +130,9 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	// Initialize forkchoice store
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+		Beacon: true,
+	}), emitters)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {
