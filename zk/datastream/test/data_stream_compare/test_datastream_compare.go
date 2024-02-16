@@ -4,10 +4,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"reflect"
+
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/nsf/jsondiff"
-	"reflect"
 )
 
 var (
@@ -82,10 +83,10 @@ func readFromClient(client *client.StreamClient, bookmark *types.Bookmark, total
 LOOP:
 	for {
 		select {
-		case d := <-client.L2BlockChan:
+		case d := <-client.GetL2BlockChan():
 			data = append(data, d)
 			count++
-		case d := <-client.GerUpdatesChan:
+		case d := <-client.GetGerUpdatesChan():
 			data = append(data, d)
 			count++
 		}

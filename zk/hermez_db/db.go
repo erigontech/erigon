@@ -344,6 +344,17 @@ func (db *HermezDbReader) GetGlobalExitRoot(ger common.Hash) (bool, error) {
 	return len(bytes) > 0, nil
 }
 
+func (db *HermezDb) DeleteGlobalExitRoots(gers *[]common.Hash) error {
+	for _, ger := range *gers {
+		err := db.tx.Delete(GLOBAL_EXIT_ROOTS, ger.Bytes())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *HermezDb) WriteBlockGlobalExitRoot(l2BlockNo uint64, ger, l1BlockHash common.Hash) error {
 	key := ConcatGerKey(l2BlockNo, l1BlockHash)
 	return db.tx.Put(BLOCK_GLOBAL_EXIT_ROOTS, key, ger.Bytes())
@@ -366,6 +377,36 @@ func (db *HermezDbReader) GetBlockGlobalExitRoot(l2BlockNo uint64) (common.Hash,
 	}
 
 	return h, l1BlockHash, nil
+}
+
+// from and to are inclusive
+func (db *HermezDbReader) GetBlockGlobalExitRoots(fromBlockNo, toBlockNo uint64) ([]common.Hash, []common.Hash, error) {
+	c, err := db.tx.Cursor(BLOCK_GLOBAL_EXIT_ROOTS)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer c.Close()
+
+	var gers, l1BlockHashes []common.Hash
+
+	var k, v []byte
+
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, nil, err
+		}
+		CurrentBlockNumber := BytesToUint64(k)
+		if CurrentBlockNumber >= fromBlockNo && CurrentBlockNumber <= toBlockNo {
+			h := common.BytesToHash(v)
+			gers = append(gers, h)
+			if len(k) == 40 {
+				l1BlockHash := common.BytesToHash(k[8:])
+				l1BlockHashes = append(l1BlockHashes, l1BlockHash)
+			}
+		}
+	}
+
+	return gers, l1BlockHashes, nil
 }
 
 func (db *HermezDb) WriteBatchGlobalExitRoot(batchNumber uint64, ger dstypes.GerUpdate) error {
@@ -415,8 +456,19 @@ func (db *HermezDbReader) GetBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerU
 	return gerUpdate, nil
 }
 
-func (db *HermezDb) DeleteBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) error {
-	for i := fromBatchNum; i <= toBatchNum; i++ {
+func (db *HermezDb) DeleteBatchGlobalExitRoots(fromBatchNum uint64) error {
+	c, err := db.tx.Cursor(GLOBAL_EXIT_ROOTS_BATCHES)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	k, _, err := c.Last()
+	if err != nil {
+		return err
+	}
+
+	for i := fromBatchNum; i <= BytesToUint64(k); i++ {
 		err := db.tx.Delete(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(i))
 		if err != nil {
 			return err
@@ -427,8 +479,25 @@ func (db *HermezDb) DeleteBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) 
 }
 
 func (db *HermezDb) DeleteBlockGlobalExitRoots(fromBlockNum, toBlockNum uint64) error {
-	for i := fromBlockNum; i <= toBlockNum; i++ {
-		err := db.tx.Delete(BLOCK_GLOBAL_EXIT_ROOTS, Uint64ToBytes(i))
+	c, err := db.tx.Cursor(BLOCK_GLOBAL_EXIT_ROOTS)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	var k []byte
+	var keys [][]byte
+	for k, _, err = c.First(); k != nil; k, _, err = c.Next() {
+		if err != nil {
+			break
+		}
+		blockNum := BytesToUint64(k[:8])
+		if blockNum >= fromBlockNum && blockNum <= toBlockNum {
+			keys = append(keys, k)
+		}
+	}
+	for _, key := range keys {
+		err := db.tx.Delete(BLOCK_GLOBAL_EXIT_ROOTS, key)
 		if err != nil {
 			return err
 		}
@@ -437,9 +506,10 @@ func (db *HermezDb) DeleteBlockGlobalExitRoots(fromBlockNum, toBlockNum uint64) 
 	return nil
 }
 
-func (db *HermezDb) DeleteBlockBatches(fromBatchNum, toBatchNum uint64) error {
-	for i := fromBatchNum; i <= toBatchNum; i++ {
-		err := db.tx.Delete(FORKIDS, Uint64ToBytes(i))
+// from and to are inclusive
+func (db *HermezDb) DeleteBlockBatches(fromBlockNum, toBlockNum uint64) error {
+	for i := fromBlockNum; i <= toBlockNum; i++ {
+		err := db.tx.Delete(BLOCKBATCHES, Uint64ToBytes(i))
 		if err != nil {
 			return err
 		}
@@ -504,6 +574,41 @@ func (db *HermezDbReader) GetForkIdBlock(forkId uint64) (uint64, error) {
 	return blockNum, err
 }
 
+func (db *HermezDb) DeleteForkIdBlock(fromBlockNo, toBlockNo uint64) error {
+	c, err := db.tx.Cursor(FORKID_BLOCK)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+
+	var forkIds []uint64
+	var k, v []byte
+	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			break
+		}
+
+		blockNum := BytesToUint64(v)
+		if blockNum >= fromBlockNo && blockNum <= toBlockNo {
+			currentForkId := BytesToUint64(k)
+			forkIds = append(forkIds, currentForkId)
+		}
+	}
+
+	if err != nil {
+		return err
+	}
+
+	for _, forkId := range forkIds {
+		err := db.tx.Delete(FORKID_BLOCK, Uint64ToBytes(forkId))
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *HermezDb) WriteForkIdBlockOnce(forkId, blockNum uint64) error {
 	tempBlockNum, err := db.GetForkIdBlock(forkId)
 	if err != nil {
@@ -541,6 +646,17 @@ func (db *HermezDbReader) GetEffectiveGasPricePercentage(txHash common.Hash) (ui
 	return BytesToUint8(data), nil
 }
 
+func (db *HermezDb) DeleteEffectiveGasPricePercentages(txHashes *[]common.Hash) error {
+	for _, txHash := range *txHashes {
+		err := db.tx.Delete(TX_PRICE_PERCENTAGE, txHash.Bytes())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (db *HermezDb) WriteStateRoot(l2BlockNo uint64, rpcRoot common.Hash) error {
 	return db.tx.Put(STATE_ROOTS, Uint64ToBytes(l2BlockNo), rpcRoot.Bytes())
 }
@@ -552,6 +668,15 @@ func (db *HermezDbReader) GetStateRoot(l2BlockNo uint64) (common.Hash, error) {
 	}
 
 	return common.BytesToHash(data), nil
+}
+
+func (db *HermezDb) DeleteStateRoots(fromBlockNo, toBlockNo uint64) error {
+	for i := fromBlockNo; i <= toBlockNo; i++ {
+		if err := db.tx.Delete(STATE_ROOTS, Uint64ToBytes(i)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (db *HermezDb) WriteL1InfoTreeUpdate(update *types.L1InfoTreeUpdate) error {

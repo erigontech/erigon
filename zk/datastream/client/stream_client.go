@@ -32,12 +32,12 @@ type StreamClient struct {
 	entriesDefinition map[types.EntryType]EntityDefinition
 
 	// atomic
-	LastWrittenTime atomic.Int64
-	Streaming       atomic.Bool
+	lastWrittenTime atomic.Int64
+	streaming       atomic.Bool
 
 	// Channels
-	L2BlockChan    chan types.FullL2Block
-	GerUpdatesChan chan types.GerUpdate // NB: unused from etrog onwards (forkid 7)
+	l2BlockChan    chan types.FullL2Block
+	gerUpdatesChan chan types.GerUpdate // NB: unused from etrog onwards (forkid 7)
 }
 
 const (
@@ -86,11 +86,24 @@ func NewClient(server string, version int) *StreamClient {
 				Definition: reflect.TypeOf(types.GerUpdate{}),
 			},
 		},
-		L2BlockChan:    make(chan types.FullL2Block, 100000),
-		GerUpdatesChan: make(chan types.GerUpdate, 1000),
+		l2BlockChan:    make(chan types.FullL2Block, 100000),
+		gerUpdatesChan: make(chan types.GerUpdate, 1000),
 	}
 
 	return c
+}
+
+func (c *StreamClient) GetL2BlockChan() chan types.FullL2Block {
+	return c.l2BlockChan
+}
+func (c *StreamClient) GetGerUpdatesChan() chan types.GerUpdate {
+	return c.gerUpdatesChan
+}
+func (c *StreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {
+	return &c.lastWrittenTime
+}
+func (c *StreamClient) GetStreamingAtomic() *atomic.Bool {
+	return &c.streaming
 }
 
 // Opens a TCP connection to the server
@@ -110,8 +123,8 @@ func (c *StreamClient) Start() error {
 func (c *StreamClient) Stop() {
 	c.conn.Close()
 
-	close(c.L2BlockChan)
-	close(c.GerUpdatesChan)
+	close(c.l2BlockChan)
+	close(c.gerUpdatesChan)
 }
 
 // Command header: Get status
@@ -261,15 +274,15 @@ func (c *StreamClient) readAllFullL2BlocksToChannel() error {
 
 		if gerUpdates != nil {
 			for _, gerUpdate := range *gerUpdates {
-				c.GerUpdatesChan <- gerUpdate
+				c.gerUpdatesChan <- gerUpdate
 			}
 		}
-		c.LastWrittenTime.Store(time.Now().UnixNano())
-		c.Streaming.Store(true)
-		c.L2BlockChan <- *fullBlock
+		c.lastWrittenTime.Store(time.Now().UnixNano())
+		c.streaming.Store(true)
+		c.l2BlockChan <- *fullBlock
 	}
 
-	c.Streaming.Store(false)
+	c.streaming.Store(false)
 	return err
 }
 
