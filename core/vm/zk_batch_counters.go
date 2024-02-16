@@ -68,6 +68,13 @@ func (bcc *BatchCounterCollector) processBatchLevelData() error {
 	bcc.l2DataCollector = NewCounterCollector(bcc.smtLevels)
 
 	batchL2DataSize := (totalRlpLength - len(bcc.transactions)*2) / 2
+
+	// simulate adding in the changeL2Block transactions
+	// 1st byte - tx type, always 11 for changeL2Block
+	// 2-4 - delta timestamp
+	// 5-9 - l1 info tree index
+	batchL2DataSize += 9 * bcc.blockCount
+
 	l2Deduction := int(math.Ceil(float64(batchL2DataSize+1) / 136))
 
 	bcc.l2DataCollector.Deduct(S, 100)

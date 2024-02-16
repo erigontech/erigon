@@ -64,6 +64,8 @@ const (
 	totalVirtualCounterSmtLevel = 80 // todo [zkevm] this should be read from the db
 
 	etrogForkId = 7
+
+	yieldSize = 20 // arbitrary number defining how many transactions to yield from the pool at once
 )
 
 var (
@@ -244,15 +246,18 @@ func SpawnSequencingStage(
 
 	// start waiting for a new transaction to arrive
 	ticker := time.NewTicker(10 * time.Second)
+	blockImmediateSeal := time.NewTicker(250 * time.Millisecond)
 	log.Info(fmt.Sprintf("[%s] Waiting for txs from the pool...", logPrefix))
 	done := false
 	var addedTransactions []types.Transaction
 	var addedReceipts []*types.Receipt
 	yielded := mapset.NewSet[[32]byte]()
+	lastTransactionCount := 0
 
 	// start to wait for transactions to come in from the pool and attempt to add them to the current batch.  Once we detect a counter
 	// overflow we revert the IBS back to the previous snapshot and don't add the transaction/receipt to the collection that will
 	// end up in the finalised block
+LOOP:
 	for {
 		if done {
 			break
@@ -261,46 +266,38 @@ func SpawnSequencingStage(
 		select {
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
+		case <-blockImmediateSeal.C:
+			// only kill the loop if we have actually processed some transactions otherwise carry on waiting
+			if lastTransactionCount > 0 && len(addedTransactions) == lastTransactionCount {
+				log.Info(fmt.Sprintf("[%s] No new transactions, closing block at %v transactions", logPrefix, lastTransactionCount))
+				break LOOP
+			}
 		default:
 			cfg.txPool.LockFlusher()
-			if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
-				slots := types2.TxsRlp{}
-				_, count, err := cfg.txPool.YieldBest(1, &slots, poolTx, executionAt, blockGasLimit, yielded)
-				if err != nil {
-					return err
-				}
-				if count == 0 {
-					time.Sleep(1 * time.Millisecond)
-				} else {
-					transactions, err := extractTransactionsFromSlot(slots)
-					if err != nil {
-						return err
-					}
-
-					for _, transaction := range transactions {
-						snap := ibs.Snapshot()
-						receipt, overflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb)
-						if err != nil {
-							ibs.RevertToSnapshot(snap)
-							return err
-						}
-						if overflow {
-							ibs.RevertToSnapshot(snap)
-							log.Debug(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "tx-hash", transaction.Hash())
-							done = true
-							break
-						}
-
-						addedTransactions = append(addedTransactions, transaction)
-						addedReceipts = append(addedReceipts, receipt)
-						done = true
-					}
-				}
-				return nil
-			}); err != nil {
-				log.Error(fmt.Sprintf("error loading txpool view: %v", err))
+			transactions, err := getNextTransactions(cfg, executionAt, yielded)
+			if err != nil {
+				return err
 			}
 			cfg.txPool.UnlockFlusher()
+
+			for _, transaction := range transactions {
+				snap := ibs.Snapshot()
+				receipt, overflow, err := attemptAddTransaction(tx, cfg, batchCounters, header, parentBlock.Header(), transaction, ibs, hermezDb)
+				if err != nil {
+					ibs.RevertToSnapshot(snap)
+					return err
+				}
+				if overflow {
+					ibs.RevertToSnapshot(snap)
+					log.Debug(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "tx-hash", transaction.Hash())
+					done = true
+					break
+				}
+
+				addedTransactions = append(addedTransactions, transaction)
+				addedReceipts = append(addedReceipts, receipt)
+				lastTransactionCount = len(addedTransactions)
+			}
 		}
 	}
 
@@ -326,6 +323,46 @@ func SpawnSequencingStage(
 	}
 
 	return nil
+}
+
+func getNextTransactions(cfg SequenceBlockCfg, executionAt uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
+	var transactions []types.Transaction
+	var err error
+	var count int
+	killer := time.NewTicker(100 * time.Millisecond)
+LOOP:
+	for {
+		// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
+		select {
+		case <-killer.C:
+			break LOOP
+		default:
+		}
+		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
+			slots := types2.TxsRlp{}
+			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, blockGasLimit, alreadyYielded)
+			if err != nil {
+				return err
+			}
+			if count == 0 {
+				time.Sleep(1 * time.Millisecond)
+				return nil
+			}
+			transactions, err = extractTransactionsFromSlot(slots)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+
+		if len(transactions) > 0 {
+			break
+		}
+	}
+
+	return transactions, err
 }
 
 const (
