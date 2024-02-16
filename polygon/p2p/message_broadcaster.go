@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
-	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -29,10 +29,10 @@ func (mb *messageBroadcaster) GetBlockHeaders66(ctx context.Context, peerId Peer
 		return err
 	}
 
-	_, err = mb.sentryClient.SendMessageById(ctx, &protosentry.SendMessageByIdRequest{
+	_, err = mb.sentryClient.SendMessageById(ctx, &sentry.SendMessageByIdRequest{
 		PeerId: peerId.H512(),
-		Data: &protosentry.OutboundMessageData{
-			Id:   protosentry.MessageId_GET_BLOCK_HEADERS_66,
+		Data: &sentry.OutboundMessageData{
+			Id:   sentry.MessageId_GET_BLOCK_HEADERS_66,
 			Data: data,
 		},
 	})
