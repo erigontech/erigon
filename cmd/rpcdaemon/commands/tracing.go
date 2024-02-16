@@ -118,6 +118,8 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		txns = append(txns, borTx)
 	}
 
+	cumulativeGas := uint64(0)
+
 	for idx, txn := range txns {
 		stream.WriteObjectStart()
 		stream.WriteObjectField("result")
@@ -141,9 +143,12 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		txCtx := evmtypes.TxContext{
-			TxHash:   txn.Hash(),
-			Origin:   msg.From(),
-			GasPrice: msg.GasPrice(),
+			TxHash:            txn.Hash(),
+			Origin:            msg.From(),
+			GasPrice:          msg.GasPrice(),
+			Txn:               txn,
+			CumulativeGasUsed: &cumulativeGas,
+			BlockNum:          block.NumberU64(),
 		}
 
 		if borTx != nil && idx == len(txns)-1 {

@@ -172,7 +172,10 @@ func TraceTx(
 			cfg = *config.TracerConfig
 		}
 		if tracer, err = tracers.New(*config.Tracer, &tracers.Context{
-			TxHash: txCtx.TxHash,
+			TxHash:            txCtx.TxHash,
+			Txn:               txCtx.Txn,
+			CumulativeGasUsed: txCtx.CumulativeGasUsed,
+			BlockNum:          blockCtx.BlockNumber,
 		}, cfg); err != nil {
 			stream.WriteNil()
 			return err
