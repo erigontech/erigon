@@ -32,12 +32,13 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 )
 
 // Compressor is the main operating type for performing per-word compression
@@ -119,7 +120,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 }
 
 func (c *Compressor) Close() {
-	c.uncompressedFile.Close()
+	c.uncompressedFile.CloseAndRemove()
 	for _, collector := range c.suffixCollectors {
 		collector.Close()
 	}
@@ -172,7 +173,10 @@ func (c *Compressor) AddUncompressedWord(word []byte) error {
 }
 
 func (c *Compressor) Compress() error {
-	c.uncompressedFile.w.Flush()
+	if err := c.uncompressedFile.Flush(); err != nil {
+		return err
+	}
+
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	if len(c.superstring) > 0 {
@@ -801,9 +805,23 @@ func NewUncompressedFile(filePath string) (*DecompressedFile, error) {
 	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
 	return &DecompressedFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
+func OpenUncompressedFile(filePath string) (*DecompressedFile, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
+	return &DecompressedFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+}
+func (f *DecompressedFile) Flush() error {
+	return f.w.Flush()
+}
 func (f *DecompressedFile) Close() {
 	f.w.Flush()
 	f.f.Close()
+}
+func (f *DecompressedFile) CloseAndRemove() {
+	f.Close()
 	os.Remove(f.filePath)
 }
 func (f *DecompressedFile) Append(v []byte) error {

@@ -26,5 +26,5 @@ func (pid PeerId) H512() *types.H512 {
 }
 
 func (pid PeerId) String() string {
-	return hex.EncodeToString(pid[:])[:20]
+	return hex.EncodeToString(pid[:])
 }

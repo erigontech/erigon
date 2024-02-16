@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -83,7 +84,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 	var headers []*types.Header
 	requestId := d.requestIdGenerator()
 
-	observer := make(chanMessageObserver)
+	observer := make(chanMessageObserver[*sentry.InboundMessage])
 	d.messageListener.RegisterBlockHeaders66(observer)
 	defer d.messageListener.UnregisterBlockHeaders66(observer)
 
@@ -101,14 +102,14 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
-			case inboundMessage := <-observer:
-				inboundMessagePeerId := PeerIdFromH512(inboundMessage.PeerId)
-				if inboundMessagePeerId != peerId {
+			case msg := <-observer:
+				msgPeerId := PeerIdFromH512(msg.PeerId)
+				if msgPeerId != peerId {
 					continue
 				}
 
 				var pkt eth.BlockHeadersPacket66
-				if err := rlp.DecodeBytes(inboundMessage.Data, &pkt); err != nil {
+				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
 					if rlp.IsInvalidRLPError(err) {
 						d.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId.String())
 						penalizeErr := d.peerPenalizer.Penalize(ctx, peerId)

@@ -17,31 +17,27 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 		return nil
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	// Check if this attestation is even slashable.
 	attestation1 := attesterSlashing.Attestation_1
 	attestation2 := attesterSlashing.Attestation_2
 	if !cltypes.IsSlashableAttestationData(attestation1.Data, attestation2.Data) {
-		f.mu.Unlock()
 		return fmt.Errorf("attestation data is not slashable")
 	}
 	// Retrieve justified state
-	s, err := f.forkGraph.GetState(f.justifiedCheckpoint.BlockRoot(), false)
+	s, err := f.forkGraph.GetState(f.justifiedCheckpoint.Load().(solid.Checkpoint).BlockRoot(), false)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	if s == nil {
-		f.mu.Unlock()
 		return fmt.Errorf("justified checkpoint state not accessible")
 	}
 	attestation1PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation1)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	attestation2PublicKeys, err := getIndexedAttestationPublicKeys(s, attestation2)
 	if err != nil {
-		f.mu.Unlock()
 		return err
 	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target().Epoch())
@@ -52,7 +48,6 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 	if err != nil {
 		return fmt.Errorf("unable to get the domain: %v", err)
 	}
-	f.mu.Unlock()
 
 	if !test {
 		// Verify validity of slashings (1)
@@ -82,8 +77,7 @@ func (f *ForkChoiceStore) OnAttesterSlashing(attesterSlashing *cltypes.AttesterS
 			return fmt.Errorf("invalid aggregate signature")
 		}
 	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
+
 	var anySlashed bool
 	for _, index := range solid.IntersectionOfSortedSets(attestation1.AttestingIndices, attestation2.AttestingIndices) {
 		f.setUnequivocating(index)

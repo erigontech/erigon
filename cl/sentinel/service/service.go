@@ -80,7 +80,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
 
-	s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
+	//s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
 
 	var subscription *sentinel.GossipSubscription
 
@@ -348,8 +348,8 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 		return err
 	}
 
-	msgType, msgCap := parseTopic(topic)
-	s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
+	// msgType, msgCap := parseTopic(topic)
+	// s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
 	if strings.Contains(topic, string(gossip.TopicNameBeaconBlock)) {
@@ -364,6 +364,8 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 		s.gossipNotifier.notify(gossip.TopicNameAttesterSlashing, data, string(textPid))
 	} else if strings.Contains(topic, string(gossip.TopicNameBlsToExecutionChange)) {
 		s.gossipNotifier.notify(gossip.TopicNameBlsToExecutionChange, data, string(textPid))
+	} else if strings.Contains(topic, string(gossip.TopicNameSyncCommitteeContributionAndProof)) {
+		s.gossipNotifier.notify(gossip.TopicNameSyncCommitteeContributionAndProof, data, string(textPid))
 	} else if gossip.IsTopicBlobSidecar(topic) {
 		// extract the index
 		s.gossipNotifier.notifyBlob(data, string(textPid), extractBlobSideCarIndex(topic))

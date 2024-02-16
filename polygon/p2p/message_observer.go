@@ -1,15 +1,11 @@
 package p2p
 
-import (
-	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-)
-
-type messageObserver interface {
-	Notify(*protosentry.InboundMessage)
+type messageObserver[M any] interface {
+	Notify(M)
 }
 
-type chanMessageObserver chan *protosentry.InboundMessage
+type chanMessageObserver[M any] chan M
 
-func (cmo chanMessageObserver) Notify(msg *protosentry.InboundMessage) {
+func (cmo chanMessageObserver[M]) Notify(msg M) {
 	cmo <- msg
 }
