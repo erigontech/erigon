@@ -348,7 +348,7 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 		return err
 	}
 
-	//msgType, msgCap := parseTopic(topic)
+	// msgType, msgCap := parseTopic(topic)
 	// s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
