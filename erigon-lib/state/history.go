@@ -1058,7 +1058,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 		if !canPruneIdx {
 			return false, 0
 		}
-		txTo = hc.maxTxNumInFiles(false)
+		txTo = min(hc.maxTxNumInFiles(false), txTo)
 	}
 	return minIdxTx < txTo, txTo
 }
@@ -1071,14 +1071,10 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPruneUntil(rwTx), txFrom, txTo)
 	if !forced {
-		can, untilTx := hc.canPruneUntil(rwTx, txTo)
+		var can bool
+		can, txTo = hc.canPruneUntil(rwTx, txTo)
 		if !can {
 			return nil, nil
-		}
-		if hc.h.dontProduceFiles {
-			txTo = untilTx
-		} else {
-			txTo = min(untilTx, txTo)
 		}
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
