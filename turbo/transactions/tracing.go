@@ -147,10 +147,17 @@ func TraceTx(
 
 	execCb := func(evm *vm.EVM, refunds bool) (*core.ExecutionResult, error) {
 		gp := new(core.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
-		return core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
+		tracer.CaptureTxStart(evm, tx)
+		result, err := core.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */)
+		if err != nil {
+			tracer.CaptureTxEnd(nil, err)
+		} else {
+			tracer.CaptureTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+		}
+		return result, err
 	}
 
-	return ExecuteTraceTx(tx, blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
+	return ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, execCb)
 }
 
 func AssembleTracer(
@@ -199,7 +206,6 @@ func AssembleTracer(
 }
 
 func ExecuteTraceTx(
-	tx types.Transaction,
 	blockCtx evmtypes.BlockContext,
 	txCtx evmtypes.TxContext,
 	ibs *state.IntraBlockState,
@@ -224,10 +230,8 @@ func ExecuteTraceTx(
 		stream.WriteArrayStart()
 	}
 
-	tracer.CaptureTxStart(evm, tx)
 	result, err := execCb(evm, refunds)
 	if err != nil {
-		tracer.CaptureTxEnd(nil, err)
 		if streaming {
 			stream.WriteArrayEnd()
 			stream.WriteObjectEnd()
@@ -236,7 +240,7 @@ func ExecuteTraceTx(
 		}
 		return fmt.Errorf("tracing failed: %w", err)
 	}
-	tracer.CaptureTxEnd(&types.Receipt{GasUsed: result.UsedGas}, nil)
+
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()

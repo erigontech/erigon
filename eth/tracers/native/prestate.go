@@ -153,7 +153,7 @@ func (t *prestateTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64,
 func (t *prestateTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 	t.env = env
 
-	signer := types.MakeSigner(env.ChainConfig(), env.Context().BlockNumber, env.Context().Time)
+	signer := types.MakeSigner(env.ChainConfig(), env.Context.BlockNumber, env.Context.Time)
 	from, err := tx.Sender(*signer)
 	if err != nil {
 		t.Stop(fmt.Errorf("could not recover sender address: %v", err))
@@ -169,7 +169,7 @@ func (t *prestateTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
 
 	t.lookupAccount(from)
 	t.lookupAccount(t.to)
-	t.lookupAccount(env.Context().Coinbase)
+	t.lookupAccount(env.Context.Coinbase)
 
 	if t.create && t.config.DiffMode {
 		t.created[t.to] = true

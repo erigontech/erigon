@@ -65,6 +65,20 @@ func (mr *MockChainHeaderReaderMockRecorder) Config() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Config", reflect.TypeOf((*MockChainHeaderReader)(nil).Config))
 }
 
+// CurrentFinalizedHeader mocks base method.
+func (m *MockChainHeaderReader) CurrentFinalizedHeader() *types.Header {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CurrentFinalizedHeader")
+	ret0, _ := ret[0].(*types.Header)
+	return ret0
+}
+
+// CurrentFinalizedHeader indicates an expected call of CurrentFinalizedHeader.
+func (mr *MockChainHeaderReaderMockRecorder) CurrentFinalizedHeader() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentFinalizedHeader", reflect.TypeOf((*MockChainHeaderReader)(nil).CurrentFinalizedHeader))
+}
+
 // CurrentHeader mocks base method.
 func (m *MockChainHeaderReader) CurrentHeader() *types.Header {
 	m.ctrl.T.Helper()
@@ -77,6 +91,20 @@ func (m *MockChainHeaderReader) CurrentHeader() *types.Header {
 func (mr *MockChainHeaderReaderMockRecorder) CurrentHeader() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentHeader", reflect.TypeOf((*MockChainHeaderReader)(nil).CurrentHeader))
+}
+
+// CurrentSafeHeader mocks base method.
+func (m *MockChainHeaderReader) CurrentSafeHeader() *types.Header {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CurrentSafeHeader")
+	ret0, _ := ret[0].(*types.Header)
+	return ret0
+}
+
+// CurrentSafeHeader indicates an expected call of CurrentSafeHeader.
+func (mr *MockChainHeaderReaderMockRecorder) CurrentSafeHeader() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CurrentSafeHeader", reflect.TypeOf((*MockChainHeaderReader)(nil).CurrentSafeHeader))
 }
 
 // FrozenBlocks mocks base method.
