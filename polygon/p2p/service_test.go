@@ -62,13 +62,13 @@ func (st *serviceTest) run(ctx context.Context, f func(t *testing.T)) {
 	})
 }
 
-func (st *serviceTest) mockExpectPenalizePeer(pid PeerId) {
+func (st *serviceTest) mockExpectPenalizePeer(peerId PeerId) {
 	st.sentryClient.
 		EXPECT().
 		PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, req *sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
-			if pid.H512() != req.PeerId {
-				return nil, fmt.Errorf("pid != reqPeerId - %v vs %v", pid.H512(), req.PeerId)
+			if peerId.H512() != req.PeerId {
+				return nil, fmt.Errorf("peerId != reqPeerId - %v vs %v", peerId.H512(), req.PeerId)
 			}
 
 			return &emptypb.Empty{}, nil
@@ -76,7 +76,7 @@ func (st *serviceTest) mockExpectPenalizePeer(pid PeerId) {
 		Times(1)
 }
 
-func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(msgs []*sentry.InboundMessage, pid PeerId) {
+func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(msgs []*sentry.InboundMessage, peerId PeerId) {
 	var wg sync.WaitGroup
 	if len(msgs) > 0 {
 		wg.Add(1)
@@ -90,7 +90,7 @@ func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(msgs []*sent
 	st.sentryClient.
 		EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(newSendGetBlockHeaders66MessageMock(&wg, pid, sentry.MessageId_GET_BLOCK_HEADERS_66, 1, 3)).
+		DoAndReturn(newSendGetBlockHeaders66MessageMock(&wg, peerId, sentry.MessageId_GET_BLOCK_HEADERS_66, 1, 3)).
 		AnyTimes()
 	st.sentryClient.
 		EXPECT().

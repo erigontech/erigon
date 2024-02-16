@@ -10,7 +10,7 @@ import (
 type PeerManager interface {
 	MaxPeers() int
 	PeersSyncProgress() PeersSyncProgress
-	Penalize(ctx context.Context, pid PeerId) error
+	Penalize(ctx context.Context, peerId PeerId) error
 }
 
 func NewPeerManager(sentryClient direct.SentryClient) PeerManager {
@@ -33,9 +33,9 @@ func (pm *peerManager) PeersSyncProgress() PeersSyncProgress {
 	panic("implement me")
 }
 
-func (pm *peerManager) Penalize(ctx context.Context, pid PeerId) error {
+func (pm *peerManager) Penalize(ctx context.Context, peerId PeerId) error {
 	_, err := pm.sentryClient.PenalizePeer(ctx, &sentry.PenalizePeerRequest{
-		PeerId:  pid.H512(),
+		PeerId:  peerId.H512(),
 		Penalty: sentry.PenaltyKind_Kick,
 	})
 

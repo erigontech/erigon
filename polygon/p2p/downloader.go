@@ -22,7 +22,7 @@ var invalidDownloadHeadersRangeErr = errors.New("invalid download headers range"
 type RequestIdGenerator func() uint64
 
 type Downloader interface {
-	DownloadHeaders(ctx context.Context, start uint64, end uint64, pid PeerId) ([]*types.Header, error)
+	DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 }
 
 func NewDownloader(
@@ -49,7 +49,7 @@ type downloader struct {
 	requestIdGenerator RequestIdGenerator
 }
 
-func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint64, pid PeerId) ([]*types.Header, error) {
+func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
 	if start > end {
 		return nil, fmt.Errorf("%w: start=%d, end=%d", invalidDownloadHeadersRangeErr, start, end)
 	}
@@ -76,16 +76,16 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 			case <-ctx.Done():
 				return fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
 			case msg := <-observer:
-				msgPid := PeerIdFromH512(msg.PeerId)
-				if msgPid != pid {
+				msgPeerId := PeerIdFromH512(msg.PeerId)
+				if msgPeerId != peerId {
 					continue
 				}
 
 				var pkt eth.BlockHeadersPacket66
 				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
 					if rlp.IsInvalidRLPError(err) {
-						d.logger.Debug("penalizing peer for invalid rlp response", "pid", pid.String())
-						penalizeErr := d.peerManager.Penalize(ctx, pid)
+						d.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
+						penalizeErr := d.peerManager.Penalize(ctx, peerId)
 						if penalizeErr != nil {
 							err = fmt.Errorf("%w: %w", penalizeErr, err)
 						}
@@ -109,7 +109,7 @@ func (d *downloader) DownloadHeaders(ctx context.Context, start uint64, end uint
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
-			return d.messageBroadcaster.GetBlockHeaders66(ctx, pid, eth.GetBlockHeadersPacket66{
+			return d.messageBroadcaster.GetBlockHeaders66(ctx, peerId, eth.GetBlockHeadersPacket66{
 				RequestId: requestId,
 				GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
 					Origin: eth.HashOrNumber{
