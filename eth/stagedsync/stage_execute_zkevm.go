@@ -143,24 +143,18 @@ Loop:
 			break
 		}
 
-		preExecuteHeaderHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+		//fetch values pre execute
+		preExecuteHeaderHash, block, header, senders, err := getPreexecuteValues(cfg, ctx, tx, blockNum)
 		if err != nil {
 			return err
 		}
 
-		block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, preExecuteHeaderHash, blockNum)
-		if err != nil {
-			return err
-		}
+		//TODO: SHOULD RETURN ERR?
 		if block == nil {
 			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
 			continue
 		}
 
-		header, err := cfg.blockReader.Header(ctx, tx, preExecuteHeaderHash, blockNum)
-		if err != nil {
-			return err
-		}
 		if header == nil {
 			log.Error(fmt.Sprintf("[%s] Empty header", logPrefix), "blocknum", blockNum)
 			continue
@@ -221,58 +215,12 @@ Loop:
 		gasUsed := header.GasUsed
 		gas = gas + gasUsed
 		currentStateGas = currentStateGas + gasUsed
-
-		// TODO: how can we store this data right first time?  Or mop up old data as we're currently duping storage
-		/*
-				        ,     \    /      ,
-				       / \    )\__/(     / \
-				      /   \  (_\  /_)   /   \
-				 ____/_____\__\@  @/___/_____\____
-				|             |\../|              |
-				|              \VV/               |
-				|       ZKEVM duping storage      |
-				|_________________________________|
-				 |    /\ /      \\       \ /\    |
-				 |  /   V        ))       V   \  |
-				 |/     `       //        '     \|
-				 `              V                '
-
-			 we need to write the header back to the db at this point as the gas
-			 used wasn't available from the data stream, or receipt hash, or bloom, so we're relying on execution to
-			 provide it.  We also need to update the canonical hash, so we can retrieve this newly updated header
-			 later.
-		*/
-		headerHash := header.Hash()
 		prevBlockHash = header.Root
 
-		rawdb.WriteHeader(tx, header)
-		err = rawdb.WriteCanonicalHash(tx, headerHash, blockNum)
-		if err != nil {
-			return fmt.Errorf("failed to write header: %v", err)
+		//commit values post execute
+		if err := postExecuteCommitValues(cfg, tx, eridb, batch, preExecuteHeaderHash, block, header, senders); err != nil {
+			return err
 		}
-
-		err = eridb.WriteBody(header.Number, headerHash, block.Transactions())
-		if err != nil {
-			return fmt.Errorf("failed to write body: %v", err)
-		}
-
-		// [zkevm] senders were saved in stage_senders for headerHashes based on incomplete headers
-		// in stage execute we complete the headers and senders should be moved to the correct headerHash
-		// also we should delete other ata based on the old hash, since it is unaccessable now
-		if err := rawdb.WriteSenders(tx, headerHash, blockNum, senders); err != nil {
-			return fmt.Errorf("failed to write senders: %v", err)
-		}
-
-		if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
-			return fmt.Errorf("failed to delete senders: %v", err)
-		}
-
-		if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
-			return fmt.Errorf("failed to delete header: %v", err)
-		}
-
-		// write the new block lookup entries
-		rawdb.WriteTxLookupEntries(tx, block)
 
 		select {
 		default:
@@ -308,6 +256,88 @@ Loop:
 		log.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
 	}
 	return stoppedErr
+}
+
+func getPreexecuteValues(cfg ExecuteBlockCfg, ctx context.Context, tx kv.RwTx, blockNum uint64) (common.Hash, *types.Block, *types.Header, []common.Address, error) {
+	preExecuteHeaderHash, err := rawdb.ReadCanonicalHash(tx, blockNum)
+	if err != nil {
+		return common.Hash{}, nil, nil, nil, err
+	}
+
+	block, senders, err := cfg.blockReader.BlockWithSenders(ctx, tx, preExecuteHeaderHash, blockNum)
+	if err != nil {
+		return common.Hash{}, nil, nil, nil, err
+	}
+
+	header, err := cfg.blockReader.Header(ctx, tx, preExecuteHeaderHash, blockNum)
+	if err != nil {
+		return common.Hash{}, nil, nil, nil, err
+	}
+
+	return preExecuteHeaderHash, block, header, senders, nil
+}
+
+func postExecuteCommitValues(
+	cfg ExecuteBlockCfg,
+	tx kv.RwTx,
+	eridb *erigon_db.ErigonDb,
+	batch ethdb.DbWithPendingMutations,
+	preExecuteHeaderHash common.Hash,
+	block *types.Block,
+	header *types.Header,
+	senders []common.Address,
+) error {
+	// TODO: how can we store this data right first time?  Or mop up old data as we're currently duping storage
+	/*
+			        ,     \    /      ,
+			       / \    )\__/(     / \
+			      /   \  (_\  /_)   /   \
+			 ____/_____\__\@  @/___/_____\____
+			|             |\../|              |
+			|              \VV/               |
+			|       ZKEVM duping storage      |
+			|_________________________________|
+			 |    /\ /      \\       \ /\    |
+			 |  /   V        ))       V   \  |
+			 |/     `       //        '     \|
+			 `              V                '
+
+		 we need to write the header back to the db at this point as the gas
+		 used wasn't available from the data stream, or receipt hash, or bloom, so we're relying on execution to
+		 provide it.  We also need to update the canonical hash, so we can retrieve this newly updated header
+		 later.
+	*/
+	headerHash := header.Hash()
+	blockNum := block.NumberU64()
+	rawdb.WriteHeader(tx, header)
+
+	if err := rawdb.WriteCanonicalHash(tx, headerHash, blockNum); err != nil {
+		return fmt.Errorf("failed to write header: %v", err)
+	}
+
+	if err := eridb.WriteBody(block.Number(), headerHash, block.Transactions()); err != nil {
+		return fmt.Errorf("failed to write body: %v", err)
+	}
+
+	// [zkevm] senders were saved in stage_senders for headerHashes based on incomplete headers
+	// in stage execute we complete the headers and senders should be moved to the correct headerHash
+	// also we should delete other ata based on the old hash, since it is unaccessable now
+	if err := rawdb.WriteSenders(tx, headerHash, blockNum, senders); err != nil {
+		return fmt.Errorf("failed to write senders: %v", err)
+	}
+
+	if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete senders: %v", err)
+	}
+
+	if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete header: %v", err)
+	}
+
+	// write the new block lookup entries
+	rawdb.WriteTxLookupEntries(tx, block)
+
+	return nil
 }
 
 func executeBlockZk(
