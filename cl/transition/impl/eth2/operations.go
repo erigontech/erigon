@@ -747,8 +747,8 @@ func (I *impl) ProcessBlockHeader(s abstract.BeaconState, block *cltypes.BeaconB
 	if err != nil {
 		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
 	}
-	fmt.Println(blockHeader.Root)
 	if block.ParentRoot != latestRoot {
+		fmt.Println(blockHeader.Root)
 		return fmt.Errorf("block parent root: %x, does not match latest block root: %x", block.ParentRoot, latestRoot)
 	}
 
