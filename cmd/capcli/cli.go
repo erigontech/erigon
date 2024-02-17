@@ -884,7 +884,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 		return err
 	}
 	startSlot := 0
-	interval := 100_000
+	interval := 20_000
 	if b.Head {
 		startSlot = int(headSlot) - 20
 		interval = 1
