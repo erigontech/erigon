@@ -868,6 +868,7 @@ type BenchmarkNode struct {
 	Accept   string `help:"accept" default:"application/json"`
 	Head     bool   `help:"head" default:"false"`
 	Method   string `help:"method" default:"GET"`
+	Body     string `help:"body" default:"{}"`
 }
 
 func (b *BenchmarkNode) Run(ctx *Context) error {
@@ -903,7 +904,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 		uri := b.BaseURL + b.Endpoint
 		uri = strings.Replace(uri, "{slot}", fmt.Sprintf("%d", i), 1)
 		uri = strings.Replace(uri, "{epoch}", fmt.Sprintf("%d", i/beaconConfig.SlotsPerEpoch), 1)
-		elapsed, err := timeRequest(uri, b.Accept, b.Method)
+		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "slot", i, "error", err)
 			continue
@@ -917,10 +918,13 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 	return nil
 }
 
-func timeRequest(uri, accept, method string) (time.Duration, error) {
+func timeRequest(uri, accept, method, body string) (time.Duration, error) {
 	req, err := http.NewRequest(method, uri, nil)
 	if err != nil {
 		return 0, err
+	}
+	if method == "POST" {
+		req.Body = io.NopCloser(strings.NewReader(body))
 	}
 	req.Header.Set("Accept", accept)
 	start := time.Now()
