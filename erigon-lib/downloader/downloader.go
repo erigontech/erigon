@@ -678,15 +678,21 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				switch {
 				case len(t.PeerConns()) > 0:
+					d.logger.Debug("downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
 					downloading[t.Name()] = struct{}{}
 					d.torrentDownload(t, sem)
 				case len(t.WebseedPeerConns()) > 0:
 					if d.webDownloadClient != nil {
-						peer := t.WebseedPeerConns()[rand.Intn(len(t.WebseedPeerConns()))]
+						var peerUrls []*url.URL
 
-						peerUrl := webPeerUrl(peer)
+						for _, peer := range t.WebseedPeerConns() {
+							if peerUrl, err := webPeerUrl(peer); err == nil {
+								peerUrls = append(peerUrls, peerUrl)
+							}
+						}
 
-						if session, err := d.webDownload(peerUrl, t, nil, webDownloadComplete, sem); err != nil {
+						d.logger.Debug("downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
+						if session, err := d.webDownload(peerUrls, t, nil, webDownloadComplete, sem); err != nil {
 							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
 							if session == nil {
 								downloading[t.Name()] = struct{}{}
@@ -704,8 +710,17 @@ func (d *Downloader) mainLoop(silent bool) error {
 				default:
 					if d.webDownloadClient != nil {
 						if webDownload, ok := d.webDownloadInfo[t.Name()]; ok {
-							peerUrl, _ := path.Split(webDownload.url.String())
-							d.webDownload(peerUrl, t, &webDownload, webDownloadComplete, sem)
+							root, _ := path.Split(webDownload.url.String())
+							peerUrl, err := url.Parse(root)
+
+							if err != nil {
+								d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
+								sem.Release(1)
+								continue
+							}
+
+							d.logger.Debug("downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
+							d.webDownload([]*url.URL{peerUrl}, t, &webDownload, webDownloadComplete, sem)
 							downloading[t.Name()] = struct{}{}
 							continue
 						}
@@ -738,29 +753,22 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 								if headRequest, err := http.NewRequestWithContext(d.ctx, "HEAD", downloadUrl.String(), nil); err == nil {
 									if headResponse, err := http.DefaultClient.Do(headRequest); err == nil && headResponse.StatusCode == http.StatusOK {
-										if torrentRequest, err := http.NewRequestWithContext(d.ctx, "GET", downloadUrl.String()+".torrent", nil); err == nil {
-											if torrentResponse, err := http.DefaultClient.Do(torrentRequest); err == nil && torrentResponse.StatusCode == http.StatusOK {
-												meta, err := metainfo.Load(torrentResponse.Body)
-												torrentResponse.Body.Close()
-
-												if err == nil {
-													if bytes.Equal(torrentHash.Bytes(), meta.HashInfoBytes().Bytes()) {
-														// TODO check the torrent's hash matches this hash
-														d.statsLock.Lock()
-														d.webDownloadInfo[t.Name()] = webDownloadInfo{
-															url:     downloadUrl,
-															length:  headResponse.ContentLength,
-															torrent: t,
-														}
-														d.statsLock.Unlock()
-														break
-													} else {
-														hash := meta.HashInfoBytes()
-														seedHashMismatches[torrentHash] = append(seedHashMismatches[torrentHash],
-															&seedHash{url: webseed, hash: &hash})
-														continue
-													}
+										if meta, err := getWebpeerTorrentInfo(d.ctx, downloadUrl); err == nil {
+											if bytes.Equal(torrentHash.Bytes(), meta.HashInfoBytes().Bytes()) {
+												// TODO check the torrent's hash matches this hash
+												d.statsLock.Lock()
+												d.webDownloadInfo[t.Name()] = webDownloadInfo{
+													url:     downloadUrl,
+													length:  headResponse.ContentLength,
+													torrent: t,
 												}
+												d.statsLock.Unlock()
+												break
+											} else {
+												hash := meta.HashInfoBytes()
+												seedHashMismatches[torrentHash] = append(seedHashMismatches[torrentHash],
+													&seedHash{url: webseed, hash: &hash})
+												continue
 											}
 										}
 									}
@@ -887,6 +895,28 @@ func (d *Downloader) mainLoop(silent bool) error {
 	}
 }
 
+func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo.MetaInfo, error) {
+	torrentRequest, err := http.NewRequestWithContext(ctx, "GET", downloadUrl.String()+".torrent", nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	torrentResponse, err := http.DefaultClient.Do(torrentRequest)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer torrentResponse.Body.Close()
+
+	if torrentResponse.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("can't get webpeer torrent unexpected http response: %s", torrentResponse.Status)
+	}
+
+	return metainfo.Load(torrentResponse.Body)
+}
+
 func (d *Downloader) torrentDownload(t *torrent.Torrent, sem *semaphore.Weighted) {
 	t.AllowDataDownload()
 
@@ -931,7 +961,13 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, sem *semaphore.Weighted
 	}(t)
 }
 
-func (d *Downloader) webDownload(peerUrl string, t *torrent.Torrent, i *webDownloadInfo, statusChan chan webDownloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
+func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan webDownloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
+	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
+
+	if err != nil {
+		return nil, err
+	}
+
 	peerUrl = strings.TrimSuffix(peerUrl, "/")
 
 	session, ok := d.webDownloadSessions[peerUrl]
@@ -1029,6 +1065,44 @@ func (d *Downloader) webDownload(peerUrl string, t *torrent.Torrent, i *webDownl
 	return session, nil
 }
 
+func selectDownloadPeer(ctx context.Context, peerUrls []*url.URL, t *torrent.Torrent) (string, error) {
+	switch len(peerUrls) {
+	case 0:
+		return "", fmt.Errorf("no download peers")
+
+	case 1:
+		downloadUrl := peerUrls[0].JoinPath(t.Name())
+		peerInfo, err := getWebpeerTorrentInfo(ctx, downloadUrl)
+
+		if err == nil && bytes.Equal(peerInfo.HashInfoBytes().Bytes(), t.InfoHash().Bytes()) {
+			return peerUrls[0].String(), nil
+		}
+
+	default:
+		peerIndex := rand.Intn(len(peerUrls))
+		peerUrl := peerUrls[peerIndex]
+		downloadUrl := peerUrl.JoinPath(t.Name())
+		peerInfo, err := getWebpeerTorrentInfo(ctx, downloadUrl)
+
+		if err == nil && bytes.Equal(peerInfo.HashInfoBytes().Bytes(), t.InfoHash().Bytes()) {
+			return peerUrl.String(), nil
+		}
+
+		for i := range peerUrls {
+			if i == peerIndex {
+				continue
+			}
+			peerInfo, err := getWebpeerTorrentInfo(ctx, downloadUrl)
+
+			if err == nil && bytes.Equal(peerInfo.HashInfoBytes().Bytes(), t.InfoHash().Bytes()) {
+				return peerUrl.String(), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("can't find download peer")
+}
+
 func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots int) []*torrent.Torrent {
 	if slots == 0 {
 		select {
@@ -1037,6 +1111,30 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 		case <-time.After(10 * time.Second):
 			return nil
 		}
+	}
+
+	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
+		in, _ := snaptype.ParseFileName("", i.Name())
+		jn, _ := snaptype.ParseFileName("", j.Name())
+		return in.CompareTo(jn)
+	})
+
+	var available []*torrent.Torrent
+
+	for len(pending) > 0 && pending[0].Info() != nil {
+		if !pending[0].Complete.Bool() {
+			available = append(available, pending[0])
+
+			if len(available) == slots {
+				return available
+			}
+		}
+
+		pending = pending[1:]
+	}
+
+	if len(pending) == 0 {
+		return nil
 	}
 
 	cases := make([]reflect.SelectCase, 0, len(pending)+2)
@@ -1060,8 +1158,6 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(time.After(10 * time.Second)),
 		})
-
-	var available []*torrent.Torrent
 
 	for {
 		selected, _, _ := reflect.Select(cases)
@@ -1293,8 +1389,17 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		d.logger.Log(d.verbosity, "[snapshots] no progress yet", "files", amount, "list", strings.Join(zeroProgress, ","))
 	}
 
-	stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
-	stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
+	if stats.BytesDownload > prevStats.BytesDownload {
+		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
+	} else {
+		stats.DownloadRate = prevStats.DownloadRate / 2
+	}
+
+	if stats.BytesUpload > prevStats.BytesUpload {
+		stats.UploadRate = (stats.BytesUpload - prevStats.BytesUpload) / uint64(interval.Seconds())
+	} else {
+		stats.UploadRate = prevStats.UploadRate / 2
+	}
 
 	if stats.BytesTotal == 0 {
 		stats.Progress = 0
@@ -1315,13 +1420,12 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 	webseedRates := make([]interface{}, 0, len(weebseedPeersOfThisFile)*2)
 	webseedRates = append(webseedRates, "file", fName)
 	for _, peer := range weebseedPeersOfThisFile {
-		urlS := webPeerUrl(peer)
-		if urlObj, err := url.Parse(urlS); err == nil {
-			if shortUrl, err := url.JoinPath(urlObj.Host, urlObj.Path); err == nil {
+		if peerUrl, err := webPeerUrl(peer); err == nil {
+			if shortUrl, err := url.JoinPath(peerUrl.Host, peerUrl.Path); err == nil {
 				rate := uint64(peer.DownloadRate())
 				if !finished {
 					seed := diagnostics.SegmentPeer{
-						Url:          urlObj.Host,
+						Url:          peerUrl.Host,
 						DownloadRate: rate,
 					}
 					seeds = append(seeds, seed)
@@ -1334,9 +1438,9 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 	return webseedRates, seeds
 }
 
-func webPeerUrl(peer *torrent.Peer) string {
+func webPeerUrl(peer *torrent.Peer) (*url.URL, error) {
 	root, _ := path.Split(strings.Trim(strings.TrimPrefix(peer.String(), "webseed peer for "), "\""))
-	return root
+	return url.Parse(root)
 }
 
 func getPeersRatesForlogs(peersOfThisFile []*torrent.PeerConn, fName string) ([]interface{}, []diagnostics.SegmentPeer) {
@@ -1546,6 +1650,7 @@ func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
 	files = append(append(append(files, l1...), l2...), l3...)
 	return files, nil
 }
+
 func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
