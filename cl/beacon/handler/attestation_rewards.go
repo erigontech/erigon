@@ -152,11 +152,15 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
+	if validatorSet == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no validator set found for this epoch"))
+	}
 
 	_, previousIdx, err := a.stateReader.ReadPartecipations(tx, lastSlot)
 	if err != nil {
 		return nil, err
 	}
+
 	_, _, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
