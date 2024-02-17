@@ -913,7 +913,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		log.Info("Benchmarked", "slot", i, "elapsed", elapsed)
+		log.Info("Benchmarked", "slot", i, "elapsed", elapsed, "uri", uri)
 	}
 	return nil
 }
