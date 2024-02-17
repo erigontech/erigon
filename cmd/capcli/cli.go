@@ -903,7 +903,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 		uri := b.BaseURL + b.Endpoint
 		uri = strings.Replace(uri, "{slot}", fmt.Sprintf("%d", i), 1)
 		uri = strings.Replace(uri, "{epoch}", fmt.Sprintf("%d", i/beaconConfig.SlotsPerEpoch), 1)
-		elapsed, err := timeRequest(uri, b.Accept)
+		elapsed, err := timeRequest(uri, b.Accept, b.Method)
 		if err != nil {
 			log.Warn("Failed to benchmark", "slot", i, "error", err)
 			continue
