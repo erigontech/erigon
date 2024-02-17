@@ -333,6 +333,7 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	}()
 
 	t, ok, err = _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
+
 	if err != nil {
 		ts.ChunkSize = 0
 		return _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
