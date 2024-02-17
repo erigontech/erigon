@@ -678,7 +678,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				switch {
 				case len(t.PeerConns()) > 0:
-					d.logger.Debug("downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
+					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
 					downloading[t.Name()] = struct{}{}
 					d.torrentDownload(t, sem)
 				case len(t.WebseedPeerConns()) > 0:
@@ -691,7 +691,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 
-						d.logger.Debug("downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
+						d.logger.Debug("[snapshots]  Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
 						if session, err := d.webDownload(peerUrls, t, nil, webDownloadComplete, sem); err != nil {
 							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
 							if session == nil {
@@ -719,7 +719,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 								continue
 							}
 
-							d.logger.Debug("downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
+							delete(d.webDownloadInfo, t.Name())
+							d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
 							d.webDownload([]*url.URL{peerUrl}, t, &webDownload, webDownloadComplete, sem)
 							downloading[t.Name()] = struct{}{}
 							continue
