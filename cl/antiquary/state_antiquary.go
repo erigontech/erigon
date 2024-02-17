@@ -195,10 +195,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	effectiveBalancesDump := etl.NewCollector(kv.EffectiveBalancesDump, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
 	defer effectiveBalancesDump.Close()
 
-	progress, err := state_accessors.GetStateProcessingProgress(tx)
+	stageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return err
 	}
+	progress := stageProgress
 	// Go back a little bit
 	if progress > (s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump) {
 		progress -= s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump
@@ -363,7 +364,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return eth1DataVotes.Collect(base_encoding.Encode64ToBytes4(slot), vote)
 		},
 	})
-	log.Log(logLvl, "Starting state processing", "from", slot, "to", to)
+	log.Log(logLvl, "Starting state processing", "from", slot, "to", to, "progress", stageProgress)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
