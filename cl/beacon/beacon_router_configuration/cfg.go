@@ -61,7 +61,7 @@ func (r *RouterConfiguration) UnwrapEndpointsList(l []string) error {
 			r.Node = false
 			r.Validator = false
 			r.Lighthouse = false
-			return fmt.Errorf("unknown endpoint for beacon.api: %s. known endpoints: beacon, builder, config, debug, events, node, validator, rewards, lighthouse", v)
+			return fmt.Errorf("unknown endpoint for beacon.api: %s. known endpoints: beacon, builder, config, debug, events, node, validator, lighthouse", v)
 		}
 	}
 	return nil
