@@ -906,7 +906,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 		uri = strings.Replace(uri, "{epoch}", fmt.Sprintf("%d", i/beaconConfig.SlotsPerEpoch), 1)
 		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
 		if err != nil {
-			log.Warn("Failed to benchmark", "slot", i, "error", err)
+			log.Warn("Failed to benchmark", "error", err, "uri", uri)
 			continue
 		}
 		_, err = f.WriteString(fmt.Sprintf("%d,%d\n", i, elapsed.Milliseconds()))
