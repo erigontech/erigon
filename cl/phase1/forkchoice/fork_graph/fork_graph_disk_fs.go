@@ -49,7 +49,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	// Read the snappy buffer
 	sszSnappyBuffer := f.sszSnappyBuffer.Bytes()
 	sszSnappyBuffer = sszSnappyBuffer[:cap(sszSnappyBuffer)]
-	n, err = io.ReadFull(file, lengthBytes)
+	n, err = io.ReadFull(file, sszSnappyBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
