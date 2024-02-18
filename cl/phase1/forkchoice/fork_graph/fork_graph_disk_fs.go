@@ -3,6 +3,7 @@ package fork_graph
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/golang/snappy"
@@ -36,7 +37,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	// Read the length
 	lengthBytes := make([]byte, 8)
 	var n int
-	n, err = file.Read(lengthBytes)
+	n, err = io.ReadFull(file, lengthBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
@@ -48,7 +49,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 	// Read the snappy buffer
 	sszSnappyBuffer := f.sszSnappyBuffer.Bytes()
 	sszSnappyBuffer = sszSnappyBuffer[:cap(sszSnappyBuffer)]
-	n, err = file.Read(sszSnappyBuffer)
+	n, err = io.ReadFull(file, lengthBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
