@@ -57,7 +57,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot libcommon.Hash) (bs *s
 
 	decLen, err := snappy.DecodedLen(sszSnappyBuffer[:n])
 	if err != nil {
-		return
+		return nil, fmt.Errorf("failed to get decoded length: %w, root: %x, len: %d", err, blockRoot, n)
 	}
 	// Grow the plain ssz buffer
 	f.sszBuffer.Grow(decLen)
