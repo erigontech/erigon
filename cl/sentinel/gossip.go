@@ -93,7 +93,7 @@ type GossipManager struct {
 	mu            sync.RWMutex
 }
 
-const maxIncomingGossipMessages = 5092
+const maxIncomingGossipMessages = 1 << 16
 
 // construct a new gossip manager that will handle packets with the given handlerfunc
 func NewGossipManager(

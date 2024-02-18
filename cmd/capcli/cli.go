@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/clparams/initial_state"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	persistence2 "github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cmd/caplin/caplin1"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
@@ -45,8 +44,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
@@ -58,24 +55,18 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/rpc"
-	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
 
-	"github.com/jedib0t/go-pretty/v6/progress"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
-	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 )
 
 var CLI struct {
 	Migrate Migrate `cmd:"" help:"migrate from one state to another"`
-
-	Blocks Blocks `cmd:"" help:"download blocks from reqresp network"`
-	Epochs Epochs `cmd:"" help:"download epochs from reqresp network"`
 
 	Chain                   Chain                   `cmd:"" help:"download the entire chain from reqresp network"`
 	DumpSnapshots           DumpSnapshots           `cmd:"" help:"generate caplin snapshots"`
@@ -125,191 +116,6 @@ func (w *withSentinel) connectSentinel() (sentinel.SentinelClient, error) {
 
 func openFs(fsName string, path string) (afero.Fs, error) {
 	return afero.NewBasePathFs(afero.NewBasePathFs(afero.NewOsFs(), fsName), path), nil
-}
-
-type Blocks struct {
-	chainCfg
-	outputFolder
-	withSentinel
-
-	FromBlock int `arg:"" name:"from" default:"0"`
-	ToBlock   int `arg:"" name:"to" default:"-1"`
-}
-
-func (b *Blocks) Run(ctx *Context) error {
-	s, err := b.withSentinel.connectSentinel()
-	if err != nil {
-		return err
-	}
-	beaconConfig, genesisConfig, err := b.configs()
-	if err != nil {
-		return err
-	}
-
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-	err = beacon.SetStatus(
-		genesisConfig.GenesisValidatorRoot,
-		beaconConfig.GenesisEpoch,
-		genesisConfig.GenesisValidatorRoot,
-		beaconConfig.GenesisSlot)
-	if err != nil {
-		return err
-	}
-
-	if b.ToBlock < 0 {
-		b.ToBlock = int(utils.GetCurrentSlot(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot))
-	}
-
-	resp, _, err := beacon.SendBeaconBlocksByRangeReq(ctx, uint64(b.FromBlock), uint64(b.ToBlock))
-	if err != nil {
-		return fmt.Errorf("error get beacon blocks: %w", err)
-	}
-	aferoFS, err := openFs(b.Datadir, "caplin/beacon")
-	if err != nil {
-		return err
-	}
-
-	db := mdbx.MustOpen("caplin/db")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	beaconDB := persistence2.NewBeaconChainDatabaseFilesystem(persistence2.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
-	for _, vv := range resp {
-		err := beaconDB.WriteBlock(ctx, tx, vv, true)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type Epochs struct {
-	chainCfg
-	outputFolder
-	withSentinel
-
-	Concurrency int `help:"number of epochs to ask concurrently for" name:"concurrency" short:"c" default:"4"`
-
-	FromEpoch int `arg:"" name:"from" default:"0"`
-	ToEpoch   int `arg:"" name:"to" default:"-1"`
-}
-
-func (b *Epochs) Run(cctx *Context) error {
-	ctx := cctx.Context
-	s, err := b.withSentinel.connectSentinel()
-	if err != nil {
-		return err
-	}
-	beaconConfig, genesisConfig, err := b.configs()
-	if err != nil {
-		return err
-	}
-
-	aferoFS, err := openFs(b.Datadir, "caplin/beacon")
-	if err != nil {
-		return err
-	}
-
-	beaconDB := persistence.NewBeaconChainDatabaseFilesystem(persistence.NewAferoRawBlockSaver(aferoFS, beaconConfig), nil, beaconConfig)
-
-	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, genesisConfig)
-	rpcSource := persistence2.NewBeaconRpcSource(beacon)
-
-	err = beacon.SetStatus(
-		genesisConfig.GenesisValidatorRoot,
-		beaconConfig.GenesisEpoch,
-		genesisConfig.GenesisValidatorRoot,
-		beaconConfig.GenesisSlot)
-	if err != nil {
-		return err
-	}
-
-	if b.ToEpoch < 0 {
-		b.ToEpoch = int(utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch))
-	}
-
-	ctx, cn := context.WithCancel(ctx)
-	defer cn()
-	egg, ctx := errgroup.WithContext(ctx)
-
-	totalEpochs := (b.ToEpoch - b.FromEpoch + 1)
-	pw := progress.NewWriter()
-	pw.SetTrackerLength(50)
-	pw.SetMessageWidth(24)
-	pw.SetStyle(progress.StyleDefault)
-	pw.SetUpdateFrequency(time.Millisecond * 100)
-	pw.SetTrackerPosition(progress.PositionRight)
-	pw.Style().Visibility.Percentage = true
-	pw.Style().Visibility.Speed = true
-	pw.Style().Visibility.Value = true
-	pw.Style().Visibility.ETA = true
-	pw.Style().Visibility.ETAOverall = false
-	pw.Style().Visibility.Tracker = true
-	pw.Style().Visibility.TrackerOverall = false
-	pw.Style().Visibility.SpeedOverall = true
-	pw.Style().Options.Separator = ""
-
-	go pw.Render()
-
-	total := int64(uint64(totalEpochs) * beaconConfig.SlotsPerEpoch)
-	tk := &progress.Tracker{
-		Message: fmt.Sprintf("downloading %d blocks", total),
-		Total:   total,
-		Units:   progress.UnitsDefault,
-	}
-	pw.AppendTracker(tk)
-	tk.UpdateTotal(total)
-
-	egg.SetLimit(b.Concurrency)
-
-	db := mdbx.MustOpen("caplin/db")
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	tx, err := db.BeginRw(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	defer cn()
-	for i := b.FromEpoch; i <= b.ToEpoch; i = i + 1 {
-		ii := i
-		egg.Go(func() error {
-			var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
-			for {
-				blocks, err = rpcSource.GetRange(ctx, tx, uint64(ii)*beaconConfig.SlotsPerEpoch, beaconConfig.SlotsPerEpoch)
-				if err != nil {
-					log.Error("dl error", "err", err, "epoch", ii)
-				} else {
-					break
-				}
-			}
-			for _, v := range blocks.Data {
-				tk.Increment(1)
-				_, _ = beaconDB, v
-				err := beaconDB.WriteBlock(ctx, tx, v, true)
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		})
-	}
-	err = egg.Wait()
-	if err != nil {
-		return err
-	}
-	tk.MarkAsDone()
-	return tx.Commit()
 }
 
 type Migrate struct {
@@ -408,8 +214,7 @@ func (c *Chain) Run(ctx *Context) error {
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 
-	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -443,7 +248,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, false, false, nil), csn, beaconDB, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, nil), csn, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -461,8 +266,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	dirs := datadir.New(c.Datadir)
-	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -490,7 +294,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 
 	log.Info("Starting with", "root", libcommon.Hash(currentRoot), "slot", currentBlock.Block.Slot)
 	currentRoot = currentBlock.Block.ParentRoot
-	if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+	if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -518,7 +322,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 		if err != nil {
 			return false, err
 		}
-		if err := beaconDB.WriteBlock(ctx, tx, currentBlock, true); err != nil {
+		if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, currentBlock, true); err != nil {
 			return false, err
 		}
 		currentRoot = currentBlock.Block.ParentRoot
@@ -583,8 +387,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -598,7 +401,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 		return
 	})
 
-	return freezeblocks.DumpBeaconBlocks(ctx, db, beaconDB, 0, to, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	return freezeblocks.DumpBeaconBlocks(ctx, db, 0, to, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
 
 type CheckSnapshots struct {
@@ -618,8 +421,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -699,8 +501,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -724,7 +525,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	}
 
 	br := &snapshot_format.MockBlockReader{}
-	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconDB, beaconConfig)
+	snReader := freezeblocks.NewBeaconSnapshotReader(csn, br, beaconConfig)
 	start := time.Now()
 	for i := c.Slot; i < to; i++ {
 		snReader.ReadBlockBySlot(ctx, tx, i)
@@ -747,11 +548,9 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return err
 	}
 
-	rawDB, _ := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
-	_, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -811,8 +610,8 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	dirs := datadir.New(r.Datadir)
-	rawDB, fs := persistence.AferoRawBeaconBlockChainFromOsPath(beaconConfig, dirs.CaplinHistory)
-	beaconDB, db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, rawDB, dirs.CaplinIndexing, nil, false)
+	fs := afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinHistory)
+	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -839,7 +638,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
-	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconDB, beaconConfig)
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 	gSpot, err := initial_state.GetGenesisState(t)
 	if err != nil {
 		return err

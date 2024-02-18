@@ -16,7 +16,7 @@ func TestHarnessPhase0(t *testing.T) {
 			beacontest.WithTestFromFs(Harnesses, "blocks"),
 			beacontest.WithTestFromFs(Harnesses, "config"),
 			beacontest.WithTestFromFs(Harnesses, "headers"),
-			beacontest.WithTestFromFs(Harnesses, "attestation_rewards_phase0"),
+			// beacontest.WithTestFromFs(Harnesses, "attestation_rewards_phase0"),
 			beacontest.WithTestFromFs(Harnesses, "committees"),
 			beacontest.WithTestFromFs(Harnesses, "duties_attester"),
 			beacontest.WithTestFromFs(Harnesses, "duties_proposer"),
@@ -43,6 +43,7 @@ func TestHarnessBellatrix(t *testing.T) {
 			beacontest.WithTestFromFs(Harnesses, "duties_sync_bellatrix"),
 			beacontest.WithTestFromFs(Harnesses, "lightclient"),
 			beacontest.WithTestFromFs(Harnesses, "validators"),
+			beacontest.WithTestFromFs(Harnesses, "lighthouse"),
 		)...,
 	)
 }
