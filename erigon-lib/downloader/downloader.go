@@ -691,7 +691,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 
-						d.logger.Debug("[snapshots]  Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
+						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
 						if session, err := d.webDownload(peerUrls, t, nil, webDownloadComplete, sem); err != nil {
 							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
 							if session == nil {
