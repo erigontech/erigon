@@ -753,7 +753,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 								downloadUrl := webseed.JoinPath(t.Name())
 
 								if headRequest, err := http.NewRequestWithContext(d.ctx, "HEAD", downloadUrl.String(), nil); err == nil {
-									if headResponse, err := http.DefaultClient.Do(headRequest); err == nil && headResponse.StatusCode == http.StatusOK {
+									headResponse, err := http.DefaultClient.Do(headRequest)
+
+									if err != nil {
+										continue
+									}
+
+									headResponse.Body.Close()
+
+									if headResponse.StatusCode == http.StatusOK {
 										if meta, err := getWebpeerTorrentInfo(d.ctx, downloadUrl); err == nil {
 											if bytes.Equal(torrentHash.Bytes(), meta.HashInfoBytes().Bytes()) {
 												// TODO check the torrent's hash matches this hash
@@ -1362,7 +1370,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 				diagnostics.Send(diagnostics.SegmentDownloadStatistics{
 					Name:            transferName,
-					TotalBytes:      uint64(tLen),
+					TotalBytes:      tLen,
 					DownloadedBytes: bytesCompleted,
 					Webseeds:        seeds,
 				})
