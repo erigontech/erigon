@@ -160,11 +160,11 @@ func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
 func (f FileInfo) Len() uint64 { return f.To - f.From }
 
 func (f FileInfo) CompareTo(o FileInfo) int {
-	if res := cmp.Compare(f.From, f.From); res != 0 {
+	if res := cmp.Compare(f.From, o.From); res != 0 {
 		return res
 	}
 
-	if res := cmp.Compare(f.To, f.To); res != 0 {
+	if res := cmp.Compare(f.To, o.To); res != 0 {
 		return res
 	}
 
