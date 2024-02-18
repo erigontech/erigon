@@ -1352,7 +1352,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				if peerUrl, err := url.Parse(transfer.Group); err == nil {
 					rate := uint64(transfer.SpeedAvg)
 					seeds = []diagnostics.SegmentPeer{
-						diagnostics.SegmentPeer{
+						{
 							Url:          peerUrl.Host,
 							DownloadRate: rate,
 						}}

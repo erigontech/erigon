@@ -423,7 +423,7 @@ func (c *RCloneSession) Upload(ctx context.Context, files ...string) error {
 	cerr := make(chan error, 1)
 
 	c.syncQueue <- syncRequest{ctx, reqInfo, cerr,
-		[]*rcloneRequest{&rcloneRequest{
+		[]*rcloneRequest{{
 			Group: c.Label(),
 			SrcFs: c.localFs,
 			DstFs: c.remoteFs,
