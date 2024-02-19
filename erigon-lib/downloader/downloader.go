@@ -1108,30 +1108,24 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 	spec.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	spec.DisallowDataDownload = true
 
+	info, _ := snaptype.ParseFileName(d.SnapDir(), name)
+
+	localHash, err := fileHashBytes(d.ctx, info)
+
+	if err == nil {
+		if bytes.Equal(infoHash.Bytes(), localHash) {
+			defer sem.Release(1)
+			d.logger.Debug("[snapshots] Web download stopped - already downloaded", "file", t.Name(), "hash", infoHash)
+			return session, nil
+		}
+	}
+
 	t.Drop()
 
 	go func() {
 		defer sem.Release(1)
 
-		info, _ := snaptype.ParseFileName(d.SnapDir(), name)
-
 		if dir.FileExist(info.Path) {
-			localHash, err := fileHashBytes(d.ctx, info)
-
-			if err == nil {
-				if bytes.Equal(infoHash.Bytes(), localHash) {
-					d.logger.Debug("[snapshots] Web download stopped - file exists", "file", t.Name(), "hash", infoHash)
-
-					statusChan <- webDownloadStatus{
-						name:   name,
-						length: length,
-						spec:   spec,
-						err:    err,
-					}
-					return
-				}
-			}
-
 			if err := os.Remove(info.Path); err != nil {
 				d.logger.Warn("Couldn't remove previous file before download", "file", name, "path", info.Path, "err", err)
 			}
@@ -1178,7 +1172,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 				d.logger.Error("Web download failed", "file", name, "url", peerUrl, "err", err)
 
 				if ferr := os.Remove(info.Path); ferr != nil {
-					d.logger.Warn("Couldn't remove invalid file", "file", name, "path", info.Path, "err", err)
+					d.logger.Warn("Couldn't remove invalid file", "file", name, "path", info.Path, "err", ferr)
 				}
 			}
 		} else {
