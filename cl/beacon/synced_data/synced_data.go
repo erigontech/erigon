@@ -24,13 +24,11 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) (err
 	if !s.enabled {
 		return
 	}
-	go func() {
-		st, err := newState.Copy()
-		if err != nil {
-			return
-		}
-		s.headState.Store(st)
-	}()
+	st, err := newState.Copy()
+	if err != nil {
+		return err
+	}
+	s.headState.Store(st)
 
 	return
 }
