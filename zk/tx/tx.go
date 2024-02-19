@@ -11,11 +11,13 @@ import (
 	"regexp"
 	"strings"
 
+	"encoding/binary"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/smt/pkg/utils"
+	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -38,6 +40,8 @@ const (
 	shortRlp                       uint64 = 55  // length of the short rlp codification
 	f7                             uint64 = 247 // 192 + 55 = c0 + shortRlp
 	efficiencyPercentageByteLength uint64 = 1
+
+	changeL2BlockTxType = 11
 )
 
 var (
@@ -162,11 +166,12 @@ func DecodeTx(encodedTx []byte, efficiencyPercentage byte, forkId uint16) (types
 // [3] To       *common.Address
 // [4] Value    *big.Int
 // [5] Data     []byte
+// [6] Chain id *big.Int
 //
 // optional fields:
-// [6] V        *big.Int
-// [7] R        *big.Int
-// [8] S        *big.Int
+// [7] V        *big.Int
+// [8] R        *big.Int
+// [9] S        *big.Int
 func rlpFieldsToLegacyTx(fields [][]byte, v, r, s []byte) (tx *types.LegacyTx, err error) {
 	const (
 		fieldsSizeWithoutChainID = 6
@@ -193,8 +198,9 @@ func rlpFieldsToLegacyTx(fields [][]byte, v, r, s []byte) (tx *types.LegacyTx, e
 	data := fields[5]
 
 	txV := big.NewInt(0).SetBytes(v)
+	chainIDBig := big.NewInt(0)
 	if len(fields) >= fieldsSizeWithChainID {
-		chainID := big.NewInt(0).SetBytes(fields[6])
+		chainIDBig = big.NewInt(0).SetBytes(fields[6])
 
 		// a = chainId * 2
 		// b = v - 27
@@ -203,11 +209,12 @@ func rlpFieldsToLegacyTx(fields [][]byte, v, r, s []byte) (tx *types.LegacyTx, e
 		//
 		// same as:
 		// v = v-27+chainId*2+35
-		a := new(big.Int).Mul(chainID, big.NewInt(double))
+		a := new(big.Int).Mul(chainIDBig, big.NewInt(double))
 		b := new(big.Int).Sub(new(big.Int).SetBytes(v), big.NewInt(ether155V))
 		c := new(big.Int).Add(a, big.NewInt(etherPre155V))
 		txV = new(big.Int).Add(b, c)
 	}
+	chainID, _ := uint256.FromBig(chainIDBig)
 
 	txVi := uint256.Int{}
 	txVi.SetBytes(txV.Bytes())
@@ -223,17 +230,92 @@ func rlpFieldsToLegacyTx(fields [][]byte, v, r, s []byte) (tx *types.LegacyTx, e
 
 	return &types.LegacyTx{
 		CommonTx: types.CommonTx{
-			Nonce: nonce,
-			Gas:   gas,
-			To:    to,
-			Value: valueI,
-			Data:  data,
-			V:     txVi,
-			R:     txRi,
-			S:     txSi,
+			Nonce:   nonce,
+			Gas:     gas,
+			To:      to,
+			Value:   valueI,
+			Data:    data,
+			V:       txVi,
+			R:       txRi,
+			S:       txSi,
+			ChainID: chainID,
 		},
 		GasPrice: gasPriceI,
 	}, nil
+}
+
+func TransactionToL2Data(tx types.Transaction, forkId uint16, efficiencyPercentage uint8) ([]byte, error) {
+	nonceBytes := hermez_db.Uint64ToBytes(tx.GetNonce())
+	gasPriceBytes := tx.GetPrice().Bytes()
+	gas := hermez_db.Uint64ToBytes(tx.GetGas())
+	val := uint256.NewInt(0)
+	if tx.GetValue() != nil {
+		val = tx.GetValue()
+	}
+	valueBytes := val.Bytes()
+	chainIdBytes := tx.GetChainID()
+
+	var to []byte
+	if tx.GetTo() != nil {
+		to = tx.GetTo().Bytes()
+	}
+
+	toEncode := [][]byte{
+		nonceBytes,
+		gasPriceBytes,
+		gas,
+		to,
+		valueBytes,
+		tx.GetData(),
+		chainIdBytes.Bytes(),
+	}
+
+	encoded, err := rlp.EncodeToBytes(toEncode)
+	if err != nil {
+		return nil, err
+	}
+
+	v, r, s := tx.RawSignatureValues()
+
+	// reverse the eip-155 changes for the V value for transport
+	multiChain := new(big.Int).Mul(tx.GetChainID().ToBig(), big.NewInt(double))
+	plus155V := new(big.Int).Add(new(big.Int).SetBytes(v.Bytes()), big.NewInt(ether155V))
+	txV := new(big.Int).Sub(plus155V, multiChain)
+	txV = txV.Sub(txV, big.NewInt(etherPre155V))
+
+	vBytes := txV.Bytes()
+	rBytes := r.Bytes32()
+	sBytes := s.Bytes32()
+
+	encoded = append(encoded, rBytes[:]...)
+	encoded = append(encoded, sBytes[:]...)
+	encoded = append(encoded, vBytes...)
+
+	if forkId >= forkID5 {
+		ep := hermez_db.Uint8ToBytes(efficiencyPercentage)
+		encoded = append(encoded, ep...)
+	}
+
+	return encoded, nil
+}
+
+func GenerateBlockBatchL2Data(forkId uint16, deltaTimestamp uint32, l1InfoTreeIndex uint32, transactions []types.Transaction) ([]byte, error) {
+	var result []byte
+
+	// add in the changeL2Block transaction
+	result = append(result, changeL2BlockTxType)
+	result = binary.BigEndian.AppendUint32(result, deltaTimestamp)
+	result = binary.BigEndian.AppendUint32(result, l1InfoTreeIndex)
+
+	for _, transaction := range transactions {
+		encoded, err := TransactionToL2Data(transaction, forkId, MaxEffectivePercentage)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, encoded...)
+	}
+
+	return result, nil
 }
 
 func ComputeL2TxHash(

@@ -1,7 +1,7 @@
 package vm
 
 import (
-	"bytes"
+	"github.com/ledgerwatch/erigon/zk/tx"
 	"math"
 	"strconv"
 )
@@ -13,14 +13,16 @@ type BatchCounterCollector struct {
 	transactions    []*TransactionCounter
 	smtLevels       int
 	blockCount      int
+	forkId          uint16
 }
 
-func NewBatchCounterCollector(smtMaxLevel uint32) *BatchCounterCollector {
+func NewBatchCounterCollector(smtMaxLevel uint32, forkId uint16) *BatchCounterCollector {
 	totalLevel := len(strconv.FormatInt(int64(math.Pow(2, float64(smtMaxLevel))+250000), 2))
 	return &BatchCounterCollector{
 		transactions: []*TransactionCounter{},
 		smtLevels:    totalLevel,
 		blockCount:   0,
+		forkId:       forkId,
 	}
 }
 
@@ -52,28 +54,25 @@ func (bcc *BatchCounterCollector) StartNewBlock() bool {
 }
 
 func (bcc *BatchCounterCollector) processBatchLevelData() error {
-	var rlpBytes []byte
-	buffer := bytes.NewBuffer(rlpBytes)
-	totalRlpLength := 0
+	totalEncodedTxLength := 0
 	for _, t := range bcc.transactions {
-		buffer.Reset()
-		err := t.transaction.EncodeRLP(buffer)
+		encoded, err := tx.TransactionToL2Data(t.transaction, bcc.forkId, tx.MaxEffectivePercentage)
 		if err != nil {
 			return err
 		}
-		totalRlpLength += len(rlpBytes)
+		totalEncodedTxLength += len(encoded)
 	}
-
-	// reset the batch processing counters ready to calc the new values
-	bcc.l2DataCollector = NewCounterCollector(bcc.smtLevels)
-
-	batchL2DataSize := (totalRlpLength - len(bcc.transactions)*2) / 2
 
 	// simulate adding in the changeL2Block transactions
 	// 1st byte - tx type, always 11 for changeL2Block
 	// 2-4 - delta timestamp
 	// 5-9 - l1 info tree index
-	batchL2DataSize += 9 * bcc.blockCount
+	totalEncodedTxLength += 9 * bcc.blockCount
+
+	// reset the batch processing counters ready to calc the new values
+	bcc.l2DataCollector = NewCounterCollector(bcc.smtLevels)
+
+	batchL2DataSize := (totalEncodedTxLength - len(bcc.transactions)*2) / 2
 
 	l2Deduction := int(math.Ceil(float64(batchL2DataSize+1) / 136))
 

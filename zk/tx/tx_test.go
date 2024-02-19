@@ -8,6 +8,7 @@ import (
 
 	zkhex "github.com/ledgerwatch/erigon/zkevm/hex"
 
+	"encoding/binary"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -328,4 +329,85 @@ func TestFormatL2TxHashParam(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_EncodeToBatchL2DataAndBack(t *testing.T) {
+	toAddress := common.HexToAddress("0x1")
+	tx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
+			TransactionMisc: types.TransactionMisc{},
+			ChainID:         uint256.NewInt(987),
+			Nonce:           2,
+			Gas:             3,
+			To:              &toAddress,
+			Value:           uint256.NewInt(4),
+			Data:            []byte{5},
+			V:               *uint256.NewInt(2009),
+			R:               *uint256.NewInt(7),
+			S:               *uint256.NewInt(8),
+		},
+		GasPrice: uint256.NewInt(100),
+	}
+
+	encoded, err := TransactionToL2Data(tx, 7, 255)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	decoded, _, _, err := DecodeTxs(encoded, 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(decoded) != 1 {
+		t.Errorf("expected 1 transaction but found %v", len(decoded))
+	}
+
+	toCompare := decoded[0]
+	require.Equal(t, tx, toCompare)
+}
+
+func Test_BlockBatchL2DataEncode(t *testing.T) {
+	toAddress := common.HexToAddress("0x1")
+	tx := &types.LegacyTx{
+		CommonTx: types.CommonTx{
+			TransactionMisc: types.TransactionMisc{},
+			ChainID:         uint256.NewInt(5),
+			Nonce:           2,
+			Gas:             3,
+			To:              &toAddress,
+			Value:           uint256.NewInt(4),
+			Data:            []byte{5},
+			V:               *uint256.NewInt(19),
+			R:               *uint256.NewInt(7),
+			S:               *uint256.NewInt(8),
+		},
+		GasPrice: uint256.NewInt(100),
+	}
+
+	expected, err := TransactionToL2Data(tx, 7, 255)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	batchL2Data, err := GenerateBlockBatchL2Data(7, 1, 2, []types.Transaction{tx})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// get the tx part
+	txBytes := batchL2Data[9:]
+	require.Equal(t, expected, txBytes, "transaction bytes mismatch")
+
+	// tx type 11 for the start
+	require.Equal(t, byte(11), batchL2Data[0], "expected change l2 block transaction type in first position")
+
+	// delta and info tree as expected
+	expectedDeltaBytes := make([]byte, 0)
+	expectedDeltaBytes = binary.BigEndian.AppendUint32(expectedDeltaBytes, 1)
+	require.Equal(t, expectedDeltaBytes, batchL2Data[1:5], "mismatch in delta timestamp")
+
+	expectedInfoTreeBytes := make([]byte, 0)
+	expectedInfoTreeBytes = binary.BigEndian.AppendUint32(expectedInfoTreeBytes, 2)
+	require.Equal(t, expectedInfoTreeBytes, batchL2Data[5:9], "mismatch in l1 info tree")
 }

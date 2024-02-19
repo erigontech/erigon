@@ -63,7 +63,7 @@ const (
 
 	totalVirtualCounterSmtLevel = 80 // todo [zkevm] this should be read from the db
 
-	etrogForkId = 7
+	etrogForkId = 7 // todo [zkevm] we need a better way of handling this
 
 	yieldSize = 20 // arbitrary number defining how many transactions to yield from the pool at once
 )
@@ -229,7 +229,7 @@ func SpawnSequencingStage(
 	parentRoot := parentBlock.Root()
 	ibs.PreExecuteStateSet(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot)
 
-	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel)
+	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, etrogForkId)
 
 	// whilst in the 1 batch = 1 block = 1 tx flow we can immediately add in the changeL2BlockTx calculation
 	// as this is the first tx we can skip the overflow check
@@ -500,7 +500,7 @@ func handleInjectedBatch(
 		return nil, nil, errors.New("expected 1 transaction in the injected batch")
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel)
+	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, etrogForkId)
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
 	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), txs[0], ibs, hermezDb)
