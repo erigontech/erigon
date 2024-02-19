@@ -75,7 +75,7 @@ func (c *ecrecover_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *ecrecover_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 
 	const ecRecoverInputLength = 128
@@ -132,7 +132,7 @@ func (c *sha256hash_zkevm) RequiredGas(input []byte) uint64 {
 }
 func (c *sha256hash_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 	h := sha256.Sum256(input)
 	return h[:], nil
@@ -155,7 +155,7 @@ func (c *ripemd160hash_zkevm) RequiredGas(input []byte) uint64 {
 }
 func (c *ripemd160hash_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 
 	ripemd := ripemd160.New()
@@ -180,7 +180,7 @@ func (c *dataCopy_zkevm) RequiredGas(input []byte) uint64 {
 }
 func (c *dataCopy_zkevm) Run(in []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 	return in, nil
 }
@@ -267,7 +267,7 @@ func (c *bigModExp_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *bigModExp_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 
 	var (
@@ -324,7 +324,7 @@ func (c *bn256AddIstanbul_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *bn256AddIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 
 	return runBn256Add(input)
@@ -347,7 +347,7 @@ func (c *bn256AddByzantium_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *bn256AddByzantium_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 	return runBn256Add(input)
 }
@@ -369,7 +369,7 @@ func (c *bn256ScalarMulIstanbul_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *bn256ScalarMulIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 
 	return runBn256ScalarMul(input)
@@ -391,7 +391,7 @@ func (c *bn256ScalarMulByzantium_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *bn256ScalarMulByzantium_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 	return runBn256ScalarMul(input)
 }
@@ -412,7 +412,7 @@ func (c *bn256PairingIstanbul_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *bn256PairingIstanbul_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 	return runBn256Pairing(input)
 }
@@ -448,7 +448,7 @@ func (c *blake2F_zkevm) RequiredGas(input []byte) uint64 {
 
 func (c *blake2F_zkevm) Run(input []byte) ([]byte, error) {
 	if !c.enabled {
-		return []byte{}, ErrExecutionReverted
+		return []byte{}, ErrUnsupportedPrecompile
 	}
 
 	// // Make sure the input is valid (correct length and final flag)
