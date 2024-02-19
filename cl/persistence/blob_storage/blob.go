@@ -23,12 +23,14 @@ var bPool = sync.Pool{
 
 const subDivisionFolderSize = 10_000
 
-// BlobStorage is the concrete implementation of the filesystem backend for saving and retrieving BlobSidecars.
+// BlobStorage is saving and retrieving BlobSidecars.
 type aferoBlobStorage struct {
 	fs  afero.Fs
 	cfg *clparams.BeaconChainConfig
 
-	blockRootToSidecar sync.Map
+	blockRootToBlobs          sync.Map
+	blockRootToKzgCommitments sync.Map
+	kzgCommitmentToBlob       sync.Map
 }
 
 func NewBlobStorage(fs afero.Fs, cfg *clparams.BeaconChainConfig) *aferoBlobStorage {
@@ -36,7 +38,9 @@ func NewBlobStorage(fs afero.Fs, cfg *clparams.BeaconChainConfig) *aferoBlobStor
 		fs:  fs,
 		cfg: cfg,
 
-		blockRootToSidecar: sync.Map{},
+		blockRootToBlobs:          sync.Map{},
+		blockRootToKzgCommitments: sync.Map{},
+		kzgCommitmentToBlob:       sync.Map{},
 	}
 }
 
@@ -46,6 +50,7 @@ func rootToPaths(slot uint64, root libcommon.Hash, config *clparams.BeaconChainC
 	defer bPool.Put(buffer)
 	buffer.Reset()
 
+	// slot/root
 	fmt.Fprintf(buffer, "%d/%x.sz", slot/subDivisionFolderSize, root)
 	split := strings.Split(buffer.String(), "/")
 	return split[0], buffer.String()
@@ -68,39 +73,73 @@ func (a *aferoBlobStorage) WriteBlob(blobSidecar *cltypes.BlobSidecar) error {
 	if err != nil {
 		return err
 	}
-	processBlock(a, blobSidecar, blockRoot)
+	notify(a, blobSidecar, blockRoot)
 	return nil
 }
 
-// BlobSidecarReader retrieves a BlobSidecars by its root
-func (a *aferoBlobStorage) ReadBlobsByBlockRoot(blockRoot [32]byte) ([]*cltypes.BlobSidecar, error) {
-	sidecars, ok := a.blockRootToSidecar.Load(blockRoot)
+func notify(a *aferoBlobStorage, blobSidecar *cltypes.BlobSidecar, blockRoot [32]byte) {
+	//blockRoot=>[]blobs
+	blobs, ok := a.blockRootToBlobs.Load(blockRoot)
+	if !ok {
+		blobs = []cltypes.Blob{}
+	}
+	blobs = append(blobs.([]cltypes.Blob), blobSidecar.Blob)
+	a.blockRootToBlobs.Store(blockRoot, blobs)
+
+	//blockRoot=>[]kzgCommitments
+	kzgCommitments, ok := a.blockRootToKzgCommitments.Load(blockRoot)
+	if !ok {
+		kzgCommitments = []libcommon.Bytes48{}
+	}
+	kzgCommitments = append(kzgCommitments.([]libcommon.Bytes48), blobSidecar.KzgCommitment)
+	a.blockRootToKzgCommitments.Store(blockRoot, kzgCommitments)
+
+	//kzgCommitments=>blob
+	a.kzgCommitmentToBlob.Store(blobSidecar.KzgCommitment, blobSidecar.Blob)
+}
+
+func (a *aferoBlobStorage) ReadBlobsByBlockRoot(blockRoot [32]byte) ([]cltypes.Blob, error) {
+	blobs, ok := a.blockRootToBlobs.Load(blockRoot)
 	if !ok {
 		return nil, errors.New("block root not found")
 	}
+	return blobs.([]cltypes.Blob), nil
+}
 
-	sidecarList, ok := sidecars.([]*cltypes.BlobSidecar)
+func (a *aferoBlobStorage) ReadKzgCommitmentsForBlockRoot(blockRoot [32]byte) ([]libcommon.Bytes48, error) {
+	kzgCommitments, ok := a.blockRootToKzgCommitments.Load(blockRoot)
 	if !ok {
-		return nil, errors.New("invalid sidecar type")
+		return nil, errors.New("block root not found")
 	}
+	return kzgCommitments.([]libcommon.Bytes48), nil
+}
 
-	// var blobs []*cltypes.Blob
-	// slot := blobSidecars.SignedBlockHeader.Header.Slot
-	// _, path := rootToPaths(slot, blockRoot, a.cfg)
-	// file, err := a.fs.OpenFile(path, os.O_RDONLY, 0o755)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// defer file.Close()
-	return sidecarList, nil
+func (a *aferoBlobStorage) ReadBlobByKzgCommitment(kzgCommitment libcommon.Bytes48) (cltypes.Blob, error) {
+	blob, ok := a.kzgCommitmentToBlob.Load(kzgCommitment)
+	if !ok {
+		return cltypes.Blob{}, errors.New("kzg commitment not found")
+	}
+	return blob.(cltypes.Blob), nil
 }
 
 func (a *aferoBlobStorage) PruneBlobs(currentSlot uint64) error {
-	a.blockRootToSidecar.Range(func(key, value interface{}) bool {
+	a.blockRootToBlobs.Range(func(key, value interface{}) bool {
 		blobSidecar := value.(*cltypes.BlobSidecar)
 		if blobSidecar.SignedBlockHeader.Header.Slot < currentSlot-a.cfg.MinEpochsForBlobsSidecarsRequest {
-			// Remove the sidecar from the map
-			a.blockRootToSidecar.Delete(key)
+			// Clean blockRootToBlobs
+			a.blockRootToBlobs.Delete(key)
+
+			// Clean kzgCommitmentToBlob
+			kzgCommitments, ok := a.blockRootToKzgCommitments.Load(key)
+			if !ok {
+				kzgCommitments = []libcommon.Bytes48{}
+			}
+			for _, kzgCommitment := range kzgCommitments.([]libcommon.Bytes48) {
+				a.kzgCommitmentToBlob.Delete(kzgCommitment)
+			}
+
+			// Clean blockRootToKzgCommitments
+			a.blockRootToKzgCommitments.Delete(key)
 
 			// Delete the file
 			blockRoot, _ := blobSidecar.SignedBlockHeader.Header.HashSSZ()
@@ -114,35 +153,14 @@ func (a *aferoBlobStorage) PruneBlobs(currentSlot uint64) error {
 	return nil
 }
 
-func processBlock(a *aferoBlobStorage, blobSidecar *cltypes.BlobSidecar, blockRoot [32]byte) {
-	blobSidecars, _ := a.blockRootToSidecar.LoadOrStore(blockRoot, []*cltypes.BlobSidecar{})
-	a.blockRootToSidecar.Store(blockRoot, append(blobSidecars.([]*cltypes.BlobSidecar), blobSidecar))
-}
-
-func (a *aferoBlobStorage) getBlobSidecarsForBlockRoot(blockRoot [32]byte) ([]*cltypes.BlobSidecar, error) {
-	blobSidecars, ok := a.blockRootToSidecar.Load(blockRoot)
-	if !ok {
-		return nil, errors.New("block root not found")
-	}
-	return blobSidecars.([]*cltypes.BlobSidecar), nil
-}
-
 func (a *aferoBlobStorage) retrieveBlobsAndProofs(beaconBlockRoot [32]byte) ([]cltypes.Blob, []libcommon.Bytes48, error) {
-	sidecars, ok := a.blockRootToSidecar.Load(beaconBlockRoot)
-	if !ok {
-		return nil, nil, errors.New("block root not found")
+	blobs, err := a.ReadBlobsByBlockRoot(beaconBlockRoot)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	sidecarList, ok := sidecars.([]*cltypes.BlobSidecar)
-	if !ok {
-		return nil, nil, errors.New("invalid sidecar type")
+	kzgCommitments, err := a.ReadKzgCommitmentsForBlockRoot(beaconBlockRoot)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	blobs := make([]cltypes.Blob, 0, len(sidecarList))
-	proofs := make([]libcommon.Bytes48, 0, len(sidecarList))
-	for _, sidecar := range sidecarList {
-		blobs = append(blobs, sidecar.Blob)
-		proofs = append(proofs, sidecar.KzgProof)
-	}
-	return blobs, proofs, nil
+	return blobs, kzgCommitments, nil
 }
