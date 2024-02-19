@@ -1140,13 +1140,21 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 		if d.downloadLimit != nil {
 			limit := float64(*d.downloadLimit) / float64(d.cfg.DownloadSlots)
 
-			torrentLimit := d.cfg.ClientConfig.DownloadRateLimiter.Limit()
-			rcloneLimit := d.webDownloadClient.GetBwLimit()
+			func() {
+				d.lock.Lock()
+				defer d.lock.Unlock()
 
-			d.cfg.ClientConfig.DownloadRateLimiter.SetLimit(torrentLimit - rate.Limit(limit))
-			d.webDownloadClient.SetBwLimit(d.ctx, rcloneLimit+rate.Limit(limit))
+				torrentLimit := d.cfg.ClientConfig.DownloadRateLimiter.Limit()
+				rcloneLimit := d.webDownloadClient.GetBwLimit()
+
+				d.cfg.ClientConfig.DownloadRateLimiter.SetLimit(torrentLimit - rate.Limit(limit))
+				d.webDownloadClient.SetBwLimit(d.ctx, rcloneLimit+rate.Limit(limit))
+			}()
 
 			defer func() {
+				d.lock.Lock()
+				defer d.lock.Unlock()
+
 				torrentLimit := d.cfg.ClientConfig.DownloadRateLimiter.Limit()
 				rcloneLimit := d.webDownloadClient.GetBwLimit()
 
@@ -1343,7 +1351,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	lastMetadataReady := stats.MetadataReady
 
-	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady = atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
+	stats.BytesTotal, stats.BytesCompleted, stats.ConnectionsTotal, stats.MetadataReady =
+		atomic.LoadUint64(&stats.DroppedTotal), atomic.LoadUint64(&stats.DroppedCompleted), 0, 0
 
 	var zeroProgress []string
 	var noMetadata []string
@@ -1520,12 +1529,25 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 		d.logger.Log(d.verbosity, "[snapshots] no metadata yet", "files", amount, "list", strings.Join(noMetadata, ","))
 	}
+
 	if len(zeroProgress) > 0 {
 		amount := len(zeroProgress)
 		if len(zeroProgress) > 5 {
 			zeroProgress = append(zeroProgress[:5], "...")
 		}
 		d.logger.Log(d.verbosity, "[snapshots] no progress yet", "files", amount, "list", strings.Join(zeroProgress, ","))
+	}
+
+	if len(d.downloading) > 0 {
+		amount := len(d.downloading)
+
+		files := make([]string, 0, len(downloading))
+
+		for file := range d.downloading {
+			files = append(files, file)
+		}
+
+		d.logger.Log(d.verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ","))
 	}
 
 	if stats.BytesDownload > prevStats.BytesDownload {
