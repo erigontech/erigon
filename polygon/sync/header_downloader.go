@@ -22,7 +22,7 @@ const headerDownloaderLogPrefix = "HeaderDownloader"
 
 //go:generate mockgen -destination=./headers_writer_mock.go -package=sync . HeadersWriter
 type HeadersWriter interface {
-	PutHeaders(headers []*types.Header) error
+	PutHeaders(ctx context.Context, headers []*types.Header) error
 }
 
 func NewHeaderDownloader(
@@ -211,7 +211,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 		}
 
 		dbWriteStartTime := time.Now()
-		if err := hd.headersWriter.PutHeaders(headers); err != nil {
+		if err := hd.headersWriter.PutHeaders(ctx, headers); err != nil {
 			return err
 		}
 

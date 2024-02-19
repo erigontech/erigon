@@ -164,7 +164,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		Times(4)
 	var persistedHeaders []*types.Header
 	test.headersWriter.EXPECT().
-		PutHeaders(gomock.Any()).
+		PutHeaders(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(1)
 
@@ -194,7 +194,7 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		Times(8)
 	var persistedHeaders []*types.Header
 	test.headersWriter.EXPECT().
-		PutHeaders(gomock.Any()).
+		PutHeaders(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 
@@ -249,11 +249,11 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
 	gomock.InOrder(
 		test.headersWriter.EXPECT().
-			PutHeaders(gomock.Any()).
+			PutHeaders(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersFirstTime)).
 			Times(1),
 		test.headersWriter.EXPECT().
-			PutHeaders(gomock.Any()).
+			PutHeaders(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersRemaining)).
 			Times(2),
 	)
@@ -276,7 +276,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		Times(8)
 	var persistedHeaders []*types.Header
 	test.headersWriter.EXPECT().
-		PutHeaders(gomock.Any()).
+		PutHeaders(gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 	gomock.InOrder(
