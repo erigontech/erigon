@@ -33,4 +33,9 @@ type ForkGraph interface {
 	GetLightClientBootstrap(blockRoot libcommon.Hash) (*cltypes.LightClientBootstrap, bool)
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
+	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
+	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
+	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
+	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 }

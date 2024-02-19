@@ -60,8 +60,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	// get the duties
 	if a.forkchoiceStore.LowestAvaiableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
-		s, cn := a.syncedData.HeadState()
-		defer cn()
+		s := a.syncedData.HeadState()
+
 		if s == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
 		}

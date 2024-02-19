@@ -245,3 +245,94 @@ func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, revers
 
 	return out, nil
 }
+
+func ComputeCompressedSerializedValidatorSetListDiff(w io.Writer, old, new []byte) error {
+	if len(old) > len(new) {
+		return fmt.Errorf("old list is longer than new list")
+	}
+
+	validatorLength := 121
+	if len(old)%validatorLength != 0 {
+		return fmt.Errorf("old list is not a multiple of validator length got %d", len(old))
+	}
+	if len(new)%validatorLength != 0 {
+		return fmt.Errorf("new list is not a multiple of validator length got %d", len(new))
+	}
+	for i := 0; i < len(old); i += validatorLength {
+		if !bytes.Equal(old[i:i+validatorLength], new[i:i+validatorLength]) {
+			if err := binary.Write(w, binary.BigEndian, uint32(i/validatorLength)); err != nil {
+				return err
+			}
+			if _, err := w.Write(new[i : i+validatorLength]); err != nil {
+				return err
+			}
+		}
+	}
+	if err := binary.Write(w, binary.BigEndian, uint32(1<<31)); err != nil {
+		return err
+	}
+
+	if _, err := w.Write(new[len(old):]); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, reverse bool) ([]byte, error) {
+	out = out[:0]
+	if cap(out) < len(in) {
+		out = make([]byte, len(in))
+	}
+	out = out[:len(in)]
+
+	buffer := bufferPool.Get().(*bytes.Buffer)
+	defer bufferPool.Put(buffer)
+	buffer.Reset()
+
+	if _, err := buffer.Write(diff); err != nil {
+		return nil, err
+	}
+
+	currValidator := make([]byte, 121)
+
+	for {
+		var index uint32
+		if err := binary.Read(buffer, binary.BigEndian, &index); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+		if index == 1<<31 {
+			break
+		}
+		n, err := io.ReadFull(buffer, currValidator)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		if n == 0 {
+			break
+		}
+		if n != 121 {
+			return nil, fmt.Errorf("read %d bytes, expected 121", n)
+		}
+		// overwrite the validator
+		copy(out[index*121:], currValidator)
+	}
+	for {
+		n, err := io.ReadFull(buffer, currValidator)
+		if err != nil && !errors.Is(err, io.EOF) {
+			return nil, err
+		}
+		if n == 0 {
+			break
+		}
+		if n != 121 {
+			return nil, fmt.Errorf("read %d bytes, expected 121", n)
+		}
+		out = append(out, currValidator...)
+	}
+
+	return out, nil
+}
