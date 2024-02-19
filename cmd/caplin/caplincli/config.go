@@ -27,7 +27,7 @@ type CaplinCliCfg struct {
 	ErigonPrivateApi      string        `json:"erigon_private_api"`
 	TransitionChain       bool          `json:"transition_chain"`
 	InitialSync           bool          `json:"initial_sync"`
-	NoBeaconApi           bool          `json:"no_beacon_api"`
+	AllowedEndpoints      []string      `json:"endpoints"`
 	BeaconApiReadTimeout  time.Duration `json:"beacon_api_read_timeout"`
 	BeaconApiWriteTimeout time.Duration `json:"beacon_api_write_timeout"`
 	BeaconAddr            string        `json:"beacon_addr"`
@@ -72,7 +72,8 @@ func SetupCaplinCli(ctx *cli.Context) (cfg *CaplinCliCfg, err error) {
 		}
 	}
 
-	cfg.NoBeaconApi = ctx.Bool(caplinflags.NoBeaconApi.Name)
+	cfg.AllowedEndpoints = ctx.StringSlice(utils.BeaconAPIFlag.Name)
+
 	cfg.BeaconApiReadTimeout = time.Duration(ctx.Uint64(caplinflags.BeaconApiReadTimeout.Name)) * time.Second
 	cfg.BeaconApiWriteTimeout = time.Duration(ctx.Uint(caplinflags.BeaconApiWriteTimeout.Name)) * time.Second
 	cfg.BeaconAddr = fmt.Sprintf("%s:%d", ctx.String(caplinflags.BeaconApiAddr.Name), ctx.Int(caplinflags.BeaconApiPort.Name))

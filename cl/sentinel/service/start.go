@@ -6,12 +6,12 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -22,8 +22,8 @@ type ServerConfig struct {
 	Addr    string
 }
 
-func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
-	sent, err := sentinel.New(context.Background(), cfg, db, indiciesDB, logger, forkChoiceReader)
+func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
+	sent, err := sentinel.New(context.Background(), cfg, blockReader, indiciesDB, logger, forkChoiceReader)
 	if err != nil {
 		return nil, err
 	}
@@ -62,9 +62,9 @@ func createSentinel(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockC
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, db persistence.RawBeaconBlockChain, indiciesDB kv.RwDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, indiciesDB kv.RwDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(cfg, db, indiciesDB, forkChoiceReader, logger)
+	sent, err := createSentinel(cfg, blockReader, indiciesDB, forkChoiceReader, logger)
 	if err != nil {
 		return nil, err
 	}

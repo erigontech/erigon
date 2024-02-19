@@ -60,8 +60,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	}
 
 	// We need to compute our duties
-	state, cancel := a.syncedData.HeadState()
-	defer cancel()
+	state := a.syncedData.HeadState()
 	if state == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
 

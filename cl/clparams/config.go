@@ -56,7 +56,7 @@ const (
 
 const (
 	SubDivisionFolderSize = 10_000
-	SlotsPerDump          = 1024
+	SlotsPerDump          = 1536
 )
 
 var (
@@ -948,7 +948,8 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
-	cfg.DenebForkEpoch = math.MaxUint64
+	cfg.DenebForkEpoch = 889856
+	cfg.DenebForkVersion = 0x04000064
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
