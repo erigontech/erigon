@@ -764,9 +764,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							if err != nil {
 								if len(mismatches) > 0 {
-									for _, mismatch := range mismatches {
-										seedHashMismatches[t.InfoHash()] = append(seedHashMismatches[t.InfoHash()], mismatch)
-									}
+									seedHashMismatches[t.InfoHash()] = append(seedHashMismatches[t.InfoHash()], mismatches...)
 
 									logSeedHashMismatches(t.InfoHash(), t.Name(), seedHashMismatches, d.logger)
 								}
@@ -819,9 +817,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							info, mismatches, err := d.getWebDownloadInfo(t)
 
-							for _, mismatch := range mismatches {
-								seedHashMismatches[t.InfoHash()] = append(seedHashMismatches[t.InfoHash()], mismatch)
-							}
+							seedHashMismatches[t.InfoHash()] = append(seedHashMismatches[t.InfoHash()], mismatches...)
 
 							if err != nil {
 								if len(mismatches) > 0 {
@@ -957,7 +953,7 @@ func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []
 		return info, nil, nil
 	}
 
-	var seedHashMismatches []*seedHash
+	seedHashMismatches := make([]*seedHash, 0, len(d.cfg.WebSeedUrls))
 
 	for _, webseed := range d.cfg.WebSeedUrls {
 		downloadUrl := webseed.JoinPath(t.Name())
