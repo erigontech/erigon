@@ -65,7 +65,7 @@ const (
 
 	etrogForkId = 7 // todo [zkevm] we need a better way of handling this
 
-	yieldSize = 20 // arbitrary number defining how many transactions to yield from the pool at once
+	yieldSize = 100 // arbitrary number defining how many transactions to yield from the pool at once
 )
 
 var (
@@ -246,9 +246,8 @@ func SpawnSequencingStage(
 
 	// start waiting for a new transaction to arrive
 	ticker := time.NewTicker(10 * time.Second)
-	blockImmediateSeal := time.NewTicker(250 * time.Millisecond)
+	blockImmediateSeal := time.NewTicker(50 * time.Millisecond)
 	log.Info(fmt.Sprintf("[%s] Waiting for txs from the pool...", logPrefix))
-	done := false
 	var addedTransactions []types.Transaction
 	var addedReceipts []*types.Receipt
 	yielded := mapset.NewSet[[32]byte]()
@@ -259,10 +258,6 @@ func SpawnSequencingStage(
 	// end up in the finalised block
 LOOP:
 	for {
-		if done {
-			break
-		}
-
 		select {
 		case <-ticker.C:
 			log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
@@ -290,8 +285,7 @@ LOOP:
 				if overflow {
 					ibs.RevertToSnapshot(snap)
 					log.Debug(fmt.Sprintf("[%s] overflowed adding transaction to batch", logPrefix), "tx-hash", transaction.Hash())
-					done = true
-					break
+					break LOOP
 				}
 
 				addedTransactions = append(addedTransactions, transaction)
@@ -329,7 +323,7 @@ func getNextTransactions(cfg SequenceBlockCfg, executionAt uint64, alreadyYielde
 	var transactions []types.Transaction
 	var err error
 	var count int
-	killer := time.NewTicker(100 * time.Millisecond)
+	killer := time.NewTicker(50 * time.Millisecond)
 LOOP:
 	for {
 		// ensure we don't spin forever looking for transactions, attempt for a while then exit up to the caller
@@ -345,7 +339,7 @@ LOOP:
 				return err
 			}
 			if count == 0 {
-				time.Sleep(1 * time.Millisecond)
+				time.Sleep(500 * time.Microsecond)
 				return nil
 			}
 			transactions, err = extractTransactionsFromSlot(slots)
