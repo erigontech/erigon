@@ -367,13 +367,12 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 		return t, true, nil
 	}
 
-	select {
-	case <-t.GotInfo():
+	if t.Info() != nil {
 		t.AddWebSeeds(ts.Webseeds)
 		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info().Length, t.Complete.Bool())); err != nil {
 			return nil, false, fmt.Errorf("update torrent info %s: %w", ts.DisplayName, err)
 		}
-	default:
+	} else {
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
 			return nil, false, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
