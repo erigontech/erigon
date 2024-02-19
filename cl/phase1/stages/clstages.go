@@ -623,7 +623,7 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return fmt.Errorf("failed to read canonical block root: %w", err)
 					}
-					reconnectionRoots := make([]canonicalEntry, 0, 1)
+					reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
 
 					for currentRoot != currentCanonical {
 						var newFoundSlot *uint64
