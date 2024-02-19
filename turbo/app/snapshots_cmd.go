@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -779,39 +780,14 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("Compute commitment")
-	if err = db.Update(ctx, func(tx kv.RwTx) error {
-		if casted, ok := tx.(kv.CanWarmupDB); ok {
-			if err := casted.WarmupDB(false); err != nil {
-				return err
-			}
-		}
-		ac := agg.MakeContext()
-		defer ac.Close()
-		sd := libstate.NewSharedDomains(tx, logger)
-		defer sd.Close()
-		if _, err = sd.ComputeCommitment(ctx, true, sd.BlockNum(), ""); err != nil {
-			return err
-		}
-		if err := sd.Flush(ctx, tx); err != nil {
-			return err
-		}
-		return err
-	}); err != nil {
-		return err
-	}
 
 	logger.Info("Prune state history")
-	for i := 0; i < 1; i++ {
+	for i := 0; i < 10000; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
-			if ac.CanPrune(tx) {
-				if err = ac.PruneSmallBatches(ctx, time.Hour, tx); err != nil {
-					return err
-				}
-			}
-			return err
+
+			return ac.PruneSmallBatches(context.Background(), time.Minute, tx)
 		}); err != nil {
 			return err
 		}
@@ -846,16 +822,28 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		return err
 	}
 
-	for i := 0; i < 10; i++ {
+	if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
+		ac := agg.MakeContext()
+		defer ac.Close()
+
+		logEvery := time.NewTicker(30 * time.Second)
+		defer logEvery.Stop()
+
+		stat, err := ac.Prune(context.Background(), tx, math.MaxUint64, logEvery)
+		if err != nil {
+			return err
+		}
+		logger.Info("aftermath prune finished", "stat", stat.String())
+		return err
+	}); err != nil {
+		return err
+	}
+	for i := 0; i < 10000; i++ {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
-			if ac.CanPrune(tx) {
-				if err = ac.PruneSmallBatches(ctx, time.Hour, tx); err != nil {
-					return err
-				}
-			}
-			return err
+
+			return ac.PruneSmallBatches(context.Background(), time.Minute, tx)
 		}); err != nil {
 			return err
 		}
@@ -878,7 +866,6 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-	logger.Info("Prune state history")
 	if err := db.Update(ctx, func(tx kv.RwTx) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
