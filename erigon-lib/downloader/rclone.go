@@ -22,7 +22,9 @@ import (
 	"time"
 
 	"golang.org/x/exp/slices"
+	"golang.org/x/time/rate"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
@@ -75,106 +77,13 @@ type RCloneClient struct {
 	rcloneUrl     string
 	rcloneSession *http.Client
 	logger        log.Logger
+	bwLimit       *rate.Limit
+	optionsQueue  chan RCloneOptions
 }
 
 type RCloneOptions struct {
-	/*"LogLevel": 5,
-	"StatsLogLevel": 6,
-	"UseJSONLog": false,
-	"DryRun": false,
-	"Interactive": false,
-	"CheckSum": false,
-	"SizeOnly": false,
-	"IgnoreTimes": false,
-	"IgnoreExisting": false,
-	"IgnoreErrors": false,
-	"ModifyWindow": 1,
-	"Checkers": 8,
-	"Transfers": 4,
-	"ConnectTimeout": 60000000000,
-	"Timeout": 300000000000,
-	"ExpectContinueTimeout": 1000000000,
-	"Dump": 0,
-	"InsecureSkipVerify": false,
-	"DeleteMode": 3,
-	"MaxDelete": -1,
-	"MaxDeleteSize": -1,
-	"TrackRenames": false,
-	"TrackRenamesStrategy": "hash",
-	"LowLevelRetries": 10,
-	"UpdateOlder": false,
-	"NoGzip": false,
-	"MaxDepth": -1,
-	"IgnoreSize": false,
-	"IgnoreChecksum": false,
-	"IgnoreCaseSync": false,
-	"NoTraverse": false,
-	"CheckFirst": false,
-	"NoCheckDest": false,
-	"NoUnicodeNormalization": false,
-	"NoUpdateModTime": false,
-	"DataRateUnit": "bytes",
-	"CompareDest": null,
-	"CopyDest": null,
-	"BackupDir": "",
-	"Suffix": "",
-	"SuffixKeepExtension": false,
-	"UseListR": false,
-	"BufferSize": 16777216,
-	"BwLimit": "",
-	"BwLimitFile": "",
-	"TPSLimit": 0,
-	"TPSLimitBurst": 1,
-	"BindAddr": "",
-	"DisableFeatures": null,
-	"UserAgent": "rclone/v1.64.0",
-	"Immutable": false,
-	"AutoConfirm": false,
-	"StreamingUploadCutoff": 102400,
-	"StatsFileNameLength": 45,
-	"AskPassword": true,
-	"PasswordCommand": null,
-	"UseServerModTime": false,
-	"MaxTransfer": -1,
-	"MaxDuration": 0,
-	"CutoffMode": 0,
-	"MaxBacklog": 10000,
-	"MaxStatsGroups": 1000,
-	"StatsOneLine": false,
-	"StatsOneLineDate": false,
-	"StatsOneLineDateFormat": "",
-	"ErrorOnNoTransfer": false,
-	"Progress": false,
-	"ProgressTerminalTitle": false,
-	"Cookie": false,
-	"UseMmap": false,
-	"CaCert": null,
-	"ClientCert": "",
-	"ClientKey": "",
-	"MultiThreadCutoff": 268435456,
-	"MultiThreadStreams": 1,
-	"MultiThreadSet": true,
-	"MultiThreadChunkSize": 67108864,
-	"MultiThreadWriteBufferSize": 131072,
-	"OrderBy": "",
-	"UploadHeaders": null,
-	"DownloadHeaders": null,
-	"Headers": null,
-	"MetadataSet": null,
-	"RefreshTimes": false,
-	"NoConsole": false,
-	"TrafficClass": 0,
-	"FsCacheExpireDuration": 300000000000,
-	"FsCacheExpireInterval": 60000000000,
-	"DisableHTTP2": false,
-	"HumanReadable": false,
-	"KvLockTime": 1000000000,
-	"DisableHTTPKeepAlives": false,
-	"Metadata": false,
-	"ServerSideAcrossConfigs": false,
-	"TerminalColorMode": 0,
-	"DefaultTime": "2000-01-01T00:00:00Z",
-	"Inplace": false*/
+	BwLimit     string `json:"BwLimit,omitempty"`
+	BwLimitFile string `json:"BwLimitFile,omitempty"`
 }
 
 func (c *RCloneClient) start(logger log.Logger) error {
@@ -194,6 +103,7 @@ func (c *RCloneClient) start(logger log.Logger) error {
 		c.rclone = exec.CommandContext(ctx, rclone, "rcd", "--rc-addr", addr, "--rc-no-auth", "--multi-thread-streams", "1")
 		c.rcloneUrl = "http://" + addr
 		c.rcloneSession = &http.Client{} // no timeout - we're doing sync calls
+		c.optionsQueue = make(chan RCloneOptions, 100)
 
 		if err := c.rclone.Start(); err != nil {
 			cancel()
@@ -207,9 +117,16 @@ func (c *RCloneClient) start(logger log.Logger) error {
 			signalCh := make(chan os.Signal, 1)
 			signal.Notify(signalCh, syscall.SIGTERM, syscall.SIGINT)
 
-			switch s := <-signalCh; s {
-			case syscall.SIGTERM, syscall.SIGINT:
-				cancel()
+			for {
+				select {
+				case s := <-signalCh:
+					switch s {
+					case syscall.SIGTERM, syscall.SIGINT:
+						cancel()
+					}
+				case o := <-c.optionsQueue:
+					c.setOptions(ctx, o)
+				}
 			}
 		}()
 	}
@@ -288,6 +205,34 @@ func (c *RCloneClient) Stats(ctx context.Context) (*RCloneStats, error) {
 	}
 
 	return &stats, nil
+}
+
+func (c *RCloneClient) GetBwLimit() rate.Limit {
+	if c.bwLimit != nil {
+		return *c.bwLimit
+	}
+
+	return 0
+}
+
+func (c *RCloneClient) SetBwLimit(ctx context.Context, limit rate.Limit) {
+	if c.bwLimit == nil || limit != *c.bwLimit {
+		c.bwLimit = &limit
+		bwLimit := datasize.ByteSize(limit).KBytes()
+		c.optionsQueue <- RCloneOptions{
+			BwLimit: fmt.Sprintf("%dK", int64(bwLimit)),
+		}
+	}
+}
+
+func (c *RCloneClient) setOptions(ctx context.Context, options RCloneOptions) error {
+	_, err := c.cmd(ctx, "options/set", struct {
+		Main RCloneOptions `json:"main"`
+	}{
+		Main: options,
+	})
+
+	return err
 }
 
 func (u *RCloneClient) sync(ctx context.Context, request *rcloneRequest) error {
@@ -820,13 +765,13 @@ type rcloneFs struct {
 }
 
 type rcloneRequest struct {
-	Async     bool                   `json:"_async,omitempty"`
-	Config    map[string]interface{} `json:"_config,omitempty"`
-	Group     string                 `json:"_group"`
-	SrcFs     interface{}            `json:"srcFs"`
-	SrcRemote string                 `json:"srcRemote,omitempty"`
-	DstFs     string                 `json:"dstFs"`
-	DstRemote string                 `json:"dstRemote,omitempty"`
+	Async     bool           `json:"_async,omitempty"`
+	Config    *RCloneOptions `json:"_config,omitempty"`
+	Group     string         `json:"_group"`
+	SrcFs     interface{}    `json:"srcFs"`
+	SrcRemote string         `json:"srcRemote,omitempty"`
+	DstFs     string         `json:"dstFs"`
+	DstRemote string         `json:"dstRemote,omitempty"`
 
 	Filter rcloneFilter `json:"_filter"`
 }

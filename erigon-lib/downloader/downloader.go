@@ -47,6 +47,7 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
+	"golang.org/x/time/rate"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -87,6 +88,7 @@ type Downloader struct {
 	snapshotLock    *snapshotLock
 	webDownloadInfo map[string]webDownloadInfo
 	downloading     map[string]struct{}
+	downloadLimit   *rate.Limit
 }
 
 type webDownloadInfo struct {
@@ -150,6 +152,11 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]struct{}{},
+	}
+
+	if cfg.ClientConfig.DownloadRateLimiter != nil {
+		downloadLimit := cfg.ClientConfig.DownloadRateLimiter.Limit()
+		d.downloadLimit = &downloadLimit
 	}
 
 	d.webseeds.torrentFiles = d.torrentFiles
@@ -1112,9 +1119,9 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 			localHash, err := fileHashBytes(d.ctx, info)
 
 			if err == nil {
-				d.logger.Debug("[snapshots] Web download stopped - file exists", "file", t.Name(), "hash", infoHash)
-
 				if bytes.Equal(infoHash.Bytes(), localHash) {
+					d.logger.Debug("[snapshots] Web download stopped - file exists", "file", t.Name(), "hash", infoHash)
+
 					statusChan <- webDownloadStatus{
 						name:   name,
 						length: length,
@@ -1128,6 +1135,24 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 			if err := os.Remove(info.Path); err != nil {
 				d.logger.Warn("Couldn't remove previous file before download", "file", name, "path", info.Path, "err", err)
 			}
+		}
+
+		if d.downloadLimit != nil {
+			limit := float64(*d.downloadLimit) / float64(d.cfg.DownloadSlots)
+
+			torrentLimit := d.cfg.ClientConfig.DownloadRateLimiter.Limit()
+			rcloneLimit := d.webDownloadClient.GetBwLimit()
+
+			d.cfg.ClientConfig.DownloadRateLimiter.SetLimit(torrentLimit - rate.Limit(limit))
+			d.webDownloadClient.SetBwLimit(d.ctx, rcloneLimit+rate.Limit(limit))
+
+			defer func() {
+				torrentLimit := d.cfg.ClientConfig.DownloadRateLimiter.Limit()
+				rcloneLimit := d.webDownloadClient.GetBwLimit()
+
+				d.cfg.ClientConfig.DownloadRateLimiter.SetLimit(torrentLimit + rate.Limit(limit))
+				d.webDownloadClient.SetBwLimit(d.ctx, rcloneLimit-rate.Limit(limit))
+			}()
 		}
 
 		err := session.Download(d.ctx, name)
@@ -1806,8 +1831,10 @@ func (d *Downloader) Stats() AggStats {
 }
 
 func (d *Downloader) Close() {
+	d.logger.Debug("[snapshots] stopping downloader")
 	d.stopMainLoop()
 	d.wg.Wait()
+	d.logger.Debug("[snapshots] closing torrents")
 	d.torrentClient.Close()
 	if err := d.folder.Close(); err != nil {
 		d.logger.Warn("[snapshots] folder.close", "err", err)
@@ -1815,7 +1842,9 @@ func (d *Downloader) Close() {
 	if err := d.pieceCompletionDB.Close(); err != nil {
 		d.logger.Warn("[snapshots] pieceCompletionDB.close", "err", err)
 	}
+	d.logger.Debug("[snapshots] closing db")
 	d.db.Close()
+	d.logger.Debug("[snapshots] downloader stopped")
 }
 
 func (d *Downloader) PeerID() []byte {
