@@ -17,7 +17,6 @@
 package dbg
 
 import (
-	"github.com/shirou/gopsutil/v3/process"
 	"os"
 	"runtime"
 	"strconv"
@@ -43,23 +42,6 @@ func ReadMemStats(m *runtime.MemStats) {
 	if doMemstat {
 		runtime.ReadMemStats(m)
 	}
-}
-
-func GetMemUsage() (process.MemoryMapsStat, error) {
-	pid := os.Getpid()
-	proc, err := process.NewProcess(int32(pid))
-
-	if err != nil {
-		return process.MemoryMapsStat{}, err
-	}
-
-	memoryMaps, err := proc.MemoryMaps(true)
-
-	if err != nil {
-		return process.MemoryMapsStat{}, err
-	}
-
-	return (*memoryMaps)[0], nil
 }
 
 var (

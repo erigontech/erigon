@@ -2,9 +2,9 @@ package diagnostics
 
 import (
 	"encoding/json"
-	"github.com/shirou/gopsutil/v3/process"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"net/http"
-	"os"
+	"time"
 )
 
 func SetupMemAccess(metricsMux *http.ServeMux) {
@@ -13,10 +13,21 @@ func SetupMemAccess(metricsMux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/json")
 		writeMem(w)
 	})
+
+	// update prometheus memory stats at least every 30 seconds
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			dbg.GetMemUsage()
+			<-ticker.C
+		}
+	}()
 }
 
 func writeMem(w http.ResponseWriter) {
-	memStats, err := GetMemUsage()
+	memStats, err := dbg.GetMemUsage()
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -24,21 +35,4 @@ func writeMem(w http.ResponseWriter) {
 	}
 
 	json.NewEncoder(w).Encode(memStats)
-}
-
-func GetMemUsage() (process.MemoryMapsStat, error) {
-	pid := os.Getpid()
-	proc, err := process.NewProcess(int32(pid))
-
-	if err != nil {
-		return process.MemoryMapsStat{}, err
-	}
-
-	memoryMaps, err := proc.MemoryMaps(true)
-
-	if err != nil {
-		return process.MemoryMapsStat{}, err
-	}
-
-	return (*memoryMaps)[0], nil
 }
