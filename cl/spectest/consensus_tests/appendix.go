@@ -90,8 +90,8 @@ func addSszTests() {
 		With("BeaconBlockBody", getSSZStaticConsensusTest(cltypes.NewBeaconBody(&clparams.MainnetBeaconConfig))).
 		With("BeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.BeaconBlockHeader{})).
 		With("BeaconState", getSSZStaticConsensusTest(state.New(&clparams.MainnetBeaconConfig))).
-		//With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
-		//With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSideCar{})).
+		With("BlobIdentifier", getSSZStaticConsensusTest(&cltypes.BlobIdentifier{})).
+		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSidecar{})).
 		With("BLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.BLSToExecutionChange{})).
 		With("Checkpoint", getSSZStaticConsensusTest(solid.Checkpoint{})).
 		//	With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
