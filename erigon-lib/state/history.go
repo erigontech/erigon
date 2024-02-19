@@ -1052,7 +1052,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 		if hc.h.keepTxInDB >= maxIdxTx {
 			return false, 0
 		}
-		txTo = maxIdxTx - hc.h.keepTxInDB // bound pruning
+		txTo = min(maxIdxTx-hc.h.keepTxInDB, untilTx) // bound pruning
 	} else {
 		canPruneIdx := hc.ic.CanPruneUntil(tx, untilTx)
 		if !canPruneIdx {
