@@ -675,6 +675,14 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			if len(available) < d.cfg.DownloadSlots-downloadingLen && len(d.webDownloadInfo) > 0 {
 				for _, webDownload := range d.webDownloadInfo {
+					d.lock.RLock()
+					_, downloading := d.downloading[webDownload.torrent.Name()]
+					d.lock.RUnlock()
+
+					if downloading {
+						continue
+					}
+
 					addDownload := true
 
 					for _, t := range available {
@@ -1328,6 +1336,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		diagnostics.Send(diagnostics.SnapshoFilesList{Files: filesList})
 	}
 
+	downloading := map[string]struct{}{}
+
+	for file := range d.downloading {
+		downloading[file] = struct{}{}
+	}
+
 	for _, t := range torrents {
 		torrentComplete := t.Complete.Bool()
 
@@ -1351,10 +1365,13 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 			torrentName := t.Name()
 
+			delete(downloading, torrentName)
+
 			for _, peer := range peersOfThisFile {
 				stats.ConnectionsTotal++
 				peers[peer.PeerID] = struct{}{}
 			}
+
 			stats.BytesCompleted += uint64(bytesCompleted)
 			stats.BytesTotal += uint64(tLen)
 
@@ -1419,6 +1436,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				tLen := transfer.Size
 				transferName := transfer.Name
 
+				delete(downloading, transferName)
+
 				if bytesCompleted > tLen {
 					bytesCompleted = tLen
 				}
@@ -1463,8 +1482,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 	}
 
-	if webTransfers < int32(len(d.downloading)) {
-		webTransfers = int32(len(d.downloading))
+	if len(downloading) > 0 {
+		webTransfers += int32(len(downloading))
 		stats.Completed = false
 	}
 
@@ -1530,7 +1549,7 @@ func getWebseedsRatesForlogs(weebseedPeersOfThisFile []*torrent.Peer, fName stri
 					}
 					seeds = append(seeds, seed)
 				}
-				webseedRates = append(webseedRates, shortUrl, fmt.Sprintf("%s/s", common.ByteCount(rate)))
+				webseedRates = append(webseedRates, strings.TrimSuffix(shortUrl, "/"), fmt.Sprintf("%s/s", common.ByteCount(rate)))
 			}
 		}
 	}
