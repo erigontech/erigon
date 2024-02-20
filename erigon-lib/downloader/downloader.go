@@ -593,17 +593,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					continue
 				}
 
-				if info, err := d.torrentInfo(t.Name()); err == nil {
-					if info.Completed != nil && info.Completed.Before(time.Now()) {
-						if info.Length != nil {
-							if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
-								if fi.Size() == *info.Length {
-									complete[t.Name()] = struct{}{}
-									continue
-								}
-							}
-						}
-					}
+				if d.checkComplete(t.Name()) {
+					complete[t.Name()] = struct{}{}
+					continue
 				}
 
 				if t.Complete.Bool() {
@@ -704,6 +696,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				if addDownload {
 					if len(available) < d.cfg.DownloadSlots-downloadingLen {
 						addedWeb++
+						delete(d.webDownloadInfo, webDownload.torrent.Name())
 						available = append(available, webDownload.torrent)
 					}
 				} else {
@@ -714,6 +707,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 						if ai.CompareTo(wi) > 0 {
 							replacedWeb++
+							delete(d.webDownloadInfo, webDownload.torrent.Name())
 							available[i] = webDownload.torrent
 							break
 						}
@@ -815,6 +809,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				for _, t := range d.torrentClient.Torrents() {
 					if t.Info() == nil {
+						if d.checkComplete(t.Name()) {
+							continue
+						}
+
 						if _, ok := d.webDownloadInfo[t.Name()]; !ok {
 							if _, ok := seedHashMismatches[t.InfoHash()]; ok {
 								continue
@@ -949,6 +947,20 @@ func logSeedHashMismatches(torrentHash infohash.T, name string, seedHashMismatch
 
 		logger.Warn("Webseed hash mismatch for torrent", "name", name, "hash", torrentHash.HexString(), "webseeds", webseeds)
 	}
+}
+
+func (d *Downloader) checkComplete(name string) bool {
+	if info, err := d.torrentInfo(name); err == nil {
+		if info.Completed != nil && info.Completed.Before(time.Now()) {
+			if info.Length != nil {
+				if fi, err := os.Stat(filepath.Join(d.SnapDir(), name)); err == nil {
+					return fi.Size() == *info.Length
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []*seedHash, error) {
