@@ -984,3 +984,28 @@ func (al AccessList) StorageKeys() int {
 	}
 	return sum
 }
+
+// Removes everything but the payload body from blob tx and prepends 0x3 at the beginning - no copy
+// Doesn't change non-blob tx
+func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
+	if blobTxRlp[0] != BlobTxType {
+		return blobTxRlp, nil
+	}
+	dataposPrev, datalen, isList, err := rlp.Prefix(blobTxRlp[1:], 0)
+	if err != nil || dataposPrev < 1 {
+		return nil, err
+	}
+	if !isList { // This is clearly not wrapped tx then
+		return blobTxRlp, nil
+	}
+
+	// Get to the wrapper list
+	datapos, datalen, err := rlp.List(blobTxRlp[1:], dataposPrev)
+	if err != nil {
+		return nil, err
+	}
+	blobTxRlp = blobTxRlp[dataposPrev-1 : datapos+datalen] // Seek left an extra-bit
+	blobTxRlp[0] = 0x3
+	// Include the prefix part of the rlp
+	return blobTxRlp, nil
+}
