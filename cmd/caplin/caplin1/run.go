@@ -57,36 +57,42 @@ func OpenCaplinDatabase(ctx context.Context,
 	dbPath string,
 	engine execution_client.ExecutionEngine,
 	wipeout bool,
-) (kv.RwDB, error) {
+) (kv.RwDB, kv.RwDB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
+	blobDbPath := path.Join(dbPath, "blobs")
+
 	if wipeout {
 		os.RemoveAll(dataDirIndexer)
+		os.RemoveAll(blobDbPath)
 	}
 
 	os.MkdirAll(dbPath, 0700)
+	os.MkdirAll(dataDirIndexer, 0700)
 
 	db := mdbx.MustOpen(dataDirIndexer)
+	blobDB := mdbx.MustOpen(blobDbPath)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer tx.Rollback()
 
 	if err := db_config.WriteConfigurationIfNotExist(ctx, tx, databaseConfig); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	{ // start ticking forkChoice
 		go func() {
 			<-ctx.Done()
-			db.Close() // close sql database here
+			db.Close()     // close sql database here
+			blobDB.Close() // close blob database here
 		}()
 	}
-	return db, nil
+	return db, blobDB, nil
 }
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
