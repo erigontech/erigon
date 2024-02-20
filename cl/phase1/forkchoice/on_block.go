@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -71,6 +73,13 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 			versionedHashes = append(versionedHashes, versionedHash)
 			return nil
 		})
+	}
+
+	// Check if blob data is available
+	if block.Version() >= clparams.DenebVersion {
+		if err := isDataAvailable(blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+			return fmt.Errorf("OnBlock: data is not available")
+		}
 	}
 
 	var invalidBlock bool
@@ -178,5 +187,48 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
 	log.Debug("OnBlock", "elapsed", time.Since(start))
+	return nil
+}
+
+const (
+	LEN_48 = 48 // KZGCommitment & KZGProof sizes
+)
+
+type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
+type KZGProof [LEN_48]byte
+type Blob [fixedgas.BlobSize]byte
+
+type BlobKzgs []KZGCommitment
+type KZGProofs []KZGProof
+type Blobs []Blob
+
+func toBlobs(_blobs Blobs) []gokzg4844.Blob {
+	blobs := make([]gokzg4844.Blob, len(_blobs))
+	for i, _blob := range _blobs {
+		blobs[i] = gokzg4844.Blob(_blob)
+	}
+	return blobs
+}
+func toComms(_comms BlobKzgs) []gokzg4844.KZGCommitment {
+	comms := make([]gokzg4844.KZGCommitment, len(_comms))
+	for i, _comm := range _comms {
+		comms[i] = gokzg4844.KZGCommitment(_comm)
+	}
+	return comms
+}
+func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
+	proofs := make([]gokzg4844.KZGProof, len(_proofs))
+	for i, _proof := range _proofs {
+		proofs[i] = gokzg4844.KZGProof(_proof)
+	}
+	return proofs
+}
+
+func isDataAvailable(blockRoot libcommon.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
+	//FIXME: retrive Blobs and Proofs and verify them
+	// blobs, proofs := retrieveBlobsAndProofs(blockRoot)
+
+	// kzgCtx := libkzg.Ctx()
+	// return kzgCtx.VerifyBlobKZGProofBatch(toBlobs(blobs), toComms(blobKzgCommitments), toProofs(proofs))
 	return nil
 }

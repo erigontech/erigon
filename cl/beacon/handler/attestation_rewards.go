@@ -134,7 +134,19 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
 	}
 
-	lastSlot := epoch*a.beaconChainCfg.SlotsPerEpoch + a.beaconChainCfg.SlotsPerEpoch - 1
+	root, err := a.findEpochRoot(tx, epoch)
+	if err != nil {
+		return nil, err
+	}
+	lastSlotPtr, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
+	if err != nil {
+		return nil, err
+	}
+	if lastSlotPtr == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no block found for this epoch"))
+	}
+	lastSlot := *lastSlotPtr
+
 	stateProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return nil, err
@@ -152,11 +164,15 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
+	if validatorSet == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no validator set found for this epoch"))
+	}
 
 	_, previousIdx, err := a.stateReader.ReadPartecipations(tx, lastSlot)
 	if err != nil {
 		return nil, err
 	}
+
 	_, _, finalizedCheckpoint, err := state_accessors.ReadCheckpoints(tx, epoch*a.beaconChainCfg.SlotsPerEpoch)
 	if err != nil {
 		return nil, err
