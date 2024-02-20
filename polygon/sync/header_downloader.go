@@ -20,34 +20,54 @@ import (
 
 const headerDownloaderLogPrefix = "HeaderDownloader"
 
+//go:generate mockgen -destination=./headers_writer_mock.go -package=sync . HeadersWriter
+type HeadersWriter interface {
+	PutHeaders(headers []*types.Header) error
+}
+
 func NewHeaderDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
 	heimdall heimdall.Heimdall,
+	checkpoints heimdall.CheckpointStore,
+	milestones heimdall.MilestoneStore,
 	verify AccumulatedHeadersVerifier,
+	headersWriter HeadersWriter,
 ) *HeaderDownloader {
 	return &HeaderDownloader{
 		logger:     logger,
 		p2pService: p2pService,
-		heimdall:   heimdall,
-		verify:     verify,
+
+		heimdall:    heimdall,
+		checkpoints: checkpoints,
+		milestones:  milestones,
+
+		verify: verify,
+
+		headersWriter: headersWriter,
 	}
 }
 
 type HeaderDownloader struct {
 	logger     log.Logger
 	p2pService p2p.Service
-	heimdall   heimdall.Heimdall
-	verify     AccumulatedHeadersVerifier
+
+	heimdall    heimdall.Heimdall
+	checkpoints heimdall.CheckpointStore
+	milestones  heimdall.MilestoneStore
+
+	verify AccumulatedHeadersVerifier
+
+	headersWriter HeadersWriter
 }
 
-func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, store CheckpointStore, start uint64) error {
-	checkpoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, store, start)
+func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
+	waypoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, hd.checkpoints, start)
 	if err != nil {
 		return err
 	}
 
-	err = hd.downloadUsingWaypoints(ctx, store, checkpoints)
+	err = hd.downloadUsingWaypoints(ctx, waypoints)
 	if err != nil {
 		return err
 	}
@@ -55,13 +75,13 @@ func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, store 
 	return nil
 }
 
-func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, store MilestoneStore, start uint64) error {
-	milestones, err := hd.heimdall.FetchMilestonesFromBlock(ctx, store, start)
+func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start uint64) error {
+	waypoints, err := hd.heimdall.FetchMilestonesFromBlock(ctx, hd.milestones, start)
 	if err != nil {
 		return err
 	}
 
-	err = hd.downloadUsingWaypoints(ctx, store, milestones)
+	err = hd.downloadUsingWaypoints(ctx, waypoints)
 	if err != nil {
 		return err
 	}
@@ -69,7 +89,7 @@ func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, store M
 	return nil
 }
 
-func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store HeaderStore, waypoints heimdall.Waypoints) error {
+func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, waypoints heimdall.Waypoints) error {
 	// waypoint rootHash->[headers part of waypoint]
 	waypointHeadersMemo, err := lru.New[common.Hash, []*types.Header](hd.p2pService.MaxPeers())
 	if err != nil {
@@ -191,7 +211,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 		}
 
 		dbWriteStartTime := time.Now()
-		if err := store.PutHeaders(headers); err != nil {
+		if err := hd.headersWriter.PutHeaders(headers); err != nil {
 			return err
 		}
 
