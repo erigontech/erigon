@@ -585,16 +585,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 		for {
 			torrents := d.torrentClient.Torrents()
 
-			if len(torrents) == 0 {
-				select {
-				case <-d.ctx.Done():
-					return
-				case <-time.After(10 * time.Second):
-				}
-
-				continue
-			}
-
 			var pending []*torrent.Torrent
 
 			for _, t := range torrents {
@@ -733,7 +723,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 
 			if len(pending) > 0 {
-				d.logger.Debug("avalible", "pending", len(pending), "available", availableLen, "web-added", addedWeb, "web-replaced", replacedWeb)
+				d.logger.Debug("available", "torrents", len(torrents), "pending", len(pending), "available", availableLen, "web-added", addedWeb, "web-replaced", replacedWeb)
 			}
 
 			for _, t := range available {
