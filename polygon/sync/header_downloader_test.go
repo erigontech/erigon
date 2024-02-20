@@ -25,20 +25,28 @@ func newHeaderDownloaderTest(t *testing.T) *headerDownloaderTest {
 
 func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts) *headerDownloaderTest {
 	ctrl := gomock.NewController(t)
-	checkpointStore := NewMockCheckpointStore(ctrl)
-	milestoneStore := NewMockMilestoneStore(ctrl)
-	heimdall := heimdall.NewMockHeimdall(ctrl)
+	checkpointStore := heimdall.NewMockCheckpointStore(ctrl)
+	milestoneStore := heimdall.NewMockMilestoneStore(ctrl)
+	heimdallService := heimdall.NewMockHeimdall(ctrl)
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
 	headerVerifier := opts.getOrCreateDefaultHeaderVerifier()
-	headerDownloader := NewHeaderDownloader(logger, p2pService, heimdall, headerVerifier)
+	headersWriter := NewMockHeadersWriter(ctrl)
+	headerDownloader := NewHeaderDownloader(
+		logger,
+		p2pService,
+		heimdallService,
+		checkpointStore,
+		milestoneStore,
+		headerVerifier,
+		headersWriter,
+	)
 	return &headerDownloaderTest{
-		heimdall:         heimdall,
+		heimdall:         heimdallService,
 		p2pService:       p2pService,
 		headerDownloader: headerDownloader,
-		milestoneStore:   milestoneStore,
-		checkpointStore:  checkpointStore,
+		headersWriter:    headersWriter,
 	}
 }
 
@@ -59,17 +67,16 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() Accumula
 type headerDownloaderTest struct {
 	heimdall         *heimdall.MockHeimdall
 	p2pService       *p2p.MockService
-	milestoneStore   *MockMilestoneStore
-	checkpointStore  *MockCheckpointStore
 	headerDownloader *HeaderDownloader
+	headersWriter    *MockHeadersWriter
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...uint64) p2p.PeersSyncProgress {
+func (hdt headerDownloaderTest) fakePeers(count int, blockNumbers ...uint64) p2p.PeersSyncProgress {
 	peers := make(p2p.PeersSyncProgress, count)
 	for i := range peers {
 		var blockNum uint64
-		if i < len(blockNums) {
-			blockNum = blockNums[i]
+		if i < len(blockNumbers) {
+			blockNum = blockNumbers[i]
 		} else {
 			blockNum = math.MaxUint64
 		}
@@ -156,12 +163,12 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(4)
 	var persistedHeaders []*types.Header
-	test.milestoneStore.EXPECT().
+	test.headersWriter.EXPECT().
 		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(1)
 
-	err := test.headerDownloader.DownloadUsingMilestones(context.Background(), test.milestoneStore, 1)
+	err := test.headerDownloader.DownloadUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 4)
 	// check headers are written in order
@@ -186,12 +193,12 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
-	test.checkpointStore.EXPECT().
+	test.headersWriter.EXPECT().
 		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
 	// check headers are written in order
@@ -241,17 +248,17 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Times(1)
 	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
 	gomock.InOrder(
-		test.checkpointStore.EXPECT().
+		test.headersWriter.EXPECT().
 			PutHeaders(gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersFirstTime)).
 			Times(1),
-		test.checkpointStore.EXPECT().
+		test.headersWriter.EXPECT().
 			PutHeaders(gomock.Any()).
 			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersRemaining)).
 			Times(2),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeadersFirstTime, 1)
 	require.Len(t, persistedHeadersRemaining, 5)
@@ -268,7 +275,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
-	test.checkpointStore.EXPECT().
+	test.headersWriter.EXPECT().
 		PutHeaders(gomock.Any()).
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
@@ -290,7 +297,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 			Times(4),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), test.checkpointStore, 1)
+	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
 }
