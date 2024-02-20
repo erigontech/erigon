@@ -721,7 +721,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 
-			if len(pending) > 0 {
+			if len(pending) > 0 || len(available) > 0 {
 				d.logger.Debug("available", "torrents", len(torrents), "pending", len(pending), "available", availableLen, "web-added", addedWeb, "web-replaced", replacedWeb)
 			}
 
@@ -745,7 +745,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 
-						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
+						d.logger.Debug("[snapshots] Downloading from webseed", "file", t.Name(), "webpeers", len(t.WebseedPeerConns()))
 						session, err := d.webDownload(peerUrls, t, nil, webDownloadComplete, sem)
 
 						if err != nil {
@@ -759,6 +759,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 						}
 
 					} else {
+						d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
 						d.torrentDownload(t, sem)
 					}
 				default:
@@ -794,7 +795,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 						}
 
 						delete(d.webDownloadInfo, t.Name())
-						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
+						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "webpeers", len(t.WebseedPeerConns()))
 						d.webDownload([]*url.URL{peerUrl}, t, &webDownload, webDownloadComplete, sem)
 
 						continue
