@@ -557,10 +557,11 @@ func (d *Downloader) MainLoopInBackground(silent bool) {
 }
 
 type webDownloadStatus struct {
-	name   string
-	length int64
-	spec   *torrent.TorrentSpec
-	err    error
+	name     string
+	length   int64
+	infoHash infohash.T
+	spec     *torrent.TorrentSpec
+	err      error
 }
 
 type seedHash struct {
@@ -642,21 +643,19 @@ func (d *Downloader) mainLoop(silent bool) error {
 				d.lock.Unlock()
 
 				if status.spec != nil {
-					t, _, err := d.torrentClient.AddTorrentSpec(status.spec)
+					_, _, err := d.torrentClient.AddTorrentSpec(status.spec)
 
 					if err != nil {
 						d.logger.Warn("Can't re-add spec after download", "file", status.name, "err", err)
 					}
 
-					if status.err == nil {
-						if err := d.db.Update(d.ctx,
-							torrentInfoUpdater(status.name, status.spec.InfoHash.Bytes(), status.length, true)); err != nil {
-							d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
-						}
-					}
 				}
 
 				if status.err == nil {
+					if err := d.db.Update(d.ctx,
+						torrentInfoUpdater(status.name, status.infoHash.Bytes(), status.length, true)); err != nil {
+						d.logger.Warn("Failed to update file info", "file", status.name, "err", err)
+					}
 					complete[status.name] = struct{}{}
 					continue
 				}
@@ -1118,13 +1117,14 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 	if err == nil {
 		if bytes.Equal(infoHash.Bytes(), localHash) {
 			defer sem.Release(1)
-			d.logger.Debug("[snapshots] Web download stopped - already downloaded", "file", t.Name(), "hash", infoHash)
+			d.logger.Debug("[snapshots] Web download already complete", "file", t.Name(), "hash", infoHash)
 
 			statusChan <- webDownloadStatus{
-				name:   name,
-				length: length,
-				spec:   nil,
-				err:    nil,
+				name:     name,
+				length:   length,
+				infoHash: infoHash,
+				spec:     nil,
+				err:      nil,
 			}
 
 			return session, nil
@@ -1197,10 +1197,11 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 		}
 
 		statusChan <- webDownloadStatus{
-			name:   name,
-			length: length,
-			spec:   spec,
-			err:    err,
+			name:     name,
+			length:   length,
+			infoHash: infoHash,
+			spec:     spec,
+			err:      err,
 		}
 	}()
 
