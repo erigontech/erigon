@@ -219,7 +219,7 @@ func (c *RCloneClient) SetBwLimit(ctx context.Context, limit rate.Limit) {
 	if c.bwLimit == nil || limit != *c.bwLimit {
 		c.bwLimit = &limit
 		bwLimit := datasize.ByteSize(limit).KBytes()
-		c.logger.Debug("Setting rclone bw limit", "kbytes", int64(bwLimit))
+		c.logger.Trace("Setting rclone bw limit", "kbytes", int64(bwLimit))
 		c.optionsQueue <- RCloneOptions{
 			BwLimit: fmt.Sprintf("%dK", int64(bwLimit)),
 		}
