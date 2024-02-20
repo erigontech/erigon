@@ -579,7 +579,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		defer d.wg.Done()
 
 		complete := map[string]struct{}{}
-		webDownloadComplete := make(chan webDownloadStatus)
+		webDownloadComplete := make(chan webDownloadStatus, 100)
 		seedHashMismatches := map[infohash.T][]*seedHash{}
 
 		for {
@@ -1112,14 +1112,12 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 			defer sem.Release(1)
 			d.logger.Debug("[snapshots] Web download stopped - already downloaded", "file", t.Name(), "hash", infoHash)
 
-			go func() {
-				statusChan <- webDownloadStatus{
-					name:   name,
-					length: length,
-					spec:   nil,
-					err:    nil,
-				}
-			}()
+			statusChan <- webDownloadStatus{
+				name:   name,
+				length: length,
+				spec:   nil,
+				err:    nil,
+			}
 
 			return session, nil
 		}
