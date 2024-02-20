@@ -99,7 +99,7 @@ type webDownloadInfo struct {
 
 type AggStats struct {
 	MetadataReady, FilesTotal int32
-	LastMetadatUpdate         *time.Time
+	LastMetadataUpdate        *time.Time
 	PeersUnique               int32
 	ConnectionsTotal          uint64
 	Downloading               int32
@@ -800,7 +800,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 
 			d.lock.Lock()
-			lastMetadatUpdate := d.stats.LastMetadatUpdate
+			lastMetadatUpdate := d.stats.LastMetadataUpdate
 			d.lock.Unlock()
 
 			if lastMetadatUpdate != nil &&
@@ -1573,7 +1573,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 	if lastMetadataReady != stats.MetadataReady {
 		now := time.Now()
-		stats.LastMetadatUpdate = &now
+		stats.LastMetadataUpdate = &now
 	}
 
 	if len(noMetadata) > 0 {
