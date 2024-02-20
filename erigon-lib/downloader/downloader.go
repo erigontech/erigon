@@ -674,6 +674,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 			default:
 			}
 
+			if len(pending)+len(d.webDownloadInfo) == 0 {
+				select {
+				case <-d.ctx.Done():
+					return
+				case <-time.After(10 * time.Second):
+					continue
+				}
+			}
+
 			d.lock.RLock()
 			downloadingLen := len(d.downloading)
 			d.stats.Downloading = int32(downloadingLen)
@@ -723,7 +732,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 				}
 			}
 
-			d.logger.Debug("avalible", "pending", len(pending), "available", availableLen, "web-added", addedWeb, "web-replaced", replacedWeb)
+			if len(pending) > 0 {
+				d.logger.Debug("avalible", "pending", len(pending), "available", availableLen, "web-added", addedWeb, "web-replaced", replacedWeb)
+			}
 
 			for _, t := range available {
 				if err := sem.Acquire(d.ctx, 1); err != nil {
