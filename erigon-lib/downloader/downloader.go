@@ -1386,9 +1386,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		var progress float32
 
-		tinfo := t.Info()
-
-		if tinfo != nil {
+		if t.Info() != nil {
 			torrentInfo++
 			stats.MetadataReady++
 
@@ -1442,17 +1440,24 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		if !torrentComplete {
 			if info, err := d.torrentInfo(torrentName); err == nil {
-				if tinfo == nil {
+				updateStats := t.Info() == nil
+
+				if updateStats {
 					dbInfo++
 				}
+
 				if info.Completed != nil && info.Completed.Before(time.Now()) {
 					if info.Length != nil {
-						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+						if updateStats {
 							stats.MetadataReady++
-							torrentComplete = fi.Size() == *info.Length
-							stats.BytesCompleted += uint64(*info.Length)
 							stats.BytesTotal += uint64(*info.Length)
-							if torrentComplete {
+						}
+
+						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+							if torrentComplete = (fi.Size() == *info.Length); torrentComplete {
+								if updateStats {
+									stats.BytesCompleted += uint64(*info.Length)
+								}
 								dbComplete++
 								progress = float32(100)
 							}
