@@ -18,10 +18,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
@@ -255,7 +256,7 @@ func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*Segment, bool) {
 	return nil, false
 }
 
-func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot uint64, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
+func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
 	f, _ := snaptype.ParseFileName(snapDir, segName)
 
@@ -270,43 +271,25 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 		return err
 	}
 	defer tx.Rollback()
-	var w bytes.Buffer
-	compressor, err := zstd.NewWriter(&w, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
-	if err != nil {
-		return err
-	}
-	defer compressor.Close()
-	// Just make a reusable buffer
-	buf := make([]byte, 2048)
+
 	// Generate .seg file, which is just the list of beacon blocks.
 	for i := fromSlot; i < toSlot; i++ {
-		obj, err := b.GetBlock(ctx, tx, i)
+		// read root.
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		if err != nil {
+			return err
+		}
+		dump, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(i, blockRoot))
 		if err != nil {
 			return err
 		}
 		if i%20_000 == 0 {
 			logger.Log(lvl, "Dumping beacon blocks", "progress", i)
 		}
-		if obj == nil {
-			if err := sn.AddWord(nil); err != nil {
-				return err
-			}
-			continue
+		if err := sn.AddWord(dump); err != nil {
+			return err
 		}
 
-		if buf, err = snapshot_format.WriteBlockForSnapshot(compressor, obj.Data, buf); err != nil {
-			return err
-		}
-		if err := compressor.Close(); err != nil {
-			return err
-		}
-		word := w.Bytes()
-
-		if err := sn.AddWord(word); err != nil {
-			return err
-		}
-		w.Reset()
-		compressor.Reset(&w)
 	}
 	if err := sn.Compress(); err != nil {
 		return fmt.Errorf("compress: %w", err)
@@ -317,8 +300,7 @@ func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, b persistence.BlockS
 	return BeaconBlocksIdx(ctx, f, filepath.Join(snapDir, segName), fromSlot, toSlot, tmpDir, p, lvl, logger)
 }
 
-func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource, fromSlot, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
-
+func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
 		blocksPerFile := snapcfg.MergeLimit("", i)
 
@@ -327,7 +309,7 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, b persistence.BlockSource
 		}
 		to := chooseSegmentEnd(i, toSlot, nil)
 		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
-		if err := dumpBeaconBlocksRange(ctx, db, b, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
+		if err := dumpBeaconBlocksRange(ctx, db, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err
 		}
 	}

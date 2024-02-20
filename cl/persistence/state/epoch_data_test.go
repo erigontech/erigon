@@ -14,7 +14,6 @@ func TestEpochData(t *testing.T) {
 	e := &EpochData{
 		TotalActiveBalance:          123,
 		JustificationBits:           &cltypes.JustificationBits{true},
-		Fork:                        &cltypes.Fork{},
 		CurrentJustifiedCheckpoint:  solid.NewCheckpointFromParameters(libcommon.Hash{}, 123),
 		PreviousJustifiedCheckpoint: solid.NewCheckpointFromParameters(libcommon.Hash{}, 123),
 		FinalizedCheckpoint:         solid.NewCheckpointFromParameters(libcommon.Hash{}, 123),

@@ -243,7 +243,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 		if body == nil {
 			return fmt.Errorf("missing body at block=%d", number)
 		}
-		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, nil, body.Withdrawals))
+		blocksBatch = append(blocksBatch, types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals))
 		if number%uint64(blockWrittenLogSize) == 0 {
 			e.logger.Info("[insertHeadersAndBodies] Written blocks", "progress", number, "to", toBlock)
 		}

@@ -50,11 +50,12 @@ var (
 	baseFeePoolLimit int
 	queuedPoolLimit  int
 
-	priceLimit    uint64
-	accountSlots  uint64
-	blobSlots     uint64
-	priceBump     uint64
-	blobPriceBump uint64
+	priceLimit         uint64
+	accountSlots       uint64
+	blobSlots          uint64
+	totalBlobPoolLimit uint64
+	priceBump          uint64
+	blobPriceBump      uint64
 
 	noTxGossip bool
 
@@ -80,6 +81,7 @@ func init() {
 	rootCmd.PersistentFlags().Uint64Var(&priceLimit, "txpool.pricelimit", txpoolcfg.DefaultConfig.MinFeeCap, "Minimum gas price (fee cap) limit to enforce for acceptance into the pool")
 	rootCmd.PersistentFlags().Uint64Var(&accountSlots, "txpool.accountslots", txpoolcfg.DefaultConfig.AccountSlots, "Minimum number of executable transaction slots guaranteed per account")
 	rootCmd.PersistentFlags().Uint64Var(&blobSlots, "txpool.blobslots", txpoolcfg.DefaultConfig.BlobSlots, "Max allowed total number of blobs (within type-3 txs) per account")
+	rootCmd.PersistentFlags().Uint64Var(&totalBlobPoolLimit, "txpool.totalblobpoollimit", txpoolcfg.DefaultConfig.TotalBlobPoolLimit, "Total limit of number of all blobs in txs within the txpool")
 	rootCmd.PersistentFlags().Uint64Var(&priceBump, "txpool.pricebump", txpoolcfg.DefaultConfig.PriceBump, "Price bump percentage to replace an already existing transaction")
 	rootCmd.PersistentFlags().Uint64Var(&blobPriceBump, "txpool.blobpricebump", txpoolcfg.DefaultConfig.BlobPriceBump, "Price bump percentage to replace an existing blob (type-3) transaction")
 	rootCmd.PersistentFlags().DurationVar(&commitEvery, utils.TxPoolCommitEveryFlag.Name, utils.TxPoolCommitEveryFlag.Value, utils.TxPoolCommitEveryFlag.Usage)
@@ -148,6 +150,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 	cfg.MinFeeCap = priceLimit
 	cfg.AccountSlots = accountSlots
 	cfg.BlobSlots = blobSlots
+	cfg.TotalBlobPoolLimit = totalBlobPoolLimit
 	cfg.PriceBump = priceBump
 	cfg.BlobPriceBump = blobPriceBump
 	cfg.NoGossip = noTxGossip

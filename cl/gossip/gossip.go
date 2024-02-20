@@ -14,7 +14,6 @@ const (
 	TopicNameBlsToExecutionChange              = "bls_to_execution_change"
 	TopicNameSyncCommitteeContributionAndProof = "sync_committee_contribution_and_proof"
 
-	TopicNameContributionAndProof        = "contribution_and_proof"
 	TopicNameLightClientFinalityUpdate   = "light_client_finality_update"
 	TopicNameLightClientOptimisticUpdate = "light_client_optimistic_update"
 
