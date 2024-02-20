@@ -658,16 +658,17 @@ func (d *Downloader) mainLoop(silent bool) error {
 						d.logger.Warn("Can't re-add spec after download", "file", status.name, "err", err)
 					}
 
-					if status.err != nil {
-						complete[status.name] = struct{}{}
-
+					if status.err == nil {
 						if err := d.db.Update(d.ctx,
 							torrentInfoUpdater(status.name, status.spec.InfoHash.Bytes(), status.length, true)); err != nil {
 							d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
 						}
-
-						continue
 					}
+				}
+
+				if status.err == nil {
+					complete[status.name] = struct{}{}
+					continue
 				}
 
 			default:
@@ -1110,6 +1111,16 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 		if bytes.Equal(infoHash.Bytes(), localHash) {
 			defer sem.Release(1)
 			d.logger.Debug("[snapshots] Web download stopped - already downloaded", "file", t.Name(), "hash", infoHash)
+
+			go func() {
+				statusChan <- webDownloadStatus{
+					name:   name,
+					length: length,
+					spec:   nil,
+					err:    nil,
+				}
+			}()
+
 			return session, nil
 		}
 	}
