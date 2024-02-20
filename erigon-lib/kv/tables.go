@@ -450,6 +450,10 @@ const (
 	LastBeaconSnapshot    = "LastBeaconSnapshot"
 	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
 
+	BlockRootToBlobs          = "BlockRootToBlobs"
+	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
+	KzgCommitmentToBlob       = "KzgCommitmentToBlob"
+
 	// [Block Root] => [Parent Root]
 	BlockRootToParentRoot = "BlockRootToParentRoot"
 
@@ -655,6 +659,10 @@ var ChaindataTables = []string{
 	BlockRootToBlockHash,
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
+	// Blob Storage
+	BlockRootToBlobs,
+	BlockRootToKzgCommitments,
+	KzgCommitmentToBlob,
 	// State Reconstitution
 	ValidatorPublicKeys,
 	InvertedValidatorPublicKeys,
