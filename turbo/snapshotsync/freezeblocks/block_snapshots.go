@@ -2257,12 +2257,13 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 }
 
 func (m *Merger) filesByRange(snapshots *RoSnapshots, snapType snaptype.Type, from, to uint64) ([]string, error) {
-	var toMerge []string
 
 	view := snapshots.View()
 	defer view.Close()
 
-	for _, sn := range view.Segments(snapType) {
+	snList := view.Segments(snapType)
+	toMerge := make([]string, 0, len(snList))
+	for _, sn := range snList {
 		if sn.from < from {
 			continue
 		}
