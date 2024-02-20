@@ -681,6 +681,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			available := availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-downloadingLen)
 
+			availableLen := len(available)
+			addedWeb := 0
+			replacedWeb := 0
+
 			for _, webDownload := range d.webDownloadInfo {
 				d.lock.RLock()
 				_, downloading := d.downloading[webDownload.torrent.Name()]
@@ -701,6 +705,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if addDownload {
 					if len(available) < d.cfg.DownloadSlots-downloadingLen {
+						addedWeb++
 						available = append(available, webDownload.torrent)
 					}
 				} else {
@@ -710,12 +715,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 						ai, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
 
 						if ai.CompareTo(wi) > 0 {
+							replacedWeb++
 							available[i] = webDownload.torrent
 							break
 						}
 					}
 				}
 			}
+
+			d.logger.Debug("avalible", "pending", len(pending), "available", availableLen, "web-added", addedWeb, "web-replaced", replacedWeb)
 
 			for _, t := range available {
 				if err := sem.Acquire(d.ctx, 1); err != nil {
@@ -806,7 +814,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				for _, t := range d.torrentClient.Torrents() {
 					if t.Info() == nil {
-
 						if _, ok := d.webDownloadInfo[t.Name()]; !ok {
 							if _, ok := seedHashMismatches[t.InfoHash()]; ok {
 								continue
