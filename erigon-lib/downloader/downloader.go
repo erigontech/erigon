@@ -680,31 +680,38 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			available := availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-downloadingLen)
 
-			if len(available) < d.cfg.DownloadSlots-downloadingLen && len(d.webDownloadInfo) > 0 {
-				for _, webDownload := range d.webDownloadInfo {
-					d.lock.RLock()
-					_, downloading := d.downloading[webDownload.torrent.Name()]
-					d.lock.RUnlock()
+			for _, webDownload := range d.webDownloadInfo {
+				d.lock.RLock()
+				_, downloading := d.downloading[webDownload.torrent.Name()]
+				d.lock.RUnlock()
 
-					if downloading {
-						continue
+				if downloading {
+					continue
+				}
+
+				addDownload := true
+
+				for _, t := range available {
+					if t.Name() == webDownload.torrent.Name() {
+						addDownload = false
+						break
 					}
+				}
 
-					addDownload := true
-
-					for _, t := range available {
-						if t.Name() == webDownload.torrent.Name() {
-							addDownload = false
-							break
-						}
-					}
-
-					if addDownload {
+				if addDownload {
+					if len(available) < d.cfg.DownloadSlots-downloadingLen {
 						available = append(available, webDownload.torrent)
 					}
+				} else {
+					wi, _ := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name())
 
-					if len(available) == d.cfg.DownloadSlots-downloadingLen {
-						break
+					for i, t := range available {
+						ai, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+
+						if ai.CompareTo(wi) > 0 {
+							available[i] = webDownload.torrent
+							break
+						}
 					}
 				}
 			}
@@ -1359,10 +1366,21 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		downloading[file] = struct{}{}
 	}
 
+	var dbInfo int
+	var dbComplete int
+	var tComplete int
+	var torrentInfo int
+
 	for _, t := range torrents {
 		torrentComplete := t.Complete.Bool()
+		torrentName := t.Name()
 
-		if t.Info() != nil {
+		var progress float32
+
+		tinfo := t.Info()
+
+		if tinfo != nil {
+			torrentInfo++
 			stats.MetadataReady++
 
 			// call methods once - to reduce internal mutex contention
@@ -1375,12 +1393,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			var bytesCompleted int64
 
 			if torrentComplete {
+				tComplete++
 				bytesCompleted = t.Length()
 			} else {
 				bytesCompleted = bytesRead.Int64()
 			}
-
-			torrentName := t.Name()
 
 			delete(downloading, torrentName)
 
@@ -1392,15 +1409,12 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			stats.BytesCompleted += uint64(bytesCompleted)
 			stats.BytesTotal += uint64(tLen)
 
-			progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-			if progress == 0 {
-				zeroProgress = append(zeroProgress, torrentName)
-			}
+			progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 
 			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
 			rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
 			// more detailed statistic: download rate of each peer (for each file)
-			if !t.Complete.Bool() && progress != 0 {
+			if !torrentComplete && progress != 0 {
 				d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
 				d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
 				d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
@@ -1414,7 +1428,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				Peers:           peers,
 			})
 		} else {
-			if info, err := d.torrentInfo(t.Name()); err == nil {
+			fmt.Println("info nil")
+		}
+
+		if !torrentComplete {
+			if info, err := d.torrentInfo(torrentName); err == nil {
+				if tinfo == nil {
+					dbInfo++
+				}
 				if info.Completed != nil && info.Completed.Before(time.Now()) {
 					if info.Length != nil {
 						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
@@ -1422,13 +1443,21 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 							torrentComplete = fi.Size() == *info.Length
 							stats.BytesCompleted += uint64(*info.Length)
 							stats.BytesTotal += uint64(*info.Length)
+							if torrentComplete {
+								dbComplete++
+								progress = float32(100)
+							}
 						}
 					}
 				}
-			} else if _, ok := d.webDownloadInfo[t.Name()]; ok {
+			} else if _, ok := d.webDownloadInfo[torrentName]; ok {
 				stats.MetadataReady++
 			} else {
-				noMetadata = append(noMetadata, t.Name())
+				noMetadata = append(noMetadata, torrentName)
+			}
+
+			if progress == 0 {
+				zeroProgress = append(zeroProgress, torrentName)
 			}
 		}
 
@@ -1503,6 +1532,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		webTransfers += int32(len(downloading))
 		stats.Completed = false
 	}
+
+	d.logger.Debug("[snapshots] info", "len", len(torrents), "webTransfers", webTransfers, "torrent", torrentInfo, "db", dbInfo, "t-complete", tComplete, "db-complete", dbComplete)
 
 	if lastMetadataReady != stats.MetadataReady {
 		now := time.Now()
