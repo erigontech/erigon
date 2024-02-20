@@ -159,7 +159,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		Return(test.fakePeers(8)).
 		Times(1)
 	test.p2pService.EXPECT().
-		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(4)
 	var persistedHeaders []*types.Header
@@ -189,7 +189,7 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		Return(test.fakePeers(2)).
 		Times(4)
 	test.p2pService.EXPECT().
-		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
@@ -233,7 +233,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Return(test.fakePeers(3)).
 		Times(3)
 	test.p2pService.EXPECT().
-		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		// request 1,2,3 in parallel
 		// -> 2 fails
@@ -271,7 +271,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
 	test.p2pService.EXPECT().
-		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
