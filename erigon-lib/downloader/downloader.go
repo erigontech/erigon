@@ -718,11 +718,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				switch {
 				case len(t.PeerConns()) > 0:
 					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
-
-					d.lock.Lock()
-					d.downloading[t.Name()] = struct{}{}
-					d.lock.Unlock()
-
 					d.torrentDownload(t, sem)
 				case len(t.WebseedPeerConns()) > 0:
 					if d.webDownloadClient != nil {
@@ -735,28 +730,19 @@ func (d *Downloader) mainLoop(silent bool) error {
 						}
 
 						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
-						if session, err := d.webDownload(peerUrls, t, nil, webDownloadComplete, sem); err != nil {
-							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
-							if session == nil {
-								d.lock.Lock()
-								d.downloading[t.Name()] = struct{}{}
-								d.lock.Unlock()
+						session, err := d.webDownload(peerUrls, t, nil, webDownloadComplete, sem)
 
+						if err != nil {
+							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
+
+							if session == nil {
 								d.torrentDownload(t, sem)
 							}
 
 							continue
 						}
 
-						d.lock.Lock()
-						d.downloading[t.Name()] = struct{}{}
-						d.lock.Unlock()
-
 					} else {
-						d.lock.Lock()
-						d.downloading[t.Name()] = struct{}{}
-						d.lock.Unlock()
-
 						d.torrentDownload(t, sem)
 					}
 				default:
@@ -794,10 +780,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 						delete(d.webDownloadInfo, t.Name())
 						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "peers", len(t.WebseedPeerConns()))
 						d.webDownload([]*url.URL{peerUrl}, t, &webDownload, webDownloadComplete, sem)
-
-						d.lock.Lock()
-						d.downloading[t.Name()] = struct{}{}
-						d.lock.Unlock()
 
 						continue
 					}
@@ -1030,6 +1012,11 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, sem *semaphore.Weighted
 	}
 
 	t.DownloadAll()
+
+	d.lock.Lock()
+	d.downloading[t.Name()] = struct{}{}
+	d.lock.Unlock()
+
 	d.wg.Add(1)
 
 	go func(t *torrent.Torrent) {
@@ -1120,9 +1107,15 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 		}
 	}
 
+	d.lock.Lock()
 	t.Drop()
+	d.downloading[name] = struct{}{}
+	d.lock.Unlock()
+
+	d.wg.Add(1)
 
 	go func() {
+		defer d.wg.Done()
 		defer sem.Release(1)
 
 		if dir.FileExist(info.Path) {

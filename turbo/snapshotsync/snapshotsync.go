@@ -260,7 +260,14 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		}
 
 		dbg.ReadMemStats(&m)
-		downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
+
+		var remainingBytes uint64
+
+		if stats.BytesTotal > stats.BytesCompleted {
+			remainingBytes = stats.BytesTotal - stats.BytesCompleted
+		}
+
+		downloadTimeLeft := calculateTime(remainingBytes, stats.DownloadRate)
 
 		progress := float64(stats.Progress)
 
