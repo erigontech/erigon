@@ -121,7 +121,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 				}
 
 				start, end := waypoint.StartBlock().Uint64(), waypoint.EndBlock().Uint64()
-				headers, err := hd.p2pService.DownloadHeaders(ctx, start, end, peerId)
+				headers, err := hd.p2pService.FetchHeaders(ctx, start, end, peerId)
 				if err != nil {
 					hd.logger.Debug(
 						fmt.Sprintf("[%s] issue downloading headers, will try again", headerDownloaderLogPrefix),
