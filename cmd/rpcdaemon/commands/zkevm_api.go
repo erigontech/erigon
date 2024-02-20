@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,32 +8,20 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/log/v3"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common/hexutil"
-	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core"
-	"github.com/ledgerwatch/erigon/core/state"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
-	db2 "github.com/ledgerwatch/erigon/smt/pkg/db"
-	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
-	"github.com/ledgerwatch/erigon/turbo/trie"
-	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
-	zkStages "github.com/ledgerwatch/erigon/zk/stages"
-	zkUtils "github.com/ledgerwatch/erigon/zk/utils"
+	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
@@ -338,8 +325,7 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		return nil, fmt.Errorf("not supported by Erigon3")
 	}
 
-	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(startBlockNrOrHash, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
-
+	blockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(startBlockNrOrHash, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err
 	}
@@ -354,247 +340,21 @@ func (api *ZkEvmAPIImpl) getBlockRangeWitness(ctx context.Context, db kv.RoDB, s
 		return nil, fmt.Errorf("start block number must be less than or equal to end block number, start=%d end=%d", blockNr, endBlockNr)
 	}
 
-	// Witness for genesis block is empty
-	if endBlockNr == 0 {
-		w := trie.NewWitness(make([]trie.WitnessOperator, 0))
-
-		var buf bytes.Buffer
-		_, err = w.WriteInto(&buf, debug)
-		if err != nil {
-			return nil, err
-		}
-
-		return buf.Bytes(), nil
-	}
-
-	block, err := api.ethApi.blockWithSenders(tx, hash, blockNr)
-	if err != nil {
-		return nil, err
-	}
-	if block == nil {
-		return nil, nil
-	}
-
-	latestBlock, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
-		return nil, err
-	}
-
-	if latestBlock < endBlockNr {
-		// shouldn't happen, but check anyway
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlock, endBlockNr)
-	}
-
-	batch := memdb.NewMemoryBatch(tx, api.ethApi.dirs.Tmp)
-	defer batch.Rollback()
-
-	// Hack for now for the new tables not defined in erigon-lib
-	err = batch.CreateBucket(db2.TableSmt)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableAccountValues)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableLastRoot)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableMetadata)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(db2.TableHashKey)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(hermez_db.TX_PRICE_PERCENTAGE)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(hermez_db.BLOCKBATCHES)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(hermez_db.BLOCK_GLOBAL_EXIT_ROOTS)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(hermez_db.GLOBAL_EXIT_ROOTS_BATCHES)
-	if err != nil {
-		return nil, err
-	}
-
-	err = batch.CreateBucket(hermez_db.STATE_ROOTS)
-	if err != nil {
-		return nil, err
-	}
-
-	if blockNr-1 < latestBlock {
-		if latestBlock-blockNr > maxGetProofRewindBlockCount {
-			return nil, fmt.Errorf("requested block is too old, block must be within %d blocks of the head block number (currently %d)", maxGetProofRewindBlockCount, latestBlock)
-		}
-
-		unwindState := &stagedsync.UnwindState{UnwindPoint: blockNr - 1}
-		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
-
-		hashStageCfg := stagedsync.StageHashStateCfg(nil, api.ethApi.dirs, api.ethApi.historyV3(batch), api.ethApi._agg)
-		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
-			return nil, err
-		}
-
-		interHashStageCfg := zkStages.StageZkInterHashesCfg(nil, true, true, false, api.ethApi.dirs.Tmp, api.ethApi._blockReader, nil, api.ethApi.historyV3(batch), api.ethApi._agg, nil)
-
-		err = zkStages.UnwindZkIntermediateHashesStage(unwindState, stageState, batch, interHashStageCfg, ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		tx = batch
-	}
-
 	chainConfig, err := api.ethApi.chainConfig(tx)
 	if err != nil {
 		return nil, err
 	}
 
-	prevHeader, err := api.ethApi._blockReader.HeaderByNumber(ctx, tx, blockNr-1)
-	if err != nil {
-		return nil, err
-	}
+	generator := witness.NewGenerator(
+		api.ethApi.dirs,
+		api.ethApi.historyV3(tx),
+		api.ethApi._agg,
+		api.ethApi._blockReader,
+		chainConfig,
+		api.ethApi._engine,
+	)
 
-	tds := state.NewTrieDbState(prevHeader.Root, tx, blockNr-1, nil)
-
-	tds.SetResolveReads(true)
-
-	tds.StartNewBuffer()
-	trieStateWriter := tds.TrieStateWriter()
-
-	getHeader := func(hash libcommon.Hash, number uint64) *eritypes.Header {
-		h, e := api.ethApi._blockReader.Header(ctx, tx, hash, number)
-		if e != nil {
-			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
-		}
-		return h
-	}
-
-	for i := blockNr; i <= endBlockNr; i++ {
-		curBlockNum := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(i))
-		blockNr, curHash, _, err := rpchelper.GetCanonicalBlockNumber(curBlockNum, tx, api.ethApi.filters) // DoCall cannot be executed on non-canonical blocks
-
-		if err != nil {
-			return nil, err
-		}
-
-		block, err := api.ethApi.blockWithSenders(tx, curHash, i)
-
-		if err != nil {
-			return nil, err
-		}
-
-		reader, err := rpchelper.CreateHistoryStateReader(tx, blockNr, 0, false, chainConfig.ChainName)
-		if err != nil {
-			return nil, err
-		}
-
-		tds.SetStateReader(reader)
-
-		gers := []*dstypes.GerUpdate{}
-
-		hermezDb := hermez_db.NewHermezDbReader(tx)
-
-		//[zkevm] get batches between last block and this one
-		// plus this blocks ger
-		lastBatchInserted, err := hermezDb.GetBatchNoByL2Block(i - 1)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get batch for block %d: %v", i-1, err)
-		}
-
-		currentBatch, err := hermezDb.GetBatchNoByL2Block(i)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get batch for block %d: %v", i, err)
-		}
-
-		gersInBetween, err := hermezDb.GetBatchGlobalExitRoots(lastBatchInserted, currentBatch)
-		if err != nil {
-			return nil, err
-		}
-
-		if gersInBetween != nil {
-			gers = append(gers, gersInBetween...)
-		}
-
-		blockGer, _, err := hermezDb.GetBlockGlobalExitRoot(i)
-		if err != nil {
-			return nil, err
-		}
-		emptyHash := libcommon.Hash{}
-
-		if blockGer != emptyHash {
-			blockGerUpdate := dstypes.GerUpdate{
-				GlobalExitRoot: blockGer,
-				Timestamp:      block.Header().Time,
-			}
-			gers = append(gers, &blockGerUpdate)
-		}
-
-		for _, ger := range gers {
-			// [zkevm] - add GER if there is one for this batch
-			if err := zkUtils.WriteGlobalExitRoot(tds, trieStateWriter, ger.GlobalExitRoot, ger.Timestamp); err != nil {
-				return nil, err
-			}
-		}
-
-		engine, ok := api.ethApi.engine().(consensus.Engine)
-
-		if !ok {
-			return nil, fmt.Errorf("engine is not consensus.Engine")
-		}
-
-		vmConfig := vm.Config{}
-
-		getHashFn := core.GetHashFn(block.Header(), getHeader)
-
-		chainReader := stagedsync.NewChainReaderImpl(chainConfig, tx, nil)
-
-		_, err = core.ExecuteBlockEphemerally(chainConfig, &vmConfig, getHashFn, engine, block, tds, trieStateWriter, chainReader, nil, nil, hermezDb)
-
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	rl, err := tds.ResolveSMTRetainList()
-
-	if err != nil {
-		return nil, err
-	}
-
-	eridb := db2.NewEriDb(batch)
-	smtTrie := smt.NewSMT(eridb)
-
-	witness, err := smt.BuildWitness(smtTrie, rl, ctx)
-
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	_, err = witness.WriteInto(&buf, debug)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
+	return generator.GenerateWitness(tx, ctx, blockNr, endBlockNr, debug)
 }
 
 func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64) (hexutility.Bytes, error) {
