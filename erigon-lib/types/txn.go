@@ -991,7 +991,7 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 	if blobTxRlp[0] != BlobTxType {
 		return blobTxRlp, nil
 	}
-	dataposPrev, datalen, isList, err := rlp.Prefix(blobTxRlp[1:], 0)
+	dataposPrev, _, isList, err := rlp.Prefix(blobTxRlp[1:], 0)
 	if err != nil || dataposPrev < 1 {
 		return nil, err
 	}
