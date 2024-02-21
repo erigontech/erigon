@@ -4,6 +4,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -51,7 +52,20 @@ func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, l
 					logger.Warn("[mem] error reading virtual memory stats", "err", err)
 				}
 
-				logger.Info("[mem] virtual memory stats", memStats)
+				typ := reflect.TypeOf(memStats)
+				val := reflect.ValueOf(memStats)
+
+				var slice []interface{}
+				for i := 0; i < typ.NumField(); i++ {
+					t := typ.Field(i).Name
+					if t == "Path" { // always empty for aggregated smap statistics
+						continue
+					}
+
+					slice = append(slice, t, val.Field(i).Interface())
+				}
+
+				logger.Info("[mem] virtual memory stats", slice...)
 				dbg.UpdatePrometheusVirtualMemStats(memStats)
 			}
 		}
