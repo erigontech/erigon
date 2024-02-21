@@ -232,7 +232,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		} else {
 			start := time.Now()
 			// progress not 0? we need to load the state from the DB
-			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.fs, s.genesisState)
+			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState)
 			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
 			if err != nil {
 				s.currentState = nil
