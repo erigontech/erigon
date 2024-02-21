@@ -185,7 +185,7 @@ Loop:
 				}
 
 				dbg.ReadMemStats(&m)
-				memStats, err := dbg.GetMemUsage()
+				memStats, err := dbg.ReadVirtualMemStats()
 
 				if err != nil {
 					log.Warn("Error reading memory stats", "err", err)

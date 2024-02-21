@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"net/http"
-	"time"
 )
 
 func SetupMemAccess(metricsMux *http.ServeMux) {
@@ -13,26 +12,17 @@ func SetupMemAccess(metricsMux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/json")
 		writeMem(w)
 	})
-
-	// update prometheus memory stats at least every 30 seconds
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			dbg.GetMemUsage()
-			<-ticker.C
-		}
-	}()
 }
 
 func writeMem(w http.ResponseWriter) {
-	memStats, err := dbg.GetMemUsage()
+	memStats, err := dbg.ReadVirtualMemStats()
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	json.NewEncoder(w).Encode(memStats)
+	if err := json.NewEncoder(w).Encode(memStats); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }

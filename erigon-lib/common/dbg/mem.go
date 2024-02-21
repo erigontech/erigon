@@ -19,7 +19,7 @@ var (
 	memSwapGauge         = metrics.NewGauge(`mem_swap`)
 )
 
-func GetMemUsage() (process.MemoryMapsStat, error) {
+func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 	pid := os.Getpid()
 	proc, err := process.NewProcess(int32(pid))
 
@@ -33,16 +33,18 @@ func GetMemUsage() (process.MemoryMapsStat, error) {
 		return process.MemoryMapsStat{}, err
 	}
 
-	memRssGauge.SetUint64((*memoryMaps)[0].Rss)
-	memSizeGauge.SetUint64((*memoryMaps)[0].Size)
-	memPssGauge.SetUint64((*memoryMaps)[0].Pss)
-	memSharedCleanGauge.SetUint64((*memoryMaps)[0].SharedClean)
-	memSharedDirtyGauge.SetUint64((*memoryMaps)[0].SharedDirty)
-	memPrivateCleanGauge.SetUint64((*memoryMaps)[0].PrivateClean)
-	memPrivateDirtyGauge.SetUint64((*memoryMaps)[0].PrivateDirty)
-	memReferencedGauge.SetUint64((*memoryMaps)[0].Referenced)
-	memAnonymousGauge.SetUint64((*memoryMaps)[0].Anonymous)
-	memSwapGauge.SetUint64((*memoryMaps)[0].Swap)
-
 	return (*memoryMaps)[0], nil
+}
+
+func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {
+	memRssGauge.SetUint64(p.Rss)
+	memSizeGauge.SetUint64(p.Size)
+	memPssGauge.SetUint64(p.Pss)
+	memSharedCleanGauge.SetUint64(p.SharedClean)
+	memSharedDirtyGauge.SetUint64(p.SharedDirty)
+	memPrivateCleanGauge.SetUint64(p.PrivateClean)
+	memPrivateDirtyGauge.SetUint64(p.PrivateDirty)
+	memReferencedGauge.SetUint64(p.Referenced)
+	memAnonymousGauge.SetUint64(p.Anonymous)
+	memSwapGauge.SetUint64(p.Swap)
 }
