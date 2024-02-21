@@ -32,7 +32,7 @@ This optimization makes ad-hoc simulations performant for block ranges of 10k or
 The overall processing time was reduced significantly for contracts which are not "busy". For contracts which are touching nearly every block, it won't make a huge difference.
 
 ## Tests
-There's a [postman collection for overlays](../../cmd/rpcdaemon/postman/Overlay_Testing.json) with sample requests for `overlay_callConstructor` and `overlay_getLogs` which can be used for reference and refactorings.
+There's a [postman collection for overlays](../../../cmd/rpcdaemon/postman/Overlay_Testing.json) with sample requests for `overlay_callConstructor` and `overlay_getLogs` which can be used for reference and refactorings.
 
 ## Configuration
 - add `ots,overlay` to your `--http.api` flag
