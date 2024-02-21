@@ -875,8 +875,8 @@ func TestShortUnwrap(t *testing.T) {
 		t.Errorf("short rlp stripping failed: %v", err)
 		return
 	}
-	llrs := append([]byte{0x03}, shortRlp...) // Added the 0x3 prefix for DecodeTransaction func
-	bbtx, err := DecodeTransaction(llrs)
+	prefixedRlp := append([]byte{0x03}, shortRlp...) // Added the 0x3 prefix for DecodeTransaction func
+	bbtx, err := DecodeTransaction(prefixedRlp)
 
 	if err != nil {
 		t.Errorf("short rlp decoding failed : %v", err)
