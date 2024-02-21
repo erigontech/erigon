@@ -28,10 +28,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"golang.org/x/time/rate"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -66,12 +66,13 @@ var rateLimits = RateLimits{
 }
 
 type ConsensusHandlers struct {
-	handlers           map[protocol.ID]network.StreamHandler
-	hs                 *handshake.HandShaker
-	beaconConfig       *clparams.BeaconChainConfig
-	genesisConfig      *clparams.GenesisConfig
-	ctx                context.Context
-	beaconDB           persistence.RawBeaconBlockChain
+	handlers      map[protocol.ID]network.StreamHandler
+	hs            *handshake.HandShaker
+	beaconConfig  *clparams.BeaconChainConfig
+	genesisConfig *clparams.GenesisConfig
+	ctx           context.Context
+	beaconDB      freezeblocks.BeaconSnapshotReader
+
 	indiciesDB         kv.RoDB
 	peerRateLimits     sync.Map
 	punishmentEndTimes sync.Map
@@ -89,7 +90,7 @@ const (
 	ResourceUnavaiablePrefix = 0x02
 )
 
-func NewConsensusHandlers(ctx context.Context, db persistence.RawBeaconBlockChain, indiciesDB kv.RoDB, host host.Host,
+func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotReader, indiciesDB kv.RoDB, host host.Host,
 	peers *peers.Pool, netCfg *clparams.NetworkConfig, me *enode.LocalNode, beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, hs *handshake.HandShaker, forkChoiceReader forkchoice.ForkChoiceStorageReader, enabledBlocks bool) *ConsensusHandlers {
 	c := &ConsensusHandlers{
 		host:               host,

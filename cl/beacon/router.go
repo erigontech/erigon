@@ -5,18 +5,17 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
-	"github.com/ledgerwatch/erigon/cl/beacon/validatorapi"
 	"github.com/ledgerwatch/log/v3"
 )
 
 type LayeredBeaconHandler struct {
-	ValidatorApi *validatorapi.ValidatorApiHandler
-	ArchiveApi   *handler.ApiHandler
+	ArchiveApi *handler.ApiHandler
 }
 
 func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
@@ -46,17 +45,16 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		})
 	})
 	// layered handling - 404 on first handler falls back to the second
-	mux.HandleFunc("/eth/*", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
 		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
-		beaconHandler.ValidatorApi.ServeHTTP(nfw, r)
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {
+			start := time.Now()
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
+			log.Debug("[Beacon API] Request", "method", r.Method, "path", r.URL.Path, "time", time.Since(start))
 		}
 	})
-	mux.HandleFunc("/validator/*", func(w http.ResponseWriter, r *http.Request) {
-		http.StripPrefix("/validator", beaconHandler.ValidatorApi).ServeHTTP(w, r)
-	})
+
 	mux.HandleFunc("/archive/*", func(w http.ResponseWriter, r *http.Request) {
 		http.StripPrefix("/archive", beaconHandler.ArchiveApi).ServeHTTP(w, r)
 	})
@@ -74,5 +72,6 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
 		return err
 	}
+	log.Info("[Beacon API] Listening", "addr", routerCfg.Address)
 	return nil
 }

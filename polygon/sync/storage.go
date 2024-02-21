@@ -5,7 +5,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
-//go:generate mockgen -destination=./db_mock.go -package=sync . DB
+//go:generate mockgen -destination=./storage_mock.go -package=sync -source=./storage.go
 type HeaderStore interface {
 	PutHeaders(headers []*types.Header) error
 }

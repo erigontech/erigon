@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/p2p"
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
@@ -27,14 +28,14 @@ func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts
 	checkpointStore := NewMockCheckpointStore(ctrl)
 	milestoneStore := NewMockMilestoneStore(ctrl)
 	heimdall := heimdall.NewMockHeimdall(ctrl)
-	sentry := NewMockSentry(ctrl)
-	sentry.EXPECT().MaxPeers().Return(100).Times(1)
+	p2pService := p2p.NewMockService(ctrl)
+	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
 	headerVerifier := opts.getOrCreateDefaultHeaderVerifier()
-	headerDownloader := NewHeaderDownloader(logger, sentry, heimdall, headerVerifier)
+	headerDownloader := NewHeaderDownloader(logger, p2pService, heimdall, headerVerifier)
 	return &headerDownloaderTest{
 		heimdall:         heimdall,
-		sentry:           sentry,
+		p2pService:       p2pService,
 		headerDownloader: headerDownloader,
 		milestoneStore:   milestoneStore,
 		checkpointStore:  checkpointStore,
@@ -57,25 +58,25 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() Accumula
 
 type headerDownloaderTest struct {
 	heimdall         *heimdall.MockHeimdall
-	sentry           *MockSentry
+	p2pService       *p2p.MockService
 	milestoneStore   *MockMilestoneStore
 	checkpointStore  *MockCheckpointStore
 	headerDownloader *HeaderDownloader
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...*big.Int) PeersWithBlockNumInfo {
-	peers := make(PeersWithBlockNumInfo, count)
+func (hdt headerDownloaderTest) fakePeers(count int, blockNums ...uint64) p2p.PeersSyncProgress {
+	peers := make(p2p.PeersSyncProgress, count)
 	for i := range peers {
-		var blockNum *big.Int
+		var blockNum uint64
 		if i < len(blockNums) {
 			blockNum = blockNums[i]
 		} else {
-			blockNum = new(big.Int).SetUint64(math.MaxUint64)
+			blockNum = math.MaxUint64
 		}
 
-		peers[i] = &PeerWithBlockNumInfo{
-			ID:       fmt.Sprintf("peer%d", i+1),
-			BlockNum: blockNum,
+		peers[i] = &p2p.PeerSyncProgress{
+			Id:              p2p.PeerIdFromUint64(uint64(i) + 1),
+			MaxSeenBlockNum: blockNum,
 		}
 	}
 
@@ -114,14 +115,21 @@ func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
 	return milestones
 }
 
-type downloadHeadersMock func(context.Context, *big.Int, *big.Int, string) ([]*types.Header, error)
+type downloadHeadersMock func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error)
 
 func (hdt headerDownloaderTest) defaultDownloadHeadersMock() downloadHeadersMock {
-	return func(ctx context.Context, start *big.Int, end *big.Int, peerID string) ([]*types.Header, error) {
-		res := make([]*types.Header, new(big.Int).Sub(end, start).Uint64()+1)
-		for i := new(big.Int).Set(start); i.Cmp(end) < 1; i.Add(i, new(big.Int).SetUint64(1)) {
-			res[new(big.Int).Sub(i, start).Uint64()] = &types.Header{Number: new(big.Int).Set(i)}
+	return func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error) {
+		if start > end {
+			return nil, fmt.Errorf("unexpected start > end in test: start=%d, end=%d", start, end)
 		}
+
+		res := make([]*types.Header, end-start+1)
+		for num := start; num <= end; num++ {
+			res[num-start] = &types.Header{
+				Number: new(big.Int).SetUint64(num),
+			}
+		}
+
 		return res, nil
 	}
 }
@@ -139,11 +147,11 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		FetchMilestonesFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeMilestones(4), nil).
 		Times(1)
-	test.sentry.EXPECT().
-		PeersWithBlockNumInfo().
+	test.p2pService.EXPECT().
+		PeersSyncProgress().
 		Return(test.fakePeers(8)).
 		Times(1)
-	test.sentry.EXPECT().
+	test.p2pService.EXPECT().
 		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(4)
@@ -169,11 +177,11 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
-	test.sentry.EXPECT().
-		PeersWithBlockNumInfo().
+	test.p2pService.EXPECT().
+		PeersSyncProgress().
 		Return(test.fakePeers(2)).
 		Times(4)
-	test.sentry.EXPECT().
+	test.p2pService.EXPECT().
 		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
@@ -213,11 +221,11 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
-	test.sentry.EXPECT().
-		PeersWithBlockNumInfo().
+	test.p2pService.EXPECT().
+		PeersSyncProgress().
 		Return(test.fakePeers(3)).
 		Times(3)
-	test.sentry.EXPECT().
+	test.p2pService.EXPECT().
 		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		// request 1,2,3 in parallel
@@ -228,8 +236,8 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		// in total 6 requests + 1 request for re-requesting checkpoint 2
 		// total = 7 (note this also tests caching works)
 		Times(7)
-	test.sentry.EXPECT().
-		Penalize(gomock.Eq("peer2")).
+	test.p2pService.EXPECT().
+		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
 		Times(1)
 	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
 	gomock.InOrder(
@@ -255,7 +263,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
 		Times(1)
-	test.sentry.EXPECT().
+	test.p2pService.EXPECT().
 		DownloadHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultDownloadHeadersMock()).
 		Times(8)
@@ -266,18 +274,18 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		Times(4)
 	gomock.InOrder(
 		// first, no peers at all
-		test.sentry.EXPECT().
-			PeersWithBlockNumInfo().
+		test.p2pService.EXPECT().
+			PeersSyncProgress().
 			Return(nil).
 			Times(1),
 		// second, 2 peers but not synced enough for us to use
-		test.sentry.EXPECT().
-			PeersWithBlockNumInfo().
-			Return(test.fakePeers(2, new(big.Int).SetUint64(0), new(big.Int).SetUint64(0))).
+		test.p2pService.EXPECT().
+			PeersSyncProgress().
+			Return(test.fakePeers(2, 0, 0)).
 			Times(1),
 		// then, 2 fully synced peers that we can use
-		test.sentry.EXPECT().
-			PeersWithBlockNumInfo().
+		test.p2pService.EXPECT().
+			PeersSyncProgress().
 			Return(test.fakePeers(2)).
 			Times(4),
 	)

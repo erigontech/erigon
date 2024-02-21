@@ -15,7 +15,7 @@ type ExecutionEngine interface {
 	NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (bool, error)
 	ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error
 	SupportInsertion() bool
-	InsertBlocks([]*types.Block) error
+	InsertBlocks([]*types.Block, bool) error
 	InsertBlock(*types.Block) error
 	IsCanonicalHash(libcommon.Hash) (bool, error)
 	Ready() (bool, error)

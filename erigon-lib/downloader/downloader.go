@@ -156,7 +156,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		if !discover {
 			return
 		}
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap, lock.Downloads)
+		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 		// webseeds.Discover may create new .torrent files on disk
 		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
@@ -173,6 +173,11 @@ type snapshotLock struct {
 }
 
 func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
+
+	if !cfg.SnapshotLock {
+		return initSnapshotLock(ctx, cfg, db, logger)
+	}
+
 	snapDir := cfg.Dirs.Snap
 
 	lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
@@ -183,10 +188,6 @@ func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, lo
 		if !errors.Is(err, os.ErrNotExist) {
 			return nil, err
 		}
-	}
-
-	if !cfg.SnapshotLock {
-		return initSnapshotLock(ctx, cfg, db, logger)
 	}
 
 	var data []byte
@@ -286,6 +287,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	// is no matching version just use the one discovered for the file
 
 	versionedCfg := map[snaptype.Version]*snapcfg.Cfg{}
+	versionedCfgLock := sync.Mutex{}
 
 	snapDir := cfg.Dirs.Snap
 
@@ -328,12 +330,19 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 					}
 				} else {
-					versioned, ok := versionedCfg[fileInfo.Version]
+					versioned := func() *snapcfg.Cfg {
+						versionedCfgLock.Lock()
+						defer versionedCfgLock.Unlock()
 
-					if !ok {
-						versioned = snapcfg.VersionedCfg(cfg.ChainName, fileInfo.Version, fileInfo.Version)
-						versionedCfg[fileInfo.Version] = versioned
-					}
+						versioned, ok := versionedCfg[fileInfo.Version]
+
+						if !ok {
+							versioned = snapcfg.VersionedCfg(cfg.ChainName, fileInfo.Version, fileInfo.Version)
+							versionedCfg[fileInfo.Version] = versioned
+						}
+
+						return versioned
+					}()
 
 					hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
 

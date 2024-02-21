@@ -40,9 +40,9 @@ type WebSeeds struct {
 	torrentFiles *TorrentFiles
 }
 
-func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string, ignore snapcfg.Preverified) {
+func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
 	d.downloadWebseedTomlFromProviders(ctx, urls, files)
-	d.downloadTorrentFilesFromProviders(ctx, rootDir, ignore)
+	d.downloadTorrentFilesFromProviders(ctx, rootDir)
 }
 
 func (d *WebSeeds) downloadWebseedTomlFromProviders(ctx context.Context, httpProviders []*url.URL, diskProviders []string) {
@@ -164,7 +164,7 @@ func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSee
 }
 
 // downloadTorrentFilesFromProviders - if they are not exist on file-system
-func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string, ignore snapcfg.Preverified) {
+func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDir string) {
 	// TODO: need more tests, need handle more forward-compatibility and backward-compatibility case
 	//  - now, if add new type of .torrent files to S3 bucket - existing nodes will start downloading it. maybe need whitelist of file types
 	//  - maybe need download new files if --snap.stop=true
@@ -174,9 +174,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	if len(d.TorrentUrls()) == 0 {
 		return
 	}
-	if d.torrentFiles.newDownloadsAreProhibited() {
-		return
-	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
 	e.SetLimit(1024)
@@ -184,16 +181,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	//TODO:
 	// - what to do if node already synced?
 
-	fileName := func(name string) string {
-		name, _ = strings.CutSuffix(name, filepath.Ext(name))
-		return name
-	}
-
 	for name, tUrls := range urlsByName {
-		if ignore.Contains(fileName(name)) {
-			continue
-		}
-
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
 			continue
@@ -210,12 +198,11 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
 				if err := d.torrentFiles.Create(tPath, res); err != nil {
-					d.logger.Debug("[snapshots] saveTorrent", "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
 					continue
 				}
 				return nil

@@ -168,7 +168,7 @@ func InitMiner(ctx context.Context, genesis *types.Genesis, privKey *ecdsa.Priva
 		return nil, nil, err
 	}
 
-	err = ethBackend.Init(stack, ethCfg)
+	err = ethBackend.Init(stack, ethCfg, ethCfg.Genesis.Config)
 	if err != nil {
 		return nil, nil, err
 	}
