@@ -999,8 +999,9 @@ func UnwrapTxPlayloadRlp(blobTxRlp []byte) ([]byte, error) {
 		return blobTxRlp, nil
 	}
 
+	blobTxRlp = blobTxRlp[1:]
 	// Get to the wrapper list
-	datapos, datalen, err := rlp.List(blobTxRlp[1:], dataposPrev)
+	datapos, datalen, err := rlp.List(blobTxRlp, dataposPrev)
 	if err != nil {
 		return nil, err
 	}
