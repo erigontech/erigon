@@ -9,6 +9,9 @@ import (
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/disk"
+	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/urfave/cli/v2"
 )
 
@@ -20,6 +23,7 @@ type DiagnosticClient struct {
 	syncStats        diaglib.SyncStatistics
 	snapshotFileList diaglib.SnapshoFilesList
 	mu               sync.Mutex
+	hardwareInfo     diaglib.HardwareInfo
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
@@ -35,6 +39,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runSyncStagesListListener()
 	d.runBlockExecutionListener()
 	d.runSnapshotFilesListListener()
+	d.getSysInfo()
 
 	//d.logDiagMsgs()
 }
@@ -67,6 +72,86 @@ func interfaceToJSONString(i interface{}) string {
 	}
 	return string(b)
 }*/
+
+func (d *DiagnosticClient) getSysInfo() {
+	ramInfo := GetRAMInfo()
+	diskInfo := GetDiskInfo()
+	cpuInfo := GetCPUInfo()
+
+	d.hardwareInfo = diaglib.HardwareInfo{
+		RAM:  ramInfo,
+		Disk: diskInfo,
+		CPU:  cpuInfo,
+	}
+}
+
+func GetRAMInfo() diaglib.RAMInfo {
+	totalRAM := uint64(0)
+	freeRAM := uint64(0)
+
+	vmStat, err := mem.VirtualMemory()
+	if err == nil {
+		totalRAM = vmStat.Total
+		freeRAM = vmStat.Free
+	}
+
+	return diaglib.RAMInfo{
+		Total: totalRAM,
+		Free:  freeRAM,
+	}
+}
+
+func GetDiskInfo() diaglib.DiskInfo {
+	fsType := ""
+	total := uint64(0)
+	free := uint64(0)
+
+	partitions, err := disk.Partitions(false)
+
+	if err == nil {
+		for _, partition := range partitions {
+			if partition.Mountpoint == "/" {
+				iocounters, err := disk.Usage(partition.Mountpoint)
+				if err == nil {
+					fsType = partition.Fstype
+					total = iocounters.Total
+					free = iocounters.Free
+
+					break
+				}
+			}
+		}
+	}
+
+	return diaglib.DiskInfo{
+		FsType: fsType,
+		Total:  total,
+		Free:   free,
+	}
+}
+
+func GetCPUInfo() diaglib.CPUInfo {
+	modelName := ""
+	cores := 0
+	mhz := float64(0)
+
+	cpuInfo, err := cpu.Info()
+	if err == nil {
+		for _, info := range cpuInfo {
+			modelName = info.ModelName
+			cores = int(info.Cores)
+			mhz = info.Mhz
+
+			break
+		}
+	}
+
+	return diaglib.CPUInfo{
+		ModelName: modelName,
+		Cores:     cores,
+		Mhz:       mhz,
+	}
+}
 
 func (d *DiagnosticClient) runSnapshotListener() {
 	go func() {
@@ -112,6 +197,10 @@ func (d *DiagnosticClient) SyncStatistics() diaglib.SyncStatistics {
 
 func (d *DiagnosticClient) SnapshotFilesList() diaglib.SnapshoFilesList {
 	return d.snapshotFileList
+}
+
+func (d *DiagnosticClient) HardwareInfo() diaglib.HardwareInfo {
+	return d.hardwareInfo
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener() {

@@ -112,6 +112,29 @@ type SnapshoFilesList struct {
 	Files []string `json:"files"`
 }
 
+type HardwareInfo struct {
+	Disk DiskInfo `json:"disk"`
+	RAM  RAMInfo  `json:"ram"`
+	CPU  CPUInfo  `json:"cpu"`
+}
+
+type RAMInfo struct {
+	Total uint64 `json:"total"`
+	Free  uint64 `json:"free"`
+}
+
+type DiskInfo struct {
+	FsType string `json:"fsType"`
+	Total  uint64 `json:"total"`
+	Free   uint64 `json:"free"`
+}
+
+type CPUInfo struct {
+	Cores     int     `json:"cores"`
+	ModelName string  `json:"modelName"`
+	Mhz       float64 `json:"mhz"`
+}
+
 func (ti SnapshoFilesList) Type() Type {
 	return TypeOf(ti)
 }
