@@ -18,7 +18,8 @@ type Service interface {
 	Stop()
 	MaxPeers() int
 	PeersSyncProgress() PeersSyncProgress
-	DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
+	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
+	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 	Penalize(ctx context.Context, peerId PeerId) error
 }
 
@@ -33,12 +34,12 @@ func newService(
 	requestIdGenerator RequestIdGenerator,
 ) Service {
 	messageListener := NewMessageListener(logger, sentryClient)
-	messageBroadcaster := NewMessageBroadcaster(sentryClient)
+	messageSender := NewMessageSender(sentryClient)
 	peerPenalizer := NewPeerPenalizer(sentryClient)
-	downloader := NewDownloader(logger, messageListener, messageBroadcaster, peerPenalizer, requestIdGenerator)
+	fetcher := NewFetcher(logger, messageListener, messageSender, peerPenalizer, requestIdGenerator)
 	return &service{
 		config:          config,
-		downloader:      downloader,
+		fetcher:         fetcher,
 		messageListener: messageListener,
 		peerPenalizer:   peerPenalizer,
 	}
@@ -47,7 +48,7 @@ func newService(
 type service struct {
 	once            sync.Once
 	config          p2p.Config
-	downloader      Downloader
+	fetcher         Fetcher
 	messageListener MessageListener
 	peerPenalizer   PeerPenalizer
 }
@@ -66,8 +67,8 @@ func (s *service) MaxPeers() int {
 	return s.config.MaxPeers
 }
 
-func (s *service) DownloadHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
-	return s.downloader.DownloadHeaders(ctx, start, end, peerId)
+func (s *service) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+	return s.fetcher.FetchHeaders(ctx, start, end, peerId)
 }
 
 func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
