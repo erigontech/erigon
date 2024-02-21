@@ -655,7 +655,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 			default:
 			}
 
-			if len(pending)+len(d.webDownloadInfo) == 0 {
+			d.lock.RLock()
+			webDownloadInfoLen := len(d.webDownloadInfo)
+			d.lock.RUnlock()
+
+			if len(pending)+webDownloadInfoLen == 0 {
 				select {
 				case <-d.ctx.Done():
 					return
@@ -671,14 +675,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			available := availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-downloadingLen)
 
-			availableLen := len(available)
-			addedWeb := 0
-			replacedWeb := 0
-
+			d.lock.RLock()
 			for _, webDownload := range d.webDownloadInfo {
-				d.lock.RLock()
 				_, downloading := d.downloading[webDownload.torrent.Name()]
-				d.lock.RUnlock()
 
 				if downloading {
 					continue
@@ -695,8 +694,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if addDownload {
 					if len(available) < d.cfg.DownloadSlots-downloadingLen {
-						addedWeb++
-						delete(d.webDownloadInfo, webDownload.torrent.Name())
 						available = append(available, webDownload.torrent)
 					}
 				} else {
@@ -706,25 +703,15 @@ func (d *Downloader) mainLoop(silent bool) error {
 						ai, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
 
 						if ai.CompareTo(wi) > 0 {
-							replacedWeb++
-							delete(d.webDownloadInfo, webDownload.torrent.Name())
 							available[i] = webDownload.torrent
 							break
 						}
 					}
 				}
 			}
-
-			if len(pending) > 0 || len(available) > 0 {
-				d.logger.Debug("available", "torrents", len(torrents), "pending", len(pending), "available", availableLen, "web-added", addedWeb, "web-replaced", replacedWeb)
-			}
+			d.lock.RUnlock()
 
 			for _, t := range available {
-				if err := sem.Acquire(d.ctx, 1); err != nil {
-					d.logger.Warn("Failed to acquire download semaphore", "err", err)
-					return
-				}
-
 				switch {
 				case len(t.PeerConns()) > 0:
 					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
@@ -758,7 +745,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 				default:
 					if d.webDownloadClient != nil {
+						d.lock.RLock()
 						webDownload, ok := d.webDownloadInfo[t.Name()]
+						d.lock.RUnlock()
 
 						if !ok {
 							var mismatches []*seedHash
@@ -774,7 +763,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 								}
 
 								d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
-								sem.Release(1)
 								continue
 							}
 						}
@@ -784,18 +772,18 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 						if err != nil {
 							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
-							sem.Release(1)
 							continue
 						}
 
+						d.lock.Lock()
 						delete(d.webDownloadInfo, t.Name())
+						d.lock.Unlock()
+
 						d.logger.Debug("[snapshots] Downloading from web", "file", t.Name(), "webpeers", len(t.WebseedPeerConns()))
 						d.webDownload([]*url.URL{peerUrl}, t, &webDownload, webDownloadComplete, sem)
-
 						continue
 					}
 
-					sem.Release(1)
 				}
 			}
 
@@ -813,7 +801,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 							continue
 						}
 
-						if _, ok := d.webDownloadInfo[t.Name()]; !ok {
+						d.lock.RLock()
+						_, ok := d.webDownloadInfo[t.Name()]
+						d.lock.RUnlock()
+
+						if !ok {
 							if _, ok := seedHashMismatches[t.InfoHash()]; ok {
 								continue
 							}
@@ -966,7 +958,11 @@ func (d *Downloader) checkComplete(name string) bool {
 func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []*seedHash, error) {
 	torrentHash := t.InfoHash()
 
-	if info, ok := d.webDownloadInfo[t.Name()]; ok {
+	d.lock.RLock()
+	info, ok := d.webDownloadInfo[t.Name()]
+	d.lock.RUnlock()
+
+	if ok {
 		return info, nil, nil
 	}
 
@@ -1046,6 +1042,11 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, sem *semaphore.Weighted
 	d.lock.Unlock()
 
 	d.wg.Add(1)
+
+	if err := sem.Acquire(d.ctx, 1); err != nil {
+		d.logger.Warn("Failed to acquire download semaphore", "err", err)
+		return
+	}
 
 	go func(t *torrent.Torrent) {
 		defer d.wg.Done()
@@ -1129,7 +1130,6 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 
 	if err == nil {
 		if bytes.Equal(infoHash.Bytes(), localHash) {
-			defer sem.Release(1)
 			d.logger.Debug("[snapshots] Web download already complete", "file", t.Name(), "hash", infoHash)
 
 			statusChan <- webDownloadStatus{
@@ -1150,6 +1150,11 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 	d.lock.Unlock()
 
 	d.wg.Add(1)
+
+	if err := sem.Acquire(d.ctx, 1); err != nil {
+		d.logger.Warn("Failed to acquire download semaphore", "err", err)
+		return nil, err
+	}
 
 	go func() {
 		defer d.wg.Done()
@@ -1456,8 +1461,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				Webseeds:        webseeds,
 				Peers:           peers,
 			})
-		} else {
-			fmt.Println("info nil")
 		}
 
 		if !torrentComplete {
