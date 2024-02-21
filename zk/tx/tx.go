@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"encoding/binary"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -348,7 +349,7 @@ func ComputeL2TxHash(
 	hash := fmt.Sprintf("%s%s%s%s", txType, noncePart, gasPricePart, gasLimitPart)
 
 	// check is deploy
-	if to == nil || to.Hex() == "0x0000000000000000000000000000000000000000" {
+	if to == nil {
 		hash += "01"
 	} else {
 		toPart, err := formatL2TxHashParam(to.Hex(), 20)

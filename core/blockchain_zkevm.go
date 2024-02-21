@@ -156,13 +156,19 @@ func ExecuteBlockEphemerallyZk(
 			return nil, err
 		}
 
-		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas, effectiveGasPricePercentage)
+		receipt, execResult, err := ApplyTransaction_zkevm(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas, effectiveGasPricePercentage)
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
 			}
 
 			vmConfig.Tracer = nil
+		}
+
+		//TODO: remove this after bug is fixed
+		localReceipt := *receipt
+		if execResult.Err == vm.ErrUnsupportedPrecompile {
+			localReceipt.Status = 1
 		}
 
 		if err != nil {
@@ -200,7 +206,7 @@ func ExecuteBlockEphemerallyZk(
 			_, err = blockInfoTree.SetBlockTx(
 				&l2TxHash,
 				txIndex,
-				receipt,
+				&localReceipt,
 				logIndex,
 				*usedGas,
 				effectiveGasPricePercentage,
@@ -215,17 +221,17 @@ func ExecuteBlockEphemerallyZk(
 		logIndex += int64(len(receipt.Logs))
 	}
 
-	var l1InfoRoot libcommon.Hash
+	var l2InfoRoot libcommon.Hash
 	if chainConfig.IsForkID7Etrog(blockNum) {
 		// [zkevm] - set the block info tree root
 		root, err := blockInfoTree.SetBlockGasUsed(*usedGas)
 		if err != nil {
 			return nil, err
 		}
-		l1InfoRoot = libcommon.BigToHash(root)
+		l2InfoRoot = libcommon.BigToHash(root)
 	}
 
-	ibs.PostExecuteStateSet(chainConfig, block.NumberU64(), &l1InfoRoot)
+	ibs.PostExecuteStateSet(chainConfig, block.NumberU64(), &l2InfoRoot)
 
 	receiptSha := types.DeriveSha(receipts)
 	// [zkevm] todo

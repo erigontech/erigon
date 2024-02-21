@@ -80,7 +80,7 @@ docker-compose.*.yml
 .env
 coverage.out
 hermezconfig*.yaml
-rpcConfig.yaml
+debugToolsConfig.yaml
 local.yml
 
 dist

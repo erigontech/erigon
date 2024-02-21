@@ -267,7 +267,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
 		evm.intraBlockState.RevertToSnapshot(snapshot)
-		if err != ErrExecutionReverted {
+		if err != ErrExecutionReverted && err != ErrUnsupportedPrecompile {
 			gas = 0
 		}
 		// TODO: consider clearing up unused snapshots:

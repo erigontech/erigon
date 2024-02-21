@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 
@@ -33,7 +32,11 @@ func main() {
 		defer jsonFile.Close()
 
 		var localTrace []OpContext
-		byteValue, _ := ioutil.ReadAll(jsonFile)
+		byteValue, err := io.ReadAll(jsonFile)
+		if err != nil {
+			fmt.Println("Error reading JSON data:", err)
+			return
+		}
 		err = json.Unmarshal(byteValue, &localTrace)
 		if err != nil {
 			fmt.Println(traceFile)
@@ -82,7 +85,7 @@ func getRpcTrace(txHash string, cfg RpcConfig) ([]OpContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.SetBasicAuth(cfg.Username, cfg.Pass)
+	// req.SetBasicAuth(cfg.Username, cfg.Pass)
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -126,7 +129,7 @@ func compareTraces(localTrace, rpcTrace []OpContext) error {
 }
 
 func getConf() (RpcConfig, error) {
-	yamlFile, err := ioutil.ReadFile("rpcConfig.yaml")
+	yamlFile, err := os.ReadFile("debugToolsConfig.yaml")
 	if err != nil {
 		return RpcConfig{}, err
 	}
@@ -141,9 +144,7 @@ func getConf() (RpcConfig, error) {
 }
 
 type RpcConfig struct {
-	Url      string `yaml:"url"`
-	Username string `yaml:"username"`
-	Pass     string `yaml:"pass"`
+	Url string `yaml:"url"`
 }
 
 type HTTPResponse struct {

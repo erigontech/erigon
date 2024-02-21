@@ -10,11 +10,13 @@ import (
 	"strconv"
 	"strings"
 
+	"io"
+	"net/url"
+
 	"github.com/iden3/go-iden3-crypto/keccak256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
-	"io"
-	"net/url"
+	"gopkg.in/yaml.v2"
 )
 
 type HTTPResponse struct {
@@ -28,10 +30,6 @@ type RequestData struct {
 	Jsonrpc string   `json:"jsonrpc"`
 }
 
-var block = "0x37D8"
-var rpcUrl = "https://rpc-debug.internal.zkevm-test.net/"
-var jsonFile = "addrDump.json"
-
 type AccountDump struct {
 	Balance  string
 	Nonce    uint64
@@ -40,14 +38,23 @@ type AccountDump struct {
 }
 
 func main() {
-	jsonFile, err := os.Open(jsonFile)
+	rpcConfig, err := getConf()
+	if err != nil {
+		panic(fmt.Sprintf("error RPGCOnfig: %s", err))
+	}
+	jsonFile, err := os.Open(rpcConfig.DumpFileName)
 	if err != nil {
 		fmt.Println(err)
 	}
 	defer jsonFile.Close()
 
 	data := make(map[string]AccountDump)
-	byteValue, _ := ioutil.ReadAll(jsonFile)
+	byteValue, err := io.ReadAll(jsonFile)
+	if err != nil {
+		fmt.Println("Error reading JSON data:", err)
+		return
+	}
+
 	err = json.Unmarshal(byteValue, &data)
 	if err != nil {
 		fmt.Println("Error parsing JSON data:", err)
@@ -55,21 +62,21 @@ func main() {
 	}
 
 	for accountHash, storageMap := range data {
-		compareBalance(accountHash, storageMap.Balance)
-		compareNonce(accountHash, storageMap.Nonce)
-		// compareCodeHash(accountHash, storageMap.Codehash.Hex())
+		compareBalance(rpcConfig, accountHash, storageMap.Balance)
+		// compareNonce(rpcConfig, accountHash, storageMap.Nonce)
+		// compareCodeHash(rpcConfig, accountHash, storageMap.Codehash.Hex())
 		for key, value := range storageMap.Storage {
-			compareValuesString(accountHash, key, value)
+			compareValuesString(rpcConfig, accountHash, key, value)
 		}
 	}
 
 	fmt.Println("Check finished.")
 }
 
-func compareValuesString(accountHash, key, value string) {
+func compareValuesString(cfg RpcConfig, accountHash, key, value string) {
 	payloadbytecode := RequestData{
 		Method:  "eth_getStorageAt",
-		Params:  []string{accountHash, key, block},
+		Params:  []string{accountHash, key, cfg.Block},
 		ID:      1,
 		Jsonrpc: "2.0",
 	}
@@ -80,7 +87,7 @@ func compareValuesString(accountHash, key, value string) {
 		return
 	}
 
-	safeUrl, err := url.Parse(rpcUrl)
+	safeUrl, err := url.Parse(cfg.Url)
 	if err != nil {
 		fmt.Println("Error parsing URL:", err)
 		return
@@ -109,10 +116,10 @@ func compareValuesString(accountHash, key, value string) {
 	}
 }
 
-func compareBalance(accountHash, value string) {
+func compareBalance(cfg RpcConfig, accountHash, value string) {
 	payloadbytecode := RequestData{
 		Method:  "eth_getBalance",
-		Params:  []string{accountHash, block},
+		Params:  []string{accountHash, cfg.Block},
 		ID:      1,
 		Jsonrpc: "2.0",
 	}
@@ -123,7 +130,7 @@ func compareBalance(accountHash, value string) {
 		return
 	}
 
-	safeUrl, err := url.Parse(rpcUrl)
+	safeUrl, err := url.Parse(cfg.Url)
 	if err != nil {
 		fmt.Println("Error parsing URL:", err)
 		return
@@ -148,10 +155,10 @@ func compareBalance(accountHash, value string) {
 	}
 }
 
-func compareNonce(accountHash string, value uint64) {
+func compareNonce(cfg RpcConfig, accountHash string, value uint64) {
 	payloadbytecode := RequestData{
 		Method:  "eth_getTransactionCount",
-		Params:  []string{accountHash, block},
+		Params:  []string{accountHash, cfg.Block},
 		ID:      1,
 		Jsonrpc: "2.0",
 	}
@@ -162,7 +169,7 @@ func compareNonce(accountHash string, value uint64) {
 		return
 	}
 
-	safeUrl, err := url.Parse(rpcUrl)
+	safeUrl, err := url.Parse(cfg.Url)
 	if err != nil {
 		fmt.Println("Error parsing URL:", err)
 		return
@@ -190,10 +197,10 @@ func compareNonce(accountHash string, value uint64) {
 	}
 }
 
-func compareCodeHash(accountHash, value string) {
+func compareCodeHash(cfg RpcConfig, accountHash, value string) {
 	payloadbytecode := RequestData{
 		Method:  "eth_getCode",
-		Params:  []string{accountHash, block},
+		Params:  []string{accountHash, cfg.Block},
 		ID:      1,
 		Jsonrpc: "2.0",
 	}
@@ -204,7 +211,7 @@ func compareCodeHash(accountHash, value string) {
 		return
 	}
 
-	safeUrl, err := url.Parse(rpcUrl)
+	safeUrl, err := url.Parse(cfg.Url)
 	if err != nil {
 		fmt.Println("Error parsing URL:", err)
 		return
@@ -227,4 +234,25 @@ func compareCodeHash(accountHash, value string) {
 	if value != value2 {
 		fmt.Printf("Nonce mismatch detected for %s. Local: %s, Remote: %s\n", accountHash, value, value2)
 	}
+}
+
+type RpcConfig struct {
+	Url          string `yaml:"url"`
+	DumpFileName string `yaml:"dumpFileName"`
+	Block        string `yaml:"block"`
+}
+
+func getConf() (RpcConfig, error) {
+	yamlFile, err := os.ReadFile("debugToolsConfig.yaml")
+	if err != nil {
+		return RpcConfig{}, err
+	}
+
+	c := RpcConfig{}
+	err = yaml.Unmarshal(yamlFile, &c)
+	if err != nil {
+		return RpcConfig{}, err
+	}
+
+	return c, nil
 }

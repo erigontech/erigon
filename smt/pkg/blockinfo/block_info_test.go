@@ -51,6 +51,24 @@ func TestBlockInfoHeader(t *testing.T) {
 			FinalGER:           "0x0000000000000000000000000000000000000000000000000000000000000000",
 			L1BlochHash:        "0x0000000000000000000000000000000000000000000000000000000000000000",
 			FinalBlockInfoRoot: "0xf8c8d52e97e83cbe07ad1883f6510ec2aafcde26e5d291290ecd240e76241bce",
+		}, {
+			BlockHash:          "0x045fa48a1342813a61c1dd2d235620d621b59cdda0bd07ff3536c6cf64f5e688",
+			CoinbaseAddress:    "0x9aeCf44E36f20DC407d1A580630c9a2419912dcB",
+			NewBlockNumber:     592221,
+			BlockGasLimit:      1125899906842624,
+			FinalTimestamp:     1708198045,
+			FinalGER:           "0x0000000000000000000000000000000000000000000000000000000000000000",
+			L1BlochHash:        "0x0000000000000000000000000000000000000000000000000000000000000000",
+			FinalBlockInfoRoot: "0xdb45b84ec5ea8b706170c775c8d0a6ded9938d850c6e878c00439f9320f68583",
+		}, {
+			BlockHash:          "0x268a22af2bae40acd1cc4228896de4420c5f3bc3bbdd8515d6d01b1b99731f82",
+			CoinbaseAddress:    "0x9aeCf44E36f20DC407d1A580630c9a2419912dcB",
+			NewBlockNumber:     592223,
+			BlockGasLimit:      18446744073709551615,
+			FinalTimestamp:     1708198051,
+			FinalGER:           "0x0000000000000000000000000000000000000000000000000000000000000000",
+			L1BlochHash:        "0x0000000000000000000000000000000000000000000000000000000000000000",
+			FinalBlockInfoRoot: "0xadb3544de6a274492901e4c8b030342d26f586f5ad3788b0fb006c0f69395d56",
 		},
 	}
 
@@ -84,7 +102,7 @@ func TestBlockInfoHeader(t *testing.T) {
 
 func TestSetBlockTx(t *testing.T) {
 	tests := []struct {
-		l2TxHash            *common.Hash
+		l2TxHash            common.Hash
 		txIndex             int
 		receipt             ethTypes.Receipt
 		logIndex            int64
@@ -93,11 +111,10 @@ func TestSetBlockTx(t *testing.T) {
 		finalBlockInfoRoot  string
 	}{
 		{
-			l2TxHash: &common.Hash{0},
+			l2TxHash: common.Hash{0},
 			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 1,
-				TxHash: common.HexToHash("0xd2a69c7d3c99953bae9d273f2375b2653bd4ec47a05eefc5fc7c041d07fba8a0"),
 				Logs: []*types.Log{
 					{
 						Address: common.HexToAddress("0x0000000000000000000000000000000000000000"),
@@ -130,11 +147,10 @@ func TestSetBlockTx(t *testing.T) {
 			effectivePercentage: 255,
 			finalBlockInfoRoot:  "0x0dde47bb5f76e014b6b13de4be07529ef018b454f09f16ef4c9b15a8f9c59d4f",
 		}, {
-			l2TxHash: &common.Hash{0},
+			l2TxHash: common.Hash{0},
 			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 0,
-				TxHash: common.HexToHash("0xac65e2fd657a4ee6318cc66cf98b05ae74ce3f0f3982370af951176e7b599c2c"),
 				Logs:   []*types.Log{},
 			},
 			logIndex:            0,
@@ -142,11 +158,10 @@ func TestSetBlockTx(t *testing.T) {
 			effectivePercentage: 0,
 			finalBlockInfoRoot:  "0x20a3ac1075ef9bb2fa88967b2b3075221c32ab3ef3034a9d9c1520adc45100be",
 		}, {
-			l2TxHash: &common.Hash{0},
+			l2TxHash: common.Hash{0},
 			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 1,
-				TxHash: common.HexToHash("0xac65e2fd657a4ee6318cc66cf98b05ae74ce3f0f3982370af951176e7b599c2c"),
 				Logs:   []*types.Log{},
 			},
 			logIndex:            0,
@@ -154,17 +169,27 @@ func TestSetBlockTx(t *testing.T) {
 			effectivePercentage: 255,
 			finalBlockInfoRoot:  "0x3ea32169f0fe8b1c54a8d35cc31f9d14a39537d72dbadd2044822816860cf816",
 		}, {
-			l2TxHash: &common.Hash{0},
+			l2TxHash: common.Hash{0},
 			txIndex:  0,
 			receipt: ethTypes.Receipt{
 				Status: 1,
-				TxHash: common.HexToHash("0x8f9b0375a6b0f1bd9d54ff499921766828ae8e5314fc44a494736b5c4cc3bb56"),
 				Logs:   []*types.Log{},
 			},
 			logIndex:            0,
 			cumulativeGasUsed:   10000,
 			effectivePercentage: 255,
 			finalBlockInfoRoot:  "0x668ff5e2a08822a32cb3929c012c0544ff0e14deb560817281184ced14f44edd",
+		}, {
+			l2TxHash: common.HexToHash("0x4844782b879fb11b10522bcc32c7efb607a2d1dc713f2d2678c994768465e113"),
+			txIndex:  0,
+			receipt: ethTypes.Receipt{
+				Status: 1,
+				Logs:   []*types.Log{},
+			},
+			logIndex:            0,
+			cumulativeGasUsed:   21000,
+			effectivePercentage: 255,
+			finalBlockInfoRoot:  "0x2a667a8dfe091e5630167afd95190a6c97a31db3c719cc614a356167904e1c18",
 		},
 	}
 
@@ -172,7 +197,7 @@ func TestSetBlockTx(t *testing.T) {
 		infoTree := NewBlockInfoTree()
 
 		root, err := infoTree.SetBlockTx(
-			test.l2TxHash,
+			&test.l2TxHash,
 			test.txIndex,
 			&test.receipt,
 			test.logIndex,

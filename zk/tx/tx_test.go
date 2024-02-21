@@ -9,6 +9,7 @@ import (
 	zkhex "github.com/ledgerwatch/erigon/zkevm/hex"
 
 	"encoding/binary"
+
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -172,8 +173,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 		gasLimit       uint64
 		value          *uint256.Int
 		data           string
-		to             libcommon.Address
-		from           libcommon.Address
+		to             string
+		from           string
 		expectedTxHash string
 	}{
 		{
@@ -183,8 +184,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       30000000,
 			value:          uint256.NewInt(0),
 			data:           "0x188ec356",
-			to:             libcommon.HexToAddress("0x1275fbb540c8efc58b812ba83b0d0b8b9917ae98"),
-			from:           libcommon.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			to:             "0x1275fbb540c8efc58b812ba83b0d0b8b9917ae98",
+			from:           "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
 			expectedTxHash: "0xf3de9c9f50d72933104d5bb109915d93e4958117de78c9a7d1a58b5c6e4cbb77",
 		},
 		{
@@ -194,8 +195,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       100000,
 			value:          uint256.NewInt(0),
 			data:           "0x56d5be740000000000000000000000001275fbb540c8efc58b812ba83b0d0b8b9917ae98",
-			to:             libcommon.HexToAddress("0x005Cf5032B2a844602278b01199ED191A86c93ff"),
-			from:           libcommon.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			to:             "0x005Cf5032B2a844602278b01199ED191A86c93ff",
+			from:           "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
 			expectedTxHash: "0x42e14eabd58bb4f26e928cada9a74081343e9ca0aad0d4f3f4e6254cb3a805ca",
 		},
 		{
@@ -205,8 +206,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       100000,
 			value:          uint256.NewInt(0),
 			data:           "0x56d5be740000000000000000000000001275fbb540c8efc58b812ba83b0d0b8b9917ae98",
-			to:             common.HexToAddress("0x0"),
-			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			to:             "",
+			from:           "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
 			expectedTxHash: "0x8f9cfb43c0f6bc7ce9f9e43e8761776a2ef9657ccf87318e2487c313d119b8cf",
 		}, {
 			chainId:        big.NewInt(4096),
@@ -215,8 +216,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       100000,
 			value:          uint256.NewInt(0),
 			data:           "0x56d5be740000000000000000000000001275fbb540c8efc58b812ba83b0d0b8b9917ae98",
-			to:             common.HexToAddress(""),
-			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			to:             "",
+			from:           "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
 			expectedTxHash: "0xe93d9aadf9ec7453204b7f26380472820729cb401e371b473132cc3ea27d2eef",
 		}, {
 			chainId:        big.NewInt(1700),
@@ -225,8 +226,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       100000,
 			value:          uint256.NewInt(0),
 			data:           "0x",
-			to:             common.HexToAddress(""),
-			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			to:             "",
+			from:           "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
 			expectedTxHash: "0xe8cd2bb2321ae825c970cb1b8ffd3ba6fb28488ca2a8003f9622d07d0cb2b63c",
 		}, {
 			chainId:        big.NewInt(1700),
@@ -235,8 +236,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       100000,
 			value:          uint256.NewInt(0),
 			data:           "0x",
-			to:             common.HexToAddress(""),
-			from:           common.HexToAddress("0x4d5Cf5032B2a844602278b01199ED191A86c93ff"),
+			to:             "",
+			from:           "0x4d5Cf5032B2a844602278b01199ED191A86c93ff",
 			expectedTxHash: "0xe8cd2bb2321ae825c970cb1b8ffd3ba6fb28488ca2a8003f9622d07d0cb2b63c",
 		}, {
 			chainId:        big.NewInt(2442),
@@ -245,8 +246,8 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       30000000,
 			value:          uint256.NewInt(10000000000000),
 			data:           "",
-			to:             common.HexToAddress("0x417a7BA2d8d0060ae6c54fd098590DB854B9C1d5"),
-			from:           common.HexToAddress("0x9AF3049dD15616Fd627A35563B5282bEA5C32E20"),
+			to:             "0x417a7BA2d8d0060ae6c54fd098590DB854B9C1d5",
+			from:           "0x9AF3049dD15616Fd627A35563B5282bEA5C32E20",
 			expectedTxHash: "0x26460f7fa46b88e6a383a496e567ba76cb307ccaa82b64fc739bfeebbef8d747",
 		}, {
 			chainId:        big.NewInt(2442),
@@ -255,9 +256,39 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			gasLimit:       21000,
 			value:          uint256.NewInt(10000000000000),
 			data:           "",
-			to:             common.HexToAddress("0x417a7BA2d8d0060ae6c54fd098590DB854B9C1d5"),
-			from:           common.HexToAddress("0x9af3049dd15616fd627a35563b5282bea5c32e20"),
+			to:             "0x417a7BA2d8d0060ae6c54fd098590DB854B9C1d5",
+			from:           "0x9af3049dd15616fd627a35563b5282bea5c32e20",
 			expectedTxHash: "0x0a3b9eafc5562a432f25398a849fd2296c717e0d9e90189d1c41e7b6ddcaa3dd",
+		}, {
+			chainId:        big.NewInt(2440),
+			nonce:          84,
+			gasPrice:       uint256.NewInt(493000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(1000000000000000000),
+			data:           "",
+			to:             "0x0000000000000000000000000000000000000000",
+			from:           "0x5751D5b29dA14d5C334A9453cF04181f417aBe4c",
+			expectedTxHash: "0x02c2b4bbe2d7e6a236b0c5c25f89dc729e1a2df1363912f966662759b6edab33",
+		}, {
+			chainId:        big.NewInt(2440),
+			nonce:          87,
+			gasPrice:       uint256.NewInt(493000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(100),
+			data:           "",
+			to:             "0x0000000000000000000000000000000000000003",
+			from:           "0x5751D5b29dA14d5C334A9453cF04181f417aBe4c",
+			expectedTxHash: "0x2d9ecd316c7106602210b7ccc290f1744308a4661bfd5f484020d5a193c63d78",
+		}, {
+			chainId:        big.NewInt(2440),
+			nonce:          88,
+			gasPrice:       uint256.NewInt(493000000),
+			gasLimit:       100000,
+			value:          uint256.NewInt(1000),
+			data:           "",
+			to:             "0x0000000000000000000000000000000000000004",
+			from:           "0x5751D5b29dA14d5C334A9453cF04181f417aBe4c",
+			expectedTxHash: "0x3fc26004cfe8bc6c3078fddace50c5d073109d18fc9095d37e60c471ffa1a075",
 		},
 	}
 
@@ -266,14 +297,24 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Test %d: unexpected error: %v", i+1, err)
 		}
+		var to, from *common.Address
+
+		if test.to != "" {
+			a := common.HexToAddress(test.to)
+			to = &a
+		}
+		if test.from != "" {
+			a := common.HexToAddress(test.from)
+			from = &a
+		}
 		result, err := ComputeL2TxHash(
 			test.chainId,
 			test.value,
 			test.gasPrice,
 			test.nonce,
 			test.gasLimit,
-			&test.to,
-			&test.from,
+			to,
+			from,
 			dataBytes,
 		)
 		if err != nil {
