@@ -15,8 +15,8 @@ import (
 type MessageListener interface {
 	Start(ctx context.Context)
 	Stop()
-	RegisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage])
-	UnregisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage])
+	RegisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage])
+	UnregisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage])
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent])
 	UnregisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent])
 }
@@ -65,11 +65,11 @@ func (ml *messageListener) Stop() {
 	ml.peerEventObservers = map[MessageObserver[*sentry.PeerEvent]]struct{}{}
 }
 
-func (ml *messageListener) RegisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage]) {
+func (ml *messageListener) RegisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage]) {
 	ml.registerInboundMessageObserver(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *messageListener) UnregisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage]) {
+func (ml *messageListener) UnregisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage]) {
 	ml.unregisterInboundMessageObserver(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
@@ -131,6 +131,8 @@ func (ml *messageListener) listenInboundMessage(name string, msgId sentry.Messag
 
 func (ml *messageListener) statusDataFactory() sentrymulticlient.StatusDataFactory {
 	return func() *sentry.StatusData {
+		// TODO add a "status data component" that message listener will use as a dependency to fetch status data
+		//      "status data component" will be responsible for providing a mechanism to provide up-to-date status data
 		return &sentry.StatusData{}
 	}
 }

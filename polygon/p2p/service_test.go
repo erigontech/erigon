@@ -77,7 +77,12 @@ func (st *serviceTest) mockExpectPenalizePeer(peerId PeerId) {
 		Times(1)
 }
 
-func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(msgs []*sentry.InboundMessage, peerId PeerId) {
+func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(
+	msgs []*sentry.InboundMessage,
+	peerId PeerId,
+	wantOriginNumber uint64,
+	wantAmount uint64,
+) {
 	var wg sync.WaitGroup
 	if len(msgs) > 0 {
 		wg.Add(1)
@@ -91,7 +96,7 @@ func (st *serviceTest) mockSentryBlockHeaders66InboundMessageStream(msgs []*sent
 	st.sentryClient.
 		EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(newSendGetBlockHeaders66MessageMock(&wg, peerId, sentry.MessageId_GET_BLOCK_HEADERS_66, 1, 3)).
+		DoAndReturn(newSendGetBlockHeaders66MessageMock(&wg, peerId, wantOriginNumber, wantAmount)).
 		AnyTimes()
 	st.sentryClient.
 		EXPECT().
@@ -187,20 +192,17 @@ func newMockRequestGenerator(reqId uint64) RequestIdGenerator {
 	}
 }
 
-func newMockBlockHeadersPacket66Bytes(t *testing.T, requestId uint64) []byte {
+func newMockBlockHeadersPacket66Bytes(t *testing.T, requestId uint64, numHeaders int) []byte {
+	headers := make([]*types.Header, numHeaders)
+	for i := range headers {
+		headers[i] = &types.Header{
+			Number: big.NewInt(int64(i) + 1),
+		}
+	}
+
 	blockHeadersPacket66 := eth.BlockHeadersPacket66{
-		RequestId: requestId,
-		BlockHeadersPacket: []*types.Header{
-			{
-				Number: big.NewInt(1),
-			},
-			{
-				Number: big.NewInt(2),
-			},
-			{
-				Number: big.NewInt(3),
-			},
-		},
+		RequestId:          requestId,
+		BlockHeadersPacket: headers,
 	}
 	blockHeadersPacket66Bytes, err := rlp.EncodeToBytes(&blockHeadersPacket66)
 	require.NoError(t, err)
@@ -210,7 +212,6 @@ func newMockBlockHeadersPacket66Bytes(t *testing.T, requestId uint64) []byte {
 func newSendGetBlockHeaders66MessageMock(
 	wg *sync.WaitGroup,
 	wantPeerId PeerId,
-	wantMessageId sentry.MessageId,
 	wantOriginNumber uint64,
 	wantAmount uint64,
 ) sendMessageByIdMock {
@@ -222,8 +223,8 @@ func newSendGetBlockHeaders66MessageMock(
 			return nil, fmt.Errorf("wantPeerId != reqPeerId - %v vs %v", wantPeerId, reqPeerId)
 		}
 
-		if wantMessageId != req.Data.Id {
-			return nil, fmt.Errorf("wantMessageId != req.Data.Id - %v vs %v", wantMessageId, req.Data.Id)
+		if sentry.MessageId_GET_BLOCK_HEADERS_66 != req.Data.Id {
+			return nil, fmt.Errorf("MessageId_GET_BLOCK_HEADERS_66 != req.Data.Id - %v", req.Data.Id)
 		}
 
 		var pkt eth.GetBlockHeadersPacket66
@@ -245,7 +246,7 @@ func newSendGetBlockHeaders66MessageMock(
 
 type sendMessageByIdMock func(context.Context, *sentry.SendMessageByIdRequest, ...grpc.CallOption) (*sentry.SentPeers, error)
 
-func TestServiceDownloadHeaders(t *testing.T) {
+func TestServiceFetchHeaders(t *testing.T) {
 	ctx := context.Background()
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
@@ -262,39 +263,38 @@ func TestServiceDownloadHeaders(t *testing.T) {
 			// should get filtered because it is from a different request id
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
-			Data:   newMockBlockHeadersPacket66Bytes(t, requestId*2),
+			Data:   newMockBlockHeadersPacket66Bytes(t, requestId*2, 2),
 		},
 		{
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
-			Data:   newMockBlockHeadersPacket66Bytes(t, requestId),
+			Data:   newMockBlockHeadersPacket66Bytes(t, requestId, 2),
 		},
 	}
 
 	test := newServiceTest(t, newMockRequestGenerator(requestId))
-	test.mockSentryBlockHeaders66InboundMessageStream(mockInboundMessages, peerId)
+	test.mockSentryBlockHeaders66InboundMessageStream(mockInboundMessages, peerId, 1, 2)
 	test.run(ctx, func(t *testing.T) {
-		headers, err := test.service.DownloadHeaders(ctx, 1, 3, peerId)
+		headers, err := test.service.FetchHeaders(ctx, 1, 3, peerId)
 		require.NoError(t, err)
-		require.Len(t, headers, 3)
+		require.Len(t, headers, 2)
 		require.Equal(t, uint64(1), headers[0].Number.Uint64())
 		require.Equal(t, uint64(2), headers[1].Number.Uint64())
-		require.Equal(t, uint64(3), headers[2].Number.Uint64())
 	})
 }
 
-func TestServiceInvalidDownloadHeadersRangeErr(t *testing.T) {
+func TestServiceErrInvalidDownloadHeadersRange(t *testing.T) {
 	ctx := context.Background()
 	test := newServiceTest(t, newMockRequestGenerator(1))
-	test.mockSentryBlockHeaders66InboundMessageStream(nil, PeerId{})
+	test.mockSentryBlockHeaders66InboundMessageStream(nil, PeerId{}, 1, 2)
 	test.run(ctx, func(t *testing.T) {
-		headers, err := test.service.DownloadHeaders(ctx, 3, 1, PeerIdFromUint64(1))
-		require.ErrorIs(t, err, invalidDownloadHeadersRangeErr)
+		headers, err := test.service.FetchHeaders(ctx, 3, 1, PeerIdFromUint64(1))
+		require.ErrorIs(t, err, ErrInvalidFetchHeadersRange)
 		require.Nil(t, headers)
 	})
 }
 
-func TestServiceDownloadHeadersShouldPenalizePeerWhenInvalidRlpErr(t *testing.T) {
+func TestServiceFetchHeadersShouldPenalizePeerWhenInvalidRlpErr(t *testing.T) {
 	ctx := context.Background()
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
@@ -307,10 +307,10 @@ func TestServiceDownloadHeadersShouldPenalizePeerWhenInvalidRlpErr(t *testing.T)
 	}
 
 	test := newServiceTest(t, newMockRequestGenerator(requestId))
-	test.mockSentryBlockHeaders66InboundMessageStream(mockInboundMessages, peerId)
+	test.mockSentryBlockHeaders66InboundMessageStream(mockInboundMessages, peerId, 1, 2)
 	test.mockExpectPenalizePeer(peerId)
 	test.run(ctx, func(t *testing.T) {
-		headers, err := test.service.DownloadHeaders(ctx, 1, 3, peerId)
+		headers, err := test.service.FetchHeaders(ctx, 1, 3, peerId)
 		require.Error(t, err)
 		require.Nil(t, headers)
 	})

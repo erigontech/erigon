@@ -35,19 +35,19 @@ func (m *MockService) EXPECT() *MockServiceMockRecorder {
 	return m.recorder
 }
 
-// DownloadHeaders mocks base method.
-func (m *MockService) DownloadHeaders(arg0 context.Context, arg1, arg2 uint64, arg3 PeerId) ([]*types.Header, error) {
+// FetchHeaders mocks base method.
+func (m *MockService) FetchHeaders(arg0 context.Context, arg1, arg2 uint64, arg3 PeerId) ([]*types.Header, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DownloadHeaders", arg0, arg1, arg2, arg3)
+	ret := m.ctrl.Call(m, "FetchHeaders", arg0, arg1, arg2, arg3)
 	ret0, _ := ret[0].([]*types.Header)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// DownloadHeaders indicates an expected call of DownloadHeaders.
-func (mr *MockServiceMockRecorder) DownloadHeaders(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
+// FetchHeaders indicates an expected call of FetchHeaders.
+func (mr *MockServiceMockRecorder) FetchHeaders(arg0, arg1, arg2, arg3 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DownloadHeaders", reflect.TypeOf((*MockService)(nil).DownloadHeaders), arg0, arg1, arg2, arg3)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchHeaders", reflect.TypeOf((*MockService)(nil).FetchHeaders), arg0, arg1, arg2, arg3)
 }
 
 // ListPeersMayHaveBlockNum mocks base method.
