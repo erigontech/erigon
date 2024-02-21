@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"runtime"
+	"sort"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -57,6 +59,27 @@ type Cfg struct {
 	gossipSource    persistence.BlockSource
 
 	hasDownloaded, backfilling bool
+}
+
+func generateCommitmentsToSlotMap(blocks []*cltypes.SignedBeaconBlock) map[common.Bytes48]uint64 {
+	out := make(map[common.Bytes48]uint64)
+	for _, block := range blocks {
+		if block.Version() < clparams.DenebVersion {
+			continue
+		}
+		for i := 0; i < block.Block.Body.BlobKzgCommitments.Len(); i++ {
+			out[common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(i))] = block.Block.Slot
+		}
+	}
+	return out
+}
+
+func getBlobProgress(s map[common.Bytes48]uint64) uint64 {
+	min := uint64(math.MaxUint64)
+	for _, slot := range s {
+		min = utils.Min64(min, slot)
+	}
+	return min
 }
 
 type Args struct {
@@ -274,11 +297,16 @@ func ConsensusClStages(ctx context.Context,
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
 					downloader.SetHighestProcessedSlot(currentSlot.Load())
 					downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed common.Hash, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
-
-						for _, block := range blocks {
+						initialHighestSlotProcessed := highestSlotProcessed
+						initialHighestBlockRootProcessed := highestBlockRootProcessed
+						sort.Slice(blocks, func(i, j int) bool {
+							return blocks[i].Block.Slot < blocks[j].Block.Slot
+						})
+						for i, block := range blocks {
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
-								return highestSlotProcessed, highestBlockRootProcessed, err
+								blocks = blocks[i:]
+								break
 							}
 							if shouldInsert && block.Version() >= clparams.BellatrixVersion {
 								if cfg.prebuffer == nil {
@@ -288,18 +316,24 @@ func ConsensusClStages(ctx context.Context,
 								executionPayload := block.Block.Body.ExecutionPayload
 								executionPayloadRoot, err := executionPayload.HashSSZ()
 								if err != nil {
-									return highestSlotProcessed, highestBlockRootProcessed, err
+									blocks = blocks[i:]
+									logger.Warn("failed to hash execution payload", "err", err)
+									break
 								}
 								versionByte := byte(block.Version())
 								enc, err := executionPayload.EncodeSSZ(nil)
 								if err != nil {
-									return highestSlotProcessed, highestBlockRootProcessed, err
+									blocks = blocks[i:]
+									logger.Warn("failed to encode execution payload", "err", err)
+									break
 								}
 								enc = append([]byte{versionByte}, append(block.Block.ParentRoot[:], enc...)...)
 								enc = utils.CompressSnappy(enc)
 
 								if err := cfg.prebuffer.Collect(dbutils.BlockBodyKey(executionPayload.BlockNumber, executionPayloadRoot), enc); err != nil {
-									return highestSlotProcessed, highestBlockRootProcessed, err
+									blocks = blocks[i:]
+									logger.Warn("failed to collect execution payload", "err", err)
+									break
 								}
 							}
 
@@ -308,18 +342,65 @@ func ConsensusClStages(ctx context.Context,
 								highestSlotProcessed = block.Block.Slot
 								highestBlockRootProcessed, err = block.Block.HashSSZ()
 								if err != nil {
-									return highestSlotProcessed, highestBlockRootProcessed, err
+									blocks = blocks[i:]
+									logger.Warn("failed to hash block", "err", err)
+									break
 								}
 							}
 						}
-
-						return highestSlotProcessed, highestBlockRootProcessed, nil
+						// Do the DA now, first of all see what blobs to retrieve
+						ids, err := network2.BlobsIdentifiersFromBlocks(blocks)
+						if err != nil {
+							logger.Warn("failed to get blob identifiers", "err", err)
+							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
+						}
+						if ids.Len() == 0 { // no blobs, no DA.
+							return highestSlotProcessed, highestBlockRootProcessed, nil
+						}
+						blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+						if err != nil {
+							logger.Warn("failed to get blobs", "err", err)
+							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
+						}
+						// We got the blobs, now we need to process them
+						blobsRequired := generateCommitmentsToSlotMap(blocks)
+						if err := cltypes.VerifyBlobsSidecarAgainstExpectedBlobs(blobs, blobsRequired); err != nil {
+							logger.Warn("failed to batch verify blobs", "err", err)
+							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
+						}
+						// We have verified the blobs, now we need to track the progress
+						cap := getBlobProgress(blobsRequired)
+						if cap == math.MaxUint64 {
+							return highestSlotProcessed, highestBlockRootProcessed, nil
+						}
+						// If there was a truncation in the response, act accordingly and record the blob download progress only.
+						var currentCandidate *cltypes.SignedBeaconBlock
+						for i := 0; i < len(blocks); i++ {
+							if currentCandidate == nil {
+								currentCandidate = blocks[i]
+							}
+							if blocks[i].Block.Slot >= cap {
+								if i == 0 {
+									return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
+								}
+								highestSlotProcessed = currentCandidate.Block.Slot
+								highestBlockRootProcessed, err = currentCandidate.Block.HashSSZ()
+								if err != nil {
+									return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
+								}
+								return highestSlotProcessed, highestBlockRootProcessed, nil
+							}
+							currentCandidate = blocks[i]
+						}
+						// Better to panic than to continue with a bad state
+						panic("should never reach here")
 					})
 					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 					logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
 					prevProgress := currentSlot.Load()
 					for currentSlot.Load()+4 < chainTipSlot {
 						downloader.RequestMore(ctx)
+
 						select {
 						case <-ctx.Done():
 							return ctx.Err()

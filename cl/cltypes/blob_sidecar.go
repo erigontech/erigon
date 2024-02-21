@@ -1,11 +1,14 @@
 package cltypes
 
 import (
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/ledgerwatch/log/v3"
 )
 
 const BRANCH_SIZE = 17
@@ -106,4 +109,23 @@ func (b *BlobIdentifier) getSchema() []interface{} {
 		b.BlockRoot[:],
 		&b.Index,
 	}
+}
+
+func VerifyBlobsSidecarAgainstExpectedBlobs(sidecars []*BlobSidecar, commitmentsToSlot map[libcommon.Bytes48]uint64) error {
+	for i, sidecar := range sidecars {
+		if commitmentsToSlot != nil {
+			if _, ok := commitmentsToSlot[sidecar.KzgCommitment]; !ok {
+				continue
+			}
+		}
+		if err := kzg.Ctx().VerifyBlobKZGProof(gokzg4844.Blob(sidecar.Blob), gokzg4844.KZGCommitment(sidecar.KzgCommitment), gokzg4844.KZGProof(sidecar.KzgProof)); err != nil {
+			log.Debug("BlobSidecar KZG proof verification failed", "index", i, "err", err)
+			continue
+		}
+		if commitmentsToSlot != nil {
+			delete(commitmentsToSlot, sidecar.KzgCommitment)
+		}
+	}
+
+	return nil
 }

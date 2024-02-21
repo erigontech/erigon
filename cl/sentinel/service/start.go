@@ -31,7 +31,6 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 			Name:     fmt.Sprintf(template, i),
 			CodecStr: sentinel.SSZSnappyCodec,
 		})
-		fmt.Println(fmt.Sprintf(template, i))
 	}
 	return topics
 }
