@@ -37,15 +37,11 @@ func NewService(
 	verify := VerifyAccumulatedHeaders
 	p2pService := polygonP2P.NewService(maxPeers, logger, sentryClient)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
-	heimdallService := heimdall.NewHeimdall(heimdallClient, logger)
-	checkpointStore := heimdall.NewMockCheckpointStore(nil)
-	milestoneStore := heimdall.NewMockMilestoneStore(nil)
+	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
 	downloader := NewHeaderDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		checkpointStore,
-		milestoneStore,
 		verify,
 		storage,
 	)

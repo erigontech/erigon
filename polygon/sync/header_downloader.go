@@ -28,21 +28,15 @@ type HeadersWriter interface {
 func NewHeaderDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.Heimdall,
-	checkpoints heimdall.CheckpointStore,
-	milestones heimdall.MilestoneStore,
+	heimdall heimdall.HeimdallNoStore,
 	verify AccumulatedHeadersVerifier,
 	headersWriter HeadersWriter,
 ) *HeaderDownloader {
 	return &HeaderDownloader{
 		logger:     logger,
 		p2pService: p2pService,
-
-		heimdall:    heimdall,
-		checkpoints: checkpoints,
-		milestones:  milestones,
-
-		verify: verify,
+		heimdall:   heimdall,
+		verify:     verify,
 
 		headersWriter: headersWriter,
 	}
@@ -51,18 +45,14 @@ func NewHeaderDownloader(
 type HeaderDownloader struct {
 	logger     log.Logger
 	p2pService p2p.Service
-
-	heimdall    heimdall.Heimdall
-	checkpoints heimdall.CheckpointStore
-	milestones  heimdall.MilestoneStore
-
-	verify AccumulatedHeadersVerifier
+	heimdall   heimdall.HeimdallNoStore
+	verify     AccumulatedHeadersVerifier
 
 	headersWriter HeadersWriter
 }
 
 func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
-	waypoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, hd.checkpoints, start)
+	waypoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return err
 	}
@@ -76,7 +66,7 @@ func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start 
 }
 
 func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start uint64) error {
-	waypoints, err := hd.heimdall.FetchMilestonesFromBlock(ctx, hd.milestones, start)
+	waypoints, err := hd.heimdall.FetchMilestonesFromBlock(ctx, start)
 	if err != nil {
 		return err
 	}
