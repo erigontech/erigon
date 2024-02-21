@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"context"
+
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
 
@@ -21,6 +23,8 @@ type Service interface {
 
 type service struct {
 	sync *Sync
+
+	p2pService polygonP2P.Service
 }
 
 func NewService(
@@ -72,10 +76,17 @@ func NewService(
 		logger,
 	)
 	return &service{
-		sync: sync,
+		sync:       sync,
+		p2pService: p2pService,
 	}
 }
 
 func (s *service) GetSync() *Sync {
 	return s.sync
+}
+
+func (s *service) Run(ctx context.Context) {
+	s.p2pService.Start(ctx)
+	<-ctx.Done()
+	s.p2pService.Stop()
 }
