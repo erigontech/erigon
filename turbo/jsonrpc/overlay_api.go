@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/adapter/ethapi"
@@ -196,13 +197,22 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address libcommo
 
 	}
 
-	overlayTx := block.Transactions()[transactionIndex]
-	statedb.SetTxContext(overlayTx.Hash(), block.Hash(), transactionIndex)
-	msg, err := overlayTx.AsMessage(*signer, block.BaseFee(), rules)
+	creationTx := block.Transactions()[transactionIndex]
+	statedb.SetTxContext(creationTx.Hash(), block.Hash(), transactionIndex)
+
+	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
+	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)
 	if err != nil {
 		return nil, err
 	}
-	msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.Tip(), *code, msg.AccessList(), msg.CheckNonce(), msg.IsFree(), msg.MaxFeePerBlobGas())
+
+	contractAddr := crypto.CreateAddress(msg.From(), msg.Nonce())
+	if creationTx.GetTo() == nil && contractAddr == address {
+		// CREATE: adapt message with new code so it's replaced instantly
+		msg = types.NewMessage(msg.From(), msg.To(), msg.Nonce(), msg.Value(), api.GasCap, msg.GasPrice(), msg.FeeCap(), msg.Tip(), *code, msg.AccessList(), msg.CheckNonce(), msg.IsFree(), msg.MaxFeePerBlobGas())
+	} else {
+		msg.ChangeGas(api.GasCap, api.GasCap)
+	}
 	txCtx = core.NewEVMTxContext(msg)
 	ct := OverlayCreateTracer{contractAddress: address, code: *code, gasCap: api.GasCap}
 	evm = vm.NewEVM(blockCtx, txCtx, evm.IntraBlockState(), chainConfig, vm.Config{Debug: true, Tracer: &ct})
@@ -224,7 +234,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address libcommo
 			return nil, err
 		}
 		code := evm.IntraBlockState().GetCode(address)
-		if code != nil && len(code) > 0 {
+		if len(code) > 0 {
 			c := hexutility.Bytes(code)
 			resultCode.Code = &c
 			return resultCode, nil

@@ -34,7 +34,7 @@ func (ct *OverlayCreateTracer) CaptureEnter(typ vm.OpCode, from libcommon.Addres
 
 	if create && to == ct.contractAddress {
 		ct.isCapturing = true
-		_, _, _, err := ct.evm.OverlayCreate(vm.AccountRef(to), vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, typ, true /* incrementNonce */)
+		_, _, _, err := ct.evm.OverlayCreate(vm.AccountRef(from), vm.NewCodeAndHash(ct.code), ct.gasCap, value, to, typ, true /* incrementNonce */)
 		if err != nil {
 			ct.err = err
 		} else {
