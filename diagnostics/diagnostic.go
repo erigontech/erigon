@@ -27,7 +27,7 @@ type DiagnosticClient struct {
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}}
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}}
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -78,11 +78,13 @@ func (d *DiagnosticClient) getSysInfo() {
 	diskInfo := GetDiskInfo()
 	cpuInfo := GetCPUInfo()
 
+	d.mu.Lock()
 	d.hardwareInfo = diaglib.HardwareInfo{
 		RAM:  ramInfo,
 		Disk: diskInfo,
 		CPU:  cpuInfo,
 	}
+	d.mu.Unlock()
 }
 
 func GetRAMInfo() diaglib.RAMInfo {
