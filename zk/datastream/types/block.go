@@ -14,9 +14,8 @@ const (
 	startL2BlockDataLengthPreEtrogForkId7 = 78
 	endL2BlockDataLength                  = 72
 
-	// EntryTypeL2Block represents a L2 block
-	EntryTypeStartL2Block EntryType = 1
-	EntryTypeEndL2Block   EntryType = 3
+	EntryTypeStartL2Block = EntryType(1)
+	EntryTypeEndL2Block   = EntryType(3)
 )
 
 // StartL2Block represents a zkEvm block
@@ -31,6 +30,17 @@ type StartL2Block struct {
 	Coinbase        common.Address // 20 bytes
 	ForkId          uint16         // 2 bytes
 	ChainId         uint32         // 4 bytes
+}
+
+func (s *StartL2Block) EntryType() EntryType {
+	return EntryTypeStartL2Block
+}
+
+func (s *StartL2Block) Bytes(bigEndian bool) []byte {
+	if bigEndian {
+		return EncodeStartL2BlockBigEndian(s)
+	}
+	return EncodeStartL2Block(s)
 }
 
 // decodes a StartL2Block from a byte array
@@ -143,6 +153,17 @@ type EndL2Block struct {
 	L2BlockNumber uint64      // 8 bytes
 	L2Blockhash   common.Hash // 32 bytes
 	StateRoot     common.Hash // 32 bytes
+}
+
+func (b *EndL2Block) EntryType() EntryType {
+	return EntryTypeEndL2Block
+}
+
+func (b *EndL2Block) Bytes(bigEndian bool) []byte {
+	if bigEndian {
+		return EncodeEndL2BlockBigEndian(b)
+	}
+	return EncodeEndL2Block(b)
 }
 
 // DecodeEndL2Block decodes a EndL2Block from a byte array

@@ -134,8 +134,7 @@ func SpawnStageDataStreamCatchup(
 			if err != nil {
 				return err
 			}
-			err = writeBlockToStream(block, reader, srv, lastBlock, currentBatch)
-			if err != nil {
+			if err = srv.CreateAndCommitEntriesToStream(block, reader, lastBlock, currentBatch, true); err != nil {
 				return err
 			}
 			lastBlock = block
@@ -189,87 +188,6 @@ func preLoadBatchedToBlocks(tx kv.RwTx) (map[uint64][]uint64, error) {
 	return batchToBlocks, nil
 }
 
-func writeBlockToStream(
-	block *eritypes.Block,
-	reader *hermez_db.HermezDbReader,
-	srv *server.DataStreamServer,
-	lastBlock *eritypes.Block,
-	currentBatch uint64,
-) error {
-	fork, err := reader.GetForkId(currentBatch)
-	if err != nil {
-		return err
-	}
-
-	err = srv.AddBookmark(server.BlockBookmarkType, block.NumberU64())
-	if err != nil {
-		return err
-	}
-
-	deltaTimestamp := block.Time() - lastBlock.Time()
-
-	var ger common.Hash
-	var l1BlockHash common.Hash
-
-	l1Index, err := reader.GetBlockL1InfoTreeIndex(block.NumberU64())
-	if err != nil {
-		return err
-	}
-
-	if block.NumberU64() == 1 {
-		// injected batch at the start of the network
-		injected, err := reader.GetL1InjectedBatch(0)
-		if err != nil {
-			return err
-		}
-		ger = injected.LastGlobalExitRoot
-		l1BlockHash = injected.L1ParentHash
-
-		// block 1 in the stream has a delta timestamp of the block time itself
-		deltaTimestamp = block.Time()
-	} else {
-		// standard behaviour for non-injected or forced batches
-		if l1Index != 0 {
-			// read the index info itself
-			l1Info, err := reader.GetL1InfoTreeUpdate(l1Index)
-			if err != nil {
-				return err
-			}
-			if l1Info != nil {
-				ger = l1Info.GER
-				l1BlockHash = l1Info.ParentHash
-			}
-		}
-	}
-
-	err = srv.AddBlockStart(block, currentBatch, uint16(fork), ger, uint32(deltaTimestamp), uint32(l1Index), l1BlockHash)
-	if err != nil {
-		return err
-	}
-
-	for _, tx := range block.Transactions() {
-		effectiveGasPricePercentage, err := reader.GetEffectiveGasPricePercentage(tx.Hash())
-		if err != nil {
-			return err
-		}
-		stateRoot, err := reader.GetStateRoot(block.NumberU64())
-		if err != nil {
-			return err
-		}
-		_, err = srv.AddTransaction(effectiveGasPricePercentage, stateRoot, uint16(fork), tx)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = srv.AddBlockEnd(block.NumberU64(), block.Root(), block.Root())
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func writeGenesisToStream(
 	genesis *eritypes.Block,
 	reader *hermez_db.HermezDbReader,
@@ -297,18 +215,11 @@ func writeGenesisToStream(
 		return err
 	}
 
-	err = srv.AddBookmark(server.BlockBookmarkType, genesis.NumberU64())
-	if err != nil {
-		return err
-	}
+	bookmark := srv.CreateBookmarkEntry(server.BlockBookmarkType, genesis.NumberU64())
+	blockStart := srv.CreateBlockStartEntry(genesis, batch, uint16(fork), ger, 0, 0, common.Hash{})
+	blockEnd := srv.CreateBlockEndEntry(genesis.NumberU64(), genesis.Hash(), genesis.Root())
 
-	err = srv.AddBlockStart(genesis, batch, uint16(fork), ger, 0, 0, common.Hash{})
-	if err != nil {
-		return err
-	}
-
-	err = srv.AddBlockEnd(genesis.NumberU64(), genesis.Hash(), genesis.Root())
-	if err != nil {
+	if err = srv.CommitEntriesToStream([]server.DataStreamEntry{bookmark, blockStart, blockEnd}, true); err != nil {
 		return err
 	}
 

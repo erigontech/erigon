@@ -22,6 +22,17 @@ type L2Transaction struct {
 	Encoded                     []byte
 }
 
+func (t *L2Transaction) EntryType() EntryType {
+	return EntryTypeL2Tx
+}
+
+func (t *L2Transaction) Bytes(bigEndian bool) []byte {
+	if bigEndian {
+		return EncodeL2TransactionBigEndian(t)
+	}
+	return EncodeL2Transaction(t)
+}
+
 // DecodeL2Transaction decodes a L2 transaction from a byte array
 func DecodeL2Transaction(data []byte) (*L2Transaction, error) {
 	dataLen := len(data)
@@ -68,7 +79,7 @@ func DecodeL2TransactionBigEndian(data []byte) (*L2Transaction, error) {
 	}, nil
 }
 
-func EncodeL2Transaction(tx L2Transaction) []byte {
+func EncodeL2Transaction(tx *L2Transaction) []byte {
 	bytes := make([]byte, 0)
 	bytes = append(bytes, []byte{tx.EffectiveGasPricePercentage, tx.IsValid}...)
 	bytes = append(bytes, tx.StateRoot[:]...)
@@ -77,7 +88,7 @@ func EncodeL2Transaction(tx L2Transaction) []byte {
 	return bytes
 }
 
-func EncodeL2TransactionBigEndian(tx L2Transaction) []byte {
+func EncodeL2TransactionBigEndian(tx *L2Transaction) []byte {
 	bytes := make([]byte, 0)
 	bytes = append(bytes, []byte{tx.EffectiveGasPricePercentage, tx.IsValid}...)
 	bytes = append(bytes, tx.StateRoot[:]...)
