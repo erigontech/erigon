@@ -17,6 +17,7 @@ type Heimdall interface {
 	LastCheckpointId(ctx context.Context, store CheckpointStore) (CheckpointId, bool, error)
 	LastMilestoneId(ctx context.Context, store MilestoneStore) (MilestoneId, bool, error)
 	LastSpanId(ctx context.Context, store SpanStore) (SpanId, bool, error)
+	FetchLatestSpan(ctx context.Context, store SpanStore) (*Span, error)
 
 	FetchCheckpoints(ctx context.Context, store CheckpointStore, start CheckpointId, end CheckpointId) ([]*Checkpoint, error)
 	FetchMilestones(ctx context.Context, store MilestoneStore, start MilestoneId, end MilestoneId) ([]*Milestone, error)
@@ -246,13 +247,17 @@ func (h *heimdallImpl) FetchMilestones(ctx context.Context, store MilestoneStore
 }
 
 func (h *heimdallImpl) LastSpanId(ctx context.Context, store SpanStore) (SpanId, bool, error) {
-	span, err := h.client.FetchLatestSpan(ctx)
+	span, err := h.FetchLatestSpan(ctx, store)
 
 	if err != nil {
 		return 0, false, err
 	}
 
 	return span.Id, true, nil
+}
+
+func (h *heimdallImpl) FetchLatestSpan(ctx context.Context, store SpanStore) (*Span, error) {
+	return h.client.FetchLatestSpan(ctx)
 }
 
 func (h *heimdallImpl) FetchSpansFromBlock(ctx context.Context, store SpanStore, startBlock uint64) ([]*Span, error) {
