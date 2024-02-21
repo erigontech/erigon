@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func (s *EthereumExecutionModule) validatePayloadBlobs(expectedBlobHashes []libcommon.Hash, transactions []types.Transaction, blobGasUsed uint64) error {
@@ -40,6 +41,9 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	log.Info("[dbg] InsertBlocks start")
+	defer func() { log.Info("[dbg] InsertBlocks end") }()
+
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
