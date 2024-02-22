@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
@@ -152,9 +153,22 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 		}
 	case gossip.TopicNameBeaconAggregateAndProof:
 		return nil
-		// if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
-		// 	return err
-		// } Uncomment when fixed.
+	// if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
+	// 	return err
+	// } Uncomment when fixed.
+	default:
+		switch {
+		case gossip.IsTopicBlobSidecar(data.Name):
+			// decode sidecar
+			blobSideCar := &cltypes.BlobSidecar{}
+			if err := blobSideCar.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				l["at"] = "decoding blob sidecar"
+				return err
+			}
+			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
+		default:
+		}
 	}
 	return nil
 }

@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"net"
 
+	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -20,6 +22,18 @@ import (
 type ServerConfig struct {
 	Network string
 	Addr    string
+}
+
+func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
+	topics := make([]sentinel.GossipTopic, 0, maxIds)
+	for i := 0; i < maxIds; i++ {
+		topics = append(topics, sentinel.GossipTopic{
+			Name:     fmt.Sprintf(template, i),
+			CodecStr: sentinel.SSZSnappyCodec,
+		})
+		fmt.Println(fmt.Sprintf(template, i))
+	}
+	return topics
 }
 
 func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
@@ -41,6 +55,7 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 		////sentinel.LightClientFinalityUpdateSsz,
 		////sentinel.LightClientOptimisticUpdateSsz,
 	}
+	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixBlobSidecar, int(cfg.BeaconConfig.MaxBlobsPerBlock))...)
 	// gossipTopics = append(gossipTopics, sentinel.GossipSidecarTopics(chain.MaxBlobsPerBlock)...)
 
 	for _, v := range gossipTopics {
