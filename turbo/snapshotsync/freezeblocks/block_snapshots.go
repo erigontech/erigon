@@ -2143,26 +2143,32 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 
 func (m *Merger) filesByRange(snapshots *RoSnapshots, from, to uint64) (map[snaptype.Enum][]string, error) {
 	toMerge := map[snaptype.Enum][]string{}
+
 	view := snapshots.View()
 	defer view.Close()
 
-	if _, first, ok := snapshots.segments.Min(); ok {
-		for i, sn := range first.segments {
-			if sn.from < from {
-				continue
-			}
-			if sn.to > to {
-				break
-			}
-
-			snapshots.segments.Scan(func(key snaptype.Enum, value *segments) bool {
-				toMerge[key] = append(toMerge[key], view.Segments(key.Type())[i].FilePath())
-				return true
-			})
-		}
+	for _, t := range snaptype.AllTypes {
+		toMerge[t.Enum()] = m.filesByRangeOfType(view, from, to, t)
 	}
 
 	return toMerge, nil
+}
+
+func (m *Merger) filesByRangeOfType(view *View, from, to uint64, snapshotType snaptype.Type) []string {
+	paths := make([]string, 0)
+
+	for _, sn := range view.Segments(snapshotType) {
+		if sn.from < from {
+			continue
+		}
+		if sn.to > to {
+			break
+		}
+
+		paths = append(paths, sn.FilePath())
+	}
+
+	return paths
 }
 
 // Merge does merge segments in given ranges

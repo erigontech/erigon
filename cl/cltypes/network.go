@@ -160,3 +160,24 @@ func (s *Status) DecodeSSZ(buf []byte, version int) error {
 func (s *Status) EncodingSizeSSZ() int {
 	return 84
 }
+
+type BlobsByRangeRequest struct {
+	StartSlot uint64
+	Count     uint64
+}
+
+func (l *BlobsByRangeRequest) EncodeSSZ(buf []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(buf, &l.StartSlot, &l.Count)
+}
+
+func (l *BlobsByRangeRequest) DecodeSSZ(buf []byte, _ int) error {
+	return ssz2.UnmarshalSSZ(buf, 0, &l.StartSlot, &l.Count)
+}
+
+func (l *BlobsByRangeRequest) EncodingSizeSSZ() int {
+	return 16
+}
+
+func (*BlobsByRangeRequest) Clone() clonable.Clonable {
+	return &BlobsByRangeRequest{}
+}
