@@ -45,12 +45,16 @@ type messageListener struct {
 func (ml *messageListener) Start(ctx context.Context) {
 	ml.once.Do(func() {
 		ml.streamCtx, ml.streamCtxCancel = context.WithCancel(ctx)
-		// note we add to wg outside spawned goroutine to avoid race condition in tests
-		// between Start and Stop (WaitGroup is reused before previous Wait has returned err)
-		// remember to increment count of wg if adding a new "listen" goroutine
-		ml.stopWg.Add(2)
-		go ml.listenBlockHeaders66()
-		go ml.listenPeerEvents()
+
+		backgroundLoops := []func(){
+			ml.listenBlockHeaders66,
+			ml.listenPeerEvents,
+		}
+
+		ml.stopWg.Add(len(backgroundLoops))
+		for _, loop := range backgroundLoops {
+			go loop()
+		}
 	})
 }
 

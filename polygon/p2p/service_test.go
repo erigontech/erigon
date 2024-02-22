@@ -127,7 +127,9 @@ func (st *serviceTest) mockSentryInboundMessageStream(wg *sync.WaitGroup, msgs [
 }
 
 func (st *serviceTest) mockSentryPeerEventsStream() sentry.Sentry_PeerEventsClient {
-	return &mockSentryMessagesStream[*sentry.PeerEvent]{}
+	return &mockSentryMessagesStream[*sentry.PeerEvent]{
+		wg: &sync.WaitGroup{},
+	}
 }
 
 type mockSentryMessagesStream[M any] struct {
