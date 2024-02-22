@@ -65,6 +65,7 @@ func (a *Attestation) UnmarshalJSON(buf []byte) error {
 		Signature       libcommon.Bytes96 `json:"signature"`
 		Data            AttestationData   `json:"data"`
 	}
+	tmp.Data = NewAttestationData()
 	if err := json.Unmarshal(buf, &tmp); err != nil {
 		return err
 	}

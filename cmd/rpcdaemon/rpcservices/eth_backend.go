@@ -9,18 +9,18 @@ import (
 	"io"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/privateapi"
 	"github.com/ledgerwatch/erigon/p2p"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -51,12 +51,22 @@ func (back *RemoteBackend) CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo
 func (back *RemoteBackend) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	panic("not implemented")
 }
+
+func (back *RemoteBackend) Integrity(_ context.Context) error {
+	panic("not implemented")
+}
+
 func (back *RemoteBackend) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	panic("not implemented")
 }
 func (back *RemoteBackend) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error) {
 	panic("not implemented")
 }
+
+func (back *RemoteBackend) FirstTxnNumNotInSnapshots() uint64 {
+	panic("not implemented")
+}
+
 func (back *RemoteBackend) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
 	panic("not implemented")
 }
@@ -241,6 +251,11 @@ func (back *RemoteBackend) BadHeaderNumber(ctx context.Context, tx kv.Getter, ha
 func (back *RemoteBackend) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error) {
 	return back.blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 }
+
+func (back *RemoteBackend) IterateFrozenBodies(_ func(blockNum uint64, baseTxNum uint64, txAmount uint64) error) error {
+	panic("not implemented")
+}
+
 func (back *RemoteBackend) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error) {
 	return back.blockReader.BodyWithTransactions(ctx, tx, hash, blockNum)
 }
@@ -265,14 +280,46 @@ func (back *RemoteBackend) CanonicalHash(ctx context.Context, tx kv.Getter, bloc
 func (back *RemoteBackend) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, error) {
 	return back.blockReader.TxnByIdxInBlock(ctx, tx, blockNum, i)
 }
+func (back *RemoteBackend) LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return back.blockReader.LastEventId(ctx, tx)
+}
 func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error) {
 	return back.blockReader.EventLookup(ctx, tx, txnHash)
 }
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
+
+func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return back.blockReader.LastSpanId(ctx, tx)
+}
+
+func (back *RemoteBackend) LastFrozenEventId() uint64 {
+	panic("not implemented")
+}
+
 func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return back.blockReader.Span(ctx, tx, spanId)
+}
+
+func (r *RemoteBackend) LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
+}
+
+func (r *RemoteBackend) Milestone(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return nil, nil
+}
+
+func (r *RemoteBackend) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
+	return 0, false, fmt.Errorf("not implemented")
+}
+
+func (r *RemoteBackend) Checkpoint(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
+	return nil, nil
+}
+
+func (back *RemoteBackend) LastFrozenSpanId() uint64 {
+	panic("not implemented")
 }
 
 func (back *RemoteBackend) NodeInfo(ctx context.Context, limit uint32) ([]p2p.NodeInfo, error) {

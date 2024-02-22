@@ -40,6 +40,10 @@ case $(uname -s) in
 			exit 2
 		fi
 
+        # The os-release file does not require any variables to be set
+        # so we define these two to avoid 'unbound variable' errors.
+        ID=""
+        VERSION_ID=""
 		source "$OS_RELEASE_PATH"
 
         if [[ -n "$ID" ]] && [[ -n "$VERSION_ID" ]]

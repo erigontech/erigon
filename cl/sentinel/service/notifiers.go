@@ -12,9 +12,10 @@ const (
 )
 
 type gossipObject struct {
-	data []byte // gossip data
-	t    string // determine which gossip message we are notifying of
-	pid  string // pid is the peer id of the sender
+	data     []byte // gossip data
+	t        string // determine which gossip message we are notifying of
+	pid      string // pid is the peer id of the sender
+	subnetId *uint64
 }
 
 type gossipNotifier struct {
@@ -47,10 +48,13 @@ func (g *gossipNotifier) notifyBlob(data []byte, pid string, blobIndex int) {
 	defer g.mu.Unlock()
 
 	for _, ch := range g.notifiers {
+		sbI := new(uint64)
+		*sbI = uint64(blobIndex)
 		ch <- gossipObject{
-			data: data,
-			t:    gossip.TopicNameBlobSidecar(blobIndex),
-			pid:  pid,
+			data:     data,
+			t:        gossip.TopicNameBlobSidecar(blobIndex),
+			pid:      pid,
+			subnetId: sbI,
 		}
 	}
 }
@@ -62,7 +66,7 @@ func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
 	if len(g.notifiers) >= maxSubscribers {
 		return nil, -1, fmt.Errorf("too many subsribers, try again later")
 	}
-	ch := make(chan gossipObject)
+	ch := make(chan gossipObject, 1<<16)
 	g.notifiers = append(g.notifiers, ch)
 	return ch, len(g.notifiers) - 1, nil
 }

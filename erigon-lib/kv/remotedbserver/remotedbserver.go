@@ -71,8 +71,9 @@ type KvServer struct {
 
 	kv                 kv.RoDB
 	stateChangeStreams *StateChangePubSub
-	blockSnapshots     Snapsthots
-	historySnapshots   Snapsthots
+	blockSnapshots     Snapshots
+	borSnapshots       Snapshots
+	historySnapshots   Snapshots
 	ctx                context.Context
 
 	//v3 fields
@@ -90,18 +91,24 @@ type threadSafeTx struct {
 	sync.Mutex
 }
 
-type Snapsthots interface {
+//go:generate mockgen -destination=./mock/snapshots_mock.go -package=mock . Snapshots
+type Snapshots interface {
 	Files() []string
 }
 
-func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapsthots, historySnapshots Snapsthots, logger log.Logger) *KvServer {
+func NewKvServer(ctx context.Context, db kv.RoDB, snapshots Snapshots, borSnapshots Snapshots, historySnapshots Snapshots, logger log.Logger) *KvServer {
 	return &KvServer{
-		trace:     false,
-		rangeStep: 1024,
-		kv:        db, stateChangeStreams: newStateChangeStreams(), ctx: ctx,
-		blockSnapshots: snapshots, historySnapshots: historySnapshots,
-		txs: map[uint64]*threadSafeTx{}, txsMapLock: &sync.RWMutex{},
-		logger: logger,
+		trace:              false,
+		rangeStep:          1024,
+		kv:                 db,
+		stateChangeStreams: newStateChangeStreams(),
+		ctx:                ctx,
+		blockSnapshots:     snapshots,
+		borSnapshots:       borSnapshots,
+		historySnapshots:   historySnapshots,
+		txs:                map[uint64]*threadSafeTx{},
+		txsMapLock:         &sync.RWMutex{},
+		logger:             logger,
 	}
 }
 
@@ -430,7 +437,7 @@ func bytesCopy(b []byte) []byte {
 	return copiedBytes
 }
 
-func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
+func (s *KvServer) StateChanges(_ *remote.StateChangeRequest, server remote.KV_StateChangesServer) error {
 	ch, remove := s.stateChangeStreams.Sub()
 	defer remove()
 	for {
@@ -447,16 +454,31 @@ func (s *KvServer) StateChanges(req *remote.StateChangeRequest, server remote.KV
 	}
 }
 
-func (s *KvServer) SendStateChanges(ctx context.Context, sc *remote.StateChangeBatch) {
+func (s *KvServer) SendStateChanges(_ context.Context, sc *remote.StateChangeBatch) {
 	s.stateChangeStreams.Pub(sc)
 }
 
-func (s *KvServer) Snapshots(ctx context.Context, _ *remote.SnapshotsRequest) (*remote.SnapshotsReply, error) {
+func (s *KvServer) Snapshots(_ context.Context, _ *remote.SnapshotsRequest) (reply *remote.SnapshotsReply, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("%v, %s", rec, dbg.Stack())
+		}
+	}()
 	if s.blockSnapshots == nil || reflect.ValueOf(s.blockSnapshots).IsNil() { // nolint
 		return &remote.SnapshotsReply{BlocksFiles: []string{}, HistoryFiles: []string{}}, nil
 	}
 
-	return &remote.SnapshotsReply{BlocksFiles: s.blockSnapshots.Files(), HistoryFiles: s.historySnapshots.Files()}, nil
+	blockFiles := s.blockSnapshots.Files()
+	if s.borSnapshots != nil && !reflect.ValueOf(s.borSnapshots).IsNil() { // nolint
+		blockFiles = append(blockFiles, s.borSnapshots.Files()...)
+	}
+
+	reply = &remote.SnapshotsReply{BlocksFiles: blockFiles}
+	if s.historySnapshots != nil && !reflect.ValueOf(s.historySnapshots).IsNil() { // nolint
+		reply.HistoryFiles = s.historySnapshots.Files()
+	}
+
+	return reply, nil
 }
 
 type StateChangePubSub struct {
@@ -507,8 +529,11 @@ func (s *StateChangePubSub) remove(id uint) {
 	delete(s.chans, id)
 }
 
+//
 // Temporal methods
-func (s *KvServer) DomainGet(ctx context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
+//
+
+func (s *KvServer) DomainGet(_ context.Context, req *remote.DomainGetReq) (reply *remote.DomainGetReply, err error) {
 	reply = &remote.DomainGetReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
@@ -532,7 +557,7 @@ func (s *KvServer) DomainGet(ctx context.Context, req *remote.DomainGetReq) (rep
 	}
 	return reply, nil
 }
-func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (reply *remote.HistoryGetReply, err error) {
+func (s *KvServer) HistoryGet(_ context.Context, req *remote.HistoryGetReq) (reply *remote.HistoryGetReply, err error) {
 	reply = &remote.HistoryGetReply{}
 	if err := s.with(req.TxId, func(tx kv.Tx) error {
 		ttx, ok := tx.(kv.TemporalTx)
@@ -552,7 +577,7 @@ func (s *KvServer) HistoryGet(ctx context.Context, req *remote.HistoryGetReq) (r
 
 const PageSizeLimit = 4 * 4096
 
-func (s *KvServer) IndexRange(ctx context.Context, req *remote.IndexRangeReq) (*remote.IndexRangeReply, error) {
+func (s *KvServer) IndexRange(_ context.Context, req *remote.IndexRangeReq) (*remote.IndexRangeReply, error) {
 	reply := &remote.IndexRangeReply{}
 	from, limit := int(req.FromTs), int(req.Limit)
 	if req.PageToken != "" {
@@ -600,7 +625,7 @@ func (s *KvServer) IndexRange(ctx context.Context, req *remote.IndexRangeReq) (*
 	return reply, nil
 }
 
-func (s *KvServer) Range(ctx context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
+func (s *KvServer) Range(_ context.Context, req *remote.RangeReq) (*remote.Pairs, error) {
 	from, limit := req.FromPrefix, int(req.Limit)
 	if req.PageToken != "" {
 		var pagination remote.ParisPagination

@@ -24,11 +24,12 @@ import (
 	"time"
 
 	"github.com/anacrolix/torrent/metainfo"
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 var (
@@ -45,7 +46,7 @@ type GrpcServer struct {
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	if err := s.d.prohibitNewDownloads(); err != nil {
+	if err := s.d.torrentFiles.prohibitNewDownloads(); err != nil {
 		return nil, err
 	}
 	return nil, nil
@@ -83,6 +84,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			return nil, err
 		}
 	}
+
 	return &emptypb.Empty{}, nil
 }
 
@@ -114,7 +116,7 @@ func (s *GrpcServer) Delete(ctx context.Context, request *proto_downloader.Delet
 }
 
 func (s *GrpcServer) Verify(ctx context.Context, request *proto_downloader.VerifyRequest) (*emptypb.Empty, error) {
-	err := s.d.VerifyData(ctx, nil)
+	err := s.d.VerifyData(ctx, nil, false)
 	if err != nil {
 		return nil, err
 	}

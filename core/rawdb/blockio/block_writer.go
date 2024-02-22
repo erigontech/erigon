@@ -3,6 +3,7 @@ package blockio
 import (
 	"context"
 	"encoding/binary"
+
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -114,6 +115,6 @@ func (w *BlockWriter) PruneBlocks(ctx context.Context, tx kv.RwTx, blockTo uint6
 // keeps genesis in db
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
 // doesn't delete Receipts, Senders, Canonical markers, TotalDifficulty
-func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, spanIDAt func(number uint64) uint64) error {
-	return rawdb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit, spanIDAt)
+func (w *BlockWriter) PruneBorBlocks(ctx context.Context, tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt func(number uint64) uint64) error {
+	return rawdb.PruneBorBlocks(tx, blockTo, blocksDeleteLimit, SpanIdAt)
 }

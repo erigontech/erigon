@@ -35,7 +35,6 @@ import (
 	"github.com/erigontech/mdbx-go/mdbx"
 	stack2 "github.com/go-stack/stack"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/pbnjay/memory"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/semaphore"
 
@@ -44,6 +43,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
+	"github.com/ledgerwatch/erigon-lib/mmap"
 )
 
 const NonExistingDBI kv.DBI = 999_999_999
@@ -83,10 +83,6 @@ func NewMDBX(log log.Logger) MdbxOpts {
 		flags:      mdbx.NoReadahead | mdbx.Coalesce | mdbx.Durable,
 		log:        log,
 		pageSize:   kv.DefaultPageSize(),
-
-		// default is (TOTAL_RAM+AVAILABLE_RAM)/42/pageSize
-		// but for reproducibility of benchmarks - please don't rely on Available RAM
-		dirtySpace: 2 * (memory.TotalMemory() / 42),
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
@@ -280,7 +276,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		return nil, err
 	}
 
-	if opts.flags&mdbx.Accede == 0 {
+	if !opts.HasFlag(mdbx.Accede) {
 		if err = env.SetGeometry(-1, -1, int(opts.mapSize), int(opts.growthStep), opts.shrinkThreshold, int(opts.pageSize)); err != nil {
 			return nil, err
 		}
@@ -289,32 +285,9 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		}
 	}
 
-	err = env.Open(opts.path, opts.flags, 0664)
-	if err != nil {
-		if err != nil {
-			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-		}
-	}
-
-	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
-	in, err := env.Info(nil)
-	if err != nil {
-		if err != nil {
-			return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
-		}
-	}
-
-	opts.pageSize = uint64(in.PageSize)
-	opts.mapSize = datasize.ByteSize(in.MapSize)
-	if opts.label == kv.ChainDB {
-		opts.log.Info("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
-	} else {
-		opts.log.Debug("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
-	}
-
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
-	if !opts.HasFlag(mdbx.Accede) && !opts.HasFlag(mdbx.Readonly) {
+	if !opts.HasFlag(mdbx.Readonly) {
 		// 1/8 is good for transactions with a lot of modifications - to reduce invalidation size.
 		// But Erigon app now using Batch and etl.Collectors to avoid writing to DB frequently changing data.
 		// It means most of our writes are: APPEND or "single UPSERT per key during transaction"
@@ -326,25 +299,71 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
-			return nil, err
+		if opts.label == kv.ChainDB {
+			if err = env.SetOption(mdbx.OptTxnDpInitial, txnDpInitial*2); err != nil {
+				return nil, err
+			}
+			dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
+			if err != nil {
+				return nil, err
+			}
+			if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+				return nil, err
+			}
 		}
-		dpReserveLimit, err := env.GetOption(mdbx.OptDpReverseLimit)
-		if err != nil {
-			return nil, err
+
+		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
+		// but we want call all `SetOption` before env.Open(), because:
+		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
+		pageSize := opts.pageSize
+		if pageSize == 0 {
+			pageSize = kv.DefaultPageSize()
 		}
-		if err = env.SetOption(mdbx.OptDpReverseLimit, dpReserveLimit*2); err != nil {
+
+		var dirtySpace uint64
+		if opts.dirtySpace > 0 {
+			dirtySpace = opts.dirtySpace
+		} else {
+			dirtySpace = mmap.TotalMemory() / 42 // it's default of mdbx, but our package also supports cgroups and GOMEMLIMIT
+			// clamp to max size
+			const dirtySpaceMaxChainDB = uint64(1 * datasize.GB)
+			const dirtySpaceMaxDefault = uint64(128 * datasize.MB)
+
+			if opts.label == kv.ChainDB && dirtySpace > dirtySpaceMaxChainDB {
+				dirtySpace = dirtySpaceMaxChainDB
+			} else if opts.label != kv.ChainDB && dirtySpace > dirtySpaceMaxDefault {
+				dirtySpace = dirtySpaceMaxDefault
+			}
+		}
+		//can't use real pagesize here - it will be known only after env.Open()
+		if err = env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize); err != nil {
 			return nil, err
 		}
 
-		if err = env.SetOption(mdbx.OptTxnDpLimit, opts.dirtySpace/opts.pageSize); err != nil {
-			return nil, err
-		}
 		// must be in the range from 12.5% (almost empty) to 50% (half empty)
 		// which corresponds to the range from 8192 and to 32768 in units respectively
 		if err = env.SetOption(mdbx.OptMergeThreshold16dot16Percent, opts.mergeThreshold); err != nil {
 			return nil, err
 		}
+	}
+
+	err = env.Open(opts.path, opts.flags, 0664)
+	if err != nil {
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+	}
+
+	// mdbx will not change pageSize if db already exists. means need read real value after env.open()
+	in, err := env.Info(nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, opts.label.String(), stack2.Trace().String())
+	}
+
+	opts.pageSize = uint64(in.PageSize)
+	opts.mapSize = datasize.ByteSize(in.MapSize)
+	if opts.label == kv.ChainDB {
+		opts.log.Info("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
+	} else {
+		opts.log.Debug("[db] open", "lable", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	}
 
 	dirtyPagesLimit, err := env.GetOption(mdbx.OptTxnDpLimit)
@@ -366,14 +385,19 @@ func (opts MdbxOpts) Open(ctx context.Context) (kv.RwDB, error) {
 		targetSemCount := int64(runtime.GOMAXPROCS(-1) * 16)
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
+
+	txsCountMutex := &sync.Mutex{}
+
 	db := &MdbxKV{
 		opts:         opts,
 		env:          env,
 		log:          opts.log,
-		wg:           &sync.WaitGroup{},
 		buckets:      kv.TableCfg{},
 		txSize:       dirtyPagesLimit * opts.pageSize,
 		roTxsLimiter: opts.roTxsLimiter,
+
+		txsCountMutex:         txsCountMutex,
+		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
 
 		leakDetector: dbg.NewLeakDetector("db."+opts.label.String(), dbg.SlowTx()),
 	}
@@ -438,13 +462,16 @@ func (opts MdbxOpts) MustOpen() kv.RwDB {
 type MdbxKV struct {
 	log          log.Logger
 	env          *mdbx.Env
-	wg           *sync.WaitGroup
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
 	opts         MdbxOpts
 	txSize       uint64
 	closed       atomic.Bool
 	path         string
+
+	txsCount              uint
+	txsCountMutex         *sync.Mutex
+	txsAllDoneOnCloseCond *sync.Cond
 
 	leakDetector *dbg.LeakDetector
 }
@@ -488,13 +515,53 @@ func (db *MdbxKV) openDBIs(buckets []string) error {
 	})
 }
 
+func (db *MdbxKV) trackTxBegin() bool {
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
+
+	isOpen := !db.closed.Load()
+	if isOpen {
+		db.txsCount++
+	}
+	return isOpen
+}
+
+func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
+	return (db.txsCount == 0) && db.closed.Load()
+}
+
+func (db *MdbxKV) trackTxEnd() {
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
+
+	if db.txsCount > 0 {
+		db.txsCount--
+	} else {
+		panic("MdbxKV: unmatched trackTxEnd")
+	}
+
+	if db.hasTxsAllDoneAndClosed() {
+		db.txsAllDoneOnCloseCond.Signal()
+	}
+}
+
+func (db *MdbxKV) waitTxsAllDoneOnClose() {
+	db.txsCountMutex.Lock()
+	defer db.txsCountMutex.Unlock()
+
+	for !db.hasTxsAllDoneAndClosed() {
+		db.txsAllDoneOnCloseCond.Wait()
+	}
+}
+
 // Close closes db
 // All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
-	db.wg.Wait()
+	db.waitTxsAllDoneOnClose()
+
 	db.env.Close()
 	db.env = nil
 
@@ -507,10 +574,6 @@ func (db *MdbxKV) Close() {
 }
 
 func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
-	if db.closed.Load() {
-		return nil, fmt.Errorf("db closed")
-	}
-
 	// don't try to acquire if the context is already done
 	select {
 	case <-ctx.Done():
@@ -519,8 +582,13 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		// otherwise carry on
 	}
 
+	if !db.trackTxBegin() {
+		return nil, fmt.Errorf("db closed")
+	}
+
 	// will return nil err if context is cancelled (may appear to acquire the semaphore)
 	if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+		db.trackTxEnd()
 		return nil, semErr
 	}
 
@@ -529,6 +597,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
 			db.roTxsLimiter.Release(1)
+			db.trackTxEnd()
 		}
 	}()
 
@@ -536,7 +605,7 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
-	db.wg.Add(1)
+
 	return &MdbxTx{
 		ctx:      ctx,
 		db:       db,
@@ -560,16 +629,18 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 	default:
 	}
 
-	if db.closed.Load() {
+	if !db.trackTxBegin() {
 		return nil, fmt.Errorf("db closed")
 	}
+
 	runtime.LockOSThread()
 	tx, err := db.env.BeginTxn(nil, flags)
 	if err != nil {
 		runtime.UnlockOSThread() // unlock only in case of error. normal flow is "defer .Rollback()"
+		db.trackTxEnd()
 		return nil, fmt.Errorf("%w, lable: %s, trace: %s", err, db.opts.label.String(), stack2.Trace().String())
 	}
-	db.wg.Add(1)
+
 	return &MdbxTx{
 		db:  db,
 		tx:  tx,
@@ -811,7 +882,7 @@ func (tx *MdbxTx) Commit() error {
 	}
 	defer func() {
 		tx.tx = nil
-		tx.db.wg.Done()
+		tx.db.trackTxEnd()
 		if tx.readOnly {
 			tx.db.roTxsLimiter.Release(1)
 		} else {
@@ -862,7 +933,7 @@ func (tx *MdbxTx) Rollback() {
 	}
 	defer func() {
 		tx.tx = nil
-		tx.db.wg.Done()
+		tx.db.trackTxEnd()
 		if tx.readOnly {
 			tx.db.roTxsLimiter.Release(1)
 		} else {

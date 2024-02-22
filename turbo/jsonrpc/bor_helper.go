@@ -9,12 +9,12 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/consensus/bor/borcfg"
+	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
 )
@@ -116,6 +116,8 @@ func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Vali
 	}
 	return nil, false
 }
+
+type ValidatorSet = valset.ValidatorSet
 
 // getUpdatedValidatorSet applies changes to a validator set and returns a new validator set
 func getUpdatedValidatorSet(oldValidatorSet *ValidatorSet, newVals []*valset.Validator) *ValidatorSet {

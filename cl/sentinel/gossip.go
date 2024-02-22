@@ -72,13 +72,28 @@ var BlsToExecutionChangeSsz = GossipTopic{
 	CodecStr: SSZSnappyCodec,
 }
 
+var SyncCommitteeContributionAndProofSsz = GossipTopic{
+	Name:     gossip.TopicNameSyncCommitteeContributionAndProof,
+	CodecStr: SSZSnappyCodec,
+}
+
+var LightClientFinalityUpdateSsz = GossipTopic{
+	Name:     gossip.TopicNameLightClientFinalityUpdate,
+	CodecStr: SSZSnappyCodec,
+}
+
+var LightClientOptimisticUpdateSsz = GossipTopic{
+	Name:     gossip.TopicNameLightClientOptimisticUpdate,
+	CodecStr: SSZSnappyCodec,
+}
+
 type GossipManager struct {
 	ch            chan *GossipMessage
 	subscriptions map[string]*GossipSubscription
 	mu            sync.RWMutex
 }
 
-const maxIncomingGossipMessages = 5092
+const maxIncomingGossipMessages = 1 << 16
 
 // construct a new gossip manager that will handle packets with the given handlerfunc
 func NewGossipManager(

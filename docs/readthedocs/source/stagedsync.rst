@@ -26,7 +26,7 @@ Stage 1 : Download Block Headers
 			},
 		},
 
-This stage uses two processes, a fetcher method and a processer method.
+This stage uses two processes, a fetcher method and a processor method.
 
 .. code-block:: go
 
@@ -42,7 +42,7 @@ the process method takes the headers retrieve thanks to the fetcher and does the
 
     * Save block headers in database.
 
-This process repeates until we reach the maximun height. once it is reached the stage finish.
+This process repeats until we reach the maximum height. once it is reached the stage finish.
 
 Changes in DB:
 

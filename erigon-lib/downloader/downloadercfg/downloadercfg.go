@@ -51,10 +51,10 @@ type Cfg struct {
 
 	WebSeedUrls                     []*url.URL
 	WebSeedFiles                    []string
-	WebSeedS3Tokens                 []string
-	ExpectedTorrentFilesHashes      snapcfg.Preverified
+	SnapshotConfig                  *snapcfg.Cfg
 	DownloadTorrentFilesFromWebseed bool
 	AddTorrentsFromDisk             bool
+	SnapshotLock                    bool
 	ChainName                       string
 
 	Dirs datadir.Dirs
@@ -92,7 +92,7 @@ func Default() *torrent.ClientConfig {
 	return torrentConfig
 }
 
-func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string) (*Cfg, error) {
+func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, uploadRate datasize.ByteSize, port, connsPerFile, downloadSlots int, staticPeers, webseeds []string, chainName string, lockSnapshots bool) (*Cfg, error) {
 	torrentConfig := Default()
 	torrentConfig.DataDir = dirs.Snap // `DataDir` of torrent-client-lib is different from Erigon's `DataDir`. Just same naming.
 
@@ -154,7 +154,6 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	webseedUrlsOrFiles := webseeds
 	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
 	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
-	webseedS3Providers := make([]string, 0, len(webseedUrlsOrFiles))
 	for _, webseed := range webseedUrlsOrFiles {
 		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
 			uri, err := url.ParseRequestURI(webseed)
@@ -171,7 +170,6 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 		if strings.HasPrefix(webseed, "v1:") {
 			withoutVerisonPrefix := webseed[3:]
 			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
-				webseedS3Providers = append(webseedS3Providers, webseed)
 				continue
 			}
 			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
@@ -188,12 +186,12 @@ func New(dirs datadir.Dirs, version string, verbosity lg.Level, downloadRate, up
 	if dir.FileExist(localCfgFile) {
 		webseedFileProviders = append(webseedFileProviders, localCfgFile)
 	}
-	//TODO: if don't pass "downloaded files list here" (which we store in db) - synced erigon will download new .torrent files. And erigon can't work with "unfinished" files.
-	snapCfg := snapcfg.KnownCfg(chainName, 0)
+
 	return &Cfg{Dirs: dirs, ChainName: chainName,
 		ClientConfig: torrentConfig, DownloadSlots: downloadSlots,
-		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders, WebSeedS3Tokens: webseedS3Providers,
-		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, ExpectedTorrentFilesHashes: snapCfg.Preverified,
+		WebSeedUrls: webseedHttpProviders, WebSeedFiles: webseedFileProviders,
+		DownloadTorrentFilesFromWebseed: true, AddTorrentsFromDisk: true, SnapshotLock: lockSnapshots,
+		SnapshotConfig: snapcfg.KnownCfg(chainName),
 	}, nil
 }
 

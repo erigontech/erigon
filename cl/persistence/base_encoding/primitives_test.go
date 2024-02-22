@@ -36,10 +36,15 @@ func TestDiff64(t *testing.T) {
 	require.NoError(t, err)
 
 	out := b.Bytes()
-	new2, err := ApplyCompressedSerializedUint64ListDiff(old, nil, out)
+	new2, err := ApplyCompressedSerializedUint64ListDiff(old, nil, out, false)
 	require.NoError(t, err)
 
 	require.Equal(t, new, new2)
+
+	new3, err := ApplyCompressedSerializedUint64ListDiff(new2, nil, out, true)
+	require.NoError(t, err)
+
+	require.Equal(t, old, new3[:len(old)])
 }
 
 func TestDiff64Effective(t *testing.T) {
@@ -67,8 +72,33 @@ func TestDiff64Effective(t *testing.T) {
 	require.NoError(t, err)
 
 	out := b.Bytes()
-	new2, err := ApplyCompressedSerializedUint64ListDiff(previous, nil, out)
+	new2, err := ApplyCompressedSerializedUint64ListDiff(previous, nil, out, false)
 	require.NoError(t, err)
 
 	require.Equal(t, new2, expected)
+}
+
+func TestDiffValidators(t *testing.T) {
+	vals := 3
+	old := make([]byte, vals*121)
+	new := make([]byte, 121*(vals+1))
+	inc := 1
+	for i := 0; i < vals*121; i++ {
+		if i%9 == 0 {
+			inc++
+		}
+		old[i] = byte(i)
+		new[i] = byte(i + inc)
+	}
+
+	var b bytes.Buffer
+
+	err := ComputeCompressedSerializedValidatorSetListDiff(&b, old, new)
+	require.NoError(t, err)
+
+	out := b.Bytes()
+	new2, err := ApplyCompressedSerializedValidatorListDiff(old, nil, out, false)
+	require.NoError(t, err)
+
+	require.Equal(t, new, new2)
 }

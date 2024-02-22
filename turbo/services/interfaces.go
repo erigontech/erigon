@@ -3,13 +3,14 @@ package services
 import (
 	"context"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type All struct {
@@ -21,6 +22,7 @@ type BlockReader interface {
 	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
 	CurrentBlock(db kv.Tx) (*types.Block, error)
 	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
+	IterateFrozenBodies(f func(blockNum, baseTxNum, txAmount uint64) error) error
 }
 
 type HeaderReader interface {
@@ -29,17 +31,32 @@ type HeaderReader interface {
 	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
 	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
 
-	//TODO: change it to `iter`
+	// HeadersRange - TODO: change it to `iter`
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
+	Integrity(ctx context.Context) error
 }
 
 type BorEventReader interface {
+	LastEventId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
 	EventLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
 	EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error)
+	LastFrozenEventId() uint64
 }
 
 type BorSpanReader interface {
-	Span(ctx context.Context, tx kv.Getter, spanNum uint64) ([]byte, error)
+	Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error)
+	LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
+	LastFrozenSpanId() uint64
+}
+
+type BorMilestoneReader interface {
+	LastMilestoneId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
+	Milestone(ctx context.Context, tx kv.Getter, milestoneId uint64) ([]byte, error)
+}
+
+type BorCheckpointReader interface {
+	LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error)
+	Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error)
 }
 
 type CanonicalReader interface {
@@ -58,7 +75,9 @@ type TxnReader interface {
 	TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, bool, error)
 	TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (txn types.Transaction, err error)
 	RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) (txs [][]byte, err error)
+	FirstTxnNumNotInSnapshots() uint64
 }
+
 type HeaderAndCanonicalReader interface {
 	HeaderReader
 	CanonicalReader
@@ -66,7 +85,6 @@ type HeaderAndCanonicalReader interface {
 
 type BlockAndTxnReader interface {
 	BlockReader
-	//HeaderReader
 	TxnReader
 }
 
@@ -76,6 +94,8 @@ type FullBlockReader interface {
 	HeaderReader
 	BorEventReader
 	BorSpanReader
+	BorMilestoneReader
+	BorCheckpointReader
 	TxnReader
 	CanonicalReader
 
@@ -104,22 +124,6 @@ type BlockRetire interface {
 	BuildMissedIndicesIfNeed(ctx context.Context, logPrefix string, notifier DBEventNotifier, cc *chain.Config) error
 	SetWorkers(workers int)
 }
-
-/*
-type HeaderWriter interface {
-	WriteHeader(tx kv.RwTx, header *types.Header) error
-	WriteHeaderRaw(tx kv.StatelessRwTx, number uint64, hash libcommon.Hash, headerRlp []byte, skipIndexing bool) error
-	WriteCanonicalHash(tx kv.RwTx, hash libcommon.Hash, number uint64) error
-	WriteTd(db kv.Putter, hash libcommon.Hash, number uint64, td *big.Int) error
-	// [from,to)
-	FillHeaderNumberIndex(logPrefix string, tx kv.RwTx, tmpDir string, from, to uint64, ctx context.Context, logger log.Logger) error
-}
-type BlockWriter interface {
-	HeaderWriter
-	WriteRawBodyIfNotExists(tx kv.RwTx, hash libcommon.Hash, number uint64, body *types.RawBody) (ok bool, lastTxnNum uint64, err error)
-	WriteBody(tx kv.RwTx, hash libcommon.Hash, number uint64, body *types.Body) error
-}
-*/
 
 type DBEventNotifier interface {
 	OnNewSnapshot()

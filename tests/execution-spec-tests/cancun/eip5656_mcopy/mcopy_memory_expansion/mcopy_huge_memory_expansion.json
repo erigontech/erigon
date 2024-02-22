@@ -1,7 +1,8 @@
 {
-    "000-fork=Cancun-from_existent_memory-successful=False--max_dest_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--max_dest_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -56,6 +57,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x8aa935a1125814d5836f94b52fb80161629e394ccd05da4f644f4a6a4ef08dc7"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -137,9 +139,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "001-fork=Cancun-from_existent_memory-successful=False--max_dest_minus_one_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--max_dest_minus_one_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -194,6 +197,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xbe063ecf9bc53e91993f0ae27390f6524b8de93b323f96ca24f31aaf68e0234a"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -275,9 +279,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "002-fork=Cancun-from_existent_memory-successful=False--half_max_dest_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--half_max_dest_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -332,6 +337,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xa2da48c3ad01aad821b3bed22d70393c688f2c4b684198eda46818022ad97773"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -413,9 +419,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "003-fork=Cancun-from_existent_memory-successful=False--max_src_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--max_src_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -470,6 +477,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x0e2cfa95bf83a96b6bb22d64acc7a067cb1dc2fde4ddfaca0cb68efd0cc54419"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -551,9 +559,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "004-fork=Cancun-from_existent_memory-successful=False--max_src_minus_one_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--max_src_minus_one_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -608,6 +617,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x48150f183abd84d77ad71ae1da6d114e13ad77526709b2dab7879a540396a9c1"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -689,9 +699,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "005-fork=Cancun-from_existent_memory-successful=False--half_max_src_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--half_max_src_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -746,6 +757,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xed925a01d36971547900271ed26c0f8746836e666915641204929f0d429544cd"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -827,9 +839,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "006-fork=Cancun-from_existent_memory-successful=False--max_length_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--max_length_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -884,6 +897,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xf8c3c3aae1dc876a543105e9d11f502ca0306731486f21265b28ebeac5096f1b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -965,9 +979,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "007-fork=Cancun-from_existent_memory-successful=False--max_length_minus_one_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--max_length_minus_one_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1022,6 +1037,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x9bfb1b2bc6f87dd185f2ad7382e9b36ec398854d92f243f6a494c3e1a9c3685d"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -1103,9 +1119,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "008-fork=Cancun-from_existent_memory-successful=False--half_max_length_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_existent_memory-successful_False--half_max_length_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1160,6 +1177,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xce9d58fb13b18aeb441df49ad9641973a4118173a4d34fba65fd243fce0d8f7c"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -1241,9 +1259,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "009-fork=Cancun-from_empty_memory-successful=False--max_dest_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--max_dest_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1298,6 +1317,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x6fb1c19073511206092b94b287e87cb69e73ba9383f72481f8ad1d5782ba005f"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -1379,9 +1399,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "010-fork=Cancun-from_empty_memory-successful=False--max_dest_minus_one_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--max_dest_minus_one_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1436,6 +1457,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xdfa2e12a6bd5d02814d6d90e743f0aa7e7d720f38411ff5ae09aaf9769893cff"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -1517,9 +1539,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "011-fork=Cancun-from_empty_memory-successful=False--half_max_dest_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--half_max_dest_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1574,6 +1597,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x1449b6f734c673d6ba9aa04aa548d247be076b0a64ee18da10a960e4193a964b"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -1655,9 +1679,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "012-fork=Cancun-from_empty_memory-successful=False--max_src_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--max_src_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1712,6 +1737,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xc1861506de797ba4b1f8413f3a6d5bee8a0eb0f4cdc3e8f01a3890102ddacc90"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -1793,9 +1819,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "013-fork=Cancun-from_empty_memory-successful=False--max_src_minus_one_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--max_src_minus_one_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1850,6 +1877,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x819f417a87a152c0e6a903c4c8348fe83fe91cb9b677e89d14fda595da0cfb8a"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -1931,9 +1959,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "014-fork=Cancun-from_empty_memory-successful=False--half_max_src_single_byte_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--half_max_src_single_byte_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -1988,6 +2017,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x15eb97133e132829cb355459c01dde36af13c753a9fc2aaf3dac4fa3ae9cfffb"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -2069,9 +2099,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "015-fork=Cancun-from_empty_memory-successful=False--max_length_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--max_length_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -2126,6 +2157,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x16c3899fffa2f9ce2747be63147b0c40b3b6ce175f6bffbe1e780e1a7d722e63"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -2207,9 +2239,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "016-fork=Cancun-from_empty_memory-successful=False--max_length_minus_one_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--max_length_minus_one_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -2264,6 +2297,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0xe89fe7d5d0d525ed0e541228acbcce54b2bf5e0ec28ba1d6f551ec0030be5bed"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",
@@ -2345,9 +2379,10 @@
         },
         "sealEngine": "NoProof"
     },
-    "017-fork=Cancun-from_empty_memory-successful=False--half_max_length_expansion": {
+    "tests/cancun/eip5656_mcopy/test_mcopy_memory_expansion.py::test_mcopy_huge_memory_expansion[fork_Cancun-blockchain_test-from_empty_memory-successful_False--half_max_length_expansion]": {
         "_info": {
-            "filling-transition-tool": "evm version 1.13.5-unstable-4d161dee-20231019",
+            "comment": "`execution-spec-tests` generated test",
+            "filling-transition-tool": "evm version 1.13.12-unstable-cd0770ea-20240124",
             "reference-spec": "https://github.com/ethereum/EIPs/blob/master/EIPS/eip-5656.md",
             "reference-spec-version": "2ade0452efe8124378f35284676ddfd16dd56ecd"
         },
@@ -2402,6 +2437,7 @@
                     "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
                     "hash": "0x6b5a7e7b7fe2f164d855821c7c434be5ad622ee6b07c9ad16b2402453522f725"
                 },
+                "blocknumber": "1",
                 "transactions": [
                     {
                         "type": "0x02",

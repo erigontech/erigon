@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,7 +26,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -75,7 +76,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -116,7 +117,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -163,7 +164,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version)
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -194,4 +195,53 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	require.Equal(t, 2, len(out.Data))
 	require.Equal(t, msg[0], out.Data[0])
 	require.Equal(t, msg[1], out.Data[1])
+}
+
+func TestPoolAggregatesAndProofs(t *testing.T) {
+	msg := []*cltypes.SignedAggregateAndProof{
+		{
+			Message: &cltypes.AggregateAndProof{
+				Aggregate: solid.NewAttestionFromParameters([]byte{1, 2}, solid.NewAttestationData(), libcommon.Bytes96{3, 45, 6}),
+			},
+			Signature: libcommon.Bytes96{2},
+		},
+		{
+			Message: &cltypes.AggregateAndProof{
+				Aggregate: solid.NewAttestionFromParameters([]byte{1, 2, 5, 6}, solid.NewAttestationData(), libcommon.Bytes96{3, 0, 6}),
+			},
+			Signature: libcommon.Bytes96{2, 3, 5},
+		},
+	}
+	// find server
+	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	// json
+	req, err := json.Marshal(msg)
+	require.NoError(t, err)
+	// post attester slashing
+	resp, err := server.Client().Post(server.URL+"/eth/v1/validator/aggregate_and_proofs", "application/json", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, 200, resp.StatusCode)
+	// get attester slashings
+	resp, err = server.Client().Get(server.URL + "/eth/v1/beacon/pool/attestations")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, 200, resp.StatusCode)
+	out := struct {
+		Data []*solid.Attestation `json:"data"`
+	}{
+		Data: []*solid.Attestation{},
+	}
+
+	err = json.NewDecoder(resp.Body).Decode(&out)
+	require.NoError(t, err)
+
+	require.Equal(t, 2, len(out.Data))
+	require.Equal(t, msg[0].Message.Aggregate, out.Data[0])
+	require.Equal(t, msg[1].Message.Aggregate, out.Data[1])
 }

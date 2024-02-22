@@ -11,6 +11,7 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 )
@@ -103,7 +104,7 @@ func (b *BackwardBeaconDownloader) Peers() (uint64, error) {
 // If the callback returns an error or signals that the download should be finished, the function will exit.
 // If the block's root hash does not match the expected root hash, it will be rejected and the function will continue to the next block.
 func (b *BackwardBeaconDownloader) RequestMore(ctx context.Context) error {
-	count := uint64(32)
+	count := uint64(64)
 	start := b.slotToDownload - count + 1
 	// Overflow? round to 0.
 	if start > b.slotToDownload {
@@ -170,7 +171,7 @@ Loop:
 		b.expectedRoot = segment.Block.ParentRoot
 		b.slotToDownload = segment.Block.Slot - 1 // update slot (might be inexact but whatever)
 	}
-	if b.neverSkip {
+	if !b.neverSkip {
 		return nil
 	}
 	// try skipping if the next slot is in db
@@ -197,6 +198,17 @@ Loop:
 		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
 		if err != nil {
 			return err
+		}
+		// Some cleaning of possible ugly restarts
+		newSlotToDownload, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
+		if err != nil {
+			return err
+		}
+		if newSlotToDownload == nil || *newSlotToDownload == 0 {
+			continue
+		}
+		for i := *newSlotToDownload + 1; i < *slot; i++ {
+			tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i))
 		}
 	}
 

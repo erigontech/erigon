@@ -149,7 +149,7 @@ func (m *Mapmutation) Put(table string, k, v []byte) error {
 	stringKey := string(k)
 
 	var ok bool
-	if _, ok = m.puts[table][stringKey]; !ok {
+	if _, ok = m.puts[table][stringKey]; ok {
 		m.size += len(v) - len(m.puts[table][stringKey])
 		m.puts[table][stringKey] = v
 		return nil
@@ -200,7 +200,7 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 	count := 0
 	total := float64(m.count)
 	for table, bucket := range m.puts {
-		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), m.logger)
+		collector := etl.NewCollector("", m.tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize/2), m.logger)
 		defer collector.Close()
 		for key, value := range bucket {
 			collector.Collect([]byte(key), value)
@@ -216,6 +216,7 @@ func (m *Mapmutation) doCommit(tx kv.RwTx) error {
 		if err := collector.Load(tx, table, etl.IdentityLoadFunc, etl.TransformArgs{Quit: m.quit}); err != nil {
 			return err
 		}
+		collector.Close()
 	}
 
 	tx.CollectMetrics()

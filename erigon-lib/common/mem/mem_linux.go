@@ -12,7 +12,7 @@ var (
 	memRssGauge          = metrics.NewGauge(`mem_rss`)
 	memSizeGauge         = metrics.NewGauge(`mem_size`)
 	memPssGauge          = metrics.NewGauge(`mem_pss`)
-	memSharedCleanGauge  = metrics.NewGauge(`mem_shared{type="clean"}"`)
+	memSharedCleanGauge  = metrics.NewGauge(`mem_shared{type="clean"}`)
 	memSharedDirtyGauge  = metrics.NewGauge(`mem_shared{type="dirty"}`)
 	memPrivateCleanGauge = metrics.NewGauge(`mem_private{type="clean"}`)
 	memPrivateDirtyGauge = metrics.NewGauge(`mem_private{type="dirty"}`)

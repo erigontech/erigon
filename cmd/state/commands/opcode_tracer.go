@@ -44,7 +44,6 @@ var (
 func init() {
 	withBlock(opcodeTracerCmd)
 	withDataDir(opcodeTracerCmd)
-	withSnapshotVersion(opcodeTracerCmd)
 	opcodeTracerCmd.Flags().Uint64Var(&numBlocks, "numBlocks", 1, "number of blocks to run the operation on")
 	opcodeTracerCmd.Flags().BoolVar(&saveOpcodes, "saveOpcodes", false, "set to save the opcodes")
 	opcodeTracerCmd.Flags().BoolVar(&saveBBlocks, "saveBBlocks", false, "set to save the basic blocks")
@@ -57,7 +56,7 @@ var opcodeTracerCmd = &cobra.Command{
 	Short: "Re-executes historical transactions in read-only mode and traces them at the opcode level",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := log.New("opcode-tracer", genesis.Config.ChainID)
-		return OpcodeTracer(genesis, snapshotVersion, block, chaindata, numBlocks, saveOpcodes, saveBBlocks, logger)
+		return OpcodeTracer(genesis, block, chaindata, numBlocks, saveOpcodes, saveBBlocks, logger)
 	},
 }
 
@@ -396,7 +395,7 @@ type segPrefix struct {
 
 // OpcodeTracer re-executes historical transactions in read-only mode
 // and traces them at the opcode level
-func OpcodeTracer(genesis *types.Genesis, snapshotVersion uint8, blockNum uint64, chaindata string, numBlocks uint64,
+func OpcodeTracer(genesis *types.Genesis, blockNum uint64, chaindata string, numBlocks uint64,
 	saveOpcodes bool, saveBblocks bool, logger log.Logger) error {
 	blockNumOrig := blockNum
 
@@ -429,7 +428,7 @@ func OpcodeTracer(genesis *types.Genesis, snapshotVersion uint8, blockNum uint64
 		}
 		return nil
 	})
-	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", snapshotVersion, log.New()), nil /* BorSnapshots */)
+	blockReader := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{Tracer: ot, Debug: true}

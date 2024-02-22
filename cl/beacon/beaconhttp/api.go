@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"reflect"
 	"strings"
-	"time"
 
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
@@ -19,9 +18,15 @@ var _ error = EndpointError{}
 var _ error = (*EndpointError)(nil)
 
 type EndpointError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code        int      `json:"code"`
+	Message     string   `json:"message"`
+	Stacktraces []string `json:"stacktraces,omitempty"`
+
+	err error
 }
+
+var ErrorCantFindBeaconState = errors.New("Could not find beacon state")
+var ErrorSszNotSupported = errors.New("This endpoint does not support SSZ response")
 
 func WrapEndpointError(err error) *EndpointError {
 	e := &EndpointError{}
@@ -29,20 +34,30 @@ func WrapEndpointError(err error) *EndpointError {
 		return e
 	}
 	if errors.Is(err, fork_graph.ErrStateNotFound) {
-		return NewEndpointError(http.StatusNotFound, "Could not find beacon state")
+		return NewEndpointError(http.StatusNotFound, ErrorCantFindBeaconState)
 	}
-	return NewEndpointError(http.StatusInternalServerError, err.Error())
+	return NewEndpointError(http.StatusInternalServerError, err)
 }
 
-func NewEndpointError(code int, message string) *EndpointError {
+func NewEndpointError(code int, err error) *EndpointError {
+	// TODO: consider adding stack traces/debug mode ?
+	//b := make([]byte, 2048)
+	//n := runtime.Stack(b, false)
+	//s := string(b[:n])
 	return &EndpointError{
 		Code:    code,
-		Message: message,
+		Message: err.Error(),
+		//	Stacktraces: []string{s}
+		err: err,
 	}
 }
 
 func (e EndpointError) Error() string {
 	return fmt.Sprintf("Code %d: %s", e.Code, e.Message)
+}
+
+func (e EndpointError) Unwrap() error {
+	return e.err
 }
 
 func (e *EndpointError) WriteTo(w http.ResponseWriter) {
@@ -69,11 +84,8 @@ func HandleEndpointFunc[T any](h EndpointHandlerFunc[T]) http.HandlerFunc {
 
 func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
 		ans, err := h.Handle(w, r)
-		log.Debug("beacon api request", "endpoint", r.URL.Path, "duration", time.Since(start))
 		if err != nil {
-			log.Error("beacon api request error", "err", err)
 			var endpointError *EndpointError
 			if e, ok := err.(*EndpointError); ok {
 				endpointError = e
@@ -86,11 +98,16 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		// TODO: potentially add a context option to buffer these
 		contentType := r.Header.Get("Accept")
 		contentTypes := strings.Split(contentType, ",")
+
+		// early return for event stream
+		if slices.Contains(w.Header().Values("Content-Type"), "text/event-stream") {
+			return
+		}
 		switch {
 		case slices.Contains(contentTypes, "application/octet-stream"):
 			sszMarshaler, ok := any(ans).(ssz.Marshaler)
 			if !ok {
-				NewEndpointError(http.StatusBadRequest, "This endpoint does not support SSZ response").WriteTo(w)
+				NewEndpointError(http.StatusBadRequest, ErrorSszNotSupported).WriteTo(w)
 				return
 			}
 			// TODO: we should probably figure out some way to stream this in the future :)
@@ -111,8 +128,10 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			} else {
 				w.WriteHeader(200)
 			}
+		case slices.Contains(contentTypes, "text/event-stream"):
+			return
 		default:
-			http.Error(w, "content type must be application/json or application/octet-stream", http.StatusBadRequest)
+			http.Error(w, "content type must be application/json, application/octet-stream, or text/event-stream", http.StatusBadRequest)
 		}
 	})
 }

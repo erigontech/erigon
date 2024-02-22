@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/prysmaticlabs/gohashtree"
 )
 
@@ -115,4 +116,45 @@ func MerkleRootFromFlatLeaves(leaves []byte, out []byte) (err error) {
 
 func MerkleRootFromFlatLeavesWithLimit(leaves []byte, out []byte, limit uint64) (err error) {
 	return globalHasher.merkleizeTrieLeavesFlat(leaves, out, limit)
+}
+
+// Merkle Proof computes the merkle proof for a given schema of objects.
+func MerkleProof(depth, proofIndex int, schema ...interface{}) ([][32]byte, error) {
+	// Calculate the total number of leaves needed based on the schema length
+	maxDepth := GetDepth(uint64(len(schema)))
+	if utils.PowerOf2(uint64(maxDepth)) != uint64(len(schema)) {
+		maxDepth++
+	}
+
+	if depth != int(maxDepth) { // TODO: Add support for lower depths
+		return nil, fmt.Errorf("depth is different than maximum depth, have %d, want %d", depth, maxDepth)
+	}
+	var err error
+	proof := make([][32]byte, maxDepth)
+	currentSizeDepth := utils.PowerOf2(uint64(maxDepth))
+	for len(schema) != int(currentSizeDepth) { // Augment the schema to be a power of 2
+		schema = append(schema, make([]byte, 32))
+	}
+
+	for i := 0; i < depth; i++ {
+		// Hash the left branch
+		if proofIndex >= int(currentSizeDepth)/2 {
+			proof[depth-i-1], err = HashTreeRoot(schema[0 : currentSizeDepth/2]...)
+			if err != nil {
+				return nil, err
+			}
+			schema = schema[currentSizeDepth/2:] // explore the right branch
+			proofIndex -= int(currentSizeDepth) / 2
+			currentSizeDepth /= 2
+			continue
+		}
+		// Hash the right branch
+		proof[depth-i-1], err = HashTreeRoot(schema[currentSizeDepth/2:]...)
+		if err != nil {
+			return nil, err
+		}
+		schema = schema[0 : currentSizeDepth/2] // explore the left branch
+		currentSizeDepth /= 2
+	}
+	return proof, nil
 }

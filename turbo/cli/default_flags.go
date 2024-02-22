@@ -20,6 +20,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.TxPoolBlobPriceBumpFlag,
 	&utils.TxPoolAccountSlotsFlag,
 	&utils.TxPoolBlobSlotsFlag,
+	&utils.TxPoolTotalBlobPoolLimit,
 	&utils.TxPoolGlobalSlotsFlag,
 	&utils.TxPoolGlobalBaseFeeSlotsFlag,
 	&utils.TxPoolAccountQueueFlag,
@@ -149,7 +150,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.HeimdallURLFlag,
 	&utils.WebSeedsFlag,
 	&utils.WithoutHeimdallFlag,
-	&utils.HeimdallgRPCAddressFlag,
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
@@ -186,4 +186,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.RPCSlowFlag,
 
 	&utils.TxPoolGossipDisableFlag,
+	&SyncLoopBlockLimitFlag,
+	&SyncLoopBreakAfterFlag,
+	&SyncLoopPruneLimitFlag,
 }
