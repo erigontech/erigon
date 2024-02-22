@@ -30,6 +30,7 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
@@ -54,12 +55,14 @@ import (
 func OpenCaplinDatabase(ctx context.Context,
 	databaseConfig db_config.DatabaseConfiguration,
 	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
 	dbPath string,
+	blobDir string,
 	engine execution_client.ExecutionEngine,
 	wipeout bool,
-) (kv.RwDB, kv.RwDB, error) {
+) (kv.RwDB, blob_storage.BlobStorage, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
-	blobDbPath := path.Join(dbPath, "blobs")
+	blobDbPath := path.Join(blobDir, "chaindata")
 
 	if wipeout {
 		os.RemoveAll(dataDirIndexer)
@@ -92,7 +95,7 @@ func OpenCaplinDatabase(ctx context.Context,
 			blobDB.Close() // close blob database here
 		}()
 	}
-	return db, blobDB, nil
+	return db, blob_storage.NewBlobStore(db, afero.NewBasePathFs(afero.NewOsFs(), blobDir), 129600, beaconConfig, genesisConfig), nil
 }
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,

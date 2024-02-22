@@ -215,7 +215,7 @@ func (c *Chain) Run(ctx *Context) error {
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	dirs := datadir.New(c.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
@@ -378,7 +378,7 @@ type DumpSnapshots struct {
 }
 
 func (c *DumpSnapshots) Run(ctx *Context) error {
-	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -388,7 +388,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
@@ -412,7 +412,7 @@ type CheckSnapshots struct {
 }
 
 func (c *CheckSnapshots) Run(ctx *Context) error {
-	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -422,7 +422,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
@@ -492,7 +492,7 @@ type LoopSnapshots struct {
 func (c *LoopSnapshots) Run(ctx *Context) error {
 	c.withProfile()
 
-	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
 	if err != nil {
 		return err
 	}
@@ -502,7 +502,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
@@ -544,14 +544,14 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	webSeeds := snapcfg.KnownWebseeds[d.Chain]
 	dirs := datadir.New(d.Datadir)
 
-	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(d.Chain)
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(d.Chain)
 	if err != nil {
 		return err
 	}
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
@@ -606,12 +606,12 @@ type RetrieveHistoricalState struct {
 
 func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	vt := state_accessors.NewStaticValidatorTable()
-	_, _, beaconConfig, t, err := clparams.GetConfigsByNetworkName(r.Chain)
+	genesisConfig, _, beaconConfig, t, err := clparams.GetConfigsByNetworkName(r.Chain)
 	if err != nil {
 		return err
 	}
 	dirs := datadir.New(r.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}

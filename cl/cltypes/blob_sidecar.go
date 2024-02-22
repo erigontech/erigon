@@ -30,8 +30,8 @@ func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, k
 		Blob:                     *blob,
 		KzgCommitment:            kzgCommitment,
 		KzgProof:                 kzgProof,
-		SignedBlockHeader:        new(SignedBeaconBlockHeader),
-		CommitmentInclusionProof: solid.NewHashVector(CommitmentBranchSize),
+		SignedBlockHeader:        signedBlockHeader,
+		CommitmentInclusionProof: commitmentInclusionProof,
 	}
 }
 
@@ -51,6 +51,8 @@ func (b *BlobSidecar) EncodingSizeSSZ() int {
 }
 
 func (b *BlobSidecar) DecodeSSZ(buf []byte, version int) error {
+	b.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
+	b.SignedBlockHeader = &SignedBeaconBlockHeader{}
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
 
