@@ -119,6 +119,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if foundLatestEth1ValidBlock.Load() {
 				logger.Info("Found latest eth1 valid block", "blockNumber", payload.BlockNumber, "blockHash", payload.BlockHash)
 			}
+
 			if !foundLatestEth1ValidBlock.Load() {
 				payloadRoot, err := payload.HashSSZ()
 				if err != nil {
@@ -174,7 +175,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
-					return
+					log.Debug("could not get peer count", "err", err)
+					continue
+				}
+				if speed == 0 {
+					continue
 				}
 				logArgs = append(logArgs,
 					"slot", currProgress,

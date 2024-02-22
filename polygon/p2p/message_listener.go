@@ -15,8 +15,8 @@ import (
 type MessageListener interface {
 	Start(ctx context.Context)
 	Stop()
-	RegisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage])
-	UnregisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage])
+	RegisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage])
+	UnregisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage])
 }
 
 func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) MessageListener {
@@ -50,11 +50,11 @@ func (ml *messageListener) Stop() {
 	ml.stopWg.Wait()
 }
 
-func (ml *messageListener) RegisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage]) {
+func (ml *messageListener) RegisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage]) {
 	ml.registerInboundMessageObserver(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
-func (ml *messageListener) UnregisterBlockHeaders66Observer(observer MessageObserver[*sentry.InboundMessage]) {
+func (ml *messageListener) UnregisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage]) {
 	ml.unregisterInboundMessageObserver(observer, sentry.MessageId_BLOCK_HEADERS_66)
 }
 
