@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"time"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -55,7 +57,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		return fmt.Errorf("block is too early compared to current_slot")
 	}
 	// Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Epoch())
+	finalizedSlot := f.computeStartSlotAtEpoch(f.finalizedCheckpoint.Load().(solid.Checkpoint).Epoch())
 	if block.Block.Slot <= finalizedSlot {
 		return nil
 	}
@@ -71,6 +73,13 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 			versionedHashes = append(versionedHashes, versionedHash)
 			return nil
 		})
+	}
+
+	// Check if blob data is available
+	if block.Version() >= clparams.DenebVersion {
+		if err := isDataAvailable(blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+			return fmt.Errorf("OnBlock: data is not available")
+		}
 	}
 
 	var invalidBlock bool
@@ -113,17 +122,17 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		f.eth2Roots.Add(blockRoot, block.Block.Body.ExecutionPayload.BlockHash)
 	}
 
-	if block.Block.Slot > f.highestSeen {
-		f.highestSeen = block.Block.Slot
+	if block.Block.Slot > f.highestSeen.Load() {
+		f.highestSeen.Store(block.Block.Slot)
 	}
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
 	// Add proposer score boost if the block is timely
-	timeIntoSlot := (f.time - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
+	timeIntoSlot := (f.time.Load() - f.genesisTime) % lastProcessedState.BeaconConfig().SecondsPerSlot
 	isBeforeAttestingInterval := timeIntoSlot < f.beaconCfg.SecondsPerSlot/f.beaconCfg.IntervalsPerSlot
-	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot == (libcommon.Hash{}) {
-		f.proposerBoostRoot = blockRoot
+	if f.Slot() == block.Block.Slot && isBeforeAttestingInterval && f.proposerBoostRoot.Load().(libcommon.Hash) == (libcommon.Hash{}) {
+		f.proposerBoostRoot.Store(libcommon.Hash(blockRoot))
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
 		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", lastProcessedState.Slot(), lastProcessedState, f.recorder); err != nil {
@@ -178,5 +187,48 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		f.updateCheckpoints(lastProcessedState.CurrentJustifiedCheckpoint().Copy(), lastProcessedState.FinalizedCheckpoint().Copy())
 	}
 	log.Debug("OnBlock", "elapsed", time.Since(start))
+	return nil
+}
+
+const (
+	LEN_48 = 48 // KZGCommitment & KZGProof sizes
+)
+
+type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
+type KZGProof [LEN_48]byte
+type Blob [fixedgas.BlobSize]byte
+
+type BlobKzgs []KZGCommitment
+type KZGProofs []KZGProof
+type Blobs []Blob
+
+func toBlobs(_blobs Blobs) []gokzg4844.Blob {
+	blobs := make([]gokzg4844.Blob, len(_blobs))
+	for i, _blob := range _blobs {
+		blobs[i] = gokzg4844.Blob(_blob)
+	}
+	return blobs
+}
+func toComms(_comms BlobKzgs) []gokzg4844.KZGCommitment {
+	comms := make([]gokzg4844.KZGCommitment, len(_comms))
+	for i, _comm := range _comms {
+		comms[i] = gokzg4844.KZGCommitment(_comm)
+	}
+	return comms
+}
+func toProofs(_proofs KZGProofs) []gokzg4844.KZGProof {
+	proofs := make([]gokzg4844.KZGProof, len(_proofs))
+	for i, _proof := range _proofs {
+		proofs[i] = gokzg4844.KZGProof(_proof)
+	}
+	return proofs
+}
+
+func isDataAvailable(blockRoot libcommon.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
+	//FIXME: retrive Blobs and Proofs and verify them
+	// blobs, proofs := retrieveBlobsAndProofs(blockRoot)
+
+	// kzgCtx := libkzg.Ctx()
+	// return kzgCtx.VerifyBlobKZGProofBatch(toBlobs(blobs), toComms(blobKzgCommitments), toProofs(proofs))
 	return nil
 }

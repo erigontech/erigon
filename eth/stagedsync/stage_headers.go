@@ -589,10 +589,12 @@ func (cr ChainReaderImpl) FrozenBlocks() uint64 {
 	return cr.blockReader.FrozenBlocks()
 }
 func (cr ChainReaderImpl) GetBlock(hash libcommon.Hash, number uint64) *types.Block {
-	panic("")
+	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
+	return b
 }
 func (cr ChainReaderImpl) HasBlock(hash libcommon.Hash, number uint64) bool {
-	panic("")
+	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
+	return b != nil
 }
 func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
