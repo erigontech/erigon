@@ -5,13 +5,15 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/log/v3"
 )
 
-const BRANCH_SIZE = 17
+const CommitmentBranchSize = 17
 
 type BlobSidecar struct {
 	Index                    uint64                   `json:"index,string"`
@@ -29,7 +31,7 @@ func NewBlobSidecar(index uint64, blob *Blob, kzgCommitment libcommon.Bytes48, k
 		KzgCommitment:            kzgCommitment,
 		KzgProof:                 kzgProof,
 		SignedBlockHeader:        new(SignedBeaconBlockHeader),
-		CommitmentInclusionProof: solid.NewHashVector(BRANCH_SIZE),
+		CommitmentInclusionProof: solid.NewHashVector(CommitmentBranchSize),
 	}
 }
 
@@ -128,4 +130,35 @@ func VerifyBlobsSidecarAgainstExpectedBlobs(sidecars []*BlobSidecar, commitments
 	}
 
 	return nil
+}
+
+func VerifyCommitmentInclusionProof(commitment libcommon.Bytes48, commitmentInclusionProof solid.HashVectorSSZ, commitmentIndex uint64, version clparams.StateVersion, bodyRoot [32]byte) bool {
+	// Initialize the merkle tree leaf
+	value, err := merkle_tree.HashTreeRoot(commitment[:])
+	if err != nil {
+		return false
+	}
+	bodyDepth := 4
+	commitmentsDepth := uint64(13) // log2(4096) + 1 = 13
+	bIndex := uint64(11)
+
+	// Start by constructing the commitments subtree
+	for i := uint64(0); i < commitmentsDepth; i++ {
+		curr := commitmentInclusionProof.Get(int(i))
+		if (commitmentIndex / utils.PowerOf2(i) % 2) == 1 {
+			value = utils.Sha256(append(curr[:], value[:]...))
+		} else {
+			value = utils.Sha256(append(value[:], curr[:]...))
+		}
+	}
+	// Construct up the block giga tree
+	for i := uint64(0); i < uint64(bodyDepth); i++ {
+		curr := commitmentInclusionProof.Get(int(i + commitmentsDepth))
+		if (bIndex / utils.PowerOf2(i) % 2) == 1 {
+			value = utils.Sha256(append(curr[:], value[:]...))
+		} else {
+			value = utils.Sha256(append(value[:], curr[:]...))
+		}
+	}
+	return value == bodyRoot
 }
