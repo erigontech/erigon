@@ -23,7 +23,7 @@ func TestBlobWriterAndReader(t *testing.T) {
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
-	sidecar := cltypes.BlobSidecar{
+	sidecar := &cltypes.BlobSidecar{
 		Index: 1,
 		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
 			Header: &cltypes.BeaconBlockHeader{
@@ -63,7 +63,7 @@ func TestRetrieveBlobsAndProofs(t *testing.T) {
 	tx, _ := db.BeginRw(context.Background())
 	defer tx.Rollback()
 
-	sidecar := cltypes.BlobSidecar{
+	sidecar := &cltypes.BlobSidecar{
 		Index: 1,
 		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
 			Header: &cltypes.BeaconBlockHeader{

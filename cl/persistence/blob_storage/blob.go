@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 )
 
-func WriteBlob(tx kv.RwTx, blobSidecar cltypes.BlobSidecar) error {
+func WriteBlob(tx kv.RwTx, blobSidecar *cltypes.BlobSidecar) error {
 	// Encode the blobSidecar
 	encodedBlobSidecar, err := blobSidecar.EncodeSSZ(nil)
 	if err != nil {
