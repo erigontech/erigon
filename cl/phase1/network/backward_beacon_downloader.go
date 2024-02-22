@@ -184,7 +184,6 @@ Loop:
 		return err
 	}
 	defer tx.Rollback()
-	var elFound bool
 	// it will stop if we end finding a gap or if we reach the maxIterations
 	for {
 		// check if the expected root is in db
@@ -208,8 +207,8 @@ Loop:
 				if err != nil {
 					return err
 				}
-				elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
-				if elFound {
+				elFound := (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
+				if !elFound {
 					break
 				}
 			}
