@@ -502,8 +502,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 				if err != nil {
 					logger.Warn("[mem] error reading virtual memory stats", "err", err)
 
-					if err.Error() == "unsupported platform" {
-						return // we do not want to pollute the log with repeated warnings
+					if err.Error() == "unsupported platform" { // do not pollute the log with repeated warnings
+						logger.Warn("[mem] platform unsupported, exiting virtual memory stats goroutine")
+						return
 					} else {
 						continue
 					}
