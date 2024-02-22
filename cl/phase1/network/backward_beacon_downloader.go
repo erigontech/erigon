@@ -1,7 +1,6 @@
 package network
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +31,7 @@ type BackwardBeaconDownloader struct {
 	reqInterval    *time.Ticker
 	db             kv.RwDB
 	neverSkip      bool
+	elFound        bool
 
 	mu sync.Mutex
 }
@@ -201,14 +201,13 @@ Loop:
 			if err != nil {
 				return err
 			}
-			fmt.Println(blockHash)
-			if blockHash != (libcommon.Hash{}) {
+			if blockHash != (libcommon.Hash{}) && !b.elFound {
 				bodyChainHeader, err := b.engine.GetBodiesByHashes([]libcommon.Hash{blockHash})
 				if err != nil {
 					return err
 				}
-				elFound := (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
-				if !elFound {
+				b.elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
+				if !b.elFound {
 					break
 				}
 			}
