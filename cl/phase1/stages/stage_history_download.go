@@ -169,7 +169,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
-					return
+					log.Debug("could not get peer count", "err", err)
+					continue
+				}
+				if speed == 0 {
+					continue
 				}
 				logArgs = append(logArgs,
 					"slot", currProgress,
