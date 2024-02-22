@@ -3,6 +3,7 @@
 package mem
 
 import (
+	"context"
 	"errors"
 
 	"github.com/shirou/gopsutil/v3/process"
