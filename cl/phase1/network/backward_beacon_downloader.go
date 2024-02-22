@@ -183,7 +183,7 @@ Loop:
 		return err
 	}
 	defer tx.Rollback()
-
+	var elFound bool
 	// it will stop if we end finding a gap or if we reach the maxIterations
 	for {
 		// check if the expected root is in db
@@ -195,14 +195,21 @@ Loop:
 		if slot == nil || *slot == 0 {
 			break
 		}
-		if b.engine != nil && b.engine.SupportInsertion() {
-			bodyChainHeader, err := b.engine.GetBodiesByHashes([]libcommon.Hash{b.expectedRoot})
+
+		if b.engine != nil && b.engine.SupportInsertion() && !elFound {
+			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
 			if err != nil {
 				return err
 			}
-			found := (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks() > payload.BlockNumber
-			if !found {
-				break
+			if blockHash != (libcommon.Hash{}) {
+				bodyChainHeader, err := b.engine.GetBodiesByHashes([]libcommon.Hash{blockHash})
+				if err != nil {
+					return err
+				}
+				elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || b.engine.FrozenBlocks() > payload.BlockNumber
+				if elFound {
+					break
+				}
 			}
 		}
 		b.slotToDownload = *slot - 1
