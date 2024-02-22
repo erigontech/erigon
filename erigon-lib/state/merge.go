@@ -1156,15 +1156,6 @@ func (dc *DomainContext) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *fi
 	}
 }
 
-func (dc *DomainContext) hasCoverFile(item *filesItem) bool {
-	for _, f := range dc.files {
-		if item.isSubsetOf(f.src) {
-			return true
-		}
-	}
-	return false
-}
-
 // cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
