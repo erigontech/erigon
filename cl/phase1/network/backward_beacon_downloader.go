@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -201,6 +202,7 @@ Loop:
 			if err != nil {
 				return err
 			}
+			fmt.Println(blockHash)
 			if blockHash != (libcommon.Hash{}) {
 				bodyChainHeader, err := b.engine.GetBodiesByHashes([]libcommon.Hash{blockHash})
 				if err != nil {
