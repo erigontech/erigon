@@ -140,46 +140,19 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 						if t := bor.EventTime(event); !checkBlockWindow(ctx, t, config, header, tx, blockReader) {
 							from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
 
-							if from.Equal(to) {
-								func(ctx context.Context, config *borcfg.BorConfig, header *types.Header, tx kv.Getter, headerReader services.HeaderReader) (from time.Time, to time.Time, err error) {
+							var diff time.Duration
 
-									blockNum := header.Number.Uint64()
-									blockNum += blockNum % config.CalculateSprintLength(blockNum)
-
-									prevHeader, err := headerReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(blockNum))
-
-									if err != nil {
-										return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
-									}
-
-									log.Info("CalculateEventWIndow 0", "blockNum", blockNum, "prevHeader", prevHeader.Number, "prevTime", prevHeader.Time)
-
-									if config.IsIndore(blockNum) {
-										stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
-										to = time.Unix(int64(header.Time-stateSyncDelay), 0)
-										from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
-									} else {
-										to = time.Unix(int64(prevHeader.Time), 0)
-										prevHeader, err := headerReader.HeaderByNumber(ctx, tx, prevHeader.Number.Uint64()-config.CalculateSprintLength(prevHeader.Number.Uint64()))
-
-										if err != nil {
-											return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
-										}
-
-										log.Info("CalculateEventWIndow 1", "prevHeader", prevHeader.Number, "prevTime", prevHeader.Time)
-										from = time.Unix(int64(prevHeader.Time), 0)
-									}
-
-									return from, to, nil
-								}(ctx, config, header, tx, blockReader)
-
+							if t.Before(from) {
+								diff = -from.Sub(t)
+							} else if t.After(to) {
+								diff = to.Sub(t)
 							}
 
 							if failFast {
 								return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", t, prevBlockStartId+uint64(i), block, from, to)
 							}
 
-							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", prevBlockStartId+uint64(i), "time", t, "expected", fmt.Sprintf("%s-%s", from, to))
+							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", prevBlockStartId+uint64(i), "time", t, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to))
 						}
 					}
 
