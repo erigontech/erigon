@@ -250,7 +250,7 @@ func CalculateEventWIndow(ctx context.Context, config *borcfg.BorConfig, header 
 		from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
 	} else {
 		to = time.Unix(int64(prevHeader.Time), 0)
-		prevHeader, err := headerReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(prevHeader.Number.Uint64()))
+		prevHeader, err := headerReader.HeaderByNumber(ctx, tx, prevHeader.Number.Uint64()-config.CalculateSprintLength(prevHeader.Number.Uint64()))
 
 		if err != nil {
 			return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)

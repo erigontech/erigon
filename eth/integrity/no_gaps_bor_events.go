@@ -152,7 +152,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 										return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
 									}
 
-									log.Info("CalculateEventWIndow 0", "blockNum", blockNum, "prevHeader", prevHeader.Number, prevHeader.Time)
+									log.Info("CalculateEventWIndow 0", "blockNum", blockNum, "prevHeader", prevHeader.Number, "prevTime", prevHeader.Time)
 
 									if config.IsIndore(blockNum) {
 										stateSyncDelay := config.CalculateStateSyncDelay(blockNum)
@@ -160,13 +160,13 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 										from = time.Unix(int64(prevHeader.Time-stateSyncDelay), 0)
 									} else {
 										to = time.Unix(int64(prevHeader.Time), 0)
-										prevHeader, err := headerReader.HeaderByNumber(ctx, tx, blockNum-config.CalculateSprintLength(prevHeader.Number.Uint64()))
+										prevHeader, err := headerReader.HeaderByNumber(ctx, tx, prevHeader.Number.Uint64()-config.CalculateSprintLength(prevHeader.Number.Uint64()))
 
 										if err != nil {
 											return time.Time{}, time.Time{}, fmt.Errorf("window calculation failed: %w", err)
 										}
 
-										log.Info("CalculateEventWIndow 1", "prevHeader", prevHeader.Number, prevHeader.Time)
+										log.Info("CalculateEventWIndow 1", "prevHeader", prevHeader.Number, "prevTime", prevHeader.Time)
 										from = time.Unix(int64(prevHeader.Time), 0)
 									}
 
