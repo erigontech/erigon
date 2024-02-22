@@ -206,7 +206,7 @@ Loop:
 				if err != nil {
 					return err
 				}
-				elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || b.engine.FrozenBlocks() > payload.BlockNumber
+				elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
 				if elFound {
 					break
 				}
