@@ -13,6 +13,21 @@ const (
 	CompressVals FileCompression = 0b10 // compress values only
 )
 
+func ParseFileCompression(s string) (FileCompression, error) {
+	switch s {
+	case "none", "":
+		return CompressNone, nil
+	case "k":
+		return CompressKeys, nil
+	case "v":
+		return CompressVals, nil
+	case "kv":
+		return CompressKeys | CompressVals, nil
+	default:
+		return 0, fmt.Errorf("invalid file compression type: %s", s)
+	}
+}
+
 type getter struct {
 	*compress.Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
