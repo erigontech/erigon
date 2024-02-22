@@ -14,6 +14,28 @@ import (
 	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
+type VirtualMemStat struct {
+	process.MemoryMapsStat
+}
+
+// Fields converts VirtualMemStat to slice
+func (m VirtualMemStat) Fields() []interface{} {
+	typ := reflect.TypeOf(m.MemoryMapsStat)
+	val := reflect.ValueOf(m.MemoryMapsStat)
+
+	var s []interface{}
+	for i := 0; i < typ.NumField(); i++ {
+		t := typ.Field(i).Name
+		if t == "Path" { // always empty for aggregated smap statistics
+			continue
+		}
+
+		s = append(s, t, val.Field(i).Interface())
+	}
+
+	return s
+}
+
 var (
 	memRssGauge          = metrics.NewGauge(`mem_rss`)
 	memSizeGauge         = metrics.NewGauge(`mem_size`)
@@ -67,23 +89,11 @@ func LogVirtualMemStats(ctx context.Context, logger log.Logger) {
 			memStats, err := ReadVirtualMemStats()
 			if err != nil {
 				logger.Warn("[mem] error reading virtual memory stats", "err", err)
+				continue
 			}
 
-			// convert to slice
-			typ := reflect.TypeOf(memStats)
-			val := reflect.ValueOf(memStats)
-
-			var slice []interface{}
-			for i := 0; i < typ.NumField(); i++ {
-				t := typ.Field(i).Name
-				if t == "Path" { // always empty for aggregated smap statistics
-					continue
-				}
-
-				slice = append(slice, t, val.Field(i).Interface())
-			}
-
-			logger.Info("[mem] virtual memory stats", slice...)
+			v := VirtualMemStat{memStats}
+			logger.Info("[mem] virtual memory stats", v.Fields()...)
 			UpdatePrometheusVirtualMemStats(memStats)
 		}
 	}
