@@ -2256,13 +2256,10 @@ func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toM
 	return toMerge
 }
 
-func (m *Merger) filesByRange(snapshots *RoSnapshots, snapType snaptype.Type, from, to uint64) []string {
-	view := snapshots.View()
-	defer view.Close()
-
+func (m *Merger) filesByRange(view *View, snapType snaptype.Type, from, to uint64) []string {
 	paths := make([]string, 0)
 
-	for _, sn := range view.Segments(snapshotType) {
+	for _, sn := range view.Segments(snapType) {
 		if sn.from < from {
 			continue
 		}
@@ -2286,11 +2283,15 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapType sna
 	defer logEvery.Stop()
 
 	for _, r := range mergeRanges {
-		toMerge := m.filesByRange(snapshots, snapType, r.from, r.to)
+		// TODO: perhaps this view should be held across the whole
+		// merge operation - the problem with this is that we may
+		// have issues with the current implementation as it holds
+		// a lock over the snapshot which may have undesirable side
+		// effrects
 
-		if err != nil {
-			return err
-		}
+		view := snapshots.View()
+		toMerge := m.filesByRange(view, snapType, r.from, r.to)
+		view.Close()
 
 		f := snapType.FileInfo(snapDir, r.from, r.to)
 
