@@ -70,6 +70,15 @@ func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
 func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
 	panic("")
 }
+func (cr Reader) BorStartEventID(number uint64) uint64 {
+	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, number)
+	if err != nil {
+		cr.logger.Error("BorEventsByBlock failed", "err", err)
+		return 0
+	}
+	return id
+
+}
 func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
 	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
 	if err != nil {

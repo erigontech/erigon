@@ -81,6 +81,9 @@ func (cr ChainReader) FrozenBlocks() uint64 {
 	return cr.BlockReader.FrozenBlocks()
 }
 
+func (cr ChainReader) BorStartEventID(_ uint64) uint64 {
+	panic("bor events by block not implemented")
+}
 func (cr ChainReader) BorEventsByBlock(_ libcommon.Hash, _ uint64) []rlp.RawValue {
 	panic("bor events by block not implemented")
 }
