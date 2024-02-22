@@ -1,4 +1,6 @@
-package dbg
+//go:build linux
+
+package mem
 
 import (
 	"github.com/ledgerwatch/erigon-lib/metrics"

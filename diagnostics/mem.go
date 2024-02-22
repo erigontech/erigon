@@ -2,8 +2,9 @@ package diagnostics
 
 import (
 	"encoding/json"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"net/http"
+
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 )
 
 func SetupMemAccess(metricsMux *http.ServeMux) {
@@ -15,7 +16,7 @@ func SetupMemAccess(metricsMux *http.ServeMux) {
 }
 
 func writeMem(w http.ResponseWriter) {
-	memStats, err := dbg.ReadVirtualMemStats()
+	memStats, err := mem.ReadVirtualMemStats()
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

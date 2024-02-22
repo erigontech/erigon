@@ -185,12 +185,6 @@ Loop:
 				}
 
 				dbg.ReadMemStats(&m)
-				memStats, err := dbg.ReadVirtualMemStats()
-
-				if err != nil {
-					log.Warn("Error reading memory stats", "err", err)
-				}
-
 				downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 				suffix := "downloading"
 				if stats.Progress > 0 && stats.DownloadRate == 0 {
@@ -207,7 +201,6 @@ Loop:
 					"files", stats.FilesTotal,
 					"connections", stats.ConnectionsTotal,
 					"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
-					"shared-usage-clean", common.ByteCount(memStats.SharedClean),
 				)
 			}
 		}

@@ -1,15 +1,11 @@
 package diagnostics
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/log/v3"
-	"net/http"
-	"reflect"
-	"strings"
-	"time"
-
 	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+	"net/http"
+	"strings"
 )
 
 func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, logger log.Logger) {
@@ -37,37 +33,4 @@ func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, l
 	SetupStagesAccess(debugMux, diagnostic)
 	SetupMemAccess(debugMux)
 
-	// setup periodic logging and prometheus updates
-	go func() {
-		logEvery := time.NewTicker(180 * time.Second)
-		defer logEvery.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				memStats, err := dbg.ReadVirtualMemStats()
-				if err != nil {
-					logger.Warn("[mem] error reading virtual memory stats", "err", err)
-				}
-
-				typ := reflect.TypeOf(memStats)
-				val := reflect.ValueOf(memStats)
-
-				var slice []interface{}
-				for i := 0; i < typ.NumField(); i++ {
-					t := typ.Field(i).Name
-					if t == "Path" { // always empty for aggregated smap statistics
-						continue
-					}
-
-					slice = append(slice, t, val.Field(i).Interface())
-				}
-
-				logger.Info("[mem] virtual memory stats", slice...)
-				dbg.UpdatePrometheusVirtualMemStats(memStats)
-			}
-		}
-	}()
 }
