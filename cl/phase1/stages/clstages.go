@@ -51,12 +51,13 @@ type Cfg struct {
 	indiciesDB      kv.RwDB
 	tmpdir          string
 	dbConfig        db_config.DatabaseConfiguration
-	sn              *freezeblocks.CaplinSnapshots
+	blockReader     freezeblocks.BeaconSnapshotReader
 	antiquary       *antiquary.Antiquary
 	syncedData      *synced_data.SyncedDataManager
 	emitter         *beaconevents.Emitters
 	prebuffer       *etl.Collector
 	gossipSource    persistence.BlockSource
+	sn              *freezeblocks.CaplinSnapshots
 
 	hasDownloaded, backfilling bool
 }
@@ -102,6 +103,7 @@ func ClStagesCfg(
 	forkChoice *forkchoice.ForkChoiceStore,
 	indiciesDB kv.RwDB,
 	sn *freezeblocks.CaplinSnapshots,
+	blockReader freezeblocks.BeaconSnapshotReader,
 	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
 	backfilling bool,
@@ -122,6 +124,7 @@ func ClStagesCfg(
 		indiciesDB:      indiciesDB,
 		dbConfig:        dbConfig,
 		sn:              sn,
+		blockReader:     blockReader,
 		backfilling:     backfilling,
 		syncedData:      syncedData,
 		emitter:         emitters,
@@ -265,7 +268,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, cfg.blockReader, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}

@@ -38,6 +38,27 @@ func BlobsIdentifiersFromBlocks(blocks []*cltypes.SignedBeaconBlock) (*solid.Lis
 	return ids, nil
 }
 
+func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBlock) (*solid.ListSSZ[*cltypes.BlobIdentifier], error) {
+	ids := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
+	for _, block := range blocks {
+		if block.Version() < clparams.DenebVersion {
+			continue
+		}
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+		kzgCommitments := block.Block.Body.BlobKzgCommitments.Len()
+		for i := 0; i < kzgCommitments; i++ {
+			ids.Append(&cltypes.BlobIdentifier{
+				BlockRoot: blockRoot,
+				Index:     uint64(i),
+			})
+		}
+	}
+	return ids, nil
+}
+
 // RequestBlobsFrantically requests blobs from the network frantically.
 func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, error) {
 	var atomicResp atomic.Value

@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -31,6 +32,7 @@ type StageHistoryReconstructionCfg struct {
 	sn                       *freezeblocks.CaplinSnapshots
 	startingRoot             libcommon.Hash
 	backfilling              bool
+	blobsBackfilling         bool
 	waitForAllRoutines       bool
 	startingSlot             uint64
 	tmpdir                   string
@@ -40,11 +42,12 @@ type StageHistoryReconstructionCfg struct {
 	logger                   log.Logger
 	executionBlocksCollector *etl.Collector
 	backfillingThrottling    time.Duration
+	blockReader              freezeblocks.BeaconSnapshotReader
 }
 
 const logIntervalTime = 30 * time.Second
 
-func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector *etl.Collector, logger log.Logger) StageHistoryReconstructionCfg {
+func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, genesisCfg *clparams.GenesisConfig, beaconCfg *clparams.BeaconChainConfig, backfilling, waitForAllRoutines bool, startingRoot libcommon.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector *etl.Collector, blockReader freezeblocks.BeaconSnapshotReader, logger log.Logger) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
 		genesisCfg:               genesisCfg,
 		beaconCfg:                beaconCfg,
@@ -61,6 +64,8 @@ func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, an
 		sn:                       sn,
 		backfillingThrottling:    backfillingThrottling,
 		executionBlocksCollector: executionBlocksCollector,
+		blockReader:              blockReader,
+		blobsBackfilling:         false,
 	}
 }
 
@@ -204,6 +209,13 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		log.Info("Backfilling finished")
 
 		close(finishCh)
+		if cfg.blobsBackfilling {
+			go func() {
+				if err := downloadBlobHistoryWorker(cfg, ctx, logger); err != nil {
+					logger.Error("Error downloading blobs", "err", err)
+				}
+			}()
+		}
 	}()
 	// Lets wait for the latestValidHash to be turned on
 	for !foundLatestEth1ValidBlock.Load() || (cfg.waitForAllRoutines && !cfg.downloader.Finished()) {
@@ -226,5 +238,90 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
+	return nil
+}
+
+func generateCommitmentsToSlotMapForBackfilling(blocks []*cltypes.SignedBlindedBeaconBlock) map[common.Bytes48]uint64 {
+	out := make(map[common.Bytes48]uint64)
+	for _, block := range blocks {
+		if block.Version() < clparams.DenebVersion {
+			continue
+		}
+		for i := 0; i < block.Block.Body.BlobKzgCommitments.Len(); i++ {
+			in := common.Bytes48(*block.Block.Body.BlobKzgCommitments.Get(i))
+			if curr, ok := out[in]; ok {
+				out[in] = utils.Max64(curr, block.Block.Slot)
+			} else {
+				out[in] = block.Block.Slot
+			}
+
+		}
+	}
+	return out
+}
+
+// downloadBlobHistoryWorker is a worker that downloads the blob history by using the already downloaded beacon blocks
+func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Context, logger log.Logger) error {
+	currentSlot := cfg.startingSlot
+	blocksBatchSize := uint64(8) // requests 8 blocks worth of blobs at a time
+	tx, err := cfg.indiciesDB.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rpc := cfg.downloader.RPC()
+	for {
+		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
+		for i := uint64(0); i < blocksBatchSize; i++ {
+			block, err := cfg.blockReader.ReadBlindedBlockBySlot(ctx, tx, currentSlot-i)
+			if err != nil {
+				return err
+			}
+			if block == nil || block.Version() < clparams.DenebVersion {
+				continue
+			}
+			batch = append(batch, block)
+		}
+		// Generate the request
+		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch)
+		if err != nil {
+			return err
+		}
+		commitmentsExpected := generateCommitmentsToSlotMapForBackfilling(batch)
+		// Request the blobs
+		blobs, err := network.RequestBlobsFrantically(ctx, rpc, req)
+		if err != nil {
+			return err
+		}
+		// Verify and track the expected blobs in commitmentsExpected we received
+		if err := cltypes.VerifyBlobsSidecarAgainstExpectedBlobs(blobs, commitmentsExpected); err != nil {
+			return err
+		}
+		// get the highest blob slot processed
+		maxBlobSlot := uint64(0)
+		for _, slot := range commitmentsExpected {
+			maxBlobSlot = utils.Max64(maxBlobSlot, slot)
+		}
+		totalCommitmentsExpected := generateCommitmentsToSlotMapForBackfilling(batch)
+		for _, blob := range blobs {
+			_, isExpected := totalCommitmentsExpected[blob.KzgCommitment]
+			_, wasNotProcessed := commitmentsExpected[blob.KzgCommitment]
+			if isExpected && !wasNotProcessed {
+				// Insert here
+				_ = blob
+				// ----------------
+			}
+		}
+		if maxBlobSlot == 0 { // all blobs were verified
+			currentSlot -= blocksBatchSize
+		} else {
+			currentSlot = maxBlobSlot + 1
+		}
+		// TODO: also check snapshots
+		if currentSlot <= cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
+			break
+		}
+	}
 	return nil
 }
