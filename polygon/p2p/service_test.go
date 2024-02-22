@@ -329,3 +329,11 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenInvalidRlpErr(t *testing.T) {
 		require.Nil(t, headers)
 	})
 }
+
+func TestListPeersMayHaveBlockNum(t *testing.T) {
+	// TODO
+}
+
+func TestListPeersMayHaveBlockNumDoesNotReturnPeerIdAfterDisconnect(t *testing.T) {
+	// TODO
+}
