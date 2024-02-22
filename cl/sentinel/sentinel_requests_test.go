@@ -34,7 +34,7 @@ import (
 func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, reader *tests.MockBlockReader) {
 	blocks, preState, postState = tests.GetPhase0Random()
 	db = memdb.NewTestDB(t)
-	reader, f = tests.LoadChain(blocks, postState, db, t)
+	reader = tests.LoadChain(blocks, postState, db, t)
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()

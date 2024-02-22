@@ -450,7 +450,6 @@ const (
 	LastBeaconSnapshot    = "LastBeaconSnapshot"
 	LastBeaconSnapshotKey = "LastBeaconSnapshotKey"
 
-	BlockRootToBlobs          = "BlockRootToBlobs"
 	BlockRootToKzgCommitments = "BlockRootToKzgCommitments"
 	KzgCommitmentToBlob       = "KzgCommitmentToBlob"
 
@@ -660,7 +659,6 @@ var ChaindataTables = []string{
 	BlockRootToBlockNumber,
 	LastBeaconSnapshot,
 	// Blob Storage
-	BlockRootToBlobs,
 	BlockRootToKzgCommitments,
 	KzgCommitmentToBlob,
 	// State Reconstitution
