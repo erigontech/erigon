@@ -888,7 +888,7 @@ func (c *Bor) Prepare(chain consensus.ChainHeaderReader, header *types.Header, s
 	// where it fetches producers internally. As we fetch data from span
 	// in Erigon, use directly the `GetCurrentProducers` function.
 	if isSprintStart(number+1, c.config.CalculateSprintLength(number)) {
-		spanID := SpanIDAt(number + 1)
+		spanID := uint64(heimdall.SpanIdAt(number + 1))
 		newValidators, err := c.spanner.GetCurrentProducers(spanID, c.authorizedSigner.Load().signer, chain)
 		if err != nil {
 			return errUnknownValidators
@@ -1315,15 +1315,19 @@ func (c *Bor) checkAndCommitSpan(
 		return err
 	}
 
-	// check span is not set initially
+	// Whenever `checkAndCommitSpan` is called for the first time, during the start of 'technically'
+	// second sprint, we need the 0th as well as the 1st span. The contract returns an empty
+	// span (i.e. all fields set to 0). Span 0 doesn't need to be committed explicitly and
+	// is committed eventually when we commit 1st span (as per the contract). The check below
+	// takes care of that and commits the 1st span (hence the `currentSpan.Id+1` param).
 	if currentSpan.EndBlock == 0 {
-		return c.fetchAndCommitSpan(currentSpan.ID, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
 	}
 
-	// if current block is first block of last sprint in current span
+	// For subsequent calls, commit the next span on the first block of the last sprint of a span
 	sprintLength := c.config.CalculateSprintLength(headerNumber)
 	if currentSpan.EndBlock > sprintLength && currentSpan.EndBlock-sprintLength+1 == headerNumber {
-		return c.fetchAndCommitSpan(currentSpan.ID+1, state, header, chain, syscall)
+		return c.fetchAndCommitSpan(uint64(currentSpan.Id+1), state, header, chain, syscall)
 	}
 
 	return nil
@@ -1336,7 +1340,7 @@ func (c *Bor) fetchAndCommitSpan(
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
 ) error {
-	var heimdallSpan heimdall.HeimdallSpan
+	var heimdallSpan heimdall.Span
 
 	if c.HeimdallClient == nil {
 		// fixme: move to a new mock or fake and remove c.HeimdallClient completely
@@ -1447,6 +1451,58 @@ func (c *Bor) CommitStates(
 	syscall consensus.SystemCall,
 ) error {
 	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
+
+	// header.Number.Uint64() == 48077376
+	if len(events) == 50 {
+		blockNum := header.Number.Uint64()
+		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum)
+
+		var to time.Time
+		if c.config.IsIndore(blockNum) {
+			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
+			to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+		} else {
+			pHeader := chain.Chain.GetHeaderByNumber(blockNum - c.config.CalculateSprintLength(blockNum))
+			to = time.Unix(int64(pHeader.Time), 0)
+		}
+
+		startEventID := chain.Chain.BorStartEventID(blockNum)
+		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
+		if err != nil {
+			return err
+		}
+		if len(remote) > 0 {
+			chainID := c.chainConfig.ChainID.String()
+
+			var merged []*heimdall.EventRecordWithTime
+			events = events[:0]
+			for _, event := range remote {
+				if event.ChainID != chainID {
+					continue
+				}
+				if event.Time.After(to) {
+					continue
+				}
+				merged = append(merged, event)
+			}
+
+			for _, ev := range merged {
+				eventRecordWithoutTime := ev.BuildEventRecord()
+
+				recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+				if err != nil {
+					panic(err)
+				}
+
+				data, err := stateReceiverABI.Pack("commitState", big.NewInt(ev.Time.Unix()), recordBytes)
+				if err != nil {
+					panic(err)
+				}
+				events = append(events, data)
+			}
+		}
+	}
+
 	for _, event := range events {
 		if err := c.GenesisContractsClient.CommitState(event, syscall); err != nil {
 			return err
@@ -1469,7 +1525,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	header *types.Header,
 	chain statefull.ChainContext,
 	syscall consensus.SystemCall,
-) (*heimdall.HeimdallSpan, error) {
+) (*heimdall.Span, error) {
 	headerNumber := header.Number.Uint64()
 
 	spanBor, err := c.spanner.GetCurrentSpan(syscall)
@@ -1484,7 +1540,7 @@ func (c *Bor) getNextHeimdallSpanForTest(
 	}
 
 	// new span
-	spanBor.ID = newSpanID
+	spanBor.Id = heimdall.SpanId(newSpanID)
 	if spanBor.EndBlock == 0 {
 		spanBor.StartBlock = 256
 	} else {
@@ -1498,14 +1554,13 @@ func (c *Bor) getNextHeimdallSpanForTest(
 		selectedProducers[i] = *v
 	}
 
-	heimdallSpan := &heimdall.HeimdallSpan{
-		Span:              *spanBor,
-		ValidatorSet:      *snap.ValidatorSet,
-		SelectedProducers: selectedProducers,
-		ChainID:           c.chainConfig.ChainID.String(),
-	}
+	heimdallSpan := *spanBor
 
-	return heimdallSpan, nil
+	heimdallSpan.ValidatorSet = *snap.ValidatorSet
+	heimdallSpan.SelectedProducers = selectedProducers
+	heimdallSpan.ChainID = c.chainConfig.ChainID.String()
+
+	return &heimdallSpan, nil
 }
 
 func validatorContains(a []*valset.Validator, x *valset.Validator) (*valset.Validator, bool) {

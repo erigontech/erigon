@@ -8,6 +8,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -92,6 +93,7 @@ func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not 
 func (r *RemoteBlockReader) FrozenBorBlocks() uint64               { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
+func (r *RemoteBlockReader) LastFrozenEventId() uint64             { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum := rawdb.ReadHeaderNumber(tx, hash)
@@ -235,6 +237,9 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 		result[i] = rlp.RawValue(r)
 	}
 	return result, nil
+}
+func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
+	panic("not implemented")
 }
 
 func (r *RemoteBlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
@@ -1038,6 +1043,15 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 	return
 }
 
+func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
+	v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
+	if err != nil {
+		return 0, err
+	}
+	startEventId := binary.BigEndian.Uint64(v)
+	return startEventId, nil
+}
+
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
@@ -1117,7 +1131,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	return result, nil
 }
 
-func (r *BlockReader) LastFrozenEventID() uint64 {
+func (r *BlockReader) LastFrozenEventId() uint64 {
 	if r.borSn == nil {
 		return 0
 	}
