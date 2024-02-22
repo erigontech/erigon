@@ -54,7 +54,7 @@ func TestBlobWriterAndReader(t *testing.T) {
 	blockRoot, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
 	readCommitments, err := ReadKzgCommitmentsByBlockRoot(tx, blockRoot)
 	require.NoError(t, err)
-	require.Equal(t, sidecar.KzgCommitment, readCommitments[0])
+	require.Equal(t, []libcommon.Bytes48{sidecar.KzgCommitment}, readCommitments)
 }
 
 func TestRetrieveBlobsAndProofs(t *testing.T) {

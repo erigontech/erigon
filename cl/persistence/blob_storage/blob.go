@@ -48,7 +48,6 @@ func ReadBlobSidecarByKzgCommitment(tx kv.Tx, kzgCommitment libcommon.Bytes48) (
 	var blob cltypes.BlobSidecar
 	data, err := tx.GetOne(kv.KzgCommitmentToBlob, kzgCommitment[:])
 	if err != nil {
-		//fmt.Println("Error in reading the blob by kzgCommitment:")
 		return blob, err
 	}
 	// Decode the data into the blob
@@ -64,7 +63,6 @@ func ReadKzgCommitmentsByBlockRoot(tx kv.Tx, blockRoot [32]byte) ([]libcommon.By
 	if err != nil {
 		return kzgCommitments, err
 	}
-
 	// Decode the data into the kzgCommitments
 	if err := json.Unmarshal(data, &kzgCommitments); err != nil {
 		return kzgCommitments, err
