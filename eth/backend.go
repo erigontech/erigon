@@ -21,18 +21,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"io/fs"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -489,46 +489,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// setup periodic logging and prometheus updates
-	go func() {
-		logEvery := time.NewTicker(180 * time.Second)
-		defer logEvery.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-logEvery.C:
-				memStats, err := mem.ReadVirtualMemStats()
-				if err != nil {
-					logger.Warn("[mem] error reading virtual memory stats", "err", err)
-
-					if err.Error() == "unsupported platform" { // do not pollute the log with repeated warnings
-						logger.Warn("[mem] platform unsupported, exiting virtual memory stats goroutine")
-						return
-					} else {
-						continue
-					}
-				}
-
-				// convert to slice
-				typ := reflect.TypeOf(memStats)
-				val := reflect.ValueOf(memStats)
-
-				var slice []interface{}
-				for i := 0; i < typ.NumField(); i++ {
-					t := typ.Field(i).Name
-					if t == "Path" { // always empty for aggregated smap statistics
-						continue
-					}
-
-					slice = append(slice, t, val.Field(i).Interface())
-				}
-
-				logger.Info("[mem] virtual memory stats", slice...)
-				mem.UpdatePrometheusVirtualMemStats(memStats)
-			}
-		}
-	}()
+	go mem.LogVirtualMemStats(ctx, logger)
 
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {

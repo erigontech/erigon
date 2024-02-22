@@ -677,7 +677,7 @@ func doUploaderCommand(cliCtx *cli.Context) error {
 	}
 
 	if metricsMux != nil {
-		diagnostics.Setup(cliCtx, metricsMux, ethNode, logger)
+		diagnostics.Setup(cliCtx, metricsMux, ethNode)
 	}
 
 	err = ethNode.Serve()

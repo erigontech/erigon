@@ -4,6 +4,7 @@ package mem
 
 import (
 	"errors"
+
 	"github.com/shirou/gopsutil/v3/process"
 )
 
@@ -12,3 +13,5 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 }
 
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {}
+
+func LogVirtualMemStats(ctx context.Context, logger log.Logger) {}
