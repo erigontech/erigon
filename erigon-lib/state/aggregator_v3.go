@@ -980,7 +980,6 @@ func (a *AggregatorV3) recalcMaxTxNum() {
 		min = txNum
 	}
 	if txNum := a.d[kv.CommitmentDomain].endTxNumMinimax(); txNum < min {
-		fmt.Printf("[dbg] commitment min: %d, %d\n", txNum/a.aggregationStep, min/a.aggregationStep)
 		min = txNum
 	}
 	if txNum := a.logAddrs.endTxNumMinimax(); txNum < min {
@@ -1208,7 +1207,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			if err != nil {
 				return err
 			}
-			ac.a.integrateMergedIdxFiles(ac.a.logAddrs, files.logAddrs, mf.logAddrs)
+			ac.a.integrateMergedIdxFiles(ac.logAddrs, files.logAddrs, mf.logAddrs)
 			return nil
 		})
 	}
@@ -1219,7 +1218,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			if err != nil {
 				return err
 			}
-			ac.a.integrateMergedIdxFiles(ac.a.logTopics, files.logTopics, mf.logTopics)
+			ac.a.integrateMergedIdxFiles(ac.logTopics, files.logTopics, mf.logTopics)
 			return nil
 		})
 	}
@@ -1230,7 +1229,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			if err != nil {
 				return err
 			}
-			ac.a.integrateMergedIdxFiles(ac.a.tracesFrom, files.tracesFrom, mf.tracesFrom)
+			ac.a.integrateMergedIdxFiles(ac.tracesFrom, files.tracesFrom, mf.tracesFrom)
 			return nil
 		})
 	}
@@ -1241,7 +1240,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			if err != nil {
 				return err
 			}
-			ac.a.integrateMergedIdxFiles(ac.a.tracesTo, files.tracesTo, mf.tracesTo)
+			ac.a.integrateMergedIdxFiles(ac.tracesTo, files.tracesTo, mf.tracesTo)
 			return nil
 		})
 	}
@@ -1249,17 +1248,17 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	if err == nil {
 		closeFiles = false
 	}
-	//fmt.Printf("[snapshots] merge done %s\n", r.String())
+	//fmt.Printf("[dbg] merge done %s\n", r.String())
 	return mf, err
 }
 
-func (a *AggregatorV3) integrateMergedIdxFiles(idx *InvertedIndex, outs []*filesItem, in *filesItem) {
+func (a *AggregatorV3) integrateMergedIdxFiles(idx *InvertedIndexContext, outs []*filesItem, in *filesItem) {
 	a.filesMutationLock.Lock()
 	defer a.filesMutationLock.Unlock()
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
-	idx.integrateMergedFiles(outs, in)
-	idx.cleanAfterFreeze(in)
+	idx.ii.integrateMergedFiles(outs, in)
+	idx.cleanAfterMerge(in)
 }
 func (a *AggregatorV3) integrateMergedDomainFiles(dc *DomainContext, valuesOuts, indexOuts, historyOuts []*filesItem, valuesIn, indexIn, historyIn *filesItem) {
 	a.filesMutationLock.Lock()
@@ -1267,8 +1266,18 @@ func (a *AggregatorV3) integrateMergedDomainFiles(dc *DomainContext, valuesOuts,
 	defer a.needSaveFilesListInDB.Store(true)
 	defer a.recalcMaxTxNum()
 	dc.d.integrateMergedFiles(valuesOuts, indexOuts, historyOuts, valuesIn, indexIn, historyIn)
-	dc.cleanAfterFreeze(valuesIn, historyIn, indexIn)
+	dc.cleanAfterMerge(valuesIn, historyIn, indexIn)
 	return
+}
+
+func (ac *AggregatorV3Context) cleanAfterMerge(in MergedFilesV3) {
+	for id, d := range ac.d {
+		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
+	}
+	ac.logAddrs.cleanAfterMerge(in.logAddrs)
+	ac.logTopics.cleanAfterMerge(in.logTopics)
+	ac.tracesFrom.cleanAfterMerge(in.tracesFrom)
+	ac.tracesTo.cleanAfterMerge(in.tracesTo)
 }
 
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots

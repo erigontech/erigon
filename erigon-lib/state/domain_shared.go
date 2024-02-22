@@ -6,13 +6,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"math"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -529,6 +530,10 @@ func (sd *SharedDomains) BlockNum() uint64 { return sd.blockNum.Load() }
 
 func (sd *SharedDomains) SetBlockNum(blockNum uint64) {
 	sd.blockNum.Store(blockNum)
+}
+
+func (sd *SharedDomains) SetTrace(b bool) {
+	sd.trace = b
 }
 
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, saveStateAfter bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
