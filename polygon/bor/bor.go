@@ -1480,6 +1480,7 @@ func (c *Bor) CommitStates(
 	syscall consensus.SystemCall,
 ) error {
 	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
+
 	for _, event := range events {
 		if err := c.GenesisContractsClient.CommitState(event, syscall); err != nil {
 			return err
