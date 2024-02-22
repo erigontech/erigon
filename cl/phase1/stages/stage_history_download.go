@@ -88,6 +88,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	var currEth1Progress atomic.Int64
 
 	bytesReadInTotal := atomic.Uint64{}
+	fmt.Println(foundLatestEth1ValidBlock.Load())
+
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
