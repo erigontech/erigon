@@ -31,10 +31,10 @@ var (
 )
 
 const (
-	stateFetchLimit    = 1000
-	apiHeimdallTimeout = 100 * time.Second
-	retryBackOff       = time.Second / 10
-	maxRetries         = 5
+	stateFetchLimit    = 50
+	apiHeimdallTimeout = 10 * time.Second
+	retryBackOff       = time.Second
+	maxRetries         = 50
 )
 
 //go:generate mockgen -destination=./client_mock.go -package=heimdall . HeimdallClient
