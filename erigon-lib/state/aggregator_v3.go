@@ -1269,16 +1269,6 @@ func (a *AggregatorV3) integrateMergedDomainFiles(dc *DomainContext, valuesOuts,
 	return
 }
 
-func (ac *AggregatorV3Context) cleanAfterMerge(in MergedFilesV3) {
-	for id, d := range ac.d {
-		d.cleanAfterMerge(in.d[id], in.dHist[id], in.dIdx[id])
-	}
-	ac.logAddrs.cleanAfterMerge(in.logAddrs)
-	ac.logTopics.cleanAfterMerge(in.logTopics)
-	ac.tracesFrom.cleanAfterMerge(in.tracesFrom)
-	ac.tracesTo.cleanAfterMerge(in.tracesTo)
-}
-
 // KeepStepsInDB - usually equal to one a.aggregationStep, but when we exec blocks from snapshots
 // we can set it to 0, because no re-org on this blocks are possible
 func (a *AggregatorV3) KeepStepsInDB(steps uint64) *AggregatorV3 {
