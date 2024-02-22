@@ -669,7 +669,7 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
 	stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
 	dc.Close()
 	require.NoError(t, err)
-	t.Logf("prune stat: %s", stat)
+	t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
 
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile

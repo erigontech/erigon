@@ -2035,22 +2035,26 @@ func (dc *DomainContext) DomainRangeLatest(roTx kv.Tx, fromKey, toKey []byte, li
 }
 
 // CanPruneUntil returns true if domain OR history tables can be pruned until txNum
-func (dc *DomainContext) CanPruneUntil(tx kv.Tx) bool {
-	canDomain, _ := dc.canPruneDomainTables(tx)
-	canHistory, _ := dc.hc.canPruneUntil(tx)
+func (dc *DomainContext) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
+	canDomain, _ := dc.canPruneDomainTables(tx, untilTx)
+	canHistory, _ := dc.hc.canPruneUntil(tx, untilTx)
 	return canHistory || canDomain
 }
 
 // checks if there is anything to prune in DOMAIN tables.
 // everything that aggregated is prunable.
 // history.CanPrune should be called separately because it responsible for different tables
-func (dc *DomainContext) canPruneDomainTables(tx kv.Tx) (can bool, maxPrunableStep uint64) {
+func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can bool, maxStepToPrune uint64) {
 	if m := dc.maxTxNumInDomainFiles(false); m > 0 {
-		maxPrunableStep = (m - 1) / dc.d.aggregationStep
+		maxStepToPrune = (m - 1) / dc.d.aggregationStep
+	}
+	var untilStep uint64
+	if untilTx > 0 {
+		untilStep = (untilTx - 1) / dc.d.aggregationStep
 	}
 	sm := dc.smallestStepForPruning(tx)
-	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxPrunableStep)
-	return sm <= maxPrunableStep, maxPrunableStep
+	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxStepToPrune)
+	return sm <= maxStepToPrune && sm <= untilStep && untilStep <= maxStepToPrune, maxStepToPrune
 }
 
 func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
@@ -2125,7 +2129,9 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 	dc.MaxStep = max(dc.MaxStep, other.MaxStep)
 	dc.Values += other.Values
 	if dc.History == nil {
-		dc.History = other.History
+		if other.History != nil {
+			dc.History = other.History
+		}
 	} else {
 		dc.History.Accumulate(other.History)
 	}
@@ -2145,7 +2151,7 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
-	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx)
+	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx, txTo)
 	if !canPrune {
 		return stat, nil
 	}

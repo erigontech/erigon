@@ -40,6 +40,17 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+
+	{ //no-gaps validation
+		var prev uint64
+		for _, a := range req.Blocks {
+			if prev > 0 && prev+1 != a.Header.BlockNumber {
+				return nil, fmt.Errorf("InsertBlocks: gap %d -> %d", prev, a.Header.BlockNumber)
+			}
+			prev = a.Header.BlockNumber
+		}
+	}
+
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
@@ -52,8 +63,10 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert headers: %s", err)
 		}
-		body := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
-
+		body, err := eth1_utils.ConvertRawBlockBodyFromRpc(block.Body)
+		if err != nil {
+			return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: cannot convert body: %s", err)
+		}
 		parentTd := common.Big0
 		height := header.Number.Uint64()
 		if height > 0 {

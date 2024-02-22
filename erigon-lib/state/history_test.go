@@ -342,7 +342,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
 
 		for i := uint64(0); i < stepsTotal; i++ {
-			cp, untilTx := hc.canPruneUntil(rwTx)
+			cp, untilTx := hc.canPruneUntil(rwTx, h.aggregationStep*(i+1))
 			require.GreaterOrEqual(t, h.aggregationStep*(stepsTotal-stepKeepInDB), untilTx)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -378,7 +378,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		for i := uint64(0); i < stepsTotal; i++ {
 			t.Logf("step %d, until %d", i, (i+1)*h.aggregationStep)
 
-			cp, untilTx := hc.canPruneUntil(rwTx)
+			cp, untilTx := hc.canPruneUntil(rwTx, (i+1)*h.aggregationStep)
 			require.GreaterOrEqual(t, h.aggregationStep*(stepsTotal-stepKeepInDB), untilTx) // we can prune until the last step
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)

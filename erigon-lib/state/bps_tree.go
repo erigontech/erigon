@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
@@ -36,11 +35,10 @@ func NewBpsTree(kv ArchiveGetter, offt *eliasfano32.EliasFano, M uint64, dataLoo
 }
 
 type BpsTree struct {
-	offt    *eliasfano32.EliasFano
-	mx      [][]Node
-	M       uint64
-	trace   bool
-	naccess uint64
+	offt  *eliasfano32.EliasFano
+	mx    [][]Node
+	M     uint64
+	trace bool
 
 	dataLookupFunc dataLookupFunc
 	keyCmpFunc     keyCmpFunc
@@ -167,7 +165,6 @@ func (b *BpsTree) bs(x []byte) (n Node, dl, dr uint64) {
 		for l < r {
 			m = (l + r) >> 1
 			n = row[m]
-			b.naccess++
 
 			if b.trace {
 				fmt.Printf("bs[%d][%d] i=%d %x\n", d, m, n.di, n.prefix)
@@ -210,9 +207,8 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 	}
 	defer func() {
 		if b.trace {
-			fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess)
+			fmt.Printf("found %x [%d %d]\n", key, l, r)
 		}
-		b.naccess = 0
 	}()
 
 	n, dl, dr := b.bs(key)
@@ -229,7 +225,6 @@ func (b *BpsTree) Seek(g ArchiveGetter, key []byte) (skey []byte, di uint64, fou
 		if err != nil {
 			return nil, 0, false, err
 		}
-		b.naccess++
 		if b.trace {
 			fmt.Printf("lr %x [%d %d]\n", skey, l, r)
 		}
@@ -274,9 +269,8 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 	}
 	defer func() {
 		if b.trace {
-			fmt.Printf("found %x [%d %d] naccsess %d\n", key, l, r, b.naccess)
+			fmt.Printf("found %x [%d %d]\n", key, l, r)
 		}
-		b.naccess = 0
 	}()
 
 	n, dl, dr := b.bs(key)
@@ -291,7 +285,6 @@ func (b *BpsTree) Get(g ArchiveGetter, key []byte) ([]byte, bool, uint64, error)
 		if err != nil {
 			return nil, false, 0, err
 		}
-		b.naccess++
 		if b.trace {
 			fmt.Printf("lr [%d %d]\n", l, r)
 		}

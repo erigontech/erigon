@@ -94,11 +94,12 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			}
 			beforeFinalized = finalized
 			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
-				slot := uint64(0)
 				if s.currentState != nil {
-					slot = s.currentState.Slot()
+					s.logger.Error("Failed to increment beacon state", "err", err, "slot", s.currentState.Slot())
+				} else {
+					s.logger.Error("Failed to increment beacon state", "err", err)
 				}
-				s.logger.Error("Failed to increment beacon state", "err", err, "slot", slot)
+				s.currentState = nil
 				time.Sleep(5 * time.Second)
 			}
 
@@ -194,13 +195,14 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	effectiveBalancesDump := etl.NewCollector(kv.EffectiveBalancesDump, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
 	defer effectiveBalancesDump.Close()
 
-	progress, err := state_accessors.GetStateProcessingProgress(tx)
+	stageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return err
 	}
+	progress := stageProgress
 	// Go back a little bit
-	if progress > s.cfg.SlotsPerEpoch*2 {
-		progress -= s.cfg.SlotsPerEpoch * 2
+	if progress > (s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump) {
+		progress -= s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump
 	} else {
 		progress = 0
 	}
@@ -233,6 +235,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.fs, s.genesisState)
 			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
 			if err != nil {
+				s.currentState = nil
 				return fmt.Errorf("failed to read historical state at slot %d: %w", progress, err)
 			}
 			end := time.Since(start)
@@ -361,7 +364,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return eth1DataVotes.Collect(base_encoding.Encode64ToBytes4(slot), vote)
 		},
 	})
-	log.Log(logLvl, "Starting state processing", "from", slot, "to", to)
+	log.Log(logLvl, "Starting state processing", "from", slot, "to", to, "progress", stageProgress)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()
@@ -411,7 +414,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		if err := transition.TransitionState(s.currentState, block, blockRewardsCollector, fullValidation); err != nil {
 			return err
 		}
-		// if s.currentState.Slot() == 4293952 {
+		// if s.currentState.Slot() == 3000010 {
 		// 	s.dumpFullBeaconState()
 		// }
 		blocksProcessed++
@@ -789,7 +792,7 @@ func (s *Antiquary) dumpPayload(k []byte, v []byte, c *etl.Collector, b *bytes.B
 // 		return
 // 	}
 // 	// just dump it in a.txt like an idiot without afero
-// 	if err := os.WriteFile("b.txt", b, 0644); err != nil {
+// 	if err := os.WriteFile("bab.txt", b, 0644); err != nil {
 // 		s.logger.Error("Failed to write full beacon state", "err", err)
 // 	}
 // }

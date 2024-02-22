@@ -209,12 +209,11 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
 				if err := d.torrentFiles.Create(tPath, res); err != nil {
-					d.logger.Debug("[snapshots] saveTorrent", "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
 					continue
 				}
 				return nil

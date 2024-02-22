@@ -151,11 +151,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			select {
 			case <-logInterval.C:
 				logTime := logIntervalTime
-				// if we found the latest valid hash extend ticker to 10 times the normal amout
-				if foundLatestEth1ValidBlock.Load() {
-					logTime = 20 * logIntervalTime
-					logInterval.Reset(logTime)
-				}
 
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
 					if ready, err := cfg.engine.Ready(); !ready {
@@ -174,7 +169,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				prevProgress = currProgress
 				peerCount, err := cfg.downloader.Peers()
 				if err != nil {
-					return
+					log.Debug("could not get peer count", "err", err)
+					continue
+				}
+				if speed == 0 {
+					continue
 				}
 				logArgs = append(logArgs,
 					"slot", currProgress,
@@ -186,7 +185,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"reconnected", foundLatestEth1ValidBlock.Load(),
 				)
 				bytesReadInTotal.Store(0)
-				logger.Info("Downloading History", logArgs...)
+				logger.Info("Backfilling History", logArgs...)
 			case <-finishCh:
 				return
 			case <-ctx.Done():

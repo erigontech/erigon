@@ -191,7 +191,6 @@ func ConsensusClStages(ctx context.Context,
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
 	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
 		if err := cfg.forkChoice.OnBlock(block, newPayload, fullValidation); err != nil {
-			log.Warn("fail to process block", "reason", err, "slot", block.Block.Slot)
 			return err
 		}
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
@@ -275,8 +274,8 @@ func ConsensusClStages(ctx context.Context,
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
 					downloader.SetHighestProcessedSlot(currentSlot.Load())
 					downloader.SetProcessFunction(func(highestSlotProcessed uint64, highestBlockRootProcessed common.Hash, blocks []*cltypes.SignedBeaconBlock) (newHighestSlotProcessed uint64, newHighestBlockRootProcessed common.Hash, err error) {
-						for _, block := range blocks {
 
+						for _, block := range blocks {
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								return highestSlotProcessed, highestBlockRootProcessed, err
@@ -522,13 +521,17 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
+								if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
+									time.Sleep(time.Millisecond)
+									continue
+								}
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.Block.HashSSZ()
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 									continue
 								}
 								if err := processBlock(tx, block, true, true); err != nil {
-									log.Error("bad blocks segment received", "err", err)
+									log.Debug("bad blocks segment received", "err", err)
 									continue
 								}
 
@@ -620,7 +623,7 @@ func ConsensusClStages(ctx context.Context,
 					if err != nil {
 						return fmt.Errorf("failed to read canonical block root: %w", err)
 					}
-					reconnectionRoots := make([]canonicalEntry, 0, 1)
+					reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
 
 					for currentRoot != currentCanonical {
 						var newFoundSlot *uint64
