@@ -11,14 +11,15 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon/consensus/bor"
-	"github.com/ledgerwatch/erigon/consensus/bor/valset"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stagedsynctest"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
+	"github.com/ledgerwatch/erigon/polygon/bor"
+	"github.com/ledgerwatch/erigon/polygon/bor/valset"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
@@ -35,16 +36,81 @@ func TestBorHeimdallForwardPersistsSpans(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	spans, err := testHarness.ReadSpansFromDB(ctx)
 	require.NoError(t, err)
 	require.Len(t, spans, 2)
-	require.Equal(t, uint64(0), spans[0].ID)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
 	require.Equal(t, uint64(0), spans[0].StartBlock)
 	require.Equal(t, uint64(255), spans[0].EndBlock)
-	require.Equal(t, uint64(1), spans[1].ID)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
+	require.Equal(t, uint64(256), spans[1].StartBlock)
+	require.Equal(t, uint64(6655), spans[1].EndBlock)
+}
+
+func TestBorHeimdallForwardFetchesFirstSpanDuringSecondSprintStart(t *testing.T) {
+	// span 0 and 1 are required in the start of second sprint (of 0th span) to commit
+	// in genesis contracts. we need span 1 at that time to mimic behaviour in bor.
+	t.Parallel()
+
+	ctx := context.Background()
+	numBlocks := 16 // Start of 2nd sprint of 0th span
+	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
+		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
+		GenerateChainNumBlocks: numBlocks,
+		LogLvl:                 log.LvlInfo,
+	})
+	// pretend-update previous stage progress
+	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
+
+	// run stage under test
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
+
+	// asserts
+	spans, err := testHarness.ReadSpansFromDB(ctx)
+	require.NoError(t, err)
+	require.Len(t, spans, 2)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
+	require.Equal(t, uint64(0), spans[0].StartBlock)
+	require.Equal(t, uint64(255), spans[0].EndBlock)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
+	require.Equal(t, uint64(256), spans[1].StartBlock)
+	require.Equal(t, uint64(6655), spans[1].EndBlock)
+}
+
+func TestBorHeimdallForwardFetchesFirstSpanAfterSecondSprintStart(t *testing.T) {
+	// Note this test differs from TestBorHeimdallForwardFetchesFirstSpanDuringSecondSprintStart
+	// since we should be able to handle both scenarios:
+	//   - calling the stage with toBlockNum=16
+	//   - calling the stage with toBlockNum=20 (some block num after second sprint start)
+	//
+	// span 0 and 1 are required at and after the start of second sprint (of 0th span) to commit
+	// in genesis contracts. we need span 1 at that time to mimic behaviour in bor.
+	t.Parallel()
+
+	ctx := context.Background()
+	numBlocks := 20 // After the start of 2nd sprint of 0th span
+	testHarness := stagedsynctest.InitHarness(ctx, t, stagedsynctest.HarnessCfg{
+		ChainConfig:            stagedsynctest.BorDevnetChainConfigWithNoBlockSealDelays(),
+		GenerateChainNumBlocks: numBlocks,
+		LogLvl:                 log.LvlInfo,
+	})
+	// pretend-update previous stage progress
+	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
+
+	// run stage under test
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
+
+	// asserts
+	spans, err := testHarness.ReadSpansFromDB(ctx)
+	require.NoError(t, err)
+	require.Len(t, spans, 2)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
+	require.Equal(t, uint64(0), spans[0].StartBlock)
+	require.Equal(t, uint64(255), spans[0].EndBlock)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
 	require.Equal(t, uint64(256), spans[1].StartBlock)
 	require.Equal(t, uint64(6655), spans[1].EndBlock)
 }
@@ -66,19 +132,19 @@ func TestBorHeimdallForwardFetchesNextSpanDuringLastSprintOfCurrentSpan(t *testi
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	spans, err := testHarness.ReadSpansFromDB(ctx)
 	require.NoError(t, err)
 	require.Len(t, spans, 3)
-	require.Equal(t, uint64(0), spans[0].ID)
+	require.Equal(t, heimdall.SpanId(0), spans[0].Id)
 	require.Equal(t, uint64(0), spans[0].StartBlock)
 	require.Equal(t, uint64(255), spans[0].EndBlock)
-	require.Equal(t, uint64(1), spans[1].ID)
+	require.Equal(t, heimdall.SpanId(1), spans[1].Id)
 	require.Equal(t, uint64(256), spans[1].StartBlock)
 	require.Equal(t, uint64(6655), spans[1].EndBlock)
-	require.Equal(t, uint64(2), spans[2].ID)
+	require.Equal(t, heimdall.SpanId(2), spans[2].Id)
 	require.Equal(t, uint64(6656), spans[2].StartBlock)
 	require.Equal(t, uint64(13055), spans[2].EndBlock)
 }
@@ -97,7 +163,7 @@ func TestBorHeimdallForwardPersistsStateSyncEvents(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	// 1 event per sprint expected
@@ -140,7 +206,7 @@ func TestBorHeimdallForwardErrHeaderValidatorsLengthMismatch(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsLengthMismatch)
+	testHarness.RunStateSyncStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsLengthMismatch)
 }
 
 func TestBorHeimdallForwardErrHeaderValidatorsBytesMismatch(t *testing.T) {
@@ -164,7 +230,7 @@ func TestBorHeimdallForwardErrHeaderValidatorsBytesMismatch(t *testing.T) {
 	testHarness.SaveStageProgress(ctx, t, stages.Headers, uint64(numBlocks))
 
 	// run stage under test
-	testHarness.RunStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsBytesMismatch)
+	testHarness.RunStateSyncStageForwardWithErrorIs(t, stages.BorHeimdall, stagedsync.ErrHeaderValidatorsBytesMismatch)
 }
 
 func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
@@ -188,7 +254,7 @@ func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
 	invalidHeader.Extra = bytes.Repeat([]byte{0x00}, types.ExtraVanityLength+types.ExtraSealLength)
 	validatorKey1, err := crypto.GenerateKey()
 	require.NoError(t, err)
-	sighash, err := crypto.Sign(crypto.Keccak256(bor.BorRLP(invalidHeader, chainConfig.Bor)), validatorKey1)
+	sighash, err := crypto.Sign(crypto.Keccak256(bor.BorRLP(invalidHeader, testHarness.BorConfig())), validatorKey1)
 	require.NoError(t, err)
 	copy(invalidHeader.Extra[len(invalidHeader.Extra)-types.ExtraSealLength:], sighash)
 	testHarness.SaveHeader(ctx, t, invalidHeader)
@@ -198,14 +264,14 @@ func TestBorHeimdallForwardDetectsUnauthorizedSignerError(t *testing.T) {
 	require.Equal(t, uint64(0), testHarness.GetStageProgress(ctx, t, stages.BorHeimdall))
 
 	// run stage under test
-	testHarness.RunStageForward(t, stages.BorHeimdall)
+	testHarness.RunStateSyncStageForward(t, stages.BorHeimdall)
 
 	// asserts
 	require.Equal(t, uint64(numBlocks+1), testHarness.GetStageProgress(ctx, t, stages.BorHeimdall))
 	require.Equal(t, invalidHeader.Number.Uint64()-1, testHarness.StateSyncUnwindPoint())
 	unwindReason := testHarness.StateSyncUnwindReason()
 	require.Equal(t, invalidHeader.Hash(), *unwindReason.Block)
-	var unauthorizedSignerErr *bor.UnauthorizedSignerError
+	var unauthorizedSignerErr *valset.UnauthorizedSignerError
 	ok := errors.As(unwindReason.Err, &unauthorizedSignerErr)
 	require.True(t, ok)
 	require.Equal(t, invalidHeader.Number.Uint64(), unauthorizedSignerErr.Number)

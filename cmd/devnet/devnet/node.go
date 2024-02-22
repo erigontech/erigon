@@ -8,6 +8,9 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/urfave/cli/v2"
+
 	"github.com/ledgerwatch/erigon/cmd/devnet/accounts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/args"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
@@ -17,8 +20,6 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 	enode "github.com/ledgerwatch/erigon/turbo/node"
-	"github.com/ledgerwatch/log/v3"
-	"github.com/urfave/cli/v2"
 )
 
 type Node interface {
@@ -166,12 +167,19 @@ func (n *devnetNode) run(ctx *cli.Context) error {
 	n.nodeCfg.MdbxGrowthStep = 32 * datasize.MB
 	n.nodeCfg.MdbxDBSizeLimit = 512 * datasize.MB
 
-	for addr, account := range n.network.Alloc {
-		n.ethCfg.Genesis.Alloc[addr] = account
+	if n.network.Genesis != nil {
+		for addr, account := range n.network.Genesis.Alloc {
+			n.ethCfg.Genesis.Alloc[addr] = account
+		}
+
+		if n.network.Genesis.GasLimit != 0 {
+			n.ethCfg.Genesis.GasLimit = n.network.Genesis.GasLimit
+		}
 	}
 
 	if n.network.BorStateSyncDelay > 0 {
-		n.ethCfg.Bor.StateSyncConfirmationDelay = map[string]uint64{"0": uint64(n.network.BorStateSyncDelay.Seconds())}
+		stateSyncConfirmationDelay := map[string]uint64{"0": uint64(n.network.BorStateSyncDelay.Seconds())}
+		logger.Warn("TODO: custom BorStateSyncDelay is not applied to BorConfig.StateSyncConfirmationDelay", "delay", stateSyncConfirmationDelay)
 	}
 
 	n.ethNode, err = enode.New(ctx.Context, n.nodeCfg, n.ethCfg, logger)

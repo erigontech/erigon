@@ -17,9 +17,9 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -31,15 +31,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState) {
+func loadChain(t *testing.T) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, reader *tests.MockBlockReader) {
 	blocks, preState, postState = tests.GetPhase0Random()
 	db = memdb.NewTestDB(t)
-	var reader *tests.MockBlockReader
-	reader, f = tests.LoadChain(blocks, postState, db, t)
+	reader = tests.LoadChain(blocks, postState, db, t)
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, nil, log.New(), true, true, f)
+	a := antiquary.NewAntiquary(ctx, preState, vt, &clparams.MainnetBeaconConfig, datadir.New("/tmp"), nil, db, nil, reader, log.New(), true, true)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	return
 }
@@ -48,8 +47,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 	listenAddrHost := "127.0.0.1"
 
 	ctx := context.Background()
-	db, blocks, f, _, _ := loadChain(t)
-	raw := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
+	db, blocks, _, _, _, reader := loadChain(t)
 	genesisConfig, networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
@@ -58,7 +56,7 @@ func TestSentinelBlocksByRange(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, raw, db, log.New())
+	}, reader, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -153,8 +151,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 	listenAddrHost := "127.0.0.1"
 
 	ctx := context.Background()
-	db, blocks, f, _, _ := loadChain(t)
-	raw := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
+	db, blocks, _, _, _, reader := loadChain(t)
 	genesisConfig, networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
@@ -163,7 +160,7 @@ func TestSentinelBlocksByRoots(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, raw, db, log.New())
+	}, reader, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 
@@ -263,8 +260,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 	listenAddrHost := "127.0.0.1"
 
 	ctx := context.Background()
-	db, blocks, f, _, _ := loadChain(t)
-	raw := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
+	db, blocks, _, _, _, reader := loadChain(t)
 	genesisConfig, networkConfig, beaconConfig := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	sentinel, err := New(ctx, &SentinelConfig{
 		NetworkConfig: networkConfig,
@@ -273,7 +269,7 @@ func TestSentinelStatusRequest(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, raw, db, log.New())
+	}, reader, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel.Stop()
 

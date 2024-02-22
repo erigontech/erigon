@@ -132,7 +132,6 @@ COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
-COMMANDS += caplin-regression
 COMMANDS += tooling
 COMMANDS += snapshots
 
@@ -247,7 +246,7 @@ install:
 	@ls -al "$(DIST)"
 
 PACKAGE_NAME          := github.com/ledgerwatch/erigon
-GOLANG_CROSS_VERSION  ?= v1.20.7
+GOLANG_CROSS_VERSION  ?= v1.21.6
 
 .PHONY: release-dry-run
 release-dry-run: git-submodules

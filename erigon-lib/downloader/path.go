@@ -171,7 +171,7 @@ func Clean(path string) string {
 	return FromSlash(out.string())
 }
 
-func unixIsLocal(path string) bool {
+func unixIsLocal(path string) bool { //nolint
 	if IsAbs(path) || path == "" {
 		return false
 	}

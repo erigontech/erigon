@@ -10,10 +10,10 @@ import (
 )
 
 // download is the process that reverse download a specific block hash.
-func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, requestId int, block *types.Block) {
+func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, requestId int, block *types.Block) {
 	/* Start download process*/
 	// First we schedule the headers download process
-	if !e.scheduleHeadersDownload(requestId, hashToDownload, 0, downloaderTip) {
+	if !e.scheduleHeadersDownload(requestId, hashToDownload, 0) {
 		e.logger.Warn("[EngineBlockDownloader] could not begin header download")
 		// could it be scheduled? if not nevermind.
 		e.status.Store(headerdownload.Idle)
@@ -83,7 +83,7 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 	// Can fail, not an issue in this case.
 	e.chainRW.InsertBlockAndWait(block)
 	// Lastly attempt verification
-	status, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
+	status, _, latestValidHash, err := e.chainRW.ValidateChain(block.Hash(), block.NumberU64())
 	if err != nil {
 		e.logger.Warn("[EngineBlockDownloader] block verification failed", "reason", err)
 		e.status.Store(headerdownload.Idle)
@@ -107,14 +107,14 @@ func (e *EngineBlockDownloader) download(hashToDownload libcommon.Hash, download
 
 // StartDownloading triggers the download process and returns true if the process started or false if it could not.
 // blockTip is optional and should be the block tip of the download request. which will be inserted at the end of the procedure if specified.
-func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload libcommon.Hash, downloaderTip libcommon.Hash, blockTip *types.Block) bool {
+func (e *EngineBlockDownloader) StartDownloading(requestId int, hashToDownload libcommon.Hash, blockTip *types.Block) bool {
 	e.lock.Lock()
 	defer e.lock.Unlock()
 	if e.status.Load() == headerdownload.Syncing {
 		return false
 	}
 	e.status.Store(headerdownload.Syncing)
-	go e.download(hashToDownload, downloaderTip, requestId, blockTip)
+	go e.download(hashToDownload, requestId, blockTip)
 	return true
 }
 

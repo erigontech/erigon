@@ -19,9 +19,9 @@ import (
 	"github.com/ledgerwatch/erigon/cmd/devnet/contracts"
 	"github.com/ledgerwatch/erigon/cmd/devnet/devnet"
 	"github.com/ledgerwatch/erigon/cmd/devnet/requests"
-	"github.com/ledgerwatch/erigon/consensus/bor/heimdall/checkpoint"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 )
 
 type CheckpointBlock struct {
@@ -65,15 +65,15 @@ var zeroAddress libcommon.Address
 func (c CheckpointBlock) ValidateBasic() error {
 
 	if c.RootHash == zeroHash {
-		return fmt.Errorf("Invalid rootHash %v", c.RootHash.String())
+		return fmt.Errorf("invalid rootHash %v", c.RootHash.String())
 	}
 
 	if c.Proposer == zeroAddress {
-		return fmt.Errorf("Invalid proposer %v", c.Proposer.String())
+		return fmt.Errorf("invalid proposer %v", c.Proposer.String())
 	}
 
 	if c.StartBlock >= c.EndBlock || c.EndBlock == 0 {
-		return fmt.Errorf("Invalid startBlock %v or/and endBlock %v", c.StartBlock, c.EndBlock)
+		return fmt.Errorf("invalid startBlock %v or/and endBlock %v", c.StartBlock, c.EndBlock)
 	}
 
 	return nil
@@ -126,7 +126,7 @@ func (h *Heimdall) startChildHeaderSubscription(ctx context.Context) {
 
 	for childHeader := range childHeaderChan {
 		if err := h.handleChildHeader(ctx, childHeader); err != nil {
-			if errors.Is(err, notEnoughChildChainTxConfirmationsError) {
+			if errors.Is(err, errNotEnoughChildChainTxConfirmations) {
 				h.logger.Info("L2 header processing skipped", "header", childHeader.Number, "err", err)
 			} else {
 				h.logger.Error("L2 header processing failed", "header", childHeader.Number, "err", err)
@@ -153,7 +153,7 @@ func (h *Heimdall) startRootHeaderBlockSubscription() {
 	}
 }
 
-var notEnoughChildChainTxConfirmationsError = errors.New("the chain doesn't have enough blocks for ChildChainTxConfirmations")
+var errNotEnoughChildChainTxConfirmations = errors.New("the chain doesn't have enough blocks for ChildChainTxConfirmations")
 
 func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) error {
 
@@ -162,7 +162,7 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 	latestConfirmedChildBlock := header.Number.Int64() - int64(h.checkpointConfig.ChildChainTxConfirmations)
 
 	if latestConfirmedChildBlock <= 0 {
-		return notEnoughChildChainTxConfirmationsError
+		return errNotEnoughChildChainTxConfirmations
 	}
 
 	timeStamp := uint64(time.Now().Unix())
@@ -176,30 +176,32 @@ func (h *Heimdall) handleChildHeader(ctx context.Context, header *types.Header) 
 			return err
 		}
 
-		h.pendingCheckpoint = &checkpoint.Checkpoint{
-			Timestamp:  timeStamp,
-			StartBlock: big.NewInt(int64(expectedCheckpointState.newStart)),
-			EndBlock:   big.NewInt(int64(expectedCheckpointState.newEnd)),
+		h.pendingCheckpoint = &heimdall.Checkpoint{
+			Fields: heimdall.WaypointFields{
+				Timestamp:  timeStamp,
+				StartBlock: big.NewInt(int64(expectedCheckpointState.newStart)),
+				EndBlock:   big.NewInt(int64(expectedCheckpointState.newEnd)),
+			},
 		}
 	}
 
-	if header.Number.Cmp(h.pendingCheckpoint.EndBlock) < 0 {
+	if header.Number.Cmp(h.pendingCheckpoint.EndBlock()) < 0 {
 		return nil
 	}
 
-	h.pendingCheckpoint.EndBlock = header.Number
+	h.pendingCheckpoint.Fields.EndBlock = header.Number
 
-	if !(h.pendingCheckpoint.Timestamp == 0 ||
-		((timeStamp > h.pendingCheckpoint.Timestamp) && timeStamp-h.pendingCheckpoint.Timestamp >= checkpointBufferTime)) {
+	if !(h.pendingCheckpoint.Timestamp() == 0 ||
+		((timeStamp > h.pendingCheckpoint.Timestamp()) && timeStamp-h.pendingCheckpoint.Timestamp() >= checkpointBufferTime)) {
 		h.logger.Debug("Pendiing checkpoint awaiting buffer expiry",
-			"start", h.pendingCheckpoint.StartBlock,
-			"end", h.pendingCheckpoint.EndBlock,
-			"expiry", time.Unix(int64(h.pendingCheckpoint.Timestamp+checkpointBufferTime), 0))
+			"start", h.pendingCheckpoint.StartBlock(),
+			"end", h.pendingCheckpoint.EndBlock(),
+			"expiry", time.Unix(int64(h.pendingCheckpoint.Timestamp()+checkpointBufferTime), 0))
 		return nil
 	}
 
-	start := h.pendingCheckpoint.StartBlock.Uint64()
-	end := h.pendingCheckpoint.EndBlock.Uint64()
+	start := h.pendingCheckpoint.StartBlock().Uint64()
+	end := h.pendingCheckpoint.EndBlock().Uint64()
 
 	shouldSend, err := h.shouldSendCheckpoint(start, end)
 
@@ -453,7 +455,7 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 			return err
 		}
 
-		h.pendingCheckpoint.RootHash, err = h.getRootHash(ctx, start, end)
+		h.pendingCheckpoint.Fields.RootHash, err = h.getRootHash(ctx, start, end)
 
 		if err != nil {
 			return err
@@ -463,7 +465,7 @@ func (h *Heimdall) createAndSendCheckpointToRootchain(ctx context.Context, start
 			Proposer:        h.checkpointConfig.CheckpointAccount.Address,
 			StartBlock:      start,
 			EndBlock:        end,
-			RootHash:        h.pendingCheckpoint.RootHash,
+			RootHash:        h.pendingCheckpoint.RootHash(),
 			AccountRootHash: accountRoot,
 			BorChainID:      h.chainConfig.ChainID.String(),
 		}
@@ -568,24 +570,24 @@ func (h *Heimdall) handleRootHeaderBlock(event *contracts.TestRootChainNewHeader
 		LogIndex:   uint64(event.Raw.Index),
 	}
 
-	if ack.StartBlock != h.pendingCheckpoint.StartBlock.Uint64() {
+	if ack.StartBlock != h.pendingCheckpoint.StartBlock().Uint64() {
 		h.logger.Error("Invalid start block", "startExpected", h.pendingCheckpoint.StartBlock, "startReceived", ack.StartBlock)
-		return fmt.Errorf("Invalid Checkpoint Ack: Invalid start block")
+		return fmt.Errorf("invalid Checkpoint Ack: Invalid start block")
 	}
 
 	// Return err if start and end matches but contract root hash doesn't match
-	if ack.StartBlock == h.pendingCheckpoint.StartBlock.Uint64() &&
-		ack.EndBlock == h.pendingCheckpoint.EndBlock.Uint64() && ack.RootHash != h.pendingCheckpoint.RootHash {
+	if ack.StartBlock == h.pendingCheckpoint.StartBlock().Uint64() &&
+		ack.EndBlock == h.pendingCheckpoint.EndBlock().Uint64() && ack.RootHash != h.pendingCheckpoint.RootHash() {
 		h.logger.Error("Invalid ACK",
-			"startExpected", h.pendingCheckpoint.StartBlock,
+			"startExpected", h.pendingCheckpoint.StartBlock(),
 			"startReceived", ack.StartBlock,
-			"endExpected", h.pendingCheckpoint.EndBlock,
+			"endExpected", h.pendingCheckpoint.EndBlock(),
 			"endReceived", ack.StartBlock,
-			"rootExpected", h.pendingCheckpoint.RootHash.String(),
+			"rootExpected", h.pendingCheckpoint.RootHash().String(),
 			"rootRecieved", ack.RootHash.String(),
 		)
 
-		return fmt.Errorf("Invalid Checkpoint Ack: Invalid root hash")
+		return fmt.Errorf("invalid Checkpoint Ack: Invalid root hash")
 	}
 
 	h.latestCheckpoint = &ack

@@ -42,7 +42,7 @@ import (
 
 // the following 2 functions are replica for the test
 // This is a replica of `bor.GetValidatorBytes` function
-// This was needed because currently, `IsParallelUniverse` will always return false.
+// This was needed because currently, `IsNapoli` will always return false.
 func GetValidatorBytesTest(h *Header) []byte {
 	if len(h.Extra) < ExtraVanityLength+ExtraSealLength {
 		log.Error("length of extra is less than vanity and seal")

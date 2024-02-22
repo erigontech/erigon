@@ -22,7 +22,6 @@ var (
 	migration                      string
 	integrityFast, integritySlow   bool
 	file                           string
-	HeimdallgRPCAddress            string
 	HeimdallURL                    string
 	txtrace                        bool // Whether to trace the execution (should only be used together with `block`)
 	pruneFlag                      string
@@ -40,7 +39,6 @@ var (
 
 	_forceSetHistoryV3    bool
 	workers, reconWorkers uint64
-	snapshotVersion       uint8 = 1
 )
 
 func must(err error) {
@@ -170,8 +168,4 @@ func withCommitment(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&commitmentMode, "commitment.mode", "direct", "defines the way to calculate commitments: 'direct' mode reads from state directly, 'update' accumulate updates before commitment, 'off' actually disables commitment calculation")
 	cmd.Flags().StringVar(&commitmentTrie, "commitment.trie", "hex", "hex - use Hex Patricia Hashed Trie for commitments, bin - use of binary patricia trie")
 	cmd.Flags().IntVar(&commitmentFreq, "commitment.freq", 1000000, "how many blocks to skip between calculating commitment")
-}
-
-func withSnapshotVersion(cmd *cobra.Command) {
-	cmd.Flags().Uint8Var(&snapshotVersion, "stapshots.version", 1, "specifies the snapshot file version")
 }

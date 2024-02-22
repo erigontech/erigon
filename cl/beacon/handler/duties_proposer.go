@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -21,10 +22,10 @@ type proposerDuties struct {
 	Slot           uint64            `json:"slot,string"`
 }
 
-func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
-	epoch, err := epochFromRequest(r)
+func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	epoch, err := beaconhttp.EpochFromRequest(r)
 	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err.Error())
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
 	if epoch < a.forkchoiceStore.FinalizedCheckpoint().Epoch() {
@@ -39,7 +40,7 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 			return nil, err
 		}
 		if len(indiciesBytes) != int(a.beaconChainCfg.SlotsPerEpoch*4) {
-			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, "proposer duties is corrupted")
+			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("proposer duties is corrupted"))
 		}
 		duties := make([]proposerDuties, a.beaconChainCfg.SlotsPerEpoch)
 		for i := uint64(0); i < a.beaconChainCfg.SlotsPerEpoch; i++ {
@@ -55,14 +56,13 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 				Slot:           epoch*a.beaconChainCfg.SlotsPerEpoch + i,
 			}
 		}
-		return newBeaconResponse(duties).withFinalized(true).withVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+		return newBeaconResponse(duties).WithFinalized(true).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
 	}
 
 	// We need to compute our duties
-	state, cancel := a.syncedData.HeadState()
-	defer cancel()
+	state := a.syncedData.HeadState()
 	if state == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, "beacon node is syncing")
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
 
 	}
 
@@ -118,5 +118,5 @@ func (a *ApiHandler) getDutiesProposer(w http.ResponseWriter, r *http.Request) (
 	}
 	wg.Wait()
 
-	return newBeaconResponse(duties).withFinalized(false).withVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
+	return newBeaconResponse(duties).WithFinalized(false).WithVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch)), nil
 }

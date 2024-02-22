@@ -17,6 +17,7 @@
   "terminalTotalDifficulty": 231707791542740786049188744689299064356246512,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1684934220,
+  "cancunTime": 1706724940,
   "minBlobGasPrice": 1000000000,
   "maxBlobGasPerBlock": 262144,
   "targetBlobGasPerBlock": 131072,

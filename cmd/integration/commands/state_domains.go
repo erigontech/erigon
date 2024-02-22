@@ -93,7 +93,7 @@ var readDomains = &cobra.Command{
 		}
 
 		dirs := datadir.New(datadirCli)
-		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, snapshotVersion, logger)
+		chainDb, err := openDB(dbCfg(kv.ChainDB, dirs.Chaindata), true, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return

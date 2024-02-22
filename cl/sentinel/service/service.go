@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+var _ sentinelrpc.SentinelServer = (*SentinelServer)(nil)
 
 type SentinelServer struct {
 	sentinelrpc.UnimplementedSentinelServer
@@ -49,14 +52,16 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 
 // extractBlobSideCarIndex takes a topic and extract the blob sidecar
 func extractBlobSideCarIndex(topic string) int {
-	// compute the index prefixless
-	startIndex := strings.Index(topic, gossip.TopicNamePrefixBlobSidecar) + len(gossip.TopicNamePrefixBlobSidecar)
-	endIndex := strings.Index(topic[:startIndex], "/")
-	blobIndex, err := strconv.Atoi(topic[startIndex:endIndex])
-	if err != nil {
-		panic(fmt.Sprintf("should not be substribed to %s", topic))
-	}
-	return blobIndex
+	// e.g /eth2/d31f6191/blob_sidecar_3/ssz_snappy, we want to extract 3
+	// split them by /
+	parts := strings.Split(topic, "/")
+	name := parts[3]
+	// get the last part of the topic
+	parts = strings.Split(name, "_")
+	// convert it to int
+	index, _ := strconv.Atoi(parts[len(parts)-1])
+	return index
+
 }
 
 //BanPeer(context.Context, *Peer) (*EmptyMessage, error)
@@ -77,7 +82,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
 
-	s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
+	//s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
 
 	var subscription *sentinel.GossipSubscription
 
@@ -95,9 +100,13 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	case gossip.TopicNameAttesterSlashing:
 		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
+		// check subnets
 		switch {
-		case gossip.IsTopicBlobSidecar(msg.Name):
-			subscription = manager.GetMatchingSubscription(msg.Name)
+		case strings.Contains(msg.Name, gossip.TopicNamePrefixBlobSidecar):
+			if msg.SubnetId == nil {
+				return nil, fmt.Errorf("subnetId is required for blob sidecar")
+			}
+			subscription = manager.GetMatchingSubscription(fmt.Sprintf("%s/%d", gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
 		default:
 			return &sentinelrpc.EmptyMessage{}, nil
 		}
@@ -108,7 +117,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	return &sentinelrpc.EmptyMessage{}, subscription.Publish(compressedData)
 }
 
-func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
+func (s *SentinelServer) SubscribeGossip(data *sentinelrpc.SubscriptionData, stream sentinelrpc.Sentinel_SubscribeGossipServer) error {
 	// first of all subscribe
 	ch, subId, err := s.gossipNotifier.addSubscriber()
 	if err != nil {
@@ -122,17 +131,32 @@ func (s *SentinelServer) SubscribeGossip(_ *sentinelrpc.EmptyMessage, stream sen
 		case <-stream.Context().Done():
 			return nil
 		case packet := <-ch:
+			if !s.gossipMatchSubscription(packet, data) {
+				continue
+			}
 			if err := stream.Send(&sentinelrpc.GossipData{
 				Data: packet.data,
 				Name: packet.t,
 				Peer: &sentinelrpc.Peer{
 					Pid: packet.pid,
 				},
+				SubnetId: packet.subnetId,
 			}); err != nil {
 				s.logger.Warn("[Sentinel] Could not relay gossip packet", "reason", err)
 			}
 		}
 	}
+}
+
+func (s *SentinelServer) gossipMatchSubscription(obj gossipObject, data *sentinelrpc.SubscriptionData) bool {
+	if data.Filter != nil {
+		filter := data.GetFilter()
+		matched, err := path.Match(obj.t, filter)
+		if err != nil || !matched {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *SentinelServer) withTimeoutCtx(pctx context.Context, dur time.Duration) (ctx context.Context, cn func()) {
@@ -172,15 +196,9 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			s.sentinel.Peers().RemovePeer(pid)
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
-		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			s.sentinel.Host().Peerstore().RemovePeer(pid)
-			s.sentinel.Host().Network().ClosePeer(pid)
-		}
+		s.sentinel.Peers().RemovePeer(pid)
+		s.sentinel.Host().Peerstore().RemovePeer(pid)
+		s.sentinel.Host().Network().ClosePeer(pid)
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -231,10 +249,33 @@ func (s *SentinelServer) SendRequest(ctx context.Context, req *sentinelrpc.Reque
 
 	resp, err := s.requestPeer(ctx, pid, req)
 	if err != nil {
+		if strings.Contains(err.Error(), "protocols not supported") {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+			s.sentinel.Peers().SetBanStatus(pid, true)
+		}
 		s.logger.Trace("[sentinel] peer gave us bad data", "peer", pid, "err", err)
 		return nil, err
 	}
 	return resp, nil
+
+}
+
+func (s *SentinelServer) Identity(ctx context.Context, in *sentinelrpc.EmptyMessage) (*sentinelrpc.IdentityResponse, error) {
+	// call s.sentinel.Identity()
+	pid, enr, p2pAddresses, discoveryAddresses, metadata := s.sentinel.Identity()
+	return &sentinelrpc.IdentityResponse{
+		Pid:                pid,
+		Enr:                enr,
+		P2PAddresses:       p2pAddresses,
+		DiscoveryAddresses: discoveryAddresses,
+		Metadata: &sentinelrpc.Metadata{
+			Seq:      metadata.SeqNumber,
+			Attnets:  fmt.Sprintf("%x", metadata.Attnets),
+			Syncnets: fmt.Sprintf("%x", *metadata.Syncnets),
+		},
+	}, nil
 
 }
 
@@ -251,10 +292,33 @@ func (s *SentinelServer) SetStatus(_ context.Context, req *sentinelrpc.Status) (
 }
 
 func (s *SentinelServer) GetPeers(_ context.Context, _ *sentinelrpc.EmptyMessage) (*sentinelrpc.PeerCount, error) {
+	count, connected, disconnected := s.sentinel.GetPeersCount()
 	// Send the request and get the data if we get an answer.
 	return &sentinelrpc.PeerCount{
-		Amount: uint64(s.sentinel.GetPeersCount()),
+		Active:       uint64(count),
+		Connected:    uint64(connected),
+		Disconnected: uint64(disconnected),
 	}, nil
+}
+
+func (s *SentinelServer) PeersInfo(ctx context.Context, r *sentinelrpc.PeersInfoRequest) (*sentinelrpc.PeersInfoResponse, error) {
+	peersInfos := s.sentinel.GetPeersInfos()
+	if r.Direction == nil && r.State == nil {
+		return peersInfos, nil
+	}
+	filtered := &sentinelrpc.PeersInfoResponse{
+		Peers: make([]*sentinelrpc.Peer, 0, len(peersInfos.Peers)),
+	}
+	for _, peer := range peersInfos.Peers {
+		if r.Direction != nil && peer.Direction != *r.Direction {
+			continue
+		}
+		if r.State != nil && peer.State != *r.State {
+			continue
+		}
+		filtered.Peers = append(filtered.Peers, peer)
+	}
+	return filtered, nil
 }
 
 func (s *SentinelServer) ListenToGossip() {
@@ -291,8 +355,8 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 		return err
 	}
 
-	msgType, msgCap := parseTopic(topic)
-	s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
+	// msgType, msgCap := parseTopic(topic)
+	// s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
 	if strings.Contains(topic, string(gossip.TopicNameBeaconBlock)) {
@@ -307,7 +371,10 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 		s.gossipNotifier.notify(gossip.TopicNameAttesterSlashing, data, string(textPid))
 	} else if strings.Contains(topic, string(gossip.TopicNameBlsToExecutionChange)) {
 		s.gossipNotifier.notify(gossip.TopicNameBlsToExecutionChange, data, string(textPid))
+	} else if strings.Contains(topic, string(gossip.TopicNameSyncCommitteeContributionAndProof)) {
+		s.gossipNotifier.notify(gossip.TopicNameSyncCommitteeContributionAndProof, data, string(textPid))
 	} else if gossip.IsTopicBlobSidecar(topic) {
+
 		// extract the index
 		s.gossipNotifier.notifyBlob(data, string(textPid), extractBlobSideCarIndex(topic))
 	}

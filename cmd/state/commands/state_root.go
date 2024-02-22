@@ -35,7 +35,6 @@ import (
 func init() {
 	withBlock(stateRootCmd)
 	withDataDir(stateRootCmd)
-	withSnapshotVersion(stateRootCmd)
 	rootCmd.AddCommand(stateRootCmd)
 }
 
@@ -44,11 +43,11 @@ var stateRootCmd = &cobra.Command{
 	Short: "Exerimental command to re-execute blocks from beginning and compute state root",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "stateroot")
-		return StateRoot(cmd.Context(), genesis, snapshotVersion, block, datadirCli, logger)
+		return StateRoot(cmd.Context(), genesis, block, datadirCli, logger)
 	},
 }
 
-func blocksIO(db kv.RoDB, snapshotVersion uint8) (services.FullBlockReader, *blockio.BlockWriter) {
+func blocksIO(db kv.RoDB) (services.FullBlockReader, *blockio.BlockWriter) {
 	var histV3 bool
 	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		histV3, _ = kvcfg.HistoryV3.Enabled(tx)
@@ -56,12 +55,12 @@ func blocksIO(db kv.RoDB, snapshotVersion uint8) (services.FullBlockReader, *blo
 	}); err != nil {
 		panic(err)
 	}
-	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", snapshotVersion, log.New()), nil /* BorSnapshots */)
+	br := freezeblocks.NewBlockReader(freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{Enabled: false}, "", 0, log.New()), nil /* BorSnapshots */)
 	bw := blockio.NewBlockWriter(histV3)
 	return br, bw
 }
 
-func StateRoot(ctx context.Context, genesis *types.Genesis, snapshotVersion uint8, blockNum uint64, datadir string, logger log.Logger) error {
+func StateRoot(ctx context.Context, genesis *types.Genesis, blockNum uint64, datadir string, logger log.Logger) error {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -94,7 +93,7 @@ func StateRoot(ctx context.Context, genesis *types.Genesis, snapshotVersion uint
 		return err2
 	}
 	defer db.Close()
-	blockReader, _ := blocksIO(db, snapshotVersion)
+	blockReader, _ := blocksIO(db)
 
 	chainConfig := genesis.Config
 	vmConfig := vm.Config{}

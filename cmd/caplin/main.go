@@ -16,18 +16,13 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/fork"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	execution_client2 "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
-	"github.com/ledgerwatch/erigon/cl/sentinel"
-	"github.com/ledgerwatch/erigon/cl/sentinel/service"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
@@ -61,6 +56,19 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	if _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
 		return err
 	}
+	rcfg := beacon_router_configuration.RouterConfiguration{
+		Protocol:         cfg.BeaconProtocol,
+		Address:          cfg.BeaconAddr,
+		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
+		WriteTimeout:     cfg.BeaconApiWriteTimeout,
+		IdleTimeout:      cfg.BeaconApiWriteTimeout,
+		AllowedOrigins:   cfg.AllowedOrigins,
+		AllowedMethods:   cfg.AllowedMethods,
+		AllowCredentials: cfg.AllowCredentials,
+	}
+	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
+		return err
+	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
@@ -77,31 +85,27 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		}
 	}
 
-	forkDigest, err := fork.ComputeForkDigest(cfg.BeaconCfg, cfg.GenesisCfg)
-	if err != nil {
-		return err
-	}
+	// sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
+	// 	IpAddr:        cfg.Addr,
+	// 	Port:          int(cfg.Port),
+	// 	TCPPort:       cfg.ServerTcpPort,
+	// 	GenesisConfig: cfg.GenesisCfg,
+	// 	NetworkConfig: cfg.NetworkCfg,
+	// 	BeaconConfig:  cfg.BeaconCfg,
+	// 	NoDiscovery:   cfg.NoDiscovery,
+	// 	EnableBlocks:  true,
+	// }, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
+	// 	ForkDigest:     forkDigest,
+	// 	FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+	// 	FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+	// 	HeadSlot:       state.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
+	// 	HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+	// }, log.Root())
+	// if err != nil {
+	// 	log.Error("Could not start sentinel", "err", err)
+	// }
 
-	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
-		IpAddr:        cfg.Addr,
-		Port:          int(cfg.Port),
-		TCPPort:       cfg.ServerTcpPort,
-		GenesisConfig: cfg.GenesisCfg,
-		NetworkConfig: cfg.NetworkCfg,
-		BeaconConfig:  cfg.BeaconCfg,
-		NoDiscovery:   cfg.NoDiscovery,
-	}, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, &cltypes.Status{
-		ForkDigest:     forkDigest,
-		FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
-		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
-		HeadSlot:       state.FinalizedCheckpoint().Epoch() * cfg.BeaconCfg.SlotsPerEpoch,
-		HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
-	}, log.Root())
-	if err != nil {
-		log.Error("Could not start sentinel", "err", err)
-	}
-
-	log.Info("Sentinel started", "addr", cfg.ServerAddr)
+	// log.Info("Sentinel started", "addr", cfg.ServerAddr)
 
 	if err != nil {
 		log.Error("[Checkpoint Sync] Failed", "reason", err)
@@ -123,23 +127,14 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			Root: cfg.RecordDir,
 		}
 	}
-	rawBeaconBlockChainDb, _ := persistence.AferoRawBeaconBlockChainFromOsPath(cfg.BeaconCfg, cfg.Dirs.CaplinHistory)
-	historyDB, indiciesDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, rawBeaconBlockChainDb, cfg.Dirs.CaplinIndexing, executionEngine, false)
+	indiciesDB, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.Dirs.CaplinIndexing, executionEngine, false)
 	if err != nil {
 		return err
 	}
 
-	snapshotVersion := snapcfg.KnownCfg(cliCtx.String(utils.ChainFlag.Name), 0).Version
-
-	return caplin1.RunCaplinPhase1(ctx, sentinel, executionEngine, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, snapshotVersion, beacon_router_configuration.RouterConfiguration{
-		Protocol:         cfg.BeaconProtocol,
-		Address:          cfg.BeaconAddr,
-		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
-		WriteTimeout:     cfg.BeaconApiWriteTimeout,
-		IdleTimeout:      cfg.BeaconApiWriteTimeout,
-		Active:           !cfg.NoBeaconApi,
-		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   cfg.AllowedMethods,
-		AllowCredentials: cfg.AllowCredentials,
-	}, nil, nil, false, false, historyDB, indiciesDB)
+	return caplin1.RunCaplinPhase1(ctx, executionEngine, &ethconfig.Config{
+		LightClientDiscoveryAddr:    cfg.Addr,
+		LightClientDiscoveryPort:    uint64(cfg.Port),
+		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, rcfg, nil, nil, false, false, indiciesDB, nil)
 }

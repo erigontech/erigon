@@ -6,14 +6,14 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/dataflow"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
@@ -97,10 +97,21 @@ func BodiesForward(
 	}
 	defer cfg.bd.ClearBodyCache()
 	var headerProgress, bodyProgress uint64
-	headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		return err
+
+	if cfg.chanConfig.Bor != nil {
+		headerProgress, err = stages.GetStageProgress(tx, stages.BorHeimdall)
+		if err != nil {
+			return err
+		}
 	}
+
+	if headerProgress == 0 {
+		headerProgress, err = stages.GetStageProgress(tx, stages.Headers)
+		if err != nil {
+			return err
+		}
+	}
+
 	bodyProgress = s.BlockNumber
 	if bodyProgress >= headerProgress {
 		return nil
@@ -134,7 +145,7 @@ func BodiesForward(
 	prevProgress := bodyProgress
 	var noProgressCount uint = 0 // How many time the progress was printed without actual progress
 	var totalDelivered uint64 = 0
-	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx, BlockReader: cfg.blockReader}
+	cr := ChainReader{Cfg: cfg.chanConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
 
 	loopBody := func() (bool, error) {
 		// loopCount is used here to ensure we don't get caught in a constant loop of making requests
@@ -168,6 +179,14 @@ func BodiesForward(
 		if err != nil {
 			return false, err
 		}
+
+		// this can happen if we have bor heimdall processing
+		// as the body downloader only has access to headers which
+		// may be higher than the current bor processing stage
+		if requestedLow > headerProgress {
+			requestedLow = headerProgress
+		}
+
 		totalDelivered += delivered
 		d4 += time.Since(start)
 		start = time.Now()
@@ -195,40 +214,45 @@ func BodiesForward(
 			if err != nil {
 				return false, err
 			}
-			blockHeight := header.Number.Uint64()
-			if blockHeight != nextBlock {
-				return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
-			}
 
-			// Txn & uncle roots are verified via bd.requestedMap
-			err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
-			if err != nil {
-				logger.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
-				u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("Uncle verification failed: %w", err)))
-				return true, nil
-			}
-
-			// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
-			ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
-			if err != nil {
-				return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
-			}
-			if cfg.historyV3 && ok {
-				if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
-					return false, err
+			// this check is necessary if we have bor heimdall processing as the body downloader only has
+			// access to headers which may be higher than the current bor processing stage
+			if headerNumber := header.Number.Uint64(); headerNumber <= headerProgress {
+				blockHeight := headerNumber
+				if blockHeight != nextBlock {
+					return false, fmt.Errorf("[%s] Header block unexpected when matching body, got %v, expected %v", logPrefix, blockHeight, nextBlock)
 				}
-			}
-			if ok {
-				dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
-			}
 
-			if blockHeight > bodyProgress {
-				bodyProgress = blockHeight
-				if err = s.Update(tx, blockHeight); err != nil {
-					return false, fmt.Errorf("saving Bodies progress: %w", err)
+				// Txn & uncle roots are verified via bd.requestedMap
+				err = cfg.bd.Engine.VerifyUncles(cr, header, rawBody.Uncles)
+				if err != nil {
+					logger.Error(fmt.Sprintf("[%s] Uncle verification failed", logPrefix), "number", blockHeight, "hash", header.Hash().String(), "err", err)
+					u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("Uncle verification failed: %w", err)))
+					return true, nil
 				}
+
+				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
+				ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
+				if err != nil {
+					return false, fmt.Errorf("WriteRawBodyIfNotExists: %w", err)
+				}
+				if cfg.historyV3 && ok {
+					if err := rawdb.AppendCanonicalTxNums(tx, blockHeight); err != nil {
+						return false, err
+					}
+				}
+				if ok {
+					dataflow.BlockBodyDownloadStates.AddChange(blockHeight, dataflow.BlockBodyCleared)
+				}
+
+				if blockHeight > bodyProgress {
+					bodyProgress = blockHeight
+					if err = s.Update(tx, blockHeight); err != nil {
+						return false, fmt.Errorf("saving Bodies progress: %w", err)
+					}
+				}
+				cfg.bd.AdvanceLow()
 			}
-			cfg.bd.AdvanceLow()
 
 			if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(i)) {
 				return true, nil

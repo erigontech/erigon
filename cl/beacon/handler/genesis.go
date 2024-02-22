@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -15,9 +16,9 @@ type genesisResponse struct {
 	GenesisForkVersion   libcommon.Bytes4 `json:"genesis_fork_version"`
 }
 
-func (a *ApiHandler) getGenesis(w http.ResponseWriter, r *http.Request) (*beaconResponse, error) {
+func (a *ApiHandler) GetEthV1BeaconGenesis(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	if a.genesisCfg == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, "Genesis Config is missing")
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("Genesis Config is missing"))
 	}
 
 	digest, err := fork.ComputeForkDigest(a.beaconChainCfg, a.genesisCfg)

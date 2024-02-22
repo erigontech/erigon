@@ -32,7 +32,7 @@ func (arr *hashList) Bytes() []byte {
 func (arr *hashList) MarshalJSON() ([]byte, error) {
 	list := make([]libcommon.Hash, arr.l)
 	for i := 0; i < arr.l; i++ {
-		list[0] = arr.Get(i)
+		list[i] = arr.Get(i)
 	}
 	return json.Marshal(list)
 }
