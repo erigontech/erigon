@@ -19,9 +19,9 @@ require (
 	github.com/RoaringBitmap/roaring v1.7.0
 	github.com/VictoriaMetrics/fastcache v1.12.2
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/log v0.14.3-0.20230823030427-4b296d71a6b4
+	github.com/anacrolix/log v0.14.6-0.20231202035202-ed7a02cad0b4
 	github.com/anacrolix/sync v0.5.1
-	github.com/anacrolix/torrent v1.53.2
+	github.com/anacrolix/torrent v1.54.1
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -153,6 +153,7 @@ require (
 	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
+	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cilium/ebpf v0.9.1 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
