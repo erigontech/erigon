@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
@@ -23,17 +24,22 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 	var cc *chain.Config
 
-	err = db.View(ctx, func(tx kv.Tx) error {
-		cc, err = chain.GetConfig(tx, nil)
+	if db == nil {
+		genesis := core.BorMainnetGenesisBlock()
+		cc = genesis.Config
+	} else {
+		err = db.View(ctx, func(tx kv.Tx) error {
+			cc, err = chain.GetConfig(tx, nil)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+
 		if err != nil {
+			err = fmt.Errorf("cant read chain config from db: %w", err)
 			return err
 		}
-		return nil
-	})
-
-	if err != nil {
-		err = fmt.Errorf("cant read chain config from db: %w", err)
-		return err
 	}
 
 	if cc.BorJSON == nil {
@@ -97,7 +103,9 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 			}
 
 			if prevBlock != 0 && prevBlock != block {
-				err := db.View(ctx, func(tx kv.Tx) error {
+				var err error
+
+				checkBlockEvents := func(tx kv.Tx) error {
 					header, err := blockReader.HeaderByNumber(ctx, tx, prevBlock)
 
 					if err != nil {
@@ -140,7 +148,13 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 					}
 
 					return nil
-				})
+				}
+
+				if db != nil {
+					err = db.View(ctx, checkBlockEvents)
+				} else {
+					err = checkBlockEvents(nil)
+				}
 
 				if err != nil {
 					return err

@@ -19,6 +19,7 @@ import (
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -205,8 +206,11 @@ func doIntegrity(cliCtx *cli.Context) error {
 	defer cancel()
 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-	chainDB := dbCfg(kv.ChainDB, dirs.Chaindata).MustOpen()
-	defer chainDB.Close()
+	chainDB, err := dbCfg(kv.ChainDB, dirs.Chaindata).Open(ctx)
+
+	if err == nil {
+		defer chainDB.Close()
+	}
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
 
@@ -223,8 +227,10 @@ func doIntegrity(cliCtx *cli.Context) error {
 	to := cliCtx.Uint64(SnapshotToFlag.Name)
 
 	blockReader, _ := blockRetire.IO()
-	if err := integrity.SnapBlocksRead(ctx, chainDB, blockReader, from, to, false); err != nil {
-		return err
+	if chainDB != nil {
+		if err := integrity.SnapBlocksRead(ctx, chainDB, blockReader, from, to, false); err != nil {
+			return err
+		}
 	}
 
 	if err := integrity.NoGapsInBorEvents(ctx, chainDB, blockReader, from, to, false); err != nil {
@@ -393,22 +399,30 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 	}
 	borSnaps.LogStat("open")
 	agg = openAgg(ctx, dirs, chainDB, logger)
-	err = chainDB.View(ctx, func(tx kv.Tx) error {
-		ac := agg.MakeContext()
-		defer ac.Close()
-		//ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
-		//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
-		//	return histBlockNumProgress
-		//})
-		return nil
-	})
-	if err != nil {
-		return
+
+	var blockWriter *blockio.BlockWriter
+	var chainConfig *chain.Config
+
+	if chainDB != nil {
+		err = chainDB.View(ctx, func(tx kv.Tx) error {
+			ac := agg.MakeContext()
+			defer ac.Close()
+			//ac.LogStats(tx, func(endTxNumMinimax uint64) uint64 {
+			//	_, histBlockNumProgress, _ := rawdbv3.TxNums.FindBlockNum(tx, endTxNumMinimax)
+			//	return histBlockNumProgress
+			//})
+			return nil
+		})
+		if err != nil {
+			return
+		}
+
+		blockWriter = blockio.NewBlockWriter(fromdb.HistV3(chainDB))
+		chainConfig = fromdb.ChainConfig(chainDB)
 	}
 
 	blockReader := freezeblocks.NewBlockReader(blockSnaps, borSnaps)
-	blockWriter := blockio.NewBlockWriter(fromdb.HistV3(chainDB))
-	chainConfig := fromdb.ChainConfig(chainDB)
+
 	br = freezeblocks.NewBlockRetire(estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, nil, logger)
 	return
 }
