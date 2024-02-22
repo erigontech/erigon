@@ -134,7 +134,7 @@ func (st *serviceTest) mockSentryPeerEventsStream() sentry.Sentry_PeerEventsClie
 
 type mockSentryMessagesStream[M any] struct {
 	wg   *sync.WaitGroup
-	msgs []*sentry.InboundMessage
+	msgs []M
 }
 
 func (s *mockSentryMessagesStream[M]) Recv() (M, error) {
@@ -170,21 +170,33 @@ func (s *mockSentryMessagesStream[M]) RecvMsg(msg any) error {
 		return nil
 	}
 
-	//
-	// TODO make it work with PeerEvent and InboundMessage
-	// TODO fix go test -race
-	//
-
-	inboundMsg, ok := msg.(*sentry.InboundMessage)
-	if !ok {
-		return errors.New("unexpected msg type")
-	}
-
 	mockMsg := s.msgs[0]
 	s.msgs = s.msgs[1:]
-	inboundMsg.Id = mockMsg.Id
-	inboundMsg.Data = mockMsg.Data
-	inboundMsg.PeerId = mockMsg.PeerId
+
+	switch any(mockMsg).(type) {
+	case *sentry.InboundMessage:
+		msg, ok := msg.(*sentry.InboundMessage)
+		if !ok {
+			return errors.New("unexpected msg type")
+		}
+
+		mockMsg := any(mockMsg).(*sentry.InboundMessage)
+		msg.Id = mockMsg.Id
+		msg.Data = mockMsg.Data
+		msg.PeerId = mockMsg.PeerId
+	case *sentry.PeerEvent:
+		msg, ok := msg.(*sentry.PeerEvent)
+		if !ok {
+			return errors.New("unexpected msg type")
+		}
+
+		mockMsg := any(mockMsg).(*sentry.PeerEvent)
+		msg.PeerId = mockMsg.PeerId
+		msg.EventId = mockMsg.EventId
+	default:
+		return errors.New("unsupported type")
+	}
+
 	return nil
 }
 
@@ -285,7 +297,7 @@ func TestServiceFetchHeaders(t *testing.T) {
 	})
 }
 
-func TestServiceErrInvalidDownloadHeadersRange(t *testing.T) {
+func TestServiceErrInvalidFetchHeadersRange(t *testing.T) {
 	ctx := context.Background()
 	test := newServiceTest(t, newMockRequestGenerator(1))
 	test.mockSentryBlockHeaders66InboundMessageStream(nil, PeerId{}, 1, 2)
