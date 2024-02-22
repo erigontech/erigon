@@ -196,7 +196,7 @@ Loop:
 			break
 		}
 
-		if b.engine != nil && b.engine.SupportInsertion() && !elFound {
+		if b.engine != nil && b.engine.SupportInsertion() {
 			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
 			if err != nil {
 				return err
