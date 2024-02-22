@@ -60,6 +60,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 	var prevEventId, prevBlock, prevBlockStartId uint64
 	var maxBlockNum uint64
+	var prevEventTime *time.Time
 
 	if to > 0 {
 		maxBlockNum = to
@@ -137,15 +138,29 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 					}
 
 					for i, event := range events {
-						if t := bor.EventTime(event); !checkBlockWindow(ctx, t, config, header, tx, blockReader) {
+
+						// TODO check eventId matches the expected event id (its in the rlp)
+						// bor.EventId(event)
+
+						eventTime := bor.EventTime(event)
+
+						if prevEventTime != nil {
+							if eventTime.Before(*prevEventTime) {
+								log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", prevBlockStartId+uint64(i), "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime), "expected", fmt.Sprintf("%s-%s", from, to))
+							}
+						}
+
+						prevEventTime = &eventTime
+
+						if !checkBlockWindow(ctx, eventTime, config, header, tx, blockReader) {
 							from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
 
 							var diff time.Duration
 
-							if t.Before(from) {
-								diff = -from.Sub(t)
-							} else if t.After(to) {
-								diff = to.Sub(t)
+							if eventTime.Before(from) {
+								diff = -from.Sub(eventTime)
+							} else if eventTime.After(to) {
+								diff = to.Sub(eventTime)
 							}
 
 							if failFast {
