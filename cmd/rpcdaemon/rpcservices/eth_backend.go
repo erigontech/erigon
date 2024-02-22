@@ -88,6 +88,10 @@ func (back *RemoteBackend) FrozenFiles() (list []string)          { return back.
 func (back *RemoteBackend) FreezingCfg() ethconfig.BlocksFreezing {
 	return back.blockReader.FreezingCfg()
 }
+func (back *RemoteBackend) LastFrozenEventId() uint64 {
+	return back.blockReader.LastFrozenEventId()
+}
+
 func (back *RemoteBackend) EnsureVersionCompatibility() bool {
 	versionReply, err := back.remoteEthBackend.Version(context.Background(), &emptypb.Empty{}, grpc.WaitForReady(true))
 	if err != nil {
@@ -271,6 +275,10 @@ func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHas
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
+func (back *RemoteBackend) BorStartEventID(ctx context.Context, tx kv.Tx, blockNum uint64) (uint64, error) {
+	return back.blockReader.BorStartEventID(ctx, tx, blockNum)
+}
+
 func (back *RemoteBackend) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]byte, error) {
 	return back.blockReader.Span(ctx, tx, spanId)
 }
