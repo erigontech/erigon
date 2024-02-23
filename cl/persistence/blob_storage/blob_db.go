@@ -8,10 +8,13 @@ import (
 	"math"
 	"strconv"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/spf13/afero"
@@ -143,4 +146,81 @@ func (bs *BlobStore) Prune() error {
 		bs.fs.RemoveAll(strconv.FormatUint(uint64(i), 10))
 	}
 	return nil
+}
+
+type sidecarsPayload struct {
+	blockRoot libcommon.Hash
+	sidecars  []*cltypes.BlobSidecar
+}
+
+// VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
+func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar) (uint64, error) {
+	kzgCtx := kzg.Ctx()
+	if identifiers.Len() == 0 || len(sidecars) == 0 {
+		return 0, nil
+	}
+	if len(sidecars) > identifiers.Len() {
+		return 0, fmt.Errorf("sidecars length is greater than identifiers length")
+	}
+	prevBlockRoot := identifiers.Get(0).BlockRoot
+	totalProcessed := 0
+
+	storableSidecars := []*sidecarsPayload{}
+	currentSidecarsPayload := &sidecarsPayload{blockRoot: identifiers.Get(0).BlockRoot}
+	highestProcessed := uint64(sidecars[0].SignedBlockHeader.Header.Slot)
+	// Some will be stored, truncate when validation goes to shit
+	for i, sidecar := range sidecars {
+		identifier := identifiers.Get(i)
+		// check if the root of the block matches the identifier
+		sidecarBlockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+		if err != nil {
+			return 0, err
+		}
+		if sidecarBlockRoot != identifier.BlockRoot {
+			return 0, fmt.Errorf("sidecar block root does not match the identifier")
+		}
+		// check if the index of the sidecar matches the identifier
+		if sidecars[i].Index != identifier.Index {
+			return 0, fmt.Errorf("sidecar index does not match the identifier")
+		}
+
+		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
+			return 0, fmt.Errorf("could not verify blob's inclusion proof")
+		}
+		// TODO: verify the signature of the block
+
+		// if the sidecar is valid, add it to the current payload of sidecars being built.
+		if identifier.BlockRoot != prevBlockRoot {
+			storableSidecars = append(storableSidecars, currentSidecarsPayload)
+			currentSidecarsPayload = &sidecarsPayload{blockRoot: identifier.BlockRoot}
+			highestProcessed = sidecars[i].SignedBlockHeader.Header.Slot
+		}
+		currentSidecarsPayload.sidecars = append(currentSidecarsPayload.sidecars, sidecar)
+		totalProcessed++
+	}
+	if totalProcessed == identifiers.Len() {
+		storableSidecars = append(storableSidecars, currentSidecarsPayload)
+	}
+
+	for _, sds := range storableSidecars {
+		blobs := make([]gokzg4844.Blob, len(sds.sidecars))
+		for i, sidecar := range sds.sidecars {
+			blobs[i] = gokzg4844.Blob(sidecar.Blob)
+		}
+		kzgCommitments := make([]gokzg4844.KZGCommitment, len(sds.sidecars))
+		for i, sidecar := range sds.sidecars {
+			kzgCommitments[i] = gokzg4844.KZGCommitment(sidecar.KzgCommitment)
+		}
+		kzgProofs := make([]gokzg4844.KZGProof, len(sds.sidecars))
+		for i, sidecar := range sds.sidecars {
+			kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
+		}
+		if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
+			return 0, fmt.Errorf("sidecar is wrong")
+		}
+		if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {
+			return 0, err
+		}
+	}
+	return highestProcessed, nil
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -58,6 +59,7 @@ type Cfg struct {
 	prebuffer       *etl.Collector
 	gossipSource    persistence.BlockSource
 	sn              *freezeblocks.CaplinSnapshots
+	blobStore       blob_storage.BlobStorage
 
 	hasDownloaded, backfilling bool
 }
@@ -110,6 +112,7 @@ func ClStagesCfg(
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.Emitters,
 	gossipSource persistence.BlockSource,
+	blobStore blob_storage.BlobStorage,
 ) *Cfg {
 	return &Cfg{
 		rpc:             rpc,
@@ -128,6 +131,7 @@ func ClStagesCfg(
 		backfilling:     backfilling,
 		syncedData:      syncedData,
 		emitter:         emitters,
+		blobStore:       blobStore,
 		prebuffer:       etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 		gossipSource:    gossipSource,
 	}
@@ -305,6 +309,7 @@ func ConsensusClStages(ctx context.Context,
 						sort.Slice(blocks, func(i, j int) bool {
 							return blocks[i].Block.Slot < blocks[j].Block.Slot
 						})
+
 						for i, block := range blocks {
 							if err := processBlock(tx, block, false, true); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
@@ -365,38 +370,17 @@ func ConsensusClStages(ctx context.Context,
 							logger.Warn("failed to get blobs", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
-						// We got the blobs, now we need to process them
-						blobsRequired := generateCommitmentsToSlotMap(blocks)
-						if err := cltypes.VerifyBlobsSidecarAgainstExpectedBlobs(blobs, blobsRequired); err != nil {
-							logger.Warn("failed to batch verify blobs", "err", err)
+						var highestProcessed uint64
+						start := time.Now()
+						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs); err != nil {
+							logger.Warn("failed to get verify blobs", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
-						// We have verified the blobs, now we need to track the progress
-						cap := getBlobProgress(blobsRequired)
-						if cap == math.MaxUint64 {
-							return highestSlotProcessed, highestBlockRootProcessed, nil
+						fmt.Println(time.Since(start))
+						if highestProcessed <= initialHighestSlotProcessed {
+							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, nil
 						}
-						// If there was a truncation in the response, act accordingly and record the blob download progress only.
-						var currentCandidate *cltypes.SignedBeaconBlock
-						for i := 0; i < len(blocks); i++ {
-							if currentCandidate == nil {
-								currentCandidate = blocks[i]
-							}
-							if blocks[i].Block.Slot >= cap {
-								if i == 0 {
-									return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
-								}
-								highestSlotProcessed = currentCandidate.Block.Slot
-								highestBlockRootProcessed, err = currentCandidate.Block.HashSSZ()
-								if err != nil {
-									return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
-								}
-								return highestSlotProcessed, highestBlockRootProcessed, nil
-							}
-							currentCandidate = blocks[i]
-						}
-						// Better to panic than to continue with a bad state
-						panic("should never reach here")
+						return highestProcessed, highestBlockRootProcessed, err
 					})
 					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 					logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
@@ -877,7 +861,11 @@ func ConsensusClStages(ctx context.Context,
 						}
 					}
 
-					return tx.Commit()
+					if err := tx.Commit(); err != nil {
+						return err
+					}
+					return cfg.blobStore.Prune()
+
 				},
 			},
 			SleepForSlot: {

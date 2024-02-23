@@ -95,13 +95,13 @@ func OpenCaplinDatabase(ctx context.Context,
 			blobDB.Close() // close blob database here
 		}()
 	}
-	return db, blob_storage.NewBlobStore(db, afero.NewBasePathFs(afero.NewOsFs(), blobDir), 129600, beaconConfig, genesisConfig), nil
+	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), 129600, beaconConfig, genesisConfig), nil
 }
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
 	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState,
 	caplinFreezer freezer.Freezer, dirs datadir.Dirs, cfg beacon_router_configuration.RouterConfiguration, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool, indexDB kv.RwDB, creds credentials.TransportCredentials) error {
+	snDownloader proto_downloader.DownloaderClient, backfilling bool, states bool, indexDB kv.RwDB, blobStorage blob_storage.BlobStorage, creds credentials.TransportCredentials) error {
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
 
@@ -261,7 +261,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 
 	forkChoice.StartAttestationsRTT()
 
-	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, syncedDataManager, emitters, gossipSource)
+	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, syncedDataManager, emitters, gossipSource, blobStorage)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")
