@@ -46,7 +46,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true)
+	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true, nil)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState)
