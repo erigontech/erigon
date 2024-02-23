@@ -2,8 +2,10 @@ package diagnostics
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
+	"syscall"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -40,6 +42,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runBlockExecutionListener()
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
+	//d.findNodeDisk()
 
 	//d.logDiagMsgs()
 }
@@ -73,9 +76,32 @@ func interfaceToJSONString(i interface{}) string {
 	return string(b)
 }*/
 
+func (d *DiagnosticClient) findNodeDisk() string {
+	dirPath := d.node.Backend().DataDir()
+
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(dirPath, &stat); err != nil {
+		fmt.Println("Error:", err)
+		return "/"
+	}
+
+	var mountPointBytes []byte
+	for _, b := range stat.Mntonname {
+		if b == 0 {
+			break
+		}
+		mountPointBytes = append(mountPointBytes, byte(b))
+	}
+	mountPoint := string(mountPointBytes)
+
+	return mountPoint
+}
+
 func (d *DiagnosticClient) getSysInfo() {
+	nodeDisk := d.findNodeDisk()
+
 	ramInfo := GetRAMInfo()
-	diskInfo := GetDiskInfo()
+	diskInfo := GetDiskInfo(nodeDisk)
 	cpuInfo := GetCPUInfo()
 
 	d.mu.Lock()
@@ -103,7 +129,7 @@ func GetRAMInfo() diaglib.RAMInfo {
 	}
 }
 
-func GetDiskInfo() diaglib.DiskInfo {
+func GetDiskInfo(nodeDisk string) diaglib.DiskInfo {
 	fsType := ""
 	total := uint64(0)
 	free := uint64(0)
@@ -112,7 +138,7 @@ func GetDiskInfo() diaglib.DiskInfo {
 
 	if err == nil {
 		for _, partition := range partitions {
-			if partition.Mountpoint == "/" {
+			if partition.Mountpoint == nodeDisk {
 				iocounters, err := disk.Usage(partition.Mountpoint)
 				if err == nil {
 					fsType = partition.Fstype
