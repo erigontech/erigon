@@ -40,8 +40,8 @@ import (
 type Features byte
 
 const (
-	Enums              Features = 0b1
-	LessFalsePositives Features = 0b10
+	Enums Features = 0b1
+	//LessFalsePositives Features = 0b10 // example of adding new feature
 )
 
 // Index implements index lookup from the file created by the RecSplit
