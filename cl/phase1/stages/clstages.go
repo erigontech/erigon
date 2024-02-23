@@ -61,7 +61,7 @@ type Cfg struct {
 	sn              *freezeblocks.CaplinSnapshots
 	blobStore       blob_storage.BlobStorage
 
-	hasDownloaded, backfilling bool
+	hasDownloaded, backfilling, blobBackfilling bool
 }
 
 func generateCommitmentsToSlotMap(blocks []*cltypes.SignedBeaconBlock) map[common.Bytes48]uint64 {
@@ -109,6 +109,7 @@ func ClStagesCfg(
 	tmpdir string,
 	dbConfig db_config.DatabaseConfiguration,
 	backfilling bool,
+	blobBackfilling bool,
 	syncedData *synced_data.SyncedDataManager,
 	emitters *beaconevents.Emitters,
 	gossipSource persistence.BlockSource,
@@ -134,6 +135,7 @@ func ClStagesCfg(
 		blobStore:       blobStore,
 		prebuffer:       etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
 		gossipSource:    gossipSource,
+		blobBackfilling: blobBackfilling,
 	}
 }
 
@@ -272,7 +274,7 @@ func ConsensusClStages(ctx context.Context,
 					startingSlot := cfg.state.LatestBlockHeader().Slot
 					downloader := network2.NewBackwardBeaconDownloader(context.Background(), cfg.rpc, cfg.executionClient, cfg.indiciesDB)
 
-					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, cfg.blockReader, logger), context.Background(), logger); err != nil {
+					if err := SpawnStageHistoryDownload(StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.genesisCfg, cfg.beaconCfg, cfg.backfilling, cfg.blobBackfilling, false, startingRoot, startingSlot, cfg.tmpdir, 600*time.Millisecond, cfg.prebuffer, cfg.blockReader, cfg.blobStore, logger), context.Background(), logger); err != nil {
 						cfg.hasDownloaded = false
 						return err
 					}
@@ -300,6 +302,7 @@ func ConsensusClStages(ctx context.Context,
 					currentSlot.Store(finalizedCheckpoint.Epoch() * cfg.beaconCfg.SlotsPerEpoch)
 					secsPerLog := 30
 					logTicker := time.NewTicker(time.Duration(secsPerLog) * time.Second)
+					verifyBlobSigFunc := forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)
 					// Always start from the current finalized checkpoint
 					downloader.SetHighestProcessedRoot(finalizedCheckpoint.BlockRoot())
 					downloader.SetHighestProcessedSlot(currentSlot.Load())
@@ -371,7 +374,7 @@ func ConsensusClStages(ctx context.Context,
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
 						var highestProcessed uint64
-						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs); err != nil {
+						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs, verifyBlobSigFunc); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}

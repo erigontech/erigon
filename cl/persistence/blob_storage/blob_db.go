@@ -155,8 +155,10 @@ type sidecarsPayload struct {
 	sidecars  []*cltypes.BlobSidecar
 }
 
+type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
+
 // VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
-func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar) (uint64, error) {
+func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, error) {
 	kzgCtx := kzg.Ctx()
 	if identifiers.Len() == 0 || len(sidecars) == 0 {
 		return 0, nil
@@ -169,7 +171,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 
 	storableSidecars := []*sidecarsPayload{}
 	currentSidecarsPayload := &sidecarsPayload{blockRoot: identifiers.Get(0).BlockRoot}
-	highestProcessed := uint64(sidecars[0].SignedBlockHeader.Header.Slot)
+	lastProcessed := uint64(sidecars[0].SignedBlockHeader.Header.Slot)
 	// Some will be stored, truncate when validation goes to shit
 	for i, sidecar := range sidecars {
 		identifier := identifiers.Get(i)
@@ -189,19 +191,23 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
 			return 0, fmt.Errorf("could not verify blob's inclusion proof")
 		}
-		// TODO: verify the signature of the block
+		// verify the signature of the sidecar head, we leave this step up to the caller to define
+		if verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
+			return 0, err
+		}
 
 		// if the sidecar is valid, add it to the current payload of sidecars being built.
 		if identifier.BlockRoot != prevBlockRoot {
 			storableSidecars = append(storableSidecars, currentSidecarsPayload)
 			currentSidecarsPayload = &sidecarsPayload{blockRoot: identifier.BlockRoot}
-			highestProcessed = sidecars[i].SignedBlockHeader.Header.Slot
+			lastProcessed = sidecars[i].SignedBlockHeader.Header.Slot
 		}
 		currentSidecarsPayload.sidecars = append(currentSidecarsPayload.sidecars, sidecar)
 		totalProcessed++
 	}
 	if totalProcessed == identifiers.Len() {
 		storableSidecars = append(storableSidecars, currentSidecarsPayload)
+		lastProcessed = sidecars[len(sidecars)-1].SignedBlockHeader.Header.Slot
 	}
 
 	var errAtomic atomic.Value
@@ -235,5 +241,5 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	if err := errAtomic.Load(); err != nil {
 		return 0, err.(error)
 	}
-	return highestProcessed, nil
+	return lastProcessed, nil
 }

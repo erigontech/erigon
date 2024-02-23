@@ -2,15 +2,18 @@ package forkchoice
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/fork"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -18,6 +21,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"golang.org/x/exp/slices"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -100,7 +104,9 @@ type ForkChoiceStore struct {
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
 	// I use the cache due to the convenient auto-cleanup feauture.
-	checkpointStates  sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	publicKeysPerState sync.Map // Maps root to non-anchor public keys
+
 	latestMessages    []LatestMessage
 	anchorPublicKeys  []byte
 	syncedDataManager *synced_data.SyncedDataManager
@@ -235,6 +241,7 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	f.unrealizedFinalizedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.unrealizedJustifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.proposerBoostRoot.Store(libcommon.Hash{})
+	f.publicKeysPerState.Store(libcommon.Hash(anchorRoot), []byte{})
 
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
@@ -490,4 +497,51 @@ func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.Vali
 
 func (f *ForkChoiceStore) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
 	return f.forkGraph.GetCurrentPartecipationIndicies(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error) {
+	anchorPubKeysLen := len(f.anchorPublicKeys) / length.Bytes48
+	if idx < uint64(anchorPubKeysLen) {
+		return libcommon.Bytes48(f.anchorPublicKeys[idx*length.Bytes48 : (idx+1)*length.Bytes48]), nil
+	}
+	pubKeysInterface, ok := f.publicKeysPerState.Load(blockRoot)
+	if !ok {
+		return libcommon.Bytes48{}, fmt.Errorf("public keys not found")
+	}
+	pubKeys := pubKeysInterface.([]byte)
+	offsetedIdx := idx - uint64(anchorPubKeysLen)
+	if offsetedIdx*length.Bytes48 >= uint64(len(pubKeys)) {
+		return libcommon.Bytes48{}, fmt.Errorf("index too large")
+	}
+	return libcommon.Bytes48(pubKeys[offsetedIdx*length.Bytes48 : (offsetedIdx+1)*length.Bytes48]), nil
+}
+
+func VerifyHeaderSignatureAgainstForkChoiceStoreFunction(fcs ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, genesisValidatorsRoot libcommon.Hash) func(header *cltypes.SignedBeaconBlockHeader) error {
+	return func(header *cltypes.SignedBeaconBlockHeader) error {
+		parentHeader, ok := fcs.GetHeader(header.Header.ParentRoot)
+		if !ok {
+			return fmt.Errorf("parent header not found")
+		}
+		currentVersion := beaconCfg.GetCurrentStateVersion(parentHeader.Slot / beaconCfg.SlotsPerEpoch)
+		forkVersion := beaconCfg.GetForkVersionByVersion(currentVersion)
+		domain, err := fork.ComputeDomain(beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), genesisValidatorsRoot)
+		if err != nil {
+			return err
+		}
+		sigRoot, err := fork.ComputeSigningRoot(header.Header, domain)
+		if err != nil {
+			return err
+		}
+		pk, err := fcs.GetPublicKeyForValidator(header.Header.ParentRoot, header.Header.ProposerIndex)
+		if err != nil {
+			return err
+		}
+		if ok, err = bls.Verify(header.Signature[:], sigRoot[:], pk[:]); err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("blob signature validation: signature not valid")
+		}
+		return nil
+	}
 }
