@@ -258,7 +258,8 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		return err
 	}
 	defer tx.Rollback()
-	logInterval := time.NewTicker(logIntervalTime)
+	defer log.Info("Blob history download finished successfully")
+	logInterval := time.NewTicker(time.Second)
 
 	rpc := cfg.downloader.RPC()
 	for {

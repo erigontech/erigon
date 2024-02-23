@@ -911,7 +911,7 @@ var (
 		Value: false,
 	}
 	CaplinBlobBackfillingFlag = cli.BoolFlag{
-		Name:  "caplin.backfillin.blobg",
+		Name:  "caplin.backfilling.blob",
 		Usage: "sets whether backfilling is enabled for caplin",
 		Value: false,
 	}
