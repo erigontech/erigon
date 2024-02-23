@@ -37,6 +37,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
 
+type Features byte
+
+const (
+	Enums              Features = 0b1
+	LessFalsePositives Features = 0b10
+)
+
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
 	offsetEf           *eliasfano32.EliasFano
@@ -133,7 +140,8 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 	}
-	idx.enums = idx.data[offset] != 0
+	features := Features(idx.data[offset])
+	idx.enums = features&Enums != 0
 	offset++
 	if idx.enums {
 		var size int
