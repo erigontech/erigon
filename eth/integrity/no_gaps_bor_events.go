@@ -148,6 +148,8 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 						}
 					}
 
+					var lastBlockEventTime time.Time
+
 					for i, event := range events {
 
 						var eventId uint64
@@ -168,19 +170,21 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 						eventTime := bor.EventTime(event)
 
+						if i != 0 {
+							if eventTime.Before(lastBlockEventTime) {
+								eventTime = lastBlockEventTime
+							}
+						}
+
+						lastBlockEventTime = eventTime
+
 						if prevEventTime != nil {
 							if eventTime.Before(*prevEventTime) {
-								if i == 0 {
-									log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
-								} else {
-									eventTime = *prevEventTime
-								}
-							} else {
-								prevEventTime = &eventTime
+								log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
 							}
-						} else {
-							prevEventTime = &eventTime
 						}
+
+						prevEventTime = &eventTime
 
 						if !checkBlockWindow(ctx, eventTime, config, header, tx, blockReader) {
 							from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
