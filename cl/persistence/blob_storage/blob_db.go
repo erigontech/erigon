@@ -27,6 +27,7 @@ const subdivisionSlot = 10_000
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) ([]*cltypes.BlobSidecar, bool, error)
+	HasBlobs(blockRoot libcommon.Hash) (bool, error)
 	Prune() error
 }
 
@@ -242,4 +243,13 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		return 0, err.(error)
 	}
 	return lastProcessed, nil
+}
+
+func (bs *BlobStore) HasBlobs(blockRoot libcommon.Hash) (bool, error) {
+	tx, err := bs.db.BeginRo(context.Background())
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	return tx.Has(kv.BlockRootToKzgCommitments, blockRoot[:])
 }
