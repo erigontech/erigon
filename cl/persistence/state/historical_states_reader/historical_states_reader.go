@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/spf13/afero"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -30,7 +29,6 @@ var buffersPool = sync.Pool{
 
 type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
-	fs             afero.Fs                              // some data is on filesystem to avoid database fragmentation
 	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
 	blockReader    freezeblocks.BeaconSnapshotReader
 	genesisState   *state.CachingBeaconState
@@ -39,7 +37,7 @@ type HistoricalStatesReader struct {
 	shuffledSetsCache *lru.Cache[uint64, []uint64]
 }
 
-func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, validatorTable *state_accessors.StaticValidatorTable, fs afero.Fs, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
+func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, validatorTable *state_accessors.StaticValidatorTable, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
 
 	cache, err := lru.New[uint64, []uint64]("shuffledSetsCache_reader", 125)
 	if err != nil {
@@ -48,7 +46,6 @@ func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader free
 
 	return &HistoricalStatesReader{
 		cfg:               cfg,
-		fs:                fs,
 		blockReader:       blockReader,
 		genesisState:      genesisState,
 		validatorTable:    validatorTable,

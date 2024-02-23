@@ -57,6 +57,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -1828,6 +1829,11 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 						if len(slotRlp) == 0 {
 							continue
 						}
+						// Strip away blob wrapper, if applicable
+						slotRlp, err2 := types2.UnwrapTxPlayloadRlp(slotRlp)
+						if err2 != nil {
+							continue
+						}
 
 						// Empty rlp can happen if a transaction we want to broadcast has just been mined, for example
 						slotsRlp = append(slotsRlp, slotRlp)
@@ -1858,7 +1864,6 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 					return
 				}
 				if newSlotsStreams != nil {
-					// TODO(eip-4844) What is this for? Is it OK to broadcast blob transactions?
 					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp}, p.logger)
 				}
 
