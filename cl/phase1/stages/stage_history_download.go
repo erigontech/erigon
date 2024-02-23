@@ -277,6 +277,18 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if block.Version() < clparams.DenebVersion {
 				break
 			}
+			blockRoot, err := block.HashSSZ()
+			if err != nil {
+				return err
+			}
+			hasBlob, err := cfg.blobStorage.HasBlobs(blockRoot)
+			if err != nil {
+				return err
+			}
+			if hasBlob {
+				continue
+			}
+
 			if block.Block.Body.BlobKzgCommitments.Len() == 0 {
 				continue
 			}
@@ -286,7 +298,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logInterval.C:
-			blkSec := float64(currentSlot-prevLogSlot) / logIntervalTime.Seconds()
+			blkSec := float64(prevLogSlot-currentSlot) / logIntervalTime.Seconds()
 			blkSecStr := fmt.Sprintf("%.1f", blkSec)
 			// round to 1 decimal place  and convert to string
 			prevLogSlot = currentSlot
@@ -297,12 +309,14 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		// Generate the request
 		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch)
 		if err != nil {
-			return err
+			cfg.logger.Debug("Error generating blob identifiers", "err", err)
+			continue
 		}
 		// Request the blobs
 		blobs, err := network.RequestBlobsFrantically(ctx, rpc, req)
 		if err != nil {
-			return err
+			cfg.logger.Debug("Error requesting blobs", "err", err)
+			continue
 		}
 		lastProcessed, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs, func(header *cltypes.SignedBeaconBlockHeader) error {
 			// The block is preverified so just check that the signature is correct against the block
@@ -318,9 +332,14 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			return fmt.Errorf("block not in batch")
 		})
 		if err != nil {
-			return err
+			cfg.logger.Debug("Error verifying blobs", "err", err)
+			continue
 		}
-		currentSlot = lastProcessed
+		if len(batch) == 0 {
+			currentSlot -= blocksBatchSize
+		} else {
+			currentSlot = lastProcessed
+		}
 		// TODO: also check snapshots
 		if currentSlot <= cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
 			break
