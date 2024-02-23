@@ -19,7 +19,7 @@ func TestOver50EventBlockFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if len(events) != 112 {
+	if len(events) != 113 {
 		t.Fatal("Unexpected event count, exptected: 113, got:", len(events))
 	}
 }

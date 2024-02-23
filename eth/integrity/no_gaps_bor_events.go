@@ -170,11 +170,17 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 						if prevEventTime != nil {
 							if eventTime.Before(*prevEventTime) {
-								log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
+								if i == 0 {
+									log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
+								} else {
+									eventTime = *prevEventTime
+								}
+							} else {
+								prevEventTime = &eventTime
 							}
+						} else {
+							prevEventTime = &eventTime
 						}
-
-						prevEventTime = &eventTime
 
 						if !checkBlockWindow(ctx, eventTime, config, header, tx, blockReader) {
 							from, to, _ := bor.CalculateEventWIndow(ctx, config, header, tx, blockReader)
@@ -191,7 +197,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 								return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, eventId, block, from, to)
 							}
 
-							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
+							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
 						}
 					}
 
