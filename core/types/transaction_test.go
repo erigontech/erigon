@@ -574,7 +574,7 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 		return nil, fmt.Errorf("rlp encoding failed: %w", err)
 	}
 	var parsedTx Transaction
-	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes()); err != nil {
+	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes(), false /* blobTxnsAreWrappedWithBlobs */); err != nil {
 		return nil, fmt.Errorf("rlp decoding failed: %w", err)
 	}
 	return parsedTx, nil
