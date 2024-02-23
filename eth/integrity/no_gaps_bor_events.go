@@ -107,7 +107,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 					return fmt.Errorf("missing bor event %d at block=%d", eventId, block)
 				}
 
-				log.Error("[integrity] NoGapsInBorEvents: missing bor event", "event", eventId, "block", block)
+				log.Error("[integrity] NoGapsInBorEvents: missing bor event", "event", eventId, "prev", prevEventId, "block", block)
 			}
 
 			if prevEventId == 0 {
@@ -144,7 +144,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 								return fmt.Errorf("block event mismatch at %d: expected: %d, got: %d", block, eventId-prevBlockStartId, len(events))
 							}
 
-							log.Error("[integrity] NoGapsInBorEvents: block event mismatch", "block", block, "expected", eventId-prevBlockStartId, "got", len(events))
+							log.Error("[integrity] NoGapsInBorEvents: block event count mismatch", "block", block, "eventId", eventId, "expected", eventId-prevBlockStartId, "got", len(events))
 						}
 					}
 
@@ -170,13 +170,15 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 						eventTime := bor.EventTime(event)
 
-						if i != 0 {
-							if eventTime.Before(lastBlockEventTime) {
-								eventTime = lastBlockEventTime
-							}
-						}
+						//if i != 0 {
+						//	if eventTime.Before(lastBlockEventTime) {
+						//		eventTime = lastBlockEventTime
+						//	}
+						//}
 
-						lastBlockEventTime = eventTime
+						if i == 0 {
+							lastBlockEventTime = eventTime
+						}
 
 						if prevEventTime != nil {
 							if eventTime.Before(*prevEventTime) {
@@ -201,7 +203,7 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 								return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, eventId, block, from, to)
 							}
 
-							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
+							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "block-start", prevBlockStartId, "first-time", lastBlockEventTime, "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
 						}
 					}
 
