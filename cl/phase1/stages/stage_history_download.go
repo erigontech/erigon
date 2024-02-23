@@ -321,7 +321,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		currentSlot = lastProcessed
 		// TODO: also check snapshots
-		if currentSlot <= cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
+		if currentSlot < cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
 			break
 		}
 	}
