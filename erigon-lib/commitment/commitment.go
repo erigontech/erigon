@@ -723,14 +723,16 @@ type BranchStat struct {
 	SPKCount    uint64
 	HashCount   uint64
 	ExtCount    uint64
+	TAMapsSize  uint64
 	IsRoot      bool
 }
 
 // do not add stat of root node to other branch stat
-func (bs *BranchStat) Collect(other BranchStat) {
-	if other.KeySize == 0 && other.ValSize == 0 {
+func (bs *BranchStat) Collect(other *BranchStat) {
+	if other == nil {
 		return
 	}
+
 	bs.KeySize += other.KeySize
 	bs.ValSize += other.ValSize
 	bs.MinCellSize = min(bs.MinCellSize, other.MinCellSize)
@@ -764,7 +766,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		if err != nil {
 			return nil
 		}
-
+		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
 		for _, c := range cells {
 			if c == nil {
@@ -790,9 +792,9 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 			if c.extLen > 0 {
 				switch tv {
 				case VariantBinPatriciaTrie:
-					stat.ExtSize += uint64(len(binToCompact(c.extension[:c.extLen])))
+					stat.ExtSize += uint64(c.extLen)
 				case VariantHexPatriciaTrie:
-					stat.ExtSize += uint64(len(CompactedKeyToHex(c.extension[:c.extLen])))
+					stat.ExtSize += uint64(c.extLen)
 				}
 				stat.ExtCount++
 			}

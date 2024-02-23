@@ -3,12 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io"
-	"os"
-	"path"
-	"path/filepath"
-	"sync"
-
+	"github.com/c2h5oh/datasize"
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
 	"github.com/go-echarts/go-echarts/v2/opts"
@@ -16,6 +11,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/state"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"sync"
 )
 
 var (
@@ -31,8 +31,11 @@ func main() {
 		fmt.Printf("no .kv file path provided")
 		return
 	}
-	files := flag.Args()
 
+	proceedFiles(flag.Args())
+}
+
+func proceedFiles(files []string) {
 	sema := make(chan struct{}, *flagConcurrency)
 	for i := 0; i < cap(sema); i++ {
 		sema <- struct{}{}
@@ -40,7 +43,10 @@ func main() {
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
-	total := NewOverallStat()
+
+	page := components.NewPage()
+	page.SetLayout(components.PageFlexLayout)
+	page.PageTitle = "Commitment Analysis"
 
 	for i, fp := range files {
 		fpath, pos := fp, i
@@ -60,8 +66,12 @@ func main() {
 			}
 
 			mu.Lock()
-			//total.Collect(&stat)
-			total = stat
+			page.AddCharts(
+
+				prefixLenCountChart(fpath, stat),
+				countersChart(fpath, stat),
+				fileContentsMapChart(fpath, stat),
+			)
 			mu.Unlock()
 		}(&wg, &mu)
 	}
@@ -78,21 +88,61 @@ func main() {
 			panic(err)
 		}
 	}
-	outPath := path.Join(dir, "analysis.html")
+	outPath := path.Join(dir, fmt.Sprintf("%s.html", "analysis"))
 	fmt.Printf("rendering total graph to %s\n", outPath)
-
-	page := components.NewPage()
-	page.AddCharts(
-		renderKeyPrefixBar(total),
-		treeMapBase(files[0], total),
-	)
 
 	f, err := os.Create(outPath)
 	if err != nil {
 		panic(err)
 	}
 	defer f.Close()
-	page.Render(io.MultiWriter(f))
+	defer f.Sync()
+
+	if err := page.Render(io.MultiWriter(f)); err != nil {
+		panic(err)
+	}
+}
+
+type overallStat struct {
+	branches   *commitment.BranchStat
+	roots      *commitment.BranchStat
+	prefixes   map[uint64]*commitment.BranchStat
+	prefCount  map[uint64]uint64
+	rootsCount uint64
+}
+
+func newOverallStat() *overallStat {
+	return &overallStat{
+		branches:  new(commitment.BranchStat),
+		roots:     new(commitment.BranchStat),
+		prefixes:  make(map[uint64]*commitment.BranchStat),
+		prefCount: make(map[uint64]uint64),
+	}
+}
+
+func (s *overallStat) Collect(other *overallStat) {
+	if other == nil {
+		return
+	}
+	s.branches.Collect(other.branches)
+	if other.roots != nil {
+		s.roots.Collect(other.roots)
+	}
+	if other.prefCount != nil {
+		for k, v := range other.prefCount {
+			s.prefCount[k] += v
+		}
+	}
+	if other.prefixes != nil {
+		for k, v := range other.prefixes {
+			ps, ok := s.prefixes[k]
+			if !ok {
+				s.prefixes[k] = v
+				continue
+			}
+			ps.Collect(v)
+		}
+	}
 }
 
 func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat) error {
@@ -108,6 +158,9 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	if err != nil {
 		return err
 	}
+	size := dec.Size()
+	paris := dec.Count() / 2
+	cpair := 0
 
 	getter := state.NewArchiveGetter(dec.MakeGetter(), fc)
 	for getter.HasNext() {
@@ -115,7 +168,13 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 		if !getter.HasNext() {
 			return fmt.Errorf("invalid key/value pair during decompression")
 		}
-		val, _ := getter.Next(nil)
+		val, afterValPos := getter.Next(nil)
+		cpair++
+
+		if cpair%100000 == 0 {
+			fmt.Printf("\r%s pair %d/%d %s/%s", filename, cpair, paris,
+				datasize.ByteSize(afterValPos).HumanReadable(), datasize.ByteSize(size).HumanReadable())
+		}
 
 		stat := commitment.DecodeBranchAndCollectStat(key, val, tv)
 		if stat == nil {
@@ -126,45 +185,8 @@ func extractKVPairFromCompressed(filename string, keysSink chan commitment.Branc
 	return nil
 }
 
-type overallStat struct {
-	branches   commitment.BranchStat
-	roots      commitment.BranchStat
-	prefixes   map[uint64]commitment.BranchStat
-	prefCount  map[uint64]uint64
-	rootsCount uint64
-}
-
-func NewOverallStat() *overallStat {
-	return &overallStat{
-		prefixes:  make(map[uint64]commitment.BranchStat),
-		prefCount: make(map[uint64]uint64),
-	}
-}
-
-func (s *overallStat) Collect(other *overallStat) {
-	if other == nil {
-		return
-	}
-	s.branches.Collect(other.branches)
-	//if other.roots != nil {
-	s.roots.Collect(other.roots)
-	//}
-	if other.prefCount != nil {
-		for k, v := range other.prefCount {
-			s.prefCount[k] += v
-		}
-	}
-	if other.prefixes != nil {
-		for k, v := range other.prefixes {
-			ps, _ := s.prefixes[k]
-			ps.Collect(v)
-			s.prefixes[k] = ps
-		}
-	}
-}
-
 func processCommitmentFile(fpath string) (*overallStat, error) {
-	stats := make(chan commitment.BranchStat, 1)
+	stats := make(chan commitment.BranchStat, 8)
 	errch := make(chan error)
 	go func() {
 		err := extractKVPairFromCompressed(fpath, stats)
@@ -174,26 +196,21 @@ func processCommitmentFile(fpath string) (*overallStat, error) {
 		close(errch)
 	}()
 
-	totals := NewOverallStat()
+	totals := newOverallStat()
 	for s := range stats {
 		if s.IsRoot {
 			totals.rootsCount++
-			//if totals.roots == nil {
-			//	totals.roots = &s
-			//} else {
-			totals.roots.Collect(s)
-			//}
+			totals.roots.Collect(&s)
 		} else {
-			//if totals.branches == nil {
-			//	totals.branches = &s
-			//} else {
-			totals.branches.Collect(s)
-			//}
+			totals.branches.Collect(&s)
 		}
 		totals.prefCount[s.KeySize]++
 
-		ps, _ := totals.prefixes[s.KeySize]
-		ps.Collect(s)
+		ps, ok := totals.prefixes[s.KeySize]
+		if !ok {
+			ps = new(commitment.BranchStat)
+		}
+		ps.Collect(&s)
 		totals.prefixes[s.KeySize] = ps
 	}
 
@@ -207,7 +224,7 @@ func processCommitmentFile(fpath string) (*overallStat, error) {
 	return totals, nil
 }
 
-func renderKeyPrefixBar(data *overallStat) *charts.Pie {
+func prefixLenCountChart(fname string, data *overallStat) *charts.Pie {
 	items := make([]opts.PieData, 0)
 	for prefSize, count := range data.prefCount {
 		items = append(items, opts.PieData{Name: fmt.Sprintf("%d", prefSize), Value: count})
@@ -216,45 +233,18 @@ func renderKeyPrefixBar(data *overallStat) *charts.Pie {
 	pie := charts.NewPie()
 	pie.SetGlobalOptions(
 		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
-		charts.WithTitleOpts(opts.Title{Title: "key prefix length distribution (bytes)", Top: "25"}),
+		charts.WithTitleOpts(opts.Title{Subtitle: fname, Title: "key prefix length distribution (bytes)", Top: "25"}),
 	)
 
 	pie.AddSeries("prefixLen/count", items)
 	return pie
 }
 
-func treeMapBase(fileName string, data *overallStat) *charts.TreeMap {
+func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 	var TreeMap = []opts.TreeMapNode{
 		{Name: "prefixes"},
 		{Name: "values"},
 	}
-
-	graph := charts.NewTreeMap()
-	graph.SetGlobalOptions(
-		charts.WithInitializationOpts(opts.Initialization{Theme: types.ThemeMacarons}),
-		charts.WithTitleOpts(opts.Title{
-			Title: fileName,
-			Left:  "center",
-			Top:   "15",
-		}),
-		charts.WithLegendOpts(opts.Legend{Show: false}),
-		charts.WithTooltipOpts(opts.Tooltip{
-			Show:      true,
-			Formatter: opts.FuncOpts(ToolTipFormatter),
-			//TextStyle: &opts.TextStyle{
-			//	Color: "#ff0000", // Set the text color
-			//},
-		}),
-		//charts.WithToolboxOpts(opts.Toolbox{
-		//	Orient: "horizontal",
-		//	Left:   "right",
-		//	Feature: &opts.ToolBoxFeature{
-		//		SaveAsImage: &opts.ToolBoxFeatureSaveAsImage{
-		//			Title: "Save as image"},
-		//		Restore: &opts.ToolBoxFeatureRestore{
-		//			Title: "Reset"},
-		//	}}),
-	)
 
 	keysIndex := 0
 	TreeMap[keysIndex].Children = make([]opts.TreeMapNode, 0)
@@ -284,13 +274,23 @@ func treeMapBase(fileName string, data *overallStat) *charts.TreeMap {
 		Value: int(data.branches.SPKSize),
 	})
 
+	graph := charts.NewTreeMap()
+	graph.SetGlobalOptions(
+		charts.WithInitializationOpts(opts.Initialization{Theme: types.ThemeMacarons}),
+		charts.WithLegendOpts(opts.Legend{Show: false}),
+		charts.WithTooltipOpts(opts.Tooltip{
+			Show:      true,
+			Formatter: opts.FuncOpts(ToolTipFormatter),
+		}),
+	)
+
 	// Add initialized data to graph.
 	graph.AddSeries(fileName, TreeMap).
 		SetSeriesOptions(
 			charts.WithTreeMapOpts(
 				opts.TreeMapChart{
-					Animation:  true,
-					Roam:       true,
+					Animation: true,
+					//Roam:       true,
 					UpperLabel: &opts.UpperLabel{Show: true, Color: "#fff"},
 					Levels: &[]opts.TreeMapLevel{
 						{ // Series
@@ -357,3 +357,40 @@ function (info) {
     ].join('');
 }
 `
+
+func countersChart(fname string, data *overallStat) *charts.Sankey {
+	sankey := charts.NewSankey()
+	sankey.SetGlobalOptions(
+		charts.WithLegendOpts(opts.Legend{Show: true}),
+		charts.WithTooltipOpts(opts.Tooltip{Show: true}),
+		//charts.WithTitleOpts(opts.Title{
+		//	Title: "Sankey-basic-example",
+		//}),
+	)
+
+	nodes := []opts.SankeyNode{
+		{Name: "Cells"},
+		{Name: "APK"},
+		{Name: "SPK"},
+		{Name: "Hashes"},
+		{Name: "Extensions"},
+	}
+	sankeyLink := []opts.SankeyLink{
+		{Source: nodes[0].Name, Target: nodes[1].Name, Value: float32(data.branches.APKCount)},
+		{Source: nodes[0].Name, Target: nodes[2].Name, Value: float32(data.branches.SPKCount)},
+		{Source: nodes[0].Name, Target: nodes[3].Name, Value: float32(data.branches.HashCount)},
+		{Source: nodes[0].Name, Target: nodes[4].Name, Value: float32(data.branches.ExtCount)},
+	}
+
+	sankey.AddSeries(fname, nodes, sankeyLink).
+		SetSeriesOptions(
+			charts.WithLineStyleOpts(opts.LineStyle{
+				Color:     "source",
+				Curveness: 0.5,
+			}),
+			charts.WithLabelOpts(opts.Label{
+				Show: true,
+			}),
+		)
+	return sankey
+}
