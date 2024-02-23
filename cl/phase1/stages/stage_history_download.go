@@ -266,7 +266,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	for currentSlot > cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
-		for i := uint64(0); i < blocksBatchSize; i++ {
+		for i := uint64(0); len(batch) < int(blocksBatchSize); i++ {
 			block, err := cfg.blockReader.ReadBlindedBlockBySlot(ctx, tx, currentSlot-i)
 			if err != nil {
 				return err
