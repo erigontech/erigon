@@ -2,14 +2,12 @@ package diagnostics
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"runtime"
 	"sync"
-	"syscall"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -77,28 +75,10 @@ func interfaceToJSONString(i interface{}) string {
 }*/
 
 func (d *DiagnosticClient) findNodeDisk() string {
-	if runtime.GOOS == "darwin" {
-		dirPath := d.node.Backend().DataDir()
+	dirPath := d.node.Backend().DataDir()
+	mountPoint := diskutils.MountPointForDirPath(dirPath)
 
-		var stat syscall.Statfs_t
-		if err := syscall.Statfs(dirPath, &stat); err != nil {
-			fmt.Println("Error:", err)
-			return "/"
-		}
-
-		var mountPointBytes []byte
-		for _, b := range stat.Mntonname {
-			if b == 0 {
-				break
-			}
-			mountPointBytes = append(mountPointBytes, byte(b))
-		}
-		mountPoint := string(mountPointBytes)
-
-		return mountPoint
-	} else {
-		return "/"
-	}
+	return mountPoint
 }
 
 func (d *DiagnosticClient) getSysInfo() {
