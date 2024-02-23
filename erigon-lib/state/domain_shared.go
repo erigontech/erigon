@@ -13,19 +13,17 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-
-	"github.com/ledgerwatch/log/v3"
-
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // KvList sort.Interface to sort write list by keys

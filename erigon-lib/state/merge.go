@@ -425,9 +425,6 @@ func (ic *InvertedIndexContext) staticFilesInRange(startTxNum, endTxNum uint64) 
 		if f == nil {
 			panic("must not happen")
 		}
-		if f.decompressor == nil {
-			panic("must not happen12")
-		}
 	}
 
 	return files, startJ

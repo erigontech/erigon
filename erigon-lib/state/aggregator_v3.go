@@ -613,7 +613,6 @@ func (a *AggregatorV3) mergeLoopStep(ctx context.Context) (somethingDone bool, e
 			in.Close()
 		}
 	}()
-	a.onFreeze(in.FrozenList())
 	closeAll = false
 	return true, nil
 }
@@ -1122,35 +1121,29 @@ type MergedFilesV3 struct {
 	tracesTo   *filesItem
 }
 
-func (mf MergedFilesV3) FrozenList() (frozen []string) {
-	for id, d := range mf.d {
-		if d == nil {
-			continue
-		}
-		frozen = append(frozen, d.decompressor.FileName())
-
-		if mf.dHist[id] != nil && mf.dHist[id].frozen {
-			frozen = append(frozen, mf.dHist[id].decompressor.FileName())
-		}
-		if mf.dIdx[id] != nil && mf.dIdx[id].frozen {
-			frozen = append(frozen, mf.dIdx[id].decompressor.FileName())
-		}
+func (mf MergedFilesV3) FrozenDomainList(id kv.Domain) (frozen []string) {
+	if mf.d[id] == nil {
+		return
 	}
 
-	if mf.logAddrs != nil && mf.logAddrs.frozen {
-		frozen = append(frozen, mf.logAddrs.decompressor.FileName())
+	frozen = append(frozen, mf.d[id].decompressor.FileName())
+
+	if mf.dHist[id] != nil && mf.dHist[id].frozen {
+		frozen = append(frozen, mf.dHist[id].decompressor.FileName())
 	}
-	if mf.logTopics != nil && mf.logTopics.frozen {
-		frozen = append(frozen, mf.logTopics.decompressor.FileName())
-	}
-	if mf.tracesFrom != nil && mf.tracesFrom.frozen {
-		frozen = append(frozen, mf.tracesFrom.decompressor.FileName())
-	}
-	if mf.tracesTo != nil && mf.tracesTo.frozen {
-		frozen = append(frozen, mf.tracesTo.decompressor.FileName())
+	if mf.dIdx[id] != nil && mf.dIdx[id].frozen {
+		frozen = append(frozen, mf.dIdx[id].decompressor.FileName())
 	}
 	return frozen
 }
+
+func (mf MergedFilesV3) FrozenIdxList(f *filesItem) (frozen []string) {
+	if f != nil && f.frozen {
+		frozen = append(frozen, f.decompressor.FileName())
+	}
+	return frozen
+}
+
 func (mf MergedFilesV3) Close() {
 	clist := make([]*filesItem, 0, kv.DomainLen+4)
 	for id := range mf.d {
@@ -1194,6 +1187,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 					return err
 				}
 				ac.a.integrateMergedDomainFiles(ac.d[id], files.d[id], files.dIdx[id], files.dHist[id], mf.d[id], mf.dIdx[id], mf.dHist[id])
+				ac.a.onFreeze(mf.FrozenDomainList(kv.Domain(id)))
 				return nil
 			})
 		}
@@ -1207,6 +1201,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				return err
 			}
 			ac.a.integrateMergedIdxFiles(ac.logAddrs, files.logAddrs, mf.logAddrs)
+			ac.a.onFreeze(mf.FrozenIdxList(mf.logAddrs))
 			return nil
 		})
 	}
@@ -1218,6 +1213,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				return err
 			}
 			ac.a.integrateMergedIdxFiles(ac.logTopics, files.logTopics, mf.logTopics)
+			ac.a.onFreeze(mf.FrozenIdxList(mf.logTopics))
 			return nil
 		})
 	}
@@ -1229,6 +1225,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				return err
 			}
 			ac.a.integrateMergedIdxFiles(ac.tracesFrom, files.tracesFrom, mf.tracesFrom)
+			ac.a.onFreeze(mf.FrozenIdxList(mf.tracesFrom))
 			return nil
 		})
 	}
@@ -1240,6 +1237,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				return err
 			}
 			ac.a.integrateMergedIdxFiles(ac.tracesTo, files.tracesTo, mf.tracesTo)
+			ac.a.onFreeze(mf.FrozenIdxList(mf.tracesTo))
 			return nil
 		})
 	}
