@@ -24,7 +24,7 @@ import (
 )
 
 func MustExist(path ...string) {
-	const perm = 0700 // user rwx, group rw, other r
+	const perm = 0764 // user rwx, group rw, other r
 	for _, p := range path {
 		if Exist(p) {
 			continue
