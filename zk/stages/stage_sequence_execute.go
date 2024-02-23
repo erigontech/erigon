@@ -206,6 +206,7 @@ func SpawnSequencingStage(
 		Number:     new(big.Int).SetUint64(nextBlockNum),
 		GasLimit:   blockGasLimit,
 		Time:       newBlockTimestamp,
+		BaseFee:    big.NewInt(0),
 	}
 
 	stateReader := state.NewPlainStateReader(tx)
