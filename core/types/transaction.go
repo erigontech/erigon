@@ -231,6 +231,20 @@ func UnmarshalWrappedTransactionFromBinary(data []byte) (Transaction, error) {
 	return t, nil
 }
 
+// Remove everything but the payload body from the wrapper - this is not used, for reference only
+func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
+	if blobTxRlp[0] != BlobTxType {
+		return blobTxRlp, nil
+	}
+	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	if err != nil {
+		return nil, err
+	}
+	it.Next()
+	retRlp = it.Value()
+	return
+}
+
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
 	var err error
 	var buf bytes.Buffer

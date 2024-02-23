@@ -875,23 +875,15 @@ func TestBlobTxReplacement(t *testing.T) {
 
 // Todo, make the tx more realistic with good values
 func makeBlobTx() types.TxSlot {
-	// Some arbitrary hardcoded example
-	bodyRlpHex := "f9012705078502540be4008506fc23ac008357b58494811a752c8cd697e3cb27" +
-		"279c330ed1ada745a8d7808204f7f872f85994de0b295669a9fd93d5f28d9ec85e40f4cb697b" +
-		"aef842a00000000000000000000000000000000000000000000000000000000000000003a000" +
-		"00000000000000000000000000000000000000000000000000000000000007d694bb9bc244d7" +
-		"98123fde783fcc1c72d3bb8c189413c07bf842a0c6bdd1de713471bd6cfa62dd8b5a5b42969e" +
-		"d09e26212d3377f3f8426d8ec210a08aaeccaf3873d07cef005aca28c39f8a9f8bdb1ec8d79f" +
-		"fc25afc0a4fa2ab73601a036b241b061a36a32ab7fe86c7aa9eb592dd59018cd0443adc09035" +
-		"90c16b02b0a05edcc541b4741c5cc6dd347c5ed9577ef293a62787b4510465fadbfe39ee4094"
-	bodyRlp := hexutility.MustDecodeHex(bodyRlpHex)
+
+	bodyRlp := hexutility.MustDecodeHex(BodyRlpHex)
 
 	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
 	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
 
 	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
-	copy(blob0[:], hexutility.MustDecodeHex(validBlob1))
-	copy(blob1[:], hexutility.MustDecodeHex(validBlob2))
+	copy(blob0[:], hexutility.MustDecodeHex(ValidBlob1Hex))
+	copy(blob1[:], hexutility.MustDecodeHex(ValidBlob2Hex))
 
 	var err error
 	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
