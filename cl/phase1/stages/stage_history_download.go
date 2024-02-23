@@ -259,9 +259,10 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	}
 	defer tx.Rollback()
 	defer log.Info("Blob history download finished successfully")
-	logInterval := time.NewTicker(time.Second)
+	logInterval := time.NewTicker(logIntervalTime)
 
 	rpc := cfg.downloader.RPC()
+	prevLogSlot := currentSlot
 	for {
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		for i := uint64(0); i < blocksBatchSize; i++ {
@@ -284,7 +285,12 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logInterval.C:
-			logger.Info("Downloading blobs backwards", "slot", currentSlot)
+			blkSec := float64(currentSlot-prevLogSlot) / logIntervalTime.Seconds()
+			blkSecStr := fmt.Sprintf("%.1f", blkSec)
+			// round to 1 decimal place  and convert to string
+			prevLogSlot = currentSlot
+
+			logger.Info("Downloading blobs backwards", "slot", currentSlot, "blks/sec", blkSecStr)
 		default:
 		}
 		// Generate the request
