@@ -151,6 +151,15 @@ func (bs *BlobStore) Prune() error {
 	return nil
 }
 
+func (bs *BlobStore) HasBlobs(blockRoot libcommon.Hash) (bool, error) {
+	tx, err := bs.db.BeginRo(context.Background())
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	return tx.Has(kv.BlockRootToKzgCommitments, blockRoot[:])
+}
+
 type sidecarsPayload struct {
 	blockRoot libcommon.Hash
 	sidecars  []*cltypes.BlobSidecar
@@ -243,13 +252,4 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		return 0, err.(error)
 	}
 	return lastProcessed, nil
-}
-
-func (bs *BlobStore) HasBlobs(blockRoot libcommon.Hash) (bool, error) {
-	tx, err := bs.db.BeginRo(context.Background())
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	return tx.Has(kv.BlockRootToKzgCommitments, blockRoot[:])
 }

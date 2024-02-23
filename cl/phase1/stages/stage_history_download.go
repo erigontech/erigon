@@ -263,7 +263,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	rpc := cfg.downloader.RPC()
 	prevLogSlot := currentSlot
-	for {
+	for currentSlot > cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		for i := uint64(0); i < blocksBatchSize; i++ {
@@ -294,6 +294,11 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 			batch = append(batch, block)
 		}
+		if len(batch) == 0 {
+			currentSlot -= blocksBatchSize + 1
+			continue
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -310,6 +315,10 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		req, err := network.BlobsIdentifiersFromBlindedBlocks(batch)
 		if err != nil {
 			cfg.logger.Debug("Error generating blob identifiers", "err", err)
+			continue
+		}
+		if req.Len() == 0 {
+			currentSlot -= blocksBatchSize + 1
 			continue
 		}
 		// Request the blobs
@@ -335,15 +344,8 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Debug("Error verifying blobs", "err", err)
 			continue
 		}
-		if len(batch) == 0 {
-			currentSlot -= blocksBatchSize
-		} else {
-			currentSlot = lastProcessed
-		}
-		// TODO: also check snapshots
-		if currentSlot <= cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
-			break
-		}
+
+		currentSlot = lastProcessed
 	}
 	return nil
 }
