@@ -88,8 +88,19 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 		for g.HasNext() {
 			word, _ = g.Next(word[:0])
 
-			eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
 			block := binary.BigEndian.Uint64(word[length.Hash : length.Hash+length.BlockNum])
+			eventId := binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
+			event := word[length.Hash+length.BlockNum+8:]
+
+			recordId := bor.EventId(event)
+
+			if recordId != eventId {
+				if failFast {
+					return fmt.Errorf("invalid event id %d in block %d: expected: %d", recordId, block, eventId)
+				}
+
+				log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", recordId, "expected", eventId)
+			}
 
 			if prevEventId > 0 && eventId != prevEventId+1 {
 				if failFast {
@@ -139,14 +150,27 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 
 					for i, event := range events {
 
-						// TODO check eventId matches the expected event id (its in the rlp)
-						// bor.EventId(event)
+						var eventId uint64
+
+						if prevBlockStartId != 0 {
+							eventId = bor.EventId(event)
+
+							if eventId != prevBlockStartId+uint64(i) {
+								if failFast {
+									return fmt.Errorf("invalid event id %d for event %d in block %d: expected: %d", eventId, i, block, prevBlockStartId+uint64(i))
+								}
+
+								log.Error("[integrity] NoGapsInBorEvents: invalid event id", "block", block, "event", i, "expected", prevBlockStartId+uint64(i), "got", eventId)
+							}
+						} else {
+							eventId = prevBlockStartId + uint64(i)
+						}
 
 						eventTime := bor.EventTime(event)
 
 						if prevEventTime != nil {
 							if eventTime.Before(*prevEventTime) {
-								log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", prevBlockStartId+uint64(i), "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
+								log.Warn("[integrity] NoGapsInBorEvents: event time before prev", "block", block, "event", eventId, "time", eventTime, "prev", *prevEventTime, "diff", -prevEventTime.Sub(eventTime))
 							}
 						}
 
@@ -164,10 +188,10 @@ func NoGapsInBorEvents(ctx context.Context, db kv.RoDB, blockReader services.Ful
 							}
 
 							if failFast {
-								return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, prevBlockStartId+uint64(i), block, from, to)
+								return fmt.Errorf("invalid time %s for event %d in block %d: expected %s-%s", eventTime, eventId, block, from, to)
 							}
 
-							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", prevBlockStartId+uint64(i), "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to))
+							log.Error("[integrity] NoGapsInBorEvents: invalid event time", "block", block, "event", eventId, "time", eventTime, "diff", diff, "expected", fmt.Sprintf("%s-%s", from, to), "timestamps", fmt.Sprintf("%d-%d", from.Unix(), to.Unix()))
 						}
 					}
 
