@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"runtime"
 	"sync"
 	"syscall"
 
@@ -42,7 +43,6 @@ func (d *DiagnosticClient) Setup() {
 	d.runBlockExecutionListener()
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
-	//d.findNodeDisk()
 
 	//d.logDiagMsgs()
 }
@@ -77,24 +77,28 @@ func interfaceToJSONString(i interface{}) string {
 }*/
 
 func (d *DiagnosticClient) findNodeDisk() string {
-	dirPath := d.node.Backend().DataDir()
+	if runtime.GOOS == "darwin" {
+		dirPath := d.node.Backend().DataDir()
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dirPath, &stat); err != nil {
-		fmt.Println("Error:", err)
+		var stat syscall.Statfs_t
+		if err := syscall.Statfs(dirPath, &stat); err != nil {
+			fmt.Println("Error:", err)
+			return "/"
+		}
+
+		var mountPointBytes []byte
+		for _, b := range stat.Mntonname {
+			if b == 0 {
+				break
+			}
+			mountPointBytes = append(mountPointBytes, byte(b))
+		}
+		mountPoint := string(mountPointBytes)
+
+		return mountPoint
+	} else {
 		return "/"
 	}
-
-	var mountPointBytes []byte
-	for _, b := range stat.Mntonname {
-		if b == 0 {
-			break
-		}
-		mountPointBytes = append(mountPointBytes, byte(b))
-	}
-	mountPoint := string(mountPointBytes)
-
-	return mountPoint
 }
 
 func (d *DiagnosticClient) getSysInfo() {
