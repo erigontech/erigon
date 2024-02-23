@@ -371,16 +371,15 @@ func ConsensusClStages(ctx context.Context,
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
 						var highestProcessed uint64
-						start := time.Now()
 						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
-						fmt.Println(time.Since(start))
+
 						if highestProcessed <= initialHighestSlotProcessed {
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, nil
 						}
-						return highestProcessed, highestBlockRootProcessed, err
+						return highestProcessed - 1, highestBlockRootProcessed, err
 					})
 					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 					logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
+	"sync/atomic"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -202,25 +204,36 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		storableSidecars = append(storableSidecars, currentSidecarsPayload)
 	}
 
+	var errAtomic atomic.Value
+	var wg sync.WaitGroup
 	for _, sds := range storableSidecars {
-		blobs := make([]gokzg4844.Blob, len(sds.sidecars))
-		for i, sidecar := range sds.sidecars {
-			blobs[i] = gokzg4844.Blob(sidecar.Blob)
-		}
-		kzgCommitments := make([]gokzg4844.KZGCommitment, len(sds.sidecars))
-		for i, sidecar := range sds.sidecars {
-			kzgCommitments[i] = gokzg4844.KZGCommitment(sidecar.KzgCommitment)
-		}
-		kzgProofs := make([]gokzg4844.KZGProof, len(sds.sidecars))
-		for i, sidecar := range sds.sidecars {
-			kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
-		}
-		if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
-			return 0, fmt.Errorf("sidecar is wrong")
-		}
-		if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {
-			return 0, err
-		}
+		wg.Add(1)
+		go func(sds *sidecarsPayload) {
+			defer wg.Done()
+			blobs := make([]gokzg4844.Blob, len(sds.sidecars))
+			for i, sidecar := range sds.sidecars {
+				blobs[i] = gokzg4844.Blob(sidecar.Blob)
+			}
+			kzgCommitments := make([]gokzg4844.KZGCommitment, len(sds.sidecars))
+			for i, sidecar := range sds.sidecars {
+				kzgCommitments[i] = gokzg4844.KZGCommitment(sidecar.KzgCommitment)
+			}
+			kzgProofs := make([]gokzg4844.KZGProof, len(sds.sidecars))
+			for i, sidecar := range sds.sidecars {
+				kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
+			}
+			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
+				errAtomic.Store(fmt.Errorf("sidecar is wrong"))
+				return
+			}
+			if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {
+				errAtomic.Store(err)
+			}
+		}(sds)
+	}
+	wg.Wait()
+	if err := errAtomic.Load(); err != nil {
+		return 0, err.(error)
 	}
 	return highestProcessed, nil
 }
