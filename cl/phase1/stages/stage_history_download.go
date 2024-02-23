@@ -277,7 +277,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if block.Version() < clparams.DenebVersion {
 				break
 			}
-			blockRoot, err := block.HashSSZ()
+			blockRoot, err := block.Block.HashSSZ()
 			if err != nil {
 				return err
 			}
