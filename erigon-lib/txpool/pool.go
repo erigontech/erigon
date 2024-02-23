@@ -401,7 +401,37 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	pendingBlobFee := stateChanges.PendingBlobFeePerGas
 	p.setBlobFee(pendingBlobFee)
 
-	p.blockGasLimit.Store(stateChanges.BlockGasLimit)
+	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
+	if oldGasLimit != stateChanges.BlockGasLimit {
+		p.all.ascendAll(func(mt *metaTx) bool {
+			var updated bool
+			if mt.Tx.Gas < stateChanges.BlockGasLimit {
+				updated = (mt.subPool & NotTooMuchGas) > 0
+				mt.subPool |= NotTooMuchGas
+			} else {
+				updated = (mt.subPool & NotTooMuchGas) == 0
+				mt.subPool &^= NotTooMuchGas
+			}
+
+			if mt.Tx.Traced {
+				p.logger.Info("TX TRACING: on block gas limit update", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderId", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "subPool", mt.currentSubPool, "updated", updated)
+			}
+
+			if !updated {
+				return true
+			}
+
+			switch mt.currentSubPool {
+			case PendingSubPool:
+				p.pending.Updated(mt)
+			case BaseFeeSubPool:
+				p.baseFee.Updated(mt)
+			case QueuedSubPool:
+				p.queued.Updated(mt)
+			}
+			return true
+		})
+	}
 
 	for i, txn := range unwindBlobTxs.Txs {
 		if txn.Type == types.BlobTxType {
