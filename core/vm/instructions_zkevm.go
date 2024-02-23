@@ -8,6 +8,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 )
 
 func opCallDataLoad_zkevmIncompatible(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -157,4 +158,40 @@ func opSendAll_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContex
 		interpreter.evm.IntraBlockState().SubBalance(callerAddr, balance)
 	}
 	return nil, errStopToken
+}
+
+// [zkEvm] log data length must be a multiple of 32, if not - fill 0 at the end until it is
+func makeLog_zkevm(size int) executionFunc {
+	return func(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+		if interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
+		topics := make([]libcommon.Hash, size)
+		stack := scope.Stack
+		mStart, mSize := stack.Pop(), stack.Pop()
+		for i := 0; i < size; i++ {
+			addr := stack.Pop()
+			topics[i] = addr.Bytes32()
+		}
+
+		d := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
+
+		// [zkEvm] fill 0 at the end
+		dataLen := len(d)
+		lenMod32 := dataLen & 31
+		if lenMod32 != 0 {
+			d = append(d, make([]byte, 32-lenMod32)...)
+		}
+
+		interpreter.evm.IntraBlockState().AddLog(&types.Log{
+			Address: scope.Contract.Address(),
+			Topics:  topics,
+			Data:    d,
+			// This is a non-consensus field, but assigned here because
+			// core/state doesn't know the current block number.
+			BlockNumber: interpreter.evm.Context().BlockNumber,
+		})
+
+		return nil, nil
+	}
 }
