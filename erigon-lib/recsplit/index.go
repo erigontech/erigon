@@ -40,6 +40,7 @@ import (
 type Features byte
 
 const (
+	// Enums -  Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	Enums Features = 0b1
 	//LessFalsePositives Features = 0b10 // example of adding new feature
 )
