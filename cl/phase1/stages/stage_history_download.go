@@ -263,7 +263,8 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	rpc := cfg.downloader.RPC()
 	prevLogSlot := currentSlot
-	for {
+	exitCondition := true
+	for exitCondition {
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		for i := uint64(0); i < blocksBatchSize; i++ {
 			block, err := cfg.blockReader.ReadBlindedBlockBySlot(ctx, tx, currentSlot-i)
@@ -274,7 +275,8 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 				continue
 			}
 			if block.Version() < clparams.DenebVersion {
-				return nil
+				exitCondition = false
+				break
 			}
 			if block.Block.Body.BlobKzgCommitments.Len() == 0 {
 				continue
