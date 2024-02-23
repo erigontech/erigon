@@ -117,6 +117,7 @@ var (
 	PrecompiledAddressesHomestead   []libcommon.Address
 	PrecompiledAddressesEtrog       []libcommon.Address
 	PrecompiledAddressesDragonfruit []libcommon.Address
+	PrecompiledAddressesForkId8     []libcommon.Address
 )
 
 func init() {
@@ -138,11 +139,16 @@ func init() {
 	for k := range PrecompiledContractForkID7Etrog {
 		PrecompiledAddressesEtrog = append(PrecompiledAddressesEtrog, k)
 	}
+	for k := range PrecompiledContractsForkID8 {
+		PrecompiledAddressesForkId8 = append(PrecompiledAddressesForkId8, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
+	case rules.IsForkID8:
+		return PrecompiledAddressesForkId8
 	case rules.IsForkID7Etrog:
 		return PrecompiledAddressesEtrog
 	case rules.IsForkID5Dragonfruit:

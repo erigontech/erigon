@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -18,20 +19,21 @@ func NewZkConfig(config Config, counterCollector *CounterCollector) ZkConfig {
 	}
 }
 
-// NewZKEVMInterpreter returns a new instance of the Interpreter.
-func NewZKEVMInterpreter(evm VMInterpreter, cfg ZkConfig) *EVMInterpreter {
+func getJumpTable(cr *chain.Rules) *JumpTable {
 	var jt *JumpTable
 	switch {
-	// to add our own IsRohan chain rule, we would need to fork or code or chain.Config
-	// that is why we hard code it here for POC
-	// our fork extends berlin anyways and starts from block 1
-	case evm.ChainRules().IsForkID7Etrog:
-		jt = &forkID7EtrogInstructionSet
-	case evm.ChainRules().IsForkID5Dragonfruit, evm.ChainRules().IsForkID6IncaBerry:
+	case cr.IsForkID5Dragonfruit, cr.IsForkID6IncaBerry, cr.IsForkID7Etrog, cr.IsForkID8:
 		jt = &forkID5DragonfruitInstructionSet
-	case evm.ChainRules().IsBerlin:
+	case cr.IsBerlin:
 		jt = &forkID4InstructionSet
 	}
+
+	return jt
+}
+
+// NewZKEVMInterpreter returns a new instance of the Interpreter.
+func NewZKEVMInterpreter(evm VMInterpreter, cfg ZkConfig) *EVMInterpreter {
+	jt := getJumpTable(evm.ChainRules())
 
 	// here we need to copy the jump table every time as we're about to wrap it with the zk counters handling
 	// if we don't take a copy of this it will be wrapped over and over again causing a deeper and deeper stack

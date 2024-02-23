@@ -26,6 +26,8 @@ import (
 	"io"
 	"net/http"
 
+	"net/url"
+
 	"github.com/ledgerwatch/erigon/common/dbutils"
 	"github.com/ledgerwatch/erigon/core/systemcontracts"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
@@ -37,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/trie"
 	"github.com/ledgerwatch/erigon/zk"
 	"github.com/status-im/keycard-go/hexutils"
-	"net/url"
 )
 
 type ZkInterHashesCfg struct {
@@ -785,24 +786,14 @@ func verifyStateRoot(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, cfg *ZkIn
 	hash := libcommon.BigToHash(dbSmt.LastRoot())
 	//psr := state2.NewPlainStateReader(tx)
 
-	fmt.Println("[zkevm] interhashes - expected root: ", expectedRootHash.Hex())
-	fmt.Println("[zkevm] interhashes - actual root: ", hash.Hex())
-
 	if cfg.checkRoot && hash != *expectedRootHash {
-		// [zkevm] - check against the rpc get block by number
-		// get block number
-		//ss := libcommon.HexToAddress("0x000000000000000000000000000000005ca1ab1e")
-		//key := libcommon.HexToHash("0x0")
-		//
-		//txno, err := psr.ReadAccountStorage(ss, 1, &key)
-		//if err != nil {
-		//	return err
-		//}
 		// convert txno to big int
 		bigTxNo := big.NewInt(0)
 		bigTxNo.SetUint64(blockNo)
 
-		fmt.Println("[zkevm] interhashes - txno: ", bigTxNo)
+		log.Error("[zkevm] - txno: ", bigTxNo)
+		log.Error("[zkevm] - expected root: ", expectedRootHash.Hex())
+		log.Error("[zkevm] - actual root: ", hash.Hex())
 
 		sr, err := stateRootByTxNo(bigTxNo, cfg.zk.L2RpcUrl)
 		if err != nil {

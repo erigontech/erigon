@@ -3,7 +3,6 @@ package vm
 var (
 	forkID4InstructionSet            = newForkID4InstructionSet()
 	forkID5DragonfruitInstructionSet = newForkID5DragonfruitInstructionSet()
-	forkID7EtrogInstructionSet       = newForkID7EtrogInstructionSet()
 )
 
 // newForkID4InstructionSet returns the instruction set for the forkID4
@@ -55,13 +54,5 @@ func newForkID5DragonfruitInstructionSet() JumpTable {
 	enable3855(&instructionSet) // EIP-3855: Enable PUSH0 opcode
 
 	validateAndFillMaxStack(&instructionSet)
-	return instructionSet
-}
-
-// newForkID7EtrogInstructionSet returns the instruction set for the forkID7
-func newForkID7EtrogInstructionSet() JumpTable {
-	instructionSet := newForkID5DragonfruitInstructionSet()
-	// TODO add the new instructions for forkID7
-
 	return instructionSet
 }

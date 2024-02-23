@@ -27,8 +27,9 @@ import (
 )
 
 const (
-	preForkId7BlockGasLimit  = 30_000_000
-	postForkId7BlockGasLimit = 18446744073709551615
+	preForkId7BlockGasLimit = 30_000_000
+	forkId7BlockGasLimit    = 18446744073709551615 // 0xffffffffffffffff
+	forkId8BlockGasLimit    = 1125899906842624     // 0x4000000000000
 )
 
 type ErigonDb interface {
@@ -541,6 +542,17 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 	return nil
 }
 
+func getGasLimit(forkId uint16) uint64 {
+	switch forkId {
+	case 8:
+		return forkId8BlockGasLimit
+	case 7:
+		return forkId7BlockGasLimit
+	default:
+		return preForkId7BlockGasLimit
+	}
+}
+
 // writeL2Block writes L2Block to ErigonDb and HermezDb
 // writes header, body, forkId and blockBatch
 func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block) error {
@@ -564,12 +576,7 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block)
 	txCollection := ethTypes.Transactions(txs)
 	txHash := ethTypes.DeriveSha(txCollection)
 
-	var gasLimit uint64
-	if l2Block.ForkId < 7 {
-		gasLimit = preForkId7BlockGasLimit
-	} else {
-		gasLimit = postForkId7BlockGasLimit
-	}
+	gasLimit := getGasLimit(l2Block.ForkId)
 
 	h, err := eriDb.WriteHeader(bn, l2Block.StateRoot, txHash, l2Block.ParentHash, l2Block.Coinbase, uint64(l2Block.Timestamp), gasLimit)
 	if err != nil {
