@@ -47,9 +47,9 @@ const (
 	//LessFalsePositives Features = 0b10 // example of adding new feature
 )
 
-// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return NotSupportedFeatureErr and recommend for user manually delete file
+// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
 var SupportedFeatures = []Features{Enums}
-var NotSupportedErr = errors.New("not supported. you can re-build all such files by command 'erigon snapshots index'")
+var IncompatibleErr = errors.New("incompatible. you can re-build all such files by command 'erigon snapshots index'")
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -120,7 +120,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return nil, fmt.Errorf("file %s %w. offset is: %d which is below zero", fName, NotSupportedErr, offset)
+		return nil, fmt.Errorf("file %s %w. offset is: %d which is below zero", fName, IncompatibleErr, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -193,7 +193,7 @@ func onlyKnownFeatures(features Features) error {
 		features = features &^ f
 	}
 	if features != No {
-		return fmt.Errorf("%w. unknown features bitmap: %b", NotSupportedErr, features)
+		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
 	}
 	return nil
 }

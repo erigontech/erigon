@@ -2357,7 +2357,7 @@ func (v *View) TxsSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(snaptype.Transactions, blockNum)
 }
 
-func RemoveUnsupportedIndices(snapsDir string) error {
+func RemoveIncompatibleIndices(snapsDir string) error {
 	l, err := dir2.ListFiles(snapsDir, ".idx")
 	if err != nil {
 		return err
@@ -2365,12 +2365,12 @@ func RemoveUnsupportedIndices(snapsDir string) error {
 	for _, fPath := range l {
 		index, err := recsplit.OpenIndex(fPath)
 		if err != nil {
-			if errors.Is(err, recsplit.NotSupportedErr) {
+			if errors.Is(err, recsplit.IncompatibleErr) {
 				_, fName := filepath.Split(fPath)
 				if err = os.Remove(fPath); err != nil {
-					log.Warn("Removing usupported index", "file", fName, "err", err)
+					log.Warn("Removing incompatible index", "file", fName, "err", err)
 				} else {
-					log.Info("Removing usupported index", "file", fName)
+					log.Info("Removing incompatible index", "file", fName)
 				}
 				continue
 			}
