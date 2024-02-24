@@ -3,6 +3,12 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
+	"os"
+	"path"
+	"path/filepath"
+	"sync"
+
 	"github.com/c2h5oh/datasize"
 	"github.com/go-echarts/go-echarts/v2/charts"
 	"github.com/go-echarts/go-echarts/v2/components"
@@ -11,11 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/state"
-	"io"
-	"os"
-	"path"
-	"path/filepath"
-	"sync"
 )
 
 var (
@@ -256,23 +257,24 @@ func fileContentsMapChart(fileName string, data *overallStat) *charts.TreeMap {
 	}
 
 	valsIndex := 1
-	TreeMap[valsIndex].Children = make([]opts.TreeMapNode, 0)
-	TreeMap[valsIndex].Children = append(TreeMap[valsIndex].Children, opts.TreeMapNode{
-		Name:  "hashes",
-		Value: int(data.branches.HashSize),
-	})
-	TreeMap[valsIndex].Children = append(TreeMap[valsIndex].Children, opts.TreeMapNode{
-		Name:  "extensions",
-		Value: int(data.branches.ExtSize),
-	})
-	TreeMap[valsIndex].Children = append(TreeMap[valsIndex].Children, opts.TreeMapNode{
-		Name:  "apk",
-		Value: int(data.branches.APKSize),
-	})
-	TreeMap[valsIndex].Children = append(TreeMap[valsIndex].Children, opts.TreeMapNode{
-		Name:  "spk",
-		Value: int(data.branches.SPKSize),
-	})
+	TreeMap[valsIndex].Children = []opts.TreeMapNode{
+		{
+			Name:  "hashes",
+			Value: int(data.branches.HashSize),
+		},
+		{
+			Name:  "extensions",
+			Value: int(data.branches.ExtSize),
+		},
+		{
+			Name:  "apk",
+			Value: int(data.branches.APKSize),
+		},
+		{
+			Name:  "spk",
+			Value: int(data.branches.SPKSize),
+		},
+	}
 
 	graph := charts.NewTreeMap()
 	graph.SetGlobalOptions(
