@@ -43,13 +43,13 @@ type Features byte
 const (
 	No Features = 0b0
 	// Enums -  Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
-	Enums              Features = 0b1
-	LessFalsePositives Features = 0b10 // example of adding new feature
+	Enums Features = 0b1
+	//LessFalsePositives Features = 0b10 // example of adding new feature
 )
 
 // SupportedFeaturs - if see feature not from this list (likely after downgrade) - return NotSupportedFeatureErr and recommend for user manually delete file
 var SupportedFeatures = []Features{Enums}
-var NotSupportedFeatureErr = errors.New("not supported feature")
+var NotSupportedErr = errors.New("not supported. you can re-build all such files by command 'erigon snapshots index'")
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -120,7 +120,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return nil, fmt.Errorf("offset is: %d which is below zero, the file: %s is broken", offset, indexFilePath)
+		return nil, fmt.Errorf("%w, offset is: %d which is below zero, the file: %s is broken", NotSupportedErr, offset, indexFilePath)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -149,7 +149,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	}
 	features := Features(idx.data[offset])
 	if err := onlyKnownFeatures(features); err != nil {
-		return nil, fmt.Errorf("seems file %s created by newer version of Erigon. You can re-build all such files by command 'erigon snapshots index'. %w", fName, err)
+		return nil, fmt.Errorf("seems file %s created by newer version of Erigon. %w", fName, err)
 	}
 
 	idx.enums = features&Enums != No
@@ -193,7 +193,7 @@ func onlyKnownFeatures(features Features) error {
 		features = features &^ f
 	}
 	if features != No {
-		return fmt.Errorf("%w. unknown features bitmap: %b", NotSupportedFeatureErr, features)
+		return fmt.Errorf("%w. unknown features bitmap: %b", NotSupportedErr, features)
 	}
 	return nil
 }
