@@ -49,7 +49,7 @@ const (
 
 // SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
 var SupportedFeatures = []Features{Enums}
-var IncompatibleErr = errors.New("incompatible. you can re-build all such files by command 'erigon snapshots index'")
+var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
