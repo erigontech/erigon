@@ -42,9 +42,9 @@ type Features byte
 
 const (
 	No Features = 0b0
-	// Enums -  Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
-	Enums Features = 0b1
-	//LessFalsePositives Features = 0b10 // example of adding new feature
+
+	Enums              Features = 0b1  // To build 2-lvl index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	LessFalsePositives Features = 0b10 // Reduce false-positives to 1/256=0.4% in cost of 1byte per key
 )
 
 // SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
