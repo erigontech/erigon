@@ -19,6 +19,7 @@ package recsplit
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -40,10 +41,15 @@ import (
 type Features byte
 
 const (
+	No Features = 0b0
 	// Enums -  Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	Enums Features = 0b1
 	//LessFalsePositives Features = 0b10 // example of adding new feature
 )
+
+// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return NotSupportedFeatureErr and recommend for user manually delete file
+var SupportedFeatures = []Features{Enums}
+var NotSupportedFeatureErr = errors.New("not supported feature")
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -142,6 +148,10 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		offset += 8
 	}
 	features := Features(idx.data[offset])
+	if err := onlyKnownFeatures(features); err != nil {
+		return nil, fmt.Errorf("seems file: %s created by newer version of Erigon, please remove it and similar older files. %w", fName, err)
+	}
+
 	idx.enums = features&Enums != 0
 	offset++
 	if idx.enums {
@@ -176,6 +186,16 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		},
 	}
 	return idx, nil
+}
+
+func onlyKnownFeatures(features Features) error {
+	for _, f := range SupportedFeatures {
+		features = features &^ f
+	}
+	if features != No {
+		return NotSupportedFeatureErr
+	}
+	return nil
 }
 
 func (idx *Index) DataHandle() unsafe.Pointer {
