@@ -112,7 +112,7 @@ func (c *BucketCaplinAutomation) Run(ctx *Context) error {
 }
 
 func checkSnapshots(ctx context.Context, beaconConfig *clparams.BeaconChainConfig, dirs datadir.Dirs) error {
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}

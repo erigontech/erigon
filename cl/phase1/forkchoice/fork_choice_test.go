@@ -5,9 +5,12 @@ import (
 	_ "embed"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -43,7 +46,7 @@ var attestationEncoded []byte
 // this is consensus spec test altair/forkchoice/ex_ante/ex_ante_attestations_is_greater_than_proposer_boost_with_boost
 func TestForkChoiceBasic(t *testing.T) {
 	expectedCheckpoint := solid.NewCheckpointFromParameters(libcommon.HexToHash("0x564d76d91f66c1fb2977484a6184efda2e1c26dd01992e048353230e10f83201"), 0)
-
+	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
 	// Decode test blocks
 	block0x3a, block0xc2, block0xd4 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig), cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig), cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(block0x3a, block3aEncoded, int(clparams.AltairVersion)))
@@ -57,7 +60,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -96,6 +99,12 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.Equal(t, headRoot, libcommon.HexToHash("0x744cc484f6503462f0f3a5981d956bf4fcb3e57ab8687ed006467e05049ee033"))
 	// lastly do attestation
 	require.NoError(t, store.OnAttestation(testAttestation, false, false))
+	bs, err := store.GetStateAtBlockRoot(headRoot, true)
+	require.NoError(t, err)
+	sd.OnHeadState(bs)
+	for sd.HeadState() == nil {
+		time.Sleep(time.Millisecond)
+	}
 	// Try processing a voluntary exit
 	err = store.OnVoluntaryExit(&cltypes.SignedVoluntaryExit{
 		VoluntaryExit: &cltypes.VoluntaryExit{
@@ -129,7 +138,10 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	// Initialize forkchoice store
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs()), emitters)
+	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
+	store, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+		Beacon: true,
+	}), emitters, sd)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {

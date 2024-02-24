@@ -76,6 +76,7 @@ var CLI struct {
 	RetrieveHistoricalState RetrieveHistoricalState `cmd:"" help:"retrieve historical state from db"`
 	ChainEndpoint           ChainEndpoint           `cmd:"" help:"chain endpoint"`
 	ArchiveSanitizer        ArchiveSanitizer        `cmd:"" help:"archive sanitizer"`
+	BenchmarkNode           BenchmarkNode           `cmd:"" help:"benchmark node"`
 }
 
 type chainCfg struct {
@@ -214,7 +215,7 @@ func (c *Chain) Run(ctx *Context) error {
 
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -247,8 +248,8 @@ func (c *Chain) Run(ctx *Context) error {
 		return err
 	}
 
-	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, nil), csn, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, log.Root())
+	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false), csn, db, nil, genesisConfig, beaconConfig, true, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -266,7 +267,7 @@ func (c *ChainEndpoint) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	dirs := datadir.New(c.Datadir)
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -387,7 +388,7 @@ func (c *DumpSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -421,7 +422,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -501,7 +502,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -550,7 +551,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -610,8 +611,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	dirs := datadir.New(r.Datadir)
-	fs := afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinHistory)
-	db, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
+	db, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, dirs.CaplinIndexing, nil, false)
 	if err != nil {
 		return err
 	}
@@ -644,7 +644,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 
-	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, fs, gSpot)
+	hr := historical_states_reader.NewHistoricalStatesReader(beaconConfig, snr, vt, gSpot)
 	start := time.Now()
 	haveState, err := hr.ReadHistoricalState(ctx, tx, r.CompareSlot)
 	if err != nil {
@@ -857,4 +857,87 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 		log.Info("State at slot", "slot", i, "root", stateRoot)
 	}
 	return nil
+}
+
+type BenchmarkNode struct {
+	chainCfg
+	BaseURL  string `help:"base url" default:"http://localhost:5555"`
+	Endpoint string `help:"endpoint" default:"/eth/v1/beacon/states/{slot}/validators"`
+	OutCSV   string `help:"output csv" default:""`
+	Accept   string `help:"accept" default:"application/json"`
+	Head     bool   `help:"head" default:"false"`
+	Method   string `help:"method" default:"GET"`
+	Body     string `help:"body" default:"{}"`
+}
+
+func (b *BenchmarkNode) Run(ctx *Context) error {
+	_, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+
+	// retrieve the head slot first through /eth/v2/debug/beacon/heads
+	headSlot, err := getHead(b.BaseURL)
+	if err != nil {
+		return err
+	}
+	startSlot := 0
+	interval := 20_000
+	if b.Head {
+		startSlot = int(headSlot) - 20
+		interval = 1
+	}
+	// make a csv file
+	f, err := os.Create(b.OutCSV)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString("slot,elapsed\n")
+	if err != nil {
+		return err
+	}
+
+	for i := uint64(startSlot); i < headSlot; i += uint64(interval) {
+		uri := b.BaseURL + b.Endpoint
+		uri = strings.Replace(uri, "{slot}", fmt.Sprintf("%d", i), 1)
+		uri = strings.Replace(uri, "{epoch}", fmt.Sprintf("%d", i/beaconConfig.SlotsPerEpoch), 1)
+		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
+		if err != nil {
+			log.Warn("Failed to benchmark", "error", err, "uri", uri)
+			continue
+		}
+		_, err = f.WriteString(fmt.Sprintf("%d,%d\n", i, elapsed.Milliseconds()))
+		if err != nil {
+			return err
+		}
+		log.Info("Benchmarked", "slot", i, "elapsed", elapsed, "uri", uri)
+	}
+	return nil
+}
+
+func timeRequest(uri, accept, method, body string) (time.Duration, error) {
+	req, err := http.NewRequest(method, uri, nil)
+	if err != nil {
+		return 0, err
+	}
+	if method == "POST" {
+		req.Body = io.NopCloser(strings.NewReader(body))
+	}
+	req.Header.Set("Accept", accept)
+	start := time.Now()
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("bad status code %d", r.StatusCode)
+	}
+	_, err = io.ReadAll(r.Body) // we wait for the body to be read
+	if err != nil {
+		return 0, err
+	}
+	return time.Since(start), nil
 }
