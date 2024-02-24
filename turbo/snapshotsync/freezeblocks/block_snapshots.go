@@ -2369,7 +2369,7 @@ func RemoveUnsupportedIndices(snapsDir string) error {
 				_ = os.Remove(fPath)
 				continue
 			}
-			return err
+			return fmt.Errorf("%w, %s", err, fPath)
 		}
 		index.Close()
 	}
