@@ -2366,7 +2366,12 @@ func RemoveUnsupportedIndices(snapsDir string) error {
 		index, err := recsplit.OpenIndex(fPath)
 		if err != nil {
 			if errors.Is(err, recsplit.NotSupportedFeatureErr) {
-				_ = os.Remove(fPath)
+				_, fName := filepath.Split(fPath)
+				if err = os.Remove(fPath); err != nil {
+					log.Warn("Removing usupported index", "file", fName, "err", err)
+				} else {
+					log.Info("Removing usupported index", "file", fName)
+				}
 				continue
 			}
 			return fmt.Errorf("%w, %s", err, fPath)
