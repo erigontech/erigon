@@ -263,6 +263,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	rpc := cfg.downloader.RPC()
 	prevLogSlot := currentSlot
+	prevTime := time.Now()
 	for currentSlot > cfg.beaconCfg.DenebForkEpoch*cfg.beaconCfg.SlotsPerEpoch {
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
@@ -303,10 +304,12 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-logInterval.C:
-			blkSec := float64(prevLogSlot-currentSlot) / logIntervalTime.Seconds()
+
+			blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
 			blkSecStr := fmt.Sprintf("%.1f", blkSec)
 			// round to 1 decimal place  and convert to string
 			prevLogSlot = currentSlot
+			prevTime = time.Now()
 
 			logger.Info("Downloading blobs backwards", "slot", currentSlot, "blks/sec", blkSecStr)
 		default:
