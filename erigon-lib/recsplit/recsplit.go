@@ -66,10 +66,14 @@ func remix(z uint64) uint64 {
 type RecSplit struct {
 	hasher          murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
 	offsetCollector *etl.Collector  // Collector that sorts by offsets
+
 	indexW          *bufio.Writer
 	indexF          *os.File
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
+
+	lessFalsePositivesBuf       []byte
+	lessFalsePositivesCollector *etl.Collector
 
 	indexFileName          string
 	indexFile, tmpFilePath string
@@ -108,6 +112,7 @@ type RecSplit struct {
 	numBuf             [8]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
 	logger             log.Logger
@@ -119,7 +124,8 @@ type RecSplitArgs struct {
 	// Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
 	// if Enum=false: can have unsorted and duplicated values
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
-	Enums bool
+	Enums              bool
+	LessFalsePositives bool
 
 	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir      string
@@ -173,6 +179,11 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if args.Enums {
 		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
+	}
+	rs.lessFalsePositives = args.LessFalsePositives
+	if rs.lessFalsePositives {
+		rs.lessFalsePositivesCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
+		rs.lessFalsePositivesCollector.LogLvl(log.LvlDebug)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -349,6 +360,14 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
+		}
+		if rs.lessFalsePositives {
+			rs.lessFalsePositivesBuf = append(rs.lessFalsePositivesBuf, byte(hi))
+			if len(rs.lessFalsePositivesBuf) > int(1*datasize.MB) {
+				if err := rs.lessFalsePositivesCollector.Collect(rs.numBuf[:], rs.lessFalsePositivesBuf); err != nil {
+					return err
+				}
+			}
 		}
 	} else {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
