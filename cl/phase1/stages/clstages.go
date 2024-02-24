@@ -387,7 +387,7 @@ func ConsensusClStages(ctx context.Context,
 					chainTipSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
 					logger.Info("[Caplin] Forward Sync", "from", currentSlot.Load(), "to", chainTipSlot)
 					prevProgress := currentSlot.Load()
-					for currentSlot.Load()+4 < chainTipSlot {
+					for downloader.GetHighestProcessedSlot() < chainTipSlot {
 						downloader.RequestMore(ctx)
 
 						select {
@@ -694,8 +694,11 @@ func ConsensusClStages(ctx context.Context,
 						return fmt.Errorf("failed to read canonical block root: %w", err)
 					}
 					reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
+					// just a check to make sure we don't get chain gaps. bugs can happen and this can stink.
+					totalIterationsCheck := 256
+					i := 0
 
-					for currentRoot != currentCanonical {
+					for currentRoot != currentCanonical || i < totalIterationsCheck {
 						var newFoundSlot *uint64
 
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
@@ -713,6 +716,7 @@ func ConsensusClStages(ctx context.Context,
 							return fmt.Errorf("failed to read canonical block root: %w", err)
 						}
 						reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
+						i++
 					}
 					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
 						return fmt.Errorf("failed to truncate canonical chain: %w", err)
