@@ -152,7 +152,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		return nil, fmt.Errorf("seems file: %s created by newer version of Erigon. You can re-build all such files by comand 'erigon snapshots index'. %w", fName, err)
 	}
 
-	idx.enums = features&Enums != 0
+	idx.enums = features&Enums != No
 	offset++
 	if idx.enums {
 		var size int
