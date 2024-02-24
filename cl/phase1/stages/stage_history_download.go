@@ -192,10 +192,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
-					"mbps/sec", fmt.Sprintf("%.4f", float64(bytesReadInTotal.Load())/(1000*1000*ratio)),
+					"mbps/sec", fmt.Sprintf("%.1f", float64(bytesReadInTotal.Load())/(1000*1000*ratio)),
 					"peers", peerCount,
 					"snapshots", cfg.sn.SegmentsMax(),
-					"reconnected", foundLatestEth1ValidBlock.Load(),
 				)
 				bytesReadInTotal.Store(0)
 				logger.Info("Backfilling History", logArgs...)
