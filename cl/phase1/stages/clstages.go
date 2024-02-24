@@ -645,9 +645,7 @@ func ConsensusClStages(ctx context.Context,
 							logger.Info("[Caplin] Progress", "progress", cfg.forkChoice.HighestSeen(), "from", args.seenSlot, "to", args.targetSlot)
 						}
 					}
-					if err := tx.Commit(); err != nil {
-						return err
-					}
+
 					return nil
 				},
 			},
@@ -723,7 +721,6 @@ func ConsensusClStages(ctx context.Context,
 							return fmt.Errorf("failed to read canonical block root: %w", err)
 						}
 						reconnectionRoots = append(reconnectionRoots, canonicalEntry{currentSlot, currentRoot})
-						i++
 					}
 					if err := beacon_indicies.TruncateCanonicalChain(ctx, tx, currentSlot); err != nil {
 						return fmt.Errorf("failed to truncate canonical chain: %w", err)
