@@ -708,3 +708,97 @@ func ParseTrieVariant(s string) TrieVariant {
 	}
 	return trieVariant
 }
+
+type BranchStat struct {
+	KeySize     uint64
+	ValSize     uint64
+	MinCellSize uint64
+	MaxCellSize uint64
+	CellCount   uint64
+	APKSize     uint64
+	SPKSize     uint64
+	ExtSize     uint64
+	HashSize    uint64
+	APKCount    uint64
+	SPKCount    uint64
+	HashCount   uint64
+	ExtCount    uint64
+	TAMapsSize  uint64
+	IsRoot      bool
+}
+
+// do not add stat of root node to other branch stat
+func (bs *BranchStat) Collect(other *BranchStat) {
+	if other == nil {
+		return
+	}
+
+	bs.KeySize += other.KeySize
+	bs.ValSize += other.ValSize
+	bs.MinCellSize = min(bs.MinCellSize, other.MinCellSize)
+	bs.MaxCellSize = max(bs.MaxCellSize, other.MaxCellSize)
+	bs.CellCount += other.CellCount
+	bs.APKSize += other.APKSize
+	bs.SPKSize += other.SPKSize
+	bs.ExtSize += other.ExtSize
+	bs.HashSize += other.HashSize
+	bs.APKCount += other.APKCount
+	bs.SPKCount += other.SPKCount
+	bs.HashCount += other.HashCount
+	bs.ExtCount += other.ExtCount
+}
+
+func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat {
+	stat := &BranchStat{}
+	if len(key) == 0 {
+		return nil
+	}
+
+	stat.KeySize = uint64(len(key))
+	stat.ValSize = uint64(len(branch))
+	stat.IsRoot = true
+
+	// if key is not "state" then we are interested in the branch data
+	if !bytes.Equal(key, []byte("state")) {
+		stat.IsRoot = false
+
+		tm, am, cells, err := BranchData(branch).DecodeCells()
+		if err != nil {
+			return nil
+		}
+		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
+		stat.CellCount = uint64(bits.OnesCount16(tm & am))
+		for _, c := range cells {
+			if c == nil {
+				continue
+			}
+			enc := uint64(len(c.Encode()))
+			stat.MinCellSize = min(stat.MinCellSize, enc)
+			stat.MaxCellSize = max(stat.MaxCellSize, enc)
+			switch {
+			case c.apl > 0:
+				stat.APKSize += uint64(c.apl)
+				stat.APKCount++
+			case c.spl > 0:
+				stat.SPKSize += uint64(c.spl)
+				stat.SPKCount++
+			case c.hl > 0:
+				stat.HashSize += uint64(c.hl)
+				stat.HashCount++
+			default:
+				panic("no plain key" + fmt.Sprintf("#+%v", c))
+				//case c.extLen > 0:
+			}
+			if c.extLen > 0 {
+				switch tv {
+				case VariantBinPatriciaTrie:
+					stat.ExtSize += uint64(c.extLen)
+				case VariantHexPatriciaTrie:
+					stat.ExtSize += uint64(c.extLen)
+				}
+				stat.ExtCount++
+			}
+		}
+	}
+	return stat
+}

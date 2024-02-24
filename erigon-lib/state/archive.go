@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 )
@@ -12,6 +13,21 @@ const (
 	CompressKeys FileCompression = 0b1  // compress keys only
 	CompressVals FileCompression = 0b10 // compress values only
 )
+
+func ParseFileCompression(s string) (FileCompression, error) {
+	switch s {
+	case "none", "":
+		return CompressNone, nil
+	case "k":
+		return CompressKeys, nil
+	case "v":
+		return CompressVals, nil
+	case "kv":
+		return CompressKeys | CompressVals, nil
+	default:
+		return 0, fmt.Errorf("invalid file compression type: %s", s)
+	}
+}
 
 type getter struct {
 	*compress.Getter
