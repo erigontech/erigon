@@ -120,7 +120,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return nil, fmt.Errorf("%w, offset is: %d which is below zero, the file: %s is broken", NotSupportedErr, offset, indexFilePath)
+		return nil, fmt.Errorf("file %s %w. offset is: %d which is below zero", fName, NotSupportedErr, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -149,7 +149,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	}
 	features := Features(idx.data[offset])
 	if err := onlyKnownFeatures(features); err != nil {
-		return nil, fmt.Errorf("seems file %s created by newer version of Erigon. %w", fName, err)
+		return nil, fmt.Errorf("file %s %w", fName, err)
 	}
 
 	idx.enums = features&Enums != No
