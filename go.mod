@@ -22,7 +22,7 @@ require (
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/log v0.14.6-0.20231202035202-ed7a02cad0b4
 	github.com/anacrolix/sync v0.5.1
-	github.com/anacrolix/torrent v1.54.0
+	github.com/anacrolix/torrent v1.54.1
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -50,7 +50,7 @@ require (
 	github.com/google/btree v1.1.2
 	github.com/google/cel-go v0.18.2
 	github.com/google/gofuzz v1.2.0
-	github.com/google/uuid v1.4.0
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.1
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/arc/v2 v2.0.6
@@ -73,12 +73,12 @@ require (
 	github.com/pelletier/go-toml/v2 v2.1.1
 	github.com/pion/randutil v0.1.0
 	github.com/pion/stun v0.6.0
-	github.com/pkg/errors v0.9.1
 	github.com/protolambda/ztyp v0.2.2
 	github.com/prysmaticlabs/go-bitfield v0.0.0-20210809151128-385d8c5e3fb7
 	github.com/prysmaticlabs/gohashtree v0.0.3-alpha.0.20230502123415-aafd8b3ca202
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/rs/cors v1.10.1
+	github.com/shirou/gopsutil/v3 v3.24.1
 	github.com/spf13/afero v1.9.5
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
@@ -98,7 +98,7 @@ require (
 	golang.org/x/sync v0.6.0
 	golang.org/x/sys v0.17.0
 	golang.org/x/time v0.5.0
-	google.golang.org/grpc v1.61.1
+	google.golang.org/grpc v1.62.0
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.3.0
 	google.golang.org/protobuf v1.32.0
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c
@@ -108,6 +108,13 @@ require (
 	modernc.org/sqlite v1.29.1
 	pgregory.net/rapid v1.1.0
 	sigs.k8s.io/yaml v1.4.0
+)
+
+require (
+	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/tklauser/go-sysconf v0.3.13 // indirect
+	github.com/tklauser/numcpus v0.7.0 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 )
 
 require (
@@ -136,6 +143,7 @@ require (
 	github.com/bits-and-blooms/bitset v1.12.0 // indirect
 	github.com/bradfitz/iter v0.0.0-20191230175014-e8f45d346db8 // indirect
 	github.com/btcsuite/btcd/chaincfg/chainhash v1.0.1 // indirect
+	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/cilium/ebpf v0.11.0 // indirect
 	github.com/consensys/bavard v0.1.13 // indirect
@@ -187,6 +195,7 @@ require (
 	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/libp2p/go-reuseport v0.4.0 // indirect
 	github.com/libp2p/go-yamux/v4 v4.0.1 // indirect
+	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/marten-seemann/tcp v0.0.0-20210406111302-dfbc87cc63fd // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
@@ -231,7 +240,9 @@ require (
 	github.com/pion/transport/v2 v2.2.1 // indirect
 	github.com/pion/turn/v2 v2.0.8 // indirect
 	github.com/pion/webrtc/v3 v3.1.42 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/power-devops/perfstat v0.0.0-20210106213030-5aafc221ea8c // indirect
 	github.com/prometheus/client_golang v1.18.0 // indirect
 	github.com/prometheus/client_model v0.5.0 // indirect
 	github.com/prometheus/common v0.45.0 // indirect
@@ -245,6 +256,7 @@ require (
 	github.com/rogpeppe/go-internal v1.12.0 // indirect
 	github.com/rs/dnscache v0.0.0-20211102005908-e0241e321417 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
+	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/shopspring/decimal v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/sosodev/duration v1.1.0 // indirect
@@ -262,8 +274,8 @@ require (
 	golang.org/x/mod v0.14.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.17.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20231106174013-bbf56f31fb17 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20231106174013-bbf56f31fb17 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20240123012728-ef4313101c80 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20240123012728-ef4313101c80 // indirect
 	gopkg.in/cenkalti/backoff.v1 v1.1.0 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	lukechampine.com/blake3 v1.2.1 // indirect

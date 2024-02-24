@@ -40,7 +40,6 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 		}, nil
 	}
 	defer e.semaphore.Release(1)
-
 	tx, err := e.db.BeginRw(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)

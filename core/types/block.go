@@ -1024,7 +1024,8 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx Transaction
-	for tx, err = DecodeRLPTransaction(s); err == nil; tx, err = DecodeRLPTransaction(s) {
+	blobTxnsAreWrappedWithBlobs := false
+	for tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
 		bb.Transactions = append(bb.Transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {
@@ -1213,7 +1214,8 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	var tx Transaction
-	for tx, err = DecodeRLPTransaction(s); err == nil; tx, err = DecodeRLPTransaction(s) {
+	blobTxnsAreWrappedWithBlobs := false
+	for tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
 		bb.transactions = append(bb.transactions, tx)
 	}
 	if !errors.Is(err, rlp.EOL) {

@@ -128,7 +128,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			Root: cfg.RecordDir,
 		}
 	}
-	indiciesDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.Dirs.CaplinIndexing, executionEngine, false)
+	indiciesDB, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.Dirs.CaplinIndexing, executionEngine, false)
 	if err != nil {
 		return err
 	}

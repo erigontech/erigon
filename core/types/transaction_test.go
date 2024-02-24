@@ -29,11 +29,16 @@ import (
 	"testing"
 	"time"
 
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/fixedgas"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
+	"github.com/ledgerwatch/erigon-lib/txpool"
+	libtypes "github.com/ledgerwatch/erigon-lib/types"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/ledgerwatch/erigon/common"
@@ -569,7 +574,7 @@ func encodeDecodeBinary(tx Transaction) (Transaction, error) {
 		return nil, fmt.Errorf("rlp encoding failed: %w", err)
 	}
 	var parsedTx Transaction
-	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes()); err != nil {
+	if parsedTx, err = UnmarshalTransactionFromBinary(buf.Bytes(), false /* blobTxnsAreWrappedWithBlobs */); err != nil {
 		return nil, fmt.Errorf("rlp decoding failed: %w", err)
 	}
 	return parsedTx, nil
@@ -815,4 +820,94 @@ func TestBlobTxEncodeDecode(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func makeBlobTxRlp() []byte {
+	bodyRlp := hexutility.MustDecodeHex(txpool.BodyRlpHex)
+
+	blobsRlpPrefix := hexutility.MustDecodeHex("fa040008")
+	blobRlpPrefix := hexutility.MustDecodeHex("ba020000")
+
+	var blob0, blob1 = gokzg4844.Blob{}, gokzg4844.Blob{}
+	copy(blob0[:], hexutility.MustDecodeHex(txpool.ValidBlob1Hex))
+	copy(blob1[:], hexutility.MustDecodeHex(txpool.ValidBlob2Hex))
+
+	var err error
+	proofsRlpPrefix := hexutility.MustDecodeHex("f862")
+	commitment0, _ := kzg.Ctx().BlobToKZGCommitment(blob0, 0)
+	commitment1, _ := kzg.Ctx().BlobToKZGCommitment(blob1, 0)
+
+	proof0, err := kzg.Ctx().ComputeBlobKZGProof(blob0, commitment0, 0)
+	if err != nil {
+		fmt.Println("error", err)
+	}
+	proof1, err := kzg.Ctx().ComputeBlobKZGProof(blob1, commitment1, 0)
+	if err != nil {
+		fmt.Println("error", err)
+	}
+
+	wrapperRlp := hexutility.MustDecodeHex("03fa0401fe")
+	wrapperRlp = append(wrapperRlp, bodyRlp...)
+	wrapperRlp = append(wrapperRlp, blobsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob0[:]...)
+	wrapperRlp = append(wrapperRlp, blobRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, blob1[:]...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, commitment1[:]...)
+	wrapperRlp = append(wrapperRlp, proofsRlpPrefix...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof0[:]...)
+	wrapperRlp = append(wrapperRlp, 0xb0)
+	wrapperRlp = append(wrapperRlp, proof1[:]...)
+
+	return wrapperRlp
+}
+
+// This test is for reference
+func TestShortUnwrap(t *testing.T) {
+	blobTxRlp := makeBlobTxRlp()
+	shortRlp, err := UnwrapTxPlayloadRlp(blobTxRlp)
+	if err != nil {
+		t.Errorf("short rlp stripping failed: %v", err)
+		return
+	}
+	prefixedRlp := append([]byte{0x03}, shortRlp...) // Added the 0x3 prefix for DecodeTransaction func
+	bbtx, err := DecodeTransaction(prefixedRlp)
+
+	if err != nil {
+		t.Errorf("short rlp decoding failed : %v", err)
+	}
+	wrappedBlobTx := BlobTxWrapper{}
+	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(blobTxRlp[1:]), 0))
+	if err != nil {
+		t.Errorf("long rlp decoding failed: %v", err)
+	}
+	assertEqual(bbtx, &wrappedBlobTx.Tx)
+}
+
+// This test actually applies to testing the behaviour as seen from the
+// onNewTx behaviour in filters.go
+func TestShortUnwrapLib(t *testing.T) {
+	blobTxRlp := makeBlobTxRlp()
+	shortRlp, err := libtypes.UnwrapTxPlayloadRlp(blobTxRlp)
+	if err != nil {
+		t.Errorf("short rlp stripping failed: %v", err)
+		return
+	}
+	blobTx, err := DecodeTransaction(shortRlp)
+
+	if err != nil {
+		t.Errorf("short rlp decoding failed : %v", err)
+	}
+	wrappedBlobTx := BlobTxWrapper{}
+	err = wrappedBlobTx.DecodeRLP(rlp.NewStream(bytes.NewReader(makeBlobTxRlp()[1:]), 0))
+	if err != nil {
+		t.Errorf("long rlp decoding failed: %v", err)
+	}
+
+	assertEqual(blobTx, &wrappedBlobTx.Tx)
 }

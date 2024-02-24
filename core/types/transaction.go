@@ -97,7 +97,7 @@ type Transaction interface {
 	Unwrap() Transaction // If this is a network wrapper, returns the unwrapped tx. Otherwise returns itself.
 }
 
-// TransactionMisc is collection of miscelaneous fields for transaction that is supposed to be embedded into concrete
+// TransactionMisc is collection of miscellaneous fields for transaction that is supposed to be embedded into concrete
 // implementations of different transaction types
 type TransactionMisc struct {
 	time time.Time // Time first seen locally (spam avoidance)
@@ -126,7 +126,7 @@ func (tm TransactionMisc) From() *atomic.Value {
 	return &tm.from
 }
 
-func DecodeRLPTransaction(s *rlp.Stream) (Transaction, error) {
+func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
 	kind, size, err := s.Kind()
 	if err != nil {
 		return nil, err
@@ -149,38 +149,39 @@ func DecodeRLPTransaction(s *rlp.Stream) (Transaction, error) {
 	if len(b) == 0 {
 		return nil, rlp.EOL
 	}
-	return UnmarshalTransactionFromBinary(b)
+	return UnmarshalTransactionFromBinary(b, blobTxnsAreWrappedWithBlobs)
 }
 
-// DecodeWrappedTransaction decodes network encoded transaction with or without
-// envelope. When transaction is not network encoded use DecodeTransaction.
+// DecodeWrappedTransaction as similar to DecodeTransaction,
+// but type-3 (blob) transactions are expected to be wrapped with blobs/commitments/proofs.
+// See https://eips.ethereum.org/EIPS/eip-4844#networking
 func DecodeWrappedTransaction(data []byte) (Transaction, error) {
+	blobTxnsAreWrappedWithBlobs := true
 	if len(data) == 0 {
 		return nil, io.EOF
 	}
 	if data[0] < 0x80 { // the encoding is canonical, not RLP
-
-		return UnmarshalWrappedTransactionFromBinary(data)
+		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
-	return DecodeRLPTransaction(s)
+	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
 // DecodeTransaction decodes a transaction either in RLP or canonical format
 func DecodeTransaction(data []byte) (Transaction, error) {
+	blobTxnsAreWrappedWithBlobs := false
 	if len(data) == 0 {
 		return nil, io.EOF
 	}
-	if data[0] < 0x80 {
-		// the encoding is canonical, not RLP
-		return UnmarshalTransactionFromBinary(data)
+	if data[0] < 0x80 { // the encoding is canonical, not RLP
+		return UnmarshalTransactionFromBinary(data, blobTxnsAreWrappedWithBlobs)
 	}
 	s := rlp.NewStream(bytes.NewReader(data), uint64(len(data)))
-	return DecodeRLPTransaction(s)
+	return DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
 }
 
 // Parse transaction without envelope.
-func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
+func UnmarshalTransactionFromBinary(data []byte, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
 	if len(data) <= 1 {
 		return nil, fmt.Errorf("short input: %v", len(data))
 	}
@@ -201,11 +202,19 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 		return t, nil
 	case BlobTxType:
 		s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
-		t := &BlobTx{}
-		if err := t.DecodeRLP(s); err != nil {
-			return nil, err
+		if blobTxnsAreWrappedWithBlobs {
+			t := &BlobTxWrapper{}
+			if err := t.DecodeRLP(s); err != nil {
+				return nil, err
+			}
+			return t, nil
+		} else {
+			t := &BlobTx{}
+			if err := t.DecodeRLP(s); err != nil {
+				return nil, err
+			}
+			return t, nil
 		}
-		return t, nil
 	default:
 		if data[0] >= 0x80 {
 			// Tx is type legacy which is RLP encoded
@@ -215,20 +224,18 @@ func UnmarshalTransactionFromBinary(data []byte) (Transaction, error) {
 	}
 }
 
-// Parse network encoded transaction without envelope.
-func UnmarshalWrappedTransactionFromBinary(data []byte) (Transaction, error) {
-	if len(data) <= 1 {
-		return nil, fmt.Errorf("short input: %v", len(data))
+// Remove everything but the payload body from the wrapper - this is not used, for reference only
+func UnwrapTxPlayloadRlp(blobTxRlp []byte) (retRlp []byte, err error) {
+	if blobTxRlp[0] != BlobTxType {
+		return blobTxRlp, nil
 	}
-	if data[0] != BlobTxType {
-		return UnmarshalTransactionFromBinary(data)
-	}
-	s := rlp.NewStream(bytes.NewReader(data[1:]), uint64(len(data)-1))
-	t := &BlobTxWrapper{}
-	if err := t.DecodeRLP(s); err != nil {
+	it, err := rlp.NewListIterator(blobTxRlp[1:])
+	if err != nil {
 		return nil, err
 	}
-	return t, nil
+	it.Next()
+	retRlp = it.Value()
+	return
 }
 
 func MarshalTransactionsBinary(txs Transactions) ([][]byte, error) {
@@ -254,7 +261,7 @@ func DecodeTransactions(txs [][]byte) ([]Transaction, error) {
 	result := make([]Transaction, len(txs))
 	var err error
 	for i := range txs {
-		result[i], err = UnmarshalTransactionFromBinary(txs[i])
+		result[i], err = UnmarshalTransactionFromBinary(txs[i], false /* blobTxnsAreWrappedWithBlobs*/)
 		if err != nil {
 			return nil, err
 		}
