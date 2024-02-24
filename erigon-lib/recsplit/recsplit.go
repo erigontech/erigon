@@ -72,8 +72,10 @@ type RecSplit struct {
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
-	lessFalsePositivesBuf       []byte
-	lessFalsePositivesCollector *etl.Collector
+	lessFalsePositivesBuf         []byte
+	lessFalsePositivesF           *os.File
+	lessFalsePositivesW           *bufio.Writer
+	tmpLessFalsePositivesFilePath string
 
 	indexFileName          string
 	indexFile, tmpFilePath string
@@ -182,8 +184,12 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
 	if rs.lessFalsePositives {
-		rs.lessFalsePositivesCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
-		rs.lessFalsePositivesCollector.LogLvl(log.LvlDebug)
+		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		if err != nil {
+			return nil, err
+		}
+		rs.lessFalsePositivesF = bufferFile
+		rs.lessFalsePositivesW = bufio.NewWriter(bufferFile)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -362,11 +368,9 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 			return err
 		}
 		if rs.lessFalsePositives {
-			rs.lessFalsePositivesBuf = append(rs.lessFalsePositivesBuf, byte(hi))
-			if len(rs.lessFalsePositivesBuf) > int(1*datasize.MB) {
-				if err := rs.lessFalsePositivesCollector.Collect(rs.numBuf[:], rs.lessFalsePositivesBuf); err != nil {
-					return err
-				}
+			//1 byte from each hashed key
+			if err := rs.lessFalsePositivesW.WriteByte(byte(hi)); err != nil {
+				return err
 			}
 		}
 	} else {
@@ -633,6 +637,10 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return err
 		}
 		rs.offsetEf.Build()
+
+		if rs.lessFalsePositives {
+			// rename file
+		}
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
@@ -671,6 +679,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	var features Features
 	if rs.enums {
 		features |= Enums
+		if rs.lessFalsePositives {
+			features |= LessFalsePositives
+		}
 	}
 	if err := rs.indexW.WriteByte(byte(features)); err != nil {
 		return fmt.Errorf("writing enums = true: %w", err)
