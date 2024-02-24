@@ -22,4 +22,18 @@ func TestOver50EventBlockFetch(t *testing.T) {
 	if len(events) != 113 {
 		t.Fatal("Unexpected event count, exptected: 113, got:", len(events))
 	}
+
+	// block :=  23893568
+	// block time := Jan-19-2022 04:48:04 AM
+
+	events, err = heimdallClient.FetchStateSyncEvents(context.Background(), 1479540, time.Unix(1642567374, 0), 0)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(events) != 9417 {
+		t.Fatal("Unexpected event count, exptected: 9417, got:", len(events))
+	}
+
 }
