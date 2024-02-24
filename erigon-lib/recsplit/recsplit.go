@@ -72,10 +72,9 @@ type RecSplit struct {
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
-	lessFalsePositivesBuf         []byte
-	lessFalsePositivesF           *os.File
-	lessFalsePositivesW           *bufio.Writer
-	tmpLessFalsePositivesFilePath string
+	lessFalsePositivesBuf []byte
+	lessFalsePositivesF   *os.File
+	lessFalsePositivesW   *bufio.Writer
 
 	indexFileName          string
 	indexFile, tmpFilePath string
@@ -637,10 +636,6 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return err
 		}
 		rs.offsetEf.Build()
-
-		if rs.lessFalsePositives {
-			// rename file
-		}
 	}
 	rs.gr.appendFixed(1, 1) // Sentinel (avoids checking for parts of size 1)
 	// Construct Elias Fano index
@@ -690,6 +685,21 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		// Write out elias fano for offsets
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
+		}
+
+		if rs.lessFalsePositives {
+			if err := rs.indexW.Flush(); err != nil {
+				return err
+			}
+			//write len of array, and array
+			binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+			if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+				return err
+			}
+			if _, err := io.Copy(rs.indexW, bufio.NewReader(rs.lessFalsePositivesF)); err != nil {
+				return err
+			}
+			rs.lessFalsePositivesF.Close()
 		}
 	}
 	// Write out the size of golomb rice params
