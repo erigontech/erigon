@@ -244,6 +244,9 @@ func doDiff(cliCtx *cli.Context) error {
 	}
 	defer dst.Close()
 
+	defer src.EnableReadAhead().DisableReadAhead()
+	defer dst.EnableReadAhead().DisableReadAhead()
+
 	i := 0
 	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
 	var srcBuf, dstBuf []byte
