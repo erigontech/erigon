@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"strconv"
 	"sync"
@@ -28,6 +29,8 @@ type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) ([]*cltypes.BlobSidecar, bool, error)
 	HasBlobs(blockRoot libcommon.Hash) (bool, error)
+	WriteStream(w io.Writer, blockRoot libcommon.Hash, idx uint64) error // Used for P2P networking
+	KzgCommitmentsCount(ctx context.Context, blockRoot libcommon.Hash) (uint32, error)
 	Prune() error
 }
 
@@ -39,7 +42,7 @@ type BlobStore struct {
 	slotsKept         uint64
 }
 
-func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) *BlobStore {
+func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig) BlobStorage {
 	return &BlobStore{fs: fs, db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, genesisConfig: genesisConfig}
 }
 
@@ -146,7 +149,7 @@ func (bs *BlobStore) Prune() error {
 	}
 	// delete all the folders that are older than slotsKept
 	for i := startPrune; i < currentSlot; i += subdivisionSlot {
-		bs.fs.RemoveAll(strconv.FormatUint(uint64(i), 10))
+		bs.fs.RemoveAll(strconv.FormatUint(i, 10))
 	}
 	return nil
 }
@@ -158,6 +161,33 @@ func (bs *BlobStore) HasBlobs(blockRoot libcommon.Hash) (bool, error) {
 	}
 	defer tx.Rollback()
 	return tx.Has(kv.BlockRootToKzgCommitments, blockRoot[:])
+}
+
+func (bs *BlobStore) WriteStream(w io.Writer, blockRoot libcommon.Hash, idx uint64) error {
+	_, filePath := blobSidecarFilePath(0, idx, blockRoot)
+	file, err := bs.fs.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = io.Copy(w, file)
+	return err
+}
+
+func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot libcommon.Hash) (uint32, error) {
+	tx, err := bs.db.BeginRo(context.Background())
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	val, err := tx.GetOne(kv.BlockRootToKzgCommitments, blockRoot[:])
+	if err != nil {
+		return 0, err
+	}
+	if len(val) != 4 {
+		return 0, nil
+	}
+	return binary.LittleEndian.Uint32(val), nil
 }
 
 type sidecarsPayload struct {
@@ -181,7 +211,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 
 	storableSidecars := []*sidecarsPayload{}
 	currentSidecarsPayload := &sidecarsPayload{blockRoot: identifiers.Get(0).BlockRoot}
-	lastProcessed := uint64(sidecars[0].SignedBlockHeader.Header.Slot)
+	lastProcessed := sidecars[0].SignedBlockHeader.Header.Slot
 	// Some will be stored, truncate when validation goes to shit
 	for i, sidecar := range sidecars {
 		identifier := identifiers.Get(i)

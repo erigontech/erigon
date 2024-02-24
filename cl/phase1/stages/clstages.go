@@ -605,9 +605,9 @@ func ConsensusClStages(ctx context.Context,
 								if err != nil {
 									return err
 								}
+								defer tx.Rollback()
 
 								if err := processBlock(tx, block, true, true); err != nil {
-									tx.Rollback()
 									log.Debug("bad blocks segment received", "err", err)
 									continue
 								}

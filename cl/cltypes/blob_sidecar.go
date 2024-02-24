@@ -101,8 +101,8 @@ func (b *BlobIdentifier) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.getSchema()...)
 }
 
-func (b *BlobIdentifier) Clone() clonable.Clonable {
-	return NewBlobIdentifier(b.BlockRoot, b.Index)
+func (*BlobIdentifier) Clone() clonable.Clonable {
+	return &BlobIdentifier{}
 }
 
 func (b *BlobIdentifier) getSchema() []interface{} {
