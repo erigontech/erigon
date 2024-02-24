@@ -149,7 +149,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	}
 	features := Features(idx.data[offset])
 	if err := onlyKnownFeatures(features); err != nil {
-		return nil, fmt.Errorf("seems file: %s created by newer version of Erigon, please remove it and similar older files. %w", fName, err)
+		return nil, fmt.Errorf("seems file: %s created by newer version of Erigon. You can re-build all such files by comand 'erigon snapshots index'. %w", fName, err)
 	}
 
 	idx.enums = features&Enums != 0
