@@ -347,7 +347,7 @@ func canonicalTransactions(db kv.Getter, baseTxId uint64, amount uint32) ([]type
 
 	if err := db.ForAmount(kv.EthTx, txIdKey, amount, func(k, v []byte) error {
 		var decodeErr error
-		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v); decodeErr != nil {
+		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); decodeErr != nil {
 			return decodeErr
 		}
 		i++
