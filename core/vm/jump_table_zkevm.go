@@ -11,10 +11,18 @@ func newForkID4InstructionSet() JumpTable {
 
 	enable2929_zkevm(&instructionSet) // Access lists for trie accesses https://eips.ethereum.org/EIPS/eip-2929
 
+	// zkevm logs have data length multiple of 32
+	// zeroes are added to the end in order to fill the 32 bytes if needed
 	instructionSet[LOG1].execute = makeLog_zkevm(1)
 	instructionSet[LOG2].execute = makeLog_zkevm(2)
 	instructionSet[LOG3].execute = makeLog_zkevm(3)
 	instructionSet[LOG4].execute = makeLog_zkevm(4)
+
+	instructionSet[DELEGATECALL].execute = opDelegateCall_zkevm
+	instructionSet[CALLCODE].execute = opCallCode_zkevm
+	instructionSet[CALL].execute = opCall_zkevm
+	instructionSet[CREATE].execute = opCreate_zkevm
+	instructionSet[CREATE2].execute = opCreate2_zkevm
 
 	instructionSet[CALLDATALOAD].execute = opCallDataLoad_zkevmIncompatible
 	instructionSet[CALLDATACOPY].execute = opCallDataCopy_zkevmIncompatible

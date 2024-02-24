@@ -48,6 +48,10 @@ var (
 	ErrUnsupportedPrecompile = errors.New("unsupported precompile")
 )
 
+func IsErrTypeRevert(err error) bool {
+	return err == ErrExecutionReverted || err == ErrUnsupportedPrecompile
+}
+
 // ErrStackUnderflow wraps an evm error when the items on the stack less
 // than the minimal requirement.
 type ErrStackUnderflow struct {

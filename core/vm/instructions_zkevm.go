@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/params"
 )
 
 func opCallDataLoad_zkevmIncompatible(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
@@ -122,7 +123,7 @@ func opStaticCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 		temp.SetOne()
 	}
 	stack.Push(&temp)
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || IsErrTypeRevert(err) {
 		ret = common.CopyBytes(ret)
 		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
 	}
@@ -130,7 +131,7 @@ func opStaticCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeCon
 	scope.Contract.Gas += returnGas
 
 	//[zkevm] do not overryde returnData if reverted
-	if err != ErrExecutionReverted {
+	if !IsErrTypeRevert(err) {
 		interpreter.returnData = ret
 	}
 
@@ -194,4 +195,185 @@ func makeLog_zkevm(size int) executionFunc {
 
 		return nil, nil
 	}
+}
+
+func opCreate_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
+	var (
+		value  = scope.Stack.Pop()
+		offset = scope.Stack.Pop()
+		size   = scope.Stack.Peek()
+		input  = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
+		gas    = scope.Contract.Gas
+	)
+	if interpreter.evm.ChainRules().IsTangerineWhistle {
+		gas -= gas / 64
+	}
+	// reuse size int for stackvalue
+	stackvalue := size
+
+	scope.Contract.UseGas(gas)
+
+	res, addr, returnGas, suberr := interpreter.evm.Create(scope.Contract, input, gas, &value, 0)
+
+	// Push item on the stack based on the returned error. If the ruleset is
+	// homestead we must check for CodeStoreOutOfGasError (homestead only
+	// rule) and treat as an error, if the ruleset is frontier we must
+	// ignore this error and pretend the operation was successful.
+	if interpreter.evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
+		stackvalue.Clear()
+	} else if suberr != nil && suberr != ErrCodeStoreOutOfGas {
+		stackvalue.Clear()
+	} else {
+		stackvalue.SetBytes(addr.Bytes())
+	}
+	scope.Contract.Gas += returnGas
+
+	if IsErrTypeRevert(suberr) {
+		interpreter.returnData = res // set REVERT data to return data buffer
+		return res, nil
+	}
+	interpreter.returnData = nil // clear dirty return data buffer
+	return nil, nil
+}
+
+func opCreate2_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	if interpreter.readOnly {
+		return nil, ErrWriteProtection
+	}
+	var (
+		endowment    = scope.Stack.Pop()
+		offset, size = scope.Stack.Pop(), scope.Stack.Pop()
+		salt         = scope.Stack.Pop()
+		input        = scope.Memory.GetCopy(int64(offset.Uint64()), int64(size.Uint64()))
+		gas          = scope.Contract.Gas
+	)
+
+	// Apply EIP150
+	gas -= gas / 64
+	scope.Contract.UseGas(gas)
+	// reuse size int for stackvalue
+	stackValue := size
+	res, addr, returnGas, suberr := interpreter.evm.Create2(scope.Contract, input, gas, &endowment, &salt)
+
+	// Push item on the stack based on the returned error.
+	if suberr != nil {
+		stackValue.Clear()
+	} else {
+		stackValue.SetBytes(addr.Bytes())
+	}
+
+	scope.Stack.Push(&stackValue)
+	scope.Contract.Gas += returnGas
+
+	if IsErrTypeRevert(suberr) {
+		interpreter.returnData = res // set REVERT data to return data buffer
+		return res, nil
+	}
+	interpreter.returnData = nil // clear dirty return data buffer
+	return nil, nil
+}
+
+func opCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	stack := scope.Stack
+	// Pop gas. The actual gas in interpreter.evm.callGasTemp.
+	// We can use this as a temporary value
+	temp := stack.Pop()
+	gas := interpreter.evm.CallGasTemp()
+	// Pop other call parameters.
+	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
+	toAddr := libcommon.Address(addr.Bytes20())
+	// Get the arguments from the memory.
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	if !value.IsZero() {
+		if interpreter.readOnly {
+			return nil, ErrWriteProtection
+		}
+		gas += params.CallStipend
+	}
+
+	ret, returnGas, err := interpreter.evm.Call(scope.Contract, toAddr, args, gas, &value, false /* bailout */, 0)
+
+	if err != nil {
+		temp.Clear()
+	} else {
+		temp.SetOne()
+	}
+	stack.Push(&temp)
+	if err == nil || IsErrTypeRevert(err) {
+		ret = common.CopyBytes(ret)
+		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+	}
+
+	scope.Contract.Gas += returnGas
+
+	interpreter.returnData = ret
+	return ret, nil
+}
+
+func opCallCode_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
+	stack := scope.Stack
+	// We use it as a temporary value
+	temp := stack.Pop()
+	gas := interpreter.evm.CallGasTemp()
+	// Pop other call parameters.
+	addr, value, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
+	toAddr := libcommon.Address(addr.Bytes20())
+	// Get arguments from the memory.
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	if !value.IsZero() {
+		gas += params.CallStipend
+	}
+
+	ret, returnGas, err := interpreter.evm.CallCode(scope.Contract, toAddr, args, gas, &value)
+	if err != nil {
+		temp.Clear()
+	} else {
+		temp.SetOne()
+	}
+	stack.Push(&temp)
+	if err == nil || IsErrTypeRevert(err) {
+		ret = common.CopyBytes(ret)
+		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+	}
+
+	scope.Contract.Gas += returnGas
+
+	interpreter.returnData = ret
+	return ret, nil
+}
+
+func opDelegateCall_zkevm(pc *uint64, interpreter *EVMInterpreter, scope *ScopeContext) ([]byte, error) {
+	stack := scope.Stack
+	// Pop gas. The actual gas is in interpreter.evm.callGasTemp.
+	// We use it as a temporary value
+	temp := stack.Pop()
+	gas := interpreter.evm.CallGasTemp()
+	// Pop other call parameters.
+	addr, inOffset, inSize, retOffset, retSize := stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop(), stack.Pop()
+	toAddr := libcommon.Address(addr.Bytes20())
+	// Get arguments from the memory.
+	args := scope.Memory.GetPtr(int64(inOffset.Uint64()), int64(inSize.Uint64()))
+
+	ret, returnGas, err := interpreter.evm.DelegateCall(scope.Contract, toAddr, args, gas)
+	if err != nil {
+		temp.Clear()
+	} else {
+		temp.SetOne()
+	}
+	stack.Push(&temp)
+	if err == nil || IsErrTypeRevert(err) {
+		ret = common.CopyBytes(ret)
+		scope.Memory.Set(retOffset.Uint64(), retSize.Uint64(), ret)
+	}
+
+	scope.Contract.Gas += returnGas
+
+	interpreter.returnData = ret
+	return ret, nil
 }
