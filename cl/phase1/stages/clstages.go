@@ -501,8 +501,8 @@ func ConsensusClStages(ctx context.Context,
 						}
 						cfg.prebuffer.Close()
 						cfg.prebuffer = nil
-
 					}
+					tx.Rollback()
 
 					logger.Debug("waiting for blocks...",
 						"seenSlot", args.seenSlot,
@@ -591,6 +591,7 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						case blocks := <-respCh:
 							for _, block := range blocks.Data {
+
 								if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
 									time.Sleep(time.Millisecond)
 									continue
@@ -600,9 +601,18 @@ func ConsensusClStages(ctx context.Context,
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 									continue
 								}
+								tx, err := cfg.indiciesDB.BeginRw(ctx)
+								if err != nil {
+									return err
+								}
+
 								if err := processBlock(tx, block, true, true); err != nil {
+									tx.Rollback()
 									log.Debug("bad blocks segment received", "err", err)
 									continue
+								}
+								if err := tx.Commit(); err != nil {
+									return err
 								}
 
 								// publish block to event handler
@@ -694,11 +704,8 @@ func ConsensusClStages(ctx context.Context,
 						return fmt.Errorf("failed to read canonical block root: %w", err)
 					}
 					reconnectionRoots := []canonicalEntry{{currentSlot, currentRoot}}
-					// just a check to make sure we don't get chain gaps. bugs can happen and this can stink.
-					totalIterationsCheck := 256
-					i := 0
 
-					for currentRoot != currentCanonical || i < totalIterationsCheck {
+					for currentRoot != currentCanonical {
 						var newFoundSlot *uint64
 
 						if currentRoot, err = beacon_indicies.ReadParentBlockRoot(ctx, tx, currentRoot); err != nil {
