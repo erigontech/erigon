@@ -43,12 +43,14 @@ type Features byte
 const (
 	No Features = 0b0
 
-	Enums              Features = 0b1  // To build 2-lvl index with perfect hash table pointing to enumeration and enumeration pointing to offsets
-	LessFalsePositives Features = 0b10 // Reduce false-positives to 1/256=0.4% in cost of 1byte per key
+	// Enums - To build 2-lvl index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	Enums Features = 0b1
+	// LessFalsePositives - Reduce false-positives to 1/256=0.4% in cost of 1byte per key
+	LessFalsePositives Features = 0b10 //
 )
 
 // SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
-var SupportedFeatures = []Features{Enums}
+var SupportedFeatures = []Features{Enums, LessFalsePositives}
 var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
 
 // Index implements index lookup from the file created by the RecSplit
@@ -77,6 +79,9 @@ type Index struct {
 	secondaryAggrBound uint16 // The lower bound for secondary key aggregation (computed from leadSize)
 	primaryAggrBound   uint16 // The lower bound for primary key aggregation (computed from leafSize)
 	enums              bool
+
+	lessFalsePositives bool
+	firstBytes         []byte
 
 	readers *sync.Pool
 }
@@ -153,11 +158,19 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	}
 
 	idx.enums = features&Enums != No
+	idx.lessFalsePositives = features&LessFalsePositives != No
 	offset++
 	if idx.enums {
 		var size int
 		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
 		offset += size
+
+		if idx.lessFalsePositives {
+			arrSz := binary.BigEndian.Uint64(idx.data[offset:])
+			offset += 8
+			idx.firstBytes = idx.data[offset : offset+int(arrSz)]
+			offset += int(arrSz)
+		}
 	}
 	// Size of golomb rice params
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
@@ -248,13 +261,13 @@ func (idx *Index) KeyCount() uint64 {
 }
 
 // Lookup is not thread-safe because it used id.hasher
-func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
+func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 	if idx.keyCount == 0 {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
 	if idx.keyCount == 1 {
-		return 0
+		return 0, true
 	}
 	var gr GolombRiceReader
 	gr.data = idx.grData
@@ -311,7 +324,11 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 	rec := int(cumKeys) + int(remap16(remix(fingerprint+idx.startSeed[level]+b), m))
 	pos := 1 + 8 + idx.bytesPerRec*(rec+1)
 
-	return binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
+	if idx.lessFalsePositives {
+		return found, idx.firstBytes[found] == byte(bucketHash)
+	}
+	return found, true
 }
 
 // OrdinalLookup returns the offset of i-th element in the index
@@ -319,6 +336,13 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) uint64 {
 // Elias-Fano structure containing all offsets.
 func (idx *Index) OrdinalLookup(i uint64) uint64 {
 	return idx.offsetEf.Get(i)
+}
+
+func (idx *Index) Has(bucketHash, i uint64) bool {
+	if idx.lessFalsePositives {
+		return idx.firstBytes[i] == byte(bucketHash)
+	}
+	return true
 }
 
 func (idx *Index) ExtractOffsets() map[uint64]uint64 {
