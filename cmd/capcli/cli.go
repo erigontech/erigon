@@ -1063,16 +1063,15 @@ func (b *BlobIdxsRebuilding) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
+		var j int
 
-		for j := 0; j < blk.Block.Body.BlobKzgCommitments.Len(); j++ {
+		for ; j < blk.Block.Body.BlobKzgCommitments.Len(); j++ {
 			if err := blobStorage.WriteStream(io.Discard, i, blockRoot, uint64(j)); err != nil {
-				if err2 := blobStorage.EXP2(blockRoot, uint32(j)); err2 != nil {
-					return err2
-				}
-				fmt.Println(err)
 				break // file not found
 			}
-
+		}
+		if err2 := blobStorage.EXP2(blockRoot, uint32(j)); err2 != nil {
+			return err2
 		}
 	}
 	log.Info("Blob archive store check passed")
