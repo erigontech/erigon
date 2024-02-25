@@ -216,6 +216,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	// Some will be stored, truncate when validation goes to shit
 	for i, sidecar := range sidecars {
 		identifier := identifiers.Get(i)
+		fmt.Println(identifier.BlockRoot, identifier.Index)
 		// check if the root of the block matches the identifier
 		sidecarBlockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
 		if err != nil {
