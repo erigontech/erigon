@@ -957,7 +957,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	log.Info("Started chain download", "chain", b.Chain)
+	log.Info("Started archive node checking", "chain", b.Chain)
 
 	dirs := datadir.New(b.Datadir)
 
@@ -1022,7 +1022,6 @@ func (b *BlobIdxsRebuilding) Run(ctx *Context) error {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
-	log.Info("Started chain download", "chain", b.Chain)
 
 	dirs := datadir.New(b.Datadir)
 
@@ -1044,6 +1043,8 @@ func (b *BlobIdxsRebuilding) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 	currentSlot := utils.GetCurrentSlot(genesisConfig.GenesisTime, beaconConfig.SlotsPerEpoch)
+	log.Info("Started chain download", "chain", b.Chain, "current slot", currentSlot, "from", 0)
+
 	for i := uint64(0); i < currentSlot; i++ {
 		blk, err := snr.ReadBlindedBlockBySlot(ctx, tx, i)
 		if err != nil {
