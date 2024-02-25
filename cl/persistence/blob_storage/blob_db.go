@@ -246,11 +246,11 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			return 0, err
 		}
 		if sidecarBlockRoot != identifier.BlockRoot {
-			return 0, fmt.Errorf("sidecar block root does not match the identifier")
+			break
 		}
 		// check if the index of the sidecar matches the identifier
 		if sidecars[i].Index != identifier.Index {
-			return 0, fmt.Errorf("sidecar index does not match the identifier")
+			break
 		}
 
 		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
