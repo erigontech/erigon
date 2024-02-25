@@ -460,7 +460,6 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 	}
 
 	for _, f := range toDel {
-		log.Warn("[dbg] removeBorOverlaps!!!", "name", f)
 		_ = os.Remove(f)
 		ext := filepath.Ext(f)
 		withoutExt := f[:len(f)-len(ext)]
@@ -486,7 +485,6 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 	if err := s.ReopenList(list, false); err != nil {
 		return err
 	}
-	log.Warn("[dbg] after reopenFolder", "s.BlocksAvailable()", s.BlocksAvailable(), "s.IndicesMax()", s.IndicesMax(), "SegmentsMax", s.SegmentsMax(), "s.idxAvailability", s.idxAvailability())
 	return nil
 }
 
