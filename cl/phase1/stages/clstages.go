@@ -374,8 +374,9 @@ func ConsensusClStages(ctx context.Context,
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
 						var highestProcessed uint64
-						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs, verifyBlobSigFunc); err != nil {
+						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
+							cfg.rpc.BanPeer(blobs.Peer)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
 

@@ -329,7 +329,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Debug("Error requesting blobs", "err", err)
 			continue
 		}
-		lastProcessed, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs, func(header *cltypes.SignedBeaconBlockHeader) error {
+		lastProcessed, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
 			// The block is preverified so just check that the signature is correct against the block
 			for _, block := range batch {
 				if block.Block.Slot != header.Header.Slot {
@@ -343,7 +343,8 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			return fmt.Errorf("block not in batch")
 		})
 		if err != nil {
-			cfg.logger.Debug("Error verifying blobs", "err", err)
+			rpc.BanPeer(blobs.Peer)
+			cfg.logger.Warn("Error verifying blobs", "err", err)
 			continue
 		}
 

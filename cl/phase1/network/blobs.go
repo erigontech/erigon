@@ -59,10 +59,16 @@ func BlobsIdentifiersFromBlindedBlocks(blocks []*cltypes.SignedBlindedBeaconBloc
 	return ids, nil
 }
 
+type PeerAndSidecars struct {
+	Peer      string
+	Responses []*cltypes.BlobSidecar
+}
+
 // RequestBlobsFrantically requests blobs from the network frantically.
-func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, error) {
+func RequestBlobsFrantically(ctx context.Context, r *rpc.BeaconRpcP2P, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*PeerAndSidecars, error) {
 	var atomicResp atomic.Value
-	atomicResp.Store([]*cltypes.BlobSidecar{})
+
+	atomicResp.Store(&PeerAndSidecars{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
 	defer reqInterval.Stop()
 Loop:
@@ -70,11 +76,11 @@ Loop:
 		select {
 		case <-reqInterval.C:
 			go func() {
-				if len(atomicResp.Load().([]*cltypes.BlobSidecar)) > 0 {
+				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 					return
 				}
 				// this is so we do not get stuck on a side-fork
-				responses, _, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
+				responses, pid, err := r.SendBlobsSidecarByIdentifierReq(ctx, req)
 
 				if err != nil {
 					return
@@ -82,10 +88,13 @@ Loop:
 				if responses == nil {
 					return
 				}
-				if len(atomicResp.Load().([]*cltypes.BlobSidecar)) > 0 {
+				if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 					return
 				}
-				atomicResp.Store(responses)
+				atomicResp.Store(&PeerAndSidecars{
+					Peer:      pid,
+					Responses: responses,
+				})
 			}()
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -93,11 +102,11 @@ Loop:
 			log.Debug("RequestBlobsFrantically: timeout")
 			return nil, nil
 		default:
-			if len(atomicResp.Load().([]*cltypes.BlobSidecar)) > 0 {
+			if len(atomicResp.Load().(*PeerAndSidecars).Responses) > 0 {
 				break Loop
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	return atomicResp.Load().([]*cltypes.BlobSidecar), nil
+	return atomicResp.Load().(*PeerAndSidecars), nil
 }
