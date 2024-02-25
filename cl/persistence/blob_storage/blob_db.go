@@ -270,6 +270,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			for i, sidecar := range sds.sidecars {
 				kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
 			}
+			fmt.Println(blobs)
 			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
 				errAtomic.Store(fmt.Errorf("sidecar is wrong"))
 				return
