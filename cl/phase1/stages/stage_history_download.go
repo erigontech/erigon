@@ -289,9 +289,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return err
 			}
-			if currentSlot-visited == 4427559 {
-				fmt.Println("blockRoot", blockRoot, "hasBlob", blobsCount)
-			}
 
 			if block.Block.Body.BlobKzgCommitments.Len() == int(blobsCount) {
 				continue
