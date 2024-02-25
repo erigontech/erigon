@@ -2,6 +2,7 @@ package cltypes
 
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -37,14 +38,7 @@ func (b *BlobSidecar) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (b *BlobSidecar) EncodingSizeSSZ() int {
-	size := 8 + 4096*32 + 48 + 48
-	if b.SignedBlockHeader != nil {
-		size += b.SignedBlockHeader.EncodingSizeSSZ()
-	}
-	if b.CommitmentInclusionProof != nil {
-		size += b.CommitmentInclusionProof.EncodingSizeSSZ()
-	}
-	return size
+	return length.BlockNum + 4096*32 + length.Bytes48 + length.Bytes48 + CommitmentBranchSize*length.Hash + length.Bytes96 + length.Hash*3 + length.BlockNum*2
 }
 
 func (b *BlobSidecar) DecodeSSZ(buf []byte, version int) error {

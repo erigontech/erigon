@@ -28,7 +28,7 @@ const subdivisionSlot = 10_000
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) error
-	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) ([]*cltypes.BlobSidecar, bool, error)
+	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) (out []*cltypes.BlobSidecar, found bool, err error)
 	WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot libcommon.Hash) (uint32, error)
 	Prune() error
