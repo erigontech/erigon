@@ -989,6 +989,9 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 		if blk.Version() < clparams.DenebVersion {
 			continue
 		}
+		if blk.Block.Slot%10_000 == 0 {
+			log.Info("Checking slot", "slot", blk.Block.Slot)
+		}
 		blockRoot, err := blk.Block.HashSSZ()
 		if err != nil {
 			return err
