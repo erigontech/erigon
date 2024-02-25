@@ -1003,6 +1003,9 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 			return err
 		}
 		if haveBlobs != uint32(blk.Block.Body.BlobKzgCommitments.Len()) {
+			if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
+				return err
+			}
 			return fmt.Errorf("slot %d: have %d blobs, want %d", i, haveBlobs, blk.Block.Body.BlobKzgCommitments.Len())
 		}
 	}

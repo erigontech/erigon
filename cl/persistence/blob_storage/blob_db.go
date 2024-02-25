@@ -27,6 +27,7 @@ const subdivisionSlot = 10_000
 
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
+	RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) error
 	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) ([]*cltypes.BlobSidecar, bool, error)
 	HasBlobs(blockRoot libcommon.Hash) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error // Used for P2P networking
@@ -188,6 +189,30 @@ func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot libcommo
 		return 0, nil
 	}
 	return binary.LittleEndian.Uint32(val), nil
+}
+
+func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) error {
+	tx, err := bs.db.BeginRw(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	val, err := tx.GetOne(kv.BlockRootToKzgCommitments, blockRoot[:])
+	if err != nil {
+		return err
+	}
+	if len(val) == 0 {
+		return nil
+	}
+	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
+	for i := uint32(0); i < kzgCommitmentsLength; i++ {
+		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
+		if err := bs.fs.Remove(filePath); err != nil {
+			return err
+		}
+		tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
+	}
+	return tx.Commit()
 }
 
 type sidecarsPayload struct {

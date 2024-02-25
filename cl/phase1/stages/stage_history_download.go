@@ -323,10 +323,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Debug("Error generating blob identifiers", "err", err)
 			continue
 		}
-		if req.Len() == 0 {
-			currentSlot -= blocksBatchSize + 1
-			continue
-		}
 		// Request the blobs
 		blobs, err := network.RequestBlobsFrantically(ctx, rpc, req)
 		if err != nil {
