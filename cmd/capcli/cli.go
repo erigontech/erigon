@@ -1069,6 +1069,7 @@ func (b *BlobIdxsRebuilding) Run(ctx *Context) error {
 				if err2 := blobStorage.EXP2(blockRoot, uint32(j)); err2 != nil {
 					return err2
 				}
+				fmt.Println(err)
 				break // file not found
 			}
 
