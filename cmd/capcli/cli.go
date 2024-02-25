@@ -996,6 +996,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
+		fmt.Println(blockRoot)
 		haveBlobs, err := blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 		if err != nil {
 			return err

@@ -187,7 +187,7 @@ func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot libcommo
 	if len(val) != 4 {
 		return 0, nil
 	}
-	fmt.Println(val)
+	fmt.Println(blockRoot, val)
 	return binary.LittleEndian.Uint32(val), nil
 }
 
