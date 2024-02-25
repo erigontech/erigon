@@ -267,11 +267,12 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	for currentSlot >= targetSlot {
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
-		for i := uint64(0); len(batch) < int(blocksBatchSize); i++ {
-			if currentSlot-i < targetSlot {
+		visited := uint64(0)
+		for ; len(batch) < int(blocksBatchSize); visited++ {
+			if currentSlot-visited < targetSlot {
 				break
 			}
-			block, err := cfg.blockReader.ReadBlindedBlockBySlot(ctx, tx, currentSlot-i)
+			block, err := cfg.blockReader.ReadBlindedBlockBySlot(ctx, tx, currentSlot-visited)
 			if err != nil {
 				return err
 			}
@@ -299,7 +300,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			batch = append(batch, block)
 		}
 		if len(batch) == 0 {
-			currentSlot -= blocksBatchSize - 1
+			currentSlot -= visited
 			fmt.Println(currentSlot, targetSlot)
 			continue
 		}
