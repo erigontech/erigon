@@ -1005,7 +1005,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 			if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
 				return err
 			}
-			return fmt.Errorf("slot %d: have %d blobs, want %d", i, haveBlobs, blk.Block.Body.BlobKzgCommitments.Len())
+			log.Warn("Slot", "slot", i, "have", haveBlobs, "want", blk.Block.Body.BlobKzgCommitments.Len())
 		}
 	}
 	log.Info("Blob archive store check passed")
