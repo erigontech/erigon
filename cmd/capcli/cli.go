@@ -78,7 +78,6 @@ var CLI struct {
 	ArchiveSanitizer        ArchiveSanitizer        `cmd:"" help:"archive sanitizer"`
 	BenchmarkNode           BenchmarkNode           `cmd:"" help:"benchmark node"`
 	BlobArchiveStoreCheck   BlobArchiveStoreCheck   `cmd:"" help:"blob archive store check"`
-	BlobIdxsRebuilding      BlobIdxsRebuilding      `cmd:"" help:"blob idxs rebuilding"`
 }
 
 type chainCfg struct {
