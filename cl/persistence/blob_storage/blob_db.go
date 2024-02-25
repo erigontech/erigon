@@ -83,6 +83,7 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot libcommon.
 		}
 	}
 	val := make([]byte, 4)
+	fmt.Println(len(blobSidecars))
 	binary.LittleEndian.PutUint32(val, uint32(len(blobSidecars)))
 	tx, err := bs.db.BeginRw(ctx)
 	if err != nil {
@@ -187,7 +188,6 @@ func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot libcommo
 	if len(val) != 4 {
 		return 0, nil
 	}
-	fmt.Println(blockRoot, val)
 	return binary.LittleEndian.Uint32(val), nil
 }
 
