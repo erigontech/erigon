@@ -83,7 +83,7 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot libcommon.
 		}
 	}
 	val := make([]byte, 4)
-	fmt.Println(len(blobSidecars))
+	fmt.Println(blockRoot, len(blobSidecars))
 	binary.LittleEndian.PutUint32(val, uint32(len(blobSidecars)))
 	tx, err := bs.db.BeginRw(ctx)
 	if err != nil {
