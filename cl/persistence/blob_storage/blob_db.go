@@ -29,7 +29,7 @@ type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot libcommon.Hash, blobSidecars []*cltypes.BlobSidecar) error
 	ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot libcommon.Hash) ([]*cltypes.BlobSidecar, bool, error)
 	HasBlobs(blockRoot libcommon.Hash) (bool, error)
-	WriteStream(w io.Writer, blockRoot libcommon.Hash, idx uint64) error // Used for P2P networking
+	WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot libcommon.Hash) (uint32, error)
 	Prune() error
 }
@@ -163,8 +163,8 @@ func (bs *BlobStore) HasBlobs(blockRoot libcommon.Hash) (bool, error) {
 	return tx.Has(kv.BlockRootToKzgCommitments, blockRoot[:])
 }
 
-func (bs *BlobStore) WriteStream(w io.Writer, blockRoot libcommon.Hash, idx uint64) error {
-	_, filePath := blobSidecarFilePath(0, idx, blockRoot)
+func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error {
+	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
 	file, err := bs.fs.Open(filePath)
 	if err != nil {
 		return err

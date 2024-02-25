@@ -65,7 +65,7 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 			if _, err := s.Write(forkDigest[:]); err != nil {
 				return err
 			}
-			if err := c.blobsStorage.WriteStream(s, blockRoot, uint64(i)); err != nil {
+			if err := c.blobsStorage.WriteStream(s, slot, blockRoot, uint64(i)); err != nil {
 				fmt.Println(err)
 				return err
 			}
@@ -120,7 +120,7 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream) error {
 		if _, err := s.Write(forkDigest[:]); err != nil {
 			return err
 		}
-		if err := c.blobsStorage.WriteStream(s, id.BlockRoot, id.Index); err != nil {
+		if err := c.blobsStorage.WriteStream(s, *slot, id.BlockRoot, id.Index); err != nil {
 			return err
 		}
 		written++
