@@ -300,6 +300,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		if len(batch) == 0 {
 			currentSlot -= blocksBatchSize - 1
+			fmt.Println(currentSlot, targetSlot)
 			continue
 		}
 
