@@ -954,6 +954,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.InactivityScoreRecoveryRate = 16
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
+	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
 	cfg.InitializeForkSchedule()
 	return cfg
 }
