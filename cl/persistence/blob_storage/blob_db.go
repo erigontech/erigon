@@ -264,8 +264,10 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		// if the sidecar is valid, add it to the current payload of sidecars being built.
 		if identifier.BlockRoot != prevBlockRoot {
 			storableSidecars = append(storableSidecars, currentSidecarsPayload)
+			if len(currentSidecarsPayload.sidecars) != 0 {
+				lastProcessed = currentSidecarsPayload.sidecars[len(currentSidecarsPayload.sidecars)-1].SignedBlockHeader.Header.Slot
+			}
 			currentSidecarsPayload = &sidecarsPayload{blockRoot: identifier.BlockRoot}
-			lastProcessed = sidecars[i].SignedBlockHeader.Header.Slot
 		}
 		currentSidecarsPayload.sidecars = append(currentSidecarsPayload.sidecars, sidecar)
 		totalProcessed++
