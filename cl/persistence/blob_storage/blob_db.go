@@ -161,7 +161,8 @@ func (bs *BlobStore) HasBlobs(blockRoot libcommon.Hash) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback()
-	return tx.Has(kv.BlockRootToKzgCommitments, blockRoot[:])
+	val, err := tx.GetOne(kv.BlockRootToKzgCommitments, blockRoot[:])
+	return len(val) == 4, err
 }
 
 func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error {
