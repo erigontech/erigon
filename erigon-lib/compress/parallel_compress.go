@@ -803,6 +803,7 @@ func processSuperstring(ctx context.Context, superstringCh chan []byte, dictColl
 			   defined for this substring, we put zero. */
 			if inv[i] == int32(n-1) {
 				k = 0
+				lcp[inv[i]] = 0
 				continue
 			}
 
