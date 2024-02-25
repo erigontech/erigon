@@ -1042,8 +1042,8 @@ func (b *BlobIdxsRebuilding) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
-	currentSlot := 6_000_000
-	log.Info("Started chain download", "chain", b.Chain, "current slot", 6_000_000, "from", 0)
+	currentSlot := uint64(6_000_000)
+	log.Info("Started chain download", "chain", b.Chain, "current slot", currentSlot, "from", 0)
 
 	for i := uint64(0); i < currentSlot; i++ {
 		blk, err := snr.ReadBlindedBlockBySlot(ctx, tx, i)
