@@ -78,12 +78,10 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
 
-	fmt.Println("A")
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, clparams.DenebVersion); err != nil {
 		return err
 	}
-	fmt.Println("B")
 
 	if err := c.checkRateLimit(peerId, "blobSidecar", rateLimits.blobSidecarsLimit, req.Len()); err != nil {
 		ssz_snappy.EncodeAndWrite(s, &emptyString{}, RateLimitedPrefix)

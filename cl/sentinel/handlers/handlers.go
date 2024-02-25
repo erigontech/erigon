@@ -131,8 +131,8 @@ func NewConsensusHandlers(ctx context.Context, db freezeblocks.BeaconSnapshotRea
 	if c.enableBlocks {
 		hm[communication.BeaconBlocksByRangeProtocolV2] = c.beaconBlocksByRangeHandler
 		hm[communication.BeaconBlocksByRootProtocolV2] = c.beaconBlocksByRootHandler
-		hm[communication.BlobSidecarByRangeProtocolV1] = c.blobsSidecarsByRangeHandler
-		hm[communication.BlobSidecarByRootProtocolV1] = c.blobsSidecarsByIdsHandler
+		//hm[communication.BlobSidecarByRangeProtocolV1] = c.blobsSidecarsByRangeHandler
+		//hm[communication.BlobSidecarByRootProtocolV1] = c.blobsSidecarsByIdsHandler
 	}
 
 	c.handlers = map[protocol.ID]network.StreamHandler{}
