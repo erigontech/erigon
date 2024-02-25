@@ -78,6 +78,7 @@ var CLI struct {
 	ArchiveSanitizer        ArchiveSanitizer        `cmd:"" help:"archive sanitizer"`
 	BenchmarkNode           BenchmarkNode           `cmd:"" help:"benchmark node"`
 	BlobArchiveStoreCheck   BlobArchiveStoreCheck   `cmd:"" help:"blob archive store check"`
+	BlobIdxsRebuilding      BlobIdxsRebuilding      `cmd:"" help:"blob idxs rebuilding"`
 }
 
 type chainCfg struct {
@@ -996,13 +997,80 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 		if err != nil {
 			return err
 		}
-		fmt.Println(blockRoot)
+
 		haveBlobs, err := blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 		if err != nil {
 			return err
 		}
 		if haveBlobs != uint32(blk.Block.Body.BlobKzgCommitments.Len()) {
 			return fmt.Errorf("slot %d: have %d blobs, want %d", i, haveBlobs, blk.Block.Body.BlobKzgCommitments.Len())
+		}
+	}
+	log.Info("Blob archive store check passed")
+	return nil
+}
+
+type BlobIdxsRebuilding struct {
+	chainCfg
+	outputFolder
+}
+
+func (b *BlobIdxsRebuilding) Run(ctx *Context) error {
+
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(b.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+	log.Info("Started chain download", "chain", b.Chain)
+
+	dirs := datadir.New(b.Datadir)
+
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
+
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	currentSlot := utils.GetCurrentSlot(genesisConfig.GenesisTime, beaconConfig.SlotsPerEpoch)
+	for i := uint64(0); i < currentSlot; i++ {
+		blk, err := snr.ReadBlindedBlockBySlot(ctx, tx, i)
+		if err != nil {
+			return err
+		}
+		if blk == nil {
+			continue
+		}
+		if blk.Version() < clparams.DenebVersion {
+			continue
+		}
+		if blk.Block.Slot%10_000 == 0 {
+			log.Info("Checking slot", "slot", blk.Block.Slot)
+		}
+		blockRoot, err := blk.Block.HashSSZ()
+		if err != nil {
+			return err
+		}
+
+		for j := 0; j < blk.Block.Body.BlobKzgCommitments.Len(); j++ {
+			if err := blobStorage.WriteStream(io.Discard, i, blockRoot, uint64(j)); err != nil {
+				if err2 := blobStorage.EXP2(blockRoot, uint32(j)); err2 != nil {
+					return err2
+				}
+				break // file not found
+			}
+
 		}
 	}
 	log.Info("Blob archive store check passed")

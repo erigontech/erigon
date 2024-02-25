@@ -31,6 +31,7 @@ type BlobStorage interface {
 	HasBlobs(blockRoot libcommon.Hash) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot libcommon.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot libcommon.Hash) (uint32, error)
+	EXP2(blockRoot libcommon.Hash, l uint32) error
 	Prune() error
 }
 
@@ -188,6 +189,20 @@ func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot libcommo
 		return 0, nil
 	}
 	return binary.LittleEndian.Uint32(val), nil
+}
+
+func (bs *BlobStore) EXP2(blockRoot libcommon.Hash, l uint32) error {
+	tx, err := bs.db.BeginRw(context.Background())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	val := make([]byte, 4)
+	binary.LittleEndian.PutUint32(val, l)
+	if err := tx.Put(kv.BlockRootToKzgCommitments, blockRoot[:], val); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 type sidecarsPayload struct {
