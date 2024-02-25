@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"fmt"
-
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -66,7 +64,6 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream) error 
 				return err
 			}
 			if err := c.blobsStorage.WriteStream(s, slot, blockRoot, uint64(i)); err != nil {
-				fmt.Println(err)
 				return err
 			}
 			written++

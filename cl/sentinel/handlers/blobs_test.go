@@ -127,7 +127,6 @@ func TestBlobsByRangeHandler(t *testing.T) {
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
-		fmt.Println(encodedLn)
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(stream)
@@ -139,7 +138,6 @@ func TestBlobsByRangeHandler(t *testing.T) {
 			}
 			bytesRead += n
 		}
-		fmt.Println(bytesRead)
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {
@@ -250,7 +248,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 
 		encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
 		require.NoError(t, err)
-		fmt.Println(encodedLn)
 
 		raw := make([]byte, encodedLn)
 		sr := snappy.NewReader(stream)
@@ -262,7 +259,6 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 			}
 			bytesRead += n
 		}
-		fmt.Println(bytesRead)
 		// Fork digests
 		respForkDigest := binary.BigEndian.Uint32(forkDigest)
 		if respForkDigest == 0 {

@@ -83,7 +83,6 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot libcommon.
 		}
 	}
 	val := make([]byte, 4)
-	fmt.Println(blockRoot, len(blobSidecars))
 	binary.LittleEndian.PutUint32(val, uint32(len(blobSidecars)))
 	tx, err := bs.db.BeginRw(ctx)
 	if err != nil {
@@ -216,7 +215,6 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 	// Some will be stored, truncate when validation goes to shit
 	for i, sidecar := range sidecars {
 		identifier := identifiers.Get(i)
-		fmt.Println(identifier.BlockRoot, identifier.Index)
 		// check if the root of the block matches the identifier
 		sidecarBlockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
 		if err != nil {
@@ -246,6 +244,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		}
 		currentSidecarsPayload.sidecars = append(currentSidecarsPayload.sidecars, sidecar)
 		totalProcessed++
+		prevBlockRoot = identifier.BlockRoot
 	}
 	if totalProcessed == identifiers.Len() {
 		storableSidecars = append(storableSidecars, currentSidecarsPayload)
@@ -270,7 +269,6 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			for i, sidecar := range sds.sidecars {
 				kzgProofs[i] = gokzg4844.KZGProof(sidecar.KzgProof)
 			}
-			fmt.Println(blobs)
 			if err := kzgCtx.VerifyBlobKZGProofBatch(blobs, kzgCommitments, kzgProofs); err != nil {
 				errAtomic.Store(fmt.Errorf("sidecar is wrong"))
 				return

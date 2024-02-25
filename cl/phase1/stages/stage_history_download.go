@@ -300,7 +300,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		if len(batch) == 0 {
 			currentSlot -= visited
-			fmt.Println(currentSlot, targetSlot)
 			continue
 		}
 
