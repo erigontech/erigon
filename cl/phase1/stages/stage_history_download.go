@@ -285,18 +285,15 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			if err != nil {
 				return err
 			}
-			hasBlob, err := cfg.blobStorage.HasBlobs(blockRoot)
+			blobsCount, err := cfg.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 			if err != nil {
 				return err
 			}
 			if currentSlot-visited == 4427559 {
-				fmt.Println("blockRoot", blockRoot, "hasBlob", hasBlob)
-			}
-			if hasBlob {
-				continue
+				fmt.Println("blockRoot", blockRoot, "hasBlob", blobsCount)
 			}
 
-			if block.Block.Body.BlobKzgCommitments.Len() == 0 {
+			if block.Block.Body.BlobKzgCommitments.Len() == int(blobsCount) {
 				continue
 			}
 			batch = append(batch, block)
