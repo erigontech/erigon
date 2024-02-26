@@ -662,7 +662,10 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *Segment, bu
 	}
 
 	reader := recsplit.NewIndexReader(index)
-	localID := reader.Lookup(hash[:])
+	localID, ok := reader.Lookup(hash[:])
+	if !ok {
+		return nil, nil
+	}
 	headerOffset := index.OrdinalLookup(localID)
 	gg := sn.MakeGetter()
 	gg.Reset(headerOffset)
@@ -812,7 +815,10 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		}
 
 		reader := recsplit.NewIndexReader(idxTxnHash)
-		txnId := reader.Lookup(txnHash[:])
+		txnId, ok := reader.Lookup(txnHash[:])
+		if !ok {
+			continue
+		}
 		offset := idxTxnHash.OrdinalLookup(txnId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -832,7 +838,10 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
-		blockNum := reader2.Lookup(txnHash[:])
+		blockNum, ok := reader2.Lookup(txnHash[:])
+		if !ok {
+			continue
+		}
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
@@ -1096,7 +1105,10 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(txnHash[:])
+		blockEventId, exists := reader.Lookup(txnHash[:])
+		if !exists {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -1190,7 +1202,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(borTxHash[:])
+		blockEventId, ok := reader.Lookup(borTxHash[:])
+		if !ok {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)

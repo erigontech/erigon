@@ -1881,8 +1881,11 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
+		KeyCount: d.Count(),
+
+		Enums:              true,
+		LessFalsePositives: true,
+
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
@@ -2390,4 +2393,28 @@ func (v *View) BodiesSegment(blockNum uint64) (*Segment, bool) {
 }
 func (v *View) TxsSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(snaptype.Transactions, blockNum)
+}
+
+func RemoveIncompatibleIndices(snapsDir string) error {
+	l, err := dir2.ListFiles(snapsDir, ".idx")
+	if err != nil {
+		return err
+	}
+	for _, fPath := range l {
+		index, err := recsplit.OpenIndex(fPath)
+		if err != nil {
+			if errors.Is(err, recsplit.IncompatibleErr) {
+				_, fName := filepath.Split(fPath)
+				if err = os.Remove(fPath); err != nil {
+					log.Warn("Removing incompatible index", "file", fName, "err", err)
+				} else {
+					log.Info("Removing incompatible index", "file", fName)
+				}
+				continue
+			}
+			return fmt.Errorf("%w, %s", err, fPath)
+		}
+		index.Close()
+	}
+	return nil
 }

@@ -66,10 +66,14 @@ func remix(z uint64) uint64 {
 type RecSplit struct {
 	hasher          murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
 	offsetCollector *etl.Collector  // Collector that sorts by offsets
+
 	indexW          *bufio.Writer
 	indexF          *os.File
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
+
+	existenceF *os.File
+	existenceW *bufio.Writer
 
 	indexFileName          string
 	indexFile, tmpFilePath string
@@ -108,6 +112,7 @@ type RecSplit struct {
 	numBuf             [8]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
 	logger             log.Logger
@@ -119,7 +124,8 @@ type RecSplitArgs struct {
 	// Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
 	// if Enum=false: can have unsorted and duplicated values
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
-	Enums bool
+	Enums              bool
+	LessFalsePositives bool
 
 	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir      string
@@ -174,6 +180,15 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 	if args.Enums {
 		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
+	}
+	rs.lessFalsePositives = args.LessFalsePositives
+	if rs.lessFalsePositives {
+		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		if err != nil {
+			return nil, err
+		}
+		rs.existenceF = bufferFile
+		rs.existenceW = bufio.NewWriter(bufferFile)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -351,6 +366,12 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
+		}
+		if rs.lessFalsePositives {
+			//1 byte from each hashed key
+			if err := rs.existenceW.WriteByte(byte(hi)); err != nil {
+				return err
+			}
 		}
 	} else {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
@@ -651,19 +672,35 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
+	var features Features
 	if rs.enums {
-		if err := rs.indexW.WriteByte(1); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
+		features |= Enums
+		if rs.lessFalsePositives {
+			features |= LessFalsePositives
 		}
-	} else {
-		if err := rs.indexW.WriteByte(0); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
-		}
+	}
+	if err := rs.indexW.WriteByte(byte(features)); err != nil {
+		return fmt.Errorf("writing enums = true: %w", err)
 	}
 	if rs.enums {
 		// Write out elias fano for offsets
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
+		}
+
+		if rs.lessFalsePositives {
+			if err := rs.existenceW.Flush(); err != nil {
+				return err
+			}
+			//write len of array, and array
+			binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+			if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+				return err
+			}
+			if _, err := io.Copy(rs.indexW, bufio.NewReader(rs.existenceF)); err != nil {
+				return err
+			}
+			_ = rs.existenceF.Close()
 		}
 	}
 	// Write out the size of golomb rice params

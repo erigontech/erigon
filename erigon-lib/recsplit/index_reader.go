@@ -57,12 +57,12 @@ func (r *IndexReader) sum2(key1, key2 []byte) (hi uint64, lo uint64) {
 }
 
 // Lookup wraps index Lookup
-func (r *IndexReader) Lookup(key []byte) uint64 {
+func (r *IndexReader) Lookup(key []byte) (uint64, bool) {
 	bucketHash, fingerprint := r.sum(key)
 	return r.index.Lookup(bucketHash, fingerprint)
 }
 
-func (r *IndexReader) Lookup2(key1, key2 []byte) uint64 {
+func (r *IndexReader) Lookup2(key1, key2 []byte) (uint64, bool) {
 	bucketHash, fingerprint := r.sum2(key1, key2)
 	return r.index.Lookup(bucketHash, fingerprint)
 }
@@ -78,10 +78,5 @@ func (r *IndexReader) Close() {
 	r.index.readers.Put(r)
 }
 
-func (r *IndexReader) Sum(key []byte) (uint64, uint64) { return r.sum(key) }
-func (r *IndexReader) LookupHash(hi, lo uint64) uint64 {
-	if r.index != nil {
-		return r.index.Lookup(hi, lo)
-	}
-	return 0
-}
+func (r *IndexReader) Sum(key []byte) (uint64, uint64)         { return r.sum(key) }
+func (r *IndexReader) LookupHash(hi, lo uint64) (uint64, bool) { return r.index.Lookup(hi, lo) }

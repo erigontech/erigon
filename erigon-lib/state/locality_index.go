@@ -311,12 +311,11 @@ func (lc *ctxLocalityIdx) lookupLatest(key []byte) (latestShard uint64, ok bool,
 		return 0, false, nil
 	}
 
-	//if bytes.HasPrefix(key, common.FromHex("f29a")) {
-	//	res, _ := lc.file.src.bm.At(lc.reader.Lookup(key))
-	//	l, _, _ := lc.file.src.bm.LastAt(lc.reader.Lookup(key))
-	//	fmt.Printf("idx: %x, %d, last: %d\n", key, res, l)
-	//}
-	return lc.file.src.bm.LastAt(lc.reader.LookupHash(hi, lo))
+	offset, ok := lc.reader.LookupHash(hi, lo)
+	if !ok {
+		return 0, false, nil
+	}
+	return lc.file.src.bm.LastAt(offset)
 }
 
 func (li *LocalityIndex) exists(fromStep, toStep uint64) bool {

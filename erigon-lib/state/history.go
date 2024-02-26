@@ -1212,8 +1212,10 @@ func (hc *HistoryContext) getNoStateByLocalityIndex(key []byte, txNum uint64) ([
 		if reader.Empty() {
 			return true
 		}
-		offset := reader.Lookup(key)
-
+		offset, ok := reader.Lookup(key)
+		if !ok {
+			return false
+		}
 		g := hc.ic.statelessGetter(item.i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
@@ -1290,7 +1292,10 @@ func (hc *HistoryContext) getNoStateByLocalityIndex(key []byte, txNum uint64) ([
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
 		reader := hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(txKey[:], key)
+		offset, ok := reader.Lookup2(txKey[:], key)
+		if !ok {
+			return nil, false, nil
+		}
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 		g := hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
@@ -1306,7 +1311,10 @@ func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint6
 	if hs.indexFile.reader.Empty() {
 		return nil, false, txNum
 	}
-	offset := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.Lookup(key)
+	if !ok {
+		return nil, false, txNum
+	}
 	g := hs.indexFile.getter
 	g.Reset(offset)
 	k, _ := g.NextUncompressed()
@@ -1322,7 +1330,10 @@ func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint6
 	}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], n)
-	offset = hs.historyFile.reader.Lookup2(txKey[:], key)
+	offset, ok = hs.historyFile.reader.Lookup2(txKey[:], key)
+	if !ok {
+		return nil, false, txNum
+	}
 	//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 	g = hs.historyFile.getter
 	g.Reset(offset)
@@ -1338,7 +1349,10 @@ func (hs *HistoryStep) MaxTxNum(key []byte) (bool, uint64) {
 	if hs.indexFile.reader.Empty() {
 		return false, 0
 	}
-	offset := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.Lookup(key)
+	if !ok {
+		return false, 0
+	}
 	g := hs.indexFile.getter
 	g.Reset(offset)
 	k, _ := g.NextUncompressed()
@@ -1526,8 +1540,10 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-
+		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		if !ok {
+			continue
+		}
 		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
@@ -1829,7 +1845,10 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		if !ok {
+			continue
+		}
 		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)

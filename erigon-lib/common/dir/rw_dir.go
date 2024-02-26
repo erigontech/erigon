@@ -122,12 +122,12 @@ func DeleteFiles(dirs ...string) error {
 	return g.Wait()
 }
 
-func ListFiles(dir string, extensions ...string) ([]string, error) {
+func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-	res := make([]string, 0, len(files))
+	paths = make([]string, 0, len(files))
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
 			continue
@@ -144,7 +144,7 @@ func ListFiles(dir string, extensions ...string) ([]string, error) {
 		if !match {
 			continue
 		}
-		res = append(res, filepath.Join(dir, f.Name()))
+		paths = append(paths, filepath.Join(dir, f.Name()))
 	}
-	return res, nil
+	return paths, nil
 }
