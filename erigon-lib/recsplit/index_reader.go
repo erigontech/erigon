@@ -19,7 +19,6 @@ package recsplit
 import (
 	"sync"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 )
 
@@ -83,7 +82,6 @@ func (r *IndexReader) Sum(key []byte) (uint64, uint64)         { return r.sum(ke
 func (r *IndexReader) LookupHash(hi, lo uint64) (uint64, bool) { return r.index.Lookup(hi, lo) }
 func (r *IndexReader) OrdinalLookup(id uint64) uint64          { return r.index.OrdinalLookup(id) }
 func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
-	log.Warn("[dbg] TwoLayerLookup", "is enums", r.index.enums, "is lessFalsePositives", r.index.lessFalsePositives, "name", r.index.fileName)
 	if r.index.Empty() {
 		return 0, false
 	}
