@@ -1272,9 +1272,12 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 
 	if !UseBpsTree {
-		valuesIdxPath := d.kvAccessorFilePath(step, step+1)
-		if valuesIdx, err = buildIndexThenOpen(ctx, valuesDecomp, d.compression, valuesIdxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync); err != nil {
+		if err = d.buildMapIdx(ctx, step, step+1, valuesDecomp, ps); err != nil {
 			return StaticFiles{}, fmt.Errorf("build %s values idx: %w", d.filenameBase, err)
+		}
+		valuesIdx, err = recsplit.OpenIndex(d.efAccessorFilePath(step, step+1))
+		if err != nil {
+			return StaticFiles{}, err
 		}
 	}
 
@@ -1302,6 +1305,21 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		valuesBt:     bt,
 		bloom:        bloom,
 	}, nil
+}
+
+func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *compress.Decompressor, ps *background.ProgressSet) error {
+	idxPath := d.kvAccessorFilePath(fromStep, toStep)
+	cfg := recsplit.RecSplitArgs{
+		Enums: false,
+		//LessFalsePositives: false,
+
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     d.dirs.Tmp,
+		IndexFile:  idxPath,
+		Salt:       d.salt,
+	}
+	return buildIndex(ctx, data, d.compression, idxPath, false, cfg, ps, d.logger, d.noFsync)
 }
 
 func (d *Domain) missedBtreeIdxFiles() (l []*filesItem) {
@@ -1386,23 +1404,15 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 			}
 
 			fromStep, toStep := item.startTxNum/d.aggregationStep, item.endTxNum/d.aggregationStep
-			idxPath := d.kvAccessorFilePath(fromStep, toStep)
-			ix, err := buildIndexThenOpen(ctx, item.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync)
+			err := d.buildMapIdx(ctx, fromStep, toStep, item.decompressor, ps)
 			if err != nil {
 				return fmt.Errorf("build %s values recsplit index: %w", d.filenameBase, err)
 			}
-			ix.Close()
 			return nil
 		})
 	}
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
-	if err := buildIndex(ctx, d, compressed, idxPath, tmpdir, values, salt, ps, logger, noFsync); err != nil {
-		return nil, err
-	}
-	return recsplit.OpenIndex(idxPath)
-}
 func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*ExistenceFilter, error) {
 	if err := buildIdxFilter(ctx, d, compressed, idxPath, salt, ps, logger, noFsync); err != nil {
 		return nil, err
@@ -1412,7 +1422,7 @@ func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, com
 	}
 	return OpenExistenceFilter(idxPath)
 }
-func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
+func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {
@@ -1426,15 +1436,8 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCo
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	var rs *recsplit.RecSplit
 	var err error
-	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   count,
-		Enums:      false,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpdir,
-		IndexFile:  idxPath,
-		Salt:       salt,
-	}, logger); err != nil {
+	cfg.KeyCount = count
+	if rs, err = recsplit.NewRecSplit(cfg, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
 	}
 	defer rs.Close()
