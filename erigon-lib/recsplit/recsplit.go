@@ -691,26 +691,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
 
-		if rs.lessFalsePositives {
-			if err := rs.existenceW.Flush(); err != nil {
-				return err
-			}
-			//write len of array, and array
-			binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-			if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
-				return err
-			}
-			if _, err := rs.existenceF.Seek(0, io.SeekStart); err != nil {
-				return err
-			}
-			n, err := io.Copy(rs.indexW, rs.existenceF)
-			if err != nil {
-				return err
-			}
-			if n != int64(rs.keysAdded) {
-				panic(fmt.Sprintf("why? %d, %d", n, rs.keysAdded))
-			}
-			_ = rs.existenceF.Close()
+		if err := rs.flushExistenceFilter(); err != nil {
+			return err
 		}
 	}
 	// Write out the size of golomb rice params
