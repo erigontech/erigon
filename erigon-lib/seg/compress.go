@@ -100,7 +100,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
-		go processSuperstring(ctx, superstrings, collector, minPatternScore, wg, logger)
+		go extractPatternsInSuperstrings(ctx, superstrings, collector, minPatternScore, wg, logger)
 	}
 
 	return &Compressor{

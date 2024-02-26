@@ -742,11 +742,11 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	return nil
 }
 
-// processSuperstring is the worker that processes one superstring and puts results
+// extractPatternsInSuperstrings is the worker that processes one superstring and puts results
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func processSuperstring(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
@@ -908,7 +908,7 @@ func processSuperstring(ctx context.Context, superstringCh chan []byte, dictColl
 				}
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
-					logger.Error("processSuperstring", "collect", err)
+					logger.Error("extractPatternsInSuperstrings", "collect", err)
 				}
 				prevSkipped = false //nolint
 				break
