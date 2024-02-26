@@ -28,14 +28,15 @@ import (
 	"time"
 
 	"github.com/google/btree"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/crypto/sha3"
+
+	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 // Defines how to evaluate commitments
@@ -362,7 +363,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 	indexFiles := oldFiles.commitmentIdx
 	historyFiles := oldFiles.commitmentHist
 
-	var comp *compress.Compressor
+	var comp *seg.Compressor
 	var closeItem bool = true
 	defer func() {
 		if closeItem {
@@ -421,7 +422,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		p := ps.AddNew(datFileName, 1)
 		defer ps.Delete(p)
 
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, d.dir, compress.MinPatternScore, workers, log.LvlTrace, d.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge", datPath, d.dir, seg.MinPatternScore, workers, log.LvlTrace, d.logger); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 		}
 		var cp CursorHeap
@@ -524,7 +525,7 @@ func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStati
 		comp.Close()
 		comp = nil
 		valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
-		if valuesIn.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+		if valuesIn.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 		ps.Delete(p)
