@@ -80,12 +80,12 @@ jobs:
       run: |
         curl -X POST -H "Accept: application/json" -d '{"status": "running"}' http://localhost:8080/production/default/status || true
 
-    #- name: Upload test results
-    #  if: always()
-    #  uses: actions/upload-artifact@v2
-    #  with:
-    #    name: test-results
-    #    path: ${{ github.workspace }}/test_results
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results
+        path: ${{ github.workspace }}/../../../../erigon-qa/test_system/qa-tests/tip-tracking/test_results
 
     - name: Action for Success
       if: steps.test_step.outputs.TEST_RESULT == 'success'
