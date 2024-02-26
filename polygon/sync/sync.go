@@ -54,12 +54,10 @@ func (s *Sync) commitExecution(ctx context.Context, oldTip uint64) error {
 		return err
 	}
 
-	err = s.execution.InsertBlocks(newHeaders)
-	if err != nil {
+	if err = s.execution.InsertBlocks(newHeaders); err != nil {
 		return err
 	}
-	err = s.execution.UpdateForkChoice(newTip)
-	return err
+	return s.execution.UpdateForkChoice(newTip)
 }
 
 func (s *Sync) onMilestoneEvent(
@@ -74,8 +72,7 @@ func (s *Sync) onMilestoneEvent(
 	milestoneHeaders := ccBuilder.HeadersInRange(event.Milestone.StartBlock().Uint64(), event.Milestone.Length())
 	err := s.verify(event.Milestone, milestoneHeaders)
 	if err == nil {
-		err = ccBuilder.Prune(event.Milestone.EndBlock().Uint64())
-		if err != nil {
+		if err = ccBuilder.Prune(event.Milestone.EndBlock().Uint64()); err != nil {
 			return err
 		}
 	}
@@ -86,18 +83,15 @@ func (s *Sync) onMilestoneEvent(
 	// unwind to the previous verified milestone
 	oldTip := ccBuilder.Root()
 	oldTipNum := oldTip.Number.Uint64()
-	err = s.execution.UpdateForkChoice(oldTip)
-	if err != nil {
+	if err = s.execution.UpdateForkChoice(oldTip); err != nil {
 		return err
 	}
 
-	err = s.downloader.DownloadUsingMilestones(ctx, oldTipNum)
-	if err != nil {
+	if err = s.downloader.DownloadUsingMilestones(ctx, oldTipNum); err != nil {
 		return err
 	}
 
-	err = s.commitExecution(ctx, oldTipNum)
-	if err != nil {
+	if err = s.commitExecution(ctx, oldTipNum); err != nil {
 		return err
 	}
 
@@ -135,21 +129,18 @@ func (s *Sync) onNewHeaderEvent(
 	}
 
 	oldTip := ccBuilder.Tip()
-	err = ccBuilder.Connect(newHeaders)
-	if err != nil {
+	if err = ccBuilder.Connect(newHeaders); err != nil {
 		s.logger.Debug("sync.Sync.onNewHeaderEvent: couldn't connect a header to the local chain tip, ignoring", "err", err)
 		return nil
 	}
 	newTip := ccBuilder.Tip()
 
 	if newTip != oldTip {
-		err = s.execution.InsertBlocks(newHeaders)
-		if err != nil {
+		if err = s.execution.InsertBlocks(newHeaders); err != nil {
 			return err
 		}
 
-		err = s.execution.UpdateForkChoice(newTip)
-		if err != nil {
+		if err = s.execution.UpdateForkChoice(newTip); err != nil {
 			return err
 		}
 	}
@@ -163,8 +154,7 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	err = s.downloader.DownloadUsingCheckpoints(ctx, oldTip)
-	if err != nil {
+	if err = s.downloader.DownloadUsingCheckpoints(ctx, oldTip); err != nil {
 		return err
 	}
 
@@ -172,13 +162,11 @@ func (s *Sync) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	err = s.downloader.DownloadUsingMilestones(ctx, newTip)
-	if err != nil {
+	if err = s.downloader.DownloadUsingMilestones(ctx, newTip); err != nil {
 		return err
 	}
 
-	err = s.commitExecution(ctx, oldTip)
-	if err != nil {
+	if err = s.commitExecution(ctx, oldTip); err != nil {
 		return err
 	}
 
@@ -193,13 +181,11 @@ func (s *Sync) Run(ctx context.Context) error {
 		case event := <-s.events:
 			switch event.Type {
 			case EventTypeMilestone:
-				err = s.onMilestoneEvent(ctx, event, ccBuilder)
-				if err != nil {
+				if err = s.onMilestoneEvent(ctx, event, ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewHeader:
-				err = s.onNewHeaderEvent(ctx, event, ccBuilder)
-				if err != nil {
+				if err = s.onNewHeaderEvent(ctx, event, ccBuilder); err != nil {
 					return err
 				}
 			}
