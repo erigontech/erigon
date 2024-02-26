@@ -1189,7 +1189,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	offset := reader.Lookup2(hc.encodeTs(histTxNum), key)
+	offset, ok := reader.Lookup2(hc.encodeTs(histTxNum), key)
+	if !ok {
+		return nil, false, nil
+	}
 	g := hc.statelessGetter(historyItem.i)
 	g.Reset(offset)
 

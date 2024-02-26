@@ -944,7 +944,10 @@ func (dc *DomainContext) getFromFileOld(i int, filekey []byte) ([]byte, bool, er
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	offset := reader.Lookup(filekey)
+	offset, ok := reader.Lookup(filekey)
+	if !ok {
+		return nil, false, nil
+	}
 	g.Reset(offset)
 
 	k, _ := g.Next(nil)
@@ -962,7 +965,10 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 		if reader.Empty() {
 			return nil, false, nil
 		}
-		offset := reader.Lookup(filekey)
+		offset, ok := reader.Lookup(filekey)
+		if !ok {
+			return nil, false, nil
+		}
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
@@ -1015,7 +1021,10 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 				}
 			}
 
-			offset := idx.GetReaderFromPool().Lookup(k)
+			offset, ok := idx.GetReaderFromPool().Lookup(k)
+			if !ok {
+				continue
+			}
 			g := item.decompressor.MakeGetter()
 			g.Reset(offset)
 			key, _ := g.NextUncompressed()
@@ -1902,7 +1911,10 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 			}
 		} else {
 			ir := dc.statelessIdxReader(i)
-			offset := ir.Lookup(prefix)
+			offset, ok := ir.Lookup(prefix)
+			if !ok {
+				continue
+			}
 			g := dc.statelessGetter(i)
 			g.Reset(offset)
 			if !g.HasNext() {

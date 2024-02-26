@@ -773,8 +773,10 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		if reader.Empty() {
 			continue
 		}
-		offset := reader.LookupHash(hi, lo)
-
+		offset, ok := reader.LookupHash(hi, lo)
+		if !ok {
+			continue
+		}
 		g := ic.statelessGetter(i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)

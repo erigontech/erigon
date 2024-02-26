@@ -272,7 +272,11 @@ func (lc *ctxLocalityIdx) lookupIdxFiles(key []byte, fromTxNum uint64) (exactSha
 	}
 
 	fromFileNum := fromTxNum / lc.aggregationStep / StepsInColdFile
-	fn1, fn2, ok1, ok2, err := lc.file.src.bm.First2At(lc.reader.Lookup(key), fromFileNum)
+	offset, ok := lc.reader.Lookup(key)
+	if !ok {
+		return 0, 0, fromTxNum, false, false
+	}
+	fn1, fn2, ok1, ok2, err := lc.file.src.bm.First2At(offset, fromFileNum)
 	if err != nil {
 		panic(err)
 	}
