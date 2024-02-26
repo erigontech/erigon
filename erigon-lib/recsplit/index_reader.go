@@ -80,3 +80,4 @@ func (r *IndexReader) Close() {
 
 func (r *IndexReader) Sum(key []byte) (uint64, uint64)         { return r.sum(key) }
 func (r *IndexReader) LookupHash(hi, lo uint64) (uint64, bool) { return r.index.Lookup(hi, lo) }
+func (r *IndexReader) OrdinalLookup(id uint64) uint64          { return r.index.OrdinalLookup(id) }

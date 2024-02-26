@@ -655,8 +655,10 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	} else {
-		idxPath := dc.d.kvAccessorFilePath(fromStep, toStep)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, dc.d.compression, idxPath, dc.d.dirs.Tmp, false, dc.d.salt, ps, dc.d.logger, dc.d.noFsync); err != nil {
+		if err = dc.d.buildMapIdx(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+		if valuesIn.index, err = recsplit.OpenIndex(dc.d.kvAccessorFilePath(fromStep, toStep)); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
@@ -801,12 +803,13 @@ func (ic *InvertedIndexContext) mergeFiles(ctx context.Context, files []*filesIt
 	}
 	ps.Delete(p)
 
-	{
-		idxPath := ic.ii.efAccessorFilePath(fromStep, toStep)
-		if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ic.ii.compression, idxPath, ic.ii.dirs.Tmp, false, ic.ii.salt, ps, ic.ii.logger, ic.ii.noFsync); err != nil {
-			return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ic.ii.filenameBase, startTxNum, endTxNum, err)
-		}
+	if err := ic.ii.buildMapIdx(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
+		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ic.ii.filenameBase, startTxNum, endTxNum, err)
 	}
+	if outItem.index, err = recsplit.OpenIndex(ic.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
+		return nil, err
+	}
+
 	if ic.ii.withExistenceIndex {
 		idxPath := ic.ii.efExistenceIdxFilePath(fromStep, toStep)
 		if outItem.existence, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ic.ii.compression, idxPath, ic.ii.dirs.Tmp, ic.ii.salt, ps, ic.ii.logger, ic.ii.noFsync); err != nil {

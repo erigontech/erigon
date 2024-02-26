@@ -121,6 +121,7 @@ func NewInvertedIndex(
 		withLocalityIndex:  withLocalityIndex,
 		withExistenceIndex: withExistenceIndex,
 		logger:             logger,
+		compression:        CompressNone,
 	}
 	ii.indexList = withHashMap
 	if ii.withExistenceIndex {
@@ -366,8 +367,7 @@ func (ii *InvertedIndex) buildEfi(ctx context.Context, item *filesItem, ps *back
 		return fmt.Errorf("buildEfi: passed item with nil decompressor %s %d-%d", ii.filenameBase, item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
 	}
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
-	idxPath := ii.efAccessorFilePath(fromStep, toStep)
-	return buildIndex(ctx, item.decompressor, CompressNone, idxPath, ii.dirs.Tmp, false, ii.salt, ps, ii.logger, ii.noFsync)
+	return ii.buildMapIdx(ctx, fromStep, toStep, item.decompressor, ps)
 }
 func (ii *InvertedIndex) buildExistenceFilter(ctx context.Context, item *filesItem, ps *background.ProgressSet) (err error) {
 	if item.decompressor == nil {
@@ -378,7 +378,7 @@ func (ii *InvertedIndex) buildExistenceFilter(ctx context.Context, item *filesIt
 	}
 	fromStep, toStep := item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep
 	idxPath := ii.efExistenceIdxFilePath(fromStep, toStep)
-	return buildIdxFilter(ctx, item.decompressor, CompressNone, idxPath, ii.salt, ps, ii.logger, ii.noFsync)
+	return buildIdxFilter(ctx, item.decompressor, ii.compression, idxPath, ii.salt, ps, ii.logger, ii.noFsync)
 }
 
 func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
@@ -773,10 +773,12 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 		if reader.Empty() {
 			continue
 		}
-		offset, ok := reader.LookupHash(hi, lo)
+		id, ok := reader.LookupHash(hi, lo)
 		if !ok {
 			continue
 		}
+		offset := reader.OrdinalLookup(id)
+
 		g := ic.statelessGetter(i)
 		g.Reset(offset)
 		k, _ := g.Next(nil)
@@ -1240,10 +1242,12 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset, ok := item.reader.Lookup(it.key)
+			id, ok := item.reader.Lookup(it.key)
 			if !ok {
 				continue
 			}
+			offset := item.reader.OrdinalLookup(id)
+
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
@@ -1744,9 +1748,11 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 
-	idxPath := ii.efAccessorFilePath(step, step+1)
-	if index, err = buildIndexThenOpen(ctx, decomp, ii.compression, idxPath, ii.dirs.Tmp, false, ii.salt, ps, ii.logger, ii.noFsync); err != nil {
+	if err := ii.buildMapIdx(ctx, step, step+1, decomp, ps); err != nil {
 		return InvertedFiles{}, fmt.Errorf("build %s efi: %w", ii.filenameBase, err)
+	}
+	if index, err = recsplit.OpenIndex(ii.efAccessorFilePath(step, step+1)); err != nil {
+		return InvertedFiles{}, err
 	}
 
 	if ii.withExistenceIndex {
@@ -1763,6 +1769,21 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 
 	closeComp = false
 	return InvertedFiles{decomp: decomp, index: index, existence: existence, warmLocality: warmLocality}, nil
+}
+
+func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *compress.Decompressor, ps *background.ProgressSet) error {
+	idxPath := ii.efAccessorFilePath(fromStep, toStep)
+	cfg := recsplit.RecSplitArgs{
+		Enums: false,
+		//LessFalsePositives: true,
+
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     ii.dirs.Tmp,
+		IndexFile:  idxPath,
+		Salt:       ii.salt,
+	}
+	return buildIndex(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger, ii.noFsync)
 }
 
 func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress.Decompressor, step uint64, ps *background.ProgressSet) (*LocalityIndexFiles, error) {
