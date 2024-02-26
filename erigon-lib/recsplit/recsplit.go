@@ -697,8 +697,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 				return err
 			}
-			if _, err := io.Copy(rs.indexW, bufio.NewReader(rs.existenceF)); err != nil {
+			n, err := io.Copy(rs.indexW, bufio.NewReader(rs.existenceF))
+			if err != nil {
 				return err
+			}
+			if n != int64(rs.keysAdded) {
+				panic(fmt.Sprintf("why? %d, %d", n, rs.keysAdded))
 			}
 			_ = rs.existenceF.Close()
 		}
