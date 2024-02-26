@@ -29,11 +29,11 @@ func (psp *peerSyncProgress) peerMayHaveBlockNum(blockNum uint64) bool {
 	// then it does not have any blocks >= X for some time Y. In some time Y we can try again to
 	// see if it has blocks >= X. This works ok for the purposes of the initial sync.
 	// In the future we can explore more sophisticated heuristics and keep track of more parameters if needed.
-	if psp.minMissingBlockNumTsExpired() {
+	if psp.minMissingBlockNumTsExpired() || psp.minMissingBlockNum == 0 {
 		return true
 	}
 
-	return psp.minMissingBlockNum <= blockNum
+	return blockNum < psp.minMissingBlockNum
 }
 
 func (psp *peerSyncProgress) minMissingBlockNumTsExpired() bool {

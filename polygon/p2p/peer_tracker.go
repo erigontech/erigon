@@ -4,14 +4,13 @@ import (
 	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type PeerTracker interface {
 	ListPeersMayHaveBlockNum(blockNum uint64) []PeerId
 	BlockNumPresent(peerId PeerId, blockNum uint64)
 	BlockNumMissing(peerId PeerId, blockNum uint64)
+	PeerConnected(peerId PeerId)
 	PeerDisconnected(peerId PeerId)
 }
 
@@ -22,12 +21,8 @@ func NewPeerTracker() PeerTracker {
 }
 
 type peerTracker struct {
-	once                     sync.Once
-	messageListener          MessageListener
-	mu                       sync.Mutex
-	peerSyncProgresses       map[PeerId]*peerSyncProgress
-	peerEventObserver        MessageObserver[*sentry.PeerEvent]
-	blockNumPresenceObserver MessageObserver[*sentry.InboundMessage]
+	mu                 sync.Mutex
+	peerSyncProgresses map[PeerId]*peerSyncProgress
 }
 
 func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
@@ -63,6 +58,17 @@ func (pt *peerTracker) PeerDisconnected(peerId PeerId) {
 	delete(pt.peerSyncProgresses, peerId)
 }
 
+func (pt *peerTracker) PeerConnected(peerId PeerId) {
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+
+	if _, ok := pt.peerSyncProgresses[peerId]; !ok {
+		pt.peerSyncProgresses[peerId] = &peerSyncProgress{
+			peerId: peerId,
+		}
+	}
+}
+
 func (pt *peerTracker) updatePeerSyncProgress(peerId PeerId, update func(psp *peerSyncProgress)) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
@@ -73,30 +79,6 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId PeerId, update func(psp *pe
 	}
 
 	update(peerSyncProgress)
-}
-
-func NewBlockNumPresenceObserver(peerTracker PeerTracker) MessageObserver[*sentry.InboundMessage] {
-	return &blockNumPresenceObserver{
-		peerTracker: peerTracker,
-	}
-}
-
-type blockNumPresenceObserver struct {
-	peerTracker PeerTracker
-}
-
-func (bnpo *blockNumPresenceObserver) Notify(msg *sentry.InboundMessage) {
-	if msg.Id == sentry.MessageId_BLOCK_HEADERS_66 {
-		var pkt eth.BlockHeadersPacket66
-		if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-			return
-		}
-
-		headers := pkt.BlockHeadersPacket
-		if len(headers) > 0 {
-			bnpo.peerTracker.BlockNumPresent(PeerIdFromH512(msg.PeerId), headers[len(headers)-1].Number.Uint64())
-		}
-	}
 }
 
 func NewPeerEventObserver(peerTracker PeerTracker) MessageObserver[*sentry.PeerEvent] {
@@ -110,7 +92,10 @@ type peerEventObserver struct {
 }
 
 func (peo *peerEventObserver) Notify(msg *sentry.PeerEvent) {
-	if msg.EventId == sentry.PeerEvent_Disconnect {
+	switch msg.EventId {
+	case sentry.PeerEvent_Connect:
+		peo.peerTracker.PeerConnected(PeerIdFromH512(msg.PeerId))
+	case sentry.PeerEvent_Disconnect:
 		peo.peerTracker.PeerDisconnected(PeerIdFromH512(msg.PeerId))
 	}
 }

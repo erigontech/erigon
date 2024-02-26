@@ -2,7 +2,6 @@ package p2p
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -16,47 +15,10 @@ import (
 
 const responseTimeout = 5 * time.Second
 
-var (
-	ErrInvalidFetchHeadersRange          = errors.New("invalid fetch headers range")
-	ErrIncompleteDownloadHeadersResponse = errors.New("incomplete download headers response")
-)
-
 type RequestIdGenerator func() uint64
 
 type Fetcher interface {
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
-}
-
-func NewTrackingFetcher(
-	logger log.Logger,
-	messageListener MessageListener,
-	messageSender MessageSender,
-	peerPenalizer PeerPenalizer,
-	requestIdGenerator RequestIdGenerator,
-	peerTracker PeerTracker,
-) Fetcher {
-	return &trackingFetcher{
-		Fetcher:     NewFetcher(logger, messageListener, messageSender, peerPenalizer, requestIdGenerator),
-		peerTracker: peerTracker,
-	}
-}
-
-type trackingFetcher struct {
-	Fetcher
-	peerTracker PeerTracker
-}
-
-func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
-	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrIncompleteDownloadHeadersResponse) {
-			tf.peerTracker.BlockNumMissing(peerId, start)
-		}
-
-		return nil, err
-	}
-
-	return res, nil
 }
 
 func NewFetcher(
@@ -85,7 +47,10 @@ type fetcher struct {
 
 func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
 	if start >= end {
-		return nil, fmt.Errorf("%w: start=%d, end=%d", ErrInvalidFetchHeadersRange, start, end)
+		return nil, &ErrInvalidFetchHeadersRange{
+			start: start,
+			end:   end,
+		}
 	}
 
 	amount := end - start
@@ -151,13 +116,52 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}
 
 	if uint64(len(headers)) != amount {
-		return nil, fmt.Errorf(
-			"%w: requested=%d, received=%d",
-			ErrIncompleteDownloadHeadersResponse,
-			amount,
-			len(headers),
-		)
+		var first, last uint64
+		if len(headers) > 0 {
+			first = headers[0].Number.Uint64()
+			last = headers[len(headers)-1].Number.Uint64()
+		}
+
+		return nil, &ErrIncompleteFetchHeadersResponse{
+			requestStart: start,
+			requestEnd:   end,
+			first:        first,
+			last:         last,
+			amount:       len(headers),
+		}
 	}
 
 	return headers, nil
+}
+
+type ErrInvalidFetchHeadersRange struct {
+	start uint64
+	end   uint64
+}
+
+func (e ErrInvalidFetchHeadersRange) Error() string {
+	return fmt.Sprintf("invalid fetch headers range: start=%d, end=%d", e.start, e.end)
+}
+
+type ErrIncompleteFetchHeadersResponse struct {
+	requestStart uint64
+	requestEnd   uint64
+	first        uint64
+	last         uint64
+	amount       int
+}
+
+func (e ErrIncompleteFetchHeadersResponse) Error() string {
+	return fmt.Sprintf(
+		"incomplete fetch headers response: first=%d, last=%d, amount=%d, requested [%d, %d)",
+		e.first, e.last, e.amount, e.requestStart, e.requestEnd,
+	)
+}
+
+func (e ErrIncompleteFetchHeadersResponse) LowestMissingBlockNum() uint64 {
+	if e.last == 0 || e.first == 0 || e.first != e.requestStart {
+		return e.requestStart
+	}
+
+	return e.last + 1
 }

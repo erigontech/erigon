@@ -35,7 +35,6 @@ func newService(
 ) Service {
 	peerTracker := NewPeerTracker()
 	messageListener := NewMessageListener(logger, sentryClient)
-	messageListener.RegisterBlockHeadersObserver(NewBlockNumPresenceObserver(peerTracker))
 	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
 	messageSender := NewMessageSender(sentryClient)
 	peerPenalizer := NewPeerPenalizer(sentryClient)

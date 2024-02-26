@@ -160,7 +160,8 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 					return
 				}
 
-				start, end := waypoint.StartBlock().Uint64(), waypoint.EndBlock().Uint64()
+				start := waypoint.StartBlock().Uint64()
+				end := waypoint.EndBlock().Uint64() + 1 // waypoint end is inclusive, fetch headers is [start, end)
 				headers, err := hd.p2pService.FetchHeaders(ctx, start, end, peerId)
 				if err != nil {
 					hd.logger.Debug(
