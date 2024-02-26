@@ -63,8 +63,8 @@ func main() {
 
 	for accountHash, storageMap := range data {
 		compareBalance(rpcConfig, accountHash, storageMap.Balance)
-		// compareNonce(rpcConfig, accountHash, storageMap.Nonce)
-		// compareCodeHash(rpcConfig, accountHash, storageMap.Codehash.Hex())
+		compareNonce(rpcConfig, accountHash, storageMap.Nonce)
+		compareCodeHash(rpcConfig, accountHash, storageMap.Codehash.Hex())
 		for key, value := range storageMap.Storage {
 			compareValuesString(rpcConfig, accountHash, key, value)
 		}
@@ -232,7 +232,7 @@ func compareCodeHash(cfg RpcConfig, accountHash, value string) {
 	commonHash := libcommon.HexToHash(remoteValueDecode).Bytes()
 	value2 := common.Bytes2Hex(keccak256.Hash(commonHash))
 	if value != value2 {
-		fmt.Printf("Nonce mismatch detected for %s. Local: %s, Remote: %s\n", accountHash, value, value2)
+		fmt.Printf("Codehash mismatch detected for %s. Local: %s, Remote: %s\n", accountHash, value, value2)
 	}
 }
 

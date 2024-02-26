@@ -33,7 +33,7 @@ func HermezEtrogGenesisBlock() *types.Genesis {
 func HermezCardonaGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HermezCardonaChainConfig,
-		Timestamp:  1676996964,
+		Timestamp:  1701262224,
 		GasLimit:   0x0,
 		Difficulty: big.NewInt(0x0),
 		Alloc:      readPrealloc("allocs/hermez-cardona.json"),
