@@ -898,6 +898,8 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	if err != nil {
 		return 0, false, err
 	}
+
+	fmt.Printf("[dbg] txnByHash0: %t\n", n != nil)
 	if n != nil {
 		return *n, true, nil
 	}
