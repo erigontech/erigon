@@ -107,10 +107,7 @@ func SpawnStageBatches(
 	}
 
 	eriDb := erigon_db.NewErigonDb(tx)
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return fmt.Errorf("failed to create hermezDb: %v", err)
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	batchesProgress, err := stages.GetStageProgress(tx, stages.Batches)
 	if err != nil {
@@ -334,10 +331,7 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	defer log.Info(fmt.Sprintf("[%s] Unwinding batches complete", logPrefix))
 
 	eriDb := erigon_db.NewErigonDb(tx)
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return fmt.Errorf("failed to create hermezDb: %v", err)
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	//////////////////////////////////
 	// delete batch connected stuff //
@@ -511,10 +505,7 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 	defer log.Info(fmt.Sprintf("[%s] Unwinding batches complete", logPrefix))
 
 	eriDb := erigon_db.NewErigonDb(tx)
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return fmt.Errorf("failed to create hermezDb: %v", err)
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	toBlock, err := stages.GetStageProgress(tx, stages.Batches)
 	if err != nil {

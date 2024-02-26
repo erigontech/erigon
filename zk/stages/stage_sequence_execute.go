@@ -175,10 +175,7 @@ func SpawnSequencingStage(
 		defer tx.Rollback()
 	}
 
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return err
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	executionAt, err := s.ExecutionAt(tx)
 	if err != nil {

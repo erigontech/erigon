@@ -95,10 +95,7 @@ func SpawnExecuteBlocksStageZk(s *StageState, u Unwinder, tx kv.RwTx, toBlock ui
 
 	var stoppedErr error
 
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return fmt.Errorf("failed to create hermezDb: %v", err)
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	var batch ethdb.DbWithPendingMutations
 	// state is stored through ethdb batches
@@ -206,10 +203,7 @@ Loop:
 				eridb = erigon_db.NewErigonDb(tx)
 			}
 			batch = olddb.NewHashBatch(tx, quit, cfg.dirs.Tmp)
-			hermezDb, err = hermez_db.NewHermezDb(tx)
-			if err != nil {
-				return fmt.Errorf("failed to create hermezDb: %v", err)
-			}
+			hermezDb = hermez_db.NewHermezDb(tx)
 		}
 
 		gasUsed := header.GasUsed

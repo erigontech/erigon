@@ -14,10 +14,7 @@ func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
 		return false, 0, err
 	}
 
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return false, 0, err
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	// if there is no inters progress - i.e. first sync, don't skip exec, and execute to the highest block in the highest verified batch that we did download
 	if intersProgress == 0 {

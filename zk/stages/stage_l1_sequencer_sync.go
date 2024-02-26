@@ -53,10 +53,7 @@ func SpawnL1SequencerSyncStage(
 		defer tx.Rollback()
 	}
 
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return err
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	progress, err := stages.GetStageProgress(tx, stages.L1InfoTree)
 	if err != nil {

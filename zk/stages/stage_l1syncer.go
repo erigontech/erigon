@@ -82,10 +82,7 @@ func SpawnStageL1Syncer(
 	}
 
 	// pass tx to the hermezdb
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return fmt.Errorf("failed to create hermezdb, %w", err)
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	// get l1 block progress from this stage's progress
 	l1BlockProgress, err := stages.GetStageProgress(tx, stages.L1Syncer)

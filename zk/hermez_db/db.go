@@ -41,11 +41,11 @@ func NewHermezDbReader(tx kv.Tx) *HermezDbReader {
 	return &HermezDbReader{tx}
 }
 
-func NewHermezDb(tx kv.RwTx) (*HermezDb, error) {
+func NewHermezDb(tx kv.RwTx) *HermezDb {
 	db := &HermezDb{tx: tx}
 	db.HermezDbReader = NewHermezDbReader(tx)
 
-	return db, nil
+	return db
 }
 
 func CreateHermezBuckets(tx kv.RwTx) error {

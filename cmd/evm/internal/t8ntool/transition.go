@@ -303,10 +303,7 @@ func Main(ctx *cli.Context) error {
 	}
 	defer tx.Rollback()
 
-	hermezDb, err := hermez_db.NewHermezDb(tx)
-	if err != nil {
-		return err
-	}
+	hermezDb := hermez_db.NewHermezDb(tx)
 
 	reader, writer := MakePreState(chainConfig.Rules(0, 0), tx, prestate.Pre)
 	// serenity engine can be used for pre-merge blocks as well, as it

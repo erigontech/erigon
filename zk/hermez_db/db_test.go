@@ -40,16 +40,14 @@ func GetDbTx() (tx kv.RwTx, cleanup func()) {
 func TestNewHermezDb(t *testing.T) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(t, err)
+	db := NewHermezDb(tx)
 	assert.NotNil(t, db)
 }
 
 func TestGetSequenceByL1Block(t *testing.T) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(t, err)
+	db := NewHermezDb(tx)
 
 	require.NoError(t, db.WriteSequence(1, 1001, common.HexToHash("0xabc"), common.HexToHash("0xabc")))
 	require.NoError(t, db.WriteSequence(2, 1002, common.HexToHash("0xdef"), common.HexToHash("0xdef")))
@@ -70,8 +68,7 @@ func TestGetSequenceByL1Block(t *testing.T) {
 func TestGetSequenceByBatchNo(t *testing.T) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(t, err)
+	db := NewHermezDb(tx)
 
 	require.NoError(t, db.WriteSequence(1, 1001, common.HexToHash("0xabc"), common.HexToHash("0xabcd")))
 	require.NoError(t, db.WriteSequence(2, 1002, common.HexToHash("0xdef"), common.HexToHash("0xdefg")))
@@ -94,8 +91,7 @@ func TestGetSequenceByBatchNo(t *testing.T) {
 func TestGetVerificationByL1BlockAndBatchNo(t *testing.T) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(t, err)
+	db := NewHermezDb(tx)
 
 	require.NoError(t, db.WriteVerification(3, 1003, common.HexToHash("0xghi"), common.HexToHash("0x333lll")))
 	require.NoError(t, db.WriteVerification(4, 1004, common.HexToHash("0xjkl"), common.HexToHash("0x444mmm")))
@@ -137,8 +133,8 @@ func TestGetAndSetLatest(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
 			tx, cleanup := GetDbTx()
-			db, err := NewHermezDb(tx)
-			require.NoError(t, err)
+			db := NewHermezDb(tx)
+			var err error
 			if tc.table == L1SEQUENCES {
 				err = tc.writeSequenceMethod(db, tc.l1BlockNo, tc.batchNo, tc.l1TxHashBytes, tc.stateRoot)
 			} else {
@@ -175,11 +171,10 @@ func TestGetAndSetLatestUnordered(t *testing.T) {
 	var highestBatchNo uint64
 
 	tx, cleanup := GetDbTx()
-	db, err := NewHermezDb(tx)
-	require.NoError(t, err)
+	db := NewHermezDb(tx)
 
 	for _, tc := range testCases {
-		err = tc.writeMethod(db, tc.l1BlockNo, tc.batchNo, tc.l1TxHashBytes, tc.stateRoot)
+		err := tc.writeMethod(db, tc.l1BlockNo, tc.batchNo, tc.l1TxHashBytes, tc.stateRoot)
 		assert.Nil(t, err)
 
 		if tc.batchNo > highestBatchNo {
@@ -211,10 +206,9 @@ func TestGetAndSetForkId(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(fmt.Sprintf("BatchNo: %d ForkId: %d", tc.batchNo, tc.forkId), func(t *testing.T) {
 			tx, cleanup := GetDbTx()
-			db, err := NewHermezDb(tx)
-			require.NoError(t, err)
+			db := NewHermezDb(tx)
 
-			err = db.WriteForkId(10, 1)
+			err := db.WriteForkId(10, 1)
 			require.NoError(t, err, "Failed to write ForkId")
 			err = db.WriteForkId(100, 2)
 			require.NoError(t, err, "Failed to write ForkId")
@@ -243,10 +237,9 @@ func TestGetL2BlockBatchNo(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(fmt.Sprintf("L2BlockNo: %d BatchNo: %d", tc.l2BlockNo, tc.batchNo), func(t *testing.T) {
 			tx, cleanup := GetDbTx()
-			db, err := NewHermezDb(tx)
-			require.NoError(t, err)
+			db := NewHermezDb(tx)
 
-			err = db.WriteBlockBatch(tc.l2BlockNo, tc.batchNo)
+			err := db.WriteBlockBatch(tc.l2BlockNo, tc.batchNo)
 			require.NoError(t, err, "Failed to write BlockBatch")
 
 			fetchedBatchNo, err := db.GetBatchNoByL2Block(tc.l2BlockNo)
@@ -282,11 +275,10 @@ func TestGetL2BlockNosByBatch(t *testing.T) {
 	for batchNo, expectedL2BlockNos := range expectedBatchMapping {
 		t.Run(fmt.Sprintf("BatchNo: %d", batchNo), func(t *testing.T) {
 			tx, cleanup := GetDbTx()
-			db, err := NewHermezDb(tx)
-			require.NoError(t, err)
+			db := NewHermezDb(tx)
 
 			for _, tc := range testCases {
-				err = db.WriteBlockBatch(tc.l2BlockNo, tc.batchNo)
+				err := db.WriteBlockBatch(tc.l2BlockNo, tc.batchNo)
 				require.NoError(t, err, "Failed to write BlockBatch")
 			}
 
@@ -303,8 +295,7 @@ func TestGetL2BlockNosByBatch(t *testing.T) {
 func BenchmarkWriteSequence(b *testing.B) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(b, err)
+	db := NewHermezDb(tx)
 
 	b.ResetTimer()
 
@@ -319,8 +310,7 @@ func BenchmarkWriteSequence(b *testing.B) {
 func BenchmarkWriteVerification(b *testing.B) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(b, err)
+	db := NewHermezDb(tx)
 
 	b.ResetTimer()
 
@@ -335,8 +325,7 @@ func BenchmarkWriteVerification(b *testing.B) {
 func BenchmarkGetSequenceByL1Block(b *testing.B) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(b, err)
+	db := NewHermezDb(tx)
 
 	for i := 0; i < 1000; i++ {
 		err := db.WriteSequence(uint64(i), uint64(i+1000), common.HexToHash("0xabc"), common.HexToHash("0xabc"))
@@ -358,8 +347,7 @@ func BenchmarkGetSequenceByL1Block(b *testing.B) {
 func BenchmarkGetVerificationByL1Block(b *testing.B) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(b, err)
+	db := NewHermezDb(tx)
 
 	for i := 0; i < 1000; i++ {
 		err := db.WriteVerification(uint64(i), uint64(i+2000), common.HexToHash("0xdef"), common.HexToHash("0xdef"))
@@ -381,8 +369,7 @@ func BenchmarkGetVerificationByL1Block(b *testing.B) {
 func BenchmarkGetSequenceByBatchNo(b *testing.B) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(b, err)
+	db := NewHermezDb(tx)
 
 	for i := 0; i < 1000; i++ {
 		err := db.WriteSequence(uint64(i), uint64(i+1000), common.HexToHash("0xabc"), common.HexToHash("0xabc"))
@@ -404,8 +391,7 @@ func BenchmarkGetSequenceByBatchNo(b *testing.B) {
 func BenchmarkGetVerificationByBatchNo(b *testing.B) {
 	tx, cleanup := GetDbTx()
 	defer cleanup()
-	db, err := NewHermezDb(tx)
-	require.NoError(b, err)
+	db := NewHermezDb(tx)
 
 	for i := 0; i < 1000; i++ {
 		err := db.WriteVerification(uint64(i), uint64(i+2000), common.HexToHash("0xdef"), common.HexToHash("0xdef"))
