@@ -942,7 +942,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir stri
 	return db, nil
 }
 
-func PersistDictrionary(fileName string, db *DictionaryBuilder) error {
+func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	df, err := os.Create(fileName)
 	if err != nil {
 		return err

@@ -196,7 +196,7 @@ func (c *Compressor) Compress() error {
 	}
 	if c.trace {
 		_, fileName := filepath.Split(c.outputFile)
-		if err := PersistDictrionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+		if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
 			return err
 		}
 	}
