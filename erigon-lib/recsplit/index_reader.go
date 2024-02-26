@@ -81,3 +81,24 @@ func (r *IndexReader) Close() {
 func (r *IndexReader) Sum(key []byte) (uint64, uint64)         { return r.sum(key) }
 func (r *IndexReader) LookupHash(hi, lo uint64) (uint64, bool) { return r.index.Lookup(hi, lo) }
 func (r *IndexReader) OrdinalLookup(id uint64) uint64          { return r.index.OrdinalLookup(id) }
+func (r *IndexReader) TwoLayerLookup(key []byte) (uint64, bool) {
+	if r.index.Empty() {
+		return 0, false
+	}
+	bucketHash, fingerprint := r.sum(key)
+	id, ok := r.index.Lookup(bucketHash, fingerprint)
+	if !ok {
+		return 0, false
+	}
+	return r.OrdinalLookup(id), true
+}
+func (r *IndexReader) TwoLayerLookupByHash(hi, lo uint64) (uint64, bool) {
+	if r.index.Empty() {
+		return 0, false
+	}
+	id, ok := r.index.Lookup(hi, lo)
+	if !ok {
+		return 0, false
+	}
+	return r.index.OrdinalLookup(id), true
+}

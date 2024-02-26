@@ -1212,11 +1212,7 @@ func (hc *HistoryContext) getNoStateByLocalityIndex(key []byte, txNum uint64) ([
 	var foundStartTxNum uint64
 	var found bool
 	var findInFile = func(item ctxItem) bool {
-		reader := hc.ic.statelessIdxReader(item.i)
-		if reader.Empty() {
-			return true
-		}
-		offset, ok := reader.Lookup(key)
+		offset, ok := hc.ic.statelessIdxReader(item.i).TwoLayerLookup(key)
 		if !ok {
 			return false
 		}

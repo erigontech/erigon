@@ -769,15 +769,10 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 				continue
 			}
 		}
-		reader := ic.statelessIdxReader(i)
-		if reader.Empty() {
-			continue
-		}
-		id, ok := reader.LookupHash(hi, lo)
+		offset, ok := ic.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
 		if !ok {
 			continue
 		}
-		offset := reader.OrdinalLookup(id)
 
 		g := ic.statelessGetter(i)
 		g.Reset(offset)
@@ -1242,11 +1237,10 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			id, ok := item.reader.Lookup(it.key)
+			offset, ok := item.reader.TwoLayerLookup(it.key)
 			if !ok {
 				continue
 			}
-			offset := item.reader.OrdinalLookup(id)
 
 			g := item.getter
 			g.Reset(offset)
