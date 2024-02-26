@@ -7,6 +7,8 @@ import (
 )
 
 func TestPeerMayHaveBlockNum(t *testing.T) {
+	t.Parallel()
+
 	psp := peerSyncProgress{
 		peerId: PeerIdFromUint64(1),
 	}

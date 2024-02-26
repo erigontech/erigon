@@ -308,6 +308,8 @@ func newMockBlockHeadersPacket66Bytes(t *testing.T, requestId uint64, numHeaders
 }
 
 func TestServiceFetchHeaders(t *testing.T) {
+	t.Parallel()
+
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
 	mockInboundMessages := []*sentry.InboundMessage{
@@ -351,6 +353,8 @@ func TestServiceFetchHeaders(t *testing.T) {
 }
 
 func TestServiceErrInvalidFetchHeadersRange(t *testing.T) {
+	t.Parallel()
+
 	test := newServiceTest(t, newMockRequestGenerator(1))
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
@@ -364,6 +368,8 @@ func TestServiceErrInvalidFetchHeadersRange(t *testing.T) {
 }
 
 func TestServiceFetchHeadersShouldPenalizePeerWhenErrInvalidRlpErr(t *testing.T) {
+	t.Parallel()
+
 	peerId := PeerIdFromUint64(1)
 	requestId := uint64(1234)
 	mockInboundMessages := []*sentry.InboundMessage{
@@ -392,6 +398,8 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenErrInvalidRlpErr(t *testing.T)
 }
 
 func TestListPeersMayHaveBlockNum(t *testing.T) {
+	t.Parallel()
+
 	peerId1 := PeerIdFromUint64(1)
 	requestId1 := uint64(1234)
 	mockInboundMessages1 := []*sentry.InboundMessage{
@@ -461,6 +469,8 @@ func TestListPeersMayHaveBlockNum(t *testing.T) {
 }
 
 func TestListPeersMayHaveBlockNumDoesNotReturnPeerIdAfterDisconnect(t *testing.T) {
+	t.Parallel()
+
 	peerId := PeerIdFromUint64(1)
 	test := newServiceTest(t, newMockRequestGenerator())
 	test.mockSentryStreams()
