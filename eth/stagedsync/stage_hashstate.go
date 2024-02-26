@@ -38,6 +38,11 @@ type HashStateCfg struct {
 
 	historyV3 bool
 	agg       *state.AggregatorV3
+	quiet     bool
+}
+
+func (h *HashStateCfg) SetQuiet(quiet bool) {
+	h.quiet = quiet
 }
 
 func StageHashStateCfg(db kv.RwDB, dirs datadir.Dirs, historyV3 bool, agg *state.AggregatorV3) HashStateCfg {
@@ -139,13 +144,13 @@ func unwindHashStateStageImpl(logPrefix string, u *UnwindState, s *StageState, t
 	prom := NewPromoter(tx, cfg.dirs, ctx)
 	if cfg.historyV3 {
 		cfg.agg.SetTx(tx)
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, true); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, true, cfg.quiet); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, false, false, cfg.quiet); err != nil {
 			return err
 		}
-		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, false); err != nil {
+		if err := prom.UnwindOnHistoryV3(logPrefix, cfg.agg, s.BlockNumber, u.UnwindPoint, true, false, cfg.quiet); err != nil {
 			return err
 		}
 		return nil
@@ -723,8 +728,10 @@ func (p *Promoter) Promote(logPrefix string, from, to uint64, storage, codes boo
 	return nil
 }
 
-func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool) error {
-	log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
+func (p *Promoter) UnwindOnHistoryV3(logPrefix string, agg *state.AggregatorV3, unwindFrom, unwindTo uint64, storage, codes bool, quiet bool) error {
+	if !quiet {
+		log.Info(fmt.Sprintf("[%s] Unwinding started", logPrefix), "from", unwindFrom, "to", unwindTo, "storage", storage, "codes", codes)
+	}
 
 	txnFrom, err := rawdbv3.TxNums.Min(p.tx, unwindTo+1)
 	if err != nil {

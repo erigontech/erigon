@@ -107,6 +107,7 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 		stageState := &stagedsync.StageState{BlockNumber: latestBlock}
 
 		hashStageCfg := stagedsync.StageHashStateCfg(nil, g.dirs, g.historyV3, g.agg)
+		hashStageCfg.SetQuiet(true)
 		if err := stagedsync.UnwindHashStateStage(unwindState, stageState, batch, hashStageCfg, ctx); err != nil {
 			return nil, err
 		}
@@ -215,11 +216,14 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 		}
 	}
 
+	// todo [zkevm] we need to use this retain list rather than using the always true retain decider
 	rl, err := tds.ResolveSMTRetainList()
-
 	if err != nil {
 		return nil, err
 	}
+
+	// if you ever need to send the full witness then you can use this always true trimmer and the whole state will be sent
+	//rl := &trie.AlwaysTrueRetainDecider{}
 
 	eridb := db2.NewEriDb(batch)
 	smtTrie := smt.NewSMT(eridb)

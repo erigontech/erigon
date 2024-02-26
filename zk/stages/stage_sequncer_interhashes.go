@@ -19,7 +19,10 @@ type SequencerInterhashesCfg struct {
 	accumulator *shards.Accumulator
 }
 
-func StageSequencerInterhashesCfg(db kv.RwDB, accumulator *shards.Accumulator) SequencerInterhashesCfg {
+func StageSequencerInterhashesCfg(
+	db kv.RwDB,
+	accumulator *shards.Accumulator,
+) SequencerInterhashesCfg {
 	return SequencerInterhashesCfg{
 		db:          db,
 		accumulator: accumulator,
@@ -62,6 +65,8 @@ func SpawnSequencerInterhashesStage(
 			return err
 		}
 	} else {
+		// todo [zkevm] we need to be prepared for multi-block batches at some point so this should really be a loop with a from/to
+		// of the previous stage state and the latest block from execution stage
 		newRoot, err = zkIncrementIntermediateHashes(s.LogPrefix(), s, tx, eridb, smt, to, false, nil, ctx.Done())
 		if err != nil {
 			return err

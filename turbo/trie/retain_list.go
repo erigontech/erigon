@@ -358,3 +358,13 @@ func (rl *RetainList) Rewind() {
 func (rl *RetainList) String() string {
 	return fmt.Sprintf("%x", rl.hexes)
 }
+
+type AlwaysTrueRetainDecider struct{}
+
+func (a AlwaysTrueRetainDecider) Retain([]byte) bool {
+	return true
+}
+
+func (a AlwaysTrueRetainDecider) IsCodeTouched(libcommon.Hash) bool {
+	return true
+}

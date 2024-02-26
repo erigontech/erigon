@@ -1513,6 +1513,8 @@ func main() {
 		err = rlptest()
 	case "readAccountAtVersion":
 		err = readAccountAtVersion(*chaindata, *account, uint64(*block))
+	case "getOldAccInputHash":
+		err = getOldAccInputHash(uint64(*block))
 	}
 
 	if err != nil {

@@ -113,9 +113,11 @@ import (
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/datastream/client"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	zkStages "github.com/ledgerwatch/erigon/zk/stages"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	txpool2 "github.com/ledgerwatch/erigon/zk/txpool"
+	"github.com/ledgerwatch/erigon/zk/witness"
 	"github.com/ledgerwatch/erigon/zkevm/etherman"
 )
 
@@ -737,6 +739,38 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				cfg.L1QueryDelay,
 			)
 
+			witnessGenerator := witness.NewGenerator(
+				config.Dirs,
+				config.HistoryV3,
+				backend.agg,
+				backend.blockReader,
+				backend.chainConfig,
+				backend.engine,
+			)
+
+			var legacyExecutors []legacy_executor_verifier.ILegacyExecutor
+			if len(cfg.ExecutorUrls) > 0 && cfg.ExecutorUrls[0] != "" {
+				levCfg := legacy_executor_verifier.Config{
+					GrpcUrls: cfg.ExecutorUrls,
+					Timeout:  time.Second * 5,
+				}
+				executors := legacy_executor_verifier.NewExecutors(levCfg)
+				for _, e := range executors {
+					legacyExecutors = append(legacyExecutors, e)
+				}
+			}
+
+			verifier := legacy_executor_verifier.NewLegacyExecutorVerifier(
+				*cfg,
+				legacyExecutors,
+				backend.chainConfig,
+				backend.chainDB,
+				witnessGenerator,
+				zkL1Syncer,
+			)
+
+			verifier.StartWork()
+
 			backend.syncStages = stages2.NewSequencerZkStages(
 				backend.sentryCtx,
 				backend.chainDB,
@@ -752,6 +786,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				zkL1Syncer,
 				backend.txPool2,
 				backend.txPool2DB,
+				verifier,
 			)
 
 			backend.syncUnwindOrder = zkStages.ZkSequencerUnwindOrder

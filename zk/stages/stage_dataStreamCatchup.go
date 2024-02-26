@@ -61,12 +61,12 @@ func SpawnStageDataStreamCatchup(
 		createdTx = true
 	}
 
-	srv := server.NewDataStreamServer(stream, cfg.chainId)
+	srv := server.NewDataStreamServer(stream, cfg.chainId, server.StandardOperationMode)
 	reader := hermez_db.NewHermezDbReader(tx)
 
-	// get the latest block so when to terminate the loop.  This is because not all batches contain blocks
-	// so we cannot use this reliably to break the loop.  Block number is more reliable
-	highestSeenBatchNumber, err := stages.GetStageProgress(tx, stages.HighestSeenBatchNumber)
+	// read the highest batch number from the verified stage.  We cannot add data to the stream that
+	// has not been verified by the executor because we cannot unwind this later
+	executorVerifyProgress, err := stages.GetStageProgress(tx, stages.SequenceExecutorVerify)
 	if err != nil {
 		return err
 	}
@@ -91,7 +91,7 @@ func SpawnStageDataStreamCatchup(
 		currentBatch++
 	}
 
-	batchToBlocks, err := preLoadBatchedToBlocks(tx)
+	batchToBlocks, err := preLoadBatchesToBlocks(tx)
 	if err != nil {
 		return err
 	}
@@ -102,12 +102,12 @@ func SpawnStageDataStreamCatchup(
 		return err
 	}
 
-	for ; currentBatch <= highestSeenBatchNumber; currentBatch++ {
+	for ; currentBatch <= executorVerifyProgress; currentBatch++ {
 		select {
 		case <-logTicker.C:
 			log.Info(fmt.Sprintf("[%s]: progress", logPrefix),
 				"batch", currentBatch,
-				"target", highestSeenBatchNumber, "%", math.Round(float64(currentBatch)/float64(highestSeenBatchNumber)*100))
+				"target", executorVerifyProgress, "%", math.Round(float64(currentBatch)/float64(executorVerifyProgress)*100))
 		default:
 		}
 
@@ -158,12 +158,12 @@ func SpawnStageDataStreamCatchup(
 
 	log.Info(fmt.Sprintf("[%s]: stage complete", logPrefix),
 		"batch", currentBatch-1,
-		"target", highestSeenBatchNumber, "%", math.Round(float64(currentBatch-1)/float64(highestSeenBatchNumber)*100))
+		"target", executorVerifyProgress, "%", math.Round(float64(currentBatch-1)/float64(executorVerifyProgress)*100))
 
 	return err
 }
 
-func preLoadBatchedToBlocks(tx kv.RwTx) (map[uint64][]uint64, error) {
+func preLoadBatchesToBlocks(tx kv.RwTx) (map[uint64][]uint64, error) {
 	// hold the mapping of block batches to block numbers - this is an expensive call so just
 	// do it once
 	// todo: can we not use memory here, could be a problem with a larger chain?

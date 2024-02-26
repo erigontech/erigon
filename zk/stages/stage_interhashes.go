@@ -55,7 +55,16 @@ type ZkInterHashesCfg struct {
 	zk        *ethconfig.Zk
 }
 
-func StageZkInterHashesCfg(db kv.RwDB, checkRoot, saveNewHashesToDB, badBlockHalt bool, tmpDir string, blockReader services.FullBlockReader, hd *headerdownload.HeaderDownload, historyV3 bool, agg *state.AggregatorV3, zk *ethconfig.Zk) ZkInterHashesCfg {
+func StageZkInterHashesCfg(
+	db kv.RwDB,
+	checkRoot, saveNewHashesToDB, badBlockHalt bool,
+	tmpDir string,
+	blockReader services.FullBlockReader,
+	hd *headerdownload.HeaderDownload,
+	historyV3 bool,
+	agg *state.AggregatorV3,
+	zk *ethconfig.Zk,
+) ZkInterHashesCfg {
 	return ZkInterHashesCfg{
 		db:                db,
 		checkRoot:         checkRoot,

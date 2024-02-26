@@ -11,16 +11,21 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 
+	"encoding/binary"
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
+	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
 )
 
 var (
 	batchWorkers = 2
 )
 
+const rollupSequencedBatchesSignature = "0x25280169" // hardcoded abi signature
+
 type IEtherman interface {
 	BlockByNumber(ctx context.Context, blockNumber *big.Int) (*ethTypes.Block, error)
 	FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]ethTypes.Log, error)
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
 }
 
 type fetchJob struct {
@@ -54,6 +59,7 @@ type L1Syncer struct {
 }
 
 func NewL1Syncer(em IEtherman, l1ContractAddresses []common.Address, topics [][]common.Hash, blockRange, queryDelay uint64) *L1Syncer {
+
 	return &L1Syncer{
 		em:                  em,
 		l1ContractAddresses: l1ContractAddresses,
@@ -128,6 +134,31 @@ func (s *L1Syncer) Run(lastCheckedBlock uint64) {
 
 func (s *L1Syncer) GetBlock(number uint64) (*ethTypes.Block, error) {
 	return s.em.BlockByNumber(context.Background(), new(big.Int).SetUint64(number))
+}
+
+func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, error) {
+	loopCount := 0
+	for {
+		if loopCount == 10 {
+			return common.Hash{}, fmt.Errorf("too many retries")
+		}
+
+		h, previousBatch, err := s.callGetRollupSequencedBatches(ctx, addr, rollupId, batchNum)
+		if err != nil {
+			log.Debug("Error getting rollup sequenced batch", "err", err)
+			time.Sleep(time.Duration(loopCount*2) * time.Second)
+			loopCount++
+			continue
+		}
+
+		if h != types.ZeroHash {
+			return h, nil
+		}
+
+		// if the hash is zero, we need to go back to the previous batch
+		batchNum = previousBatch
+		loopCount++
+	}
 }
 
 func (s *L1Syncer) getLatestL1Block() (uint64, error) {
@@ -261,4 +292,31 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 			}
 		}
 	}
+}
+
+func (s *L1Syncer) callGetRollupSequencedBatches(ctx context.Context, addr *common.Address, rollupId, batchNum uint64) (common.Hash, uint64, error) {
+	rollupID := fmt.Sprintf("%064x", rollupId)
+	batchNumber := fmt.Sprintf("%064x", batchNum)
+
+	resp, err := s.em.CallContract(ctx, ethereum.CallMsg{
+		To:   addr,
+		Data: common.FromHex(rollupSequencedBatchesSignature + rollupID + batchNumber),
+	}, nil)
+
+	if err != nil {
+		return common.Hash{}, 0, err
+	}
+
+	if len(resp) < 32 {
+		return common.Hash{}, 0, fmt.Errorf("response too short to contain hash data")
+	}
+	h := common.BytesToHash(resp[:32])
+	fmt.Printf("hash: %s\n", h.String())
+
+	if len(resp) < 96 {
+		return common.Hash{}, 0, fmt.Errorf("response too short to contain last batch number data")
+	}
+	lastBatchNumber := binary.BigEndian.Uint64(resp[88:96])
+
+	return h, lastBatchNumber, nil
 }

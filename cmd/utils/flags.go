@@ -422,6 +422,21 @@ var (
 		Usage: "Rebuild the state tree after this many blocks behind",
 		Value: 10000,
 	}
+	SequencerAddressFlag = cli.StringFlag{
+		Name:  "zkevm.sequencer-address",
+		Usage: "The sequencer address to use if running as a sequencer",
+		Value: "",
+	}
+	ExecutorUrls = cli.StringFlag{
+		Name:  "zkevm.executor-urls",
+		Usage: "A comma separated list of grpc addresses that host executors",
+		Value: "",
+	}
+	ExecutorStrictMode = cli.BoolFlag{
+		Name:  "zkevm.executor-strict",
+		Usage: "Defaulted to true to ensure you must set some executor URLs, bypass this restriction by setting to false",
+		Value: true,
+	}
 	RpcRateLimitsFlag = cli.IntFlag{
 		Name:  "zkevm.rpc-ratelimit",
 		Usage: "RPC rate limit in requests per second.",

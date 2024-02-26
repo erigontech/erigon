@@ -15,6 +15,13 @@ type BookmarkType byte
 
 var BlockBookmarkType BookmarkType = 0
 
+type OperationMode int
+
+const (
+	StandardOperationMode OperationMode = iota
+	ExecutorOperationMode
+)
+
 var entryTypeMappings = map[types.EntryType]datastreamer.EntryType{
 	types.EntryTypeStartL2Block: datastreamer.EntryType(1),
 	types.EntryTypeL2Tx:         datastreamer.EntryType(2),
@@ -25,6 +32,7 @@ var entryTypeMappings = map[types.EntryType]datastreamer.EntryType{
 type DataStreamServer struct {
 	stream  *datastreamer.StreamServer
 	chainId uint64
+	mode    OperationMode
 }
 
 type DataStreamEntry interface {
@@ -32,10 +40,11 @@ type DataStreamEntry interface {
 	Bytes(bigEndian bool) []byte
 }
 
-func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint64) *DataStreamServer {
+func NewDataStreamServer(stream *datastreamer.StreamServer, chainId uint64, mode OperationMode) *DataStreamServer {
 	return &DataStreamServer{
 		stream:  stream,
 		chainId: chainId,
+		mode:    mode,
 	}
 }
 
@@ -103,7 +112,8 @@ func (srv *DataStreamServer) CreateTransactionEntry(
 
 	encoded := writer.Bytes()
 
-	if fork >= 5 {
+	// we only want to append the effective price when not running in an executor context
+	if fork >= 5 && srv.mode != ExecutorOperationMode {
 		encoded = append(encoded, effectiveGasPricePercentage)
 	}
 

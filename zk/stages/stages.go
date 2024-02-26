@@ -19,6 +19,7 @@ func SequencerZkStages(
 	exec SequenceBlockCfg,
 	hashState stagedsync.HashStateCfg,
 	zkInterHashesCfg ZkInterHashesCfg,
+	sequencerExecutorVerifyCfg SequencerExecutorVerifyCfg,
 	history stagedsync.HistoryCfg,
 	logIndex stagedsync.LogIndexCfg,
 	callTraces stagedsync.CallTracesCfg,
@@ -104,6 +105,19 @@ func SequencerZkStages(
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return PruneSequencerInterhashesStage(p, tx, sequencerInterhashesCfg, ctx, firstCycle)
+			},
+		},
+		{
+			ID:          stages2.SequenceExecutorVerify,
+			Description: "Sequencer, check batch with legacy executor",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return SpawnSequencerExecutorVerifyStage(s, u, tx, ctx, sequencerExecutorVerifyCfg, firstCycle, quiet)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return UnwindSequencerExecutorVerifyStage(u, s, tx, ctx, sequencerExecutorVerifyCfg, firstCycle)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return PruneSequencerExecutorVerifyStage(p, tx, sequencerExecutorVerifyCfg, ctx, firstCycle)
 			},
 		},
 		{

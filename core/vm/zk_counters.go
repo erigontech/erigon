@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -25,6 +26,18 @@ type Counter struct {
 }
 
 type Counters map[CounterKey]*Counter
+
+func (c Counters) UsedAsString() string {
+	res := fmt.Sprintf("[SHA: %v]", c[SHA].used)
+	res += fmt.Sprintf("[A: %v]", c[A].used)
+	res += fmt.Sprintf("[B: %v]", c[B].used)
+	res += fmt.Sprintf("[K: %v]", c[K].used)
+	res += fmt.Sprintf("[M: %v]", c[M].used)
+	res += fmt.Sprintf("[P: %v]", c[P].used)
+	res += fmt.Sprintf("[S: %v]", c[S].used)
+	res += fmt.Sprintf("[D: %v]", c[D].used)
+	return res
+}
 
 type CounterKey string
 
