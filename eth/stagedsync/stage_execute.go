@@ -178,7 +178,8 @@ func executeBlock(
 	receipts = execRs.Receipts
 	stateSyncReceipt = execRs.StateSyncReceipt
 
-	if writeReceipts || filterNoPruneReceipts(receipts, cfg.chainConfig).Len() > 0 {
+	// If writeReceipts is false here, append the not to be pruned receipts anyways
+	if writeReceipts || gatherNoPruneReceipts(&receipts, cfg.chainConfig) {
 		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
@@ -201,10 +202,11 @@ func executeBlock(
 	return nil
 }
 
-// Filters out receipts of contracts that may be needed by CL, such as deposit contract
-func filterNoPruneReceipts(receipts types.Receipts, chainCfg *chain.Config) types.Receipts {
+// Filters out and keeps receipts of contracts that may be needed by CL, such as deposit contrac,
+// The list of contracts to filter is config-specified
+func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool{
 	cr := types.Receipts{}
-	for _, r := range receipts {
+	for _, r := range *receipts {
 		for _, l := range r.Logs {
 			if chainCfg.NoPruneContracts[l.Address] {
 				cr = append(cr, r)
@@ -212,8 +214,11 @@ func filterNoPruneReceipts(receipts types.Receipts, chainCfg *chain.Config) type
 			}
 		}
 	}
-	receipts = cr
-	return cr
+	receipts = &cr
+	if receipts.Len() > 0 {
+		return true
+	}
+	return false
 }
 
 func newStateReaderWriter(
