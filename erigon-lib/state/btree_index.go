@@ -771,15 +771,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	defer ps.Delete(p)
 
 	defer kv.EnableReadAhead().DisableReadAhead()
-	//bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
-	//bloom, err := NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
-	//if err != nil {
-	//	return err
-	//}
-	//if noFsync {
-	//	bloom.DisableFsync()
-	//}
-	//hasher := murmur3.New128WithSeed(salt)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -798,24 +789,13 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	key := make([]byte, 0, 64)
 	var pos uint64
 
-	//var kp, emptys uint64
-	//ks := make(map[int]int)
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
 		err = iw.AddKey(key, pos)
 		if err != nil {
 			return err
 		}
-		//hasher.Reset()
-		//hasher.Write(key) //nolint:errcheck
-		//hi, _ := hasher.Sum128()
-		//bloom.AddHash(hi)
 		pos, _ = getter.Skip()
-		//if pos-kp == 1 {
-		//	ks[len(key)]++
-		//	emptys++
-		//}
-
 		p.Processed.Add(1)
 	}
 	//logger.Warn("empty keys", "key lengths", ks, "total emptys", emptys, "total", kv.Count()/2)
@@ -823,11 +803,6 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 		return err
 	}
 
-	//if bloom != nil {
-	//	if err := bloom.Build(); err != nil {
-	//		return err
-	//	}
-	//}
 	return nil
 }
 
