@@ -239,8 +239,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 	return x
 }
 
-// reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 

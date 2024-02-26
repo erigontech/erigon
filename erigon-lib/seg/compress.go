@@ -210,7 +210,7 @@ func (c *Compressor) Compress() error {
 	}
 	defer cf.Close()
 	t = time.Now()
-	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
+	if err := compressWithPatternCandidates(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
 		return err
 	}
 	if err = c.fsync(cf); err != nil {
