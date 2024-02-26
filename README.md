@@ -630,7 +630,7 @@ in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-pr
 
 ### How to run erigon as a separate user? (e.g. as a `systemd` daemon)
 
-Running erigon from `build/bin` as a separate user might produce and error:
+Running erigon from `build/bin` as a separate user might produce an error:
 
     error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
 
