@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/log/v3"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRecSplit2(t *testing.T) {
@@ -115,6 +116,9 @@ func TestIndexLookup(t *testing.T) {
 		TmpDir:     tmpDir,
 		IndexFile:  indexFile,
 		LeafSize:   8,
+
+		Enums:              false,
+		LessFalsePositives: true, //must not impact index when `Enums: false`
 	}, logger)
 	if err != nil {
 		t.Fatal(err)
@@ -131,7 +135,8 @@ func TestIndexLookup(t *testing.T) {
 	defer idx.Close()
 	for i := 0; i < 100; i++ {
 		reader := NewIndexReader(idx)
-		offset, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		offset, ok := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		assert.True(t, ok)
 		if offset != uint64(i*17) {
 			t.Errorf("expected offset: %d, looked up: %d", i*17, offset)
 		}
