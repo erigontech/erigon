@@ -62,8 +62,9 @@ type History struct {
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
 	// MakeContext() using roFiles in zero-copy way
-	files   *btree2.BTreeG[*filesItem]
-	roFiles atomic.Pointer[[]ctxItem]
+	files     *btree2.BTreeG[*filesItem]
+	roFiles   atomic.Pointer[[]ctxItem]
+	indexList idxList
 
 	// Schema:
 	//  .v - list of values
@@ -110,6 +111,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		historyValsTable:   historyValsTable,
 		compression:        cfg.compression,
 		compressWorkers:    1,
+		indexList:          withHashMap,
 		integrityCheck:     integrityCheck,
 		historyLargeValues: cfg.historyLargeValues,
 		dontProduceFiles:   cfg.dontProduceFiles,
