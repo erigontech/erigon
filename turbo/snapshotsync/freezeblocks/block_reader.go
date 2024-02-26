@@ -1105,8 +1105,8 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId, ok := reader.Lookup(txnHash[:])
-		if !ok {
+		blockEventId, exists := reader.Lookup(txnHash[:])
+		if !exists {
 			continue
 		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
