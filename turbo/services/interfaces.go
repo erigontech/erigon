@@ -114,6 +114,7 @@ type BlockSnapshots interface {
 	ReopenFolder() error
 	SegmentsMax() uint64
 	SegmentsMin() uint64
+	Close()
 }
 
 // BlockRetire - freezing blocks: moving old data from DB to snapshot files

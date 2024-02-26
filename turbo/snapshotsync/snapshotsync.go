@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"runtime"
 	"strings"
 	"time"
@@ -82,6 +81,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 		}
 		return nil
 	}
+
+	snapshots.Close()
+	borSnapshots.Close()
 
 	//Corner cases:
 	// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
@@ -269,14 +271,8 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 
 		downloadTimeLeft := calculateTime(remainingBytes, stats.DownloadRate)
 
-		progress := float64(stats.Progress)
-
-		if math.Ceil(progress*1000)/1000 > 99.995 {
-			progress = 100
-		}
-
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
 			// TODO: "downloading", stats.Downloading,
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),

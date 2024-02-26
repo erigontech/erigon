@@ -112,6 +112,10 @@ func (s Segment) FileName() string {
 	return s.Type().FileName(s.version, s.from, s.to)
 }
 
+func (s Segment) FileInfo(dir string) snaptype.FileInfo {
+	return s.Type().FileInfo(dir, s.from, s.to)
+}
+
 func (s *Segment) reopenSeg(dir string) (err error) {
 	s.closeSeg()
 	s.Decompressor, err = compress.NewDecompressor(filepath.Join(dir, s.FileName()))
@@ -163,7 +167,7 @@ func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
 	err = s.reopenIdx(dir)
 
 	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
+		if !(errors.Is(err, os.ErrNotExist) || errors.Is(err, ErrIndexModifiedBeforeSegment)) {
 			if optimistic {
 				log.Warn("[snapshots] open index", "err", err)
 			} else {
@@ -174,6 +178,8 @@ func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
 
 	return nil
 }
+
+var ErrIndexModifiedBeforeSegment = errors.New("index modified before segment")
 
 func (s *Segment) reopenIdx(dir string) (err error) {
 	s.closeIdx()
@@ -188,7 +194,12 @@ func (s *Segment) reopenIdx(dir string) (err error) {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
-		s.indexes = append(s.indexes, index)
+		if s.Decompressor.ModTime().After(index.ModTime()) {
+			s.closeIdx()
+			return fmt.Errorf("%w, fileName: %s: file mod:%s, index mod: %s", ErrIndexModifiedBeforeSegment, fileName, s.Decompressor.ModTime(), index.ModTime())
+		} else {
+			s.indexes = append(s.indexes, index)
+		}
 	}
 
 	return nil
@@ -777,14 +788,10 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 	return nil
 }
 
-func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, types []snaptype.Type, minIndex uint64, chainConfig *chain.Config, workers int, logger log.Logger) error {
+func buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs, snapshots *RoSnapshots, chainConfig *chain.Config, workers int, logger log.Logger) error {
 	dir, tmpDir := dirs.Snap, dirs.Tmp
 	//log.Log(lvl, "[snapshots] Build indices", "from", min)
 
-	segments, _, err := typedSegments(dir, minIndex, types)
-	if err != nil {
-		return err
-	}
 	ps := background.NewProgressSet()
 	startIndexingTime := time.Now()
 
@@ -811,25 +818,28 @@ func BuildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 		}
 	}()
 
-	for _, t := range types {
-		for index := range segments {
-			segment := segments[index]
-			if segment.Type.Enum() != t.Enum() {
+	snapshots.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		for _, segment := range value.segments {
+			info := segment.FileInfo(dir)
+
+			if hasIdxFile(info, logger) {
 				continue
 			}
-			if hasIdxFile(segment, logger) {
-				continue
-			}
-			sn := segment
+
+			segment.closeIdx()
+
 			g.Go(func() error {
 				p := &background.Progress{}
 				ps.Add(p)
-				defer notifySegmentIndexingFinished(sn.Name())
+				defer notifySegmentIndexingFinished(info.Name())
 				defer ps.Delete(p)
-				return buildIdx(gCtx, sn, chainConfig, tmpDir, p, log.LvlInfo, logger)
+				return buildIdx(gCtx, info, chainConfig, tmpDir, p, log.LvlInfo, logger)
 			})
 		}
-	}
+
+		return true
+	})
+
 	go func() {
 		defer close(finish)
 		g.Wait()
@@ -1335,7 +1345,7 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
-	if err := BuildMissedIndices(logPrefix, ctx, br.dirs, snapshots.Types(), snapshots.SegmentsMin(), cc, indexWorkers, br.logger); err != nil {
+	if err := buildMissedIndices(logPrefix, ctx, br.dirs, snapshots, cc, indexWorkers, br.logger); err != nil {
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
 
@@ -1425,27 +1435,45 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 	dir := sn.Dir()
 	fName := snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.Type.String())
 	var result = true
+
+	segment, err := compress.NewDecompressor(sn.Path)
+
+	if err != nil {
+		return false
+	}
+
+	defer segment.Close()
+
 	switch sn.Type.Enum() {
 	case snaptype.Enums.Headers, snaptype.Enums.Bodies, snaptype.Enums.BorEvents, snaptype.Enums.BorSpans, snaptype.Enums.BeaconBlocks:
 		idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
 			return false
 		}
-		idx.Close()
+		defer idx.Close()
+
+		return idx.ModTime().After(segment.ModTime())
 	case snaptype.Enums.Transactions:
 		idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
 			return false
 		}
-		idx.Close()
+		defer idx.Close()
+
+		if !idx.ModTime().After(segment.ModTime()) {
+			return false
+		}
 
 		fName = snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum.String())
 		idx, err = recsplit.OpenIndex(filepath.Join(dir, fName))
 		if err != nil {
 			return false
 		}
-		idx.Close()
+		defer idx.Close()
+
+		return idx.ModTime().After(segment.ModTime())
 	}
+
 	return result
 }
 
