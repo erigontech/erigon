@@ -859,14 +859,13 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    collation.historyCount,
-		Enums:       false,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      h.dirs.Tmp,
-		IndexFile:   historyIdxPath,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
-		Salt:        h.salt,
+		KeyCount:   collation.historyCount,
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     h.dirs.Tmp,
+		IndexFile:  historyIdxPath,
+		Salt:       h.salt,
 	}, h.logger); err != nil {
 		return HistoryFiles{}, fmt.Errorf("create recsplit: %w", err)
 	}
