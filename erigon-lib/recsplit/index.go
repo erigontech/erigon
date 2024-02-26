@@ -137,7 +137,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	}
 	idx.enums = idx.data[offset] != 0
 	offset++
-	if idx.enums {
+	if idx.enums && idx.keyCount > 0 {
 		var size int
 		idx.offsetEf, size = eliasfano32.ReadEliasFano(idx.data[offset:])
 		offset += size
