@@ -53,15 +53,21 @@ import (
 type History struct {
 	*InvertedIndex // indexKeysTable contains mapping txNum -> key1+key2, while index table `key -> {txnums}` is omitted.
 
-	// Files:
+	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	//
+	// roFiles derivative from field `file`, but without garbage:
+	//  - no files with `canDelete=true`
+	//  - no overlaps
+	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
+	//
+	// MakeContext() using roFiles in zero-copy way
+	files   *btree2.BTreeG[*filesItem]
+	roFiles atomic.Pointer[[]ctxItem]
+
+	// Schema:
 	//  .v - list of values
 	//  .vi - txNum+key -> offset in .v
-	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
-	indexList idxList
-
-	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
-	// MakeContext() using this field in zero-copy way
-	roFiles atomic.Pointer[[]ctxItem]
 
 	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	compressWorkers  int
@@ -77,8 +83,6 @@ type History struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
-
-	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
 	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
 	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
@@ -144,7 +148,7 @@ func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
 }
 func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
-	h.garbageFiles = h.scanStateFiles(fNames)
+	h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
 		return fmt.Errorf("History(%s).openFiles: %w", h.filenameBase, err)
 	}
