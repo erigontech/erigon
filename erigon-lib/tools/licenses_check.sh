@@ -30,7 +30,7 @@ output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     | grep -v "erigon-lib has empty version"        `# self` \
     | grep -v "golang.org/x/"                       `# a part of Go` \
     | grep -v "crawshaw.io/sqlite"                  `# ISC` \
-    | grep -v "erigon-lib/sais"                     `# MIT` \
+    | grep -v "erigon-lib/seg/sais"                 `# MIT` \
     | grep -v "github.com/anacrolix/go-libutp"      `# MIT` \
     | grep -v "github.com/cespare/xxhash/v2"        `# MIT` \
     | grep -v "github.com/anacrolix/mmsg"           `# MPL-2.0` \
