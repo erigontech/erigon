@@ -138,14 +138,16 @@ func TestTwoLayerIndex(t *testing.T) {
 	logger := log.New()
 	tmpDir := t.TempDir()
 	indexFile := filepath.Join(tmpDir, "index")
+	salt := uint32(1)
 	rs, err := NewRecSplit(RecSplitArgs{
-		KeyCount:   100,
-		BucketSize: 10,
-		Salt:       0,
-		TmpDir:     tmpDir,
-		IndexFile:  indexFile,
-		LeafSize:   8,
-		Enums:      true,
+		KeyCount:           100,
+		BucketSize:         10,
+		Salt:               salt,
+		TmpDir:             tmpDir,
+		IndexFile:          indexFile,
+		LeafSize:           8,
+		Enums:              true,
+		LessFalsePositives: true,
 	}, logger)
 	if err != nil {
 		t.Fatal(err)
