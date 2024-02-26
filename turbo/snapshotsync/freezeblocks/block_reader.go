@@ -610,9 +610,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if err != nil {
 		return nil, nil, err
 	}
-	if !ok {
-		return
-	}
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		return block, senders, nil // no senders is fine - will recover them on the fly
@@ -816,6 +813,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 
 		reader := recsplit.NewIndexReader(idxTxnHash)
 		txnId, ok := reader.Lookup(txnHash[:])
+		fmt.Printf("[dbg] txnByHash: sn=%d-%d, esists=%t, txnId=%d", sn.from, sn.to, ok, txnId)
 		if !ok {
 			continue
 		}
