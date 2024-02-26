@@ -14,5 +14,8 @@
   "terminalTotalDifficulty": 0,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1696000704,
-  "cancunTime": 1707305664
+  "cancunTime": 1707305664,
+  "noPruneContracts": {
+    "0x4242424242424242424242424242424242424242": true
+  }
 }
