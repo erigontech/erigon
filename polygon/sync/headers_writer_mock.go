@@ -5,6 +5,7 @@
 package sync
 
 import (
+	context "context"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
@@ -35,15 +36,15 @@ func (m *MockHeadersWriter) EXPECT() *MockHeadersWriterMockRecorder {
 }
 
 // PutHeaders mocks base method.
-func (m *MockHeadersWriter) PutHeaders(arg0 []*types.Header) error {
+func (m *MockHeadersWriter) PutHeaders(arg0 context.Context, arg1 []*types.Header) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PutHeaders", arg0)
+	ret := m.ctrl.Call(m, "PutHeaders", arg0, arg1)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // PutHeaders indicates an expected call of PutHeaders.
-func (mr *MockHeadersWriterMockRecorder) PutHeaders(arg0 interface{}) *gomock.Call {
+func (mr *MockHeadersWriterMockRecorder) PutHeaders(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutHeaders", reflect.TypeOf((*MockHeadersWriter)(nil).PutHeaders), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PutHeaders", reflect.TypeOf((*MockHeadersWriter)(nil).PutHeaders), arg0, arg1)
 }
