@@ -1,6 +1,6 @@
 //go:build silkworm_seg_fuzz
 
-package compress
+package seg
 
 import (
 	"context"
