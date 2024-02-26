@@ -15,7 +15,6 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
@@ -96,11 +95,10 @@ func (m *MockBlockReader) FrozenSlots() uint64 {
 	panic("implement me")
 }
 
-func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) (*MockBlockReader, afero.Fs) {
+func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState, db kv.RwDB, t *testing.T) *MockBlockReader {
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	fs := afero.NewMemMapFs()
 
 	m := NewMockBlockReader()
 	for _, block := range blocks {
@@ -111,7 +109,7 @@ func LoadChain(blocks []*cltypes.SignedBeaconBlock, s *state.CachingBeaconState,
 	require.NoError(t, state_accessors.InitializeStaticTables(tx, s))
 
 	require.NoError(t, tx.Commit())
-	return m, fs
+	return m
 }
 
 func GetCapellaRandom() ([]*cltypes.SignedBeaconBlock, *state.CachingBeaconState, *state.CachingBeaconState) {

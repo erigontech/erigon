@@ -88,6 +88,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	var currEth1Progress atomic.Int64
 
 	bytesReadInTotal := atomic.Uint64{}
+
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
@@ -110,28 +111,33 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		if !foundLatestEth1ValidBlock.Load() && blk.Version() >= clparams.BellatrixVersion {
 			payload := blk.Block.Body.ExecutionPayload
-			payloadRoot, err := payload.HashSSZ()
-			if err != nil {
-				return false, fmt.Errorf("error hashing execution payload during download: %s", err)
-			}
-			encodedPayload, err := payload.EncodeSSZ(nil)
-			if err != nil {
-				return false, fmt.Errorf("error encoding execution payload during download: %s", err)
-			}
-			// Use snappy compression that the temporary files do not take too much disk.
-			encodedPayload = utils.CompressSnappy(append([]byte{byte(blk.Version())}, append(blk.Block.ParentRoot[:], encodedPayload...)...))
-			if err := cfg.executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payloadRoot), encodedPayload); err != nil {
-				return false, fmt.Errorf("error collecting execution payload during download: %s", err)
-			}
-			if currEth1Progress.Load()%100 == 0 {
-				return false, tx.Commit()
-			}
-
 			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
 			foundLatestEth1ValidBlock.Store((len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks() > payload.BlockNumber)
+			if foundLatestEth1ValidBlock.Load() {
+				logger.Info("Found latest eth1 valid block", "blockNumber", payload.BlockNumber, "blockHash", payload.BlockHash)
+			}
+
+			if !foundLatestEth1ValidBlock.Load() {
+				payloadRoot, err := payload.HashSSZ()
+				if err != nil {
+					return false, fmt.Errorf("error hashing execution payload during download: %s", err)
+				}
+				encodedPayload, err := payload.EncodeSSZ(nil)
+				if err != nil {
+					return false, fmt.Errorf("error encoding execution payload during download: %s", err)
+				}
+				// Use snappy compression that the temporary files do not take too much disk.
+				encodedPayload = utils.CompressSnappy(append([]byte{byte(blk.Version())}, append(blk.Block.ParentRoot[:], encodedPayload...)...))
+				if err := cfg.executionBlocksCollector.Collect(dbutils.BlockBodyKey(payload.BlockNumber, payloadRoot), encodedPayload); err != nil {
+					return false, fmt.Errorf("error collecting execution payload during download: %s", err)
+				}
+				if currEth1Progress.Load()%100 == 0 {
+					return false, tx.Commit()
+				}
+			}
 		}
 		if blk.Version() <= clparams.AltairVersion {
 			foundLatestEth1ValidBlock.Store(true)
