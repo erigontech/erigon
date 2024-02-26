@@ -688,7 +688,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 
 		if rs.lessFalsePositives {
-			if err := rs.indexW.Flush(); err != nil {
+			if err := rs.lessFalsePositivesW.Flush(); err != nil {
 				return err
 			}
 			//write len of array, and array
@@ -699,7 +699,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			if _, err := io.Copy(rs.indexW, bufio.NewReader(rs.lessFalsePositivesF)); err != nil {
 				return err
 			}
-			rs.lessFalsePositivesF.Close()
+			_ = rs.lessFalsePositivesF.Close()
 		}
 	}
 	// Write out the size of golomb rice params
