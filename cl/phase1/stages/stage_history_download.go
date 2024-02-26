@@ -88,6 +88,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	var currEth1Progress atomic.Int64
 
 	bytesReadInTotal := atomic.Uint64{}
+
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
@@ -115,6 +116,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
 			foundLatestEth1ValidBlock.Store((len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks() > payload.BlockNumber)
+			if foundLatestEth1ValidBlock.Load() {
+				logger.Info("Found latest eth1 valid block", "blockNumber", payload.BlockNumber, "blockHash", payload.BlockHash)
+			}
+
 			if !foundLatestEth1ValidBlock.Load() {
 				payloadRoot, err := payload.HashSSZ()
 				if err != nil {

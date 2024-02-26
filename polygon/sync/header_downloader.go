@@ -24,15 +24,13 @@ const (
 
 //go:generate mockgen -destination=./headers_writer_mock.go -package=sync . HeadersWriter
 type HeadersWriter interface {
-	PutHeaders(headers []*types.Header) error
+	PutHeaders(ctx context.Context, headers []*types.Header) error
 }
 
 func NewHeaderDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.Heimdall,
-	checkpointStore heimdall.CheckpointStore,
-	milestoneStore heimdall.MilestoneStore,
+	heimdall heimdall.HeimdallNoStore,
 	headersVerifier AccumulatedHeadersVerifier,
 	headersWriter HeadersWriter,
 ) *HeaderDownloader {
@@ -40,8 +38,6 @@ func NewHeaderDownloader(
 		logger,
 		p2pService,
 		heimdall,
-		checkpointStore,
-		milestoneStore,
 		headersVerifier,
 		headersWriter,
 		notEnoughPeersBackOffDuration,
@@ -51,9 +47,7 @@ func NewHeaderDownloader(
 func newHeaderDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
-	heimdall heimdall.Heimdall,
-	checkpointStore heimdall.CheckpointStore,
-	milestoneStore heimdall.MilestoneStore,
+	heimdall heimdall.HeimdallNoStore,
 	headersVerifier AccumulatedHeadersVerifier,
 	headersWriter HeadersWriter,
 	notEnoughPeersBackOffDuration time.Duration,
@@ -62,8 +56,6 @@ func newHeaderDownloader(
 		logger:                        logger,
 		p2pService:                    p2pService,
 		heimdall:                      heimdall,
-		checkpointStore:               checkpointStore,
-		milestoneStore:                milestoneStore,
 		headersVerifier:               headersVerifier,
 		headersWriter:                 headersWriter,
 		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
@@ -73,16 +65,14 @@ func newHeaderDownloader(
 type HeaderDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
-	heimdall                      heimdall.Heimdall
-	checkpointStore               heimdall.CheckpointStore
-	milestoneStore                heimdall.MilestoneStore
+	heimdall                      heimdall.HeimdallNoStore
 	headersVerifier               AccumulatedHeadersVerifier
 	headersWriter                 HeadersWriter
 	notEnoughPeersBackOffDuration time.Duration
 }
 
 func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
-	waypoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, hd.checkpointStore, start)
+	waypoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return err
 	}
@@ -96,7 +86,7 @@ func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start 
 }
 
 func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start uint64) error {
-	waypoints, err := hd.heimdall.FetchMilestonesFromBlock(ctx, hd.milestoneStore, start)
+	waypoints, err := hd.heimdall.FetchMilestonesFromBlock(ctx, start)
 	if err != nil {
 		return err
 	}
@@ -232,7 +222,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 		}
 
 		dbWriteStartTime := time.Now()
-		if err := hd.headersWriter.PutHeaders(headers); err != nil {
+		if err := hd.headersWriter.PutHeaders(ctx, headers); err != nil {
 			return err
 		}
 

@@ -13,7 +13,7 @@ type Waypoint interface {
 	EndBlock() *big.Int
 	RootHash() libcommon.Hash
 	Timestamp() uint64
-	Length() int
+	Length() uint64
 	CmpRange(n uint64) int
 }
 
@@ -26,8 +26,8 @@ type WaypointFields struct {
 	Timestamp  uint64            `json:"timestamp"`
 }
 
-func (a *WaypointFields) Length() int {
-	return int(new(big.Int).Sub(a.EndBlock, a.StartBlock).Int64() + 1)
+func (a *WaypointFields) Length() uint64 {
+	return a.EndBlock.Uint64() - a.StartBlock.Uint64() + 1
 }
 
 func (a *WaypointFields) CmpRange(n uint64) int {

@@ -9,7 +9,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/p2p"
 )
 
 //go:generate mockgen -destination=./service_mock.go -package=p2p . Service
@@ -23,12 +22,12 @@ type Service interface {
 	Penalize(ctx context.Context, peerId PeerId) error
 }
 
-func NewService(config p2p.Config, logger log.Logger, sentryClient direct.SentryClient) Service {
-	return newService(config, logger, sentryClient, rand.Uint64)
+func NewService(maxPeers int, logger log.Logger, sentryClient direct.SentryClient) Service {
+	return newService(maxPeers, logger, sentryClient, rand.Uint64)
 }
 
 func newService(
-	config p2p.Config,
+	maxPeers int,
 	logger log.Logger,
 	sentryClient direct.SentryClient,
 	requestIdGenerator RequestIdGenerator,
@@ -40,7 +39,7 @@ func newService(
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	fetcher := NewTrackingFetcher(logger, messageListener, messageSender, peerPenalizer, requestIdGenerator, peerTracker)
 	return &service{
-		config:          config,
+		maxPeers:        maxPeers,
 		fetcher:         fetcher,
 		messageListener: messageListener,
 		peerPenalizer:   peerPenalizer,
@@ -50,7 +49,7 @@ func newService(
 
 type service struct {
 	once            sync.Once
-	config          p2p.Config
+	maxPeers        int
 	fetcher         Fetcher
 	messageListener MessageListener
 	peerPenalizer   PeerPenalizer
@@ -68,7 +67,7 @@ func (s *service) Stop() {
 }
 
 func (s *service) MaxPeers() int {
-	return s.config.MaxPeers
+	return s.maxPeers
 }
 
 func (s *service) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
