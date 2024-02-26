@@ -24,7 +24,7 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/sais"
+	"github.com/ledgerwatch/erigon-lib/seg/sais"
 )
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string
