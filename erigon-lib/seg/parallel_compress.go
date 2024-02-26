@@ -240,7 +240,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 }
 
 // reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -309,9 +309,9 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
-	totalWords := datFile.count
+	totalWords := uncompressedFile.count
 
-	if err = datFile.ForEach(func(v []byte, compression bool) error {
+	if err = uncompressedFile.ForEach(func(v []byte, compression bool) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
