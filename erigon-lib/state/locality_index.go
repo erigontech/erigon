@@ -29,7 +29,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
@@ -361,14 +360,13 @@ func (li *LocalityIndex) buildFiles(ctx context.Context, fromStep, toStep uint64
 	p.Total.Store(uint64(count))
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    count,
-		Enums:       false,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      li.tmpdir,
-		IndexFile:   idxPath,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
-		Salt:        li.salt,
+		KeyCount:   count,
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     li.tmpdir,
+		IndexFile:  idxPath,
+		Salt:       li.salt,
 	}, li.logger)
 	if err != nil {
 		return nil, fmt.Errorf("create recsplit: %w", err)
