@@ -12,17 +12,20 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/edsrzf/mmap-go"
+	"github.com/ledgerwatch/log/v3"
+	"github.com/spaolacci/murmur3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
 )
 
 var UseBpsTree = true
@@ -771,6 +774,16 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	defer ps.Delete(p)
 
 	defer kv.EnableReadAhead().DisableReadAhead()
+	bloomPath := strings.TrimSuffix(indexPath, ".bt") + ".kvei"
+
+	bloom, err := NewExistenceFilter(uint64(kv.Count()/2), bloomPath)
+	if err != nil {
+		return err
+	}
+	if noFsync {
+		bloom.DisableFsync()
+	}
+	hasher := murmur3.New128WithSeed(salt)
 
 	args := BtIndexWriterArgs{
 		IndexFile: indexPath,
@@ -789,13 +802,24 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 	key := make([]byte, 0, 64)
 	var pos uint64
 
+	//var kp, emptys uint64
+	//ks := make(map[int]int)
 	for getter.HasNext() {
 		key, _ = getter.Next(key[:0])
 		err = iw.AddKey(key, pos)
 		if err != nil {
 			return err
 		}
+		hasher.Reset()
+		hasher.Write(key) //nolint:errcheck
+		hi, _ := hasher.Sum128()
+		bloom.AddHash(hi)
 		pos, _ = getter.Skip()
+		//if pos-kp == 1 {
+		//	ks[len(key)]++
+		//	emptys++
+		//}
+
 		p.Processed.Add(1)
 	}
 	//logger.Warn("empty keys", "key lengths", ks, "total emptys", emptys, "total", kv.Count()/2)
@@ -803,6 +827,11 @@ func BuildBtreeIndexWithDecompressor(indexPath string, kv *compress.Decompressor
 		return err
 	}
 
+	if bloom != nil {
+		if err := bloom.Build(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
