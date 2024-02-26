@@ -182,6 +182,8 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
+	log.Warn("[dbg] NewRec", "is enums", rs.enums, "is lessFalsePositives", rs.lessFalsePositives, "name", rs.indexFileName)
+
 	if rs.lessFalsePositives {
 		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
 		if err != nil {
