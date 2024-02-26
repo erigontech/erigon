@@ -168,6 +168,9 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		if idx.lessFalsePositives {
 			arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 			offset += 8
+			if arrSz != idx.keyCount {
+				return nil, fmt.Errorf("%w. size of existence filter %d != keys count %d", IncompatibleErr, arrSz, idx.keyCount)
+			}
 			idx.existence = idx.data[offset : offset+int(arrSz)]
 			offset += int(arrSz)
 		}

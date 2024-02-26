@@ -187,7 +187,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			return nil, err
 		}
 		rs.existenceF = bufferFile
-		rs.existenceW = bufio.NewWriter(bufferFile)
+		rs.existenceW = bufio.NewWriter(rs.existenceF)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -213,6 +213,9 @@ func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
 	}
+	if rs.existenceF != nil {
+		rs.existenceF.Close()
+	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
@@ -229,8 +232,8 @@ func (rs *RecSplit) SetTrace(trace bool) {
 
 // remap converts the number x which is assumed to be uniformly distributed over the range [0..2^64) to the number that is uniformly
 // distributed over the range [0..n)
-func remap(x uint64, n uint64) uint64 {
-	hi, _ := bits.Mul64(x, n)
+func remap(x uint64, n uint64) (hi uint64) {
+	hi, _ = bits.Mul64(x, n)
 	return hi
 }
 
@@ -279,6 +282,8 @@ func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fano
 	return
 }
 
+var golombBaseLog2 = -math.Log((math.Sqrt(5) + 1.0) / 2.0)
+
 func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, secondaryAggrBound uint16) {
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	k := make([]uint16, fanout)
@@ -292,7 +297,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		sqrtProd *= math.Sqrt(float64(k[i]))
 	}
 	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrtProd)
-	golombRiceLength := uint32(math.Ceil(math.Log2(-math.Log((math.Sqrt(5)+1.0)/2.0) / math.Log1p(-p)))) // log2 Golomb modulus
+	golombRiceLength := uint32(math.Ceil(math.Log2(golombBaseLog2 / math.Log1p(-p)))) // log2 Golomb modulus
 	if golombRiceLength > 0x1F {
 		panic("golombRiceLength > 0x1F")
 	}
@@ -318,8 +323,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
 func (rs *RecSplit) golombParam(m uint16) int {
-	s := uint16(len(rs.golombRice))
-	for m >= s {
+	for s := uint16(len(rs.golombRice)); m >= s; s++ {
 		rs.golombRice = append(rs.golombRice, 0)
 		// For the case where bucket is larger than planned
 		if s == 0 {
@@ -329,7 +333,6 @@ func (rs *RecSplit) golombParam(m uint16) int {
 		} else {
 			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		}
-		s++
 	}
 	return int(rs.golombRice[m] >> 27)
 }
@@ -686,19 +689,8 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
 
-		if rs.lessFalsePositives {
-			if err := rs.existenceW.Flush(); err != nil {
-				return err
-			}
-			//write len of array, and array
-			binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
-			if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
-				return err
-			}
-			if _, err := io.Copy(rs.indexW, bufio.NewReader(rs.existenceF)); err != nil {
-				return err
-			}
-			_ = rs.existenceF.Close()
+		if err := rs.flushExistenceFilter(); err != nil {
+			return err
 		}
 	}
 	// Write out the size of golomb rice params
@@ -730,6 +722,31 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
+	return nil
+}
+
+func (rs *RecSplit) flushExistenceFilter() error {
+	if !rs.lessFalsePositives {
+		return nil
+	}
+	defer rs.existenceF.Close()
+
+	//Write len of array
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return err
+	}
+
+	// flush bufio and rewind before io.Copy, but no reason to fsync the file - it temporary
+	if err := rs.existenceW.Flush(); err != nil {
+		return err
+	}
+	if _, err := rs.existenceF.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := io.CopyN(rs.indexW, rs.existenceF, int64(rs.keysAdded)); err != nil {
+		return err
+	}
 	return nil
 }
 
