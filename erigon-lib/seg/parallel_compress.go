@@ -43,7 +43,7 @@ import (
 // MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const MinPatternScore = 1024
 
-func optimiseCluster(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
+func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
 	if len(matches) == 0 {
@@ -182,7 +182,7 @@ func optimiseCluster(trace bool, input []byte, mf2 *patricia.MatchFinder2, outpu
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -194,7 +194,7 @@ func reduceDictWorker(trace bool, inputCh chan *CompressionWord, outCh chan *Com
 		wordLen := uint64(len(compW.word))
 		n := binary.PutUvarint(numBuf[:], wordLen)
 		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered = optimiseCluster(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
 		compW.word = append(compW.word[:0], output...)
 		outCh <- compW
 		inputSize.Add(1 + wordLen)
@@ -292,7 +292,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
-			go reduceDictWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
+			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
 		}
 	}
 	t := time.Now()
@@ -378,7 +378,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 			}
 			if wordLen > 0 {
 				if compression {
-					output, patterns, uncovered = optimiseCluster(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
+					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
 					if _, e := intermediateW.Write(output); e != nil {
 						return e
 					}
