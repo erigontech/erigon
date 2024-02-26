@@ -72,9 +72,8 @@ type RecSplit struct {
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
 
-	lessFalsePositivesBuf []byte
-	lessFalsePositivesF   *os.File
-	lessFalsePositivesW   *bufio.Writer
+	existenceF *os.File
+	existenceW *bufio.Writer
 
 	indexFileName          string
 	indexFile, tmpFilePath string
@@ -187,8 +186,8 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		if err != nil {
 			return nil, err
 		}
-		rs.lessFalsePositivesF = bufferFile
-		rs.lessFalsePositivesW = bufio.NewWriter(bufferFile)
+		rs.existenceF = bufferFile
+		rs.existenceW = bufio.NewWriter(bufferFile)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -368,7 +367,7 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		}
 		if rs.lessFalsePositives {
 			//1 byte from each hashed key
-			if err := rs.lessFalsePositivesW.WriteByte(byte(hi)); err != nil {
+			if err := rs.existenceW.WriteByte(byte(hi)); err != nil {
 				return err
 			}
 		}
@@ -688,7 +687,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 
 		if rs.lessFalsePositives {
-			if err := rs.lessFalsePositivesW.Flush(); err != nil {
+			if err := rs.existenceW.Flush(); err != nil {
 				return err
 			}
 			//write len of array, and array
@@ -696,10 +695,10 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 				return err
 			}
-			if _, err := io.Copy(rs.indexW, bufio.NewReader(rs.lessFalsePositivesF)); err != nil {
+			if _, err := io.Copy(rs.indexW, bufio.NewReader(rs.existenceF)); err != nil {
 				return err
 			}
-			_ = rs.lessFalsePositivesF.Close()
+			_ = rs.existenceF.Close()
 		}
 	}
 	// Write out the size of golomb rice params

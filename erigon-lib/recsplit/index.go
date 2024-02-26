@@ -81,7 +81,7 @@ type Index struct {
 	enums              bool
 
 	lessFalsePositives bool
-	firstBytes         []byte
+	existence          []byte
 
 	readers *sync.Pool
 }
@@ -168,7 +168,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		if idx.lessFalsePositives {
 			arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 			offset += 8
-			idx.firstBytes = idx.data[offset : offset+int(arrSz)]
+			idx.existence = idx.data[offset : offset+int(arrSz)]
 			offset += int(arrSz)
 		}
 	}
@@ -326,7 +326,7 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 
 	found := binary.BigEndian.Uint64(idx.data[pos:]) & idx.recMask
 	if idx.lessFalsePositives {
-		return found, idx.firstBytes[found] == byte(bucketHash)
+		return found, idx.existence[found] == byte(bucketHash)
 	}
 	return found, true
 }
@@ -340,7 +340,7 @@ func (idx *Index) OrdinalLookup(i uint64) uint64 {
 
 func (idx *Index) Has(bucketHash, i uint64) bool {
 	if idx.lessFalsePositives {
-		return idx.firstBytes[i] == byte(bucketHash)
+		return idx.existence[i] == byte(bucketHash)
 	}
 	return true
 }
