@@ -112,7 +112,6 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		compressWorkers:    1,
 		integrityCheck:     integrityCheck,
 		historyLargeValues: cfg.historyLargeValues,
-		indexList:          withHashMap,
 		dontProduceFiles:   cfg.dontProduceFiles,
 		keepTxInDB:         cfg.keepTxInDB,
 	}
