@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
@@ -953,14 +952,13 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 		p = ps.AddNew(path.Base(idxPath), uint64(decomp.Count()/2))
 		defer ps.Delete(p)
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:    keyCount,
-			Enums:       false,
-			BucketSize:  2000,
-			LeafSize:    8,
-			TmpDir:      hc.h.dirs.Tmp,
-			IndexFile:   idxPath,
-			EtlBufLimit: etl.BufferOptimalSize / 2,
-			Salt:        hc.h.salt,
+			KeyCount:   keyCount,
+			Enums:      false,
+			BucketSize: 2000,
+			LeafSize:   8,
+			TmpDir:     hc.h.dirs.Tmp,
+			IndexFile:  idxPath,
+			Salt:       hc.h.salt,
 		}, hc.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}
