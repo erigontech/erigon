@@ -33,8 +33,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/patricia"
 	"github.com/ledgerwatch/erigon-lib/sais"
+	"github.com/ledgerwatch/erigon-lib/seg/patricia"
+
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 )
