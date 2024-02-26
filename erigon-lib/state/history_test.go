@@ -167,7 +167,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
 		for i := 0; i < len(keyWords); i++ {
-			offset, _ := r.Lookup([]byte(keyWords[i]))
+			offset, _ := r.TwoLayerLookup([]byte(keyWords[i]))
 			g.Reset(offset)
 			w, _ := g.Next(nil)
 			require.Equal(keyWords[i], string(w))
