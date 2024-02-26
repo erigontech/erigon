@@ -109,16 +109,17 @@ func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
 	return milestones
 }
 
-type downloadHeadersMock func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error)
+type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error)
 
-func (hdt headerDownloaderTest) defaultDownloadHeadersMock() downloadHeadersMock {
+func (hdt headerDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
+	// p2p.Service.FetchHeaders interface is using [start, end) so we stick to that
 	return func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error) {
-		if start > end {
-			return nil, fmt.Errorf("unexpected start > end in test: start=%d, end=%d", start, end)
+		if start >= end {
+			return nil, fmt.Errorf("unexpected start >= end in test: start=%d, end=%d", start, end)
 		}
 
-		res := make([]*types.Header, end-start+1)
-		for num := start; num <= end; num++ {
+		res := make([]*types.Header, end-start)
+		for num := start; num < end; num++ {
 			res[num-start] = &types.Header{
 				Number: new(big.Int).SetUint64(num),
 			}
@@ -147,7 +148,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		Times(1)
 	test.p2pService.EXPECT().
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultDownloadHeadersMock()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
 		Times(4)
 	var persistedHeaders []*types.Header
 	test.headersWriter.EXPECT().
@@ -177,7 +178,7 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		Times(4)
 	test.p2pService.EXPECT().
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultDownloadHeadersMock()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
 	test.headersWriter.EXPECT().
@@ -221,7 +222,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Times(3)
 	test.p2pService.EXPECT().
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultDownloadHeadersMock()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
 		// request 1,2,3 in parallel
 		// -> 2 fails
 		// requests 2,3,4 in parallel
@@ -259,7 +260,7 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		Times(1)
 	test.p2pService.EXPECT().
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultDownloadHeadersMock()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
 		Times(8)
 	var persistedHeaders []*types.Header
 	test.headersWriter.EXPECT().
