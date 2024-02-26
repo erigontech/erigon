@@ -602,13 +602,13 @@ func (ph *PositionHeap) Pop() interface{} {
 	return x
 }
 
-type HuffmanCoder struct {
+type BitWriter struct {
 	w          *bufio.Writer
 	outputBits int
 	outputByte byte
 }
 
-func (hf *HuffmanCoder) encode(code uint64, codeBits int) error {
+func (hf *BitWriter) encode(code uint64, codeBits int) error {
 	for codeBits > 0 {
 		var bitsUsed int
 		if hf.outputBits+codeBits > 8 {
@@ -632,7 +632,7 @@ func (hf *HuffmanCoder) encode(code uint64, codeBits int) error {
 	return nil
 }
 
-func (hf *HuffmanCoder) flush() error {
+func (hf *BitWriter) flush() error {
 	if hf.outputBits > 0 {
 		if e := hf.w.WriteByte(hf.outputByte); e != nil {
 			return e

@@ -651,7 +651,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	}
 	// Re-encode all the words with the use of optimised (via Huffman coding) dictionaries
 	wc := 0
-	var hc HuffmanCoder
+	var hc BitWriter
 	hc.w = cw
 	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
 	var l uint64
