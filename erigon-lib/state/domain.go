@@ -344,23 +344,25 @@ func (ds *DomainStats) Accumulate(other DomainStats) {
 //  3. acc doesn’t exists, then delete: .kv - no,  .v - no
 type Domain struct {
 	*History
-	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
-	indexList idxList
 
+	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	//
 	// roFiles derivative from field `file`, but without garbage:
 	//  - no files with `canDelete=true`
 	//  - no overlaps
 	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
 	//
-	// MakeContext() using this field in zero-copy way
-	roFiles   atomic.Pointer[[]ctxItem]
+	// MakeContext() using roFiles in zero-copy way
+	files   *btree2.BTreeG[*filesItem]
+	roFiles atomic.Pointer[[]ctxItem]
+
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
 
-	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
-
 	compression FileCompression
+	indexList   idxList
 }
 
 type domainCfg struct {
@@ -440,7 +442,7 @@ func (d *Domain) OpenList(idxFiles, histFiles, domainFiles []string, readonly bo
 
 func (d *Domain) openList(names []string, readonly bool) error {
 	d.closeWhatNotInList(names)
-	d.garbageFiles = d.scanStateFiles(names)
+	d.scanStateFiles(names)
 	if err := d.openFiles(); err != nil {
 		return fmt.Errorf("Domain.OpenList: %s, %w", d.filenameBase, err)
 	}

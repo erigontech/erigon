@@ -78,8 +78,6 @@ type History struct {
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
 
-	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
-
 	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
 	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
 }
@@ -144,7 +142,7 @@ func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
 }
 func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
-	h.garbageFiles = h.scanStateFiles(fNames)
+	h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
 		return fmt.Errorf("History(%s).openFiles: %w", h.filenameBase, err)
 	}

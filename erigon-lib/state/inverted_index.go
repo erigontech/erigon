@@ -56,8 +56,10 @@ import (
 
 type InvertedIndex struct {
 	iiCfg
-	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
-	indexList idxList
+
+	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	files *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
 
 	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
 	// MakeContext() using this field in zero-copy way
@@ -80,8 +82,6 @@ type InvertedIndex struct {
 	warmLocalityIdx *LocalityIndex
 	coldLocalityIdx *LocalityIndex
 
-	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
-
 	// fields for history write
 	logger log.Logger
 
@@ -89,6 +89,7 @@ type InvertedIndex struct {
 
 	compression     FileCompression
 	compressWorkers int
+	indexList       idxList
 }
 
 type iiCfg struct {
@@ -200,7 +201,7 @@ func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
 	}
 
 	ii.closeWhatNotInList(fNames)
-	ii.garbageFiles = ii.scanStateFiles(fNames)
+	ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
 		return fmt.Errorf("InvertedIndex(%s).openFiles: %w", ii.filenameBase, err)
 	}
