@@ -63,7 +63,7 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() Accumula
 type headerDownloaderTest struct {
 	heimdall         *heimdall.MockHeimdallNoStore
 	p2pService       *p2p.MockService
-	headerDownloader *HeaderDownloader
+	headerDownloader HeaderDownloader
 	headersWriter    *MockHeadersWriter
 }
 
