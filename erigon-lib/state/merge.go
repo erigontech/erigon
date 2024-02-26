@@ -655,8 +655,10 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	} else {
-		idxPath := dc.d.kvAccessorFilePath(fromStep, toStep)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, dc.d.compression, idxPath, dc.d.dirs.Tmp, false, dc.d.salt, ps, dc.d.logger, dc.d.noFsync); err != nil {
+		if err = dc.d.buildMapIdx(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+		if valuesIn.index, err = recsplit.OpenIndex(dc.d.kvAccessorFilePath(fromStep, toStep)); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}

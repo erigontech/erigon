@@ -1413,22 +1413,6 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	}
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, values bool, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
-	cfg := recsplit.RecSplitArgs{
-		Enums: true,
-		//LessFalsePositives: true,
-
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpdir,
-		IndexFile:  idxPath,
-		Salt:       salt,
-	}
-	if err := buildIndex(ctx, d, compressed, idxPath, values, cfg, ps, logger, noFsync); err != nil {
-		return nil, err
-	}
-	return recsplit.OpenIndex(idxPath)
-}
 func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*ExistenceFilter, error) {
 	if err := buildIdxFilter(ctx, d, compressed, idxPath, salt, ps, logger, noFsync); err != nil {
 		return nil, err
