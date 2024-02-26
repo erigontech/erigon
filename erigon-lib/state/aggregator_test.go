@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"math"
 	"math/rand"
 	"os"
@@ -15,6 +13,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -127,7 +128,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 }
 
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
-
+	//t.Skip()
 	t.Run("BPlus", func(t *testing.T) {
 		rc := runCfg{
 			aggStep:  50,
