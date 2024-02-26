@@ -1441,12 +1441,11 @@ func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCo
 		Enums:              true,
 		LessFalsePositives: true,
 
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      tmpdir,
-		IndexFile:   idxPath,
-		Salt:        salt,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpdir,
+		IndexFile:  idxPath,
+		Salt:       salt,
 	}, logger); err != nil {
 		return fmt.Errorf("create recsplit: %w", err)
 	}
