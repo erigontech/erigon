@@ -764,12 +764,8 @@ func (rs *RecSplit) flushExistenceFilter() error {
 	if _, err := rs.existenceF.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	n, err := io.Copy(rs.indexW, rs.existenceF)
-	if err != nil {
+	if _, err := io.CopyN(rs.indexW, rs.existenceF, int64(rs.keysAdded)); err != nil {
 		return err
-	}
-	if n != int64(rs.keysAdded) {
-		panic(fmt.Sprintf("why? %d, %d", n, rs.keysAdded))
 	}
 	return nil
 }
