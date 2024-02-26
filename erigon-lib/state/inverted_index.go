@@ -1768,8 +1768,8 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *compress.Decompressor, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums: false,
-		//LessFalsePositives: true,
+		Enums:              true,
+		LessFalsePositives: true,
 
 		BucketSize: 2000,
 		LeafSize:   8,

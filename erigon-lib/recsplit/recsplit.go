@@ -29,6 +29,7 @@ import (
 	"path/filepath"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 
@@ -182,7 +183,9 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
-	log.Warn("[dbg] NewRec", "is enums", rs.enums, "is lessFalsePositives", rs.lessFalsePositives, "name", rs.indexFileName)
+	if !rs.enums {
+		log.Warn("[dbg] NewRec", "is enums", rs.enums, "is lessFalsePositives", rs.lessFalsePositives, "name", rs.indexFileName, "stack", dbg.Stack())
+	}
 
 	if rs.lessFalsePositives {
 		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
