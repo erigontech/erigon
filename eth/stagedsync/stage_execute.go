@@ -204,7 +204,7 @@ func executeBlock(
 
 // Filters out and keeps receipts of contracts that may be needed by CL, such as deposit contrac,
 // The list of contracts to filter is config-specified
-func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool{
+func gatherNoPruneReceipts(receipts *types.Receipts, chainCfg *chain.Config) bool {
 	cr := types.Receipts{}
 	for _, r := range *receipts {
 		for _, l := range r.Logs {
