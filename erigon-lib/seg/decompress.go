@@ -26,9 +26,10 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/mmap"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type word []byte // plain text word associated with code from dictionary
@@ -549,8 +550,8 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		}
 		return buf, g.dataP
 	}
-	bufPos := len(buf) // Tracking position in buf where to insert part of the word
-	lastUncovered := len(buf)
+
+	bufOffset := len(buf)
 	if len(buf)+int(wordLen) > cap(buf) {
 		newBuf := make([]byte, len(buf)+int(wordLen))
 		copy(newBuf, buf)
@@ -559,7 +560,10 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		// Expand buffer
 		buf = buf[:len(buf)+int(wordLen)]
 	}
+
 	// Loop below fills in the patterns
+	// Tracking position in buf where to insert part of the word
+	bufPos := bufOffset
 	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		pt := g.nextPattern()
@@ -573,7 +577,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	g.dataP = savePos
 	g.dataBit = 0
 	g.nextPos(true /* clean */) // Reset the state of huffman reader
-	bufPos = lastUncovered      // Restore to the beginning of buf
+
+	// Restore to the beginning of buf
+	bufPos = bufOffset
+	lastUncovered := bufOffset
+
 	// Loop below fills the data which is not in the patterns
 	for pos := g.nextPos(false); pos != 0; pos = g.nextPos(false) {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
@@ -584,9 +592,9 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		}
 		lastUncovered = bufPos + len(g.nextPattern())
 	}
-	if int(wordLen) > lastUncovered {
-		dif := wordLen - uint64(lastUncovered)
-		copy(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
+	if bufOffset+int(wordLen) > lastUncovered {
+		dif := uint64(bufOffset + int(wordLen) - lastUncovered)
+		copy(buf[lastUncovered:lastUncovered+int(dif)], g.data[postLoopPos:postLoopPos+dif])
 		postLoopPos += dif
 	}
 	g.dataP = postLoopPos
