@@ -188,7 +188,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 			return nil, err
 		}
 		rs.existenceF = bufferFile
-		rs.existenceW = bufio.NewWriter(bufferFile)
+		rs.existenceW = bufio.NewWriter(rs.existenceF)
 	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
@@ -214,6 +214,9 @@ func (rs *RecSplit) Salt() uint32 { return rs.salt }
 func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
+	}
+	if rs.existenceF != nil {
+		rs.existenceF.Close()
 	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
@@ -697,7 +700,10 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 			if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
 				return err
 			}
-			n, err := io.Copy(rs.indexW, bufio.NewReader(rs.existenceF))
+			if _, err := rs.existenceF.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+			n, err := io.Copy(rs.indexW, rs.existenceF)
 			if err != nil {
 				return err
 			}
@@ -736,6 +742,35 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
+	return nil
+}
+
+func (rs *RecSplit) flushExistenceFilter() error {
+	if !rs.lessFalsePositives {
+		return nil
+	}
+	defer rs.existenceF.Close()
+
+	//Write len of array
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return err
+	}
+
+	// flush bufio and rewind before io.Copy, but no reason to fsync the file - it temporary
+	if err := rs.existenceW.Flush(); err != nil {
+		return err
+	}
+	if _, err := rs.existenceF.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	n, err := io.Copy(rs.indexW, rs.existenceF)
+	if err != nil {
+		return err
+	}
+	if n != int64(rs.keysAdded) {
+		panic(fmt.Sprintf("why? %d, %d", n, rs.keysAdded))
+	}
 	return nil
 }
 
