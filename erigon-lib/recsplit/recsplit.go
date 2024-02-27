@@ -182,7 +182,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
-	if rs.enums && rs.lessFalsePositives {
+	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
 		if err != nil {
 			return nil, err
