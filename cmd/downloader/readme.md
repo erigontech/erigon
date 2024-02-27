@@ -196,7 +196,6 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 # See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
 ```
 
-
 ---------------
 
 ## E3
@@ -209,6 +208,8 @@ Golang 1.21
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
+Supported networks: all (which supported by E2).
+
 ### E3 changes from E2:
 
 - Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
@@ -219,9 +220,7 @@ Almost all RPC methods are implemented - if something doesn't work - just drop i
 - Doesn't store Receipts/Logs - it always re-executing historical transactions - but re-execution is cheaper (see point
   above). We would like to see how it will impact users - welcome feedback. Likely we will try add some small LRU-cache
   here. Likely later we will add optional flag "to persist receipts".
-- More cold-start-friendly and os-pre-fetch-friendly. E2 DB had MADVISE_RANDOM (because b+tree gravitating towards
-  random-pages-distribution and confusing OS's pre-fetch logic), now snapshots storing data sequentially and have
-  MADVISE_NORMAL - and it showing better performance on our benchmarks.
+- More cold-start-friendly and os-pre-fetch-friendly.
 - datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
   enough.
 
