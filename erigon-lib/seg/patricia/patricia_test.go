@@ -24,7 +24,7 @@ import (
 
 func TestInserts1(t *testing.T) {
 	n := &node{}
-	s := makestate(n)
+	s := newPathWalker(n)
 	d := s.transition(0x34, true)
 	fmt.Printf("1 tree:\n%sstate: %s\ndivergence %s\n\n", n, s, tostr(d))
 	s.diverge(d)
@@ -42,7 +42,7 @@ func TestInserts1(t *testing.T) {
 	s.diverge(d)
 	fmt.Printf("8 tree:\n%sstate: %s\n\n", n, s)
 	s.insert(nil)
-	s = makestate(n)
+	s = newPathWalker(n)
 	d = s.transition(0x34, true)
 	fmt.Printf("9 tree:\n%sstate: %s\ndivergence %s\n\n", n, s, tostr(d))
 	d = s.transition(0x66, true)

@@ -325,4 +325,13 @@ var (
 	BorSnapshotTypes = []Type{BorEvents, BorSpans}
 
 	CaplinSnapshotTypes = []Type{BeaconBlocks}
+
+	AllTypes = []Type{
+		Headers,
+		Bodies,
+		Transactions,
+		BorEvents,
+		BorSpans,
+		BeaconBlocks,
+	}
 )
