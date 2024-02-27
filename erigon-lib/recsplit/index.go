@@ -47,6 +47,19 @@ const (
 	// Enums - To build 2-lvl index with perfect hash table pointing to enumeration and enumeration pointing to offsets
 	Enums Features = 0b1
 	// LessFalsePositives - Reduce false-positives to 1/256=0.4% in cost of 1byte per key
+	// Implementation:
+	//   PerfectHashMap - does false-positives if unknown key is requested. But "false-positives itself" is not a problem.
+	//   Problem is "nature of false-positives" - they are randomly/smashed across .seg files.
+	//   It makes .seg files "warm" - which is bad because they are big and
+	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
+	//   Can add build-in "existence filter" (like bloom/cucko/ribbon/xor-filter/fuse-filter) it will improve
+	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
+	//   But there are 2 additional properties we have in our data:
+	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
+	//   It means: if we rely on this properties then we can do better than general-purpose-existance-filter.
+	//   Seems just an "array of 1-st bytes of key-hashes" is great alternative:
+	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
+	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
 	LessFalsePositives Features = 0b10 //
 )
 
