@@ -1540,3 +1540,7 @@ func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader ser
 func (s *Ethereum) Sentinel() rpcsentinel.SentinelClient {
 	return s.sentinel
 }
+
+func (s *Ethereum) DataDir() string {
+	return s.config.Dirs.DataDir
+}

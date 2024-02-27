@@ -20,15 +20,15 @@ import (
 	"bytes"
 	"encoding/binary"
 
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 // Algorithms for reconstituting the state from state history
 
 type ReconItem struct {
-	g           *compress.Getter
+	g           *seg.Getter
 	key         []byte
 	txNum       uint64
 	startTxNum  uint64
@@ -92,7 +92,7 @@ func (rh ReconHeapOlderFirst) Less(i, j int) bool {
 }
 
 type ScanIteratorInc struct {
-	g         *compress.Getter
+	g         *seg.Getter
 	key       []byte
 	nextTxNum uint64
 	hasNext   bool
@@ -142,8 +142,8 @@ func (hs *HistoryStep) iterateTxs() *ScanIteratorInc {
 
 type HistoryIteratorInc struct {
 	uptoTxNum    uint64
-	indexG       *compress.Getter
-	historyG     *compress.Getter
+	indexG       *seg.Getter
+	historyG     *seg.Getter
 	r            *recsplit.IndexReader
 	key          []byte
 	nextKey      []byte
