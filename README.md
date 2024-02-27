@@ -628,6 +628,18 @@ RFC 922, Section 7
 Same
 in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
 
+### How to run erigon as a separate user? (e.g. as a `systemd` daemon)
+
+Running erigon from `build/bin` as a separate user might produce an error:
+
+    error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
+
+The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon` or `/opt/erigon` as the installation path, for example:
+
+    make DIST=/opt/erigon install
+
+and then run `/opt/erigon/erigon`.
+
 ### How to get diagnostic for bug report?
 
 - Get stack trace: `kill -SIGUSR1 <pid>`, get trace and stop: `kill -6 <pid>`

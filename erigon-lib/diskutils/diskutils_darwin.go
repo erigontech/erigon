@@ -3,14 +3,15 @@
 package diskutils
 
 import (
-	"fmt"
 	"syscall"
+
+	"github.com/ledgerwatch/log/v3"
 )
 
 func MountPointForDirPath(dirPath string) string {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(dirPath, &stat); err != nil {
-		fmt.Println("Error:", err)
+		log.Debug("[diskutils] Error getting mount point for dir path:", dirPath, "Error:", err)
 		return "/"
 	}
 
