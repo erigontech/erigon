@@ -291,33 +291,7 @@ func (dc *DomainContext) BuildOptionalMissedIndices(ctx context.Context, ps *bac
 }
 
 func (ic *InvertedIndexContext) BuildOptionalMissedIndices(ctx context.Context, ps *background.ProgressSet) (err error) {
-	if ic.ii.withLocalityIndex && ic.ii.coldLocalityIdx != nil {
-		from, to := uint64(0), ic.maxColdStep()
-		if to == 0 || ic.ii.coldLocalityIdx.exists(from, to) {
-			return nil
-		}
-		defer func() {
-			if ic.ii.filenameBase == traceFileLife {
-				ic.ii.logger.Warn(fmt.Sprintf("[agg] BuildColdLocality done: %s.%d-%d", ic.ii.filenameBase, from, to))
-			}
-		}()
-		if err = ic.ii.coldLocalityIdx.BuildMissedIndices(ctx, from, to, true, ps,
-			func() *LocalityIterator { return ic.iterateKeysLocality(ctx, from, to, nil) },
-		); err != nil {
-			return err
-		}
-	}
 	return nil
-}
-
-func (ic *InvertedIndexContext) maxColdStep() uint64 {
-	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
-}
-func (ic *InvertedIndexContext) minWarmStep() uint64 {
-	return ic.maxTxNumInFiles(true) / ic.ii.aggregationStep
-}
-func (ic *InvertedIndexContext) maxWarmStep() uint64 {
-	return ic.maxTxNumInFiles(false) / ic.ii.aggregationStep
 }
 
 // endTxNum is always a multiply of aggregation step but this txnum is not available in file (it will be first tx of file to follow after that)
