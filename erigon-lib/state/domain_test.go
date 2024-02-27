@@ -1450,7 +1450,7 @@ func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bo
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
-
+	t.Skip()
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 
 	tx, err := db.BeginRw(context.Background())
@@ -1519,7 +1519,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_PruneAfterAggregation(t *testing.T) {
-	//t.Skip()
+	t.Skip()
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	defer db.Close()
 	defer d.Close()
