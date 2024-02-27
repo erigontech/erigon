@@ -1,6 +1,6 @@
 //go:build silkworm_seg_fuzz
 
-package compress
+package seg
 
 import (
 	"context"
@@ -23,7 +23,7 @@ func makeSegFilePath(path string, suffix string) string {
 	return strings.TrimSuffix(path, filepath.Ext(path)) + suffix + ".seg"
 }
 
-func SegZipEx(ctx context.Context, words *DecompressedFile, outPath string, tmpDirPath string, logger log.Logger) error {
+func SegZipEx(ctx context.Context, words *RawWordsFile, outPath string, tmpDirPath string, logger log.Logger) error {
 	compressor, err := NewCompressor(ctx, "SegZip", outPath, tmpDirPath, MinPatternScore, 1, log.LvlDebug, logger)
 	if err != nil {
 		return err
@@ -45,7 +45,7 @@ func SegZipEx(ctx context.Context, words *DecompressedFile, outPath string, tmpD
 }
 
 func SegZip(path string, tmpDirPath string) error {
-	words, err := OpenUncompressedFile(path)
+	words, err := OpenRawWordsFile(path)
 	if err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func SegUnzip(path string) error {
 	defer decompressor.Close()
 
 	outPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".idt"
-	words, err := NewUncompressedFile(outPath)
+	words, err := NewRawWordsFile(outPath)
 	if err != nil {
 		return err
 	}
@@ -120,12 +120,12 @@ func generatePatterns(r *rand.Rand) []RandPattern {
 	return patterns
 }
 
-func generateRawWordsFile(path string, seed int64) (*DecompressedFile, error) {
+func generateRawWordsFile(path string, seed int64) (*RawWordsFile, error) {
 	const maxTotalSize = int(512 * datasize.KB)
 	const maxWordLen = int(1 * datasize.KB)
 	const maxWordPatterns = 3
 
-	words, err := NewUncompressedFile(path)
+	words, err := NewRawWordsFile(path)
 	if err != nil {
 		return nil, err
 	}
