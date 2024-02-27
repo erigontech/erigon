@@ -196,7 +196,6 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 # See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
 ```
 
-
 ---------------
 
 ## E3
@@ -208,6 +207,8 @@ RAM requirement is higher: 32gb and better 64gb. We will work on this topic a bi
 Golang 1.21
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
+
+Supported networks: all (which supported by E2).
 
 ### E3 changes from E2:
 
