@@ -182,7 +182,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
-	if rs.lessFalsePositives {
+	if rs.enums && rs.lessFalsePositives {
 		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
 		if err != nil {
 			return nil, err
@@ -690,10 +690,9 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
-
-		if err := rs.flushExistenceFilter(); err != nil {
-			return err
-		}
+	}
+	if err := rs.flushExistenceFilter(); err != nil {
+		return err
 	}
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
@@ -728,7 +727,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 }
 
 func (rs *RecSplit) flushExistenceFilter() error {
-	if !rs.lessFalsePositives {
+	if !rs.enums || rs.keysAdded == 0 || !rs.lessFalsePositives {
 		return nil
 	}
 	defer rs.existenceF.Close()
