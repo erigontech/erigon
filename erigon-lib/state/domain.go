@@ -361,8 +361,9 @@ type Domain struct {
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
 
-	compression FileCompression
-	indexList   idxList
+	compression        FileCompression
+	indexList          idxList
+	withExistenceIndex bool
 }
 
 type domainCfg struct {
@@ -381,16 +382,14 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
-		indexList: withBTree,
+		indexList:          withBTree | withExistence,
+		withExistenceIndex: true,
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
 		return nil, err
-	}
-	if d.withExistenceIndex {
-		d.indexList |= withExistence
 	}
 
 	return d, nil

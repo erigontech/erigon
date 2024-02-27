@@ -770,11 +770,13 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 			continue
 		}
 		if ic.ii.withExistenceIndex && ic.files[i].src.existence != nil {
+			fmt.Printf("[dbg] check1: %x, %d -> %t\n", key, txNum, ic.files[i].src.existence.ContainsHash(hi))
 			if !ic.files[i].src.existence.ContainsHash(hi) {
 				continue
 			}
 		}
 		offset, ok := ic.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
+		fmt.Printf("[dbg] check2: %x, %d -> %t\n", key, txNum, ok)
 		if !ok {
 			continue
 		}

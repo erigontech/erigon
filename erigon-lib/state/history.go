@@ -1178,9 +1178,10 @@ func (hc *HistoryContext) getFile(txNum uint64) (it ctxItem, ok bool) {
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
-	if !hc.h.withExistenceIndex {
+	if !hc.h.withExistenceIndex && hc.h.withLocalityIndex {
 		return hc.getNoStateByLocalityIndex(key, txNum)
 	}
+
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum := hc.ic.Seek(key, txNum)
