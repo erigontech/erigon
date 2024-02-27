@@ -28,9 +28,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -540,7 +540,7 @@ type LocalityIterator struct {
 	progress          uint64
 
 	totalOffsets, filesAmount uint64
-	involvedFiles             []*compress.Decompressor //used in destructor to disable read-ahead
+	involvedFiles             []*seg.Decompressor //used in destructor to disable read-ahead
 	ctx                       context.Context
 }
 
@@ -616,7 +616,7 @@ func (si *LocalityIterator) Close() {
 }
 
 // iterateKeysLocality [from, to)
-func (ic *InvertedIndexContext) iterateKeysLocality(ctx context.Context, fromStep, toStep uint64, last *compress.Decompressor) *LocalityIterator {
+func (ic *InvertedIndexContext) iterateKeysLocality(ctx context.Context, fromStep, toStep uint64, last *seg.Decompressor) *LocalityIterator {
 	fromTxNum, toTxNum := fromStep*ic.ii.aggregationStep, toStep*ic.ii.aggregationStep
 	si := &LocalityIterator{ctx: ctx, aggStep: ic.ii.aggregationStep, compressVals: false}
 

@@ -42,7 +42,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -50,6 +49,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 var (
@@ -93,7 +93,7 @@ var (
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
-	decompressor         *compress.Decompressor
+	decompressor         *seg.Decompressor
 	index                *recsplit.Index
 	bindex               *BtIndex
 	bm                   *bitmapdb.FixedSizeBitmaps
@@ -593,7 +593,7 @@ func (d *Domain) openFiles() (err error) {
 					continue
 				}
 
-				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					d.logger.Warn("[agg] Domain.openFiles", "err", err, "f", fName)
 					invalidFileItemsLock.Lock()
@@ -889,7 +889,7 @@ func (ch *CursorHeap) Pop() interface{} {
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type ctxItem struct {
-	getter     *compress.Getter
+	getter     *seg.Getter
 	reader     *recsplit.IndexReader
 	startTxNum uint64
 	endTxNum   uint64
@@ -1089,7 +1089,7 @@ func (d *Domain) MakeContext() *DomainContext {
 // Collation is the set of compressors created after aggregation
 type Collation struct {
 	HistoryCollation
-	valuesComp  *compress.Compressor
+	valuesComp  *seg.Compressor
 	valuesPath  string
 	valuesCount int
 }
@@ -1133,7 +1133,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	}()
 
 	coll.valuesPath = d.kvFilePath(step, step+1)
-	if coll.valuesComp, err = compress.NewCompressor(ctx, "collate values", coll.valuesPath, d.dirs.Tmp, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
+	if coll.valuesComp, err = seg.NewCompressor(ctx, "collate values", coll.valuesPath, d.dirs.Tmp, seg.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 	comp := NewArchiveWriter(coll.valuesComp, d.compression)
@@ -1190,7 +1190,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 
 type StaticFiles struct {
 	HistoryFiles
-	valuesDecomp *compress.Decompressor
+	valuesDecomp *seg.Decompressor
 	valuesIdx    *recsplit.Index
 	valuesBt     *BtIndex
 	bloom        *ExistenceFilter
@@ -1235,7 +1235,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	valuesComp := collation.valuesComp
 
 	var (
-		valuesDecomp *compress.Decompressor
+		valuesDecomp *seg.Decompressor
 		valuesIdx    *recsplit.Index
 		bt           *BtIndex
 		bloom        *ExistenceFilter
@@ -1269,7 +1269,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	valuesComp.Close()
 	valuesComp = nil
-	if valuesDecomp, err = compress.NewDecompressor(collation.valuesPath); err != nil {
+	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
@@ -1309,7 +1309,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}, nil
 }
 
-func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *compress.Decompressor, ps *background.ProgressSet) error {
+func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums: false,
@@ -1415,7 +1415,7 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	}
 }
 
-func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*ExistenceFilter, error) {
+func buildIndexFilterThenOpen(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath, tmpdir string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) (*ExistenceFilter, error) {
 	if err := buildIdxFilter(ctx, d, compressed, idxPath, salt, ps, logger, noFsync); err != nil {
 		return nil, err
 	}
@@ -1424,7 +1424,7 @@ func buildIndexFilterThenOpen(ctx context.Context, d *compress.Decompressor, com
 	}
 	return OpenExistenceFilter(idxPath)
 }
-func buildIndex(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
+func buildIndex(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count()
 	if !values {

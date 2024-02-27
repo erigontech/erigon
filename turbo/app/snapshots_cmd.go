@@ -26,13 +26,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/metrics"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/cmd/utils"
@@ -75,7 +75,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "index",
 			Action: doIndicesCommand,
-			Usage:  "Create all indices for snapshots",
+			Usage:  "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -407,16 +407,19 @@ func doDiff(cliCtx *cli.Context) error {
 	log.Info("staring")
 	defer log.Info("Done")
 	srcF, dstF := cliCtx.String("src"), cliCtx.String("dst")
-	src, err := compress.NewDecompressor(srcF)
+	src, err := seg.NewDecompressor(srcF)
 	if err != nil {
 		return err
 	}
 	defer src.Close()
-	dst, err := compress.NewDecompressor(dstF)
+	dst, err := seg.NewDecompressor(dstF)
 	if err != nil {
 		return err
 	}
 	defer dst.Close()
+
+	defer src.EnableReadAhead().DisableReadAhead()
+	defer dst.EnableReadAhead().DisableReadAhead()
 
 	i := 0
 	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
@@ -437,7 +440,7 @@ func doDiff(cliCtx *cli.Context) error {
 func doMeta(cliCtx *cli.Context) error {
 	fname := cliCtx.String("src")
 	if strings.HasSuffix(fname, ".seg") {
-		src, err := compress.NewDecompressor(fname)
+		src, err := seg.NewDecompressor(fname)
 		if err != nil {
 			return err
 		}
@@ -445,7 +448,7 @@ func doMeta(cliCtx *cli.Context) error {
 		log.Info("meta", "count", src.Count(), "size", datasize.ByteSize(src.Size()).String(), "name", src.FileName())
 	} else if strings.HasSuffix(fname, ".bt") {
 		kvFPath := strings.TrimSuffix(fname, ".bt") + ".kv"
-		src, err := compress.NewDecompressor(kvFPath)
+		src, err := seg.NewDecompressor(kvFPath)
 		if err != nil {
 			return err
 		}
@@ -485,7 +488,7 @@ func doDecompressSpeed(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 
-	decompressor, err := compress.NewDecompressor(f)
+	decompressor, err := seg.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
@@ -529,6 +532,10 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		panic("not implemented")
+	}
+
+	if err := freezeblocks.RemoveIncompatibleIndices(dirs.Snap); err != nil {
+		return err
 	}
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)
@@ -604,7 +611,7 @@ func doUncompress(cliCtx *cli.Context) error {
 	}
 	f := args.First()
 
-	decompressor, err := compress.NewDecompressor(f)
+	decompressor, err := seg.NewDecompressor(f)
 	if err != nil {
 		return err
 	}
@@ -658,7 +665,7 @@ func doCompress(cliCtx *cli.Context) error {
 	f := args.First()
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	logger.Info("file", "datadir", dirs.DataDir, "f", f)
-	c, err := compress.NewCompressor(ctx, "compress", f, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
+	c, err := seg.NewCompressor(ctx, "compress", f, dirs.Tmp, seg.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 	if err != nil {
 		return err
 	}
@@ -943,12 +950,12 @@ func doBodiesDecrement(cliCtx *cli.Context) error {
 		l = append(l, f)
 	}
 	migrateSingleBody := func(srcF, dstF string) error {
-		src, err := compress.NewDecompressor(srcF)
+		src, err := seg.NewDecompressor(srcF)
 		if err != nil {
 			return err
 		}
 		defer src.Close()
-		dst, err := compress.NewCompressor(ctx, "compress", dstF, dirs.Tmp, compress.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
+		dst, err := seg.NewCompressor(ctx, "compress", dstF, dirs.Tmp, seg.MinPatternScore, estimate.CompressSnapshot.Workers(), log.LvlInfo, logger)
 		if err != nil {
 			return err
 		}

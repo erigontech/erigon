@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/iter"
-	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"math"
 	"math/rand"
 	"os"
@@ -15,6 +13,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/iter"
+	"github.com/ledgerwatch/erigon-lib/kv/order"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -24,10 +25,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon-lib/types"
 )
 
@@ -825,7 +826,7 @@ func Test_EncodeCommitmentState(t *testing.T) {
 }
 
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
-	decomp, err := compress.NewDecompressor(dataPath)
+	decomp, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, err
 	}
@@ -867,7 +868,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.MinPatternScore, 1, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	bufSize := 8 * datasize.KB
@@ -909,7 +910,7 @@ func generateKV(tb testing.TB, tmp string, keySize, valueSize, keyCount int, log
 	require.NoError(tb, err)
 	comp.Close()
 
-	decomp, err := compress.NewDecompressor(dataPath)
+	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
 
 	getter := NewArchiveGetter(decomp.MakeGetter(), compressFlags)

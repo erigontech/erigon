@@ -23,13 +23,13 @@ import (
 	"slices"
 
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cryptozerocopy"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/types"
 )
 
 // Defines how to evaluate commitments
@@ -500,7 +500,7 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 //
 //	fromStep, toStep := r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep
 //	kvFilePath := d.kvFilePath(fromStep, toStep)
-//	compr, err := compress.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, compress.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger)
+//	compr, err := seg.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, seg.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger)
 //	if err != nil {
 //		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
 //	}
@@ -588,7 +588,7 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 //
 //	valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
 //	valuesIn.frozen = false
-//	if valuesIn.decompressor, err = compress.NewDecompressor(kvFilePath); err != nil {
+//	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 //		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 //	}
 //

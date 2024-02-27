@@ -14,12 +14,12 @@ func MountPointForDirPath(dirPath string) string {
 		return "/"
 	}
 
-	var mountPointBytes []byte
-	for _, b := range stat.Mntonname {
-		if b == 0 {
+	mountPointBytes := make([]byte, 0, len(stat.Mntonname))
+	for i := range stat.Mntonname {
+		if stat.Mntonname[i] == 0 {
 			break
 		}
-		mountPointBytes = append(mountPointBytes, byte(b))
+		mountPointBytes = append(mountPointBytes, byte(stat.Mntonname[i]))
 	}
 	mountPoint := string(mountPointBytes)
 

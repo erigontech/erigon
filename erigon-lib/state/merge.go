@@ -30,13 +30,14 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 func (d *Domain) endTxNumMinimax() uint64 {
@@ -563,7 +564,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 
 	fromStep, toStep := r.valuesStartTxNum/dc.d.aggregationStep, r.valuesEndTxNum/dc.d.aggregationStep
 	kvFilePath := dc.d.kvFilePath(fromStep, toStep)
-	kvFile, err := compress.NewCompressor(ctx, "merge", kvFilePath, dc.d.dirs.Tmp, compress.MinPatternScore, dc.d.compressWorkers, log.LvlTrace, dc.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge", kvFilePath, dc.d.dirs.Tmp, seg.MinPatternScore, dc.d.compressWorkers, log.LvlTrace, dc.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dc.d.filenameBase, err)
 	}
@@ -644,7 +645,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 
 	valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, dc.d.aggregationStep)
 	valuesIn.frozen = false
-	if valuesIn.decompressor, err = compress.NewDecompressor(kvFilePath); err != nil {
+	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 
@@ -684,8 +685,8 @@ func (ic *InvertedIndexContext) mergeFiles(ctx context.Context, files []*filesIt
 	}
 
 	var outItem *filesItem
-	var comp *compress.Compressor
-	var decomp *compress.Decompressor
+	var comp *seg.Compressor
+	var decomp *seg.Decompressor
 	var err error
 	var closeItem = true
 	defer func() {
@@ -707,7 +708,7 @@ func (ic *InvertedIndexContext) mergeFiles(ctx context.Context, files []*filesIt
 	fromStep, toStep := startTxNum/ic.ii.aggregationStep, endTxNum/ic.ii.aggregationStep
 
 	datPath := ic.ii.efFilePath(fromStep, toStep)
-	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ic.ii.dirs.Tmp, compress.MinPatternScore, ic.ii.compressWorkers, log.LvlTrace, ic.ii.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, "Snapshots merge", datPath, ic.ii.dirs.Tmp, seg.MinPatternScore, ic.ii.compressWorkers, log.LvlTrace, ic.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ic.ii.filenameBase, err)
 	}
 	if ic.ii.noFsync {
@@ -798,7 +799,7 @@ func (ic *InvertedIndexContext) mergeFiles(ctx context.Context, files []*filesIt
 	comp = nil
 
 	outItem = newFilesItem(startTxNum, endTxNum, ic.ii.aggregationStep)
-	if outItem.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", ic.ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	ps.Delete(p)
@@ -844,8 +845,8 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 			defer f.decompressor.EnableReadAhead().DisableReadAhead()
 		}
 
-		var comp *compress.Compressor
-		var decomp *compress.Decompressor
+		var comp *seg.Compressor
+		var decomp *seg.Decompressor
 		var rs *recsplit.RecSplit
 		var index *recsplit.Index
 		var closeItem = true
@@ -871,7 +872,7 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 		fromStep, toStep := r.historyStartTxNum/hc.h.aggregationStep, r.historyEndTxNum/hc.h.aggregationStep
 		datPath := hc.h.vFilePath(fromStep, toStep)
 		idxPath := hc.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, hc.h.dirs.Tmp, compress.MinPatternScore, hc.h.compressWorkers, log.LvlTrace, hc.h.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge", datPath, hc.h.dirs.Tmp, seg.MinPatternScore, hc.h.compressWorkers, log.LvlTrace, hc.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", hc.h.filenameBase, err)
 		}
 		compr := NewArchiveWriter(comp, hc.h.compression)
@@ -947,7 +948,7 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 		}
 		compr.Close()
 		comp = nil
-		if decomp, err = compress.NewDecompressor(datPath); err != nil {
+		if decomp, err = seg.NewDecompressor(datPath); err != nil {
 			return nil, nil, err
 		}
 		ps.Delete(p)

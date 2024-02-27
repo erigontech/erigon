@@ -651,14 +651,12 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
+	var features Features
 	if rs.enums {
-		if err := rs.indexW.WriteByte(1); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
-		}
-	} else {
-		if err := rs.indexW.WriteByte(0); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
-		}
+		features |= Enums
+	}
+	if err := rs.indexW.WriteByte(byte(features)); err != nil {
+		return fmt.Errorf("writing enums = true: %w", err)
 	}
 	if rs.enums && rs.keysAdded > 0 {
 		// Write out elias fano for offsets

@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -48,6 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type History struct {
@@ -220,7 +220,7 @@ func (h *History) openFiles() error {
 					invalidFileItems = append(invalidFileItems, item)
 					continue
 				}
-				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
 					invalidFileItems = append(invalidFileItems, item)
@@ -582,7 +582,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		}
 	}()
 	historyPath := h.vFilePath(step, step+1)
-	comp, err := compress.NewCompressor(ctx, "collate history", historyPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+	comp, err := seg.NewCompressor(ctx, "collate history", historyPath, h.dirs.Tmp, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
@@ -693,9 +693,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 }
 
 type HistoryFiles struct {
-	historyDecomp   *compress.Decompressor
+	historyDecomp   *seg.Decompressor
 	historyIdx      *recsplit.Index
-	efHistoryDecomp *compress.Decompressor
+	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
 	efExistence     *ExistenceFilter
 
@@ -743,10 +743,10 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyComp.DisableFsync()
 	}
 	var (
-		historyDecomp, efHistoryDecomp *compress.Decompressor
+		historyDecomp, efHistoryDecomp *seg.Decompressor
 		historyIdx, efHistoryIdx       *recsplit.Index
 		efExistence                    *ExistenceFilter
-		efHistoryComp                  *compress.Compressor
+		efHistoryComp                  *seg.Compressor
 		warmLocality                   *LocalityIndexFiles
 		rs                             *recsplit.RecSplit
 	)
@@ -805,7 +805,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	efHistoryPath := h.efFilePath(step, step+1)
 	{
 		var err error
-		if historyDecomp, err = compress.NewDecompressor(collation.historyPath); err != nil {
+		if historyDecomp, err = seg.NewDecompressor(collation.historyPath); err != nil {
 			return HistoryFiles{}, fmt.Errorf("open %s history decompressor: %w", h.filenameBase, err)
 		}
 
@@ -813,7 +813,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		_, efHistoryFileName := filepath.Split(efHistoryPath)
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
-		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+		efHistoryComp, err = seg.NewCompressor(ctx, "ef history", efHistoryPath, h.dirs.Tmp, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 		}
@@ -847,7 +847,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	var err error
-	if efHistoryDecomp, err = compress.NewDecompressor(efHistoryPath); err != nil {
+	if efHistoryDecomp, err = seg.NewDecompressor(efHistoryPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s ef history decompressor: %w", h.filenameBase, err)
 	}
 	{

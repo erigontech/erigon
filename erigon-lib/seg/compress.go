@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package compress
+package seg
 
 import (
 	"bufio"
@@ -53,7 +53,7 @@ type Compressor struct {
 	ctx              context.Context
 	wg               *sync.WaitGroup
 	superstrings     chan []byte
-	uncompressedFile *DecompressedFile
+	uncompressedFile *RawWordsFile
 	tmpDir           string // temporary directory to use for ETL when building dictionary
 	logPrefix        string
 	outputFile       string // File where to output the dictionary and compressed data
@@ -78,14 +78,13 @@ type Compressor struct {
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, minPatternScore uint64, workers int, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	dir2.MustExist(tmpDir)
 	dir, fileName := filepath.Split(outputFile)
-	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
-	// UncompressedFile - it's intermediate .idt file, outputFile it's final .seg (or .dat) file.
-	// tmpOutFilePath - it's ".seg.tmp" (".idt.tmp") file which will be renamed to .seg file if everything succeed.
-	// It allow atomically create .seg file (downloader will not see partially ready/ non-ready .seg files).
-	// I didn't create ".seg.tmp" file in tmpDir, because I think tmpDir and snapsthoDir may be mounted to different drives
-	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
 
-	uncompressedFile, err := NewUncompressedFile(uncompressedPath)
+	// tmpOutFilePath is a ".seg.tmp" file which will be renamed to ".seg" if everything succeeds.
+	// It allows to atomically create a ".seg" file (the downloader will not see partial ".seg" files).
+	tmpOutFilePath := filepath.Join(dir, fileName) + ".tmp"
+
+	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
+	uncompressedFile, err := NewRawWordsFile(uncompressedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +99,7 @@ func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, mi
 		collector.LogLvl(lvl)
 
 		suffixCollectors[i] = collector
-		go processSuperstring(ctx, superstrings, collector, minPatternScore, wg, logger)
+		go extractPatternsInSuperstrings(ctx, superstrings, collector, minPatternScore, wg, logger)
 	}
 
 	return &Compressor{
@@ -196,7 +195,7 @@ func (c *Compressor) Compress() error {
 	}
 	if c.trace {
 		_, fileName := filepath.Split(c.outputFile)
-		if err := PersistDictrionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
+		if err := PersistDictionary(filepath.Join(c.tmpDir, fileName)+".dictionary.txt", db); err != nil {
 			return err
 		}
 	}
@@ -211,7 +210,7 @@ func (c *Compressor) Compress() error {
 	}
 	defer cf.Close()
 	t = time.Now()
-	if err := reducedict(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
+	if err := compressWithPatternCandidates(c.ctx, c.trace, c.logPrefix, c.tmpOutFilePath, cf, c.uncompressedFile, c.workers, db, c.lvl, c.logger); err != nil {
 		return err
 	}
 	if err = c.fsync(cf); err != nil {
@@ -602,13 +601,13 @@ func (ph *PositionHeap) Pop() interface{} {
 	return x
 }
 
-type HuffmanCoder struct {
+type BitWriter struct {
 	w          *bufio.Writer
 	outputBits int
 	outputByte byte
 }
 
-func (hf *HuffmanCoder) encode(code uint64, codeBits int) error {
+func (hf *BitWriter) encode(code uint64, codeBits int) error {
 	for codeBits > 0 {
 		var bitsUsed int
 		if hf.outputBits+codeBits > 8 {
@@ -632,7 +631,7 @@ func (hf *HuffmanCoder) encode(code uint64, codeBits int) error {
 	return nil
 }
 
-func (hf *HuffmanCoder) flush() error {
+func (hf *BitWriter) flush() error {
 	if hf.outputBits > 0 {
 		if e := hf.w.WriteByte(hf.outputByte); e != nil {
 			return e
@@ -788,8 +787,8 @@ func Ratio(f1, f2 string) (CompressionRatio, error) {
 	return CompressionRatio(float64(s1.Size()) / float64(s2.Size())), nil
 }
 
-// DecompressedFile - .dat file format - simple format for temporary data store
-type DecompressedFile struct {
+// RawWordsFile - .idt file format - simple format for temporary data store
+type RawWordsFile struct {
 	f        *os.File
 	w        *bufio.Writer
 	filePath string
@@ -797,34 +796,34 @@ type DecompressedFile struct {
 	count    uint64
 }
 
-func NewUncompressedFile(filePath string) (*DecompressedFile, error) {
+func NewRawWordsFile(filePath string) (*RawWordsFile, error) {
 	f, err := os.Create(filePath)
 	if err != nil {
 		return nil, err
 	}
 	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &DecompressedFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
-func OpenUncompressedFile(filePath string) (*DecompressedFile, error) {
+func OpenRawWordsFile(filePath string) (*RawWordsFile, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
 	w := bufio.NewWriterSize(f, 2*etl.BufIOSize)
-	return &DecompressedFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
+	return &RawWordsFile{filePath: filePath, f: f, w: w, buf: make([]byte, 128)}, nil
 }
-func (f *DecompressedFile) Flush() error {
+func (f *RawWordsFile) Flush() error {
 	return f.w.Flush()
 }
-func (f *DecompressedFile) Close() {
+func (f *RawWordsFile) Close() {
 	f.w.Flush()
 	f.f.Close()
 }
-func (f *DecompressedFile) CloseAndRemove() {
+func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
 	os.Remove(f.filePath)
 }
-func (f *DecompressedFile) Append(v []byte) error {
+func (f *RawWordsFile) Append(v []byte) error {
 	f.count++
 	// For compressed words, the length prefix is shifted to make lowest bit zero
 	n := binary.PutUvarint(f.buf, 2*uint64(len(v)))
@@ -838,7 +837,7 @@ func (f *DecompressedFile) Append(v []byte) error {
 	}
 	return nil
 }
-func (f *DecompressedFile) AppendUncompressed(v []byte) error {
+func (f *RawWordsFile) AppendUncompressed(v []byte) error {
 	f.count++
 	// For uncompressed words, the length prefix is shifted to make lowest bit one
 	n := binary.PutUvarint(f.buf, 2*uint64(len(v))+1)
@@ -855,7 +854,7 @@ func (f *DecompressedFile) AppendUncompressed(v []byte) error {
 
 // ForEach - Read keys from the file and generate superstring (with extra byte 0x1 prepended to each character, and with 0x0 0x0 pair inserted between keys and values)
 // We only consider values with length > 2, because smaller values are not compressible without going into bits
-func (f *DecompressedFile) ForEach(walker func(v []byte, compressed bool) error) error {
+func (f *RawWordsFile) ForEach(walker func(v []byte, compressed bool) error) error {
 	_, err := f.f.Seek(0, 0)
 	if err != nil {
 		return err

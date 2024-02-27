@@ -12,7 +12,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 
-	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 func TestArchiveWriter(t *testing.T) {
@@ -25,7 +25,7 @@ func TestArchiveWriter(t *testing.T) {
 	openWriter := func(tb testing.TB, tmp, name string, compFlags FileCompression) ArchiveWriter {
 		tb.Helper()
 		file := filepath.Join(tmp, name)
-		comp, err := compress.NewCompressor(context.Background(), "", file, tmp, 8, 1, log.LvlDebug, logger)
+		comp, err := seg.NewCompressor(context.Background(), "", file, tmp, 8, 1, log.LvlDebug, logger)
 		require.NoError(tb, err)
 		return NewArchiveWriter(comp, compFlags)
 	}
@@ -68,7 +68,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := compress.NewDecompressor(path.Join(tmp, "uncompressed"))
+		decomp, err := seg.NewDecompressor(path.Join(tmp, "uncompressed"))
 		require.NoError(t, err)
 		defer decomp.Close()
 
@@ -83,7 +83,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := compress.NewDecompressor(path.Join(tmp, "compressed"))
+		decomp, err := seg.NewDecompressor(path.Join(tmp, "compressed"))
 		require.NoError(t, err)
 		defer decomp.Close()
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
@@ -98,7 +98,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := compress.NewDecompressor(path.Join(tmp, "compressed-keys"))
+		decomp, err := seg.NewDecompressor(path.Join(tmp, "compressed-keys"))
 		require.NoError(t, err)
 		defer decomp.Close()
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()
@@ -113,7 +113,7 @@ func TestArchiveWriter(t *testing.T) {
 		writeLatest(t, w, td)
 		w.Close()
 
-		decomp, err := compress.NewDecompressor(path.Join(tmp, "compressed-vals"))
+		decomp, err := seg.NewDecompressor(path.Join(tmp, "compressed-vals"))
 		require.NoError(t, err)
 		defer decomp.Close()
 		ds := (datasize.B * datasize.ByteSize(decomp.Size())).HR()

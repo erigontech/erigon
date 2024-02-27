@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
 	btree2 "github.com/tidwall/btree"
@@ -44,7 +45,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -386,7 +386,7 @@ func (ii *InvertedIndex) buildExistenceFilter(ctx context.Context, item *filesIt
 	return buildIdxFilter(ctx, item.decompressor, ii.compression, idxPath, ii.salt, ps, ii.logger, ii.noFsync)
 }
 
-func buildIdxFilter(ctx context.Context, d *compress.Decompressor, compressed FileCompression, idxPath string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
+func buildIdxFilter(ctx context.Context, d *seg.Decompressor, compressed FileCompression, idxPath string, salt *uint32, ps *background.ProgressSet, logger log.Logger, noFsync bool) error {
 	g := NewArchiveGetter(d.MakeGetter(), compressed)
 	_, fileName := filepath.Split(idxPath)
 	count := d.Count() / 2
@@ -476,7 +476,7 @@ func (ii *InvertedIndex) openFiles() error {
 					continue
 				}
 
-				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					ii.logger.Warn("[agg] InvertedIndex.openFiles", "err", err, "f", fName)
 					invalidFileItemsLock.Lock()
@@ -1652,7 +1652,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 }
 
 type InvertedFiles struct {
-	decomp       *compress.Decompressor
+	decomp       *seg.Decompressor
 	index        *recsplit.Index
 	existence    *ExistenceFilter
 	warmLocality *LocalityIndexFiles
@@ -1671,16 +1671,15 @@ func (sf InvertedFiles) CleanupOnError() {
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
 	var (
-		decomp       *compress.Decompressor
+		decomp       *seg.Decompressor
 		index        *recsplit.Index
 		existence    *ExistenceFilter
-		comp         *compress.Compressor
+		comp         *seg.Compressor
 		warmLocality *LocalityIndexFiles
 		err          error
 	)
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
-
 	closeComp := true
 	defer func() {
 		if closeComp {
@@ -1711,7 +1710,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	{
 		p := ps.AddNew(path.Base(datPath), 1)
 		defer ps.Delete(p)
-		comp, err = compress.NewCompressor(ctx, "snapshots", datPath, ii.dirs.Tmp, compress.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
+		comp, err = seg.NewCompressor(ctx, "snapshots", datPath, ii.dirs.Tmp, seg.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
 		if err != nil {
 			return InvertedFiles{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 		}
@@ -1740,7 +1739,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		comp = nil
 		ps.Delete(p)
 	}
-	if decomp, err = compress.NewDecompressor(datPath); err != nil {
+	if decomp, err = seg.NewDecompressor(datPath); err != nil {
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 
@@ -1767,7 +1766,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	return InvertedFiles{decomp: decomp, index: index, existence: existence, warmLocality: warmLocality}, nil
 }
 
-func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *compress.Decompressor, ps *background.ProgressSet) error {
+func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
 		Enums: false,
@@ -1782,7 +1781,7 @@ func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint6
 	return buildIndex(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger, ii.noFsync)
 }
 
-func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *compress.Decompressor, step uint64, ps *background.ProgressSet) (*LocalityIndexFiles, error) {
+func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *seg.Decompressor, step uint64, ps *background.ProgressSet) (*LocalityIndexFiles, error) {
 	if !ii.withLocalityIndex {
 		return nil, nil
 	}
