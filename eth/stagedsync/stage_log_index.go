@@ -9,6 +9,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/RoaringBitmap/roaring"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/c2h5oh/datasize"
