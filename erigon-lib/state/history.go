@@ -1314,7 +1314,7 @@ func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint6
 	if hs.indexFile.reader.Empty() {
 		return nil, false, txNum
 	}
-	offset, ok := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.TwoLayerLookup(key)
 	if !ok {
 		return nil, false, txNum
 	}
@@ -1352,7 +1352,7 @@ func (hs *HistoryStep) MaxTxNum(key []byte) (bool, uint64) {
 	if hs.indexFile.reader.Empty() {
 		return false, 0
 	}
-	offset, ok := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.TwoLayerLookup(key)
 	if !ok {
 		return false, 0
 	}

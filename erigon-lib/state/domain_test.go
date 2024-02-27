@@ -1519,6 +1519,7 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 }
 
 func TestDomain_PruneAfterAggregation(t *testing.T) {
+	//t.Skip()
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	defer db.Close()
 	defer d.Close()
