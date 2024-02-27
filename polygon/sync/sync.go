@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
@@ -15,7 +16,9 @@ type Sync struct {
 	verify           AccumulatedHeadersVerifier
 	p2pService       p2p.Service
 	downloader       HeaderDownloader
-	ccBuilderFactory func(root *types.Header) CanonicalChainBuilder
+	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
+	spansCache       *SpansCache
+	fetchLatestSpan  func(ctx context.Context) (*heimdall.Span, error)
 	events           chan Event
 	logger           log.Logger
 }
@@ -26,7 +29,9 @@ func NewSync(
 	verify AccumulatedHeadersVerifier,
 	p2pService p2p.Service,
 	downloader HeaderDownloader,
-	ccBuilderFactory func(root *types.Header) CanonicalChainBuilder,
+	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder,
+	spansCache *SpansCache,
+	fetchLatestSpan func(ctx context.Context) (*heimdall.Span, error),
 	events chan Event,
 	logger log.Logger,
 ) *Sync {
@@ -37,6 +42,8 @@ func NewSync(
 		p2pService:       p2pService,
 		downloader:       downloader,
 		ccBuilderFactory: ccBuilderFactory,
+		spansCache:       spansCache,
+		fetchLatestSpan:  fetchLatestSpan,
 		events:           events,
 		logger:           logger,
 	}
@@ -177,7 +184,14 @@ func (s *Sync) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	ccBuilder := s.ccBuilderFactory(root)
+
+	latestSpan, err := s.fetchLatestSpan(ctx)
+	if err != nil {
+		return err
+	}
+	s.spansCache.Add(latestSpan)
+
+	ccBuilder := s.ccBuilderFactory(root, latestSpan)
 
 	for {
 		select {
@@ -191,6 +205,8 @@ func (s *Sync) Run(ctx context.Context) error {
 				if err = s.onNewHeaderEvent(ctx, event, ccBuilder); err != nil {
 					return err
 				}
+			case EventTypeNewSpan:
+				s.spansCache.Add(event.NewSpan)
 			}
 		case <-ctx.Done():
 			return ctx.Err()
