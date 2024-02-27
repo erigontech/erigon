@@ -153,7 +153,11 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 		if len(hash) == 0 {
 			return nil
 		}
-		notifyTo = binary.BigEndian.Uint64(k)
+		blockNum := binary.BigEndian.Uint64(k)
+		if blockNum > finishStageAfterSync {
+			return nil
+		}
+		notifyTo = blockNum
 		notifyToHash, err = blockReader.CanonicalHash(ctx, tx, notifyTo)
 		if err != nil {
 			logger.Warn("[Finish] failed checking if header is cannonical")

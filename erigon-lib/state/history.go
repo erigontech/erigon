@@ -40,7 +40,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -48,20 +47,28 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type History struct {
 	*InvertedIndex // indexKeysTable contains mapping txNum -> key1+key2, while index table `key -> {txnums}` is omitted.
 
-	// Files:
-	//  .v - list of values
-	//  .vi - txNum+key -> offset in .v
-	files     *btree2.BTreeG[*filesItem] // thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	// files - list of ALL files - including: un-indexed-yet, garbage, merged-into-bigger-one, ...
+	// thread-safe, but maybe need 1 RWLock for all trees in AggregatorV3
+	//
+	// roFiles derivative from field `file`, but without garbage:
+	//  - no files with `canDelete=true`
+	//  - no overlaps
+	//  - no un-indexed files (`power-off` may happen between .ef and .efi creation)
+	//
+	// MakeContext() using roFiles in zero-copy way
+	files     *btree2.BTreeG[*filesItem]
+	roFiles   atomic.Pointer[[]ctxItem]
 	indexList idxList
 
-	// roFiles derivative from field `file`, but without garbage (canDelete=true, overlaps, etc...)
-	// MakeContext() using this field in zero-copy way
-	roFiles atomic.Pointer[[]ctxItem]
+	// Schema:
+	//  .v - list of values
+	//  .vi - txNum+key -> offset in .v
 
 	historyValsTable string // key1+key2+txnNum -> oldValue , stores values BEFORE change
 	compressWorkers  int
@@ -77,8 +84,6 @@ type History struct {
 	//   keys: txNum -> key1+key2
 	//   vals: key1+key2+txNum -> value (not DupSort)
 	historyLargeValues bool // can't use DupSort optimization (aka. prefix-compression) if values size > 4kb
-
-	garbageFiles []*filesItem // files that exist on disk, but ignored on opening folder - because they are garbage
 
 	dontProduceFiles bool   // don't produce .v and .ef files. old data will be pruned anyway.
 	keepTxInDB       uint64 // When dontProduceFiles=true, keepTxInDB is used to keep this amount of tx in db before pruning
@@ -106,9 +111,9 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 		historyValsTable:   historyValsTable,
 		compression:        cfg.compression,
 		compressWorkers:    1,
+		indexList:          withHashMap,
 		integrityCheck:     integrityCheck,
 		historyLargeValues: cfg.historyLargeValues,
-		indexList:          withHashMap,
 		dontProduceFiles:   cfg.dontProduceFiles,
 		keepTxInDB:         cfg.keepTxInDB,
 	}
@@ -144,7 +149,7 @@ func (h *History) OpenList(idxFiles, histNames []string, readonly bool) error {
 }
 func (h *History) openList(fNames []string) error {
 	h.closeWhatNotInList(fNames)
-	h.garbageFiles = h.scanStateFiles(fNames)
+	h.scanStateFiles(fNames)
 	if err := h.openFiles(); err != nil {
 		return fmt.Errorf("History(%s).openFiles: %w", h.filenameBase, err)
 	}
@@ -196,29 +201,7 @@ func (h *History) scanStateFiles(fNames []string) (garbageFiles []*filesItem) {
 		if _, has := h.files.Get(newFile); has {
 			continue
 		}
-
-		addNewFile := true
-		var subSets []*filesItem
-		h.files.Walk(func(items []*filesItem) bool {
-			for _, item := range items {
-				if item.isSubsetOf(newFile) {
-					subSets = append(subSets, item)
-					continue
-				}
-
-				if newFile.isSubsetOf(item) {
-					if item.frozen {
-						addNewFile = false
-						garbageFiles = append(garbageFiles, newFile)
-					}
-					continue
-				}
-			}
-			return true
-		})
-		if addNewFile {
-			h.files.Set(newFile)
-		}
+		h.files.Set(newFile)
 	}
 	return garbageFiles
 }
@@ -237,7 +220,7 @@ func (h *History) openFiles() error {
 					invalidFileItems = append(invalidFileItems, item)
 					continue
 				}
-				if item.decompressor, err = compress.NewDecompressor(fPath); err != nil {
+				if item.decompressor, err = seg.NewDecompressor(fPath); err != nil {
 					_, fName := filepath.Split(fPath)
 					h.logger.Warn("[agg] History.openFiles", "err", err, "f", fName)
 					invalidFileItems = append(invalidFileItems, item)
@@ -599,7 +582,7 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 		}
 	}()
 	historyPath := h.vFilePath(step, step+1)
-	comp, err := compress.NewCompressor(ctx, "collate history", historyPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+	comp, err := seg.NewCompressor(ctx, "collate history", historyPath, h.dirs.Tmp, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 	if err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
@@ -710,9 +693,9 @@ func (h *History) collate(ctx context.Context, step, txFrom, txTo uint64, roTx k
 }
 
 type HistoryFiles struct {
-	historyDecomp   *compress.Decompressor
+	historyDecomp   *seg.Decompressor
 	historyIdx      *recsplit.Index
-	efHistoryDecomp *compress.Decompressor
+	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
 	efExistence     *ExistenceFilter
 
@@ -760,10 +743,10 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyComp.DisableFsync()
 	}
 	var (
-		historyDecomp, efHistoryDecomp *compress.Decompressor
+		historyDecomp, efHistoryDecomp *seg.Decompressor
 		historyIdx, efHistoryIdx       *recsplit.Index
 		efExistence                    *ExistenceFilter
-		efHistoryComp                  *compress.Compressor
+		efHistoryComp                  *seg.Compressor
 		warmLocality                   *LocalityIndexFiles
 		rs                             *recsplit.RecSplit
 	)
@@ -822,7 +805,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	efHistoryPath := h.efFilePath(step, step+1)
 	{
 		var err error
-		if historyDecomp, err = compress.NewDecompressor(collation.historyPath); err != nil {
+		if historyDecomp, err = seg.NewDecompressor(collation.historyPath); err != nil {
 			return HistoryFiles{}, fmt.Errorf("open %s history decompressor: %w", h.filenameBase, err)
 		}
 
@@ -830,7 +813,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		_, efHistoryFileName := filepath.Split(efHistoryPath)
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
-		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.dirs.Tmp, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+		efHistoryComp, err = seg.NewCompressor(ctx, "ef history", efHistoryPath, h.dirs.Tmp, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 		}
@@ -864,13 +847,15 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	var err error
-	if efHistoryDecomp, err = compress.NewDecompressor(efHistoryPath); err != nil {
+	if efHistoryDecomp, err = seg.NewDecompressor(efHistoryPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s ef history decompressor: %w", h.filenameBase, err)
 	}
 	{
-		efHistoryIdxPath := h.efAccessorFilePath(step, step+1)
-		if efHistoryIdx, err = buildIndexThenOpen(ctx, efHistoryDecomp, h.compression, efHistoryIdxPath, h.dirs.Tmp, false, h.salt, ps, h.logger, h.noFsync); err != nil {
+		if err := h.InvertedIndex.buildMapIdx(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s ef history idx: %w", h.filenameBase, err)
+		}
+		if efHistoryIdx, err = recsplit.OpenIndex(h.InvertedIndex.efAccessorFilePath(step, step+1)); err != nil {
+			return HistoryFiles{}, err
 		}
 	}
 	if h.InvertedIndex.withExistenceIndex {
@@ -881,14 +866,13 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 
 	}
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:    collation.historyCount,
-		Enums:       false,
-		BucketSize:  2000,
-		LeafSize:    8,
-		TmpDir:      h.dirs.Tmp,
-		IndexFile:   historyIdxPath,
-		EtlBufLimit: etl.BufferOptimalSize / 2,
-		Salt:        h.salt,
+		KeyCount:   collation.historyCount,
+		Enums:      false,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     h.dirs.Tmp,
+		IndexFile:  historyIdxPath,
+		Salt:       h.salt,
 	}, h.logger); err != nil {
 		return HistoryFiles{}, fmt.Errorf("create recsplit: %w", err)
 	}
@@ -1062,21 +1046,25 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 	return r
 }
 
-func (hc *HistoryContext) canPruneUntil(tx kv.Tx) (can bool, txTo uint64) {
+func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
 	minIdxTx := hc.ic.CanPruneFrom(tx)
 	maxIdxTx := hc.ic.highestTxNum(tx)
 	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
-	//		hc.h.filenameBase, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
+	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
+	//		hc.h.filenameBase, untilTx, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
 	//}()
 
 	if hc.h.dontProduceFiles {
 		if hc.h.keepTxInDB >= maxIdxTx {
 			return false, 0
 		}
-		txTo = maxIdxTx - hc.h.keepTxInDB // bound pruning
+		txTo = min(maxIdxTx-hc.h.keepTxInDB, untilTx) // bound pruning
 	} else {
-		txTo = hc.maxTxNumInFiles(false)
+		canPruneIdx := hc.ic.CanPruneUntil(tx, untilTx)
+		if !canPruneIdx {
+			return false, 0
+		}
+		txTo = min(hc.maxTxNumInFiles(false), untilTx)
 	}
 	return minIdxTx < txTo, txTo
 }
@@ -1089,11 +1077,11 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx) (can bool, txTo uint64) {
 func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPruneUntil(rwTx), txFrom, txTo)
 	if !forced {
-		can, untilTx := hc.canPruneUntil(rwTx)
+		var can bool
+		can, txTo = hc.canPruneUntil(rwTx, txTo)
 		if !can {
 			return nil, nil
 		}
-		txTo = min(untilTx, txTo)
 	}
 	defer func(t time.Time) { mxPruneTookHistory.ObserveDuration(t) }(time.Now())
 

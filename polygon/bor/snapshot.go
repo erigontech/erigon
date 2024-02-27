@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
@@ -131,15 +130,8 @@ func (s *Snapshot) Apply(parent *types.Header, headers []*types.Header, logger l
 	}
 	// Iterate through the headers and create a new snapshot
 	snap := s.copy()
-	if len(headers) > 100_000 {
-		logger.Debug("[bor] Snapshot.Apply", "blockNum", parent.Number, "snapNum", snap.Number)
-	}
 
-	for i, header := range headers {
-		if len(headers) > 100_000 && i > 0 && i%100_000 == 0 {
-			logger.Debug("[bor] Snapshot.Apply", "headerNum", header.Number.Uint64(), "snapNum", snap.Number, "progress", fmt.Sprintf("%dK/%dK", i/1_000, len(headers)/1_000))
-		}
-
+	for _, header := range headers {
 		// Remove any votes on checkpoint blocks
 		number := header.Number.Uint64()
 		sprintLen := s.config.CalculateSprintLength(number)

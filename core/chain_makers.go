@@ -471,9 +471,6 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 	}
 
 	if histV4 {
-		//if GenerateTrace {
-		//	panic("implement me")
-		//}
 		h := libcommon.NewHasher()
 		defer libcommon.ReturnHasherToPool(h)
 
@@ -515,6 +512,7 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 			if err != nil {
 				return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 			}
+			fmt.Printf("storage %x -> %x\n", k, newK)
 			if err := tx.Put(kv.HashedStorage, newK, v); err != nil {
 				return hashRoot, fmt.Errorf("clear HashedStorage bucket: %w", err)
 			}
@@ -522,6 +520,33 @@ func CalcHashRootForTests(tx kv.RwTx, header *types.Header, histV4, trace bool) 
 		}
 
 		if trace {
+			if GenerateTrace {
+				fmt.Printf("State after %d================\n", header.Number)
+				it, err := tx.Range(kv.HashedAccounts, nil, nil)
+				if err != nil {
+					return hashRoot, err
+				}
+				for it.HasNext() {
+					k, v, err := it.Next()
+					if err != nil {
+						return hashRoot, err
+					}
+					fmt.Printf("%x: %x\n", k, v)
+				}
+				fmt.Printf("..................\n")
+				it, err = tx.Range(kv.HashedStorage, nil, nil)
+				if err != nil {
+					return hashRoot, err
+				}
+				for it.HasNext() {
+					k, v, err := it.Next()
+					if err != nil {
+						return hashRoot, err
+					}
+					fmt.Printf("%x: %x\n", k, v)
+				}
+				fmt.Printf("===============================\n")
+			}
 			root, err := trie.CalcRootTrace("GenerateChain", tx)
 			return root, err
 		}
@@ -673,5 +698,8 @@ func (cr *FakeChainReader) GetTd(hash libcommon.Hash, number uint64) *big.Int   
 func (cr *FakeChainReader) FrozenBlocks() uint64                                       { return 0 }
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
+}
+func (cr *FakeChainReader) BorStartEventID(number uint64) uint64 {
+	return 0
 }
 func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }

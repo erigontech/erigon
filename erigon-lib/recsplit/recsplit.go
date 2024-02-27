@@ -609,7 +609,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
 	}
-	if rs.enums {
+	if rs.enums && rs.keysAdded > 0 {
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
 		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
@@ -651,16 +651,14 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
+	var features Features
 	if rs.enums {
-		if err := rs.indexW.WriteByte(1); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
-		}
-	} else {
-		if err := rs.indexW.WriteByte(0); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
-		}
+		features |= Enums
 	}
-	if rs.enums {
+	if err := rs.indexW.WriteByte(byte(features)); err != nil {
+		return fmt.Errorf("writing enums = true: %w", err)
+	}
+	if rs.enums && rs.keysAdded > 0 {
 		// Write out elias fano for offsets
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)

@@ -27,16 +27,17 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 func (d *Domain) endTxNumMinimax() uint64 {
@@ -105,6 +106,7 @@ func (h *History) endIndexedTxNumMinimax(needFrozen bool) uint64 {
 }
 
 type DomainRanges struct {
+	name              kv.Domain
 	valuesStartTxNum  uint64
 	valuesEndTxNum    uint64
 	historyStartTxNum uint64
@@ -149,7 +151,12 @@ func (r DomainRanges) any() bool {
 // As any other methods of DomainContext - it can't see any files overlaps or garbage
 func (dc *DomainContext) findMergeRange(maxEndTxNum, maxSpan uint64) DomainRanges {
 	hr := dc.hc.findMergeRange(maxEndTxNum, maxSpan)
+	domainName, err := kv.String2Domain(dc.d.filenameBase)
+	if err != nil {
+		panic(err)
+	}
 	r := DomainRanges{
+		name:              domainName,
 		historyStartTxNum: hr.historyStartTxNum,
 		historyEndTxNum:   hr.historyEndTxNum,
 		history:           hr.history,
@@ -557,7 +564,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 
 	fromStep, toStep := r.valuesStartTxNum/dc.d.aggregationStep, r.valuesEndTxNum/dc.d.aggregationStep
 	kvFilePath := dc.d.kvFilePath(fromStep, toStep)
-	kvFile, err := compress.NewCompressor(ctx, "merge", kvFilePath, dc.d.dirs.Tmp, compress.MinPatternScore, dc.d.compressWorkers, log.LvlTrace, dc.d.logger)
+	kvFile, err := seg.NewCompressor(ctx, "merge", kvFilePath, dc.d.dirs.Tmp, seg.MinPatternScore, dc.d.compressWorkers, log.LvlTrace, dc.d.logger)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", dc.d.filenameBase, err)
 	}
@@ -638,7 +645,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 
 	valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, dc.d.aggregationStep)
 	valuesIn.frozen = false
-	if valuesIn.decompressor, err = compress.NewDecompressor(kvFilePath); err != nil {
+	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
 		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 	}
 
@@ -649,8 +656,10 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	} else {
-		idxPath := dc.d.kvAccessorFilePath(fromStep, toStep)
-		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, dc.d.compression, idxPath, dc.d.dirs.Tmp, false, dc.d.salt, ps, dc.d.logger, dc.d.noFsync); err != nil {
+		if err = dc.d.buildMapIdx(ctx, fromStep, toStep, valuesIn.decompressor, ps); err != nil {
+			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
+		}
+		if valuesIn.index, err = recsplit.OpenIndex(dc.d.kvAccessorFilePath(fromStep, toStep)); err != nil {
 			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", dc.d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
 		}
 	}
@@ -676,8 +685,8 @@ func (ic *InvertedIndexContext) mergeFiles(ctx context.Context, files []*filesIt
 	}
 
 	var outItem *filesItem
-	var comp *compress.Compressor
-	var decomp *compress.Decompressor
+	var comp *seg.Compressor
+	var decomp *seg.Decompressor
 	var err error
 	var closeItem = true
 	defer func() {
@@ -699,7 +708,7 @@ func (ic *InvertedIndexContext) mergeFiles(ctx context.Context, files []*filesIt
 	fromStep, toStep := startTxNum/ic.ii.aggregationStep, endTxNum/ic.ii.aggregationStep
 
 	datPath := ic.ii.efFilePath(fromStep, toStep)
-	if comp, err = compress.NewCompressor(ctx, "Snapshots merge", datPath, ic.ii.dirs.Tmp, compress.MinPatternScore, ic.ii.compressWorkers, log.LvlTrace, ic.ii.logger); err != nil {
+	if comp, err = seg.NewCompressor(ctx, "Snapshots merge", datPath, ic.ii.dirs.Tmp, seg.MinPatternScore, ic.ii.compressWorkers, log.LvlTrace, ic.ii.logger); err != nil {
 		return nil, fmt.Errorf("merge %s inverted index compressor: %w", ic.ii.filenameBase, err)
 	}
 	if ic.ii.noFsync {
@@ -790,17 +799,18 @@ func (ic *InvertedIndexContext) mergeFiles(ctx context.Context, files []*filesIt
 	comp = nil
 
 	outItem = newFilesItem(startTxNum, endTxNum, ic.ii.aggregationStep)
-	if outItem.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+	if outItem.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 		return nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", ic.ii.filenameBase, startTxNum, endTxNum, err)
 	}
 	ps.Delete(p)
 
-	{
-		idxPath := ic.ii.efAccessorFilePath(fromStep, toStep)
-		if outItem.index, err = buildIndexThenOpen(ctx, outItem.decompressor, ic.ii.compression, idxPath, ic.ii.dirs.Tmp, false, ic.ii.salt, ps, ic.ii.logger, ic.ii.noFsync); err != nil {
-			return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ic.ii.filenameBase, startTxNum, endTxNum, err)
-		}
+	if err := ic.ii.buildMapIdx(ctx, fromStep, toStep, outItem.decompressor, ps); err != nil {
+		return nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", ic.ii.filenameBase, startTxNum, endTxNum, err)
 	}
+	if outItem.index, err = recsplit.OpenIndex(ic.ii.efAccessorFilePath(fromStep, toStep)); err != nil {
+		return nil, err
+	}
+
 	if ic.ii.withExistenceIndex {
 		idxPath := ic.ii.efExistenceIdxFilePath(fromStep, toStep)
 		if outItem.existence, err = buildIndexFilterThenOpen(ctx, outItem.decompressor, ic.ii.compression, idxPath, ic.ii.dirs.Tmp, ic.ii.salt, ps, ic.ii.logger, ic.ii.noFsync); err != nil {
@@ -835,8 +845,8 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 			defer f.decompressor.EnableReadAhead().DisableReadAhead()
 		}
 
-		var comp *compress.Compressor
-		var decomp *compress.Decompressor
+		var comp *seg.Compressor
+		var decomp *seg.Decompressor
 		var rs *recsplit.RecSplit
 		var index *recsplit.Index
 		var closeItem = true
@@ -862,7 +872,7 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 		fromStep, toStep := r.historyStartTxNum/hc.h.aggregationStep, r.historyEndTxNum/hc.h.aggregationStep
 		datPath := hc.h.vFilePath(fromStep, toStep)
 		idxPath := hc.h.vAccessorFilePath(fromStep, toStep)
-		if comp, err = compress.NewCompressor(ctx, "merge", datPath, hc.h.dirs.Tmp, compress.MinPatternScore, hc.h.compressWorkers, log.LvlTrace, hc.h.logger); err != nil {
+		if comp, err = seg.NewCompressor(ctx, "merge", datPath, hc.h.dirs.Tmp, seg.MinPatternScore, hc.h.compressWorkers, log.LvlTrace, hc.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("merge %s history compressor: %w", hc.h.filenameBase, err)
 		}
 		compr := NewArchiveWriter(comp, hc.h.compression)
@@ -938,7 +948,7 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 		}
 		compr.Close()
 		comp = nil
-		if decomp, err = compress.NewDecompressor(datPath); err != nil {
+		if decomp, err = seg.NewDecompressor(datPath); err != nil {
 			return nil, nil, err
 		}
 		ps.Delete(p)
@@ -946,14 +956,13 @@ func (hc *HistoryContext) mergeFiles(ctx context.Context, indexFiles, historyFil
 		p = ps.AddNew(path.Base(idxPath), uint64(decomp.Count()/2))
 		defer ps.Delete(p)
 		if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
-			KeyCount:    keyCount,
-			Enums:       false,
-			BucketSize:  2000,
-			LeafSize:    8,
-			TmpDir:      hc.h.dirs.Tmp,
-			IndexFile:   idxPath,
-			EtlBufLimit: etl.BufferOptimalSize / 2,
-			Salt:        hc.h.salt,
+			KeyCount:   keyCount,
+			Enums:      false,
+			BucketSize: 2000,
+			LeafSize:   8,
+			TmpDir:     hc.h.dirs.Tmp,
+			IndexFile:  idxPath,
+			Salt:       hc.h.salt,
 		}, hc.h.logger); err != nil {
 			return nil, nil, fmt.Errorf("create recsplit: %w", err)
 		}
@@ -1121,161 +1130,188 @@ func (h *History) integrateMergedFiles(indexOuts, historyOuts []*filesItem, inde
 	h.reCalcRoFiles()
 }
 
-// nolint
-func (dc *DomainContext) frozenTo() uint64 {
-	if len(dc.files) == 0 {
-		return 0
-	}
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.files[i].src.frozen {
-			return cmp.Min(dc.files[i].endTxNum, dc.hc.frozenTo())
-		}
-	}
-	return 0
-}
-
-// nolint
-func (hc *HistoryContext) frozenTo() uint64 {
-	if len(hc.files) == 0 {
-		return 0
-	}
-	for i := len(hc.files) - 1; i >= 0; i-- {
-		if hc.files[i].src.frozen {
-			return cmp.Min(hc.files[i].endTxNum, hc.ic.frozenTo())
-		}
-	}
-	return 0
-}
-
-// nolint
-func (ic *InvertedIndexContext) frozenTo() uint64 {
-	if len(ic.files) == 0 {
-		return 0
-	}
-	for i := len(ic.files) - 1; i >= 0; i-- {
-		if ic.files[i].src.frozen {
-			return ic.files[i].endTxNum
-		}
-	}
-	return 0
-}
-
-func (d *Domain) cleanAfterFreeze(mergedDomain, mergedHist, mergedIdx *filesItem) {
-	if mergedHist != nil && mergedHist.frozen {
-		d.History.cleanAfterFreeze(mergedHist.endTxNum)
-	}
+func (dc *DomainContext) cleanAfterMerge(mergedDomain, mergedHist, mergedIdx *filesItem) {
+	dc.hc.cleanAfterMerge(mergedHist, mergedIdx)
 	if mergedDomain == nil {
 		return
 	}
-	var outs []*filesItem
-	mergedFrom, mergedTo := mergedDomain.startTxNum, mergedDomain.endTxNum
-	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
-	d.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.startTxNum > mergedFrom && item.endTxNum < mergedTo {
-				outs = append(outs, item)
-			}
-			//TODO: domain doesn't have .frozen flag. Somehow need delete all earlier sub-sets, but keep largest one.
-		}
-		return true
-	})
-
+	outs := dc.garbage(mergedDomain)
 	for _, out := range outs {
 		if out == nil {
-			panic("must not happen: " + d.filenameBase)
+			panic("must not happen: " + dc.d.filenameBase)
 		}
-		d.files.Delete(out)
+		dc.d.files.Delete(out)
 		out.canDelete.Store(true)
 		if out.refcount.Load() == 0 {
-			if d.filenameBase == traceFileLife && out.decompressor != nil {
-				d.logger.Info(fmt.Sprintf("[agg] cleanAfterFreeze remove: %s\n", out.decompressor.FileName()))
+			if dc.d.filenameBase == traceFileLife && out.decompressor != nil {
+				dc.d.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
 			}
 			// if it has no readers (invisible even for us) - it's safe to remove file right here
 			out.closeFilesAndRemove()
 		} else {
-			if d.filenameBase == traceFileLife && out.decompressor != nil {
-				d.logger.Warn(fmt.Sprintf("[agg] cleanAfterFreeze mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
+			if dc.d.filenameBase == traceFileLife && out.decompressor != nil {
+				dc.d.logger.Warn(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s, refcnt=%d", out.decompressor.FileName(), out.refcount.Load()))
 			}
 		}
 	}
 }
 
-// cleanAfterFreeze - sometime inverted_index may be already merged, but history not yet. and power-off happening.
+// cleanAfterMerge - sometime inverted_index may be already merged, but history not yet. and power-off happening.
 // in this case we need keep small files, but when history already merged to `frozen` state - then we can cleanup
 // all earlier small files, by mark tem as `canDelete=true`
-func (h *History) cleanAfterFreeze(frozenTo uint64) {
-	if frozenTo == 0 {
+func (hc *HistoryContext) cleanAfterMerge(merged, mergedIdx *filesItem) {
+	if merged == nil {
 		return
 	}
-	//if h.filenameBase == "accounts" {
-	//	log.Warn("[history] History.cleanAfterFreeze", "frozenTo", frozenTo/h.aggregationStep, "stack", dbg.Stack())
-	//}
-	var outs []*filesItem
-	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
-	h.files.Walk(func(items []*filesItem) bool {
-		for _, item := range items {
-			if item.frozen || item.endTxNum > frozenTo {
-				continue
-			}
-			outs = append(outs, item)
-		}
-		return true
-	})
-
+	if merged.endTxNum == 0 {
+		return
+	}
+	outs := hc.garbage(merged)
 	for _, out := range outs {
 		if out == nil {
-			panic("must not happen: " + h.filenameBase)
+			panic("must not happen: " + hc.h.filenameBase)
 		}
+		hc.h.files.Delete(out)
 		out.canDelete.Store(true)
-
-		//if out.refcount.Load() == 0 {
-		//	if h.filenameBase == "accounts" {
-		//		log.Warn("[history] History.cleanAfterFreeze: immediately delete", "name", out.decompressor.FileName())
-		//	}
-		//} else {
-		//	if h.filenameBase == "accounts" {
-		//		log.Warn("[history] History.cleanAfterFreeze: mark as 'canDelete=true'", "name", out.decompressor.FileName())
-		//	}
-		//}
 
 		// if it has no readers (invisible even for us) - it's safe to remove file right here
 		if out.refcount.Load() == 0 {
+			if hc.h.filenameBase == traceFileLife && out.decompressor != nil {
+				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
+			}
 			out.closeFilesAndRemove()
+		} else {
+			if hc.h.filenameBase == traceFileLife && out.decompressor != nil {
+				hc.h.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s", out.decompressor.FileName()))
+			}
 		}
-		h.files.Delete(out)
 	}
-	h.InvertedIndex.cleanAfterFreeze(frozenTo)
+	hc.ic.cleanAfterMerge(mergedIdx)
 }
 
-// cleanAfterFreeze - mark all small files before `f` as `canDelete=true`
-func (ii *InvertedIndex) cleanAfterFreeze(frozenTo uint64) {
-	if frozenTo == 0 {
+// cleanAfterMerge - mark all small files before `f` as `canDelete=true`
+func (ic *InvertedIndexContext) cleanAfterMerge(merged *filesItem) {
+	if merged == nil {
 		return
 	}
-	var outs []*filesItem
+	if merged.endTxNum == 0 {
+		return
+	}
+	outs := ic.garbage(merged)
+	for _, out := range outs {
+		if out == nil {
+			panic("must not happen: " + ic.ii.filenameBase)
+		}
+		ic.ii.files.Delete(out)
+		out.canDelete.Store(true)
+		if out.refcount.Load() == 0 {
+			if ic.ii.filenameBase == traceFileLife && out.decompressor != nil {
+				ic.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge remove: %s", out.decompressor.FileName()))
+			}
+			// if it has no readers (invisible even for us) - it's safe to remove file right here
+			out.closeFilesAndRemove()
+		} else {
+			if ic.ii.filenameBase == traceFileLife && out.decompressor != nil {
+				ic.ii.logger.Info(fmt.Sprintf("[agg] cleanAfterMerge mark as delete: %s\n", out.decompressor.FileName()))
+			}
+		}
+	}
+}
+
+// garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
+func (dc *DomainContext) garbage(merged *filesItem) (outs []*filesItem) {
+	if merged == nil {
+		return
+	}
 	// `kill -9` may leave some garbage
-	// but it may be useful for merges, until merge `frozen` file
-	ii.files.Walk(func(items []*filesItem) bool {
+	// AggContext doesn't have such files, only Agg.files does
+	dc.d.files.Walk(func(items []*filesItem) bool {
 		for _, item := range items {
-			if item.frozen || item.endTxNum > frozenTo {
+			if item.frozen {
 				continue
 			}
-			outs = append(outs, item)
+			if item.isSubsetOf(merged) {
+				outs = append(outs, item)
+			}
+			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
+			if item.isBefore(merged) && dc.hasCoverFile(item) {
+				outs = append(outs, item)
+			}
 		}
 		return true
 	})
+	return outs
+}
 
-	for _, out := range outs {
-		if out == nil {
-			panic("must not happen: " + ii.filenameBase)
-		}
-		out.canDelete.Store(true)
-		if out.refcount.Load() == 0 {
-			// if it has no readers (invisible even for us) - it's safe to remove file right here
-			out.closeFilesAndRemove()
-		}
-		ii.files.Delete(out)
+// garbage - returns list of garbage files after merge step is done. at startup pass here last frozen file
+func (hc *HistoryContext) garbage(merged *filesItem) (outs []*filesItem) {
+	if merged == nil {
+		return
 	}
+	// `kill -9` may leave some garbage
+	// AggContext doesn't have such files, only Agg.files does
+	hc.h.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.frozen {
+				continue
+			}
+			if item.isSubsetOf(merged) {
+				outs = append(outs, item)
+			}
+			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
+			if item.isBefore(merged) && hc.hasCoverFile(item) {
+				outs = append(outs, item)
+			}
+		}
+		return true
+	})
+	return outs
+}
+
+func (ic *InvertedIndexContext) garbage(merged *filesItem) (outs []*filesItem) {
+	if merged == nil {
+		return
+	}
+	// `kill -9` may leave some garbage
+	// AggContext doesn't have such files, only Agg.files does
+	ic.ii.files.Walk(func(items []*filesItem) bool {
+		for _, item := range items {
+			if item.frozen {
+				continue
+			}
+			if item.isSubsetOf(merged) {
+				outs = append(outs, item)
+			}
+			// delete garbage file only if it's before merged range and it has bigger file (which indexed and visible for user now - using `DomainContext`)
+			if item.isBefore(merged) && ic.hasCoverFile(item) {
+				outs = append(outs, item)
+			}
+		}
+		return true
+	})
+	return outs
+}
+func (dc *DomainContext) hasCoverFile(item *filesItem) bool {
+	for _, f := range dc.files {
+		if item.isSubsetOf(f.src) {
+			return true
+		}
+	}
+	return false
+}
+func (hc *HistoryContext) hasCoverFile(item *filesItem) bool {
+	for _, f := range hc.files {
+		if item.isSubsetOf(f.src) {
+			return true
+		}
+	}
+	return false
+}
+func (ic *InvertedIndexContext) hasCoverFile(item *filesItem) bool {
+	for _, f := range ic.files {
+		if item.isSubsetOf(f.src) {
+			return true
+		}
+	}
+	return false
 }

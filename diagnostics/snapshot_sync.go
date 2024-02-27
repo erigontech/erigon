@@ -17,6 +17,12 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) {
 		w.Header().Set("Content-Type", "application/json")
 		writeFilesList(w, diag)
 	})
+
+	metricsMux.HandleFunc("/hardware-info", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Content-Type", "application/json")
+		writeHardwareInfo(w, diag)
+	})
 }
 
 func writeStages(w http.ResponseWriter, diag *DiagnosticClient) {
@@ -25,4 +31,8 @@ func writeStages(w http.ResponseWriter, diag *DiagnosticClient) {
 
 func writeFilesList(w http.ResponseWriter, diag *DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.SnapshotFilesList())
+}
+
+func writeHardwareInfo(w http.ResponseWriter, diag *DiagnosticClient) {
+	json.NewEncoder(w).Encode(diag.HardwareInfo())
 }

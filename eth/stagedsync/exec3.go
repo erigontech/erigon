@@ -15,6 +15,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
+	"github.com/ledgerwatch/erigon/consensus/aura"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -156,8 +157,12 @@ func ExecV3(ctx context.Context,
 	blocksFreezeCfg := cfg.blockReader.FreezingCfg()
 
 	if initialCycle {
+		if _, ok := engine.(*aura.AuRa); ok { //gnosis collate eating too much RAM, will add ETL later
+			agg.SetCollateAndBuildWorkers(1)
+		} else {
+			agg.SetCollateAndBuildWorkers(min(2, estimate.StateV3Collate.Workers()))
+		}
 		agg.SetCompressWorkers(estimate.CompressSnapshot.Workers())
-		agg.SetCollateAndBuildWorkers(estimate.StateV3Collate.Workers())
 		if err := agg.BuildOptionalMissedIndices(ctx, estimate.IndexSnapshot.Workers()); err != nil {
 			return err
 		}
@@ -696,7 +701,6 @@ Loop:
 		var receipts types.Receipts
 		var usedGas, blobGasUsed uint64
 		for txIndex := -1; txIndex <= len(txs); txIndex++ {
-
 			// Do not oversend, wait for the result heap to go under certain size
 			txTask := &state.TxTask{
 				BlockNum:        blockNum,
@@ -708,7 +712,6 @@ Loop:
 				TxNum:           inputTxNum,
 				TxIndex:         txIndex,
 				BlockHash:       b.Hash(),
-				BlockRoot:       b.Root(),
 				SkipAnalysis:    skipAnalysis,
 				Final:           txIndex == len(txs),
 				GetHashFn:       getHashFn,

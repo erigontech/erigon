@@ -1451,6 +1451,57 @@ func (c *Bor) CommitStates(
 	syscall consensus.SystemCall,
 ) error {
 	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
+
+	if len(events) == 50 {
+		blockNum := header.Number.Uint64()
+		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum)
+
+		var to time.Time
+		if c.config.IsIndore(blockNum) {
+			stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
+			to = time.Unix(int64(header.Time-stateSyncDelay), 0)
+		} else {
+			pHeader := chain.Chain.GetHeaderByNumber(blockNum - c.config.CalculateSprintLength(blockNum))
+			to = time.Unix(int64(pHeader.Time), 0)
+		}
+
+		startEventID := chain.Chain.BorStartEventID(blockNum)
+		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
+		if err != nil {
+			return err
+		}
+		if len(remote) > 0 {
+			chainID := c.chainConfig.ChainID.String()
+
+			var merged []*heimdall.EventRecordWithTime
+			events = events[:0]
+			for _, event := range remote {
+				if event.ChainID != chainID {
+					continue
+				}
+				if event.Time.After(to) {
+					continue
+				}
+				merged = append(merged, event)
+			}
+
+			for _, ev := range merged {
+				eventRecordWithoutTime := ev.BuildEventRecord()
+
+				recordBytes, err := rlp.EncodeToBytes(eventRecordWithoutTime)
+				if err != nil {
+					panic(err)
+				}
+
+				data, err := stateReceiverABI.Pack("commitState", big.NewInt(ev.Time.Unix()), recordBytes)
+				if err != nil {
+					panic(err)
+				}
+				events = append(events, data)
+			}
+		}
+	}
+
 	for _, event := range events {
 		if err := c.GenesisContractsClient.CommitState(event, syscall); err != nil {
 			return err

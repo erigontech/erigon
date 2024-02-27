@@ -125,6 +125,105 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 	return responsePacket, message.Peer.Pid, nil
 }
 
+func (b *BeaconRpcP2P) sendBlobsSidecar(ctx context.Context, topic string, reqData []byte, count uint64) ([]*cltypes.BlobSidecar, string, error) {
+	// Prepare output slice.
+	responsePacket := []*cltypes.BlobSidecar{}
+
+	ctx, cn := context.WithTimeout(ctx, time.Second*2)
+	defer cn()
+	message, err := b.sentinel.SendRequest(ctx, &sentinel.RequestData{
+		Data:  reqData,
+		Topic: topic,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+	if message.Error {
+		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
+		errBytes, _ := io.ReadAll(rd)
+		log.Trace("received range req error", "err", string(errBytes), "raw", string(message.Data))
+		return nil, message.Peer.Pid, nil
+	}
+
+	r := bytes.NewReader(message.Data)
+	for i := 0; i < int(count); i++ {
+		forkDigest := make([]byte, 4)
+		if _, err := r.Read(forkDigest); err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, message.Peer.Pid, err
+		}
+
+		// Read varint for length of message.
+		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
+		if err != nil {
+			return nil, message.Peer.Pid, fmt.Errorf("unable to read varint from message prefix: %w", err)
+		}
+		// Sanity check for message size.
+		if encodedLn > uint64(maxMessageLength) {
+			return nil, message.Peer.Pid, fmt.Errorf("received message too big")
+		}
+
+		// Read bytes using snappy into a new raw buffer of side encodedLn.
+		raw := make([]byte, encodedLn)
+		sr := snappy.NewReader(r)
+		bytesRead := 0
+		for bytesRead < int(encodedLn) {
+			n, err := sr.Read(raw[bytesRead:])
+			if err != nil {
+				return nil, message.Peer.Pid, fmt.Errorf("read error: %w", err)
+			}
+			bytesRead += n
+		}
+		// Fork digests
+		respForkDigest := binary.BigEndian.Uint32(forkDigest)
+		if respForkDigest == 0 {
+			return nil, message.Peer.Pid, fmt.Errorf("null fork digest")
+		}
+
+		version, err := fork.ForkDigestVersion(utils.Uint32ToBytes4(respForkDigest), b.beaconConfig, b.genesisConfig.GenesisValidatorRoot)
+		if err != nil {
+			return nil, message.Peer.Pid, err
+		}
+		responseChunk := &cltypes.BlobSidecar{}
+
+		if err = responseChunk.DecodeSSZ(raw, int(version)); err != nil {
+			return nil, message.Peer.Pid, err
+		}
+		responsePacket = append(responsePacket, responseChunk)
+		// TODO(issues/5884): figure out why there is this extra byte.
+		r.ReadByte()
+	}
+
+	return responsePacket, message.Peer.Pid, nil
+}
+
+// SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
+func (b *BeaconRpcP2P) SendBlobsSidecarByIdentifierReq(ctx context.Context, req *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
+		return nil, "", err
+	}
+
+	data := libcommon.CopyBytes(buffer.Bytes())
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRootProtocolV1, data, uint64(req.Len()))
+}
+
+// SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
+func (b *BeaconRpcP2P) SendBlobsSidecarByRangerReq(ctx context.Context, start, count uint64) ([]*cltypes.BlobSidecar, string, error) {
+	var buffer buffer.Buffer
+	if err := ssz_snappy.EncodeAndWrite(&buffer, &cltypes.BlobsByRangeRequest{
+		StartSlot: start,
+		Count:     count,
+	}); err != nil {
+		return nil, "", err
+	}
+
+	data := libcommon.CopyBytes(buffer.Bytes())
+	return b.sendBlobsSidecar(ctx, communication.BlobSidecarByRangeProtocolV1, data, count*b.beaconConfig.MaxBlobsPerBlock)
+}
+
 // SendBeaconBlocksByRangeReq retrieves blocks range from beacon chain.
 func (b *BeaconRpcP2P) SendBeaconBlocksByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	req := &cltypes.BeaconBlocksByRangeRequest{

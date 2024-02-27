@@ -162,14 +162,13 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 			defer ct.Close()
 			doms := state.NewSharedDomains(tx, logger)
 			defer doms.Close()
-			blockNum := doms.BlockNum()
-			if blockNum > 0 {
-				if err := doms.Flush(ctx, tx); err != nil {
-					return err
-				}
+
+			_ = stages.SaveStageProgress(tx, stages.Execution, doms.BlockNum())
+			mxs := agg.EndTxNumMinimax() / agg.StepSize()
+			if mxs > 0 {
+				mxs--
 			}
-			_ = stages.SaveStageProgress(tx, stages.Execution, blockNum)
-			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum())
+			log.Info("[reset] exec", "toBlock", doms.BlockNum(), "toTxNum", doms.TxNum(), "maxStepInFiles", mxs)
 		}
 
 		return nil
@@ -196,6 +195,7 @@ var Tables = map[stages.SyncStage][]string{
 	stages.LogIndex:            {kv.LogAddressIndex, kv.LogTopicIndex},
 	stages.AccountHistoryIndex: {kv.E2AccountsHistory},
 	stages.StorageHistoryIndex: {kv.E2StorageHistory},
+	stages.CustomTrace:         {},
 	stages.Finish:              {},
 }
 var stateBuckets = []string{

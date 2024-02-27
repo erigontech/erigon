@@ -188,6 +188,29 @@ var cmdStageExec = &cobra.Command{
 	},
 }
 
+var cmdStageCustomTrace = &cobra.Command{
+	Use:   "stage_custom_trace",
+	Short: "",
+	Run: func(cmd *cobra.Command, args []string) {
+		logger := debug.SetupCobra(cmd, "integration")
+		db, err := openDB(dbCfg(kv.ChainDB, chaindata), true, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		defer func(t time.Time) { logger.Info("total", "took", time.Since(t)) }(time.Now())
+
+		if err := stageCustomTrace(db, cmd.Context(), logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
 var cmdStageTrie = &cobra.Command{
 	Use:   "stage_trie",
 	Short: "",
@@ -210,7 +233,7 @@ var cmdStageTrie = &cobra.Command{
 }
 
 var cmdStagePatriciaTrie = &cobra.Command{
-	Use:   "stage_trie3",
+	Use:   "rebuild_trie3_files",
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
@@ -550,6 +573,20 @@ func init() {
 	withHeimdall(cmdStageExec)
 	withWorkers(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
+
+	withConfig(cmdStageCustomTrace)
+	withDataDir(cmdStageCustomTrace)
+	withReset(cmdStageCustomTrace)
+	withBlock(cmdStageCustomTrace)
+	withUnwind(cmdStageCustomTrace)
+	withNoCommit(cmdStageCustomTrace)
+	withPruneTo(cmdStageCustomTrace)
+	withBatchSize(cmdStageCustomTrace)
+	withTxTrace(cmdStageCustomTrace)
+	withChain(cmdStageCustomTrace)
+	withHeimdall(cmdStageCustomTrace)
+	withWorkers(cmdStageCustomTrace)
+	rootCmd.AddCommand(cmdStageCustomTrace)
 
 	withConfig(cmdStageHashState)
 	withDataDir(cmdStageHashState)
@@ -1130,6 +1167,113 @@ func stageExec(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	return nil
 }
 
+func stageCustomTrace(db kv.RwDB, ctx context.Context, logger log.Logger) error {
+	dirs := datadir.New(datadirCli)
+	if err := datadir.ApplyMigrations(dirs); err != nil {
+		return err
+	}
+
+	engine, vmConfig, sync, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
+	must(sync.SetCurrentStage(stages.Execution))
+	sn, borSn, agg := allSnapshots(ctx, db, logger)
+	defer sn.Close()
+	defer borSn.Close()
+	defer agg.Close()
+	if warmup {
+		panic("not implemented")
+		//return reset2.WarmupExec(ctx, db)
+	}
+	if reset {
+		if err := reset2.Reset(ctx, db, stages.CustomTrace); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if txtrace {
+		// Activate tracing and writing into json files for each transaction
+		vmConfig.Tracer = nil
+		vmConfig.Debug = true
+	}
+
+	var batchSize datasize.ByteSize
+	must(batchSize.UnmarshalText([]byte(batchSizeStr)))
+
+	s := stage(sync, nil, db, stages.CustomTrace)
+
+	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
+	chainConfig, historyV3, pm := fromdb.ChainConfig(db), kvcfg.HistoryV3.FromDB(db), fromdb.PruneMode(db)
+	if pruneTo > 0 {
+		pm.History = prune.Distance(s.BlockNumber - pruneTo)
+		pm.Receipts = prune.Distance(s.BlockNumber - pruneTo)
+		pm.CallTraces = prune.Distance(s.BlockNumber - pruneTo)
+		pm.TxIndex = prune.Distance(s.BlockNumber - pruneTo)
+	}
+
+	syncCfg := ethconfig.Defaults.Sync
+	syncCfg.ExecWorkerCount = int(workers)
+	syncCfg.ReconWorkerCount = int(reconWorkers)
+
+	genesis := core.GenesisBlockByChainName(chain)
+	br, _ := blocksIO(db, logger)
+	cfg := stagedsync.StageCustomTraceCfg(db, pm, dirs, br, chainConfig, engine, genesis, &syncCfg)
+
+	if unwind > 0 && historyV3 {
+		if err := db.View(ctx, func(tx kv.Tx) error {
+			blockNumWithCommitment, ok, err := tx.(libstate.HasAggCtx).AggCtx().(*libstate.AggregatorV3Context).CanUnwindBeforeBlockNum(s.BlockNumber-unwind, tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("too deep unwind requested: %d, minimum alowed: %d\n", s.BlockNumber-unwind, blockNumWithCommitment)
+			}
+			unwind = s.BlockNumber - blockNumWithCommitment
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+
+	var tx kv.RwTx //nil - means lower-level code (each stage) will manage transactions
+	if noCommit {
+		var err error
+		tx, err = db.BeginRw(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+	}
+	txc := wrap.TxContainer{Tx: tx}
+
+	if unwind > 0 {
+		u := sync.NewUnwindState(stages.CustomTrace, s.BlockNumber-unwind, s.BlockNumber)
+		err := stagedsync.UnwindCustomTrace(u, s, txc, cfg, ctx, logger)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if pruneTo > 0 {
+		p, err := sync.PruneStageState(stages.CustomTrace, s.BlockNumber, tx, db)
+		if err != nil {
+			return err
+		}
+		err = stagedsync.PruneCustomTrace(p, tx, cfg, ctx, true, logger)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	err := stagedsync.SpawnCustomTrace(s, txc, cfg, ctx, true /* initialCycle */, 0, logger)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func stageTrie(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
 	sn, borSn, agg := allSnapshots(ctx, db, logger)
@@ -1279,7 +1423,7 @@ func stageHashState(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 }
 
 func stageLogIndex(db kv.RwDB, ctx context.Context, logger log.Logger) error {
-	dirs, pm, historyV3 := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db)
+	dirs, pm, historyV3, chainConfig := datadir.New(datadirCli), fromdb.PruneMode(db), kvcfg.HistoryV3.FromDB(db), fromdb.ChainConfig(db)
 	if historyV3 {
 		return fmt.Errorf("this stage is disable in --history.v3=true")
 	}
@@ -1309,7 +1453,7 @@ func stageLogIndex(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 	logger.Info("Stage exec", "progress", execAt)
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
 
-	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp)
+	cfg := stagedsync.StageLogIndexCfg(db, pm, dirs.Tmp, chainConfig.NoPruneContracts)
 	if unwind > 0 {
 		u := sync.NewUnwindState(stages.LogIndex, s.BlockNumber-unwind, s.BlockNumber)
 		err = stagedsync.UnwindLogIndex(u, s, tx, cfg, ctx)

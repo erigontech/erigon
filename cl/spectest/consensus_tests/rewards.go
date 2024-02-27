@@ -12,7 +12,6 @@ type RewardsCore struct {
 
 func (b *RewardsCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	t.Skipf("Skippinf attestation reward calculation tests for now")
-	//TODO: we should find some way to pass these
 	//preState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PreSsz)
 	//require.NoError(t, err)
 

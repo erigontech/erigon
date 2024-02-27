@@ -174,9 +174,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	if len(d.TorrentUrls()) == 0 {
 		return
 	}
-	if d.torrentFiles.newDownloadsAreProhibited() {
-		return
-	}
 	var addedNew int
 	e, ctx := errgroup.WithContext(ctx)
 	e.SetLimit(1024)
@@ -211,14 +208,12 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		e.Go(func() error {
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
-				fmt.Printf("[dbg] a: %s, %s, %s\n", name, err, url)
 				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name)
 				if err := d.torrentFiles.Create(tPath, res); err != nil {
-					d.logger.Debug("[snapshots] saveTorrent", "err", err)
+					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
 					continue
 				}
 				return nil

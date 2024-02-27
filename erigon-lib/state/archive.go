@@ -1,8 +1,10 @@
 package state
 
 import (
-	"github.com/ledgerwatch/erigon-lib/compress"
+	"fmt"
+
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type FileCompression uint8
@@ -13,13 +15,28 @@ const (
 	CompressVals FileCompression = 0b10 // compress values only
 )
 
+func ParseFileCompression(s string) (FileCompression, error) {
+	switch s {
+	case "none", "":
+		return CompressNone, nil
+	case "k":
+		return CompressKeys, nil
+	case "v":
+		return CompressVals, nil
+	case "kv":
+		return CompressKeys | CompressVals, nil
+	default:
+		return 0, fmt.Errorf("invalid file compression type: %s", s)
+	}
+}
+
 type getter struct {
-	*compress.Getter
+	*seg.Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
 	c         FileCompression // compressed
 }
 
-func NewArchiveGetter(g *compress.Getter, c FileCompression) ArchiveGetter {
+func NewArchiveGetter(g *seg.Getter, c FileCompression) ArchiveGetter {
 	return &getter{Getter: g, c: c}
 }
 
@@ -65,7 +82,7 @@ func (g *getter) Skip() (uint64, int) {
 
 }
 
-// ArchiveGetter hides if the underlying compress.Getter is compressed or not
+// ArchiveGetter hides if the underlying seg.Getter is compressed or not
 type ArchiveGetter interface {
 	HasNext() bool
 	FileName() string
@@ -85,12 +102,12 @@ type ArchiveWriter interface {
 }
 
 type compWriter struct {
-	*compress.Compressor
+	*seg.Compressor
 	keyWritten bool
 	c          FileCompression
 }
 
-func NewArchiveWriter(kv *compress.Compressor, compress FileCompression) ArchiveWriter {
+func NewArchiveWriter(kv *seg.Compressor, compress FileCompression) ArchiveWriter {
 	return &compWriter{kv, false, compress}
 }
 
