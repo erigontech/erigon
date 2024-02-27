@@ -698,11 +698,10 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 				continue
 			}
 		}
-		reader := ic.statelessIdxReader(i)
-		if reader.Empty() {
+		offset, ok := ic.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
+		if !ok {
 			continue
 		}
-		offset := reader.LookupHash(hi, lo)
 
 		g := ic.statelessGetter(i)
 		g.Reset(offset)
@@ -1167,7 +1166,11 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset := item.reader.Lookup(it.key)
+			offset, ok := item.reader.TwoLayerLookup(it.key)
+			if !ok {
+				continue
+			}
+
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
@@ -1682,8 +1685,8 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums: false,
-		//LessFalsePositives: true,
+		Enums:              true,
+		LessFalsePositives: true,
 
 		BucketSize: 2000,
 		LeafSize:   8,

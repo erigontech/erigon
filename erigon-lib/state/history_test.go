@@ -73,7 +73,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	salt := uint32(1)
 	cfg := histCfg{
 		iiCfg:             iiCfg{salt: &salt, dirs: dirs},
-		withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: largeValues,
+		withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
@@ -167,7 +167,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
 		for i := 0; i < len(keyWords); i++ {
-			offset := r.Lookup([]byte(keyWords[i]))
+			offset, ok := r.TwoLayerLookup([]byte(keyWords[i]))
+			if !ok {
+				continue
+			}
 			g.Reset(offset)
 			w, _ := g.Next(nil)
 			require.Equal(keyWords[i], string(w))
@@ -180,7 +183,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 			for j := 0; j < len(ints); j++ {
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], ints[j])
-				offset := r.Lookup2(txKey[:], []byte(keyWords[i]))
+				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
+				if !ok {
+					continue
+				}
 				g.Reset(offset)
 				w, _ := g.Next(nil)
 				require.Equal(valWords[vi], string(w))

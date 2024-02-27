@@ -78,7 +78,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	cfg := domainCfg{
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: &salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: true,
+			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: true,
 		}}
 	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
 	require.NoError(t, err)
@@ -196,7 +196,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		//r := recsplit.NewIndexReader(sf.valuesIdx)
 		//defer r.Close()
 		//for i := 0; i < len(words); i += 2 {
-		//	offset := r.Lookup([]byte(words[i]))
+		//	offset, _ := r.Lookup([]byte(words[i]))
 		//	g.Reset(offset)
 		//	w, _ := g.Next(nil)
 		//	require.Equal(t, words[i], string(w))
@@ -1450,7 +1450,6 @@ func generateRandomTxNum(r *rand.Rand, maxTxNum uint64, usedTxNums map[uint64]bo
 }
 
 func TestDomain_GetAfterAggregation(t *testing.T) {
-
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 
 	tx, err := db.BeginRw(context.Background())
@@ -1529,6 +1528,7 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
+	d.withExistenceIndex = true
 
 	dc := d.MakeContext()
 	defer dc.Close()

@@ -361,8 +361,9 @@ type Domain struct {
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
 
-	compression FileCompression
-	indexList   idxList
+	compression        FileCompression
+	indexList          idxList
+	withExistenceIndex bool
 }
 
 type domainCfg struct {
@@ -381,16 +382,14 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
-		indexList: withBTree,
+		indexList:          withBTree | withExistence,
+		withExistenceIndex: true,
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
 		return nil, err
-	}
-	if d.withExistenceIndex {
-		d.indexList |= withExistence
 	}
 
 	return d, nil
@@ -924,7 +923,10 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 		if reader.Empty() {
 			return nil, false, nil
 		}
-		offset := reader.Lookup(filekey)
+		offset, ok := reader.Lookup(filekey)
+		if !ok {
+			return nil, false, nil
+		}
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
@@ -977,7 +979,10 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 				}
 			}
 
-			offset := idx.GetReaderFromPool().Lookup(k)
+			offset, ok := idx.GetReaderFromPool().Lookup(k)
+			if !ok {
+				continue
+			}
 			g := item.decompressor.MakeGetter()
 			g.Reset(offset)
 			key, _ := g.NextUncompressed()
@@ -1272,8 +1277,8 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums: false,
-		//LessFalsePositives: false,
+		Enums:              false,
+		LessFalsePositives: false,
 
 		BucketSize: 2000,
 		LeafSize:   8,
@@ -1861,8 +1866,10 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
 			}
 		} else {
-			ir := dc.statelessIdxReader(i)
-			offset := ir.Lookup(prefix)
+			offset, ok := dc.statelessIdxReader(i).Lookup(prefix)
+			if !ok {
+				continue
+			}
 			g := dc.statelessGetter(i)
 			g.Reset(offset)
 			if !g.HasNext() {

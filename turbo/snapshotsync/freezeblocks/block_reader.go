@@ -610,9 +610,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if err != nil {
 		return nil, nil, err
 	}
-	if !ok {
-		return
-	}
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		return block, senders, nil // no senders is fine - will recover them on the fly
@@ -662,7 +659,10 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *Segment, bu
 	}
 
 	reader := recsplit.NewIndexReader(index)
-	localID := reader.Lookup(hash[:])
+	localID, ok := reader.Lookup(hash[:])
+	if !ok {
+		return nil, nil
+	}
 	headerOffset := index.OrdinalLookup(localID)
 	gg := sn.MakeGetter()
 	gg.Reset(headerOffset)
@@ -801,6 +801,7 @@ func (r *BlockReader) txnByID(txnID uint64, sn *Segment, buf []byte) (txn types.
 }
 
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []byte) (types.Transaction, uint64, bool, error) {
+	fmt.Printf("[dbg] txnByHash1\n")
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
@@ -812,7 +813,11 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		}
 
 		reader := recsplit.NewIndexReader(idxTxnHash)
-		txnId := reader.Lookup(txnHash[:])
+		txnId, ok := reader.Lookup(txnHash[:])
+		fmt.Printf("[dbg] txnByHash: sn=%d-%d, esists=%t, txnId=%d", sn.from, sn.to, ok, txnId)
+		if !ok {
+			continue
+		}
 		offset := idxTxnHash.OrdinalLookup(txnId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -832,7 +837,10 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
-		blockNum := reader2.Lookup(txnHash[:])
+		blockNum, ok := reader2.Lookup(txnHash[:])
+		if !ok {
+			continue
+		}
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
@@ -890,6 +898,8 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	if err != nil {
 		return 0, false, err
 	}
+
+	fmt.Printf("[dbg] txnByHash0: %t\n", n != nil)
 	if n != nil {
 		return *n, true, nil
 	}
@@ -1096,7 +1106,10 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(txnHash[:])
+		blockEventId, exists := reader.Lookup(txnHash[:])
+		if !exists {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -1190,7 +1203,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(borTxHash[:])
+		blockEventId, ok := reader.Lookup(borTxHash[:])
+		if !ok {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
