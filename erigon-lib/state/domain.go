@@ -901,12 +901,6 @@ type ctxItem struct {
 func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
-type ctxLocalityIdx struct {
-	reader          *recsplit.IndexReader
-	file            *ctxItem
-	aggregationStep uint64
-}
-
 // DomainContext allows accesing the same domain from multiple go-routines
 type DomainContext struct {
 	hc         *HistoryContext
@@ -1620,10 +1614,6 @@ var (
 )
 
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
-	if !dc.d.withExistenceIndex {
-		return dc.getLatestFromFilesWithoutExistenceIndex(filekey)
-	}
-
 	hi, _ := dc.hc.ic.hashKey(filekey)
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
@@ -2503,142 +2493,4 @@ func (mf MergedFiles) Close() {
 			}
 		}
 	}
-}
-
-// ---- deprecated area START ---
-
-func (dc *DomainContext) getLatestFromFilesWithoutExistenceIndex(filekey []byte) (v []byte, found bool, err error) {
-	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
-		return nil, false, err
-	} else if found {
-		return v, true, nil
-	}
-
-	if v, found, err = dc.getLatestFromColdFilesGrind(filekey); err != nil {
-		return nil, false, err
-	} else if found {
-		return v, true, nil
-	}
-
-	// still not found, search in indexed cold shards
-	return dc.getLatestFromColdFiles(filekey)
-}
-
-func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, error) {
-	exactWarmStep, ok, err := dc.hc.ic.warmLocality.lookupLatest(filekey)
-	if err != nil {
-		return nil, false, err
-	}
-	// _ = ok
-	if !ok {
-		return nil, false, nil
-	}
-
-	t := time.Now()
-	exactTxNum := exactWarmStep * dc.d.aggregationStep
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
-		if !isUseful {
-			continue
-		}
-
-		v, found, err := dc.getFromFileOld(i, filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if !found {
-			LatestStateReadWarmNotFound.ObserveDuration(t)
-			t = time.Now()
-			continue
-		}
-		// fmt.Printf("warm [%d] want %x keys i idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
-
-		LatestStateReadWarm.ObserveDuration(t)
-		return v, found, nil
-	}
-	return nil, false, nil
-}
-
-func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, found bool, err error) {
-	// sometimes there is a gap between indexed cold files and indexed warm files. just grind them.
-	// possible reasons:
-	// - no locality indices at all
-	// - cold locality index is "lazy"-built
-	// corner cases:
-	// - cold and warm segments can overlap
-	lastColdIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
-	firstWarmIndexedTxNum, haveWarmIdx := dc.hc.ic.warmLocality.indexedFrom()
-	if !haveWarmIdx && len(dc.files) > 0 {
-		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
-	}
-
-	if firstWarmIndexedTxNum <= lastColdIndexedTxNum {
-		return nil, false, nil
-	}
-
-	t := time.Now()
-	//if firstWarmIndexedTxNum/dc.d.aggregationStep-lastColdIndexedTxNum/dc.d.aggregationStep > 0 && dc.d.withLocalityIndex {
-	//	if dc.d.filenameBase != "commitment" {
-	//		log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
-	//		if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
-	//			log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
-	//		}
-	//		if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
-	//			log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
-	//		}
-	//	}
-	//}
-
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
-		if !isUseful {
-			continue
-		}
-		v, ok, err := dc.getFromFileOld(i, filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if !ok {
-			LatestStateReadGrindNotFound.ObserveDuration(t)
-			t = time.Now()
-			continue
-		}
-		LatestStateReadGrind.ObserveDuration(t)
-		return v, true, nil
-	}
-	return nil, false, nil
-}
-
-func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
-	// exactColdShard, ok, err := dc.hc.ic.coldLocality.lookupLatest(filekey)
-	// if err != nil {
-	// 	return nil, false, err
-	// }
-	// _ = ok
-	// if !ok {
-	// 	return nil, false, nil
-	// }
-	//dc.d.stats.FilesQuerie.Add(1)
-	t := time.Now()
-	// exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
-	// fmt.Printf("exactColdShard: %d, exactTxNum=%d\n", exactColdShard, exactTxNum)
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		// isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
-		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
-		// if !isUseful {
-		// 	continue
-		// }
-		v, found, err = dc.getFromFileOld(i, filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if !found {
-			LatestStateReadColdNotFound.ObserveDuration(t)
-			t = time.Now()
-			continue
-		}
-		LatestStateReadCold.ObserveDuration(t)
-		return v, true, nil
-	}
-	return nil, false, nil
 }

@@ -1460,7 +1460,6 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
-	d.withLocalityIndex = true
 
 	dc := d.MakeContext()
 	defer d.Close()
@@ -1530,7 +1529,6 @@ func TestDomain_PruneAfterAggregation(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
-	d.withLocalityIndex = true
 
 	dc := d.MakeContext()
 	defer dc.Close()
@@ -1695,7 +1693,6 @@ func TestDomain_PruneProgress(t *testing.T) {
 	d.historyLargeValues = false
 	d.History.compression = CompressKeys | CompressVals
 	d.compression = CompressKeys | CompressVals
-	d.withLocalityIndex = true
 
 	dc := d.MakeContext()
 	defer dc.Close()

@@ -119,9 +119,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, cfg.withExistenceIndex,
-		func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) },
-		logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withExistenceIndex, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -698,9 +696,6 @@ type HistoryFiles struct {
 	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
 	efExistence     *ExistenceFilter
-
-	warmLocality *LocalityIndexFiles
-	coldLocality *LocalityIndexFiles
 }
 
 func (sf HistoryFiles) CleanupOnError() {
@@ -718,12 +713,6 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 	if sf.efExistence != nil {
 		sf.efExistence.Close()
-	}
-	if sf.warmLocality != nil {
-		sf.warmLocality.Close()
-	}
-	if sf.coldLocality != nil {
-		sf.coldLocality.Close()
 	}
 }
 func (h *History) reCalcRoFiles() {
@@ -747,7 +736,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyIdx, efHistoryIdx       *recsplit.Index
 		efExistence                    *ExistenceFilter
 		efHistoryComp                  *seg.Compressor
-		warmLocality                   *LocalityIndexFiles
 		rs                             *recsplit.RecSplit
 	)
 	closeComp := true
@@ -773,9 +761,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 			}
 			if efExistence != nil {
 				efExistence.Close()
-			}
-			if warmLocality != nil {
-				warmLocality.Close()
 			}
 			if rs != nil {
 				rs.Close()
@@ -915,11 +900,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	rs.Close()
 	rs = nil
 
-	warmLocality, err = h.buildWarmLocality(ctx, efHistoryDecomp, step, ps)
-	if err != nil {
-		return HistoryFiles{}, err
-	}
-
 	if historyIdx, err = recsplit.OpenIndex(historyIdxPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
@@ -930,7 +910,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		efHistoryDecomp: efHistoryDecomp,
 		efHistoryIdx:    efHistoryIdx,
 		efExistence:     efExistence,
-		warmLocality:    warmLocality,
 	}, nil
 }
 
@@ -941,11 +920,9 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	}
 
 	h.InvertedIndex.integrateFiles(InvertedFiles{
-		decomp:       sf.efHistoryDecomp,
-		index:        sf.efHistoryIdx,
-		existence:    sf.efExistence,
-		warmLocality: sf.warmLocality,
-		coldLocality: sf.coldLocality,
+		decomp:    sf.efHistoryDecomp,
+		index:     sf.efHistoryIdx,
+		existence: sf.efExistence,
 	}, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
@@ -1178,9 +1155,6 @@ func (hc *HistoryContext) getFile(txNum uint64) (it ctxItem, ok bool) {
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
-	if !hc.h.withExistenceIndex {
-		return hc.getNoStateByLocalityIndex(key, txNum)
-	}
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum := hc.ic.Seek(key, txNum)
@@ -1204,107 +1178,6 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		fmt.Printf("GetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", hc.h.filenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 	return v, true, nil
-}
-func (hc *HistoryContext) getNoStateByLocalityIndex(key []byte, txNum uint64) ([]byte, bool, error) {
-	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.ic.coldLocality.lookupIdxFiles(key, txNum)
-
-	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
-	var foundTxNum uint64
-	var foundEndTxNum uint64
-	var foundStartTxNum uint64
-	var found bool
-	var findInFile = func(item ctxItem) bool {
-		reader := hc.ic.statelessIdxReader(item.i)
-		if reader.Empty() {
-			return true
-		}
-		offset := reader.Lookup(key)
-
-		g := hc.ic.statelessGetter(item.i)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-
-		if !bytes.Equal(k, key) {
-			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
-			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
-			//}
-			return true
-		}
-		eliasVal, _ := g.Next(nil)
-		n, ok := eliasfano32.Seek(eliasVal, txNum)
-		if ok {
-			foundTxNum = n
-			foundEndTxNum = item.endTxNum
-			foundStartTxNum = item.startTxNum
-			found = true
-			return false
-		}
-		return true
-	}
-
-	// -- LocaliyIndex opimization --
-	// check up to 2 exact files
-	if foundExactShard1 {
-		from, to := exactStep1*hc.h.aggregationStep, (exactStep1+StepsInColdFile)*hc.h.aggregationStep
-		item, ok := hc.ic.getFile(from, to)
-		if ok {
-			findInFile(item)
-		}
-		//for _, item := range hc.invIndexFiles {
-		//	if item.startTxNum == from && item.endTxNum == to {
-		//		findInFile(item)
-		//	}
-		//}
-		//exactShard1, ok := hc.invIndexFiles.Get(ctxItem{startTxNum: exactStep1 * hc.h.aggregationStep, endTxNum: (exactStep1 + StepsInColdFile) * hc.h.aggregationStep})
-		//if ok {
-		//	findInFile(exactShard1)
-		//}
-	}
-	if !found && foundExactShard2 {
-		from, to := exactStep2*hc.h.aggregationStep, (exactStep2+StepsInColdFile)*hc.h.aggregationStep
-		item, ok := hc.ic.getFile(from, to)
-		if ok {
-			findInFile(item)
-		}
-		//exactShard2, ok := hc.invIndexFiles.Get(ctxItem{startTxNum: exactStep2 * hc.h.aggregationStep, endTxNum: (exactStep2 + StepsInColdFile) * hc.h.aggregationStep})
-		//if ok {
-		//	findInFile(exactShard2)
-		//}
-	}
-	// otherwise search in recent non-fully-merged files (they are out of LocalityIndex scope)
-	// searchFrom - variable already set for this
-	// if there is no LocaliyIndex available
-	// -- LocaliyIndex opimization End --
-
-	if !found {
-		for _, item := range hc.ic.files {
-			if item.endTxNum <= lastIndexedTxNum {
-				continue
-			}
-			if !findInFile(item) {
-				break
-			}
-		}
-		//hc.invIndexFiles.AscendGreaterOrEqual(ctxItem{startTxNum: lastIndexedTxNum, endTxNum: lastIndexedTxNum}, findInFile)
-	}
-
-	if found {
-		historyItem, ok := hc.getFileDeprecated(foundStartTxNum, foundEndTxNum)
-		if !ok {
-			return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, foundStartTxNum/hc.h.aggregationStep, foundEndTxNum/hc.h.aggregationStep)
-		}
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-		reader := hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(txKey[:], key)
-		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
-		g := hc.statelessGetter(historyItem.i)
-		g.Reset(offset)
-
-		v, _ := g.Next(nil)
-		return v, true, nil
-	}
-	return nil, false, nil
 }
 
 func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint64) {
