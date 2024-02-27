@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -25,7 +26,7 @@ func TestPeerMayHaveBlockNum(t *testing.T) {
 	require.False(t, psp.peerMayHaveBlockNum(1_000))
 
 	// expired timestamp
-	psp.minMissingBlockNumTs = psp.minMissingBlockNumTs.Add(-missingBlockNumExpiry)
+	psp.minMissingBlockNumTs = psp.minMissingBlockNumTs.Add(-missingBlockNumExpiry).Add(-time.Second)
 	require.True(t, psp.peerMayHaveBlockNum(0))
 	require.True(t, psp.peerMayHaveBlockNum(200))
 	require.True(t, psp.peerMayHaveBlockNum(500))

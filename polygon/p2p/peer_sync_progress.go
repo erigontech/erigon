@@ -13,7 +13,7 @@ type peerSyncProgress struct {
 func (psp *peerSyncProgress) blockNumPresent(blockNum uint64) {
 	if psp.minMissingBlockNum <= blockNum {
 		psp.minMissingBlockNum = 0
-		psp.minMissingBlockNumTs = time.Unix(0, 0)
+		psp.minMissingBlockNumTs = time.Time{}
 	}
 }
 
