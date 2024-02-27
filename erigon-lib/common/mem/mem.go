@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/process"
 )
 
