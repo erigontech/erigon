@@ -181,7 +181,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
 	rs.lessFalsePositives = args.LessFalsePositives
-	if rs.lessFalsePositives {
+	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
 		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
 		if err != nil {
 			return nil, err
@@ -585,7 +585,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
 
-	rs.logger.Debug("[index] created", "file", rs.tmpFilePath, "fs", rs.indexF)
+	rs.logger.Debug("[index] created", "file", rs.tmpFilePath)
 
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
@@ -631,7 +631,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
 	}
-	if rs.enums {
+	if rs.enums && rs.keysAdded > 0 {
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
 		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
@@ -683,16 +683,16 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if err := rs.indexW.WriteByte(byte(features)); err != nil {
 		return fmt.Errorf("writing enums = true: %w", err)
 	}
-	if rs.enums {
+	if rs.enums && rs.keysAdded > 0 {
 		// Write out elias fano for offsets
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
-
-		if err := rs.flushExistenceFilter(); err != nil {
-			return err
-		}
 	}
+	if err := rs.flushExistenceFilter(); err != nil {
+		return err
+	}
+
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
 	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
@@ -726,7 +726,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 }
 
 func (rs *RecSplit) flushExistenceFilter() error {
-	if !rs.lessFalsePositives {
+	if !rs.enums || rs.keysAdded == 0 || !rs.lessFalsePositives {
 		return nil
 	}
 	defer rs.existenceF.Close()
