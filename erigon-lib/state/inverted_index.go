@@ -686,15 +686,6 @@ func (ic *InvertedIndexContext) statelessIdxReader(i int) *recsplit.IndexReader 
 	return r
 }
 
-func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
-	for _, item := range ic.files {
-		if item.startTxNum == from && item.endTxNum == to {
-			return item, true
-		}
-	}
-	return it, false
-}
-
 func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
 	hi, lo := ic.hashKey(key)
 

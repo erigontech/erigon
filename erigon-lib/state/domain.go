@@ -917,40 +917,6 @@ type DomainContext struct {
 	valsC kv.Cursor
 }
 
-// getFromFile returns exact match for the given key from the given file
-func (dc *DomainContext) getFromFileOld(i int, filekey []byte) ([]byte, bool, error) {
-	g := dc.statelessGetter(i)
-	if UseBtree || UseBpsTree {
-		if dc.d.withExistenceIndex && dc.files[i].src.existence != nil {
-			hi, _ := dc.hc.ic.hashKey(filekey)
-			if !dc.files[i].src.existence.ContainsHash(hi) {
-				return nil, false, nil
-			}
-		}
-
-		_, v, ok, err := dc.statelessBtree(i).Get(filekey, g)
-		if err != nil || !ok {
-			return nil, false, err
-		}
-		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
-		return v, true, nil
-	}
-
-	reader := dc.statelessIdxReader(i)
-	if reader.Empty() {
-		return nil, false, nil
-	}
-	offset := reader.Lookup(filekey)
-	g.Reset(offset)
-
-	k, _ := g.Next(nil)
-	if !bytes.Equal(filekey, k) {
-		return nil, false, nil
-	}
-	v, _ := g.Next(nil)
-	return v, true, nil
-}
-
 func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	g := dc.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
