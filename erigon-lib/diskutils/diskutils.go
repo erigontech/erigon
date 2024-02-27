@@ -2,9 +2,11 @@
 
 package diskutils
 
-import "fmt"
+import (
+	"github.com/ledgerwatch/log/v3"
+)
 
 func MountPointForDirPath(dirPath string) string {
-	fmt.Println("Implemented only for darwin")
+	log.Debug("[diskutils] Implemented only for darwin")
 	return "/"
 }
