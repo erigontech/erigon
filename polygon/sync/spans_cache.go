@@ -34,3 +34,7 @@ func (cache *SpansCache) Prune(blockNum uint64) {
 		}
 	}
 }
+
+func (cache *SpansCache) IsEmpty() bool {
+	return len(cache.spans) == 0
+}
