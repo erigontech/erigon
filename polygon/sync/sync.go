@@ -14,7 +14,7 @@ type Sync struct {
 	execution        ExecutionClient
 	verify           AccumulatedHeadersVerifier
 	p2pService       p2p.Service
-	downloader       *HeaderDownloader
+	downloader       HeaderDownloader
 	ccBuilderFactory func(root *types.Header) CanonicalChainBuilder
 	events           chan Event
 	logger           log.Logger
@@ -25,7 +25,7 @@ func NewSync(
 	execution ExecutionClient,
 	verify AccumulatedHeadersVerifier,
 	p2pService p2p.Service,
-	downloader *HeaderDownloader,
+	downloader HeaderDownloader,
 	ccBuilderFactory func(root *types.Header) CanonicalChainBuilder,
 	events chan Event,
 	logger log.Logger,
@@ -77,7 +77,10 @@ func (s *Sync) onMilestoneEvent(
 		}
 	}
 
-	s.logger.Debug("sync.Sync.onMilestoneEvent: local chain tip does not match the milestone, unwinding to the previous verified milestone", "err", err)
+	s.logger.Debug(
+		"sync.Sync.onMilestoneEvent: local chain tip does not match the milestone, unwinding to the previous verified milestone",
+		"err", err,
+	)
 
 	// the milestone doesn't correspond to the tip of the chain
 	// unwind to the previous verified milestone
