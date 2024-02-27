@@ -27,13 +27,18 @@ type HeadersWriter interface {
 	PutHeaders(ctx context.Context, headers []*types.Header) error
 }
 
+type HeaderDownloader interface {
+	DownloadUsingCheckpoints(ctx context.Context, start uint64) error
+	DownloadUsingMilestones(ctx context.Context, start uint64) error
+}
+
 func NewHeaderDownloader(
 	logger log.Logger,
 	p2pService p2p.Service,
 	heimdall heimdall.HeimdallNoStore,
 	headersVerifier AccumulatedHeadersVerifier,
 	headersWriter HeadersWriter,
-) *HeaderDownloader {
+) HeaderDownloader {
 	return newHeaderDownloader(
 		logger,
 		p2pService,
@@ -51,8 +56,8 @@ func newHeaderDownloader(
 	headersVerifier AccumulatedHeadersVerifier,
 	headersWriter HeadersWriter,
 	notEnoughPeersBackOffDuration time.Duration,
-) *HeaderDownloader {
-	return &HeaderDownloader{
+) HeaderDownloader {
+	return &headerDownloader{
 		logger:                        logger,
 		p2pService:                    p2pService,
 		heimdall:                      heimdall,
@@ -62,7 +67,7 @@ func newHeaderDownloader(
 	}
 }
 
-type HeaderDownloader struct {
+type headerDownloader struct {
 	logger                        log.Logger
 	p2pService                    p2p.Service
 	heimdall                      heimdall.HeimdallNoStore
@@ -71,7 +76,7 @@ type HeaderDownloader struct {
 	notEnoughPeersBackOffDuration time.Duration
 }
 
-func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
+func (hd *headerDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
 	waypoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return err
@@ -85,7 +90,7 @@ func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, start 
 	return nil
 }
 
-func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start uint64) error {
+func (hd *headerDownloader) DownloadUsingMilestones(ctx context.Context, start uint64) error {
 	waypoints, err := hd.heimdall.FetchMilestonesFromBlock(ctx, start)
 	if err != nil {
 		return err
@@ -99,7 +104,7 @@ func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, start u
 	return nil
 }
 
-func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, waypoints heimdall.Waypoints) error {
+func (hd *headerDownloader) downloadUsingWaypoints(ctx context.Context, waypoints heimdall.Waypoints) error {
 	// waypoint rootHash->[headers part of waypoint]
 	waypointHeadersMemo, err := lru.New[common.Hash, []*types.Header](hd.p2pService.MaxPeers())
 	if err != nil {
