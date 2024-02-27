@@ -33,7 +33,7 @@ func (c Checkpoint) Timestamp() uint64 {
 	return c.Fields.Timestamp
 }
 
-func (c Checkpoint) Length() int {
+func (c Checkpoint) Length() uint64 {
 	return c.Fields.Length()
 }
 

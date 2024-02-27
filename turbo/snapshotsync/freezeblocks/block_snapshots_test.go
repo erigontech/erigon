@@ -6,13 +6,14 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/ledgerwatch/erigon-lib/chain/networkname"
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/compress"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -20,7 +21,7 @@ import (
 )
 
 func createTestSegmentFile(t *testing.T, from, to uint64, name snaptype.Enum, dir string, version snaptype.Version, logger log.Logger) {
-	c, err := compress.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(version, from, to, name)), dir, 100, 1, log.LvlDebug, logger)
+	c, err := seg.NewCompressor(context.Background(), "test", filepath.Join(dir, snaptype.SegmentFileName(version, from, to, name)), dir, 100, 1, log.LvlDebug, logger)
 	require.NoError(t, err)
 	defer c.Close()
 	c.DisableFsync()
@@ -142,7 +143,7 @@ func TestMergeSnapshots(t *testing.T) {
 	}
 
 	expectedFileName := snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 0, 500_000, snaptype.Transactions.Enum())
-	d, err := compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	d, err := seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()
@@ -158,7 +159,7 @@ func TestMergeSnapshots(t *testing.T) {
 	}
 
 	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 600_000, 700_000, snaptype.Transactions.Enum())
-	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()
@@ -181,7 +182,7 @@ func TestMergeSnapshots(t *testing.T) {
 	}
 
 	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, start+100_000, start+200_000, snaptype.Transactions.Enum())
-	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()
@@ -197,7 +198,7 @@ func TestMergeSnapshots(t *testing.T) {
 	}
 
 	expectedFileName = snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, start+600_000, start+700_000, snaptype.Transactions.Enum())
-	d, err = compress.NewDecompressor(filepath.Join(dir, expectedFileName))
+	d, err = seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a = d.Count()

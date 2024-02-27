@@ -18,10 +18,10 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.RwDB, *AggregatorV3) {
@@ -238,7 +238,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	require.NoError(b, err)
 	idxr := recsplit.NewIndexReader(idx)
 
-	decomp, err := compress.NewDecompressor(dataPath)
+	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(b, err)
 	defer decomp.Close()
 

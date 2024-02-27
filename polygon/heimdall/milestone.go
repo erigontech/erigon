@@ -33,7 +33,7 @@ func (m Milestone) Timestamp() uint64 {
 	return m.Fields.Timestamp
 }
 
-func (m Milestone) Length() int {
+func (m Milestone) Length() uint64 {
 	return m.Fields.Length()
 }
 
