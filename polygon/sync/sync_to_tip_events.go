@@ -8,6 +8,7 @@ import (
 
 const EventTypeMilestone = "milestone"
 const EventTypeNewHeader = "new-header"
+const EventTypeNewSpan = "new-span"
 
 type Event struct {
 	Type string
@@ -16,6 +17,8 @@ type Event struct {
 
 	NewHeader *types.Header
 	PeerId    p2p.PeerId
+
+	NewSpan *heimdall.Span
 }
 
 type SyncToTipEvents struct {

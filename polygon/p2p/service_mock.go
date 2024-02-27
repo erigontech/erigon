@@ -50,6 +50,20 @@ func (mr *MockServiceMockRecorder) FetchHeaders(arg0, arg1, arg2, arg3 interface
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchHeaders", reflect.TypeOf((*MockService)(nil).FetchHeaders), arg0, arg1, arg2, arg3)
 }
 
+// ListPeersMayHaveBlockNum mocks base method.
+func (m *MockService) ListPeersMayHaveBlockNum(arg0 uint64) []PeerId {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ListPeersMayHaveBlockNum", arg0)
+	ret0, _ := ret[0].([]PeerId)
+	return ret0
+}
+
+// ListPeersMayHaveBlockNum indicates an expected call of ListPeersMayHaveBlockNum.
+func (mr *MockServiceMockRecorder) ListPeersMayHaveBlockNum(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListPeersMayHaveBlockNum", reflect.TypeOf((*MockService)(nil).ListPeersMayHaveBlockNum), arg0)
+}
+
 // MaxPeers mocks base method.
 func (m *MockService) MaxPeers() int {
 	m.ctrl.T.Helper()
@@ -62,20 +76,6 @@ func (m *MockService) MaxPeers() int {
 func (mr *MockServiceMockRecorder) MaxPeers() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxPeers", reflect.TypeOf((*MockService)(nil).MaxPeers))
-}
-
-// PeersSyncProgress mocks base method.
-func (m *MockService) PeersSyncProgress() PeersSyncProgress {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "PeersSyncProgress")
-	ret0, _ := ret[0].(PeersSyncProgress)
-	return ret0
-}
-
-// PeersSyncProgress indicates an expected call of PeersSyncProgress.
-func (mr *MockServiceMockRecorder) PeersSyncProgress() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PeersSyncProgress", reflect.TypeOf((*MockService)(nil).PeersSyncProgress))
 }
 
 // Penalize mocks base method.
