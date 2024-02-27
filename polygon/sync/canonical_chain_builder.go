@@ -16,6 +16,7 @@ type CanonicalChainBuilder interface {
 	Reset(root *types.Header)
 	ContainsHash(hash libcommon.Hash) bool
 	Tip() *types.Header
+	Root() *types.Header
 	HeadersInRange(start uint64, count uint64) []*types.Header
 	Prune(newRootNum uint64) error
 	Connect(headers []*types.Header) error
@@ -104,6 +105,9 @@ func (ccb *canonicalChainBuilder) ContainsHash(hash libcommon.Hash) bool {
 
 func (ccb *canonicalChainBuilder) Tip() *types.Header {
 	return ccb.tip.header
+}
+func (ccb *canonicalChainBuilder) Root() *types.Header {
+	return ccb.root.header
 }
 
 func (ccb *canonicalChainBuilder) Headers() []*types.Header {

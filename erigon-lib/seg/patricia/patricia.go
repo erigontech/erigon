@@ -21,9 +21,10 @@ import (
 	"math/bits"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common/cmp"
-	"github.com/ledgerwatch/erigon-lib/sais"
 	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
+	"github.com/ledgerwatch/erigon-lib/seg/sais"
 )
 
 // Implementation of paticia tree for efficient search of substrings from a dictionary in a given string
@@ -73,7 +74,7 @@ func (n *node) String() string {
 	return sb.String()
 }
 
-// state represent a position anywhere inside patricia tree
+// pathWalker represents a position anywhere inside patricia tree
 // position can be identified by combination of node, and the partitioning
 // of that node's p0 or p1 into head and tail.
 // As with p0 and p1, head and tail are encoded as follows:
@@ -82,29 +83,29 @@ func (n *node) String() string {
 // For example, if the position is at the beginning of a node,
 // head would be zero, and tail would be equal to either p0 or p1,
 // depending on whether the position corresponds to going left (0) or right (1).
-type state struct {
+type pathWalker struct {
 	n    *node
 	head uint32
 	tail uint32
 }
 
-func (s *state) String() string {
+func (s *pathWalker) String() string {
 	return fmt.Sprintf("%p head %s tail %s", s.n, tostr(s.head), tostr(s.tail))
 }
 
-func (s *state) reset(n *node) {
+func (s *pathWalker) reset(n *node) {
 	s.n = n
 	s.head = 0
 	s.tail = 0
 }
 
-func makestate(n *node) *state {
-	return &state{n: n, head: 0, tail: 0}
+func newPathWalker(n *node) *pathWalker {
+	return &pathWalker{n: n, head: 0, tail: 0}
 }
 
-// transition consumes next byte of the key, moves the state to corresponding
+// transition consumes next byte of the key, moves the path walker to corresponding
 // node of the patricia tree and returns divergence prefix (0 if there is no divergence)
-func (s *state) transition(b byte, readonly bool) uint32 {
+func (s *pathWalker) transition(b byte, readonly bool) uint32 {
 	bitsLeft := 8 // Bits in b to process
 	b32 := uint32(b) << 24
 	for bitsLeft > 0 {
@@ -117,7 +118,7 @@ func (s *state) transition(b byte, readonly bool) uint32 {
 			}
 		}
 		if s.tail == 0 {
-			// state positioned at the end of the current node
+			// positioned at the end of the current node
 			return b32 | uint32(bitsLeft)
 		}
 		tailLen := int(s.tail & 0x1f)
@@ -214,7 +215,7 @@ func (s *state) transition(b byte, readonly bool) uint32 {
 	return 0
 }
 
-func (s *state) diverge(divergence uint32) {
+func (s *pathWalker) diverge(divergence uint32) {
 	if s.tail == 0 {
 		// try to add to the existing head
 		//fmt.Printf("adding divergence to existing head\n")
@@ -288,7 +289,7 @@ func (s *state) diverge(divergence uint32) {
 }
 
 func (n *node) insert(key []byte, value interface{}) {
-	s := makestate(n)
+	s := newPathWalker(n)
 	for _, b := range key {
 		divergence := s.transition(b, false /* readonly */)
 		if divergence != 0 {
@@ -298,7 +299,7 @@ func (n *node) insert(key []byte, value interface{}) {
 	s.insert(value)
 }
 
-func (s *state) insert(value interface{}) {
+func (s *pathWalker) insert(value interface{}) {
 	if s.tail != 0 {
 		s.diverge(0)
 	}
@@ -317,10 +318,10 @@ func (s *state) insert(value interface{}) {
 }
 
 func (n *node) get(key []byte) (interface{}, bool) {
-	s := makestate(n)
+	s := newPathWalker(n)
 	for _, b := range key {
 		divergence := s.transition(b, true /* readonly */)
-		//fmt.Printf("get %x, b = %x, divergence = %s\nstate=%s\n", key, b, tostr(divergence), s)
+		//fmt.Printf("get %x, b = %x, divergence = %s\npath walker state=%s\n", key, b, tostr(divergence), s)
 		if divergence != 0 {
 			return nil, false
 		}
@@ -366,7 +367,7 @@ func (m *Matches) Swap(i, j int) {
 
 type MatchFinder struct {
 	pt      *PatriciaTree
-	s       state
+	s       pathWalker
 	matches []Match
 }
 
@@ -392,7 +393,7 @@ func NewMatchFinder2(pt *PatriciaTree) *MatchFinder2 {
 	return &MatchFinder2{pt: pt, top: &pt.root, nodeStack: []*node{&pt.root}, side: 2}
 }
 
-// unfold consumes next byte of the key, moves the state to corresponding
+// unfold consumes next byte of the key, moves the pathWalker to corresponding
 // node of the patricia tree and returns divergence prefix (0 if there is no divergence)
 func (mf2 *MatchFinder2) unfold(b byte) uint32 {
 	//fmt.Printf("unfold %x, headLen = %d, tailLen = %d, nodeStackLen = %d\n", b, mf2.headLen, mf2.tailLen, len(mf2.nodeStack))
@@ -412,7 +413,7 @@ func (mf2 *MatchFinder2) unfold(b byte) uint32 {
 				mf2.tailLen = int(mf2.top.p1 & 0x1f)
 			}
 			if mf2.tailLen == 0 {
-				// state positioned at the end of the current node
+				// positioned at the end of the current node
 				mf2.side = 2
 				//fmt.Fprintf(&sb, "1 ")
 				//fmt.Printf("%s\n", sb.String())

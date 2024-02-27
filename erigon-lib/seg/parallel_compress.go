@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-package compress
+package seg
 
 import (
 	"bufio"
@@ -33,8 +33,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/patricia"
-	"github.com/ledgerwatch/erigon-lib/sais"
+	"github.com/ledgerwatch/erigon-lib/seg/patricia"
+	"github.com/ledgerwatch/erigon-lib/seg/sais"
+
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
 )
@@ -42,7 +43,7 @@ import (
 // MinPatternScore is minimum score (per superstring) required to consider including pattern into the dictionary
 const MinPatternScore = 1024
 
-func optimiseCluster(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
+func coverWordByPatterns(trace bool, input []byte, mf2 *patricia.MatchFinder2, output []byte, uncovered []int, patterns []int, cellRing *Ring, posMap map[uint64]uint64) ([]byte, []int, []int) {
 	matches := mf2.FindLongestMatches(input)
 
 	if len(matches) == 0 {
@@ -181,7 +182,7 @@ func optimiseCluster(trace bool, input []byte, mf2 *patricia.MatchFinder2, outpu
 	return output, patterns, uncovered
 }
 
-func reduceDictWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
+func coverWordsByPatternsWorker(trace bool, inputCh chan *CompressionWord, outCh chan *CompressionWord, completion *sync.WaitGroup, trie *patricia.PatriciaTree, inputSize, outputSize *atomic.Uint64, posMap map[uint64]uint64) {
 	defer completion.Done()
 	var output = make([]byte, 0, 256)
 	var uncovered = make([]int, 256)
@@ -193,7 +194,7 @@ func reduceDictWorker(trace bool, inputCh chan *CompressionWord, outCh chan *Com
 		wordLen := uint64(len(compW.word))
 		n := binary.PutUvarint(numBuf[:], wordLen)
 		output = append(output[:0], numBuf[:n]...) // Prepend with the encoding of length
-		output, patterns, uncovered = optimiseCluster(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
+		output, patterns, uncovered = coverWordByPatterns(trace, compW.word, mf2, output, uncovered, patterns, cellRing, posMap)
 		compW.word = append(compW.word[:0], output...)
 		outCh <- compW
 		inputSize.Add(1 + wordLen)
@@ -238,8 +239,7 @@ func (cq *CompressionQueue) Pop() interface{} {
 	return x
 }
 
-// reduceDict reduces the dictionary by trying the substitutions and counting frequency for each word
-func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, datFile *DecompressedFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
+func compressWithPatternCandidates(ctx context.Context, trace bool, logPrefix, segmentFilePath string, cf *os.File, uncompressedFile *RawWordsFile, workers int, dictBuilder *DictionaryBuilder, lvl log.Lvl, logger log.Logger) error {
 	logEvery := time.NewTicker(60 * time.Second)
 	defer logEvery.Stop()
 
@@ -291,7 +291,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 			posMap := make(map[uint64]uint64)
 			posMaps = append(posMaps, posMap)
 			wg.Add(1)
-			go reduceDictWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
+			go coverWordsByPatternsWorker(trace, ch, out, &wg, &pt, inputSize, outputSize, posMap)
 		}
 	}
 	t := time.Now()
@@ -308,9 +308,9 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 
 	var inCount, outCount, emptyWordsCount uint64 // Counters words sent to compression and returned for compression
 	var numBuf [binary.MaxVarintLen64]byte
-	totalWords := datFile.count
+	totalWords := uncompressedFile.count
 
-	if err = datFile.ForEach(func(v []byte, compression bool) error {
+	if err = uncompressedFile.ForEach(func(v []byte, compression bool) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -377,7 +377,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 			}
 			if wordLen > 0 {
 				if compression {
-					output, patterns, uncovered = optimiseCluster(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
+					output, patterns, uncovered = coverWordByPatterns(trace, v, mf2, output[:0], uncovered, patterns, cellRing, uncompPosMap)
 					if _, e := intermediateW.Write(output); e != nil {
 						return e
 					}
@@ -650,7 +650,7 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	}
 	// Re-encode all the words with the use of optimised (via Huffman coding) dictionaries
 	wc := 0
-	var hc HuffmanCoder
+	var hc BitWriter
 	hc.w = cw
 	r := bufio.NewReaderSize(intermediateFile, 2*etl.BufIOSize)
 	var l uint64
@@ -741,11 +741,11 @@ func reducedict(ctx context.Context, trace bool, logPrefix, segmentFilePath stri
 	return nil
 }
 
-// processSuperstring is the worker that processes one superstring and puts results
+// extractPatternsInSuperstrings is the worker that processes one superstring and puts results
 // into the collector, using lock to mutual exclusion. At the end (when the input channel is closed),
 // it notifies the waitgroup before exiting, so that the caller known when all work is done
 // No error channels for now
-func processSuperstring(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
+func extractPatternsInSuperstrings(ctx context.Context, superstringCh chan []byte, dictCollector *etl.Collector, minPatternScore uint64, completion *sync.WaitGroup, logger log.Logger) {
 	defer completion.Done()
 	dictVal := make([]byte, 8)
 	dictKey := make([]byte, maxPatternLen)
@@ -907,7 +907,7 @@ func processSuperstring(ctx context.Context, superstringCh chan []byte, dictColl
 				}
 				binary.BigEndian.PutUint64(dictVal, score)
 				if err := dictCollector.Collect(dictKey, dictVal); err != nil {
-					logger.Error("processSuperstring", "collect", err)
+					logger.Error("extractPatternsInSuperstrings", "collect", err)
 				}
 				prevSkipped = false //nolint
 				break
@@ -941,7 +941,7 @@ func DictionaryBuilderFromCollectors(ctx context.Context, logPrefix, tmpDir stri
 	return db, nil
 }
 
-func PersistDictrionary(fileName string, db *DictionaryBuilder) error {
+func PersistDictionary(fileName string, db *DictionaryBuilder) error {
 	df, err := os.Create(fileName)
 	if err != nil {
 		return err
