@@ -2395,11 +2395,21 @@ func (v *View) TxsSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(snaptype.Transactions, blockNum)
 }
 
-func RemoveIncompatibleIndices(snapsDir string) error {
-	l, err := dir2.ListFiles(snapsDir, ".idx")
+func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
+	l, err := dir2.ListFiles(dirs.Snap, ".idx")
 	if err != nil {
 		return err
 	}
+	l1, err := dir2.ListFiles(dirs.SnapAccessors, ".efi")
+	if err != nil {
+		return err
+	}
+	l2, err := dir2.ListFiles(dirs.SnapAccessors, ".vi")
+	if err != nil {
+		return err
+	}
+	l = append(append(l, l1...), l2...)
+
 	for _, fPath := range l {
 		index, err := recsplit.OpenIndex(fPath)
 		if err != nil {
