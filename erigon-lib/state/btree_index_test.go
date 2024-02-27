@@ -13,8 +13,8 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 func Test_BtreeIndex_Init2(t *testing.T) {
@@ -40,7 +40,7 @@ func Test_BtreeIndex_Init(t *testing.T) {
 
 	keyCount, M := 100, uint64(4)
 	compPath := generateKV(t, tmp, 52, 300, keyCount, logger, 0)
-	decomp, err := compress.NewDecompressor(compPath)
+	decomp, err := seg.NewDecompressor(compPath)
 	require.NoError(t, err)
 	defer decomp.Close()
 
@@ -249,7 +249,7 @@ func TestBpsTree_Seek(t *testing.T) {
 	compressFlag := CompressNone
 	dataPath := generateKV(t, tmp, 10, 48, keyCount, logger, compressFlag)
 
-	kv, err := compress.NewDecompressor(dataPath)
+	kv, err := seg.NewDecompressor(dataPath)
 	require.NoError(t, err)
 	defer kv.Close()
 
