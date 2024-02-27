@@ -60,6 +60,8 @@ const (
 	//   Seems just an "array of 1-st bytes of key-hashes" is great alternative:
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
+	//
+	// See also: https://github.com/ledgerwatch/erigon/issues/9486
 	LessFalsePositives Features = 0b10 //
 )
 
