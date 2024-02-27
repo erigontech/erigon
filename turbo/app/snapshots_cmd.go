@@ -70,7 +70,7 @@ var snapshotCommand = cli.Command{
 		{
 			Name:   "index",
 			Action: doIndicesCommand,
-			Usage:  "Create all indices for snapshots",
+			Usage:  "Create all missed indices for snapshots. It also removing unsupported versions of existing indices and re-build them",
 			Flags: joinFlags([]cli.Flag{
 				&utils.DataDirFlag,
 				&SnapshotFromFlag,
@@ -244,6 +244,9 @@ func doDiff(cliCtx *cli.Context) error {
 	}
 	defer dst.Close()
 
+	defer src.EnableReadAhead().DisableReadAhead()
+	defer dst.EnableReadAhead().DisableReadAhead()
+
 	i := 0
 	srcG, dstG := src.MakeGetter(), dst.MakeGetter()
 	var srcBuf, dstBuf []byte
@@ -343,6 +346,10 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 
 	if rebuild {
 		panic("not implemented")
+	}
+
+	if err := freezeblocks.RemoveIncompatibleIndices(dirs.Snap); err != nil {
+		return err
 	}
 
 	cfg := ethconfig.NewSnapCfg(true, false, true)

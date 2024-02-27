@@ -19,6 +19,7 @@ package recsplit
 import (
 	"bufio"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -36,6 +37,19 @@ import (
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano16"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 )
+
+type Features byte
+
+const (
+	No Features = 0b0
+	// Enums -  Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	Enums Features = 0b1
+	//LessFalsePositives Features = 0b10 // example of adding new feature
+)
+
+// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
+var SupportedFeatures = []Features{Enums}
+var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -106,7 +120,7 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return nil, fmt.Errorf("offset is: %d which is below zero, the file: %s is broken", offset, indexFilePath)
+		return nil, fmt.Errorf("file %s %w. offset is: %d which is below zero", fName, IncompatibleErr, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -133,7 +147,12 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 	}
-	idx.enums = idx.data[offset] != 0
+	features := Features(idx.data[offset])
+	if err := onlyKnownFeatures(features); err != nil {
+		return nil, fmt.Errorf("file %s %w", fName, err)
+	}
+
+	idx.enums = features&Enums != No
 	offset++
 	if idx.enums {
 		var size int
@@ -167,6 +186,16 @@ func OpenIndex(indexFilePath string) (*Index, error) {
 		},
 	}
 	return idx, nil
+}
+
+func onlyKnownFeatures(features Features) error {
+	for _, f := range SupportedFeatures {
+		features = features &^ f
+	}
+	if features != No {
+		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
+	}
+	return nil
 }
 
 func (idx *Index) DataHandle() unsafe.Pointer {
