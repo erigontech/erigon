@@ -534,7 +534,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 
-	if err := freezeblocks.RemoveIncompatibleIndices(dirs.Snap); err != nil {
+	if err := freezeblocks.RemoveIncompatibleIndices(dirs); err != nil {
 		return err
 	}
 
