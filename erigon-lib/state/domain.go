@@ -942,11 +942,14 @@ func (dc *DomainContext) getFromFileOld(i int, filekey []byte) ([]byte, bool, er
 		return v, true, nil
 	}
 
-	offset, ok := dc.statelessIdxReader(i).TwoLayerLookup(filekey)
+	reader := dc.statelessIdxReader(i)
+	if reader.Empty() {
+		return nil, false, nil
+	}
+	offset, ok := reader.Lookup(filekey)
 	if !ok {
 		return nil, false, nil
 	}
-
 	g.Reset(offset)
 
 	k, _ := g.Next(nil)
@@ -960,11 +963,14 @@ func (dc *DomainContext) getFromFileOld(i int, filekey []byte) ([]byte, bool, er
 func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	g := dc.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
-		offset, ok := dc.statelessIdxReader(i).TwoLayerLookup(filekey)
+		reader := dc.statelessIdxReader(i)
+		if reader.Empty() {
+			return nil, false, nil
+		}
+		offset, ok := reader.Lookup(filekey)
 		if !ok {
 			return nil, false, nil
 		}
-
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
@@ -1017,7 +1023,7 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 				}
 			}
 
-			offset, ok := idx.GetReaderFromPool().TwoLayerLookup(k)
+			offset, ok := idx.GetReaderFromPool().Lookup(k)
 			if !ok {
 				continue
 			}
@@ -1908,7 +1914,7 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
 			}
 		} else {
-			offset, ok := dc.statelessIdxReader(i).TwoLayerLookup(prefix)
+			offset, ok := dc.statelessIdxReader(i).Lookup(prefix)
 			if !ok {
 				continue
 			}
