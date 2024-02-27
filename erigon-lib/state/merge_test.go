@@ -4,7 +4,7 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +31,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -56,7 +56,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -77,7 +77,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -100,7 +100,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -112,7 +112,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -136,7 +136,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -148,7 +148,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -173,7 +173,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -187,7 +187,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -211,7 +211,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -225,7 +225,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -249,7 +249,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -263,7 +263,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -291,7 +291,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -306,7 +306,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -333,7 +333,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -346,7 +346,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -372,7 +372,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
@@ -386,7 +386,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		h.files.Scan(func(item *filesItem) bool {
 			fName := h.vFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		h.reCalcRoFiles()
@@ -408,7 +408,7 @@ func TestFindMergeRangeCornerCases(t *testing.T) {
 		})
 		ii.files.Scan(func(item *filesItem) bool {
 			fName := ii.efFilePath(item.startTxNum/ii.aggregationStep, item.endTxNum/ii.aggregationStep)
-			item.decompressor = &compress.Decompressor{FileName1: fName}
+			item.decompressor = &seg.Decompressor{FileName1: fName}
 			return true
 		})
 		ii.reCalcRoFiles()
