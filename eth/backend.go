@@ -32,6 +32,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/mem"
+
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
@@ -485,6 +487,9 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}()
 	}
+
+	// setup periodic logging and prometheus updates
+	go mem.LogVirtualMemStats(ctx, logger)
 
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
