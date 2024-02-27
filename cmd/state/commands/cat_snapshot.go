@@ -11,7 +11,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -48,7 +48,7 @@ var catSnapshot = &cobra.Command{
 		if fpath == "" {
 			return errors.New("fpath is required")
 		}
-		d, err := compress.NewDecompressor(fpath)
+		d, err := seg.NewDecompressor(fpath)
 		if err != nil {
 			return err
 		}
