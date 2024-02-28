@@ -538,6 +538,12 @@ type BeaconChainConfig struct {
 	MaxBlobGasPerBlock           uint64 // MaxBlobGasPerBlock defines the maximum gas limit for blob sidecar per block.
 	MaxBlobsPerBlock             uint64 // MaxBlobsPerBlock defines the maximum number of blobs per block.
 	MaxRequestLightClientUpdates uint64 // MaxRequestLightClientUpdates defines the maximum number of light client updates per request.
+
+	// Deneb
+	MaxRequestBlocksDeneb             uint64 // Maximum number of blocks in a single request
+	MaxRequestBlobSidecars            uint64 // Maximum number of blob sidecars in a single request
+	MinEpochsForBlobsSidecarsRequests uint64 // The minimum epoch range over which a node must serve blob sidecars
+	BlobSidecarSubnetCount            uint64 // The number of blob sidecar subnets used in the gossipsub protocol.
 }
 
 func (b *BeaconChainConfig) RoundSlotToEpoch(slot uint64) uint64 {
@@ -806,6 +812,11 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	MaxBlobGasPerBlock:           786432,
 	MaxBlobsPerBlock:             6,
 	MaxRequestLightClientUpdates: 128,
+
+	MaxRequestBlocksDeneb:             128,
+	MaxRequestBlobSidecars:            768,
+	MinEpochsForBlobsSidecarsRequests: 4096,
+	BlobSidecarSubnetCount:            6,
 }
 
 func mainnetConfig() BeaconChainConfig {
