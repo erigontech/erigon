@@ -11,6 +11,7 @@ type HeimdallNoStore interface {
 	LastCheckpointId(ctx context.Context) (CheckpointId, bool, error)
 	LastMilestoneId(ctx context.Context) (MilestoneId, bool, error)
 	LastSpanId(ctx context.Context) (SpanId, bool, error)
+	FetchLatestSpan(ctx context.Context) (*Span, error)
 
 	FetchCheckpoints(ctx context.Context, start CheckpointId, end CheckpointId) ([]*Checkpoint, error)
 	FetchMilestones(ctx context.Context, start MilestoneId, end MilestoneId) ([]*Milestone, error)
@@ -77,6 +78,10 @@ func (h *heimdallNoStore) LastMilestoneId(ctx context.Context) (MilestoneId, boo
 
 func (h *heimdallNoStore) LastSpanId(ctx context.Context) (SpanId, bool, error) {
 	return h.Heimdall.LastSpanId(ctx, noopStore{})
+}
+
+func (h *heimdallNoStore) FetchLatestSpan(ctx context.Context) (*Span, error) {
+	return h.Heimdall.FetchLatestSpan(ctx, noopStore{})
 }
 
 func (h *heimdallNoStore) FetchCheckpoints(ctx context.Context, start CheckpointId, end CheckpointId) ([]*Checkpoint, error) {

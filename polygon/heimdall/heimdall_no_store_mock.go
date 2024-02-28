@@ -64,6 +64,21 @@ func (mr *MockHeimdallNoStoreMockRecorder) FetchCheckpointsFromBlock(arg0, arg1 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchCheckpointsFromBlock", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchCheckpointsFromBlock), arg0, arg1)
 }
 
+// FetchLatestSpan mocks base method.
+func (m *MockHeimdallNoStore) FetchLatestSpan(arg0 context.Context) (*Span, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchLatestSpan", arg0)
+	ret0, _ := ret[0].(*Span)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchLatestSpan indicates an expected call of FetchLatestSpan.
+func (mr *MockHeimdallNoStoreMockRecorder) FetchLatestSpan(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchLatestSpan", reflect.TypeOf((*MockHeimdallNoStore)(nil).FetchLatestSpan), arg0)
+}
+
 // FetchMilestones mocks base method.
 func (m *MockHeimdallNoStore) FetchMilestones(arg0 context.Context, arg1, arg2 MilestoneId) ([]*Milestone, error) {
 	m.ctrl.T.Helper()
