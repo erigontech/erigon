@@ -133,8 +133,10 @@ func (tf *TorrentFiles) prohibitNewDownloads() error {
 func (tf *TorrentFiles) newDownloadsAreProhibited() bool {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	return dir.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName)) ||
-		dir.FileExist(filepath.Join(tf.dir, SnapshotsLockFileName))
+	return dir.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName))
+
+	//return dir.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName)) ||
+	//	dir.FileExist(filepath.Join(tf.dir, SnapshotsLockFileName))
 }
 
 func CreateProhibitNewDownloadsFile(dir string) error {
