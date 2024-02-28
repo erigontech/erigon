@@ -357,6 +357,8 @@ type Domain struct {
 	files   *btree2.BTreeG[*filesItem]
 	roFiles atomic.Pointer[[]ctxItem]
 
+	replaceKeysInValues bool
+
 	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats

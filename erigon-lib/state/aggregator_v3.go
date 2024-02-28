@@ -77,6 +77,8 @@ type AggregatorV3 struct {
 	collateAndBuildWorkers int // minimize amount of background workers by default
 	mergeWorkers           int // usually 1
 
+	commitmentValuesTransform bool
+
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
 	buildingFiles           atomic.Bool
@@ -126,6 +128,8 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		logger:                 logger,
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
+
+		commitmentValuesTransform: true,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -1218,11 +1222,37 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	}()
 
 	ac.a.logger.Info(fmt.Sprintf("[snapshots] merge state %s", r.String()))
+
+	var valReplaceWg *sync.WaitGroup
+	if ac.a.commitmentValuesTransform {
+		valReplaceWg = new(sync.WaitGroup)
+	}
+
 	for id := range ac.d {
 		id := id
 		if r.d[id].any() {
+			kid := kv.Domain(id)
+			if kid == kv.AccountsDomain || kid == kv.StorageDomain {
+				valReplaceWg.Add(1)
+			}
+
 			g.Go(func() (err error) {
-				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], ac.a.ps)
+				var vt valueTransformer
+				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
+					vt = ac.d[id].commitmentValTransform(
+						files.d[kv.AccountsDomain], mf.d[kv.AccountsDomain], ac.d[kv.AccountsDomain].d.indexList,
+						files.d[kv.StorageDomain], mf.d[kv.StorageDomain], ac.d[kv.StorageDomain].d.indexList,
+						r.d[kv.AccountsDomain].valuesStartTxNum, r.d[kv.AccountsDomain].valuesEndTxNum,
+					)
+					fmt.Printf("waiting for valReplaceWg\n")
+					valReplaceWg.Wait()
+					fmt.Printf("valReplaceWg released, merging commit\n")
+				}
+
+				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
+				if ac.a.commitmentValuesTransform && kid == kv.AccountsDomain || kid == kv.StorageDomain {
+					valReplaceWg.Done()
+				}
 				return err
 			})
 		}

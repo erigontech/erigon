@@ -49,7 +49,7 @@ type Trie interface {
 }
 
 type PatriciaContext interface {
-	// load branch node and fill up the cells
+	// GetBranch load branch node and fill up the cells
 	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
 	// and for the extension, account, and leaf type, the `l` and `k`
 	GetBranch(prefix []byte) ([]byte, uint64, error)
@@ -299,7 +299,7 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, readCel
 func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
 
 // ExtractPlainKeys parses branchData and extract the plain keys for accounts and storage in the same order
-// they appear witjin the branchData
+// they appear within the branchData
 func (branchData BranchData) ExtractPlainKeys() (accountPlainKeys [][]byte, storagePlainKeys [][]byte, err error) {
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])

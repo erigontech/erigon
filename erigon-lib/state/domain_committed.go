@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"slices"
-
 	"github.com/google/btree"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
+	"slices"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -306,318 +306,150 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
-//type DomainCommitted struct {
-//	*Domain
-//	trace        bool
-//	shortenKeys  bool
-//	updates      *UpdateTree
-//	mode         CommitmentMode
-//	patriciaTrie commitment.Trie
-//	justRestored atomic.Bool
-//	discard      bool
-//}
+func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, endTxNum uint64, idxList idxList, list ...*filesItem) (shortened []byte, found bool) {
+	shortened = make([]byte, 2, 10)
+	for _, item := range list {
+		if item.startTxNum == startTxNum && item.endTxNum == endTxNum {
+			g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
 
-// nolint
-//
-//	func (d *DomainCommitted) findShortenKey(fullKey []byte, list ...*filesItem) (shortened []byte, found bool) {
-//		shortened = make([]byte, 2, 10)
-//
-//		//dc := d.MakeContext()
-//		//defer dc.Close()
-//
-//		for _, item := range list {
-//			g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
-//			//index := recsplit.NewIndexReader(item.index) // TODO is support recsplt is needed?
-//			// TODO: existence filter existence should be checked for domain which filesItem list is provided, not in commitmnet
-//			//if d.withExistenceIndex && item.existence != nil {
-//			//	hi, _ := dc.hc.ic.hashKey(fullKey)
-//			//	if !item.existence.ContainsHash(hi) {
-//			//		continue
-//			//		//return nil, false, nil
-//			//	}
-//			//}
-//
-//			cur, err := item.bindex.Seek(g, fullKey)
-//			if err != nil {
-//				d.logger.Warn("commitment branch key replacement seek failed", "key", fmt.Sprintf("%x", fullKey), "err", err, "file", item.decompressor.FileName())
-//				continue
-//			}
-//			if cur == nil {
-//				continue
-//			}
-//			step := uint16(item.endTxNum / d.aggregationStep)
-//			shortened = encodeShortenedKey(shortened[:], step, cur.Di())
-//			if d.trace {
-//				fmt.Printf("replacing [%x] => {%x} step=%d, di=%d file=%s\n", fullKey, shortened, step, cur.Di(), item.decompressor.FileName())
-//			}
-//			found = true
-//			break
-//		}
-//		//if !found {
-//		//	d.logger.Warn("failed to find key reference", "key", fmt.Sprintf("%x", fullKey))
-//		//}
-//		return shortened, found
-//	}
-//
-// // nolint
-//
-//	func (d *DomainCommitted) lookupByShortenedKey(shortKey []byte, list []*filesItem) (fullKey []byte, found bool) {
-//		fileStep, offset := shortenedKey(shortKey)
-//		expected := uint64(fileStep) * d.aggregationStep
-//
-//		for _, item := range list {
-//			if item.startTxNum > expected || item.endTxNum < expected {
-//				continue
-//			}
-//
-//			g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
-//			fullKey, _, err := item.bindex.dataLookup(offset, g)
-//			if err != nil {
-//				return nil, false
-//			}
-//			if d.trace {
-//				fmt.Printf("shortenedKey [%x]=>{%x} step=%d offset=%d, file=%s\n", shortKey, fullKey, fileStep, offset, item.decompressor.FileName())
-//			}
-//			found = true
-//			break
-//		}
-//		return fullKey, found
-//	}
-//
-// // commitmentValTransform parses the value of the commitment record to extract references
-// // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
-// // the updated references
-//
-//	func (d *DomainCommitted) commitmentValTransform(files *SelectedStaticFiles, merged *MergedFiles, val commitment.BranchData) ([]byte, error) {
-//		if !d.shortenKeys || len(val) == 0 {
-//			return val, nil
-//		}
-//		var transValBuf []byte
-//		defer func(t time.Time) {
-//			d.logger.Info("commitmentValTransform", "took", time.Since(t), "in_size", len(val), "out_size", len(transValBuf), "ratio", float64(len(transValBuf))/float64(len(val)))
-//		}(time.Now())
-//
-//		accountPlainKeys, storagePlainKeys, err := val.ExtractPlainKeys()
-//		if err != nil {
-//			return nil, err
-//		}
-//
-//		transAccountPks := make([][]byte, 0, len(accountPlainKeys))
-//		var apkBuf, spkBuf []byte
-//		var found bool
-//		for _, accountPlainKey := range accountPlainKeys {
-//			if len(accountPlainKey) == length.Addr {
-//				// Non-optimised key originating from a database record
-//				apkBuf = append(apkBuf[:0], accountPlainKey...)
-//			} else {
-//				var found bool
-//				apkBuf, found = d.lookupByShortenedKey(accountPlainKey, files.accounts)
-//				if !found {
-//					d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
-//				}
-//			}
-//			accountPlainKey, found = d.findShortenKey(apkBuf, merged.accounts)
-//			if !found {
-//				d.logger.Crit("replacement for full account key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
-//			}
-//			transAccountPks = append(transAccountPks, accountPlainKey)
-//		}
-//
-//		transStoragePks := make([][]byte, 0, len(storagePlainKeys))
-//		for _, storagePlainKey := range storagePlainKeys {
-//			if len(storagePlainKey) == length.Addr+length.Hash {
-//				// Non-optimised key originating from a database record
-//				spkBuf = append(spkBuf[:0], storagePlainKey...)
-//			} else {
-//				// Optimised key referencing a state file record (file number and offset within the file)
-//				var found bool
-//				spkBuf, found = d.lookupByShortenedKey(storagePlainKey, files.storage)
-//				if !found {
-//					d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
-//				}
-//			}
-//
-//			storagePlainKey, found = d.findShortenKey(spkBuf, merged.storage)
-//			if !found {
-//				d.logger.Crit("replacement for full storage key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
-//			}
-//			transStoragePks = append(transStoragePks, storagePlainKey)
-//		}
-//
-//		transValBuf, err = val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
-//		if err != nil {
-//			return nil, err
-//		}
-//		return transValBuf, nil
-//	}
-//
-//func (d *DomainCommitted) mergeFiles(ctx context.Context, oldFiles SelectedStaticFiles, mergedFiles MergedFiles, r DomainRanges, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
-//	if !r.any() {
-//		return
-//	}
-//
-//	domainFiles := oldFiles.commitment
-//	indexFiles := oldFiles.commitmentIdx
-//	historyFiles := oldFiles.commitmentHist
-//
-//	var comp ArchiveWriter
-//	closeItem := true
-//	defer func() {
-//		if closeItem {
-//			if comp != nil {
-//				comp.Close()
-//			}
-//			if indexIn != nil {
-//				indexIn.closeFilesAndRemove()
-//			}
-//			if historyIn != nil {
-//				historyIn.closeFilesAndRemove()
-//			}
-//			if valuesIn != nil {
-//				valuesIn.closeFilesAndRemove()
-//			}
-//		}
-//	}()
-//	if indexIn, historyIn, err = d.History.mergeFiles(ctx, indexFiles, historyFiles, HistoryRanges{
-//		historyStartTxNum: r.historyStartTxNum,
-//		historyEndTxNum:   r.historyEndTxNum,
-//		history:           r.history,
-//		indexStartTxNum:   r.indexStartTxNum,
-//		indexEndTxNum:     r.indexEndTxNum,
-//		index:             r.index}, ps); err != nil {
-//		return nil, nil, nil, err
-//	}
-//
-//	if !r.values {
-//		closeItem = false
-//		return
-//	}
-//
-//	for _, f := range domainFiles {
-//		f := f
-//		defer f.decompressor.EnableReadAhead().DisableReadAhead()
-//	}
-//
-//	fromStep, toStep := r.valuesStartTxNum/d.aggregationStep, r.valuesEndTxNum/d.aggregationStep
-//	kvFilePath := d.kvFilePath(fromStep, toStep)
-//	compr, err := seg.NewCompressor(ctx, "merge", kvFilePath, d.dirs.Tmp, seg.MinPatternScore, d.compressWorkers, log.LvlTrace, d.logger)
-//	if err != nil {
-//		return nil, nil, nil, fmt.Errorf("merge %s compressor: %w", d.filenameBase, err)
-//	}
-//
-//	comp = NewArchiveWriter(compr, d.compression)
-//	if d.noFsync {
-//		comp.DisableFsync()
-//	}
-//	p := ps.AddNew("merge "+path.Base(kvFilePath), 1)
-//	defer ps.Delete(p)
-//
-//	var cp CursorHeap
-//	heap.Init(&cp)
-//	for _, item := range domainFiles {
-//		g := NewArchiveGetter(item.decompressor.MakeGetter(), d.compression)
-//		g.Reset(0)
-//		if g.HasNext() {
-//			key, _ := g.Next(nil)
-//			val, _ := g.Next(nil)
-//			heap.Push(&cp, &CursorItem{
-//				t:        FILE_CURSOR,
-//				dg:       g,
-//				key:      key,
-//				val:      val,
-//				endTxNum: item.endTxNum,
-//				reverse:  true,
-//			})
-//		}
-//	}
-//	// In the loop below, the pair `keyBuf=>valBuf` is always 1 item behind `lastKey=>lastVal`.
-//	// `lastKey` and `lastVal` are taken from the top of the multi-way merge (assisted by the CursorHeap cp), but not processed right away
-//	// instead, the pair from the previous iteration is processed first - `keyBuf=>valBuf`. After that, `keyBuf` and `valBuf` are assigned
-//	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
-//	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
-//	var keyBuf, valBuf []byte
-//	for cp.Len() > 0 {
-//		lastKey := common.Copy(cp[0].key)
-//		lastVal := common.Copy(cp[0].val)
-//		// Advance all the items that have this key (including the top)
-//		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
-//			ci1 := heap.Pop(&cp).(*CursorItem)
-//			if ci1.dg.HasNext() {
-//				ci1.key, _ = ci1.dg.Next(nil)
-//				ci1.val, _ = ci1.dg.Next(nil)
-//				heap.Push(&cp, ci1)
-//			}
-//		}
-//
-//		// For the rest of types, empty value means deletion
-//		deleted := r.valuesStartTxNum == 0 && len(lastVal) == 0
-//		if !deleted {
-//			if keyBuf != nil {
-//				if err = comp.AddWord(keyBuf); err != nil {
-//					return nil, nil, nil, err
-//				}
-//				if err = comp.AddWord(valBuf); err != nil {
-//					return nil, nil, nil, err
-//				}
-//			}
-//			keyBuf = append(keyBuf[:0], lastKey...)
-//			valBuf = append(valBuf[:0], lastVal...)
-//		}
-//	}
-//	if keyBuf != nil {
-//		if err = comp.AddWord(keyBuf); err != nil {
-//			return nil, nil, nil, err
-//		}
-//		//fmt.Printf("last heap key %x\n", keyBuf)
-//		if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
-//			valBuf, err = d.commitmentValTransform(&oldFiles, &mergedFiles, valBuf)
-//			if err != nil {
-//				return nil, nil, nil, fmt.Errorf("merge: 2valTransform [%x] %w", valBuf, err)
-//			}
-//		}
-//		if err = comp.AddWord(valBuf); err != nil {
-//			return nil, nil, nil, err
-//		}
-//	}
-//	if err = comp.Compress(); err != nil {
-//		return nil, nil, nil, err
-//	}
-//	comp.Close()
-//	comp = nil
-//	ps.Delete(p)
-//
-//	valuesIn = newFilesItem(r.valuesStartTxNum, r.valuesEndTxNum, d.aggregationStep)
-//	valuesIn.frozen = false
-//	if valuesIn.decompressor, err = seg.NewDecompressor(kvFilePath); err != nil {
-//		return nil, nil, nil, fmt.Errorf("merge %s decompressor [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-//	}
-//
-//	if !UseBpsTree {
-//		idxPath := d.kvAccessorFilePath(fromStep, toStep)
-//		if valuesIn.index, err = buildIndexThenOpen(ctx, valuesIn.decompressor, d.compression, idxPath, d.dirs.Tmp, false, d.salt, ps, d.logger, d.noFsync); err != nil {
-//			return nil, nil, nil, fmt.Errorf("merge %s buildIndex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-//		}
-//	}
-//
-//	if UseBpsTree {
-//		btPath := d.kvBtFilePath(fromStep, toStep)
-//		valuesIn.bindex, err = CreateBtreeIndexWithDecompressor(btPath, DefaultBtreeM, valuesIn.decompressor, d.compression, *d.salt, ps, d.dirs.Tmp, d.logger, d.noFsync)
-//		if err != nil {
-//			return nil, nil, nil, fmt.Errorf("merge %s btindex [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-//		}
-//	}
-//
-//	{
-//		bloomIndexPath := d.kvExistenceIdxFilePath(fromStep, toStep)
-//		if dir.FileExist(bloomIndexPath) {
-//			valuesIn.existence, err = OpenExistenceFilter(bloomIndexPath)
-//			if err != nil {
-//				return nil, nil, nil, fmt.Errorf("merge %s existence [%d-%d]: %w", d.filenameBase, r.valuesStartTxNum, r.valuesEndTxNum, err)
-//			}
-//		}
-//	}
-//
-//	closeItem = false
-//	d.stats.MergesCount++
-//	return
-//}
+			//TODO: existence filter existence should be checked for domain which filesItem list is provided, not in commitmnet
+			//if idxList&withExistence != 0 {
+			//	hi, lo := ic.hashKey(key)
+			//	if !item.existence.ContainsHash(hi) {
+			//		continue
+			//	}
+			//}
+			var offset uint64
+			if idxList&withHashMap != 0 {
+				reader := recsplit.NewIndexReader(item.index)
+				defer reader.Close()
+
+				var ok bool
+				if offset, ok = reader.Lookup(fullKey); !ok {
+					return nil, false
+				}
+				g.Reset(offset)
+
+				k, _ := g.Next(nil)
+				if !bytes.Equal(fullKey, k) {
+					dc.d.logger.Warn("commitment branch key replacement seek failed",
+						"key", fmt.Sprintf("%x", fullKey), "idx", "recsplit", "file", item.decompressor.FileName())
+					//return nil, false
+					continue
+				}
+			}
+			if idxList&withBTree != 0 {
+				cur, err := item.bindex.Seek(g, fullKey)
+				if err != nil {
+					dc.d.logger.Warn("commitment branch key replacement seek failed",
+						"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
+					continue
+				}
+				if cur == nil {
+					panic("commitment branch key replacement seek failed")
+				}
+				offset = cur.offsetInFile()
+			}
+
+			step := uint16(item.endTxNum / dc.d.aggregationStep)
+			shortened = encodeShortenedKey(shortened, step, offset)
+
+			dc.d.logger.Info(fmt.Sprintf("replacing [%x] => {%x}", fullKey, shortened),
+				"step", step, "offset", offset, "file", item.decompressor.FileName())
+			return shortened, true
+		}
+	}
+	return nil, false
+}
+
+func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem) (fullKey []byte, found bool) {
+	fileStep, offset := shortenedKey(shortKey)
+	expected := uint64(fileStep) * dc.d.aggregationStep
+
+	for _, item := range list {
+		if item.startTxNum > expected || item.endTxNum < expected {
+			continue
+		}
+
+		g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
+		fullKey, _, err := item.bindex.dataLookup(offset, g)
+		if err != nil {
+			return nil, false
+		}
+		dc.d.logger.Info(fmt.Sprintf("shortenedKey [%x]=>{%x}", shortKey, fullKey),
+			"step", fileStep, "offset", offset, "file", item.decompressor.FileName())
+
+		found = true
+		break
+	}
+	return fullKey, found
+}
+
+// commitmentValTransform parses the value of the commitment record to extract references
+// to accounts and storage items, then looks them up in the new, merged files, and replaces them with
+// the updated references
+
+func (dc *DomainContext) commitmentValTransform(
+	filesAccount []*filesItem, mergedAccount *filesItem, idxListAccount idxList,
+	filesStorage []*filesItem, mergedStorage *filesItem, idxListStorage idxList,
+	startTxNum, endTxNum uint64,
+
+) valueTransformer {
+
+	return func(valBuf []byte) (transValBuf []byte, err error) {
+		if !dc.d.replaceKeysInValues || len(valBuf) == 0 {
+			return valBuf, nil
+		}
+
+		val := commitment.BranchData(valBuf)
+		accountPlainKeys, storagePlainKeys, err := val.ExtractPlainKeys()
+		if err != nil {
+			return nil, err
+		}
+
+		transAccountPks := make([][]byte, 0, len(accountPlainKeys))
+		var apkBuf, spkBuf []byte
+		var found bool
+		for _, accountPlainKey := range accountPlainKeys {
+			if len(accountPlainKey) == length.Addr {
+				// Non-optimised key originating from a database record
+				apkBuf = append(apkBuf[:0], accountPlainKey...)
+			} else {
+				apkBuf, found = dc.lookupByShortenedKey(accountPlainKey, filesAccount)
+				if !found {
+					dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
+				}
+			}
+			accountPlainKey, found = dc.findKeyReplacement(apkBuf, startTxNum, endTxNum, idxListAccount, mergedAccount)
+			if !found {
+				dc.d.logger.Crit("replacement for full account key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
+			}
+			transAccountPks = append(transAccountPks, accountPlainKey)
+		}
+
+		transStoragePks := make([][]byte, 0, len(storagePlainKeys))
+		for _, storagePlainKey := range storagePlainKeys {
+			if len(storagePlainKey) == length.Addr+length.Hash {
+				// Non-optimised key originating from a database record
+				spkBuf = append(spkBuf[:0], storagePlainKey...)
+			} else {
+				// Optimised key referencing a state file record (file number and offset within the file)
+				spkBuf, found = dc.lookupByShortenedKey(storagePlainKey, filesStorage)
+				if !found {
+					dc.d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
+				}
+			}
+
+			storagePlainKey, found = dc.findKeyReplacement(spkBuf, startTxNum, endTxNum, idxListStorage, mergedStorage)
+			if !found {
+				dc.d.logger.Crit("replacement for full storage key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
+			}
+			transStoragePks = append(transStoragePks, storagePlainKey)
+		}
+		transValBuf, err = val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
+		if err != nil {
+			return nil, err
+		}
+		return transValBuf, nil
+	}
+}

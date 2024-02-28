@@ -493,7 +493,9 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	return newEf.AppendBytes(buf), nil
 }
 
-func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
+type valueTransformer func(val []byte) ([]byte, error)
+
+func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
 	if !r.any() {
 		return
 	}
@@ -603,6 +605,14 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 		}
 	}
 	if keyBuf != nil {
+		if vt != nil {
+			if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
+				valBuf, err = vt(valBuf)
+				if err != nil {
+					return nil, nil, nil, fmt.Errorf("merge: valTransform [%x] %w", valBuf, err)
+				}
+			}
+		}
 		if err = kvWriter.AddWord(keyBuf); err != nil {
 			return nil, nil, nil, err
 		}

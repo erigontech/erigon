@@ -93,6 +93,10 @@ func (c *Cursor) Di() uint64 {
 	return c.d
 }
 
+func (c *Cursor) offsetInFile() uint64 {
+	return c.btt.ef.Get(c.d)
+}
+
 func (c *Cursor) Value() []byte {
 	return c.value
 }
