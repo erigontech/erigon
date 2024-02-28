@@ -25,9 +25,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -90,7 +88,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 		if !snaptype.IsCorrectFileName(name) {
 			continue
 		}
-		ff, ok := snaptype.ParseFileName(dir, name)
+		ff, _, ok := snaptype.ParseFileName(dir, name)
 		if !ok {
 			continue
 		}
@@ -102,9 +100,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 	return res, nil
 }
 
-var historyFileRegex = regexp.MustCompile("^([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
-
-func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
+func seedableStateFilesBySubDir(dir, subDir string) ([]string, error) {
 	historyDir := filepath.Join(dir, subDir)
 	dir2.MustExist(historyDir)
 	files, err := dir2.ListFiles(historyDir, ".kv", ".v", ".ef")
@@ -114,7 +110,7 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
 		_, name := filepath.Split(fPath)
-		if !e3seedable(name) {
+		if !snaptype.E3Seedable(name) {
 			continue
 		}
 		res = append(res, filepath.Join(subDir, name))
@@ -122,25 +118,6 @@ func seedableSnapshotsBySubDir(dir, subDir string) ([]string, error) {
 	return res, nil
 }
 
-func e3seedable(name string) bool {
-	subs := historyFileRegex.FindStringSubmatch(name)
-	if len(subs) != 5 {
-		return false
-	}
-	// Check that it's seedable
-	from, err := strconv.ParseUint(subs[2], 10, 64)
-	if err != nil {
-		return false
-	}
-	to, err := strconv.ParseUint(subs[3], 10, 64)
-	if err != nil {
-		return false
-	}
-	if (to-from)%snaptype.Erigon3SeedableSteps != 0 {
-		return false
-	}
-	return true
-}
 func ensureCantLeaveDir(fName, root string) (string, error) {
 	if filepath.IsAbs(fName) {
 		newFName, err := filepath.Rel(root, fName)

@@ -454,7 +454,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 					return err
 				}
 
-				info1, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Name())
+				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Name())
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
@@ -464,7 +464,7 @@ func (c comparitor) compareHeaders(ctx context.Context, f1ents []fs.DirEntry, f2
 
 				f1snaps.ReopenList([]string{ent1.Name()}, false)
 
-				info2, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
+				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent1.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
@@ -582,7 +582,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				g.Go(func() error {
 
-					info, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
+					info, _, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
 
 					err := func() error {
 						startTime := time.Now()
@@ -617,7 +617,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				})
 
 				g.Go(func() error {
-					info, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Transactions.Name())
+					info, _, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Transactions.Name())
 
 					err := func() error {
 						startTime := time.Now()
@@ -659,7 +659,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				b2err := make(chan error, 1)
 
 				g.Go(func() error {
-					info, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
+					info, _, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
 
 					err := func() error {
 						startTime := time.Now()
@@ -693,7 +693,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 				})
 
 				g.Go(func() error {
-					info, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Transactions.Name())
+					info, _, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Transactions.Name())
 
 					err := func() error {
 						startTime := time.Now()
@@ -737,7 +737,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					return err
 				}
 
-				info1, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
+				info1, _, _ := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Body.Name())
 
 				f1snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,
@@ -747,7 +747,7 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				f1snaps.ReopenList([]string{ent1.Body.Name(), ent1.Transactions.Name()}, false)
 
-				info2, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
+				info2, _, _ := snaptype.ParseFileName(c.session2.LocalFsRoot(), ent2.Body.Name())
 
 				f2snaps := freezeblocks.NewRoSnapshots(ethconfig.BlocksFreezing{
 					Enabled:      true,

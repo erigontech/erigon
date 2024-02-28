@@ -345,8 +345,12 @@ func (c *RCloneSession) Upload(ctx context.Context, files ...string) error {
 					localInfo: localInfo,
 				}
 
-				if snapInfo, ok := snaptype.ParseFileName(c.localFs, file); ok {
-					info.snapInfo = &snapInfo
+				if snapInfo, isStateFile, ok := snaptype.ParseFileName(c.localFs, file); ok {
+					if isStateFile {
+						//TODO
+					} else {
+						info.snapInfo = &snapInfo
+					}
 				}
 
 				c.files[file] = info
@@ -586,8 +590,12 @@ func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.D
 				rcinfo.localInfo = localInfo
 				rcinfo.remoteInfo = fi
 
-				if snapInfo, ok := snaptype.ParseFileName(c.localFs, fi.Name); ok {
-					rcinfo.snapInfo = &snapInfo
+				if snapInfo, isStateFile, ok := snaptype.ParseFileName(c.localFs, fi.Name); ok {
+					if isStateFile {
+						//TODO
+					} else {
+						rcinfo.snapInfo = &snapInfo
+					}
 				} else {
 					rcinfo.snapInfo = nil
 				}
@@ -599,8 +607,12 @@ func (c *RCloneSession) ReadRemoteDir(ctx context.Context, refresh bool) ([]fs.D
 					remoteInfo: fi,
 				}
 
-				if snapInfo, ok := snaptype.ParseFileName(c.localFs, fi.Name); ok {
-					info.snapInfo = &snapInfo
+				if snapInfo, isStateFile, ok := snaptype.ParseFileName(c.localFs, fi.Name); ok {
+					if isStateFile {
+						//TODO
+					} else {
+						info.snapInfo = &snapInfo
+					}
 				}
 
 				c.files[fi.Name] = info
