@@ -15,11 +15,13 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 
+	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	gokzg4844 "github.com/ledgerwatch/go-kzg-4844"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -171,7 +173,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
 			if blobSideCar.Index >= g.beaconConfig.MaxBlobsPerBlock {
 				g.sentinel.BanPeer(ctx, data.Peer)
-				l["at"] = "validating blob sidecar"
 				return fmt.Errorf("sidecar index exceeds maximum allowed value")
 			}
 
@@ -179,7 +180,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			subnetId := blobSideCar.Index % g.beaconConfig.BlobSidecarSubnetCount
 			if subnetId != *data.SubnetId {
 				g.sentinel.BanPeer(ctx, data.Peer)
-				l["at"] = "validating blob sidecar"
 				return fmt.Errorf("sidecar index does not match topic")
 			}
 
@@ -191,8 +191,9 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			}
 
 			// [IGNORE] The sidecar is from a slot greater than the latest finalized slot -- i.e. validate that block_header.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
-			lastFinializedSlot := (currentEpoch - 1) * g.beaconConfig.SlotsPerEpoch
-			if blobSideCar.SignedBlockHeader.Header.Slot <= lastFinializedSlot {
+			latestFinalizedCheckpoint := g.forkChoice.FinalizedCheckpoint()
+			latestFinializedStartSlot := g.computeStartSlotAtEpoch(latestFinalizedCheckpoint.Epoch())
+			if blobSideCar.SignedBlockHeader.Header.Slot <= latestFinializedStartSlot {
 				return fmt.Errorf("sidecar is from a slot less than or equal to the latest finalized slot")
 			}
 
@@ -200,15 +201,26 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 
 			// [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue sidecars for processing once the parent block is retrieved).
 
-			// // [REJECT] The sidecar's block's parent (defined by block_header.parent_root) passes validation.
-
 			// [REJECT] The sidecar is from a higher slot than the sidecar's block's parent (defined by block_header.parent_root).
+			parentBlock, _ := g.forkChoice.GetStateAtBlockRoot(blobSideCar.SignedBlockHeader.Header.ParentRoot, true)
+			if blobSideCar.SignedBlockHeader.Header.Slot <= parentBlock.Slot() {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("sidecar Parent's slot not smaller")
+			}
 
-			// // [REJECT] The current finalized_checkpoint is an ancestor of the sidecar's block -- i.e. get_checkpoint_block(store, block_header.parent_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root.
-
+			// [REJECT] The current finalized_checkpoint is an ancestor of the sidecar's block -- i.e. get_checkpoint_block(store, block_header.parent_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root.
+			ancestor := g.forkChoice.Ancestor(blobSideCar.SignedBlockHeader.Header.ParentRoot, latestFinializedStartSlot)
+			if ancestor != latestFinalizedCheckpoint.BlockRoot() {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("finalized_checkpoint is not an ancestor of the sidecar's block")
+			}
 			// TODO [REJECT] The sidecar's inclusion proof is valid as verified by verify_blob_sidecar_inclusion_proof(blob_sidecar).
 
-			// // [REJECT] The sidecar's blob is valid as verified by verify_blob_kzg_proof(blob_sidecar.blob, blob_sidecar.kzg_commitment, blob_sidecar.kzg_proof).
+			// [REJECT] The sidecar's blob is valid as verified by verify_blob_kzg_proof(blob_sidecar.blob, blob_sidecar.kzg_commitment, blob_sidecar.kzg_proof).
+			if !g.verifyBlobKZGProof(*blobSideCar) {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("invalid blob")
+			}
 
 			// [IGNORE] The sidecar is the first sidecar for the tuple (block_header.slot, block_header.proposer_index, blob_sidecar.index) with valid header signature, sidecar inclusion proof, and kzg proof.
 
@@ -276,4 +288,20 @@ func (g *GossipManager) Start(ctx context.Context) {
 			operationsCh <- data
 		}
 	}
+}
+
+// computeStartSlotAtEpoch calculates the starting slot of a given epoch.
+func (g *GossipManager) computeStartSlotAtEpoch(epoch uint64) uint64 {
+	return epoch * g.beaconConfig.SlotsPerEpoch
+}
+
+func (g *GossipManager) verifyBlobKZGProof(blobSideCar cltypes.BlobSidecar) bool {
+	kzgCtx := libkzg.Ctx()
+	blob := gokzg4844.Blob(blobSideCar.Blob)
+	commitment := gokzg4844.KZGCommitment(blobSideCar.KzgCommitment)
+	proof := gokzg4844.KZGProof(blobSideCar.KzgProof)
+	if err := kzgCtx.VerifyBlobKZGProof(blob, commitment, proof); err != nil {
+		return false
+	}
+	return true
 }
