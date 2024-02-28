@@ -208,6 +208,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		e.Go(func() error {
 			for _, url := range tUrls {
 				res, err := d.callTorrentHttpProvider(ctx, url, name)
+				fmt.Printf("[dbg] a: %s, %s, %s\n", name, err, url)
 				if err != nil {
 					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
