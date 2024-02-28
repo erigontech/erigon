@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/process"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
@@ -30,7 +31,12 @@ func (m VirtualMemStat) Fields() []interface{} {
 			continue
 		}
 
-		s = append(s, t, val.Field(i).Interface())
+		value := val.Field(i).Interface()
+		if uint64Val, ok := value.(uint64); ok {
+			value = common.ByteCount(uint64Val)
+		}
+
+		s = append(s, t, value)
 	}
 
 	return s
