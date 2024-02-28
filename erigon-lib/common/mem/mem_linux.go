@@ -6,17 +6,21 @@ import (
 	"context"
 	"os"
 	"reflect"
+	"runtime"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/process"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 )
 
 type VirtualMemStat struct {
 	process.MemoryMapsStat
+	alloc uint64
+	sys   uint64
 }
 
 // Fields converts VirtualMemStat to slice
@@ -38,6 +42,8 @@ func (m VirtualMemStat) Fields() []interface{} {
 
 		s = append(s, t, value)
 	}
+
+	s = append(s, "alloc", common.ByteCount(m.alloc), "sys", common.ByteCount(m.sys))
 
 	return s
 }
@@ -98,7 +104,10 @@ func LogVirtualMemStats(ctx context.Context, logger log.Logger) {
 				continue
 			}
 
-			v := VirtualMemStat{memStats}
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+
+			v := VirtualMemStat{memStats, m.Alloc, m.Sys}
 			logger.Info("[mem] virtual memory stats", v.Fields()...)
 			UpdatePrometheusVirtualMemStats(memStats)
 		}
