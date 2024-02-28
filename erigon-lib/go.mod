@@ -1,6 +1,8 @@
 module github.com/ledgerwatch/erigon-lib
 
-go 1.21
+go 1.21.4
+
+toolchain go1.22.0
 
 require (
 	github.com/erigontech/mdbx-go v0.37.1
@@ -15,7 +17,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.21.0
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.14.6-0.20231202035202-ed7a02cad0b4
-	github.com/anacrolix/torrent v1.54.1
+	github.com/anacrolix/torrent v1.55.0
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-kzg-4844 v0.7.0
@@ -54,10 +56,10 @@ require (
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/anacrolix/chansync v0.3.0 // indirect
 	github.com/anacrolix/envpprof v1.3.0 // indirect
-	github.com/anacrolix/generics v0.0.0-20230816105729-c755655aee45 // indirect
+	github.com/anacrolix/generics v0.0.0-20230911070922-5dd7545c6b13 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
-	github.com/anacrolix/missinggo/v2 v2.7.2-0.20230527121029-a582b4f397b9 // indirect
+	github.com/anacrolix/missinggo/v2 v2.7.3 // indirect
 	github.com/anacrolix/mmsg v1.0.0 // indirect
 	github.com/anacrolix/multiless v0.3.1-0.20221221005021-2d12701f83f7 // indirect
 	github.com/anacrolix/stm v0.4.1-0.20221221005312-96d17df0e496 // indirect
