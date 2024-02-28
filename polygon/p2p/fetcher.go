@@ -7,15 +7,19 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
+	"modernc.org/mathutil"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const responseTimeout = 5 * time.Second
+const (
+	responseTimeout      = 5 * time.Second
+	maxFetchHeadersRange = 16384
+)
 
 type RequestIdGenerator func() uint64
 
@@ -56,34 +60,53 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}
 
 	amount := end - start
-	requestId := f.requestIdGenerator()
-	observer := make(ChanMessageObserver[*sentry.InboundMessage])
+	if amount > maxFetchHeadersRange {
+		return nil, &ErrInvalidFetchHeadersRange{
+			start: start,
+			end:   end,
+		}
+	}
 
+	// Soft response limits are:
+	//   1. 2 MB size
+	//   2. 1024 headers
+	//
+	// A header is approximately 500 bytes, hence 1024 headers should be less than 2 MB.
+	// As a simplification we can only use MaxHeadersServe for chunking.
+	chunks := amount / eth.MaxHeadersServe
+	if amount%eth.MaxHeadersServe > 0 {
+		chunks++
+	}
+
+	observer := make(ChanMessageObserver[*sentry.InboundMessage], chunks)
 	f.messageListener.RegisterBlockHeadersObserver(observer)
 	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
 
-	//
-	// TODO 1) chunk request into smaller ranges if needed to fit in the 2 MiB response size soft limit
-	//      and also 1024 max headers server (check AnswerGetBlockHeadersQuery)
-	err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
-		RequestId: requestId,
-		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
-			Origin: eth.HashOrNumber{
-				Number: start,
+	requestIds := make(map[uint64]uint64, chunks)
+	for i := uint64(0); i < chunks; i++ {
+		chunkStart := start + i*eth.MaxHeadersServe
+		chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
+		requestId := f.requestIdGenerator()
+		requestIds[requestId] = i
+
+		if err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
+			RequestId: requestId,
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Origin: eth.HashOrNumber{
+					Number: chunkStart,
+				},
+				Amount: chunkAmount,
 			},
-			Amount: amount,
-		},
-	})
-	if err != nil {
-		return nil, err
+		}); err != nil {
+			return nil, err
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(len(requestIds))*responseTimeout)
 	defer cancel()
 
-	var headers []*types.Header
-	var requestReceived bool
-	for !requestReceived {
+	headerChunks := make([][]*types.Header, chunks)
+	for len(requestIds) > 0 {
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
@@ -106,16 +129,24 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 				return nil, fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
 			}
 
-			if pkt.RequestId != requestId {
+			requestIdIndex, ok := requestIds[pkt.RequestId]
+			if !ok {
 				continue
 			}
 
-			headers = pkt.BlockHeadersPacket
-			requestReceived = true
+			headerChunks[requestIdIndex] = pkt.BlockHeadersPacket
+			delete(requestIds, pkt.RequestId)
 		}
 	}
 
-	if err = f.validateHeadersResponse(headers, start, end, amount); err != nil {
+	headers := make([]*types.Header, 0, amount)
+	for _, headerChunk := range headerChunks {
+		for _, header := range headerChunk {
+			headers = append(headers, header)
+		}
+	}
+
+	if err := f.validateHeadersResponse(headers, start, end, amount); err != nil {
 		shouldPenalize := errors.Is(err, &ErrIncorrectOriginHeader{}) ||
 			errors.Is(err, &ErrTooManyHeaders{}) ||
 			errors.Is(err, &ErrDisconnectedHeaders{})
@@ -244,10 +275,10 @@ func (e ErrTooManyHeaders) Is(err error) bool {
 }
 
 type ErrDisconnectedHeaders struct {
-	currentHash       libcommon.Hash
-	currentParentHash libcommon.Hash
+	currentHash       common.Hash
+	currentParentHash common.Hash
 	currentNum        uint64
-	parentHash        libcommon.Hash
+	parentHash        common.Hash
 	parentNum         uint64
 }
 

@@ -371,6 +371,55 @@ func TestServiceFetchHeaders(t *testing.T) {
 	})
 }
 
+func TestServiceFetchHeadersWithChunking(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(1999)
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			// 1024 headers in first response
+			Data: blockHeadersPacket66Bytes(t, requestId1, mockHeaders[:1025]),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1,
+		wantRequestAmount:           1024,
+	}
+	requestId2 := uint64(1235)
+	mockInboundMessages2 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			// remaining 975 headers in second response
+			Data: blockHeadersPacket66Bytes(t, requestId2, mockHeaders[1025:]),
+		},
+	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1025,
+		wantRequestAmount:           975,
+	}
+
+	test := newServiceTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	test.run(func(ctx context.Context, t *testing.T) {
+		headers, err := test.service.FetchHeaders(ctx, 1, 2000, peerId)
+		require.NoError(t, err)
+		require.Len(t, headers, 1999)
+		require.Equal(t, uint64(1), headers[0].Number.Uint64())
+		require.Equal(t, uint64(1999), headers[len(headers)-1].Number.Uint64())
+	})
+}
+
 func TestServiceErrInvalidFetchHeadersRange(t *testing.T) {
 	t.Parallel()
 
@@ -382,6 +431,12 @@ func TestServiceErrInvalidFetchHeadersRange(t *testing.T) {
 		require.ErrorAs(t, err, &errInvalidFetchHeadersRange)
 		require.Equal(t, uint64(3), errInvalidFetchHeadersRange.start)
 		require.Equal(t, uint64(1), errInvalidFetchHeadersRange.end)
+		require.Nil(t, headers)
+
+		headers, err = test.service.FetchHeaders(ctx, 1, 1+maxFetchHeadersRange+1, PeerIdFromUint64(1))
+		require.ErrorAs(t, err, &errInvalidFetchHeadersRange)
+		require.Equal(t, uint64(1), errInvalidFetchHeadersRange.start)
+		require.Equal(t, uint64(1+maxFetchHeadersRange+1), errInvalidFetchHeadersRange.end)
 		require.Nil(t, headers)
 	})
 }
