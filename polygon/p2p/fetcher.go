@@ -2,12 +2,10 @@ package p2p
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -16,8 +14,6 @@ import (
 )
 
 const responseTimeout = 5 * time.Second
-
-var invalidFetchHeadersRangeErr = errors.New("invalid fetch headers range")
 
 type RequestIdGenerator func() uint64
 
@@ -51,13 +47,16 @@ type fetcher struct {
 
 func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
 	if start >= end {
-		return nil, fmt.Errorf("%w: start=%d, end=%d", invalidFetchHeadersRangeErr, start, end)
+		return nil, &ErrInvalidFetchHeadersRange{
+			start: start,
+			end:   end,
+		}
 	}
 
-	var headers []*types.Header
+	amount := end - start
 	requestId := f.requestIdGenerator()
-
 	observer := make(ChanMessageObserver[*sentry.InboundMessage])
+
 	f.messageListener.RegisterBlockHeadersObserver(observer)
 	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
 
@@ -72,7 +71,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 			Origin: eth.HashOrNumber{
 				Number: start,
 			},
-			Amount: end - start,
+			Amount: amount,
 		},
 	})
 	if err != nil {
@@ -81,45 +80,88 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 
 	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
 	defer cancel()
-	wg, ctx := errgroup.WithContext(ctx)
 
-	wg.Go(func() error {
-		for {
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
-			case msg := <-observer:
-				msgPeerId := PeerIdFromH512(msg.PeerId)
-				if msgPeerId != peerId {
-					continue
-				}
-
-				var pkt eth.BlockHeadersPacket66
-				if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-					if rlp.IsInvalidRLPError(err) {
-						f.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
-						penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
-						if penalizeErr != nil {
-							err = fmt.Errorf("%w: %w", penalizeErr, err)
-						}
-					}
-
-					return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
-				}
-
-				if pkt.RequestId != requestId {
-					continue
-				}
-
-				headers = pkt.BlockHeadersPacket
-				return nil
+	var headers []*types.Header
+	var requestReceived bool
+	for !requestReceived {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
+		case msg := <-observer:
+			msgPeerId := PeerIdFromH512(msg.PeerId)
+			if msgPeerId != peerId {
+				continue
 			}
-		}
-	})
 
-	if err := wg.Wait(); err != nil {
-		return nil, err
+			var pkt eth.BlockHeadersPacket66
+			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
+				if rlp.IsInvalidRLPError(err) {
+					f.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
+					penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
+					if penalizeErr != nil {
+						err = fmt.Errorf("%w: %w", penalizeErr, err)
+					}
+				}
+
+				return nil, fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
+			}
+
+			if pkt.RequestId != requestId {
+				continue
+			}
+
+			headers = pkt.BlockHeadersPacket
+			requestReceived = true
+		}
+	}
+
+	if uint64(len(headers)) != amount {
+		var first, last uint64
+		if len(headers) > 0 {
+			first = headers[0].Number.Uint64()
+			last = headers[len(headers)-1].Number.Uint64()
+		}
+
+		return nil, &ErrIncompleteFetchHeadersResponse{
+			requestStart: start,
+			requestEnd:   end,
+			first:        first,
+			last:         last,
+			amount:       len(headers),
+		}
 	}
 
 	return headers, nil
+}
+
+type ErrInvalidFetchHeadersRange struct {
+	start uint64
+	end   uint64
+}
+
+func (e ErrInvalidFetchHeadersRange) Error() string {
+	return fmt.Sprintf("invalid fetch headers range: start=%d, end=%d", e.start, e.end)
+}
+
+type ErrIncompleteFetchHeadersResponse struct {
+	requestStart uint64
+	requestEnd   uint64
+	first        uint64
+	last         uint64
+	amount       int
+}
+
+func (e ErrIncompleteFetchHeadersResponse) Error() string {
+	return fmt.Sprintf(
+		"incomplete fetch headers response: first=%d, last=%d, amount=%d, requested [%d, %d)",
+		e.first, e.last, e.amount, e.requestStart, e.requestEnd,
+	)
+}
+
+func (e ErrIncompleteFetchHeadersResponse) LowestMissingBlockNum() uint64 {
+	if e.last == 0 || e.first == 0 || e.first != e.requestStart {
+		return e.requestStart
+	}
+
+	return e.last + 1
 }

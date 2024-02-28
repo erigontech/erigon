@@ -57,7 +57,13 @@ func NewService(
 	difficultyCalculator := NewDifficultyCalculator(borConfig, spansCache, nil, signaturesCache)
 	headerTimeValidator := NewHeaderTimeValidator(borConfig, spansCache, nil, signaturesCache)
 	headerValidator := NewHeaderValidator(chainConfig, borConfig, headerTimeValidator)
-	ccBuilderFactory := func(root *types.Header) CanonicalChainBuilder {
+	ccBuilderFactory := func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder {
+		if span == nil {
+			panic("sync.Service: ccBuilderFactory - span is nil")
+		}
+		if spansCache.IsEmpty() {
+			panic("sync.Service: ccBuilderFactory - spansCache is empty")
+		}
 		return NewCanonicalChainBuilder(
 			root,
 			difficultyCalculator,
@@ -72,6 +78,8 @@ func NewService(
 		p2pService,
 		downloader,
 		ccBuilderFactory,
+		spansCache,
+		heimdallService.FetchLatestSpan,
 		events.Events(),
 		logger,
 	)
