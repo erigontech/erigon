@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/c2h5oh/datasize"
+	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
@@ -21,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	gokzg4844 "github.com/ledgerwatch/go-kzg-4844"
 	"github.com/ledgerwatch/log/v3"
 )
 
@@ -214,7 +214,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return fmt.Errorf("finalized_checkpoint is not an ancestor of the sidecar's block")
 			}
-			// TODO [REJECT] The sidecar's inclusion proof is valid as verified by verify_blob_sidecar_inclusion_proof(blob_sidecar).
+			// [REJECT] The sidecar's inclusion proof is valid as verified by verify_blob_sidecar_inclusion_proof(blob_sidecar).
 
 			// [REJECT] The sidecar's blob is valid as verified by verify_blob_kzg_proof(blob_sidecar.blob, blob_sidecar.kzg_commitment, blob_sidecar.kzg_proof).
 			if !g.verifyBlobKZGProof(*blobSideCar) {
