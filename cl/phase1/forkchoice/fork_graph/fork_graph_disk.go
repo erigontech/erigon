@@ -9,16 +9,21 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/lightclient_utils"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	diffstorage "github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph/diff_storage"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 )
+
+const dumpSlotFrequency = 32
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -90,6 +95,12 @@ type forkGraphDisk struct {
 	// for each block root we keep track of the sync committees for head retrieval.
 	syncCommittees        sync.Map
 	lightclientBootstraps sync.Map
+	// diffs storage
+	balancesStorage         *diffstorage.ChainDiffStorage
+	validatorSetStorage     *diffstorage.ChainDiffStorage
+	inactivityScoresStorage *diffstorage.ChainDiffStorage
+	previousIndicies        sync.Map
+	currentIndicies         sync.Map
 
 	// configurations
 	beaconCfg   *clparams.BeaconChainConfig
@@ -105,10 +116,12 @@ type forkGraphDisk struct {
 	// reusable buffers
 	sszBuffer       bytes.Buffer
 	sszSnappyBuffer bytes.Buffer
+
+	rcfg beacon_router_configuration.RouterConfiguration
 }
 
 // Initialize fork graph with a new state
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) ForkGraph {
 	farthestExtendingPath := make(map[libcommon.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -121,14 +134,22 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, aferoFs afero.Fs) F
 
 	farthestExtendingPath[anchorRoot] = true
 
+	balancesStorage := diffstorage.NewChainDiffStorage(base_encoding.ComputeCompressedSerializedUint64ListDiff, base_encoding.ApplyCompressedSerializedUint64ListDiff)
+	validatorSetStorage := diffstorage.NewChainDiffStorage(base_encoding.ComputeCompressedSerializedValidatorSetListDiff, base_encoding.ApplyCompressedSerializedValidatorListDiff)
+	inactivityScoresStorage := diffstorage.NewChainDiffStorage(base_encoding.ComputeCompressedSerializedUint64ListDiff, base_encoding.ApplyCompressedSerializedUint64ListDiff)
+
 	f := &forkGraphDisk{
 		fs: aferoFs,
 		// current state data
 		currentState: anchorState,
 		// configuration
-		beaconCfg:   anchorState.BeaconConfig(),
-		genesisTime: anchorState.GenesisTime(),
-		anchorSlot:  anchorState.Slot(),
+		beaconCfg:               anchorState.BeaconConfig(),
+		genesisTime:             anchorState.GenesisTime(),
+		anchorSlot:              anchorState.Slot(),
+		balancesStorage:         balancesStorage,
+		validatorSetStorage:     validatorSetStorage,
+		inactivityScoresStorage: inactivityScoresStorage,
+		rcfg:                    rcfg,
 	}
 	f.lowestAvaiableBlock.Store(anchorState.Slot())
 	f.headers.Store(libcommon.Hash(anchorRoot), &anchorHeader)
@@ -176,7 +197,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	parentBlock, hasParentBlock := f.getBlock(block.ParentRoot)
 
 	// Before processing the state: update the newest lightclient update.
-	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized {
+	if block.Version() >= clparams.AltairVersion && hasParentBlock && fullValidation && hasFinalized && f.rcfg.Beacon {
 		nextSyncCommitteeBranch, err := newState.NextSyncCommitteeBranch()
 		if err != nil {
 			return nil, LogisticError, err
@@ -185,7 +206,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err != nil {
 			return nil, LogisticError, err
 		}
-
 		lightclientUpdate, err := lightclient_utils.CreateLightClientUpdate(f.beaconCfg, signedBlock, finalizedBlock, parentBlock, newState.Slot(),
 			newState.NextSyncCommittee(), newState.FinalizedCheckpoint(), convertHashSliceToHashList(nextSyncCommitteeBranch), convertHashSliceToHashList(finalityBranch))
 		if err != nil {
@@ -200,7 +220,15 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			}
 		}
 	}
+
 	blockRewardsCollector := &eth2.BlockRewardsCollector{}
+	var prevDumpBalances, prevValidatorSetDump, prevInactivityScores []byte
+	epochCross := newState.Slot()/f.beaconCfg.SlotsPerEpoch != block.Slot/f.beaconCfg.SlotsPerEpoch
+	if (f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse) && !epochCross {
+		prevDumpBalances = libcommon.Copy(newState.RawBalances())
+		prevValidatorSetDump = libcommon.Copy(newState.RawValidatorSet())
+		prevInactivityScores = libcommon.Copy(newState.RawInactivityScores())
+	}
 	// Execute the state
 	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 		// Add block to list of invalid blocks
@@ -210,21 +238,31 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 
 		return nil, InvalidBlock, invalidBlockErr
 	}
-	f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
 
-	f.syncCommittees.Store(libcommon.Hash(blockRoot), syncCommittees{
-		currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
-		nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
-	})
-
-	if block.Version() >= clparams.AltairVersion {
-		lightclientBootstrap, err := lightclient_utils.CreateLightClientBootstrap(newState, signedBlock)
-		if err != nil {
-			return nil, LogisticError, err
+	// update diff storages.
+	if f.rcfg.Beacon || f.rcfg.Validator || f.rcfg.Lighthouse {
+		if block.Version() != clparams.Phase0Version {
+			f.currentIndicies.Store(libcommon.Hash(blockRoot), libcommon.Copy(newState.RawCurrentEpochParticipation()))
+			f.previousIndicies.Store(libcommon.Hash(blockRoot), libcommon.Copy(newState.RawPreviousEpochParticipation()))
+			f.inactivityScoresStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevInactivityScores, newState.RawInactivityScores(), epochCross)
 		}
-		f.lightclientBootstraps.Store(libcommon.Hash(blockRoot), lightclientBootstrap)
-	}
+		f.blockRewards.Store(libcommon.Hash(blockRoot), blockRewardsCollector)
+		f.balancesStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevDumpBalances, newState.RawBalances(), epochCross)
+		f.validatorSetStorage.Insert(libcommon.Hash(blockRoot), block.ParentRoot, prevValidatorSetDump, newState.RawValidatorSet(), epochCross)
 
+		f.syncCommittees.Store(libcommon.Hash(blockRoot), syncCommittees{
+			currentSyncCommittee: newState.CurrentSyncCommittee().Copy(),
+			nextSyncCommittee:    newState.NextSyncCommittee().Copy(),
+		})
+
+		if block.Version() >= clparams.AltairVersion {
+			lightclientBootstrap, err := lightclient_utils.CreateLightClientBootstrap(newState, signedBlock)
+			if err != nil {
+				return nil, LogisticError, err
+			}
+			f.lightclientBootstraps.Store(libcommon.Hash(blockRoot), lightclientBootstrap)
+		}
+	}
 	f.blocks.Store(libcommon.Hash(blockRoot), signedBlock)
 	bodyRoot, err := signedBlock.Block.Body.HashSSZ()
 	if err != nil {
@@ -375,6 +413,11 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.blockRewards.Delete(root)
 		f.fs.Remove(getBeaconStateFilename(root))
 		f.fs.Remove(getBeaconStateCacheFilename(root))
+		f.balancesStorage.Delete(root)
+		f.validatorSetStorage.Delete(root)
+		f.inactivityScoresStorage.Delete(root)
+		f.previousIndicies.Delete(root)
+		f.currentIndicies.Delete(root)
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return
@@ -422,4 +465,64 @@ func (f *forkGraphDisk) GetLightClientUpdate(period uint64) (*cltypes.LightClien
 		return nil, false
 	}
 	return obj.(*cltypes.LightClientUpdate), true
+}
+
+func (f *forkGraphDisk) GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+	b, err := f.balancesStorage.Get(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) == 0 {
+		return nil, nil
+	}
+	out := solid.NewUint64ListSSZ(int(f.beaconCfg.ValidatorRegistryLimit))
+	return out, out.DecodeSSZ(b, 0)
+}
+
+func (f *forkGraphDisk) GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error) {
+	b, err := f.inactivityScoresStorage.Get(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) == 0 {
+		return nil, nil
+	}
+	out := solid.NewUint64ListSSZ(int(f.beaconCfg.ValidatorRegistryLimit))
+	return out, out.DecodeSSZ(b, 0)
+}
+
+func (f *forkGraphDisk) GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	b, ok := f.previousIndicies.Load(blockRoot)
+	if !ok {
+		return nil, nil
+	}
+	if len(b.([]byte)) == 0 {
+		return nil, nil
+	}
+	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	return out, out.DecodeSSZ(b.([]byte), 0)
+}
+
+func (f *forkGraphDisk) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	b, ok := f.currentIndicies.Load(blockRoot)
+	if !ok {
+		return nil, nil
+	}
+	if len(b.([]byte)) == 0 {
+		return nil, nil
+	}
+	out := solid.NewBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
+	return out, out.DecodeSSZ(b.([]byte), 0)
+}
+
+func (f *forkGraphDisk) GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error) {
+	b, err := f.validatorSetStorage.Get(blockRoot)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) == 0 {
+		return nil, nil
+	}
+	out := solid.NewValidatorSet(int(f.beaconCfg.ValidatorRegistryLimit))
+	return out, out.DecodeSSZ(b, 0)
 }

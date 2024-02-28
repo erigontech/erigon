@@ -11,7 +11,9 @@ import (
 	"golang.org/x/net/context"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 )
 
@@ -23,22 +25,25 @@ type BackwardBeaconDownloader struct {
 	slotToDownload uint64
 	expectedRoot   libcommon.Hash
 	rpc            *rpc.BeaconRpcP2P
+	engine         execution_client.ExecutionEngine
 	onNewBlock     OnNewBlock
 	finished       bool
 	reqInterval    *time.Ticker
 	db             kv.RwDB
 	neverSkip      bool
+	elFound        bool
 
 	mu sync.Mutex
 }
 
-func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, db kv.RwDB) *BackwardBeaconDownloader {
+func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, engine execution_client.ExecutionEngine, db kv.RwDB) *BackwardBeaconDownloader {
 	return &BackwardBeaconDownloader{
 		ctx:         ctx,
 		rpc:         rpc,
 		db:          db,
 		reqInterval: time.NewTicker(300 * time.Millisecond),
 		neverSkip:   true,
+		engine:      engine,
 	}
 }
 
@@ -170,7 +175,7 @@ Loop:
 		b.expectedRoot = segment.Block.ParentRoot
 		b.slotToDownload = segment.Block.Slot - 1 // update slot (might be inexact but whatever)
 	}
-	if b.neverSkip {
+	if !b.neverSkip {
 		return nil
 	}
 	// try skipping if the next slot is in db
@@ -179,7 +184,6 @@ Loop:
 		return err
 	}
 	defer tx.Rollback()
-
 	// it will stop if we end finding a gap or if we reach the maxIterations
 	for {
 		// check if the expected root is in db
@@ -187,8 +191,26 @@ Loop:
 		if err != nil {
 			return err
 		}
+
 		if slot == nil || *slot == 0 {
 			break
+		}
+
+		if b.engine != nil && b.engine.SupportInsertion() {
+			blockHash, err := beacon_indicies.ReadExecutionBlockHash(tx, b.expectedRoot)
+			if err != nil {
+				return err
+			}
+			if blockHash != (libcommon.Hash{}) && !b.elFound {
+				bodyChainHeader, err := b.engine.GetBodiesByHashes([]libcommon.Hash{blockHash})
+				if err != nil {
+					return err
+				}
+				b.elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
+				if !b.elFound {
+					break
+				}
+			}
 		}
 		b.slotToDownload = *slot - 1
 		if err := beacon_indicies.MarkRootCanonical(b.ctx, tx, *slot, b.expectedRoot); err != nil {
@@ -197,6 +219,17 @@ Loop:
 		b.expectedRoot, err = beacon_indicies.ReadParentBlockRoot(b.ctx, tx, b.expectedRoot)
 		if err != nil {
 			return err
+		}
+		// Some cleaning of possible ugly restarts
+		newSlotToDownload, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, b.expectedRoot)
+		if err != nil {
+			return err
+		}
+		if newSlotToDownload == nil || *newSlotToDownload == 0 {
+			continue
+		}
+		for i := *newSlotToDownload + 1; i < *slot; i++ {
+			tx.Delete(kv.CanonicalBlockRoots, base_encoding.Encode64ToBytes4(i))
 		}
 	}
 

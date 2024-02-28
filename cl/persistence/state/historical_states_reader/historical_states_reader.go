@@ -19,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/lru"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/spf13/afero"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -30,7 +29,6 @@ var buffersPool = sync.Pool{
 
 type HistoricalStatesReader struct {
 	cfg            *clparams.BeaconChainConfig
-	fs             afero.Fs                              // some data is on filesystem to avoid database fragmentation
 	validatorTable *state_accessors.StaticValidatorTable // We can save 80% of the I/O by caching the validator table
 	blockReader    freezeblocks.BeaconSnapshotReader
 	genesisState   *state.CachingBeaconState
@@ -39,7 +37,7 @@ type HistoricalStatesReader struct {
 	shuffledSetsCache *lru.Cache[uint64, []uint64]
 }
 
-func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, validatorTable *state_accessors.StaticValidatorTable, fs afero.Fs, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
+func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader freezeblocks.BeaconSnapshotReader, validatorTable *state_accessors.StaticValidatorTable, genesisState *state.CachingBeaconState) *HistoricalStatesReader {
 
 	cache, err := lru.New[uint64, []uint64]("shuffledSetsCache_reader", 125)
 	if err != nil {
@@ -48,7 +46,6 @@ func NewHistoricalStatesReader(cfg *clparams.BeaconChainConfig, blockReader free
 
 	return &HistoricalStatesReader{
 		cfg:               cfg,
-		fs:                fs,
 		blockReader:       blockReader,
 		genesisState:      genesisState,
 		validatorTable:    validatorTable,
@@ -724,7 +721,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 	validatorLength := sd.ValidatorLength
 
 	currentIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
-	previousIdxs, err := r.readInitialPreviousParticipatingIndicies(tx, slot, validatorLength, previousActiveIndicies)
+	previousIdxs := solid.NewBitList(int(validatorLength), int(r.cfg.ValidatorRegistryLimit))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -739,7 +736,7 @@ func (r *HistoricalStatesReader) ReadPartecipations(tx kv.Tx, slot uint64) (*sol
 		if err != nil {
 			return nil, nil, err
 		}
-		if block == nil || block.Version() == clparams.Phase0Version {
+		if block == nil {
 			continue
 		}
 		currentEpoch := i / r.cfg.SlotsPerEpoch
@@ -816,45 +813,6 @@ func (r *HistoricalStatesReader) computeRelevantEpochs(slot uint64) (uint64, uin
 		return epoch, epoch
 	}
 	return epoch, epoch - 1
-}
-
-func (r *HistoricalStatesReader) readInitialPreviousParticipatingIndicies(tx kv.Tx, slot, validatorSetSize uint64, previousActiveIndicies []uint64) (*solid.BitList, error) {
-	out := solid.NewBitList(int(validatorSetSize), int(r.cfg.ValidatorRegistryLimit))
-	if slot/r.cfg.SlotsPerEpoch != r.cfg.AltairForkEpoch {
-		return out, nil
-	}
-
-	atts, _, err := r.readPendingEpochs(tx, (r.cfg.AltairForkEpoch*r.cfg.SlotsPerEpoch)-1)
-	if err != nil {
-		return nil, err
-	}
-	altairSlot := r.cfg.AltairForkEpoch * r.cfg.SlotsPerEpoch
-	if err := solid.RangeErr[*solid.PendingAttestation](atts, func(i1 int, pa *solid.PendingAttestation, i2 int) error {
-		attestationData := pa.AttestantionData()
-		mixPosition := ((attestationData.Slot() / r.cfg.SlotsPerEpoch) + r.cfg.EpochsPerHistoricalVector - r.cfg.MinSeedLookahead - 1) % r.cfg.EpochsPerHistoricalVector
-		flags, err := r.getAttestationParticipationFlagIndicies(tx, clparams.AltairVersion, altairSlot, attestationData, pa.InclusionDelay(), false)
-		if err != nil {
-			return err
-		}
-		mix, err := r.ReadRandaoMixBySlotAndIndex(tx, attestationData.Slot(), mixPosition)
-		if err != nil {
-			return err
-		}
-		indices, err := r.attestingIndicies(attestationData, pa.AggregationBits(), false, mix, previousActiveIndicies)
-		if err != nil {
-			return err
-		}
-		for _, idx := range indices {
-			for _, flagIndex := range flags {
-				flagParticipation := cltypes.ParticipationFlags(out.Get(int(idx))).Add(int(flagIndex))
-				out.Set(int(idx), byte(flagParticipation))
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (r *HistoricalStatesReader) tryCachingEpochsInParallell(tx kv.Tx, activeIdxs [][]uint64, epochs []uint64) error {

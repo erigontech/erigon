@@ -44,6 +44,12 @@ type ForkChoiceStorageReader interface {
 	NewestLightClientUpdate() *cltypes.LightClientUpdate
 	GetLightClientUpdate(period uint64) (*cltypes.LightClientUpdate, bool)
 	GetHeader(blockRoot libcommon.Hash) (*cltypes.BeaconBlockHeader, bool)
+
+	GetBalances(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
+	GetInactivitiesScores(blockRoot libcommon.Hash) (solid.Uint64ListSSZ, error)
+	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
+	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 }
 
 type ForkChoiceStorageWriter interface {

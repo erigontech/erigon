@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -39,16 +40,16 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	fcu = forkchoice.NewForkChoiceStorageMock()
 	db = memdb.NewTestDB(t)
 	var reader *tests.MockBlockReader
-	reader, f = tests.LoadChain(blocks, postState, db, t)
+	reader = tests.LoadChain(blocks, postState, db, t)
 
 	bcfg.InitializeForkSchedule()
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true, f)
+	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
-	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, f, preState)
+	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState)
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
@@ -63,7 +64,16 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		syncedData,
 		statesReader,
 		nil,
-		"test-version")
+		"test-version", &beacon_router_configuration.RouterConfiguration{
+			Beacon:     true,
+			Node:       true,
+			Builder:    true,
+			Config:     true,
+			Debug:      true,
+			Events:     true,
+			Validator:  true,
+			Lighthouse: true,
+		}, nil)
 	h.Init()
 	return
 }
