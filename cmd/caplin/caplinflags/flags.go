@@ -6,7 +6,7 @@ import (
 )
 
 var CliFlags = []cli.Flag{
-	&NoBeaconApi,
+	&utils.BeaconAPIFlag,
 	&BeaconApiReadTimeout,
 	&BeaconApiWriteTimeout,
 	&BeaconApiPort,

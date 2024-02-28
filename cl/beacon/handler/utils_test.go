@@ -1,4 +1,4 @@
-package handler_test
+package handler
 
 import (
 	"context"
@@ -9,11 +9,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/antiquary/tests"
-	"github.com/ledgerwatch/erigon/cl/beacon/handler"
+	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -24,7 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *handler.ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
+func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
 	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {
 		blocks, preState, postState = tests.GetPhase0Random()
@@ -32,31 +31,32 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		bcfg.AltairForkEpoch = 1
 		bcfg.BellatrixForkEpoch = 1
 		blocks, preState, postState = tests.GetBellatrixRandom()
-	} else {
-		require.FailNow(t, "unknown state version")
+	} else if v == clparams.CapellaVersion {
+		bcfg.AltairForkEpoch = 1
+		bcfg.BellatrixForkEpoch = 1
+		bcfg.CapellaForkEpoch = 1
+		blocks, preState, postState = tests.GetCapellaRandom()
 	}
 	fcu = forkchoice.NewForkChoiceStorageMock()
 	db = memdb.NewTestDB(t)
 	var reader *tests.MockBlockReader
-	reader, f = tests.LoadChain(blocks, postState, db, t)
+	reader = tests.LoadChain(blocks, postState, db, t)
 
-	rawDB := persistence.NewAferoRawBlockSaver(f, &clparams.MainnetBeaconConfig)
 	bcfg.InitializeForkSchedule()
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, nil, logger, true, true, f)
+	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
-	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, f, preState)
+	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState)
 	opPool = pool.NewOperationsPool(&bcfg)
 	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
 	gC := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	h = handler.NewApiHandler(
+	h = NewApiHandler(
 		&gC,
 		&bcfg,
-		rawDB,
 		db,
 		fcu,
 		opPool,
@@ -64,7 +64,16 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		syncedData,
 		statesReader,
 		nil,
-		"test-version")
+		"test-version", &beacon_router_configuration.RouterConfiguration{
+			Beacon:     true,
+			Node:       true,
+			Builder:    true,
+			Config:     true,
+			Debug:      true,
+			Events:     true,
+			Validator:  true,
+			Lighthouse: true,
+		}, nil)
 	h.Init()
 	return
 }

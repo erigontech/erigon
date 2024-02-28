@@ -18,7 +18,6 @@ import (
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -55,6 +54,19 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		return err
 	}
 	if _, _, err := debug.Setup(cliCtx, true /* root logger */); err != nil {
+		return err
+	}
+	rcfg := beacon_router_configuration.RouterConfiguration{
+		Protocol:         cfg.BeaconProtocol,
+		Address:          cfg.BeaconAddr,
+		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
+		WriteTimeout:     cfg.BeaconApiWriteTimeout,
+		IdleTimeout:      cfg.BeaconApiWriteTimeout,
+		AllowedOrigins:   cfg.AllowedOrigins,
+		AllowedMethods:   cfg.AllowedMethods,
+		AllowCredentials: cfg.AllowCredentials,
+	}
+	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
 		return err
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
@@ -115,8 +127,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			Root: cfg.RecordDir,
 		}
 	}
-	rawBeaconBlockChainDb, _ := persistence.AferoRawBeaconBlockChainFromOsPath(cfg.BeaconCfg, cfg.Dirs.CaplinHistory)
-	historyDB, indiciesDB, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, rawBeaconBlockChainDb, cfg.Dirs.CaplinIndexing, executionEngine, false)
+	indiciesDB, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.Dirs.CaplinIndexing, executionEngine, false)
 	if err != nil {
 		return err
 	}
@@ -125,15 +136,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, beacon_router_configuration.RouterConfiguration{
-		Protocol:         cfg.BeaconProtocol,
-		Address:          cfg.BeaconAddr,
-		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
-		WriteTimeout:     cfg.BeaconApiWriteTimeout,
-		IdleTimeout:      cfg.BeaconApiWriteTimeout,
-		Active:           !cfg.NoBeaconApi,
-		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   cfg.AllowedMethods,
-		AllowCredentials: cfg.AllowCredentials,
-	}, nil, nil, false, false, historyDB, indiciesDB, nil)
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, rcfg, nil, nil, false, false, indiciesDB, nil)
 }

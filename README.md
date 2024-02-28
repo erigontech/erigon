@@ -4,6 +4,9 @@ Erigon is an implementation of Ethereum (execution layer with embeddable consens
 frontier. [Archive Node](https://ethereum.org/en/developers/docs/nodes-and-clients/archive-nodes/#what-is-an-archive-node)
 by default.
 
+An accessible and complete version of the documentation is available at **[erigon.gitbook.io](https://erigon.gitbook.io)**.
+<br>
+
 ![Build status](https://github.com/ledgerwatch/erigon/actions/workflows/ci.yml/badge.svg)
 
 ![Coverage](https://gist.githubusercontent.com/revitteth/ee38e9beb22353eef6b88f2ad6ed7aa9/raw/badge.svg)
@@ -20,6 +23,7 @@ by default.
     + [GoDoc](https://godoc.org/github.com/ledgerwatch/erigon)
     + [Beacon Chain](#beacon-chain-consensus-layer)
     + [Dev Chain](#dev-chain)
+    + [Caplin (Internal Consensus Layer)](#caplin)
 
 - [Key features](#key-features)
     + [More Efficient State Storage](#more-efficient-state-storage)
@@ -27,6 +31,7 @@ by default.
     + [JSON-RPC daemon](#json-rpc-daemon)
     + [Run all components by docker-compose](#run-all-components-by-docker-compose)
     + [Grafana dashboard](#grafana-dashboard)
+    + [Internal Consensus Layer](#caplin)
 - [Documentation](#documentation)
 - [FAQ](#faq)
 - [Getting in touch](#getting-in-touch)
@@ -105,7 +110,7 @@ Use `--datadir` to choose where to store data.
 Use `--chain=gnosis` for [Gnosis Chain](https://www.gnosis.io/), `--chain=bor-mainnet` for Polygon Mainnet, 
 `--chain=mumbai` for Polygon Mumbai and `--chain=amoy` for Polygon Amoy.
 For Gnosis Chain you need a [Consensus Layer](#beacon-chain-consensus-layer) client alongside
-Erigon (https://docs.gnosischain.com/node/guide/beacon).
+Erigon (https://docs.gnosischain.com/node/manual/beacon).
 
 Running `make help` will list and describe the convenience commands available in the [Makefile](./Makefile).
 
@@ -302,6 +307,26 @@ More information can be found [here](https://github.com/ethereum/execution-apis/
 Once Erigon is running, you need to point your CL client to `<erigon address>:8551`,
 where `<erigon address>` is either `localhost` or the IP address of the device running Erigon, and also point to the JWT
 secret path created by Erigon.
+
+### Caplin
+
+Caplin is a full-fledged validating Consensus Client like Prysm, Lighthouse, Teku, Nimbus and Lodestar. Its goal is: 
+
+* provide better stability
+* Validation of the chain
+* Stay in sync
+* keep the execution of blocks on chain tip
+* serve the  Beacon API using a fast and compact data model alongside low CPU and memory usage.
+
+ The main reason why developed a new Consensus Layer is to experiment with the possible benefits that could come with it.  For example, The Engine API does not work well with Erigon. The Engine API sends data one block at a time, which does not suit how Erigon works. Erigon is designed to handle many blocks simultaneously and needs to sort and process data efficiently. Therefore, it would be better for Erigon to handle the blocks independently instead of relying on the Engine API.
+
+#### Caplin's Usage.
+
+Caplin can be enabled through the `--internalcl` flag. from that point on, an external Consensus Layer will not be need anymore.
+
+Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive` flag.
+In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead to a 6 GB higher RAM usage.
 
 ### Multiple Instances / One Machine
 
@@ -602,6 +627,18 @@ RFC 922, Section 7
 
 Same
 in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
+
+### How to run erigon as a separate user? (e.g. as a `systemd` daemon)
+
+Running erigon from `build/bin` as a separate user might produce an error:
+
+    error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
+
+The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon` or `/opt/erigon` as the installation path, for example:
+
+    make DIST=/opt/erigon install
+
+and then run `/opt/erigon/erigon`.
 
 ### How to get diagnostic for bug report?
 

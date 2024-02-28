@@ -29,10 +29,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel/handshake"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/p2p/discover"
 	"github.com/ledgerwatch/erigon/p2p/enode"
@@ -75,10 +75,10 @@ type Sentinel struct {
 
 	httpApi http.Handler
 
-	metadataV2 *cltypes.Metadata
 	handshaker *handshake.HandShaker
 
-	db         persistence.RawBeaconBlockChain
+	blockReader freezeblocks.BeaconSnapshotReader
+
 	indiciesDB kv.RoDB
 
 	discoverConfig       discover.Config
@@ -165,20 +165,14 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 		return nil, err
 	}
 
-	// TODO: Set up proper attestation number
-	s.metadataV2 = &cltypes.Metadata{
-		SeqNumber: localNode.Seq(),
-		Attnets:   0,
-		Syncnets:  new(uint64),
-	}
-
 	// Start stream handlers
-	handlers.NewConsensusHandlers(s.ctx, s.db, s.indiciesDB, s.host, s.peers, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.metadataV2, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
 
 	net, err := discover.ListenV5(s.ctx, "any", conn, localNode, discCfg)
 	if err != nil {
 		return nil, err
 	}
+	handlers.NewConsensusHandlers(s.ctx, s.blockReader, s.indiciesDB, s.host, s.peers, s.cfg.NetworkConfig, localNode, s.cfg.BeaconConfig, s.cfg.GenesisConfig, s.handshaker, s.forkChoiceReader, s.cfg.EnableBlocks).Start()
+
 	return net, err
 }
 
@@ -186,7 +180,7 @@ func (s *Sentinel) createListener() (*discover.UDPv5, error) {
 func New(
 	ctx context.Context,
 	cfg *SentinelConfig,
-	db persistence.RawBeaconBlockChain,
+	blockReader freezeblocks.BeaconSnapshotReader,
 	indiciesDB kv.RoDB,
 	logger log.Logger,
 	forkChoiceReader forkchoice.ForkChoiceStorageReader,
@@ -194,7 +188,7 @@ func New(
 	s := &Sentinel{
 		ctx:              ctx,
 		cfg:              cfg,
-		db:               db,
+		blockReader:      blockReader,
 		indiciesDB:       indiciesDB,
 		metrics:          true,
 		logger:           logger,
@@ -368,14 +362,17 @@ func (s *Sentinel) GetPeersInfos() *sentinelrpc.PeersInfoResponse {
 		if err == nil {
 			entry.AgentVersion = agent.(string)
 		}
+		if entry.AgentVersion == "" {
+			entry.AgentVersion = "unknown"
+		}
 		out.Peers = append(out.Peers, entry)
 	}
 	return out
 }
 
-func (s *Sentinel) Identity() (pid, enr string, p2pAddresses, discoveryAddresses []string, metadata *cltypes.Metadata) {
+func (s *Sentinel) Identity() (pid, enrStr string, p2pAddresses, discoveryAddresses []string, metadata *cltypes.Metadata) {
 	pid = s.host.ID().String()
-	enr = s.listener.LocalNode().Node().String()
+	enrStr = s.listener.LocalNode().Node().String()
 	p2pAddresses = make([]string, 0, len(s.host.Addrs()))
 	for _, addr := range s.host.Addrs() {
 		p2pAddresses = append(p2pAddresses, fmt.Sprintf("%s/%s", addr.String(), pid))
@@ -398,7 +395,21 @@ func (s *Sentinel) Identity() (pid, enr string, p2pAddresses, discoveryAddresses
 		port := s.listener.LocalNode().Node().UDP()
 		discoveryAddresses = append(discoveryAddresses, fmt.Sprintf("/%s/%s/udp/%d/p2p/%s", protocol, s.listener.LocalNode().Node().IP(), port, pid))
 	}
-	metadata = s.metadataV2
+	subnetField := [8]byte{}
+	syncnetField := [1]byte{}
+	attSubEnr := enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField[:])
+	syncNetEnr := enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, syncnetField[:])
+	if err := s.listener.LocalNode().Node().Load(attSubEnr); err != nil {
+		return
+	}
+	if err := s.listener.LocalNode().Node().Load(syncNetEnr); err != nil {
+		return
+	}
+	metadata = &cltypes.Metadata{
+		SeqNumber: s.listener.LocalNode().Seq(),
+		Attnets:   subnetField,
+		Syncnets:  &syncnetField,
+	}
 	return
 }
 

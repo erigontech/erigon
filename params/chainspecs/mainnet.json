@@ -18,5 +18,9 @@
   "terminalTotalDifficulty": 58750000000000000000000,
   "terminalTotalDifficultyPassed": true,
   "shanghaiTime": 1681338455,
-  "ethash": {}
+  "cancunTime": 1710338135,
+  "ethash": {},
+  "noPruneContracts": {
+    "0x00000000219ab540356cBB839Cbe05303d7705Fa": true
+  }
 }

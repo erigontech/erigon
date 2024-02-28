@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 )
@@ -19,7 +20,7 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 	return newBeaconResponse(
 		[]interface{}{
 			map[string]interface{}{
-				"slot":                 slotNumber,
+				"slot":                 strconv.FormatUint(slotNumber, 10),
 				"root":                 hash,
 				"execution_optimistic": false,
 			},

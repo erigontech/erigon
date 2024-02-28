@@ -9,6 +9,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -258,6 +259,9 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 		result[i] = rlp.RawValue(r)
 	}
 	return result, nil
+}
+func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
+	panic("not implemented")
 }
 
 func (r *RemoteBlockReader) LastFrozenEventId() uint64 {
@@ -1107,6 +1111,15 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 	return
 }
 
+func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
+	v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
+	if err != nil {
+		return 0, err
+	}
+	startEventId := binary.BigEndian.Uint64(v)
+	return startEventId, nil
+}
+
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
 	maxBlockNumInFiles := r.FrozenBorBlocks()
 	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
@@ -1165,7 +1178,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			continue
 		}
 		if sn.to <= blockHeight {
-			continue
+			break
 		}
 
 		idxBorTxnHash := sn.Index()

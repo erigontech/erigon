@@ -13,7 +13,7 @@ import (
 
 var testMetadata = &cltypes.Metadata{
 	SeqNumber: 99,
-	Attnets:   69,
+	Attnets:   [8]byte{1, 2, 3, 4, 5, 6, 7, 8},
 }
 
 var testPing = &cltypes.Ping{
@@ -49,6 +49,11 @@ var testLightClientUpdatesByRange = &cltypes.LightClientUpdatesByRangeRequest{
 	Count:       10,
 }
 
+var testBlobRequestByRange = &cltypes.BlobsByRangeRequest{
+	StartSlot: 100,
+	Count:     10,
+}
+
 func TestMarshalNetworkTypes(t *testing.T) {
 	cases := []ssz.EncodableSSZ{
 		testMetadata,
@@ -57,6 +62,7 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		testStatus,
 		testBlockRoot,
 		testLightClientUpdatesByRange,
+		testBlobRequestByRange,
 	}
 
 	unmarshalDestinations := []ssz.EncodableSSZ{
@@ -66,6 +72,7 @@ func TestMarshalNetworkTypes(t *testing.T) {
 		&cltypes.Status{},
 		&cltypes.Root{},
 		&cltypes.LightClientUpdatesByRangeRequest{},
+		&cltypes.BlobsByRangeRequest{},
 	}
 	for i, tc := range cases {
 		marshalledBytes, err := tc.EncodeSSZ(nil)

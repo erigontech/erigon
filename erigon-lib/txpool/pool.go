@@ -59,6 +59,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon-lib/types"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 )
 
 const DefaultBlockGasLimit = uint64(30000000)
@@ -219,6 +220,7 @@ type TxPool struct {
 	pendingBaseFee          atomic.Uint64
 	pendingBlobFee          atomic.Uint64 // For gas accounting for blobs, which has its own dimension
 	blockGasLimit           atomic.Uint64
+	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
 	agraBlock               *uint64
@@ -400,7 +402,37 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	pendingBlobFee := stateChanges.PendingBlobFeePerGas
 	p.setBlobFee(pendingBlobFee)
 
-	p.blockGasLimit.Store(stateChanges.BlockGasLimit)
+	oldGasLimit := p.blockGasLimit.Swap(stateChanges.BlockGasLimit)
+	if oldGasLimit != stateChanges.BlockGasLimit {
+		p.all.ascendAll(func(mt *metaTx) bool {
+			var updated bool
+			if mt.Tx.Gas < stateChanges.BlockGasLimit {
+				updated = (mt.subPool & NotTooMuchGas) > 0
+				mt.subPool |= NotTooMuchGas
+			} else {
+				updated = (mt.subPool & NotTooMuchGas) == 0
+				mt.subPool &^= NotTooMuchGas
+			}
+
+			if mt.Tx.Traced {
+				p.logger.Info("TX TRACING: on block gas limit update", "idHash", fmt.Sprintf("%x", mt.Tx.IDHash), "senderId", mt.Tx.SenderID, "nonce", mt.Tx.Nonce, "subPool", mt.currentSubPool, "updated", updated)
+			}
+
+			if !updated {
+				return true
+			}
+
+			switch mt.currentSubPool {
+			case PendingSubPool:
+				p.pending.Updated(mt)
+			case BaseFeeSubPool:
+				p.baseFee.Updated(mt)
+			case QueuedSubPool:
+				p.queued.Updated(mt)
+			}
+			return true
+		})
+	}
 
 	for i, txn := range unwindBlobTxs.Txs {
 		if txn.Type == types.BlobTxType {
@@ -870,11 +902,17 @@ func (p *TxPool) validateTx(txn *types.TxSlot, isLocal bool, stateCache kvcache.
 		}
 		return txpoolcfg.Spammer
 	}
-	if !isLocal && p.all.blobCount(txn.SenderID) > p.cfg.BlobSlots {
+	if !isLocal && (p.all.blobCount(txn.SenderID)+uint64(len(txn.BlobHashes))) > p.cfg.BlobSlots {
 		if txn.Traced {
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx marked as spamming (too many blobs) idHash=%x slots=%d, limit=%d", txn.IDHash, p.all.count(txn.SenderID), p.cfg.AccountSlots))
 		}
 		return txpoolcfg.Spammer
+	}
+	if p.totalBlobsInPool.Load() >= p.cfg.TotalBlobPoolLimit {
+		if txn.Traced {
+			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx total blobs limit reached in pool limit=%x current blobs=%d", p.cfg.TotalBlobPoolLimit, p.totalBlobsInPool.Load()))
+		}
+		return txpoolcfg.BlobPoolOverflow
 	}
 
 	// check nonce and balance
@@ -1400,6 +1438,11 @@ func (p *TxPool) addLocked(mt *metaTx, announcements *types.Announcements) txpoo
 	}
 	// All transactions are first added to the queued pool and then immediately promoted from there if required
 	p.queued.Add(mt, "addLocked", p.logger)
+	if mt.Tx.Type == types.BlobTxType {
+		t := p.totalBlobsInPool.Load()
+		p.totalBlobsInPool.Store(t + (uint64(len(mt.Tx.BlobHashes))))
+	}
+
 	// Remove from mined cache as we are now "resurrecting" it to a sub-pool
 	p.deleteMinedBlobTxn(hashStr)
 	return txpoolcfg.NotSet
@@ -1413,6 +1456,10 @@ func (p *TxPool) discardLocked(mt *metaTx, reason txpoolcfg.DiscardReason) {
 	p.deletedTxs = append(p.deletedTxs, mt)
 	p.all.delete(mt, reason, p.logger)
 	p.discardReasonsLRU.Add(hashStr, reason)
+	if mt.Tx.Type == types.BlobTxType {
+		t := p.totalBlobsInPool.Load()
+		p.totalBlobsInPool.Store(t - uint64(len(mt.Tx.BlobHashes)))
+	}
 }
 
 // Cache recently mined blobs in anticipation of reorg, delete finalized ones
@@ -1813,6 +1860,11 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 						if len(slotRlp) == 0 {
 							continue
 						}
+						// Strip away blob wrapper, if applicable
+						slotRlp, err2 := types2.UnwrapTxPlayloadRlp(slotRlp)
+						if err2 != nil {
+							continue
+						}
 
 						// Empty rlp can happen if a transaction we want to broadcast has just been mined, for example
 						slotsRlp = append(slotsRlp, slotRlp)
@@ -1843,7 +1895,6 @@ func MainLoop(ctx context.Context, db kv.RwDB, p *TxPool, newTxs chan types.Anno
 					return
 				}
 				if newSlotsStreams != nil {
-					// TODO(eip-4844) What is this for? Is it OK to broadcast blob transactions?
 					newSlotsStreams.Broadcast(&proto_txpool.OnAddReply{RplTxs: slotsRlp}, p.logger)
 				}
 

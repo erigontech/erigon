@@ -289,6 +289,9 @@ func (back *RemoteBackend) EventLookup(ctx context.Context, tx kv.Getter, txnHas
 func (back *RemoteBackend) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockNum uint64) ([]rlp.RawValue, error) {
 	return back.blockReader.EventsByBlock(ctx, tx, hash, blockNum)
 }
+func (back *RemoteBackend) BorStartEventID(ctx context.Context, tx kv.Tx, blockNum uint64) (uint64, error) {
+	return back.blockReader.BorStartEventID(ctx, tx, blockNum)
+}
 
 func (back *RemoteBackend) LastSpanId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
 	return back.blockReader.LastSpanId(ctx, tx)

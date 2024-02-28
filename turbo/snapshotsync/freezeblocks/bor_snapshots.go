@@ -20,10 +20,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -238,7 +238,7 @@ func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *b
 		}
 	}()
 	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(sn.Path)
+	d, err := seg.NewDecompressor(sn.Path)
 	if err != nil {
 		return err
 	}
@@ -323,7 +323,7 @@ func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *ba
 		}
 	}()
 	// Calculate how many records there will be in the index
-	d, err := compress.NewDecompressor(sn.Path)
+	d, err := seg.NewDecompressor(sn.Path)
 	if err != nil {
 		return err
 	}
@@ -480,7 +480,10 @@ func (s *BorRoSnapshots) ReopenFolder() error {
 		_, fName := filepath.Split(f.Path)
 		list = append(list, fName)
 	}
-	return s.ReopenList(list, false)
+	if err := s.ReopenList(list, false); err != nil {
+		return err
+	}
+	return nil
 }
 
 type BorView struct {
