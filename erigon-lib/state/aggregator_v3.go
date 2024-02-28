@@ -1493,7 +1493,6 @@ type AggregatorV3Context struct {
 }
 
 func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
-
 	ac := &AggregatorV3Context{
 		a:          a,
 		logAddrs:   a.logAddrs.MakeContext(),
