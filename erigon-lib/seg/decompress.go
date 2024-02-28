@@ -19,6 +19,7 @@ package seg
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -116,6 +117,10 @@ type Decompressor struct {
 	filePath, fileName string
 }
 
+// Maximal Huffman tree depth
+// Note: mainnet has patternMaxDepth 31
+const maxAllowedDepth = 50
+
 // Tables with bitlen greater than threshold will be condensed.
 // Condensing reduces size of decompression table but leads to slower reads.
 // To disable condesning at all set to 9 (we dont use tables larger than 2^9)
@@ -191,7 +196,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 
 	for i < dictSize {
 		d, ns := binary.Uvarint(data[i:])
-		if d > 64 { // mainnet has maxDepth 31
+		if d > maxAllowedDepth {
 			return nil, fmt.Errorf("dictionary is invalid: patternMaxDepth=%d", d)
 		}
 		depths = append(depths, d)
@@ -215,7 +220,9 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		}
 		// fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
 		d.dict = newPatternTable(bitLen)
-		buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth)
+		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth); err != nil {
+			return nil, err
+		}
 	}
 
 	// read positions
@@ -230,7 +237,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	i = 0
 	for i < dictSize {
 		d, ns := binary.Uvarint(data[i:])
-		if d > 2048 {
+		if d > maxAllowedDepth {
 			return nil, fmt.Errorf("dictionary is invalid: posMaxDepth=%d", d)
 		}
 		posDepths = append(posDepths, d)
@@ -258,22 +265,28 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
-		buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth)
+		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
+			return nil, err
+		}
 	}
 	d.wordsStart = pos + 8 + dictSize
 	return d, nil
 }
 
-func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64) int {
+func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
+	if maxDepth > maxAllowedDepth {
+		return 0, fmt.Errorf("buildCondensedPatternTable: maxDepth=%d is too deep", maxDepth)
+	}
+
 	if len(depths) == 0 {
-		return 0
+		return 0, nil
 	}
 	if depth == depths[0] {
 		pattern := word(patterns[0])
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
 		cw := &codeword{code: code, pattern: &pattern, len: byte(bits), ptr: nil}
 		table.insertWord(cw)
-		return 1
+		return 1, nil
 	}
 	if bits == 9 {
 		var bitLen int
@@ -286,13 +299,23 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 		table.insertWord(cw)
 		return buildCondensedPatternTable(cw.ptr, depths, patterns, 0, 0, depth, maxDepth)
 	}
-	b0 := buildCondensedPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1)
-	return b0 + buildCondensedPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	if maxDepth == 0 {
+		return 0, errors.New("buildCondensedPatternTable: maxDepth reached zero")
+	}
+	b0, err := buildCondensedPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1)
+	if err != nil {
+		return 0, err
+	}
+	b1, err := buildCondensedPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	return b0 + b1, err
 }
 
-func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) int {
+func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
+	if maxDepth > maxAllowedDepth {
+		return 0, fmt.Errorf("buildPosTable: maxDepth=%d is too deep", maxDepth)
+	}
 	if len(depths) == 0 {
-		return 0
+		return 0, nil
 	}
 	if depth == depths[0] {
 		p := poss[0]
@@ -311,7 +334,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 				table.ptrs[c] = nil
 			}
 		}
-		return 1
+		return 1, nil
 	}
 	if bits == 9 {
 		var bitLen int
@@ -332,8 +355,15 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		table.ptrs[code] = newTable
 		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
 	}
-	b0 := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
-	return b0 + buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	if maxDepth == 0 {
+		return 0, errors.New("buildPosTable: maxDepth reached zero")
+	}
+	b0, err := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
+	if err != nil {
+		return 0, err
+	}
+	b1, err := buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	return b0 + b1, err
 }
 
 func (d *Decompressor) DataHandle() unsafe.Pointer {

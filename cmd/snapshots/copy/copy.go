@@ -297,8 +297,12 @@ func selectFiles(entries []fs.DirEntry, version snaptype.Version, firstBlock, la
 				if ext := filepath.Ext(info.Name()); ext == ".torrent" {
 					fileName := strings.TrimSuffix(info.Name(), ".torrent")
 
-					if fileInfo, ok := snaptype.ParseFileName("", fileName); ok {
-						snapInfo = sinf{fileInfo}
+					if fileInfo, isStateFile, ok := snaptype.ParseFileName("", fileName); ok {
+						if isStateFile {
+							//TODO
+						} else {
+							snapInfo = sinf{fileInfo}
+						}
 					}
 				}
 			}
