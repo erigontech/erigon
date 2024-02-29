@@ -230,9 +230,15 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		if overflow {
 			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
 		}
-		balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, blobGasVal)
-		if overflow {
-			return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+		if st.evm.ChainRules().IsCancun {
+			maxBlobFee, overflow := new(uint256.Int).MulOverflow(st.msg.MaxFeePerBlobGas(), new(uint256.Int).SetUint64(st.msg.BlobGas()))
+			if overflow {
+				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+			}
+			balanceCheck, overflow = balanceCheck.AddOverflow(balanceCheck, maxBlobFee)
+			if overflow {
+				return fmt.Errorf("%w: address %v", ErrInsufficientFunds, st.msg.From().Hex())
+			}
 		}
 	}
 	var subBalance = false
