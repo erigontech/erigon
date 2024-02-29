@@ -263,7 +263,6 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	if snapCfg == nil {
 		snapCfg = snapcfg.KnownCfg(cfg.ChainName)
 	}
-	fmt.Printf("a: %s\n", snapCfg.Preverified)
 	//if len(files) == 0 {
 	lock.Downloads = snapCfg.Preverified
 	//}
