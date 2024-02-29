@@ -1466,7 +1466,7 @@ func (c *Bor) CommitStates(
 		}
 
 		startEventID := chain.Chain.BorStartEventID(header.Hash(), blockNum)
-		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum, "startEventID", startEventID)
+		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum, "startEventID", startEventID, "events_from_db_or_snaps", len(events))
 		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
 		if err != nil {
 			return err
