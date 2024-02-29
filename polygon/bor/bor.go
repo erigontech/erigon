@@ -1452,7 +1452,7 @@ func (c *Bor) CommitStates(
 ) error {
 	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
 
-	if len(events) == 50 {
+	if len(events) == 50 || len(events) == 0 {
 		blockNum := header.Number.Uint64()
 		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum)
 
