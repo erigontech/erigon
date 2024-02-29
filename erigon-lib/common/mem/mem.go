@@ -5,9 +5,14 @@ package mem
 import (
 	"context"
 	"errors"
+	"runtime"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/process"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 )
 
 func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
@@ -17,7 +22,7 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {}
 
 func LogMemStats(ctx context.Context, logger log.Logger) {
-	logEvery := time.NewTicker(180 * time.Second)
+	logEvery := time.NewTicker(1 * time.Second)
 	defer logEvery.Stop()
 
 	for {
@@ -28,7 +33,7 @@ func LogMemStats(ctx context.Context, logger log.Logger) {
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 
-			logger.Info("[mem] memory stats", "alloc", m.alloc, "sys", m.sys)
+			logger.Info("[mem] memory stats", "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
 		}
 	}
 }
