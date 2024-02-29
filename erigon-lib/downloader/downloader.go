@@ -410,6 +410,9 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 			continue
 		}
 		if isStateFile {
+			if strings.HasSuffix(item.Name, ".kv") {
+				continue
+			}
 			if !downloads.Contains(item.Name, true) {
 				missingItems = append(missingItems, item)
 			}
