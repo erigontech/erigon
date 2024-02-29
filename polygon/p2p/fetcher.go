@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/ledgerwatch/log/v3"
 	"modernc.org/mathutil"
 
@@ -16,10 +17,13 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const (
-	responseTimeout      = 5 * time.Second
-	maxFetchHeadersRange = 16384
-)
+const maxFetchHeadersRange = 16384
+
+type FetcherConfig struct {
+	responseTimeout time.Duration
+	retryBackOff    time.Duration
+	maxRetries      uint64
+}
 
 type RequestIdGenerator func() uint64
 
@@ -28,6 +32,7 @@ type Fetcher interface {
 }
 
 func NewFetcher(
+	config FetcherConfig,
 	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
@@ -35,6 +40,7 @@ func NewFetcher(
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
 	return &fetcher{
+		config:             config,
 		logger:             logger,
 		messageListener:    messageListener,
 		messageSender:      messageSender,
@@ -44,6 +50,7 @@ func NewFetcher(
 }
 
 type fetcher struct {
+	config             FetcherConfig
 	logger             log.Logger
 	messageListener    MessageListener
 	messageSender      MessageSender
@@ -73,75 +80,31 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	//
 	// A header is approximately 500 bytes, hence 1024 headers should be less than 2 MB.
 	// As a simplification we can only use MaxHeadersServe for chunking.
-	chunks := amount / eth.MaxHeadersServe
+	numChunks := amount / eth.MaxHeadersServe
 	if amount%eth.MaxHeadersServe > 0 {
-		chunks++
+		numChunks++
 	}
 
-	observer := make(ChanMessageObserver[*sentry.InboundMessage], chunks)
-	f.messageListener.RegisterBlockHeadersObserver(observer)
-	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
-
-	requestIds := make(map[uint64]uint64, chunks)
-	for i := uint64(0); i < chunks; i++ {
-		chunkStart := start + i*eth.MaxHeadersServe
-		chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
-		requestId := f.requestIdGenerator()
-		requestIds[requestId] = i
-
-		if err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
-			RequestId: requestId,
-			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
-				Origin: eth.HashOrNumber{
-					Number: chunkStart,
-				},
-				Amount: chunkAmount,
-			},
-		}); err != nil {
-			return nil, err
+	chunks := make(map[uint64][]*types.Header, numChunks)
+	err := backoff.Retry(func() error {
+		err := f.fetchHeaders(ctx, start, end, numChunks, chunks, peerId)
+		if err != nil {
+			// retry response timeouts - peer might be busy
+			if errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			// do not retry other errors
+			return backoff.Permanent(err)
 		}
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(len(requestIds))*responseTimeout)
-	defer cancel()
-
-	headerChunks := make([][]*types.Header, chunks)
-	for len(requestIds) > 0 {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
-		case msg := <-observer:
-			msgPeerId := PeerIdFromH512(msg.PeerId)
-			if msgPeerId != peerId {
-				continue
-			}
-
-			var pkt eth.BlockHeadersPacket66
-			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-				if rlp.IsInvalidRLPError(err) {
-					f.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
-					penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
-					if penalizeErr != nil {
-						err = fmt.Errorf("%w: %w", penalizeErr, err)
-					}
-				}
-
-				return nil, fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
-			}
-
-			requestIdIndex, ok := requestIds[pkt.RequestId]
-			if !ok {
-				continue
-			}
-
-			headerChunks[requestIdIndex] = pkt.BlockHeadersPacket
-			delete(requestIds, pkt.RequestId)
-		}
+		return nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(f.config.retryBackOff), f.config.maxRetries))
+	if err != nil {
+		return nil, err
 	}
 
 	headers := make([]*types.Header, 0, amount)
-	for _, headerChunk := range headerChunks {
-		for _, header := range headerChunk {
+	for chunkNum := uint64(0); chunkNum < uint64(len(chunks)); chunkNum++ {
+		for _, header := range chunks[chunkNum] {
 			headers = append(headers, header)
 		}
 	}
@@ -164,6 +127,82 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}
 
 	return headers, nil
+}
+
+func (f *fetcher) fetchHeaders(
+	ctx context.Context,
+	start uint64,
+	end uint64,
+	numChunks uint64,
+	chunks map[uint64][]*types.Header,
+	peerId PeerId,
+) error {
+	observer := make(ChanMessageObserver[*sentry.InboundMessage], numChunks)
+	f.messageListener.RegisterBlockHeadersObserver(observer)
+	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
+
+	requestIdToChunkNum := make(map[uint64]uint64, numChunks)
+	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
+		if _, ok := chunks[chunkNum]; ok {
+			continue
+		}
+
+		chunkStart := start + chunkNum*eth.MaxHeadersServe
+		chunkEnd := mathutil.MinUint64(end, chunkStart+eth.MaxHeadersServe)
+		chunkAmount := chunkEnd - chunkStart
+		requestId := f.requestIdGenerator()
+		requestIdToChunkNum[requestId] = chunkNum
+
+		if err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
+			RequestId: requestId,
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Origin: eth.HashOrNumber{
+					Number: chunkStart,
+				},
+				Amount: chunkAmount,
+			},
+		}); err != nil {
+			return err
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(len(requestIdToChunkNum))*f.config.responseTimeout)
+	defer cancel()
+
+	for len(requestIdToChunkNum) > 0 {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
+		case msg := <-observer:
+			msgPeerId := PeerIdFromH512(msg.PeerId)
+			if msgPeerId != peerId {
+				continue
+			}
+
+			var pkt eth.BlockHeadersPacket66
+			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
+				if rlp.IsInvalidRLPError(err) {
+					f.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
+					penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
+					if penalizeErr != nil {
+						err = fmt.Errorf("%w: %w", penalizeErr, err)
+					}
+				}
+
+				return fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
+			}
+
+			chunkNum, ok := requestIdToChunkNum[pkt.RequestId]
+			if !ok {
+				continue
+			}
+
+			chunks[chunkNum] = pkt.BlockHeadersPacket
+			delete(requestIdToChunkNum, pkt.RequestId)
+		}
+	}
+
+	return nil
 }
 
 func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, end, amount uint64) error {
