@@ -34,7 +34,7 @@ const (
 	stateFetchLimit    = 50
 	apiHeimdallTimeout = 10 * time.Second
 	retryBackOff       = time.Second
-	maxRetries         = 50
+	maxRetries         = 150
 )
 
 //go:generate mockgen -destination=./client_mock.go -package=heimdall . HeimdallClient
