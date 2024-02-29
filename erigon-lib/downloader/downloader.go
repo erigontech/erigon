@@ -167,12 +167,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 
 		for _, download := range lock.Downloads {
 			if info, err := d.torrentInfo(download.Name); err == nil {
-				if download.Name == "v1-000000-000500-bodies.seg" {
-					fmt.Println(download.Name, hex.EncodeToString(info.Hash))
-				}
 				if info.Completed != nil {
 					if hash := hex.EncodeToString(info.Hash); download.Hash != hash {
-						fileInfo, _ := snaptype.ParseFileName(d.SnapDir(), download.Name)
+						fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), download.Name)
 
 						// this is lazy as it can be expensive for large files
 						fileHashBytes, err := fileHashBytes(d.ctx, fileInfo)
@@ -413,7 +410,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 			}
 
 			if preverified, ok := snapCfg.Preverified.Get(fileInfo.Name()); ok {
-				hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
+				hashBytes, err := localHashBytes(ctx, fileInfo, db)
 
 				if err != nil {
 					return fmt.Errorf("localHashBytes: %w", err)
@@ -444,7 +441,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 					return versioned
 				}()
 
-				hashBytes, err := localHashBytes(ctx, fileInfo, db, logger)
+				hashBytes, err := localHashBytes(ctx, fileInfo, db)
 
 				if err != nil {
 					return fmt.Errorf("localHashBytes: %w", err)
@@ -696,14 +693,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 					continue
 				}
 
-				if t.Name() == "v1-000000-000500-bodies.seg" {
-					isComplete, length, completionTime := d.checkComplete(t.Name())
-					fmt.Println("v1", isComplete, t.InfoHash(), length, completionTime)
-				}
-
 				if isComplete, length, completionTime := d.checkComplete(t.Name()); isComplete && completionTime != nil {
 					if _, ok := checking[t.Name()]; !ok {
-						fileInfo, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+						fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
 
 						stat, err := os.Stat(fileInfo.Path)
 
@@ -761,7 +753,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 
 					var completionTime *time.Time
-					fileInfo, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+					fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
 
 					info, err := d.torrentInfo(t.Name())
 
@@ -789,7 +781,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 					if err := d.db.Update(d.ctx,
 						torrentInfoUpdater(t.Info().Name, nil, t.Info().Length, completionTime)); err != nil {
 						d.logger.Warn("Failed to update file info", "file", t.Info().Name, "err", err)
-					} else {
 					}
 
 					d.lock.Lock()
@@ -825,7 +816,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if status.err == nil {
 					var completionTime *time.Time
-					fileInfo, _ := snaptype.ParseFileName(d.SnapDir(), status.name)
+					fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), status.name)
 
 					if info, err := d.torrentInfo(status.name); err == nil {
 						completionTime = info.Completed
@@ -904,10 +895,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 						available = append(available, webDownload.torrent)
 					}
 				} else {
-					wi, _ := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name())
+					wi, _, _ := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name())
 
 					for i, t := range available {
-						ai, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+						ai, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
 
 						if ai.CompareTo(wi) > 0 {
 							available[i] = webDownload.torrent
@@ -921,7 +912,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			for _, t := range available {
 
 				torrentInfo, _ := d.torrentInfo(t.Name())
-				fileInfo, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+				fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
 
 				if torrentInfo != nil && torrentInfo.Completed != nil {
 					if bytes.Equal(t.InfoHash().Bytes(), torrentInfo.Hash) {
@@ -1147,7 +1138,6 @@ func localHashCompletionCheck(ctx context.Context, t *torrent.Torrent, fileInfo 
 	localHash, err := fileHashBytes(ctx, fileInfo)
 
 	if err == nil {
-		fmt.Println(t.InfoHash(), hex.EncodeToString(localHash))
 		if bytes.Equal(t.InfoHash().Bytes(), localHash) {
 			statusChan <- downloadStatus{
 				name:     t.Name(),
@@ -1390,7 +1380,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 	spec.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	spec.DisallowDataDownload = true
 
-	info, _ := snaptype.ParseFileName(d.SnapDir(), name)
+	info, _, _ := snaptype.ParseFileName(d.SnapDir(), name)
 
 	d.lock.Lock()
 	t.Drop()
@@ -1523,8 +1513,8 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 	}
 
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
-		in, _ := snaptype.ParseFileName("", i.Name())
-		jn, _ := snaptype.ParseFileName("", j.Name())
+		in, _, _ := snaptype.ParseFileName("", i.Name())
+		jn, _, _ := snaptype.ParseFileName("", j.Name())
 		return in.CompareTo(jn)
 	})
 

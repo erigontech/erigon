@@ -1445,7 +1445,7 @@ func hasIdxFile(sn snaptype.FileInfo, logger log.Logger) bool {
 	fName := snaptype.IdxFileName(sn.Version, sn.From, sn.To, sn.Type.String())
 	var result = true
 
-	segment, err := compress.NewDecompressor(sn.Path)
+	segment, err := seg.NewDecompressor(sn.Path)
 
 	if err != nil {
 		return false
