@@ -371,6 +371,8 @@ type Domain struct {
 type domainCfg struct {
 	hist     histCfg
 	compress FileCompression
+
+	replaceKeysInValues bool
 }
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
@@ -384,9 +386,11 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
-		indexList:          withBTree | withExistence,
-		withExistenceIndex: true,
+		indexList:           withBTree | withExistence,
+		replaceKeysInValues: cfg.replaceKeysInValues, // for commitment domain only
+		withExistenceIndex:  true,
 	}
+
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error

@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"math"
 	"path/filepath"
 	"runtime"
@@ -895,6 +896,7 @@ type SharedDomainsCommitmentContext struct {
 	discard      bool
 	updates      *UpdateTree
 	mode         CommitmentMode
+	branchCache  map[string]cachedBranch
 	patriciaTrie commitment.Trie
 	justRestored atomic.Bool
 }
@@ -906,13 +908,31 @@ func NewSharedDomainsCommitmentContext(sd *SharedDomains, mode CommitmentMode, t
 		updates:      NewUpdateTree(mode),
 		discard:      dbg.DiscardCommitment(),
 		patriciaTrie: commitment.InitializeTrie(trieVariant),
+		branchCache:  make(map[string]cachedBranch),
 	}
 
 	ctx.patriciaTrie.ResetContext(ctx)
 	return ctx
 }
 
+type cachedBranch struct {
+	data []byte
+	step uint64
+}
+
+// Cache should ResetBranchCache after each commitment computation
+func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
+	sdc.branchCache = make(map[string]cachedBranch)
+}
+
 func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint64, error) {
+	//cached, ok := sdc.branchCache[string(pref)]
+	//if ok {
+	//	// cached value is already transformed/clean to read.
+	//	// Cache should ResetBranchCache after each commitment computation
+	//	return cached.data, cached.step, nil
+	//}
+	//
 	v, step, err := sdc.sd.LatestCommitment(pref)
 	if err != nil {
 		return nil, step, fmt.Errorf("GetBranch failed: %w", err)
@@ -923,7 +943,63 @@ func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint6
 	if len(v) == 0 {
 		return nil, step, nil
 	}
+	if sdc.sd.aggCtx.a.commitmentValuesTransform && !bytes.Equal(pref, keyCommitmentState) {
+		// todo returned step by LatestCommitment could be used as well, to determine endTxNum of file with that key
+		v, err = sdc.replaceShortenedBranch(v)
+		if err != nil {
+			return nil, step, err
+		}
+	}
+
+	sdc.branchCache[string(pref)] = cachedBranch{data: v, step: step}
 	return v, step, nil
+}
+
+func (sdc *SharedDomainsCommitmentContext) replaceShortenedBranch(branch commitment.BranchData) (commitment.BranchData, error) {
+	if !sdc.sd.aggCtx.a.commitmentValuesTransform {
+		panic("agg.commitmentValuesTransform must be enabled to use replaceShortenedBranch")
+	}
+
+	apks, spks, err := branch.ExtractPlainKeys()
+	if err != nil {
+		return nil, err
+	}
+	if len(apks) == 0 && len(spks) == 0 {
+		return branch, nil
+	}
+
+	transAccountPks := make([][]byte, 0, len(apks))
+	var apkBuf, spkBuf []byte
+	var found bool
+
+	for _, accountPlainKey := range apks {
+		if len(accountPlainKey) == length.Addr {
+			// Non-optimised key originating from a database record
+			apkBuf = append(apkBuf[:0], accountPlainKey...)
+		} else {
+			apkBuf, found = sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(accountPlainKey, nil)
+			if !found {
+				sdc.sd.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
+			}
+		}
+		transAccountPks = append(transAccountPks, apkBuf)
+	}
+
+	transStoragePks := make([][]byte, 0, len(spks))
+	for _, storagePlainKey := range spks {
+		if len(storagePlainKey) == length.Addr+length.Hash {
+			// Non-optimised key originating from a database record
+			spkBuf = append(spkBuf[:0], storagePlainKey...)
+		} else {
+			// Optimised key referencing a state file record (file number and offset within the file)
+			spkBuf, found = sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(storagePlainKey, nil)
+			if !found {
+				sdc.sd.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
+			}
+		}
+		transStoragePks = append(transStoragePks, spkBuf)
+	}
+	return branch.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {
@@ -1023,6 +1099,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchCode(c *commitmentItem, val []by
 
 // Evaluates commitment for processed state.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctext context.Context, saveState bool, blockNum uint64, logPrefix string) (rootHash []byte, err error) {
+	defer sdc.ResetBranchCache()
 	if dbg.DiscardCommitment() {
 		sdc.updates.List(true)
 		return nil, nil

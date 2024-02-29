@@ -2249,3 +2249,54 @@ func TestDomain_PruneSimple(t *testing.T) {
 		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
 	})
 }
+
+func TestShortenedKeyEncodeDecode(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepFrom uint64
+		stepTo   uint64
+		offset   uint64
+	}{
+		{"Basic case", 0, 2, 1234567890},
+		{"Min step and offset", 1 << 20, 1 << 30, 0},
+		{"Max step", 1 << 10, math.MaxUint64, 1234567890},
+		{"Max offset", 1, 1 << 40, math.MaxUint64},
+		{"Max everything", math.MaxUint64 - 2, math.MaxUint64, math.MaxUint64},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			buf := make([]byte, 2) // Adjust size based on how encodeU64 works
+
+			encoded := encodeShortenedKey(buf, tt.stepFrom, tt.stepTo, tt.offset)
+
+			decodedStepFrom, decodedStepTo, decodedOffset := decodeShortenedKey(encoded)
+
+			require.EqualValues(t, tt.stepFrom, decodedStepFrom)
+			require.EqualValues(t, tt.stepTo, decodedStepTo)
+			require.EqualValues(t, tt.offset, decodedOffset)
+			t.Logf("encoded size %d (s0=%d s1=%d of=%d)", len(encoded), decodedStepFrom, decodedStepTo, decodedOffset)
+		})
+	}
+
+	t.Run("ShortenedKeyInvalidInput", func(t *testing.T) {
+		// Expecting this to not panic
+		_, _, _ = decodeShortenedKey([]byte{})
+	})
+
+	t.Run("EncodeShortenedKeyInvalidInput", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("with nil input")
+			}
+		}()
+		step := uint64(1)
+		stepTo := uint64(20489)
+		offset := uint64(100)
+
+		shortened := encodeShortenedKey(nil, step, stepTo, offset) // This should not panic
+		rstep, _, rofft := decodeShortenedKey(shortened)
+		require.EqualValues(t, step, rstep)
+		require.EqualValues(t, offset, rofft)
+	})
+}

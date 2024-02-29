@@ -260,41 +260,64 @@ func decodeU64(from []byte) uint64 {
 	return i
 }
 
-// nolint
-func encodeU64(i uint64, to []byte) []byte {
+func encodeU64(i uint64, to []byte) (int, []byte) {
 	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
 	switch {
 	case i < (1 << 8):
-		return append(to, byte(i))
+		return 1, append(to, byte(i))
 	case i < (1 << 16):
-		return append(to, byte(i>>8), byte(i))
+		return 2, append(to, byte(i>>8), byte(i))
 	case i < (1 << 24):
-		return append(to, byte(i>>16), byte(i>>8), byte(i))
+		return 3, append(to, byte(i>>16), byte(i>>8), byte(i))
 	case i < (1 << 32):
-		return append(to, byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
+		return 4, append(to, byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
 	case i < (1 << 40):
-		return append(to, byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
+		return 5, append(to, byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
 	case i < (1 << 48):
-		return append(to, byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
+		return 6, append(to, byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
 	case i < (1 << 56):
-		return append(to, byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
+		return 7, append(to, byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
 	default:
-		return append(to, byte(i>>56), byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
+		return 8, append(to, byte(i>>56), byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
 	}
 }
 
-// Optimised key referencing a state file record (file number and offset within the file)
-// nolint
-func shortenedKey(apk []byte) (step uint16, offset uint64) {
-	step = binary.BigEndian.Uint16(apk[:2])
-	return step, decodeU64(apk[1:])
+func encodeShortenedKey(buf []byte, stepFrom uint64, stepTo uint64, offset uint64) []byte {
+	if len(buf) < 2 {
+		buf = make([]byte, 2)
+	}
+
+	var s0, s1, of int
+	s0, buf = encodeU64(stepFrom, buf[:])
+	s1, buf = encodeU64(stepTo, buf[:])
+	of, buf = encodeU64(offset, buf[:])
+
+	// to put them into 3 bits each normalized to 0..7
+	s0--
+	s1--
+	of--
+
+	enc := uint16((s0&0x07)<<6 | (s1&0x07)<<3 | (of & 0x07))
+	binary.BigEndian.PutUint16(buf[:2], enc)
+	return buf
 }
 
-// nolint
-func encodeShortenedKey(buf []byte, step uint16, offset uint64) []byte {
-	binary.BigEndian.PutUint16(buf[:2], step)
-	encodeU64(offset, buf[2:])
-	return buf
+// Optimised key referencing a state file record (file number and offset within the file)
+func decodeShortenedKey(shortened []byte) (stepFrom, stepTo, offset uint64) {
+	if len(shortened) < 1 {
+		return 0, 0, 0
+	}
+
+	encoded := binary.BigEndian.Uint16(shortened[:2])
+	s0 := int((encoded>>6)&0x07) + 1
+	s1 := int((encoded>>3)&0x07) + 1
+	of := int(encoded&0x07) + 1
+	// denormalize lengths
+
+	shortened = shortened[2:]
+	return decodeU64(shortened[:s0]),
+		decodeU64(shortened[s0 : s0+s1]),
+		decodeU64(shortened[s0+s1 : s0+s1+of])
 }
 
 type commitmentItem struct {
@@ -307,7 +330,6 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 }
 
 func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, endTxNum uint64, idxList idxList, list ...*filesItem) (shortened []byte, found bool) {
-	shortened = make([]byte, 2, 10)
 	for _, item := range list {
 		if item.startTxNum == startTxNum && item.endTxNum == endTxNum {
 			g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
@@ -334,7 +356,7 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 				if !bytes.Equal(fullKey, k) {
 					dc.d.logger.Warn("commitment branch key replacement seek failed",
 						"key", fmt.Sprintf("%x", fullKey), "idx", "recsplit", "file", item.decompressor.FileName())
-					//return nil, false
+					return fullKey, false
 					continue
 				}
 			}
@@ -346,43 +368,63 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 					continue
 				}
 				if cur == nil {
+					return fullKey, false
 					panic("commitment branch key replacement seek failed")
 				}
 				offset = cur.offsetInFile()
 			}
 
-			step := uint16(item.endTxNum / dc.d.aggregationStep)
-			shortened = encodeShortenedKey(shortened, step, offset)
+			stepFrom, stepTo := item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep
+			shortened = encodeShortenedKey(make([]byte, 2), stepFrom, stepTo, offset)
 
 			dc.d.logger.Info(fmt.Sprintf("replacing [%x] => {%x}", fullKey, shortened),
-				"step", step, "offset", offset, "file", item.decompressor.FileName())
+				"step", fmt.Sprintf("%d-%d", stepFrom, stepTo), "offset", offset, "file", item.decompressor.FileName())
 			return shortened, true
 		}
 	}
 	return nil, false
 }
 
+// searches in given list of files for a key or searches in domain files if list is empty
 func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem) (fullKey []byte, found bool) {
-	fileStep, offset := shortenedKey(shortKey)
-	expected := uint64(fileStep) * dc.d.aggregationStep
+	stepFrom, stepTo, offset := decodeShortenedKey(shortKey)
+	txFrom, txTo := stepFrom*dc.d.aggregationStep, stepTo*dc.d.aggregationStep
 
-	for _, item := range list {
-		if item.startTxNum > expected || item.endTxNum < expected {
-			continue
+	var item *filesItem
+	if len(list) > 0 {
+		for _, f := range list {
+			if f.startTxNum == txFrom && f.endTxNum == txTo {
+				item = f
+				break
+			}
 		}
-
-		g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
-		fullKey, _, err := item.bindex.dataLookup(offset, g)
-		if err != nil {
-			return nil, false
+	} else {
+		var newFile = newFilesItem(txFrom, txTo, dc.d.aggregationStep)
+		newFile.frozen = false
+		var has bool
+		item, has = dc.d.files.Get(newFile)
+		if !has {
+			item = nil
 		}
-		dc.d.logger.Info(fmt.Sprintf("shortenedKey [%x]=>{%x}", shortKey, fullKey),
-			"step", fileStep, "offset", offset, "file", item.decompressor.FileName())
-
-		found = true
-		break
 	}
-	return fullKey, found
+	if item == nil {
+		dc.d.logger.Warn("commitment branch key file not found",
+			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
+			"listSize", len(list), "filesCount", dc.d.files.Len())
+		return nil, false
+	}
+
+	g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
+	g.Reset(offset)
+	if !g.HasNext() {
+		dc.d.logger.Warn("commitment branch key lookup failed",
+			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset, "file", item.decompressor.FileName())
+		return nil, false
+	}
+	fullKey, _ = g.Next(nil)
+	dc.d.logger.Info(fmt.Sprintf("decodeShortenedKey [%x]=>{%x}", shortKey, fullKey),
+		"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset, "file", item.decompressor.FileName())
+	return fullKey, true
 }
 
 // commitmentValTransform parses the value of the commitment record to extract references
@@ -405,6 +447,9 @@ func (dc *DomainContext) commitmentValTransform(
 		accountPlainKeys, storagePlainKeys, err := val.ExtractPlainKeys()
 		if err != nil {
 			return nil, err
+		}
+		if len(accountPlainKeys) == 0 && len(storagePlainKeys) == 0 {
+			return valBuf, nil
 		}
 
 		transAccountPks := make([][]byte, 0, len(accountPlainKeys))
@@ -446,10 +491,6 @@ func (dc *DomainContext) commitmentValTransform(
 			}
 			transStoragePks = append(transStoragePks, storagePlainKey)
 		}
-		transValBuf, err = val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
-		if err != nil {
-			return nil, err
-		}
-		return transValBuf, nil
+		return val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
 	}
 }

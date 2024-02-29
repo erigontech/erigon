@@ -162,9 +162,10 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		hist: histCfg{
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
-			dontProduceFiles: true,
+			dontProduceHistoryFiles: true,
 		},
-		compress: CompressNone,
+		replaceKeysInValues: a.commitmentValuesTransform,
+		compress:            CompressNone,
 	}
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
@@ -1244,9 +1245,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 						files.d[kv.StorageDomain], mf.d[kv.StorageDomain], ac.d[kv.StorageDomain].d.indexList,
 						r.d[kv.AccountsDomain].valuesStartTxNum, r.d[kv.AccountsDomain].valuesEndTxNum,
 					)
-					fmt.Printf("waiting for valReplaceWg\n")
 					valReplaceWg.Wait()
-					fmt.Printf("valReplaceWg released, merging commit\n")
 				}
 
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)

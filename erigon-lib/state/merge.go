@@ -593,6 +593,14 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 		deleted := r.valuesStartTxNum == 0 && len(lastVal) == 0
 		if !deleted {
 			if keyBuf != nil {
+				if vt != nil {
+					if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
+						valBuf, err = vt(valBuf)
+						if err != nil {
+							return nil, nil, nil, fmt.Errorf("merge: valTransform [%x] %w", valBuf, err)
+						}
+					}
+				}
 				if err = kvWriter.AddWord(keyBuf); err != nil {
 					return nil, nil, nil, err
 				}

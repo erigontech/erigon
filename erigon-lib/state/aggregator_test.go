@@ -127,6 +127,73 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.EqualValues(t, otherMaxWrite, binary.BigEndian.Uint64(v[:]))
 }
 
+func TestAggregatorV3_MergeValTransform(t *testing.T) {
+	db, agg := testDbAndAggregatorv3(t, 1000)
+	rwTx, err := db.BeginRwNosync(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
+	ac := agg.MakeContext()
+	defer ac.Close()
+	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	defer domains.Close()
+
+	txs := uint64(100000)
+	rnd := rand.New(rand.NewSource(time.Now().UnixNano()))
+
+	agg.commitmentValuesTransform = true
+
+	state := make(map[string][]byte)
+
+	// keys are encodings of numbers 1..31
+	// each key changes value on every txNum which is multiple of the key
+	//var maxWrite, otherMaxWrite uint64
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		domains.SetTxNum(txNum)
+
+		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
+
+		n, err := rnd.Read(addr)
+		require.NoError(t, err)
+		require.EqualValues(t, length.Addr, n)
+
+		n, err = rnd.Read(loc)
+		require.NoError(t, err)
+		require.EqualValues(t, length.Hash, n)
+
+		buf := types.EncodeAccountBytesV3(1, uint256.NewInt(txNum*1e6), nil, 0)
+		err = domains.DomainPut(kv.AccountsDomain, addr, nil, buf, nil, 0)
+		require.NoError(t, err)
+
+		err = domains.DomainPut(kv.StorageDomain, addr, loc, []byte{addr[0], loc[0]}, nil, 0)
+		require.NoError(t, err)
+
+		if (txNum+1)%agg.StepSize() == 0 {
+			_, err := domains.ComputeCommitment(context.Background(), true, txNum/10, "")
+			require.NoError(t, err)
+		}
+
+		state[string(addr)] = buf
+		state[string(addr)+string(loc)] = []byte{addr[0], loc[0]}
+	}
+
+	err = domains.Flush(context.Background(), rwTx)
+	require.NoError(t, err)
+
+	err = rwTx.Commit()
+	require.NoError(t, err)
+	rwTx = nil
+
+	err = agg.BuildFiles(txs)
+	require.NoError(t, err)
+
+	err = agg.MergeLoop(context.Background())
+	require.NoError(t, err)
+}
+
 func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 	//t.Skip()
 	t.Run("BPlus", func(t *testing.T) {
