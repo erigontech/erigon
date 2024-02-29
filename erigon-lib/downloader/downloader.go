@@ -167,6 +167,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 
 		for _, download := range lock.Downloads {
 			if info, err := d.torrentInfo(download.Name); err == nil {
+				if download.Name == "v1-000000-000500-bodies.seg" {
+					fmt.Println(download.Name, hex.EncodeToString(info.Hash))
+				}
 				if info.Completed != nil {
 					if hash := hex.EncodeToString(info.Hash); download.Hash != hash {
 						fileInfo, _ := snaptype.ParseFileName(d.SnapDir(), download.Name)
