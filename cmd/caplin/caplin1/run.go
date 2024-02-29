@@ -129,7 +129,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	syncedDataManager := synced_data.NewSyncedDataManager(true, beaconConfig)
 
 	emitters := beaconevents.NewEmitters()
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager)
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager, blobStorage)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -260,7 +260,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
 
-	forkChoice.StartAttestationsRTT()
+	forkChoice.StartJobsRTT()
 
 	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, gossipSource, blobStorage)
 	sync := stages.ConsensusClStages(ctx, stageCfg)

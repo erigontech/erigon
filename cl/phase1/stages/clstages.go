@@ -221,8 +221,8 @@ func ConsensusClStages(ctx context.Context,
 ) *clstages.StageGraph[*Cfg, Args] {
 
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
-	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation bool) error {
-		if err := cfg.forkChoice.OnBlock(block, newPayload, fullValidation); err != nil {
+	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+		if err := cfg.forkChoice.OnBlock(block, newPayload, fullValidation, checkDataAvaiability); err != nil {
 			return err
 		}
 		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
@@ -314,7 +314,7 @@ func ConsensusClStages(ctx context.Context,
 						})
 
 						for i, block := range blocks {
-							if err := processBlock(tx, block, false, true); err != nil {
+							if err := processBlock(tx, block, false, true, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								blocks = blocks[i:]
 								break
@@ -551,6 +551,21 @@ func ConsensusClStages(ctx context.Context,
 									if len(blocks.Data) == 0 {
 										continue
 									}
+									ids, err := network2.BlobsIdentifiersFromBlocks(blocks.Data)
+									if err != nil {
+										errCh <- err
+										return
+									}
+									blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+									if err != nil {
+										errCh <- err
+										return
+									}
+									if _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+										errCh <- err
+										return
+									}
+
 									select {
 									case respCh <- blocks:
 									case <-ctx.Done():
@@ -608,8 +623,9 @@ func ConsensusClStages(ctx context.Context,
 								}
 								defer tx.Rollback()
 
-								if err := processBlock(tx, block, true, true); err != nil {
+								if err := processBlock(tx, block, true, true, true); err != nil {
 									log.Debug("bad blocks segment received", "err", err)
+									tx.Rollback()
 									continue
 								}
 								if err := tx.Commit(); err != nil {

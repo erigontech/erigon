@@ -60,7 +60,7 @@ type ForkChoiceStorageWriter interface {
 	OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error
 	OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error
 	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
-	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error
+	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaibility bool) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
 }

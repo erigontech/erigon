@@ -12,7 +12,10 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
 
-const maxAttestationJobLifetime = 30 * time.Minute
+const (
+	maxAttestationJobLifetime = 30 * time.Minute
+	maxBlockJobLifetime       = 36 * time.Second // 3 mainnet slots
+)
 
 // OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool, insert bool) error {
@@ -129,7 +132,25 @@ func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *sol
 	})
 }
 
-func (f *ForkChoiceStore) StartAttestationsRTT() {
+type blockJob struct {
+	block *cltypes.SignedBeaconBlock
+	when  time.Time
+}
+
+// scheduleAttestationForLaterProcessing scheudules an attestation for later processing
+func (f *ForkChoiceStore) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
+	root, err := block.HashSSZ()
+	if err != nil {
+		log.Error("failed to hash block", "err", err)
+		return
+	}
+	f.blocksSet.Store(root, &blockJob{
+		block: block,
+		when:  time.Now(),
+	})
+}
+
+func (f *ForkChoiceStore) StartJobsRTT() {
 	go func() {
 		interval := time.NewTicker(500 * time.Millisecond)
 		for {
@@ -150,6 +171,31 @@ func (f *ForkChoiceStore) StartAttestationsRTT() {
 						}
 						f.attestationSet.Delete(key)
 					}
+					return true
+				})
+			}
+		}
+	}()
+
+	go func() {
+		interval := time.NewTicker(10 * time.Millisecond)
+		for {
+			select {
+			case <-f.ctx.Done():
+				return
+			case <-interval.C:
+				f.blocksSet.Range(func(key, value interface{}) bool {
+					job := value.(*blockJob)
+					if time.Since(job.when) > maxBlockJobLifetime {
+						f.blocksSet.Delete(key)
+						return true
+					}
+
+					f.blocksSet.Delete(key)
+					if err := f.OnBlock(job.block, true, true, true); err != nil {
+						log.Warn("failed to process attestation", "err", err)
+					}
+
 					return true
 				})
 			}

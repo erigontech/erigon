@@ -166,6 +166,40 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding blob sidecar"
 				return err
 			}
+			// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
+			if blobSideCar.Index >= g.beaconConfig.MaxBlobsPerBlock {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("blob index out of range")
+			}
+			sidecarSubnetIndex := blobSideCar.Index % g.beaconConfig.MaxBlobsPerBlock
+			if sidecarSubnetIndex != *data.SubnetId {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("blob index mismatch")
+			}
+			currentSlot := utils.GetCurrentSlot(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot)
+			// [REJECT] The sidecar's slot is consistent with the current slot -- i.e. blob_sidecar.slot == current_slot.
+			if blobSideCar.SignedBlockHeader.Header.Slot > currentSlot+1 {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("blob slot too far ahead")
+			}
+			// [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue sidecars for processing once the parent block is retrieved).
+			if _, has := g.forkChoice.GetHeader(blobSideCar.SignedBlockHeader.Header.ParentRoot); !has {
+				return nil
+			}
+			blockRoot, err := blobSideCar.SignedBlockHeader.Header.HashSSZ()
+			if err != nil {
+				return err
+			}
+			// Do not bother with blocks processed by fork choice already.
+			if _, has := g.forkChoice.GetHeader(blockRoot); has {
+				return nil
+			}
+			// The background checks above are enough for now.
+			if err := g.forkChoice.OnBlobSidecar(blobSideCar); err != nil {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return err
+			}
+
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		default:
 		}
