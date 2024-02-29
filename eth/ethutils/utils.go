@@ -12,9 +12,10 @@ import (
 )
 
 var (
-	ErrNilBlobHashes      = errors.New("nil blob hashes array")
-	ErrMaxBlobGasUsed     = errors.New("max blob gas used")
-	ErrMismatchBlobHashes = errors.New("mismatch blob hashes")
+	ErrNilBlobHashes       = errors.New("nil blob hashes array")
+	ErrMaxBlobGasUsed      = errors.New("max blob gas used")
+	ErrMismatchBlobHashes  = errors.New("mismatch blob hashes")
+	ErrInvalidVersiondHash = errors.New("invalid blob versioned hash, must start with VERSIONED_HASH_VERSION_KZG")
 )
 
 // IsLocalBlock checks whether the specified block is mined
@@ -48,7 +49,14 @@ func ValidateBlobs(blobGasUsed, maxBlobsGas, maxBlobsPerBlock uint64, expectedBl
 	}
 	actualBlobHashes := []libcommon.Hash{}
 	for _, txn := range *transactions {
-		actualBlobHashes = append(actualBlobHashes, txn.GetBlobHashes()...)
+		if txn.Type() == types.BlobTxType {
+			for _, h := range txn.GetBlobHashes() {
+				if h[0] != 0x01 {
+					return ErrInvalidVersiondHash
+				}
+				actualBlobHashes = append(actualBlobHashes, h)
+			}
+		}
 	}
 	if len(actualBlobHashes) > int(maxBlobsPerBlock) || blobGasUsed > maxBlobsGas {
 		return ErrMaxBlobGasUsed
