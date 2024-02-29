@@ -432,12 +432,6 @@ func TestServiceErrInvalidFetchHeadersRange(t *testing.T) {
 		require.Equal(t, uint64(3), errInvalidFetchHeadersRange.start)
 		require.Equal(t, uint64(1), errInvalidFetchHeadersRange.end)
 		require.Nil(t, headers)
-
-		headers, err = test.service.FetchHeaders(ctx, 1, 1+maxFetchHeadersRange+1, PeerIdFromUint64(1))
-		require.ErrorAs(t, err, &errInvalidFetchHeadersRange)
-		require.Equal(t, uint64(1), errInvalidFetchHeadersRange.start)
-		require.Equal(t, uint64(1+maxFetchHeadersRange+1), errInvalidFetchHeadersRange.end)
-		require.Nil(t, headers)
 	})
 }
 
