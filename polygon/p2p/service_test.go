@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
 	"testing"
 	"time"
 
@@ -41,14 +40,13 @@ func newServiceTest(t *testing.T, requestIdGenerator RequestIdGenerator) *servic
 }
 
 type serviceTest struct {
-	ctx                           context.Context
-	ctxCancel                     context.CancelFunc
-	t                             *testing.T
-	sentryClient                  *direct.MockSentryClient
-	service                       Service
-	headersRequestResponseMocksMu sync.Mutex
-	headersRequestResponseMocks   map[uint64]requestResponseMock
-	peerEvents                    chan *sentry.PeerEvent
+	ctx                         context.Context
+	ctxCancel                   context.CancelFunc
+	t                           *testing.T
+	sentryClient                *direct.MockSentryClient
+	service                     Service
+	headersRequestResponseMocks map[uint64]requestResponseMock
+	peerEvents                  chan *sentry.PeerEvent
 }
 
 // run is needed so that we can properly shut down tests involving the p2p service due to how the sentry multi
@@ -112,8 +110,6 @@ func (st *serviceTest) mockSentryStreams(mocks ...requestResponseMock) {
 }
 
 func (st *serviceTest) mockSentryInboundMessagesStream(mocks ...requestResponseMock) {
-	st.headersRequestResponseMocksMu.Lock()
-	defer st.headersRequestResponseMocksMu.Unlock()
 	for _, mock := range mocks {
 		st.headersRequestResponseMocks[mock.requestId] = mock
 	}
@@ -142,13 +138,12 @@ func (st *serviceTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 				return nil, err
 			}
 
-			st.headersRequestResponseMocksMu.Lock()
-			defer st.headersRequestResponseMocksMu.Unlock()
 			mock, ok := st.headersRequestResponseMocks[pkt.RequestId]
 			if !ok {
 				return nil, fmt.Errorf("unexpected request id: %d", pkt.RequestId)
 			}
 
+			delete(st.headersRequestResponseMocks, pkt.RequestId)
 			reqPeerId := PeerIdFromH512(req.PeerId)
 			if mock.wantRequestPeerId != reqPeerId {
 				return nil, fmt.Errorf("wantRequestPeerId != reqPeerId - %v vs %v", mock.wantRequestPeerId, reqPeerId)
@@ -368,6 +363,55 @@ func TestServiceFetchHeaders(t *testing.T) {
 		require.Len(t, headers, 2)
 		require.Equal(t, uint64(1), headers[0].Number.Uint64())
 		require.Equal(t, uint64(2), headers[1].Number.Uint64())
+	})
+}
+
+func TestServiceFetchHeadersWithChunking(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	mockHeaders := newMockBlockHeaders(1999)
+	requestId1 := uint64(1234)
+	mockInboundMessages1 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			// 1024 headers in first response
+			Data: blockHeadersPacket66Bytes(t, requestId1, mockHeaders[:1025]),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1,
+		wantRequestAmount:           1024,
+	}
+	requestId2 := uint64(1235)
+	mockInboundMessages2 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			// remaining 975 headers in second response
+			Data: blockHeadersPacket66Bytes(t, requestId2, mockHeaders[1025:]),
+		},
+	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1025,
+		wantRequestAmount:           975,
+	}
+
+	test := newServiceTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	test.run(func(ctx context.Context, t *testing.T) {
+		headers, err := test.service.FetchHeaders(ctx, 1, 2000, peerId)
+		require.NoError(t, err)
+		require.Len(t, headers, 1999)
+		require.Equal(t, uint64(1), headers[0].Number.Uint64())
+		require.Equal(t, uint64(1999), headers[len(headers)-1].Number.Uint64())
 	})
 }
 
