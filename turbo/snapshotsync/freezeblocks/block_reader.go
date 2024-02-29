@@ -238,7 +238,7 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	}
 	return result, nil
 }
-func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
+func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
 	panic("not implemented")
 }
 
@@ -1043,13 +1043,46 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*BorEv
 	return
 }
 
-func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
-	v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
-	if err != nil {
-		return 0, err
+func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
+	maxBlockNumInFiles := r.FrozenBorBlocks()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
+		if err != nil {
+			return 0, err
+		}
+		startEventId := binary.BigEndian.Uint64(v)
+		return startEventId, nil
 	}
-	startEventId := binary.BigEndian.Uint64(v)
-	return startEventId, nil
+
+	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	view := r.borSn.View()
+	defer view.Close()
+
+	segments := view.Events()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.from > blockHeight {
+			continue
+		}
+		if sn.to <= blockHeight {
+			break
+		}
+		if sn.IdxBorTxnHash == nil {
+			continue
+		}
+		if sn.IdxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
+		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
+		blockEventId := reader.Lookup(borTxHash[:])
+		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
+		gg := sn.seg.MakeGetter()
+		gg.Reset(offset)
+		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
+			return blockEventId + sn.IdxBorTxnHash.BaseDataID(), nil
+		}
+	}
+	return 0, nil
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {

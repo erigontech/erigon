@@ -1466,7 +1466,7 @@ func (c *Bor) CommitStates(
 			to = time.Unix(int64(pHeader.Time), 0)
 		}
 
-		startEventID := chain.Chain.BorStartEventID(blockNum)
+		startEventID := chain.Chain.BorStartEventID(header.Hash(), blockNum)
 		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
 		if err != nil {
 			return err
