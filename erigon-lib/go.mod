@@ -2,8 +2,6 @@ module github.com/ledgerwatch/erigon-lib
 
 go 1.21.4
 
-toolchain go1.22.0
-
 require (
 	github.com/erigontech/mdbx-go v0.37.1
 	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240229034447-941f03d54420
