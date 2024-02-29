@@ -57,36 +57,42 @@ func OpenCaplinDatabase(ctx context.Context,
 	dbPath string,
 	engine execution_client.ExecutionEngine,
 	wipeout bool,
-) (kv.RwDB, error) {
+) (kv.RwDB, kv.RwDB, error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
+	blobDbPath := path.Join(dbPath, "blobs")
+
 	if wipeout {
 		os.RemoveAll(dataDirIndexer)
+		os.RemoveAll(blobDbPath)
 	}
 
 	os.MkdirAll(dbPath, 0700)
+	os.MkdirAll(dataDirIndexer, 0700)
 
 	db := mdbx.MustOpen(dataDirIndexer)
+	blobDB := mdbx.MustOpen(blobDbPath)
 
 	tx, err := db.BeginRw(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer tx.Rollback()
 
 	if err := db_config.WriteConfigurationIfNotExist(ctx, tx, databaseConfig); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	{ // start ticking forkChoice
 		go func() {
 			<-ctx.Done()
-			db.Close() // close sql database here
+			db.Close()     // close sql database here
+			blobDB.Close() // close blob database here
 		}()
 	}
-	return db, nil
+	return db, blobDB, nil
 }
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
@@ -116,9 +122,10 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		return err
 	}
 	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
+	syncedDataManager := synced_data.NewSyncedDataManager(true, beaconConfig)
 
 	emitters := beaconevents.NewEmitters()
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters)
+	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -227,8 +234,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	if err != nil {
 		return err
 	}
-	af := afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinHistory)
-	antiq := antiquary.NewAntiquary(ctx, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling, af)
+	antiq := antiquary.NewAntiquary(ctx, genesisState, vTables, beaconConfig, dirs, snDownloader, indexDB, csn, rcsn, logger, states, backfilling)
 	// Create the antiquary
 	go func() {
 		if err := antiq.Loop(); err != nil {
@@ -240,8 +246,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		return err
 	}
 
-	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, af, genesisState)
-	syncedDataManager := synced_data.NewSyncedDataManager(cfg.Active, beaconConfig)
+	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState)
 	if cfg.Active {
 		apiHandler := handler.NewApiHandler(genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &cfg, emitters)
 

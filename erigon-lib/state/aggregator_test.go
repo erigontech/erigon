@@ -13,16 +13,17 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+
+	"github.com/ledgerwatch/erigon-lib/common/background"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 func testDbAndAggregator(t *testing.T, aggStep uint64) (string, kv.RwDB, *Aggregator) {
@@ -524,7 +525,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 }
 
 func pivotKeysFromKV(dataPath string) ([][]byte, error) {
-	decomp, err := compress.NewDecompressor(dataPath)
+	decomp, err := seg.NewDecompressor(dataPath)
 	if err != nil {
 		return nil, err
 	}
@@ -566,7 +567,7 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 	values := make([]byte, valueSize)
 
 	dataPath := path.Join(tmp, fmt.Sprintf("%dk.kv", keyCount/1000))
-	comp, err := compress.NewCompressor(context.Background(), "cmp", dataPath, tmp, compress.MinPatternScore, 1, log.LvlDebug, logger)
+	comp, err := seg.NewCompressor(context.Background(), "cmp", dataPath, tmp, seg.MinPatternScore, 1, log.LvlDebug, logger)
 	require.NoError(tb, err)
 
 	for i := 0; i < keyCount; i++ {
@@ -589,7 +590,7 @@ func generateCompressedKV(tb testing.TB, tmp string, keySize, valueSize, keyCoun
 	require.NoError(tb, err)
 	comp.Close()
 
-	decomp, err := compress.NewDecompressor(dataPath)
+	decomp, err := seg.NewDecompressor(dataPath)
 	require.NoError(tb, err)
 
 	getter := decomp.MakeGetter()
@@ -623,7 +624,7 @@ func Test_InitBtreeIndex(t *testing.T) {
 
 	keyCount, M := 100, uint64(4)
 	compPath := generateCompressedKV(t, tmp, 52, 300, keyCount, logger)
-	decomp, err := compress.NewDecompressor(compPath)
+	decomp, err := seg.NewDecompressor(compPath)
 	require.NoError(t, err)
 	defer decomp.Close()
 

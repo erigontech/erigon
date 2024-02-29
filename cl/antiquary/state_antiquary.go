@@ -94,11 +94,12 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			}
 			beforeFinalized = finalized
 			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
-				slot := uint64(0)
 				if s.currentState != nil {
-					slot = s.currentState.Slot()
+					s.logger.Error("Failed to increment beacon state", "err", err, "slot", s.currentState.Slot())
+				} else {
+					s.logger.Error("Failed to increment beacon state", "err", err)
 				}
-				s.logger.Error("Failed to increment beacon state", "err", err, "slot", slot)
+				s.currentState = nil
 				time.Sleep(5 * time.Second)
 			}
 
@@ -194,10 +195,11 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	effectiveBalancesDump := etl.NewCollector(kv.EffectiveBalancesDump, s.dirs.Tmp, etl.NewSortableBuffer(etlBufSz), s.logger)
 	defer effectiveBalancesDump.Close()
 
-	progress, err := state_accessors.GetStateProcessingProgress(tx)
+	stageProgress, err := state_accessors.GetStateProcessingProgress(tx)
 	if err != nil {
 		return err
 	}
+	progress := stageProgress
 	// Go back a little bit
 	if progress > (s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump) {
 		progress -= s.cfg.SlotsPerEpoch*2 + clparams.SlotsPerDump
@@ -230,7 +232,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		} else {
 			start := time.Now()
 			// progress not 0? we need to load the state from the DB
-			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.fs, s.genesisState)
+			historicalReader := historical_states_reader.NewHistoricalStatesReader(s.cfg, s.snReader, s.validatorsTable, s.genesisState)
 			s.currentState, err = historicalReader.ReadHistoricalState(ctx, tx, progress)
 			if err != nil {
 				s.currentState = nil
@@ -362,7 +364,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			return eth1DataVotes.Collect(base_encoding.Encode64ToBytes4(slot), vote)
 		},
 	})
-	log.Log(logLvl, "Starting state processing", "from", slot, "to", to)
+	log.Log(logLvl, "Starting state processing", "from", slot, "to", to, "progress", stageProgress)
 	// Set up a timer to log progress
 	progressTimer := time.NewTicker(1 * time.Minute)
 	defer progressTimer.Stop()

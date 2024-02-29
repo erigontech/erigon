@@ -16,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/spf13/afero"
 )
 
 const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head
@@ -33,7 +32,6 @@ type Antiquary struct {
 	backfilled      *atomic.Bool
 	cfg             *clparams.BeaconChainConfig
 	states, blocks  bool
-	fs              afero.Fs
 	validatorsTable *state_accessors.StaticValidatorTable
 	genesisState    *state.CachingBeaconState
 	// set to nil
@@ -41,7 +39,7 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks bool, fs afero.Fs) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks bool) *Antiquary {
 	backfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	return &Antiquary{
@@ -55,7 +53,6 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 		cfg:             cfg,
 		states:          states,
 		snReader:        reader,
-		fs:              fs,
 		validatorsTable: validatorsTable,
 		genesisState:    genesisState,
 		blocks:          blocks,

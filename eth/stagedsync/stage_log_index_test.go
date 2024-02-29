@@ -99,12 +99,12 @@ func TestPromoteLogIndex(t *testing.T) {
 
 	expectAddrs, expectTopics := genReceipts(t, tx, 100)
 
-	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
 
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Check indices GetCardinality (in how many blocks they meet)
@@ -127,15 +127,15 @@ func TestPruneLogIndex(t *testing.T) {
 
 	_, _ = genReceipts(t, tx, 100)
 
-	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger)
+	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger, nil)
 	require.NoError(err)
 
 	{
@@ -167,15 +167,15 @@ func TestUnwindLogIndex(t *testing.T) {
 
 	expectAddrs, expectTopics := genReceipts(t, tx, 100)
 
-	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "")
+	cfg := StageLogIndexCfg(nil, prune.DefaultMode, "", nil)
 	cfgCopy := cfg
 	cfgCopy.bufLimit = 10
 	cfgCopy.flushEvery = time.Nanosecond
-	err := promoteLogIndex("logPrefix", tx, 0, 0, cfgCopy, ctx, logger)
+	err := promoteLogIndex("logPrefix", tx, 0, 0, 0, cfgCopy, ctx, logger)
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger)
+	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger, nil)
 	require.NoError(err)
 
 	// Unwind test

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"reflect"
-	"sort"
 	"sync"
 	"time"
 
@@ -15,33 +14,75 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
-const headerDownloaderLogPrefix = "HeaderDownloader"
+const (
+	headerDownloaderLogPrefix     = "HeaderDownloader"
+	notEnoughPeersBackOffDuration = time.Minute
+)
 
-func NewHeaderDownloader(logger log.Logger, sentry Sentry, heimdall heimdall.Heimdall, verify AccumulatedHeadersVerifier) *HeaderDownloader {
-	return &HeaderDownloader{
-		logger:   logger,
-		sentry:   sentry,
-		heimdall: heimdall,
-		verify:   verify,
+//go:generate mockgen -destination=./headers_writer_mock.go -package=sync . HeadersWriter
+type HeadersWriter interface {
+	PutHeaders(ctx context.Context, headers []*types.Header) error
+}
+
+type HeaderDownloader interface {
+	DownloadUsingCheckpoints(ctx context.Context, start uint64) error
+	DownloadUsingMilestones(ctx context.Context, start uint64) error
+}
+
+func NewHeaderDownloader(
+	logger log.Logger,
+	p2pService p2p.Service,
+	heimdall heimdall.HeimdallNoStore,
+	headersVerifier AccumulatedHeadersVerifier,
+	headersWriter HeadersWriter,
+) HeaderDownloader {
+	return newHeaderDownloader(
+		logger,
+		p2pService,
+		heimdall,
+		headersVerifier,
+		headersWriter,
+		notEnoughPeersBackOffDuration,
+	)
+}
+
+func newHeaderDownloader(
+	logger log.Logger,
+	p2pService p2p.Service,
+	heimdall heimdall.HeimdallNoStore,
+	headersVerifier AccumulatedHeadersVerifier,
+	headersWriter HeadersWriter,
+	notEnoughPeersBackOffDuration time.Duration,
+) HeaderDownloader {
+	return &headerDownloader{
+		logger:                        logger,
+		p2pService:                    p2pService,
+		heimdall:                      heimdall,
+		headersVerifier:               headersVerifier,
+		headersWriter:                 headersWriter,
+		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
 	}
 }
 
-type HeaderDownloader struct {
-	logger   log.Logger
-	sentry   Sentry
-	heimdall heimdall.Heimdall
-	verify   AccumulatedHeadersVerifier
+type headerDownloader struct {
+	logger                        log.Logger
+	p2pService                    p2p.Service
+	heimdall                      heimdall.HeimdallNoStore
+	headersVerifier               AccumulatedHeadersVerifier
+	headersWriter                 HeadersWriter
+	notEnoughPeersBackOffDuration time.Duration
 }
 
-func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, store CheckpointStore, start uint64) error {
-	checkpoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, store, start)
+func (hd *headerDownloader) DownloadUsingCheckpoints(ctx context.Context, start uint64) error {
+	waypoints, err := hd.heimdall.FetchCheckpointsFromBlock(ctx, start)
 	if err != nil {
 		return err
 	}
 
-	err = hd.downloadUsingWaypoints(ctx, store, checkpoints)
+	err = hd.downloadUsingWaypoints(ctx, waypoints)
 	if err != nil {
 		return err
 	}
@@ -49,13 +90,13 @@ func (hd *HeaderDownloader) DownloadUsingCheckpoints(ctx context.Context, store 
 	return nil
 }
 
-func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, store MilestoneStore, start uint64) error {
-	milestones, err := hd.heimdall.FetchMilestonesFromBlock(ctx, store, start)
+func (hd *headerDownloader) DownloadUsingMilestones(ctx context.Context, start uint64) error {
+	waypoints, err := hd.heimdall.FetchMilestonesFromBlock(ctx, start)
 	if err != nil {
 		return err
 	}
 
-	err = hd.downloadUsingWaypoints(ctx, store, milestones)
+	err = hd.downloadUsingWaypoints(ctx, waypoints)
 	if err != nil {
 		return err
 	}
@@ -63,39 +104,39 @@ func (hd *HeaderDownloader) DownloadUsingMilestones(ctx context.Context, store M
 	return nil
 }
 
-func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store HeaderStore, waypoints heimdall.Waypoints) error {
+func (hd *headerDownloader) downloadUsingWaypoints(ctx context.Context, waypoints heimdall.Waypoints) error {
 	// waypoint rootHash->[headers part of waypoint]
-	waypointHeadersMemo, err := lru.New[common.Hash, []*types.Header](hd.sentry.MaxPeers())
+	waypointHeadersMemo, err := lru.New[common.Hash, []*types.Header](hd.p2pService.MaxPeers())
 	if err != nil {
 		return err
 	}
 
 	for len(waypoints) > 0 {
-		allPeers := hd.sentry.PeersWithBlockNumInfo()
-		if len(allPeers) == 0 {
-			hd.logger.Warn(fmt.Sprintf("[%s] zero peers, will try again", headerDownloaderLogPrefix))
-			continue
-		}
-
-		sort.Sort(allPeers) // sort by block num in asc order
-		peers := hd.choosePeers(allPeers, waypoints)
+		endBlockNum := waypoints[len(waypoints)-1].EndBlock()
+		peers := hd.p2pService.ListPeersMayHaveBlockNum(endBlockNum.Uint64())
 		if len(peers) == 0 {
 			hd.logger.Warn(
 				fmt.Sprintf("[%s] can't use any peers to sync, will try again", headerDownloaderLogPrefix),
 				"start", waypoints[0].StartBlock(),
-				"end", waypoints[len(waypoints)-1].EndBlock(),
-				"minPeerBlockNum", allPeers[0].BlockNum,
-				"minPeerID", allPeers[0].ID,
+				"end", endBlockNum,
+				"sleepSeconds", hd.notEnoughPeersBackOffDuration.Seconds(),
 			)
+
+			time.Sleep(hd.notEnoughPeersBackOffDuration)
 			continue
 		}
 
 		peerCount := len(peers)
-		waypointsBatch := waypoints[:peerCount]
+		waypointsBatch := waypoints
+		if len(waypointsBatch) > peerCount {
+			waypointsBatch = waypointsBatch[:peerCount]
+		}
+
 		hd.logger.Info(
 			fmt.Sprintf("[%s] downloading headers", headerDownloaderLogPrefix),
-			"start", waypointsBatch[0].StartBlock(),
-			"end", waypointsBatch[len(waypointsBatch)-1].EndBlock(),
+			"waypointsBatchLength", len(waypointsBatch),
+			"startBlockNum", waypointsBatch[0].StartBlock(),
+			"endBlockNum", waypointsBatch[len(waypointsBatch)-1].EndBlock(),
 			"kind", reflect.TypeOf(waypointsBatch[0]),
 			"peerCount", peerCount,
 		)
@@ -106,7 +147,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 		for i, waypoint := range waypointsBatch {
 			maxWaypointLength = math.Max(float64(waypoint.Length()), maxWaypointLength)
 			wg.Add(1)
-			go func(i int, waypoint heimdall.Waypoint, peerID string) {
+			go func(i int, waypoint heimdall.Waypoint, peerId p2p.PeerId) {
 				defer wg.Done()
 
 				if headers, ok := waypointHeadersMemo.Get(waypoint.RootHash()); ok {
@@ -114,7 +155,9 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 					return
 				}
 
-				headers, err := hd.sentry.DownloadHeaders(ctx, waypoint.StartBlock(), waypoint.EndBlock(), peerID)
+				start := waypoint.StartBlock().Uint64()
+				end := waypoint.EndBlock().Uint64() + 1 // waypoint end is inclusive, fetch headers is [start, end)
+				headers, err := hd.p2pService.FetchHeaders(ctx, start, end, peerId)
 				if err != nil {
 					hd.logger.Debug(
 						fmt.Sprintf("[%s] issue downloading headers, will try again", headerDownloaderLogPrefix),
@@ -123,12 +166,12 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 						"end", waypoint.EndBlock(),
 						"rootHash", waypoint.RootHash(),
 						"kind", reflect.TypeOf(waypoint),
-						"peerID", peerID,
+						"peerId", peerId,
 					)
 					return
 				}
 
-				if err := hd.verify(waypoint, headers); err != nil {
+				if err := hd.headersVerifier(waypoint, headers); err != nil {
 					hd.logger.Debug(
 						fmt.Sprintf(
 							"[%s] bad headers received from peer for waypoint - penalizing and will try again",
@@ -138,16 +181,23 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 						"end", waypoint.EndBlock(),
 						"rootHash", waypoint.RootHash(),
 						"kind", reflect.TypeOf(waypoint),
-						"peerID", peerID,
+						"peerId", peerId,
 					)
 
-					hd.sentry.Penalize(peerID)
+					if err := hd.p2pService.Penalize(ctx, peerId); err != nil {
+						hd.logger.Error(
+							fmt.Sprintf("[%s] failed to penalize peer", headerDownloaderLogPrefix),
+							"peerId", peerId,
+							"err", err,
+						)
+					}
+
 					return
 				}
 
 				waypointHeadersMemo.Add(waypoint.RootHash(), headers)
 				headerBatches[i] = headers
-			}(i, waypoint, peers[i].ID)
+			}(i, waypoint, peers[i])
 		}
 
 		wg.Wait()
@@ -177,7 +227,7 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 		}
 
 		dbWriteStartTime := time.Now()
-		if err := store.PutHeaders(headers); err != nil {
+		if err := hd.headersWriter.PutHeaders(ctx, headers); err != nil {
 			return err
 		}
 
@@ -189,24 +239,4 @@ func (hd *HeaderDownloader) downloadUsingWaypoints(ctx context.Context, store He
 	}
 
 	return nil
-}
-
-// choosePeers assumes peers are sorted in ascending order based on block num
-func (hd *HeaderDownloader) choosePeers(peers PeersWithBlockNumInfo, waypoints heimdall.Waypoints) PeersWithBlockNumInfo {
-	var peersIdx int
-	chosenPeers := make(PeersWithBlockNumInfo, 0, len(peers))
-	for _, waypoint := range waypoints {
-		if peersIdx >= len(peers) {
-			break
-		}
-
-		peer := peers[peersIdx]
-		if peer.BlockNum.Cmp(waypoint.EndBlock()) > -1 {
-			chosenPeers = append(chosenPeers, peer)
-		}
-
-		peersIdx++
-	}
-
-	return chosenPeers
 }

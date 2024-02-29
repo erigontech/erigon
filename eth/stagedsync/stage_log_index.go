@@ -31,20 +31,22 @@ const (
 )
 
 type LogIndexCfg struct {
-	tmpdir     string
-	db         kv.RwDB
-	prune      prune.Mode
-	bufLimit   datasize.ByteSize
-	flushEvery time.Duration
+	tmpdir           string
+	db               kv.RwDB
+	prune            prune.Mode
+	bufLimit         datasize.ByteSize
+	flushEvery       time.Duration
+	noPruneContracts map[libcommon.Address]bool
 }
 
-func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string) LogIndexCfg {
+func StageLogIndexCfg(db kv.RwDB, prune prune.Mode, tmpDir string, noPruneContracts map[libcommon.Address]bool) LogIndexCfg {
 	return LogIndexCfg{
-		db:         db,
-		prune:      prune,
-		bufLimit:   bitmapsBufLimit,
-		flushEvery: bitmapsFlushEvery,
-		tmpdir:     tmpDir,
+		db:               db,
+		prune:            prune,
+		bufLimit:         bitmapsBufLimit,
+		flushEvery:       bitmapsFlushEvery,
+		tmpdir:           tmpDir,
+		noPruneContracts: noPruneContracts,
 	}
 }
 
@@ -80,14 +82,14 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	startBlock := s.BlockNumber
-	pruneTo := cfg.prune.Receipts.PruneTo(endBlock)
-	if startBlock < pruneTo {
-		startBlock = pruneTo
-	}
+	pruneTo := cfg.prune.Receipts.PruneTo(endBlock) //endBlock - prune.r.older
+	// if startBlock < pruneTo {
+	// 	startBlock = pruneTo
+	// }
 	if startBlock > 0 {
 		startBlock++
 	}
-	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, cfg, ctx, logger); err != nil {
+	if err = promoteLogIndex(logPrefix, tx, startBlock, endBlock, pruneTo, cfg, ctx, logger); err != nil {
 		return err
 	}
 	if err = s.Update(tx, endBlock); err != nil {
@@ -103,7 +105,7 @@ func SpawnLogIndex(s *StageState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, cfg LogIndexCfg, ctx context.Context, logger log.Logger) error {
+func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64, pruneBlock uint64, cfg LogIndexCfg, ctx context.Context, logger log.Logger) error {
 	quit := ctx.Done()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -175,6 +177,9 @@ func promoteLogIndex(logPrefix string, tx kv.RwTx, start uint64, endBlock uint64
 		}
 
 		for _, l := range ll {
+			if l.BlockNumber < pruneBlock && cfg.noPruneContracts != nil && !cfg.noPruneContracts[l.Address] {
+				continue
+			}
 			for _, topic := range l.Topics {
 				topicStr := string(topic.Bytes())
 				m, ok := topics[topicStr]
@@ -405,7 +410,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx, logger); err != nil {
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
 		return err
 	}
 	if err = s.Done(tx); err != nil {
@@ -420,7 +425,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, ctx context.Context, logger log.Logger) error {
+func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, ctx context.Context, logger log.Logger, noPruneContracts map[libcommon.Address]bool) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -461,6 +466,9 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 			}
 
 			for _, l := range logs {
+				if noPruneContracts != nil && noPruneContracts[l.Address] {
+					continue
+				}
 				for _, topic := range l.Topics {
 					if err := topics.Collect(topic.Bytes(), nil); err != nil {
 						return err

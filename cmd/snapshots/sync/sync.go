@@ -275,7 +275,7 @@ func (i *torrentInfo) Hash() string {
 
 func (fi *fileInfo) Sys() any {
 	info := torrentInfo{hash: fi.info.Hash}
-	if snapInfo, ok := snaptype.ParseFileName("", fi.Name()); ok {
+	if snapInfo, isStateFile, ok := snaptype.ParseFileName("", fi.Name()); ok && !isStateFile {
 		info.snapInfo = &snapInfo
 	}
 

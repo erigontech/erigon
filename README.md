@@ -326,7 +326,7 @@ Caplin can be enabled through the `--internalcl` flag. from that point on, an ex
 
 Caplin also has an archivial mode for historical states and blocks. it can be enabled through the `--caplin.archive` flag.
 In order to enable the caplin's Beacon API, the flag `--beacon.api=<namespaces>` must be added.
-e.g: `--beacon.api=beacon,builder,config,debug,events,node,validator,rewards,lighthouse` will enable all endpoints. **NOTE: Caplin is not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead to a 6 GB higher RAM usage.
+e.g: `--beacon.api=beacon,builder,config,debug,node,validator,lighthouse` will enable all endpoints. **NOTE: Caplin is not staking-ready so aggregation endpoints are still to be implemented. Additionally enabling the Beacon API will lead to a 6 GB higher RAM usage.
 
 ### Multiple Instances / One Machine
 
@@ -627,6 +627,18 @@ RFC 922, Section 7
 
 Same
 in [IpTables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068)
+
+### How to run erigon as a separate user? (e.g. as a `systemd` daemon)
+
+Running erigon from `build/bin` as a separate user might produce an error:
+
+    error while loading shared libraries: libsilkworm_capi.so: cannot open shared object file: No such file or directory
+
+The library needs to be *installed* for another user using `make DIST=<path> install`. You could use `$HOME/erigon` or `/opt/erigon` as the installation path, for example:
+
+    make DIST=/opt/erigon install
+
+and then run `/opt/erigon/erigon`.
 
 ### How to get diagnostic for bug report?
 

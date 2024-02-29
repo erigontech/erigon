@@ -25,19 +25,9 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 		return nil
 	}
 
-	headHash, _, err := f.GetHead()
-	if err != nil {
-		return err
-	}
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	s, err := f.forkGraph.GetState(headHash, false)
-	if err != nil {
-		return err
-	}
-
+	s := f.syncedDataManager.HeadState()
 	if s == nil {
-		return errors.New("OnVoluntaryExit: state is nil")
+		return nil
 	}
 
 	val, err := s.ValidatorForValidatorIndex(int(voluntaryExit.ValidatorIndex))
@@ -101,16 +91,13 @@ func (f *ForkChoiceStore) OnProposerSlashing(proposerSlashing *cltypes.ProposerS
 		return fmt.Errorf("proposee slashing headers are the same")
 	}
 
-	headHash, _, err := f.GetHead()
+	// Take lock as we interact with state.
+	s := f.syncedDataManager.HeadState()
 	if err != nil {
 		return err
 	}
-	// Take lock as we interact with state.
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	s, err := f.forkGraph.GetState(headHash, false)
-	if err != nil {
-		return err
+	if s == nil {
+		return fmt.Errorf("no head state avaible")
 	}
 	proposer, err := s.ValidatorForValidatorIndex(int(h1.ProposerIndex))
 	if err != nil {
@@ -167,16 +154,10 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 	change := signedChange.Message
 
-	headHash, _, err := f.GetHead()
-	if err != nil {
-		return err
-	}
 	// Take lock as we interact with state.
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	s, err := f.forkGraph.GetState(headHash, false)
-	if err != nil {
-		return err
+	s := f.syncedDataManager.HeadState()
+	if s == nil {
+		return fmt.Errorf("no head state avaible")
 	}
 	validator, err := s.ValidatorForValidatorIndex(int(change.ValidatorIndex))
 	if err != nil {
