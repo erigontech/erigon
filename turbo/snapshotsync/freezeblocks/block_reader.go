@@ -1075,6 +1075,7 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 		}
 		reader := recsplit.NewIndexReader(sn.IdxBorTxnHash)
 		blockEventId := reader.Lookup(borTxHash[:])
+		log.Warn("[dbg] blockEventId1", "blockEventId", blockEventId, "sn.IdxBorTxnHash.BaseDataID()", sn.IdxBorTxnHash.BaseDataID())
 		offset := sn.IdxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.seg.MakeGetter()
 		gg.Reset(offset)
