@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.21.4
+go 1.21.7
 
 require (
 	github.com/erigontech/mdbx-go v0.37.1
