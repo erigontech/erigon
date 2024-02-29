@@ -452,45 +452,91 @@ func (dc *DomainContext) commitmentValTransform(
 			return valBuf, nil
 		}
 
-		transAccountPks := make([][]byte, 0, len(accountPlainKeys))
-		var apkBuf, spkBuf []byte
-		var found bool
-		for _, accountPlainKey := range accountPlainKeys {
-			if len(accountPlainKey) == length.Addr {
-				// Non-optimised key originating from a database record
-				apkBuf = append(apkBuf[:0], accountPlainKey...)
-			} else {
-				apkBuf, found = dc.lookupByShortenedKey(accountPlainKey, filesAccount)
+		return val.ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
+			var found bool
+			if isStorage {
+				var spkBuf []byte
+				if len(key) == length.Addr+length.Hash {
+					// Non-optimised key originating from a database record
+					spkBuf = append(spkBuf[:0], key...)
+				} else {
+					// Optimised key referencing a state file record (file number and offset within the file)
+					spkBuf, found = dc.lookupByShortenedKey(key, filesStorage)
+					if !found {
+						dc.d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", key))
+					}
+				}
+
+				shortened, found := dc.findKeyReplacement(spkBuf, startTxNum, endTxNum, idxListStorage, mergedStorage)
 				if !found {
-					dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
+					dc.d.logger.Crit("replacement for full storage key was not found", "shortened", fmt.Sprintf("%x", spkBuf))
+					shortened = spkBuf
+				}
+				return shortened
+			}
+
+			var apkBuf []byte
+			if len(key) == length.Addr {
+				// Non-optimised key originating from a database record
+				apkBuf = append(apkBuf[:0], key...)
+			} else {
+				//apkBuf, found := sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, nil)
+				apkBuf, found = dc.lookupByShortenedKey(key, filesAccount)
+				if !found {
+					dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key))
+					panic(fmt.Sprintf("lost account full key: %x", key))
 				}
 			}
-			accountPlainKey, found = dc.findKeyReplacement(apkBuf, startTxNum, endTxNum, idxListAccount, mergedAccount)
+
+			shortened, found := dc.findKeyReplacement(apkBuf, startTxNum, endTxNum, idxListAccount, mergedAccount)
 			if !found {
 				dc.d.logger.Crit("replacement for full account key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
+				shortened = apkBuf
 			}
-			transAccountPks = append(transAccountPks, accountPlainKey)
-		}
+			return shortened
+		})
 
-		transStoragePks := make([][]byte, 0, len(storagePlainKeys))
-		for _, storagePlainKey := range storagePlainKeys {
-			if len(storagePlainKey) == length.Addr+length.Hash {
-				// Non-optimised key originating from a database record
-				spkBuf = append(spkBuf[:0], storagePlainKey...)
-			} else {
-				// Optimised key referencing a state file record (file number and offset within the file)
-				spkBuf, found = dc.lookupByShortenedKey(storagePlainKey, filesStorage)
-				if !found {
-					dc.d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
-				}
-			}
-
-			storagePlainKey, found = dc.findKeyReplacement(spkBuf, startTxNum, endTxNum, idxListStorage, mergedStorage)
-			if !found {
-				dc.d.logger.Crit("replacement for full storage key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
-			}
-			transStoragePks = append(transStoragePks, storagePlainKey)
-		}
-		return val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
+		//transAccountPks := make([][]byte, 0, len(accountPlainKeys))
+		//var apkBuf, spkBuf []byte
+		//var found bool
+		//for _, accountPlainKey := range accountPlainKeys {
+		//	if len(accountPlainKey) == length.Addr {
+		//		// Non-optimised key originating from a database record
+		//		apkBuf = append(apkBuf[:0], accountPlainKey...)
+		//	} else {
+		//		apkBuf, found = dc.lookupByShortenedKey(accountPlainKey, filesAccount)
+		//		if !found {
+		//			dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
+		//		}
+		//	}
+		//	accountPlainKey, found = dc.findKeyReplacement(apkBuf, startTxNum, endTxNum, idxListAccount, mergedAccount)
+		//	if !found {
+		//		dc.d.logger.Crit("replacement for full account key was not found", "shortened", fmt.Sprintf("%x", apkBuf))
+		//		accountPlainKey = apkBuf
+		//	}
+		//	transAccountPks = append(transAccountPks, accountPlainKey)
+		//}
+		//
+		//transStoragePks := make([][]byte, 0, len(storagePlainKeys))
+		//for _, storagePlainKey := range storagePlainKeys {
+		//	if len(storagePlainKey) == length.Addr+length.Hash {
+		//		// Non-optimised key originating from a database record
+		//		spkBuf = append(spkBuf[:0], storagePlainKey...)
+		//	} else {
+		//		// Optimised key referencing a state file record (file number and offset within the file)
+		//		spkBuf, found = dc.lookupByShortenedKey(storagePlainKey, filesStorage)
+		//		if !found {
+		//			dc.d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
+		//		}
+		//	}
+		//
+		//	storagePlainKey, found = dc.findKeyReplacement(spkBuf, startTxNum, endTxNum, idxListStorage, mergedStorage)
+		//	if !found {
+		//		dc.d.logger.Crit("replacement for full storage key was not found", "shortened", fmt.Sprintf("%x", spkBuf))
+		//		storagePlainKey = spkBuf
+		//	}
+		//	transStoragePks = append(transStoragePks, storagePlainKey)
+		//}
+		//return val.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
 	}
 }

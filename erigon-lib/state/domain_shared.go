@@ -968,38 +968,61 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedBranch(branch commitm
 		return branch, nil
 	}
 
-	transAccountPks := make([][]byte, 0, len(apks))
-	var apkBuf, spkBuf []byte
-	var found bool
-
-	for _, accountPlainKey := range apks {
-		if len(accountPlainKey) == length.Addr {
-			// Non-optimised key originating from a database record
-			apkBuf = append(apkBuf[:0], accountPlainKey...)
-		} else {
-			apkBuf, found = sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(accountPlainKey, nil)
-			if !found {
-				sdc.sd.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
+	return branch.ReplacePlainKeysIter(make([]byte, 0), func(key []byte, isStorage bool) []byte {
+		if isStorage {
+			if len(key) == length.Addr+length.Hash {
+				return nil
 			}
-		}
-		transAccountPks = append(transAccountPks, apkBuf)
-	}
-
-	transStoragePks := make([][]byte, 0, len(spks))
-	for _, storagePlainKey := range spks {
-		if len(storagePlainKey) == length.Addr+length.Hash {
-			// Non-optimised key originating from a database record
-			spkBuf = append(spkBuf[:0], storagePlainKey...)
-		} else {
 			// Optimised key referencing a state file record (file number and offset within the file)
-			spkBuf, found = sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(storagePlainKey, nil)
+			storagePlainKey, found := sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, nil)
 			if !found {
-				sdc.sd.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
+				sdc.sd.logger.Crit("replace lost storage full key", "shortened", fmt.Sprintf("%x", key))
 			}
+			return storagePlainKey
 		}
-		transStoragePks = append(transStoragePks, spkBuf)
-	}
-	return branch.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
+		if len(key) == length.Addr {
+			return nil
+		}
+
+		apkBuf, found := sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, nil)
+		if !found {
+			sdc.sd.logger.Crit("replace lost account full key", "shortened", fmt.Sprintf("%x", key))
+		}
+		return apkBuf
+	})
+
+	//transAccountPks := make([][]byte, 0, len(apks))
+	//var apkBuf, spkBuf []byte
+	//var found bool
+	//
+	//for _, accountPlainKey := range apks {
+	//	if len(accountPlainKey) == length.Addr {
+	//		// Non-optimised key originating from a database record
+	//		apkBuf = append(apkBuf[:0], accountPlainKey...)
+	//	} else {
+	//		apkBuf, found = sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(accountPlainKey, nil)
+	//		if !found {
+	//			sdc.sd.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
+	//		}
+	//	}
+	//	transAccountPks = append(transAccountPks, apkBuf)
+	//}
+	//
+	//transStoragePks := make([][]byte, 0, len(spks))
+	//for _, storagePlainKey := range spks {
+	//	if len(storagePlainKey) == length.Addr+length.Hash {
+	//		// Non-optimised key originating from a database record
+	//		spkBuf = append(spkBuf[:0], storagePlainKey...)
+	//	} else {
+	//		// Optimised key referencing a state file record (file number and offset within the file)
+	//		spkBuf, found = sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(storagePlainKey, nil)
+	//		if !found {
+	//			sdc.sd.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
+	//		}
+	//	}
+	//	transStoragePks = append(transStoragePks, spkBuf)
+	//}
+	//return branch.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {

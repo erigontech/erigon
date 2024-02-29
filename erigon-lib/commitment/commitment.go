@@ -374,6 +374,104 @@ func (branchData BranchData) ExtractPlainKeys() (accountPlainKeys [][]byte, stor
 	}
 	return
 }
+func (branchData BranchData) ReplacePlainKeysIter(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte)) (BranchData, error) {
+	var numBuf [binary.MaxVarintLen64]byte
+	touchMap := binary.BigEndian.Uint16(branchData[0:])
+	afterMap := binary.BigEndian.Uint16(branchData[2:])
+	if touchMap&afterMap == 0 {
+		return branchData, nil
+	}
+	pos := 4
+	newData = append(newData, branchData[:4]...)
+	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
+		bit := bitset & -bitset
+		fieldBits := PartFlags(branchData[pos])
+		newData = append(newData, byte(fieldBits))
+		pos++
+		if fieldBits&HashedKeyPart != 0 {
+			l, n := binary.Uvarint(branchData[pos:])
+			if n == 0 {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey len")
+			} else if n < 0 {
+				return nil, fmt.Errorf("replacePlainKeys value overflow for hashedKey len")
+			}
+			newData = append(newData, branchData[pos:pos+n]...)
+			pos += n
+			if len(branchData) < pos+int(l) {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for hashedKey")
+			}
+			if l > 0 {
+				newData = append(newData, branchData[pos:pos+int(l)]...)
+				pos += int(l)
+			}
+		}
+		if fieldBits&AccountPlainPart != 0 {
+			l, n := binary.Uvarint(branchData[pos:])
+			if n == 0 {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountPlainKey len")
+			} else if n < 0 {
+				return nil, fmt.Errorf("replacePlainKeys value overflow for accountPlainKey len")
+			}
+			pos += n
+			if len(branchData) < pos+int(l) {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for accountPlainKey")
+			}
+			if l > 0 {
+				pos += int(l)
+			}
+			newKey := fn(branchData[pos-int(l):pos], false)
+			if newKey == nil {
+				newData = append(newData, branchData[pos-int(l)-n:pos]...)
+			} else {
+				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
+				newData = append(newData, numBuf[:n]...)
+				newData = append(newData, newKey...)
+			}
+		}
+		if fieldBits&StoragePlainPart != 0 {
+			l, n := binary.Uvarint(branchData[pos:])
+			if n == 0 {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for storagePlainKey len")
+			} else if n < 0 {
+				return nil, fmt.Errorf("replacePlainKeys value overflow for storagePlainKey len")
+			}
+			pos += n
+			if len(branchData) < pos+int(l) {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for storagePlainKey")
+			}
+			if l > 0 {
+				pos += int(l)
+			}
+			newKey := fn(branchData[pos-int(l):pos], true)
+			if newKey == nil {
+				newData = append(newData, branchData[pos-int(l)-n:pos]...)
+			} else {
+				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
+				newData = append(newData, numBuf[:n]...)
+				newData = append(newData, newKey...)
+			}
+		}
+		if fieldBits&HashPart != 0 {
+			l, n := binary.Uvarint(branchData[pos:])
+			if n == 0 {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash len")
+			} else if n < 0 {
+				return nil, fmt.Errorf("replacePlainKeys value overflow for hash len")
+			}
+			newData = append(newData, branchData[pos:pos+n]...)
+			pos += n
+			if len(branchData) < pos+int(l) {
+				return nil, fmt.Errorf("replacePlainKeys buffer too small for hash")
+			}
+			if l > 0 {
+				newData = append(newData, branchData[pos:pos+int(l)]...)
+				pos += int(l)
+			}
+		}
+		bitset ^= bit
+	}
+	return newData, nil
+}
 
 func (branchData BranchData) ReplacePlainKeys(accountPlainKeys [][]byte, storagePlainKeys [][]byte, newData []byte) (BranchData, error) {
 	var numBuf [binary.MaxVarintLen64]byte

@@ -190,6 +190,27 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	err = agg.BuildFiles(txs)
 	require.NoError(t, err)
 
+	ac.Close()
+	ac = agg.MakeContext()
+	defer ac.Close()
+
+	rwTx, err = db.BeginRwNosync(context.Background())
+	require.NoError(t, err)
+	defer func() {
+		if rwTx != nil {
+			rwTx.Rollback()
+		}
+	}()
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	require.NoError(t, err)
+	t.Logf("Prune: %s", stat)
+
+	err = rwTx.Commit()
+	require.NoError(t, err)
+
 	err = agg.MergeLoop(context.Background())
 	require.NoError(t, err)
 }
