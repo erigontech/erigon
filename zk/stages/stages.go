@@ -289,24 +289,6 @@ func DefaultZkStages(
 			},
 		},
 		{
-			/*
-			* FIXME: this stage doesn't work since the "headers" we have in the datastream don't have any gasUsed, it's always 0.
-			*
-			* to solve this we probably should move it after execution (execution doesn't depend on it) and update the unwinds.
-			**/
-			ID:          stages2.CumulativeIndex,
-			Description: "Write Cumulative Index",
-			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
-				return stagedsync.SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
-			},
-			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
-				return stagedsync.UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
-			},
-			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
-				return stagedsync.PruneCumulativeIndexStage(p, tx, ctx)
-			},
-		},
-		{
 			ID:          stages2.BlockHashes,
 			Description: "Write block hashes",
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
@@ -343,6 +325,18 @@ func DefaultZkStages(
 			},
 			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
 				return stagedsync.PruneExecutionStageZk(p, tx, exec, ctx, firstCycle)
+			},
+		}, {
+			ID:          stages2.CumulativeIndex,
+			Description: "Write Cumulative Index",
+			Forward: func(firstCycle bool, badBlockUnwind bool, s *stages.StageState, u stages.Unwinder, tx kv.RwTx, quiet bool) error {
+				return stagedsync.SpawnStageCumulativeIndex(cumulativeIndex, s, tx, ctx)
+			},
+			Unwind: func(firstCycle bool, u *stages.UnwindState, s *stages.StageState, tx kv.RwTx) error {
+				return stagedsync.UnwindCumulativeIndexStage(u, cumulativeIndex, tx, ctx)
+			},
+			Prune: func(firstCycle bool, p *stages.PruneState, tx kv.RwTx) error {
+				return stagedsync.PruneCumulativeIndexStage(p, tx, ctx)
 			},
 		},
 		{

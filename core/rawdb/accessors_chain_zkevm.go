@@ -11,6 +11,15 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
+func DeleteCumulativeGasUsed(tx kv.RwTx, blockFrom uint64) error {
+	if err := tx.ForEach(kv.CumulativeGasIndex, hexutility.EncodeTs(blockFrom), func(k, v []byte) error {
+		return tx.Delete(kv.CumulativeGasIndex, k)
+	}); err != nil {
+		return fmt.Errorf("TruncateCanonicalHash: %w", err)
+	}
+	return nil
+}
+
 func DeleteTransactions(db kv.RwTx, txsCount, baseTxId uint64, blockHash *libcommon.Hash) error {
 	for id := baseTxId; id < baseTxId+txsCount; id++ {
 		txIdKey := make([]byte, 8)
