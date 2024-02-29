@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
 	"testing"
 	"time"
 
@@ -41,14 +40,13 @@ func newServiceTest(t *testing.T, requestIdGenerator RequestIdGenerator) *servic
 }
 
 type serviceTest struct {
-	ctx                           context.Context
-	ctxCancel                     context.CancelFunc
-	t                             *testing.T
-	sentryClient                  *direct.MockSentryClient
-	service                       Service
-	headersRequestResponseMocksMu sync.Mutex
-	headersRequestResponseMocks   map[uint64]requestResponseMock
-	peerEvents                    chan *sentry.PeerEvent
+	ctx                         context.Context
+	ctxCancel                   context.CancelFunc
+	t                           *testing.T
+	sentryClient                *direct.MockSentryClient
+	service                     Service
+	headersRequestResponseMocks map[uint64]requestResponseMock
+	peerEvents                  chan *sentry.PeerEvent
 }
 
 // run is needed so that we can properly shut down tests involving the p2p service due to how the sentry multi
@@ -112,8 +110,6 @@ func (st *serviceTest) mockSentryStreams(mocks ...requestResponseMock) {
 }
 
 func (st *serviceTest) mockSentryInboundMessagesStream(mocks ...requestResponseMock) {
-	st.headersRequestResponseMocksMu.Lock()
-	defer st.headersRequestResponseMocksMu.Unlock()
 	for _, mock := range mocks {
 		st.headersRequestResponseMocks[mock.requestId] = mock
 	}
@@ -142,13 +138,12 @@ func (st *serviceTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 				return nil, err
 			}
 
-			st.headersRequestResponseMocksMu.Lock()
-			defer st.headersRequestResponseMocksMu.Unlock()
 			mock, ok := st.headersRequestResponseMocks[pkt.RequestId]
 			if !ok {
 				return nil, fmt.Errorf("unexpected request id: %d", pkt.RequestId)
 			}
 
+			delete(st.headersRequestResponseMocks, pkt.RequestId)
 			reqPeerId := PeerIdFromH512(req.PeerId)
 			if mock.wantRequestPeerId != reqPeerId {
 				return nil, fmt.Errorf("wantRequestPeerId != reqPeerId - %v vs %v", mock.wantRequestPeerId, reqPeerId)
