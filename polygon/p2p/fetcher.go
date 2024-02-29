@@ -131,7 +131,7 @@ func (f *fetcher) awaitHeadersResponse(
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("headers response await interrupted: %w", ctx.Err())
+			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
 		case msg := <-observer:
 			msgPeerId := PeerIdFromH512(msg.PeerId)
 			if msgPeerId != peerId {
