@@ -113,7 +113,11 @@ func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chu
 }
 
 func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
-	observer := make(ChanMessageObserver[*sentry.InboundMessage])
+	// cleanup for the chan message observer
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx, 1)
 	f.messageListener.RegisterBlockHeadersObserver(observer)
 	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
 
@@ -155,7 +159,7 @@ func (f *fetcher) awaitHeadersResponse(
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
-		case msg := <-observer:
+		case msg := <-observer.MessageChan():
 			msgPeerId := PeerIdFromH512(msg.PeerId)
 			if msgPeerId != peerId {
 				continue

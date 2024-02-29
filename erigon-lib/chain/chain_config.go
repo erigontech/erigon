@@ -86,7 +86,7 @@ type Config struct {
 	BorJSON json.RawMessage `json:"bor,omitempty"`
 
 	// For not pruning the logs of these contracts
-	// For depsoit contract logs are needed by CL to validate/produce blocks.
+	// For deposit contract logs are needed by CL to validate/produce blocks.
 	// All logs should be available to a validating node through eth_getLogs
 	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
 }
