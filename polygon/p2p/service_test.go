@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -291,13 +292,31 @@ func newMockRequestGenerator(requestIds ...uint64) RequestIdGenerator {
 }
 
 func newMockBlockHeadersPacket66Bytes(t *testing.T, requestId uint64, numHeaders int) []byte {
+	headers := newMockBlockHeaders(numHeaders)
+	return blockHeadersPacket66Bytes(t, requestId, headers)
+}
+
+func newMockBlockHeaders(numHeaders int) []*types.Header {
 	headers := make([]*types.Header, numHeaders)
+	var parentHeader *types.Header
 	for i := range headers {
-		headers[i] = &types.Header{
-			Number: big.NewInt(int64(i) + 1),
+		var parentHash libcommon.Hash
+		if parentHeader != nil {
+			parentHash = parentHeader.Hash()
 		}
+
+		headers[i] = &types.Header{
+			Number:     big.NewInt(int64(i) + 1),
+			ParentHash: parentHash,
+		}
+
+		parentHeader = headers[i]
 	}
 
+	return headers
+}
+
+func blockHeadersPacket66Bytes(t *testing.T, requestId uint64, headers []*types.Header) []byte {
 	blockHeadersPacket66 := eth.BlockHeadersPacket66{
 		RequestId:          requestId,
 		BlockHeadersPacket: headers,
@@ -367,7 +386,38 @@ func TestServiceErrInvalidFetchHeadersRange(t *testing.T) {
 	})
 }
 
-func TestServiceFetchHeadersShouldPenalizePeerWhenErrInvalidRlpErr(t *testing.T) {
+func TestServiceErrIncompleteHeaders(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockHeadersPacket66Bytes(t, requestId, 2),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1,
+		wantRequestAmount:           3,
+	}
+
+	test := newServiceTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		var errIncompleteHeaders *ErrIncompleteHeaders
+		headers, err := test.service.FetchHeaders(ctx, 1, 4, peerId)
+		require.ErrorAs(t, err, &errIncompleteHeaders)
+		require.Equal(t, uint64(3), errIncompleteHeaders.LowestMissingBlockNum())
+		require.Nil(t, headers)
+	})
+}
+
+func TestServiceFetchHeadersShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -389,10 +439,122 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenErrInvalidRlpErr(t *testing.T)
 
 	test := newServiceTest(t, newMockRequestGenerator(requestId))
 	test.mockSentryStreams(mockRequestResponse)
+	// setup expectation that peer should be penalized
 	test.mockExpectPenalizePeer(peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		headers, err := test.service.FetchHeaders(ctx, 1, 3, peerId)
 		require.Error(t, err)
+		require.Nil(t, headers)
+	})
+}
+
+func TestServiceFetchHeadersShouldPenalizePeerWhenErrTooManyHeaders(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			// response should contain 2 headers instead we return 5
+			Data: newMockBlockHeadersPacket66Bytes(t, requestId, 5),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1,
+		wantRequestAmount:           2,
+	}
+
+	test := newServiceTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	// setup expectation that peer should be penalized
+	test.mockExpectPenalizePeer(peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		var errTooManyHeaders *ErrTooManyHeaders
+		headers, err := test.service.FetchHeaders(ctx, 1, 3, peerId)
+		require.ErrorAs(t, err, &errTooManyHeaders)
+		require.Equal(t, 2, errTooManyHeaders.requested)
+		require.Equal(t, 5, errTooManyHeaders.received)
+		require.Nil(t, headers)
+	})
+}
+
+func TestServiceFetchHeadersShouldPenalizePeerWhenErrDisconnectedHeaders(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	mockBlockHeaders := newMockBlockHeaders(5)
+	disconnectedHeaders := make([]*types.Header, 3)
+	disconnectedHeaders[0] = mockBlockHeaders[0]
+	disconnectedHeaders[1] = mockBlockHeaders[2]
+	disconnectedHeaders[2] = mockBlockHeaders[4]
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			Data:   blockHeadersPacket66Bytes(t, requestId, disconnectedHeaders),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1,
+		wantRequestAmount:           3,
+	}
+
+	test := newServiceTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	// setup expectation that peer should be penalized
+	test.mockExpectPenalizePeer(peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		var errDisconnectedHeaders *ErrDisconnectedHeaders
+		headers, err := test.service.FetchHeaders(ctx, 1, 4, peerId)
+		require.ErrorAs(t, err, &errDisconnectedHeaders)
+		require.Equal(t, uint64(3), errDisconnectedHeaders.currentNum)
+		require.Equal(t, uint64(1), errDisconnectedHeaders.parentNum)
+		require.Nil(t, headers)
+	})
+}
+
+func TestServiceFetchHeadersShouldPenalizePeerWhenErrIncorrectOriginHeader(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	mockBlockHeaders := newMockBlockHeaders(3)
+	incorrectOriginHeaders := mockBlockHeaders[1:]
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_HEADERS_66,
+			PeerId: peerId.H512(),
+			// response should contain 2 headers instead we return 5
+			Data: blockHeadersPacket66Bytes(t, requestId, incorrectOriginHeaders),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestOriginNumber:     1,
+		wantRequestAmount:           2,
+	}
+
+	test := newServiceTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	// setup expectation that peer should be penalized
+	test.mockExpectPenalizePeer(peerId)
+	test.run(func(ctx context.Context, t *testing.T) {
+		var errIncorrectOriginHeader *ErrIncorrectOriginHeader
+		headers, err := test.service.FetchHeaders(ctx, 1, 3, peerId)
+		require.ErrorAs(t, err, &errIncorrectOriginHeader)
+		require.Equal(t, uint64(1), errIncorrectOriginHeader.requested)
+		require.Equal(t, uint64(2), errIncorrectOriginHeader.received)
 		require.Nil(t, headers)
 	})
 }
@@ -451,15 +613,15 @@ func TestListPeersMayHaveBlockNum(t *testing.T) {
 		peerIds = test.service.ListPeersMayHaveBlockNum(4) // peers which may have blocks 1,2,3,4
 		require.Len(t, peerIds, 2)
 
-		var errIncompleteFetchHeadersResponse *ErrIncompleteFetchHeadersResponse
+		var errIncompleteHeaders *ErrIncompleteHeaders
 		headers, err = test.service.FetchHeaders(ctx, 3, 5, peerId1) // fetch headers 3 and 4
-		require.ErrorAs(t, err, &errIncompleteFetchHeadersResponse)  // peer 1 does not have headers 3 and 4
-		require.Equal(t, uint64(3), errIncompleteFetchHeadersResponse.requestStart)
-		require.Equal(t, uint64(5), errIncompleteFetchHeadersResponse.requestEnd)
-		require.Equal(t, uint64(0), errIncompleteFetchHeadersResponse.first)
-		require.Equal(t, uint64(0), errIncompleteFetchHeadersResponse.last)
-		require.Equal(t, 0, errIncompleteFetchHeadersResponse.amount)
-		require.Equal(t, uint64(3), errIncompleteFetchHeadersResponse.LowestMissingBlockNum())
+		require.ErrorAs(t, err, &errIncompleteHeaders)               // peer 1 does not have headers 3 and 4
+		require.Equal(t, uint64(3), errIncompleteHeaders.requestStart)
+		require.Equal(t, uint64(5), errIncompleteHeaders.requestEnd)
+		require.Equal(t, uint64(0), errIncompleteHeaders.first)
+		require.Equal(t, uint64(0), errIncompleteHeaders.last)
+		require.Equal(t, 0, errIncompleteHeaders.amount)
+		require.Equal(t, uint64(3), errIncompleteHeaders.LowestMissingBlockNum())
 		require.Nil(t, headers)
 
 		// should be one peer less now given that we know that peer 1 does not have block num 4
