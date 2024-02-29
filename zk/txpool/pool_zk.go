@@ -2,6 +2,7 @@ package txpool
 
 import (
 	"fmt"
+
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -18,7 +19,7 @@ hard compilation fail when rebasing from upstream further down the line.
 */
 
 const (
-	transactionGasLimit = 3_000_000
+	transactionGasLimit = 30_000_000
 )
 
 func calcProtocolBaseFee(baseFee uint64) uint64 {
