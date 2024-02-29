@@ -19,8 +19,6 @@ import (
 
 type VirtualMemStat struct {
 	process.MemoryMapsStat
-	alloc uint64
-	sys   uint64
 }
 
 // Fields converts VirtualMemStat to slice
@@ -42,8 +40,6 @@ func (m VirtualMemStat) Fields() []interface{} {
 
 		s = append(s, t, value)
 	}
-
-	s = append(s, "alloc", common.ByteCount(m.alloc), "sys", common.ByteCount(m.sys))
 
 	return s
 }
@@ -89,7 +85,7 @@ func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {
 	memSwapGauge.SetUint64(p.Swap)
 }
 
-func LogVirtualMemStats(ctx context.Context, logger log.Logger) {
+func LogMemStats(ctx context.Context, logger log.Logger) {
 	logEvery := time.NewTicker(180 * time.Second)
 	defer logEvery.Stop()
 
@@ -98,7 +94,7 @@ func LogVirtualMemStats(ctx context.Context, logger log.Logger) {
 		case <-ctx.Done():
 			return
 		case <-logEvery.C:
-			memStats, err := ReadVirtualMemStats()
+			vm, err := ReadVirtualMemStats()
 			if err != nil {
 				logger.Warn("[mem] error reading virtual memory stats", "err", err)
 				continue
@@ -107,9 +103,12 @@ func LogVirtualMemStats(ctx context.Context, logger log.Logger) {
 			var m runtime.MemStats
 			dbg.ReadMemStats(&m)
 
-			v := VirtualMemStat{memStats, m.Alloc, m.Sys}
-			logger.Info("[mem] virtual memory stats", v.Fields()...)
-			UpdatePrometheusVirtualMemStats(memStats)
+			v := VirtualMemStat{vm}
+			l := v.Fields()
+			l = append(l, "alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys))
+
+			logger.Info("[mem] memory stats", l...)
+			UpdatePrometheusVirtualMemStats(vm)
 		}
 	}
 }

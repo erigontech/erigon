@@ -16,4 +16,19 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {}
 
-func LogVirtualMemStats(ctx context.Context, logger log.Logger) {}
+func LogMemStats(ctx context.Context, logger log.Logger) {
+	logEvery := time.NewTicker(180 * time.Second)
+	defer logEvery.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-logEvery.C:
+			var m runtime.MemStats
+			dbg.ReadMemStats(&m)
+
+			logger.Info("[mem] memory stats", "alloc", m.alloc, "sys", m.sys)
+		}
+	}
+}
