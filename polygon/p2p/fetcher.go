@@ -17,8 +17,6 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const responseTimeout = 5 * time.Second
-
 type RequestIdGenerator func() uint64
 
 type FetcherConfig struct {
@@ -79,12 +77,8 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}
 
 	headers := make([]*types.Header, 0, amount)
-	observer := make(ChanMessageObserver[*sentry.InboundMessage])
-	f.messageListener.RegisterBlockHeadersObserver(observer)
-	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
-
 	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
-		headerChunk, err := f.fetchHeaderChunkWithRetry(ctx, start, end, chunkNum, peerId, observer)
+		headerChunk, err := f.fetchHeaderChunkWithRetry(ctx, start, end, chunkNum, peerId)
 		if err != nil {
 			return nil, err
 		}
@@ -112,21 +106,16 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	return headers, nil
 }
 
-func (f *fetcher) fetchHeaderChunkWithRetry(
-	ctx context.Context,
-	start uint64,
-	end uint64,
-	chunkNum uint64,
-	peerId PeerId,
-	observer ChanMessageObserver[*sentry.InboundMessage],
-) ([]*types.Header, error) {
+func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
 	headers, err := backoff.RetryWithData(func() ([]*types.Header, error) {
-		headers, err := f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId, observer)
+		headers, err := f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId)
 		if err != nil {
+			// retry timeouts
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nil, err
 			}
-			// only retry timeouts
+
+			// permanent errors are not retried
 			return nil, backoff.Permanent(err)
 		}
 
@@ -139,14 +128,11 @@ func (f *fetcher) fetchHeaderChunkWithRetry(
 	return headers, nil
 }
 
-func (f *fetcher) fetchHeaderChunk(
-	ctx context.Context,
-	start uint64,
-	end uint64,
-	chunkNum uint64,
-	peerId PeerId,
-	observer ChanMessageObserver[*sentry.InboundMessage],
-) ([]*types.Header, error) {
+func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+	observer := make(ChanMessageObserver[*sentry.InboundMessage])
+	f.messageListener.RegisterBlockHeadersObserver(observer)
+	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
+
 	chunkStart := start + chunkNum*eth.MaxHeadersServe
 	chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
 	requestId := f.requestIdGenerator()
@@ -178,7 +164,7 @@ func (f *fetcher) awaitHeadersResponse(
 	peerId PeerId,
 	observer ChanMessageObserver[*sentry.InboundMessage],
 ) ([]*types.Header, error) {
-	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, f.config.responseTimeout)
 	defer cancel()
 
 	for {
