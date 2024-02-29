@@ -7,8 +7,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
+	"modernc.org/mathutil"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -55,38 +56,82 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 		}
 	}
 
+	// Soft response limits are:
+	//   1. 2 MB size
+	//   2. 1024 headers
+	//
+	// A header is approximately 500 bytes, hence 1024 headers should be less than 2 MB.
+	// As a simplification we can only use MaxHeadersServe for chunking.
 	amount := end - start
-	requestId := f.requestIdGenerator()
-	observer := make(ChanMessageObserver[*sentry.InboundMessage])
+	chunks := amount / eth.MaxHeadersServe
+	if amount%eth.MaxHeadersServe > 0 {
+		chunks++
+	}
 
+	headers := make([]*types.Header, 0, amount)
+	observer := make(ChanMessageObserver[*sentry.InboundMessage])
 	f.messageListener.RegisterBlockHeadersObserver(observer)
 	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
 
-	//
-	// TODO 1) chunk request into smaller ranges if needed to fit in the 2 MiB response size soft limit
-	//      and also 1024 max headers server (check AnswerGetBlockHeadersQuery)
-	err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
-		RequestId: requestId,
-		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
-			Origin: eth.HashOrNumber{
-				Number: start,
+	for i := uint64(0); i < chunks; i++ {
+		chunkStart := start + i*eth.MaxHeadersServe
+		chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
+		requestId := f.requestIdGenerator()
+
+		err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
+			RequestId: requestId,
+			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+				Origin: eth.HashOrNumber{
+					Number: chunkStart,
+				},
+				Amount: chunkAmount,
 			},
-			Amount: amount,
-		},
-	})
-	if err != nil {
+		})
+		if err != nil {
+			return nil, err
+		}
+
+		headerChunk, err := f.awaitHeadersResponse(ctx, requestId, peerId, observer)
+		if err != nil {
+			return nil, err
+		}
+
+		headers = append(headers, headerChunk...)
+	}
+
+	if err := f.validateHeadersResponse(headers, start, end, amount); err != nil {
+		shouldPenalize := errors.Is(err, &ErrIncorrectOriginHeader{}) ||
+			errors.Is(err, &ErrTooManyHeaders{}) ||
+			errors.Is(err, &ErrDisconnectedHeaders{})
+
+		if shouldPenalize {
+			f.logger.Debug("penalizing peer", "peerId", peerId, "err", err.Error())
+
+			penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
+			if penalizeErr != nil {
+				err = fmt.Errorf("%w: %w", penalizeErr, err)
+			}
+		}
+
 		return nil, err
 	}
 
+	return headers, nil
+}
+
+func (f *fetcher) awaitHeadersResponse(
+	ctx context.Context,
+	requestId uint64,
+	peerId PeerId,
+	observer ChanMessageObserver[*sentry.InboundMessage],
+) ([]*types.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
 	defer cancel()
 
-	var headers []*types.Header
-	var requestReceived bool
-	for !requestReceived {
+	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("interrupted while waiting for msg from peer: %w", ctx.Err())
+			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
 		case msg := <-observer:
 			msgPeerId := PeerIdFromH512(msg.PeerId)
 			if msgPeerId != peerId {
@@ -110,29 +155,9 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 				continue
 			}
 
-			headers = pkt.BlockHeadersPacket
-			requestReceived = true
+			return pkt.BlockHeadersPacket, nil
 		}
 	}
-
-	if err = f.validateHeadersResponse(headers, start, end, amount); err != nil {
-		shouldPenalize := errors.Is(err, &ErrIncorrectOriginHeader{}) ||
-			errors.Is(err, &ErrTooManyHeaders{}) ||
-			errors.Is(err, &ErrDisconnectedHeaders{})
-
-		if shouldPenalize {
-			f.logger.Debug("penalizing peer", "peerId", peerId, "err", err.Error())
-
-			penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
-			if penalizeErr != nil {
-				err = fmt.Errorf("%w: %w", penalizeErr, err)
-			}
-		}
-
-		return nil, err
-	}
-
-	return headers, nil
 }
 
 func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, end, amount uint64) error {
@@ -244,10 +269,10 @@ func (e ErrTooManyHeaders) Is(err error) bool {
 }
 
 type ErrDisconnectedHeaders struct {
-	currentHash       libcommon.Hash
-	currentParentHash libcommon.Hash
+	currentHash       common.Hash
+	currentParentHash common.Hash
 	currentNum        uint64
-	parentHash        libcommon.Hash
+	parentHash        common.Hash
 	parentNum         uint64
 }
 
