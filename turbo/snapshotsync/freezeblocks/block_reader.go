@@ -1157,7 +1157,7 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(borTxHash[:])
+		blockEventId, _ := reader.Lookup(borTxHash[:])
 		return idxBorTxnHash.BaseDataID() + blockEventId, nil
 	}
 	return 0, nil
