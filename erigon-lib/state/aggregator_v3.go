@@ -106,7 +106,7 @@ type OnFreezeFunc func(frozenFileNames []string)
 
 func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
 	tmpdir := dirs.Tmp
-	salt, err := getIndicesSalt(dirs.Snap)
+	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
 	}
@@ -200,10 +200,13 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	return a, nil
 }
 
-// getIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
-func getIndicesSalt(baseDir string) (salt *uint32, err error) {
-	fpath := filepath.Join(baseDir, "salt.txt")
+func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
+	if dir.FileExist(filepath.Join(baseDir, "salt.txt")) && !dir.FileExist(filepath.Join(baseDir, "salt-state.txt")) {
+		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
+	}
+	fpath := filepath.Join(baseDir, "salt-state.txt")
 	if !dir.FileExist(fpath) {
 		if salt == nil {
 			saltV := rand2.Uint32()
