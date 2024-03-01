@@ -184,10 +184,12 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			}
 			// [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue sidecars for processing once the parent block is retrieved).
 			if _, has := g.forkChoice.GetHeader(blobSideCar.SignedBlockHeader.Header.ParentRoot); !has {
+				fmt.Println("NOTSEEN")
 				return nil
 			}
 			blockRoot, err := blobSideCar.SignedBlockHeader.Header.HashSSZ()
 			if err != nil {
+				fmt.Println("SEEN")
 				return err
 			}
 			// Do not bother with blocks processed by fork choice already.
