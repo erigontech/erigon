@@ -1293,20 +1293,21 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 		return
 	}
 
-	t.AllowDataDownload()
-
-	select {
-	case <-d.ctx.Done():
-		return
-	case <-t.GotInfo():
-	}
-
-	t.DownloadAll()
 	d.wg.Add(1)
 
 	go func(t *torrent.Torrent) {
 		defer d.wg.Done()
 		defer sem.Release(1)
+
+		t.AllowDataDownload()
+
+		select {
+		case <-d.ctx.Done():
+			return
+		case <-t.GotInfo():
+		}
+
+		t.DownloadAll()
 
 		idleCount := 0
 		var lastRead int64
