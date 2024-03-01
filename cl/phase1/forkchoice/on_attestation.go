@@ -204,6 +204,7 @@ func (f *ForkChoiceStore) StartJobsRTT() {
 						return true
 					}
 					f.mu.Unlock()
+					fmt.Println("passed")
 
 					if err := f.OnBlock(job.block, true, true, true); err != nil {
 						log.Warn("failed to process attestation", "err", err)
