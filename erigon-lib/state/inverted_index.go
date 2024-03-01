@@ -765,7 +765,10 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset := item.reader.Lookup(it.key)
+			offset, ok := item.reader.Lookup(it.key)
+			if !ok {
+				continue
+			}
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()

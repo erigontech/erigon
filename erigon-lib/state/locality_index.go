@@ -263,7 +263,11 @@ func (li *LocalityIndex) lookupIdxFiles(loc *ctxLocalityIdx, key []byte, fromTxN
 	}
 
 	fromFileNum := fromTxNum / li.aggregationStep / StepsInBiggestFile
-	fn1, fn2, ok1, ok2, err := loc.bm.First2At(loc.reader.Lookup(key), fromFileNum)
+	i, ok := loc.reader.Lookup(key)
+	if !ok {
+		return 0, 0, fromTxNum, false, false
+	}
+	fn1, fn2, ok1, ok2, err := loc.bm.First2At(i, fromFileNum)
 	if err != nil {
 		panic(err)
 	}
