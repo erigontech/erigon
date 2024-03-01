@@ -1018,12 +1018,11 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 				}
 				l = append(l, f)
 			}
-			noOver := noOverlaps(segmentsTypeCheck(dir, l))
-			l, m = noGaps(noOver, minBlock)
+			l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
 			res = append(res, l...)
 			if len(m) > 0 {
 				lst := m[len(m)-1]
-				log.Warn("[dbg] see gap", "type", segType, "from", lst.from)
+				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
 			}
 
 			missingSnapshots = append(missingSnapshots, m...)
