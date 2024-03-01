@@ -3,38 +3,12 @@
 package mem
 
 import (
-	"context"
 	"os"
-	"reflect"
-	"time"
 
-	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/process"
 
 	"github.com/ledgerwatch/erigon-lib/metrics"
 )
-
-type VirtualMemStat struct {
-	process.MemoryMapsStat
-}
-
-// Fields converts VirtualMemStat to slice
-func (m VirtualMemStat) Fields() []interface{} {
-	typ := reflect.TypeOf(m.MemoryMapsStat)
-	val := reflect.ValueOf(m.MemoryMapsStat)
-
-	var s []interface{}
-	for i := 0; i < typ.NumField(); i++ {
-		t := typ.Field(i).Name
-		if t == "Path" { // always empty for aggregated smap statistics
-			continue
-		}
-
-		s = append(s, t, val.Field(i).Interface())
-	}
-
-	return s
-}
 
 var (
 	memRssGauge          = metrics.NewGauge(`mem_rss`)
@@ -75,26 +49,4 @@ func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {
 	memReferencedGauge.SetUint64(p.Referenced)
 	memAnonymousGauge.SetUint64(p.Anonymous)
 	memSwapGauge.SetUint64(p.Swap)
-}
-
-func LogVirtualMemStats(ctx context.Context, logger log.Logger) {
-	logEvery := time.NewTicker(180 * time.Second)
-	defer logEvery.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-logEvery.C:
-			memStats, err := ReadVirtualMemStats()
-			if err != nil {
-				logger.Warn("[mem] error reading virtual memory stats", "err", err)
-				continue
-			}
-
-			v := VirtualMemStat{memStats}
-			logger.Info("[mem] virtual memory stats", v.Fields()...)
-			UpdatePrometheusVirtualMemStats(memStats)
-		}
-	}
 }

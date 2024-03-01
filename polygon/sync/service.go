@@ -7,14 +7,14 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	polygonP2P "github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
 type Service interface {
@@ -24,7 +24,7 @@ type Service interface {
 type service struct {
 	sync *Sync
 
-	p2pService polygonP2P.Service
+	p2pService p2p.Service
 }
 
 func NewService(
@@ -39,7 +39,7 @@ func NewService(
 	storage := NewStorage()
 	execution := NewExecutionClient(engine)
 	verify := VerifyAccumulatedHeaders
-	p2pService := polygonP2P.NewService(maxPeers, logger, sentryClient)
+	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
 	downloader := NewHeaderDownloader(
@@ -50,7 +50,7 @@ func NewService(
 		storage,
 	)
 	spansCache := NewSpansCache()
-	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
+	signaturesCache, err := lru.NewARC[common.Hash, common.Address](stagedsync.InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}

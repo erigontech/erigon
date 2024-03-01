@@ -322,7 +322,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		".kv", ".kvi", ".bt", ".kvei", // e3 domain
 		".v", ".vi", //e3 hist
 		".ef", ".efi", //e3 idx
-		".txt", //salt.txt
+		".txt", //salt-state.txt, salt-blocks.txt
 	}
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {

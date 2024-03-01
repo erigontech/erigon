@@ -523,6 +523,11 @@ func NewDefaultStages(ctx context.Context,
 		}
 	}
 
+	var noPruneContracts map[libcommon.Address]bool
+	if cfg.Genesis != nil {
+		noPruneContracts = cfg.Genesis.Config.NoPruneContracts
+	}
+
 	return stagedsync.DefaultStages(ctx,
 		stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.HistoryV3, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, silkworm),
 		stagedsync.StageHeadersCfg(db, controlServer.Hd, controlServer.Bd, *controlServer.ChainConfig, cfg.Sync, controlServer.SendHeaderRequest, controlServer.PropagateNewBlockHashes, controlServer.Penalize, cfg.BatchSize, p2pCfg.NoDiscovery, blockReader, blockWriter, dirs.Tmp, cfg.HistoryV3, notifications, forkValidator, loopBreakCheck),
@@ -553,7 +558,7 @@ func NewDefaultStages(ctx context.Context,
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 		stagedsync.StageTrieCfg(db, true, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, cfg.Genesis.Config.NoPruneContracts),
+		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, noPruneContracts),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -599,6 +604,11 @@ func NewPipelineStages(ctx context.Context,
 		}
 	}
 
+	var noPruneContracts map[libcommon.Address]bool
+	if cfg.Genesis != nil {
+		noPruneContracts = cfg.Genesis.Config.NoPruneContracts
+	}
+
 	if len(cfg.Sync.UploadLocation) == 0 {
 		return stagedsync.PipelineStages(ctx,
 			stagedsync.StageSnapshotsCfg(db, *controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.HistoryV3, agg, cfg.InternalCL && cfg.CaplinConfig.Backfilling, silkworm),
@@ -627,7 +637,7 @@ func NewPipelineStages(ctx context.Context,
 			stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 			stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
 			stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, cfg.Genesis.Config.NoPruneContracts),
+			stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, noPruneContracts),
 			stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 			stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 			stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
@@ -663,7 +673,7 @@ func NewPipelineStages(ctx context.Context,
 		stagedsync.StageHashStateCfg(db, dirs, cfg.HistoryV3),
 		stagedsync.StageTrieCfg(db, checkStateRoot, true, false, dirs.Tmp, blockReader, controlServer.Hd, cfg.HistoryV3, agg),
 		stagedsync.StageHistoryCfg(db, cfg.Prune, dirs.Tmp),
-		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, cfg.Genesis.Config.NoPruneContracts),
+		stagedsync.StageLogIndexCfg(db, cfg.Prune, dirs.Tmp, noPruneContracts),
 		stagedsync.StageCallTracesCfg(db, cfg.Prune, 0, dirs.Tmp),
 		stagedsync.StageTxLookupCfg(db, cfg.Prune, dirs.Tmp, controlServer.ChainConfig.Bor, blockReader),
 		stagedsync.StageFinishCfg(db, dirs.Tmp, forkValidator),
