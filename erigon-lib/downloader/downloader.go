@@ -404,14 +404,8 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 	})
 
 	for _, item := range snapCfg.Preverified {
-		_, isStateFile, ok := snaptype.ParseFileName(snapDir, item.Name)
+		_, _, ok := snaptype.ParseFileName(snapDir, item.Name)
 		if !ok {
-			continue
-		}
-		if isStateFile {
-			if !downloads.Contains(item.Name, true) {
-				missingItems = append(missingItems, item)
-			}
 			continue
 		}
 
