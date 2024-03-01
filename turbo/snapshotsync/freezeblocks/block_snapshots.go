@@ -1014,26 +1014,24 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 			var m []Range
 			for _, f := range list {
 				if f.Type.Enum() != segType.Enum() {
+					if len(list) > 0 {
+						lst := list[len(list)-1]
+						log.Warn("[dbg] list last", "name", lst.Name())
+					}
 					continue
 				}
 				l = append(l, f)
 			}
-			l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+			noOver := noOverlaps(segmentsTypeCheck(dir, l))
+			l, m = noGaps(noOver, minBlock)
 			res = append(res, l...)
+			if len(m) > 0 {
+				lst := missingSnapshots[len(missingSnapshots)-1]
+				log.Warn("[dbg] missing last", "type", segType, "from", lst.from, "to", lst.to)
+			}
+
 			missingSnapshots = append(missingSnapshots, m...)
 		}
-	}
-	if len(list) > 0 {
-		lst := list[len(list)-1]
-		log.Warn("[dbg] list last", "name", lst.Name())
-	}
-	if len(res) > 0 {
-		lst := res[len(res)-1]
-		log.Warn("[dbg] res last", "name", lst.Name())
-	}
-	if len(missingSnapshots) > 0 {
-		lst := missingSnapshots[len(missingSnapshots)-1]
-		log.Warn("[dbg] missing last", "from", lst.from, "to", lst.to)
 	}
 	return res, missingSnapshots, nil
 }
