@@ -487,13 +487,13 @@ func (dc *DomainContext) commitmentValTransform(
 					shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListStorage, mergedStorage)
 					if !found {
 						// if plain key is lost, we can save original fullkey
-						if len(key) == length.Addr+length.Hash {
+						if len(buf) == length.Addr+length.Hash {
 							return nil
 						}
 						// if shortened key lost, we can't continue
 						dc.d.logger.Crit("valTransform: replacement for full storage key was not found",
 							"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
-							"shortened", fmt.Sprintf("%x", shortened))
+							"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
 						panic("valTransform: replacement for full storage key was not found")
 					}
 					//if s, seen := shortens[string(shortened)]; seen {
@@ -518,7 +518,7 @@ func (dc *DomainContext) commitmentValTransform(
 
 				shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListAccount, mergedAccount)
 				if !found {
-					if len(key) == length.Addr {
+					if len(buf) == length.Addr {
 						return nil
 					}
 					dc.d.logger.Crit("valTransform: replacement for full account key was not found",
