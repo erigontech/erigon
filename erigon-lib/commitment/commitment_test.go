@@ -2,6 +2,7 @@ package commitment
 
 import (
 	"encoding/hex"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"math/rand"
 	"testing"
 
@@ -211,4 +212,51 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	}
 	require.True(t, len(shortApk) == len(rextA))
 	require.True(t, len(shortSpk) == len(rextS))
+}
+
+func TestBranchData_ReplacePlainKeysIter(t *testing.T) {
+	row, bm := generateCellRow(t, 16)
+
+	cg := func(nibble int, skip bool) (*Cell, error) {
+		return row[nibble], nil
+	}
+
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	require.NoError(t, err)
+
+	original := common.Copy(enc)
+
+	target := make([]byte, 0, len(enc))
+	oldKeys := make([][]byte, 0)
+	replaced, err := enc.ReplacePlainKeysIter(target, func(key []byte, isStorage bool) []byte {
+		oldKeys = append(oldKeys, key)
+		if isStorage {
+			return key[:8]
+		}
+		return key[:4]
+	})
+	require.NoError(t, err)
+	require.Truef(t, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
+
+	keyI := 0
+	replacedBack, err := replaced.ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
+		require.EqualValues(t, oldKeys[keyI][:4], key[:4])
+		defer func() { keyI++ }()
+		return oldKeys[keyI]
+	})
+
+	require.EqualValues(t, original, replacedBack)
+
+	t.Run("merge replaced and original", func(t *testing.T) {
+		orig := common.Copy(original)
+
+		merged, err := replaced.MergeHexBranches(original, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, orig, merged)
+
+		merged, err = merged.MergeHexBranches(replacedBack, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, orig, merged)
+	})
 }

@@ -414,7 +414,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 		for _, item := range dc.d.files.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
 		}
-		dc.d.logger.Warn("shortened key file not found",
+		dc.d.logger.Warn("lookupByShortenedKey file not found",
 			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
 			"domain", dc.d.keysTable, "fileSteps", fileStepsss,
 			"listSize", len(list), "filesCount", dc.d.files.Len())
@@ -424,7 +424,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 	g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
 	g.Reset(offset)
 	if !g.HasNext() {
-		dc.d.logger.Warn("shortened key lookup failed",
+		dc.d.logger.Warn("lookupByShortenedKey failed",
 			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset, "file", item.decompressor.FileName())
 		return nil, false
 	}
