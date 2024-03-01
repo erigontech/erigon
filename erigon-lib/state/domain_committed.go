@@ -20,11 +20,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"slices"
+
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/types"
 	"golang.org/x/crypto/sha3"
-	"slices"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -365,7 +366,6 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 				if err != nil {
 					dc.d.logger.Warn("commitment branch key replacement seek failed",
 						"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
-					continue
 				}
 
 				if cur == nil {
@@ -375,14 +375,16 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 			}
 
 			stepFrom, stepTo := item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep
-			shortened = encodeShortenedKey(make([]byte, 2), stepFrom, stepTo, offset)
+			shortened = encodeShortenedKey(nil, stepFrom, stepTo, offset)
 
-			dc.d.logger.Info(fmt.Sprintf("replacing [%x] => {%x}", fullKey, shortened),
-				"step", fmt.Sprintf("%d-%d", stepFrom, stepTo), "offset", offset, "file", item.decompressor.FileName())
+			if len(fullKey) > length.Addr {
+				dc.d.logger.Info(fmt.Sprintf("replacing [%x] => {%x}", fullKey, shortened),
+					"step", fmt.Sprintf("%d-%d", stepFrom, stepTo), "offset", offset, "file", item.decompressor.FileName())
+			}
 			return shortened, true
 		}
 	}
-	return nil, false
+	return fullKey, false
 }
 
 // searches in given list of files for a key or searches in domain files if list is empty
@@ -408,8 +410,13 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 		}
 	}
 	if item == nil {
-		dc.d.logger.Warn("commitment branch key file not found",
+		fileStepsss := ""
+		for _, item := range dc.d.files.Items() {
+			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
+		}
+		dc.d.logger.Warn("shortened key file not found",
 			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
+			"domain", dc.d.keysTable, "fileSteps", fileStepsss,
 			"listSize", len(list), "filesCount", dc.d.files.Len())
 		return nil, false
 	}
@@ -417,13 +424,13 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 	g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
 	g.Reset(offset)
 	if !g.HasNext() {
-		dc.d.logger.Warn("commitment branch key lookup failed",
+		dc.d.logger.Warn("shortened key lookup failed",
 			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset, "file", item.decompressor.FileName())
 		return nil, false
 	}
 	fullKey, _ = g.Next(nil)
-	dc.d.logger.Info(fmt.Sprintf("decodeShortenedKey [%x]=>{%x}", shortKey, fullKey),
-		"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset, "file", item.decompressor.FileName())
+	// dc.d.logger.Debug(fmt.Sprintf("lookupByShortenedKey [%x]=>{%x}", shortKey, fullKey),
+	// 	"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset, "file", item.decompressor.FileName())
 	return fullKey, true
 }
 
@@ -456,6 +463,7 @@ func (dc *DomainContext) commitmentValTransform(
 						spkBuf, found = dc.lookupByShortenedKey(key, filesStorage)
 						if !found {
 							dc.d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", key))
+							panic("lost storage full key")
 						}
 					}
 
@@ -463,10 +471,10 @@ func (dc *DomainContext) commitmentValTransform(
 					// if plain key is lost, we can save original fullkey
 					shortened, found := dc.findKeyReplacement(spkBuf, startTxNum, endTxNum, idxListStorage, mergedStorage)
 					if !found {
+						shortened = spkBuf
 						dc.d.logger.Crit("valTransrom: replacement for full storage key was not found",
 							"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
-							"shortened", fmt.Sprintf("%x", spkBuf))
-						shortened = spkBuf
+							"shortened", fmt.Sprintf("%x", shortened))
 					}
 					return shortened
 				}
@@ -486,10 +494,10 @@ func (dc *DomainContext) commitmentValTransform(
 
 				shortened, found := dc.findKeyReplacement(apkBuf, startTxNum, endTxNum, idxListAccount, mergedAccount)
 				if !found {
+					shortened = apkBuf
 					dc.d.logger.Crit("valTransform: replacement for full account key was not found",
 						"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
-						"shortened", fmt.Sprintf("%x", apkBuf))
-					shortened = apkBuf
+						"shortened", fmt.Sprintf("%x", shortened))
 				}
 				return shortened
 			})

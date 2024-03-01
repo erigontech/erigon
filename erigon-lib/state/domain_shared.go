@@ -6,14 +6,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/length"
 	"math"
 	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/ledgerwatch/erigon-lib/common/assert"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -963,7 +964,7 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 		panic("agg.commitmentValuesTransform must be enabled to use replaceShortenedKeysInBranch")
 	}
 
-	return branch.ReplacePlainKeysIter(make([]byte, 0), func(key []byte, isStorage bool) []byte {
+	return branch.ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil
@@ -972,7 +973,7 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 			storagePlainKey, found := sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, nil)
 			if !found {
 				s0, s1, oft := decodeShortenedKey(key)
-				sdc.sd.logger.Crit("replace lost storage full key", "shortened", fmt.Sprintf("%x", key),
+				sdc.sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
 			}
 			return storagePlainKey
@@ -984,7 +985,7 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 		apkBuf, found := sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, nil)
 		if !found {
 			s0, s1, oft := decodeShortenedKey(key)
-			sdc.sd.logger.Crit("replace lost account full key", "shortened", fmt.Sprintf("%x", key),
+			sdc.sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
 		}
 		return apkBuf
@@ -995,6 +996,7 @@ func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte,
 	if sdc.sd.trace {
 		fmt.Printf("[SDC] PutBranch: %x: %x\n", prefix, data)
 	}
+	sdc.branchCache[string(prefix)] = cachedBranch{data: data, step: prevStep}
 	return sdc.sd.updateCommitmentData(prefix, data, prevData, prevStep)
 }
 
