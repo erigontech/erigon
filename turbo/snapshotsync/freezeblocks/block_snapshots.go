@@ -1023,7 +1023,7 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 			res = append(res, l...)
 			if len(m) > 0 {
 				lst := m[len(m)-1]
-				log.Warn("[dbg] see gap", "type", segType, "from", lst.from, "to", lst.to)
+				log.Warn("[dbg] see gap", "type", segType, "from", lst.from)
 			}
 
 			missingSnapshots = append(missingSnapshots, m...)
