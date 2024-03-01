@@ -1023,7 +1023,14 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 			missingSnapshots = append(missingSnapshots, m...)
 		}
 	}
-
+	if len(res) > 0 {
+		lst := res[len(res)-1]
+		log.Warn("[dbg] res last", "name", lst.Name())
+	}
+	if len(missingSnapshots) > 0 {
+		lst := missingSnapshots[len(missingSnapshots)-1]
+		log.Warn("[dbg] missing last", "from", lst.from, "to", lst.to)
+	}
 	return res, missingSnapshots, nil
 }
 
