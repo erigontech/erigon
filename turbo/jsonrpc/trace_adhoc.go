@@ -1132,6 +1132,9 @@ func (api *TraceAPIImpl) doCallMany(ctx context.Context, dbtx kv.Tx, msgs []type
 	if err != nil {
 		return nil, nil, err
 	}
+	if parentBlock == nil {
+		return nil, nil, fmt.Errorf("parent block %d(%x) not found", blockNumber, hash)
+	}
 	parentHeader := parentBlock.Header()
 	if parentHeader == nil {
 		return nil, nil, fmt.Errorf("parent header %d(%x) not found", blockNumber, hash)
