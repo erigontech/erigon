@@ -598,6 +598,7 @@ func ConsensusClStages(ctx context.Context,
 					}
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
+					seenBlockRoots := make(map[common.Hash]struct{})
 				MainLoop:
 					for {
 						select {
@@ -617,12 +618,15 @@ func ConsensusClStages(ctx context.Context,
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 									continue
 								}
+								if _, ok := seenBlockRoots[blockRoot]; ok {
+									continue
+								}
+								seenBlockRoots[blockRoot] = struct{}{}
 								tx, err := cfg.indiciesDB.BeginRw(ctx)
 								if err != nil {
 									return err
 								}
 								defer tx.Rollback()
-
 								if err := processBlock(tx, block, true, true, true); err != nil {
 									log.Debug("bad blocks segment received", "err", err)
 									tx.Rollback()
