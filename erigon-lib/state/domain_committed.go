@@ -351,7 +351,13 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 				if offset, ok = reader.Lookup(fullKey); !ok {
 					return nil, false
 				}
+
 				g.Reset(offset)
+				if !g.HasNext() {
+					dc.d.logger.Warn("commitment branch key replacement seek failed",
+						"key", fmt.Sprintf("%x", fullKey), "idx", "recsplit", "file", item.decompressor.FileName())
+					return fullKey, false
+				}
 
 				k, _ := g.Next(nil)
 				if !bytes.Equal(fullKey, k) {
@@ -375,10 +381,11 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 			}
 
 			stepFrom, stepTo := item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep
-			shortened = encodeShortenedKey(nil, stepFrom, stepTo, offset)
+			shortened := encodeShortenedKey(nil, stepFrom, stepTo, offset)
 
 			if len(fullKey) > length.Addr {
 				dc.d.logger.Info(fmt.Sprintf("replacing [%x] => {%x}", fullKey, shortened),
+					"domain", dc.d.keysTable,
 					"step", fmt.Sprintf("%d-%d", stepFrom, stepTo), "offset", offset, "file", item.decompressor.FileName())
 			}
 			return shortened, true
@@ -450,17 +457,24 @@ func (dc *DomainContext) commitmentValTransform(
 			return valBuf, nil
 		}
 
+		seen := make(map[string]struct{})
+		shortens := make(map[string][]byte)
+
 		return commitment.BranchData(valBuf).
 			ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
 				var found bool
+				if _, ok := seen[string(key)]; ok {
+					fmt.Printf("key %x already seen\n", key)
+				}
+				seen[string(key)] = struct{}{}
+				var buf []byte
 				if isStorage {
-					var spkBuf []byte
 					if len(key) == length.Addr+length.Hash {
 						// Non-optimised key originating from a database record
-						spkBuf = append(spkBuf[:0], key...)
+						buf = append(buf[:0], key...)
 					} else {
 						// Optimised key referencing a state file record (file number and offset within the file)
-						spkBuf, found = dc.lookupByShortenedKey(key, filesStorage)
+						buf, found = dc.lookupByShortenedKey(key, filesStorage)
 						if !found {
 							dc.d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", key))
 							panic("lost storage full key")
@@ -469,36 +483,42 @@ func (dc *DomainContext) commitmentValTransform(
 
 					// if shortened key lost, we can't continue
 					// if plain key is lost, we can save original fullkey
-					shortened, found := dc.findKeyReplacement(spkBuf, startTxNum, endTxNum, idxListStorage, mergedStorage)
+					shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListStorage, mergedStorage)
 					if !found {
-						shortened = spkBuf
-						dc.d.logger.Crit("valTransrom: replacement for full storage key was not found",
+						shortened = buf
+						dc.d.logger.Crit("valTransform: replacement for full storage key was not found",
 							"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
 							"shortened", fmt.Sprintf("%x", shortened))
 					}
+					if _, seen := shortens[string(key)]; seen {
+						fmt.Printf("short key %x already seen\n", key)
+					}
+					shortens[string(key)] = shortened
 					return shortened
 				}
 
-				var apkBuf []byte
 				if len(key) == length.Addr {
 					// Non-optimised key originating from a database record
-					apkBuf = append(apkBuf[:0], key...)
+					buf = append(buf[:0], key...)
 				} else {
-					//apkBuf, found := sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, nil)
-					apkBuf, found = dc.lookupByShortenedKey(key, filesAccount)
+					buf, found = dc.lookupByShortenedKey(key, filesAccount)
 					if !found {
 						dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key))
 						panic(fmt.Sprintf("lost account full key: %x", key))
 					}
 				}
 
-				shortened, found := dc.findKeyReplacement(apkBuf, startTxNum, endTxNum, idxListAccount, mergedAccount)
+				shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListAccount, mergedAccount)
 				if !found {
-					shortened = apkBuf
+					shortened = buf
 					dc.d.logger.Crit("valTransform: replacement for full account key was not found",
 						"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
 						"shortened", fmt.Sprintf("%x", shortened))
 				}
+				if _, seen := shortens[string(key)]; seen {
+					fmt.Printf("short key %x already seen\n", key)
+				}
+				shortens[string(key)] = shortened
 				return shortened
 			})
 	}

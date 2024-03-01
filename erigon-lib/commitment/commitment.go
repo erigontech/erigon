@@ -422,13 +422,13 @@ func (branchData BranchData) ReplacePlainKeysIter(newData []byte, fn func(key []
 				pos += int(l)
 			}
 			newKey := fn(branchData[pos-int(l):pos], false)
-			if newKey == nil {
-				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-			} else {
-				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
-				newData = append(newData, numBuf[:n]...)
-				newData = append(newData, newKey...)
-			}
+			//if newKey == nil {
+			//	newData = append(newData, branchData[pos-int(l)-n:pos]...)
+			//} else {
+			n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
+			newData = append(newData, numBuf[:n]...)
+			newData = append(newData, newKey...)
+			//}
 		}
 		if fieldBits&StoragePlainPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
@@ -445,13 +445,13 @@ func (branchData BranchData) ReplacePlainKeysIter(newData []byte, fn func(key []
 				pos += int(l)
 			}
 			newKey := fn(branchData[pos-int(l):pos], true)
-			if newKey == nil {
-				newData = append(newData, branchData[pos-int(l)-n:pos]...)
-			} else {
-				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
-				newData = append(newData, numBuf[:n]...)
-				newData = append(newData, newKey...)
-			}
+			//if newKey == nil {
+			//	newData = append(newData, branchData[pos-int(l)-n:pos]...)
+			//} else {
+			n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
+			newData = append(newData, numBuf[:n]...)
+			newData = append(newData, newKey...)
+			//}
 		}
 		if fieldBits&HashPart != 0 {
 			l, n := binary.Uvarint(branchData[pos:])
