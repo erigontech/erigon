@@ -260,6 +260,11 @@ func EnsureNotChanged(tx kv.GetPut, pruneMode Mode) (Mode, error) {
 	}
 
 	if pruneMode.Initialised {
+		// Don't change from previous default as default for Receipts pruning has now changed
+		if pruneMode.Receipts.useDefaultValue() {
+			pruneMode.Receipts = pm.Receipts
+		}
+
 		// If storage mode is not explicitly specified, we take whatever is in the database
 		if !reflect.DeepEqual(pm, pruneMode) {
 			if bytes.Equal(pm.Receipts.dbType(), kv.PruneTypeOlder) && bytes.Equal(pruneMode.Receipts.dbType(), kv.PruneTypeBefore) {
