@@ -598,10 +598,17 @@ func ConsensusClStages(ctx context.Context,
 					}
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
+					// blocks may be scheduled for later execution outside of the catch-up flow
+					presenceTicker := time.NewTicker(20 * time.Millisecond)
+					defer presenceTicker.Stop()
 					seenBlockRoots := make(map[common.Hash]struct{})
 				MainLoop:
 					for {
 						select {
+						case <-presenceTicker.C:
+							if cfg.forkChoice.HighestSeen() >= args.targetSlot {
+								break MainLoop
+							}
 						case <-ctx.Done():
 							return errors.New("timeout waiting for blocks")
 						case err := <-errCh:
