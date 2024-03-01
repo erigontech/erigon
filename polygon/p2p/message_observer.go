@@ -6,10 +6,10 @@ type MessageObserver[M any] interface {
 	Notify(M)
 }
 
-func NewChanMessageObserver[M any](ctx context.Context, chanSize int) ChanMessageObserver[M] {
+func NewChanMessageObserver[M any](ctx context.Context) ChanMessageObserver[M] {
 	return ChanMessageObserver[M]{
 		ctx:     ctx,
-		channel: make(chan M, chanSize),
+		channel: make(chan M),
 	}
 }
 

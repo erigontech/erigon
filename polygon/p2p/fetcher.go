@@ -133,7 +133,7 @@ func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uin
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx, 1)
+	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx)
 	f.messageListener.RegisterBlockHeadersObserver(observer)
 	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
 
