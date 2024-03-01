@@ -166,6 +166,8 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding blob sidecar"
 				return err
 			}
+			log.Info("Pre: Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
+
 			// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
 			if blobSideCar.Index >= g.beaconConfig.MaxBlobsPerBlock {
 				g.sentinel.BanPeer(ctx, data.Peer)
