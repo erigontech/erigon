@@ -228,7 +228,6 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 						KzgCommitment:     common.Bytes48(*blk.Block.Body.BlobKzgCommitments.Get(index)),
 						KzgProof:          proof,
 					}, true)
-					fmt.Println(err)
 					return true
 				})
 
