@@ -616,6 +616,9 @@ func ConsensusClStages(ctx context.Context,
 								// we can ignore this error because the block would not process if the hashssz failed
 								blockRoot, _ := block.Block.HashSSZ()
 								if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
+									if block.Block.Slot >= args.targetSlot {
+										break MainLoop
+									}
 									continue
 								}
 								if _, ok := seenBlockRoots[blockRoot]; ok {
