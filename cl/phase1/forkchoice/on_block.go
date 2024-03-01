@@ -98,7 +98,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	if block.Version() >= clparams.DenebVersion && checkDataAvaiability {
 		if err := f.isDataAvailable(block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
 			if err == errEIP4844DataNotAvailable {
-				log.Info("Blob data is not available, the block will be scheduled for later processing", "slot", block.Block.Slot, "blockRoot", libcommon.Hash(blockRoot))
+				log.Debug("Blob data is not available, the block will be scheduled for later processing", "slot", block.Block.Slot, "blockRoot", libcommon.Hash(blockRoot))
 				f.scheduleBlockForLaterProcessing(block)
 				return err
 			}
