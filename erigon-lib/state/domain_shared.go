@@ -963,6 +963,9 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 	if !sdc.sd.aggCtx.a.commitmentValuesTransform {
 		panic("agg.commitmentValuesTransform must be enabled to use replaceShortenedKeysInBranch")
 	}
+	if sdc.sd.aggCtx.maxTxNumInDomainFiles(false) == 0 {
+		return branch, nil
+	}
 
 	return branch.ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
 		if isStorage {

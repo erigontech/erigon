@@ -1088,6 +1088,9 @@ func (b *BtIndex) Seek(g ArchiveGetter, x []byte) (*Cursor, error) {
 		}
 		return nil, err
 	}
+	if bytes.Compare(k, x) < 0 {
+		panic("seek key > found key")
+	}
 	return b.newCursor(context.Background(), k, v, dt, g), nil
 }
 

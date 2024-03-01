@@ -136,84 +136,6 @@ func unfoldBranchDataFromString(t *testing.T, encs string) (row []*Cell, am uint
 	return origins[:], am
 }
 
-func TestBranchData_ExtractPlainKeys(t *testing.T) {
-	row, bm := generateCellRow(t, 16)
-
-	cg := func(nibble int, skip bool) (*Cell, error) {
-		return row[nibble], nil
-	}
-
-	be := NewBranchEncoder(1024, t.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
-	require.NoError(t, err)
-
-	extAPK, extSPK, err := enc.ExtractPlainKeys()
-	require.NoError(t, err)
-
-	for i, c := range row {
-		if c == nil {
-			continue
-		}
-		switch {
-		case c.apl != 0:
-			require.Containsf(t, extAPK, c.apk[:], "at pos %d expected %x..", i, c.apk[:8])
-		case c.spl != 0:
-			require.Containsf(t, extSPK, c.spk[:], "at pos %d expected %x..", i, c.spk[:8])
-		default:
-			continue
-		}
-	}
-}
-
-func TestBranchData_ReplacePlainKeys(t *testing.T) {
-	row, bm := generateCellRow(t, 16)
-
-	cg := func(nibble int, skip bool) (*Cell, error) {
-		return row[nibble], nil
-	}
-
-	be := NewBranchEncoder(1024, t.TempDir())
-	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
-	require.NoError(t, err)
-
-	extAPK, extSPK, err := enc.ExtractPlainKeys()
-	require.NoError(t, err)
-
-	shortApk, shortSpk := make([][]byte, 0), make([][]byte, 0)
-	for i, c := range row {
-		if c == nil {
-			continue
-		}
-		switch {
-		case c.apl != 0:
-			shortApk = append(shortApk, c.apk[:8])
-			require.Containsf(t, extAPK, c.apk[:], "at pos %d expected %x..", i, c.apk[:8])
-		case c.spl != 0:
-			shortSpk = append(shortSpk, c.spk[:8])
-			require.Containsf(t, extSPK, c.spk[:], "at pos %d expected %x..", i, c.spk[:8])
-		default:
-			continue
-		}
-	}
-
-	target := make([]byte, 0, len(enc))
-	replaced, err := enc.ReplacePlainKeys(shortApk, shortSpk, target)
-	require.NoError(t, err)
-	require.Truef(t, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
-
-	rextA, rextS, err := replaced.ExtractPlainKeys()
-	require.NoError(t, err)
-
-	for _, apk := range shortApk {
-		require.Containsf(t, rextA, apk, "expected %x to be in replaced account keys", apk)
-	}
-	for _, spk := range shortSpk {
-		require.Containsf(t, rextS, spk, "expected %x to be in replaced storage keys", spk)
-	}
-	require.True(t, len(shortApk) == len(rextA))
-	require.True(t, len(shortSpk) == len(rextS))
-}
-
 func TestBranchData_ReplacePlainKeysIter(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
@@ -245,10 +167,10 @@ func TestBranchData_ReplacePlainKeysIter(t *testing.T) {
 		defer func() { keyI++ }()
 		return oldKeys[keyI]
 	})
-
+	require.NoError(t, err)
 	require.EqualValues(t, original, replacedBack)
 
-	t.Run("merge replaced and original", func(t *testing.T) {
+	t.Run("merge replaced and original back", func(t *testing.T) {
 		orig := common.Copy(original)
 
 		merged, err := replaced.MergeHexBranches(original, nil)

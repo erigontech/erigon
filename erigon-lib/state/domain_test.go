@@ -22,7 +22,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/commitment"
 	"math"
 	"math/rand"
 	"sort"
@@ -2300,10 +2299,4 @@ func TestShortenedKeyEncodeDecode(t *testing.T) {
 		require.EqualValues(t, step, rstep)
 		require.EqualValues(t, offset, rofft)
 	})
-}
-
-func TestBranchData_Restore(t *testing.T) {
-
-	be := commitment.BranchEncoder{}
-
 }
