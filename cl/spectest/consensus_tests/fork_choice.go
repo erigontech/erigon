@@ -159,7 +159,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEmitters()
-	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil)
+	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, nil)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 
@@ -189,7 +189,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			blk := cltypes.NewSignedBeaconBlock(anchorState.BeaconConfig())
 			err := spectest.ReadSsz(root, c.Version(), step.GetBlock()+".ssz_snappy", blk)
 			require.NoError(t, err, stepstr)
-			err = forkStore.OnBlock(blk, true, true)
+			err = forkStore.OnBlock(blk, true, true, false)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {

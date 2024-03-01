@@ -204,6 +204,10 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				return err
 			}
 
+			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+				log.Debug("failed publish gossip", "err", err)
+			}
+
 			log.Info("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		default:
 		}
