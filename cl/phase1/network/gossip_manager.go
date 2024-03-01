@@ -200,7 +200,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				return err
 			}
 
-			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
+			log.Info("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		default:
 		}
 	}
@@ -256,7 +256,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				l := log.Ctx{}
 				err = g.onRecv(ctx, data, l)
 				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
+					log.Warn("[Beacon Gossip] Recoverable Error", "err", err)
 				}
 			}
 		}

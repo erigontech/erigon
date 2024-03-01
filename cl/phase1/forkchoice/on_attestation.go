@@ -201,9 +201,9 @@ func (f *ForkChoiceStore) StartJobsRTT() {
 					f.blocksSet.Delete(key)
 					f.mu.Lock()
 					if err := f.isDataAvailable(job.block.Block.Slot, job.blockRoot, job.block.Block.Body.BlobKzgCommitments); err != nil {
+						f.mu.Unlock()
 						return true
 					}
-
 					f.mu.Unlock()
 
 					if err := f.OnBlock(job.block, true, true, true); err != nil {
