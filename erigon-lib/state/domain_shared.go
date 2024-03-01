@@ -926,13 +926,13 @@ func (sdc *SharedDomainsCommitmentContext) ResetBranchCache() {
 }
 
 func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint64, error) {
-	//cached, ok := sdc.branchCache[string(pref)]
-	//if ok {
-	//	// cached value is already transformed/clean to read.
-	//	// Cache should ResetBranchCache after each commitment computation
-	//	return cached.data, cached.step, nil
-	//}
-	//
+	cached, ok := sdc.branchCache[string(pref)]
+	if ok {
+		// cached value is already transformed/clean to read.
+		// Cache should ResetBranchCache after each commitment computation
+		return cached.data, cached.step, nil
+	}
+
 	v, step, err := sdc.sd.LatestCommitment(pref)
 	if err != nil {
 		return nil, step, fmt.Errorf("GetBranch failed: %w", err)
@@ -945,7 +945,9 @@ func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint6
 	}
 	if sdc.sd.aggCtx.a.commitmentValuesTransform && !bytes.Equal(pref, keyCommitmentState) {
 		// todo returned step by LatestCommitment could be used as well, to determine endTxNum of file with that key
-		v, err = sdc.replaceShortenedBranch(v)
+
+		// transfrom shortened keys back to full keys to allow HPH work seamlessly
+		v, err = sdc.replaceShortenedKeysInBranch(v)
 		if err != nil {
 			return nil, step, err
 		}
@@ -955,17 +957,10 @@ func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint6
 	return v, step, nil
 }
 
-func (sdc *SharedDomainsCommitmentContext) replaceShortenedBranch(branch commitment.BranchData) (commitment.BranchData, error) {
+// replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
+func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch commitment.BranchData) (commitment.BranchData, error) {
 	if !sdc.sd.aggCtx.a.commitmentValuesTransform {
-		panic("agg.commitmentValuesTransform must be enabled to use replaceShortenedBranch")
-	}
-
-	apks, spks, err := branch.ExtractPlainKeys()
-	if err != nil {
-		return nil, err
-	}
-	if len(apks) == 0 && len(spks) == 0 {
-		return branch, nil
+		panic("agg.commitmentValuesTransform must be enabled to use replaceShortenedKeysInBranch")
 	}
 
 	return branch.ReplacePlainKeysIter(make([]byte, 0), func(key []byte, isStorage bool) []byte {
@@ -976,7 +971,9 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedBranch(branch commitm
 			// Optimised key referencing a state file record (file number and offset within the file)
 			storagePlainKey, found := sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, nil)
 			if !found {
-				sdc.sd.logger.Crit("replace lost storage full key", "shortened", fmt.Sprintf("%x", key))
+				s0, s1, oft := decodeShortenedKey(key)
+				sdc.sd.logger.Crit("replace lost storage full key", "shortened", fmt.Sprintf("%x", key),
+					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
 			}
 			return storagePlainKey
 		}
@@ -986,43 +983,12 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedBranch(branch commitm
 
 		apkBuf, found := sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, nil)
 		if !found {
-			sdc.sd.logger.Crit("replace lost account full key", "shortened", fmt.Sprintf("%x", key))
+			s0, s1, oft := decodeShortenedKey(key)
+			sdc.sd.logger.Crit("replace lost account full key", "shortened", fmt.Sprintf("%x", key),
+				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
 		}
 		return apkBuf
 	})
-
-	//transAccountPks := make([][]byte, 0, len(apks))
-	//var apkBuf, spkBuf []byte
-	//var found bool
-	//
-	//for _, accountPlainKey := range apks {
-	//	if len(accountPlainKey) == length.Addr {
-	//		// Non-optimised key originating from a database record
-	//		apkBuf = append(apkBuf[:0], accountPlainKey...)
-	//	} else {
-	//		apkBuf, found = sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(accountPlainKey, nil)
-	//		if !found {
-	//			sdc.sd.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", accountPlainKey))
-	//		}
-	//	}
-	//	transAccountPks = append(transAccountPks, apkBuf)
-	//}
-	//
-	//transStoragePks := make([][]byte, 0, len(spks))
-	//for _, storagePlainKey := range spks {
-	//	if len(storagePlainKey) == length.Addr+length.Hash {
-	//		// Non-optimised key originating from a database record
-	//		spkBuf = append(spkBuf[:0], storagePlainKey...)
-	//	} else {
-	//		// Optimised key referencing a state file record (file number and offset within the file)
-	//		spkBuf, found = sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(storagePlainKey, nil)
-	//		if !found {
-	//			sdc.sd.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", storagePlainKey))
-	//		}
-	//	}
-	//	transStoragePks = append(transStoragePks, spkBuf)
-	//}
-	//return branch.ReplacePlainKeys(transAccountPks, transStoragePks, nil)
 }
 
 func (sdc *SharedDomainsCommitmentContext) PutBranch(prefix []byte, data []byte, prevData []byte, prevStep uint64) error {

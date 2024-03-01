@@ -374,6 +374,8 @@ func (branchData BranchData) ExtractPlainKeys() (accountPlainKeys [][]byte, stor
 	}
 	return
 }
+
+// if fn returns nil, the original key will be copied from branchData
 func (branchData BranchData) ReplacePlainKeysIter(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte)) (BranchData, error) {
 	var numBuf [binary.MaxVarintLen64]byte
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
