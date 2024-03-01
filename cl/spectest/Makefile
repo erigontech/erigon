@@ -9,10 +9,8 @@ tests:
 	rm -rf tests/minimal
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
-	# FIXME: Add fork choice coverage for deneb
-	rm -rf tests/mainnet/deneb/fork_choice
 clean:
 	rm -rf tests
 
 mainnet:
-	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/deneb/merkle_proof -failfast -v --timeout 30m
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet -failfast -v --timeout 30m

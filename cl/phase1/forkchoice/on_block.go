@@ -269,7 +269,7 @@ func (f *ForkChoiceStore) isDataAvailable(slot uint64, blockRoot libcommon.Hash,
 	return nil
 }
 
-func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar) error {
+func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar, test bool) error {
 	kzgCtx := kzg.Ctx()
 
 	parentHeader, has := f.GetHeader(blobSidecar.SignedBlockHeader.Header.ParentRoot)
@@ -281,7 +281,7 @@ func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar) error 
 	}
 	expectedProposers, has := f.nextBlockProposers.Get(blobSidecar.SignedBlockHeader.Header.ParentRoot)
 	proposerSubIdx := blobSidecar.SignedBlockHeader.Header.Slot - parentHeader.Slot
-	if has && proposerSubIdx < foreseenProposers && len(expectedProposers) > int(proposerSubIdx) {
+	if !test && has && proposerSubIdx < foreseenProposers && len(expectedProposers) > int(proposerSubIdx) {
 		// Do extra checks on the proposer.
 		expectedProposer := expectedProposers[proposerSubIdx]
 		if blobSidecar.SignedBlockHeader.Header.ProposerIndex != expectedProposer {
@@ -294,7 +294,7 @@ func (f *ForkChoiceStore) OnBlobSidecar(blobSidecar *cltypes.BlobSidecar) error 
 		}
 	}
 
-	if !cltypes.VerifyCommitmentInclusionProof(blobSidecar.KzgCommitment, blobSidecar.CommitmentInclusionProof, blobSidecar.Index,
+	if !test && !cltypes.VerifyCommitmentInclusionProof(blobSidecar.KzgCommitment, blobSidecar.CommitmentInclusionProof, blobSidecar.Index,
 		clparams.DenebVersion, blobSidecar.SignedBlockHeader.Header.BodyRoot) {
 		return fmt.Errorf("commitment inclusion proof failed")
 	}

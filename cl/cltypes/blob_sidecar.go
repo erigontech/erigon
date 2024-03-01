@@ -1,6 +1,8 @@
 package cltypes
 
 import (
+	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
@@ -42,6 +44,8 @@ func (b *BlobSidecar) EncodingSizeSSZ() int {
 }
 
 func (b *BlobSidecar) DecodeSSZ(buf []byte, version int) error {
+	fmt.Println(len(buf))
+	fmt.Println(b.EncodingSizeSSZ())
 	b.CommitmentInclusionProof = solid.NewHashVector(CommitmentBranchSize)
 	b.SignedBlockHeader = &SignedBeaconBlockHeader{}
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)

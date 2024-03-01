@@ -195,7 +195,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				return nil
 			}
 			// The background checks above are enough for now.
-			if err := g.forkChoice.OnBlobSidecar(blobSideCar); err != nil {
+			if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
