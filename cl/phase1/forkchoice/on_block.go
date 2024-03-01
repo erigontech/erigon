@@ -255,7 +255,6 @@ func (f *ForkChoiceStore) isDataAvailable(slot uint64, blockRoot libcommon.Hash,
 		delete(commitmentsLeftToCheck, sidecar.KzgCommitment)
 	}
 	if len(commitmentsLeftToCheck) > 0 {
-		log.Info("Blob data is not available, the block will be scheduled for later processing", "slot", slot, "blockRoot", blockRoot)
 		return errEIP4844DataNotAvailable // This should then schedule the block for reprocessing
 	}
 	if !foundOnDisk {

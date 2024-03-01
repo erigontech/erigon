@@ -198,7 +198,6 @@ func (f *ForkChoiceStore) StartJobsRTT() {
 						return true
 					}
 
-					f.blocksSet.Delete(key)
 					f.mu.Lock()
 					if err := f.isDataAvailable(job.block.Block.Slot, job.blockRoot, job.block.Block.Body.BlobKzgCommitments); err != nil {
 						f.mu.Unlock()
