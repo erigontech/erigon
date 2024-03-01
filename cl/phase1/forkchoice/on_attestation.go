@@ -133,8 +133,9 @@ func (f *ForkChoiceStore) scheduleAttestationForLaterProcessing(attestation *sol
 }
 
 type blockJob struct {
-	block *cltypes.SignedBeaconBlock
-	when  time.Time
+	block     *cltypes.SignedBeaconBlock
+	blockRoot libcommon.Hash
+	when      time.Time
 }
 
 // scheduleAttestationForLaterProcessing scheudules an attestation for later processing
@@ -144,9 +145,15 @@ func (f *ForkChoiceStore) scheduleBlockForLaterProcessing(block *cltypes.SignedB
 		log.Error("failed to hash block", "err", err)
 		return
 	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		log.Error("failed to hash block root", "err", err)
+		return
+	}
 	f.blocksSet.Store(root, &blockJob{
-		block: block,
-		when:  time.Now(),
+		block:     block,
+		when:      time.Now(),
+		blockRoot: blockRoot,
 	})
 }
 
@@ -178,7 +185,7 @@ func (f *ForkChoiceStore) StartJobsRTT() {
 	}()
 
 	go func() {
-		interval := time.NewTicker(10 * time.Millisecond)
+		interval := time.NewTicker(50 * time.Millisecond)
 		for {
 			select {
 			case <-f.ctx.Done():
@@ -192,9 +199,17 @@ func (f *ForkChoiceStore) StartJobsRTT() {
 					}
 
 					f.blocksSet.Delete(key)
+					f.mu.Lock()
+					if err := f.isDataAvailable(job.block.Block.Slot, job.blockRoot, job.block.Block.Body.BlobKzgCommitments); err != nil {
+						return true
+					}
+
+					f.mu.Unlock()
+
 					if err := f.OnBlock(job.block, true, true, true); err != nil {
 						log.Warn("failed to process attestation", "err", err)
 					}
+					f.blocksSet.Delete(key)
 
 					return true
 				})
