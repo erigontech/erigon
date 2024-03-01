@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"modernc.org/mathutil"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -26,6 +27,7 @@ type FetcherConfig struct {
 
 type Fetcher interface {
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId PeerId) ([]*types.Body, error)
 }
 
 func NewFetcher(
@@ -74,7 +76,9 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 
 	headers := make([]*types.Header, 0, amount)
 	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
-		headerChunk, err := f.fetchHeaderChunkWithRetry(ctx, start, end, chunkNum, peerId)
+		headerChunk, err := fetchWithRetry(f.config, func() ([]*types.Header, error) {
+			return f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -89,26 +93,52 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	return headers, nil
 }
 
-func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
-	headers, err := backoff.RetryWithData(func() ([]*types.Header, error) {
-		headers, err := f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId)
-		if err != nil {
-			// retry timeouts
-			if errors.Is(err, context.DeadlineExceeded) {
-				return nil, err
-			}
+func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId PeerId) ([]*types.Body, error) {
+	//
+	// TODO 1. chunking
+	//      2. retrying
+	//      3. validation?
+	//      4. penalizing?
+	//      5. tracking?
+	//      6. tests
 
-			// permanent errors are not retried
-			return nil, backoff.Permanent(err)
-		}
+	// cleanup for the chan message observer
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-		return headers, nil
-	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(f.config.retryBackOff), f.config.maxRetries))
+	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx, 1)
+	f.messageListener.RegisterBlockBodiesObserver(observer)
+	defer f.messageListener.UnregisterBlockBodiesObserver(observer)
+
+	requestId := f.requestIdGenerator()
+	hashes := make([]common.Hash, len(headers))
+	for i, header := range headers {
+		hashes[i] = header.Hash()
+	}
+
+	err := f.messageSender.SendGetBlockBodies(ctx, peerId, eth.GetBlockBodiesPacket66{
+		RequestId:            requestId,
+		GetBlockBodiesPacket: hashes,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	return headers, nil
+	decode := func(data []byte) ([]*types.Body, uint64, error) {
+		var packet eth.BlockBodiesPacket66
+		if err := rlp.DecodeBytes(data, &packet); err != nil {
+			return nil, 0, err
+		}
+
+		return packet.BlockBodiesPacket, packet.RequestId, nil
+	}
+
+	bodies, err := awaitResponse(ctx, requestId, peerId, observer, f.config.responseTimeout, decode)
+	if err != nil {
+		return nil, err
+	}
+
+	return bodies, nil
 }
 
 func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
@@ -137,45 +167,21 @@ func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uin
 		return nil, err
 	}
 
-	headers, err := f.awaitHeadersResponse(ctx, requestId, peerId, observer)
+	decode := func(data []byte) ([]*types.Header, uint64, error) {
+		var packet eth.BlockHeadersPacket66
+		if err := rlp.DecodeBytes(data, &packet); err != nil {
+			return nil, 0, err
+		}
+
+		return packet.BlockHeadersPacket, packet.RequestId, nil
+	}
+
+	headers, err := awaitResponse(ctx, requestId, peerId, observer, f.config.responseTimeout, decode)
 	if err != nil {
 		return nil, err
 	}
 
 	return headers, nil
-}
-
-func (f *fetcher) awaitHeadersResponse(
-	ctx context.Context,
-	requestId uint64,
-	peerId PeerId,
-	observer ChanMessageObserver[*sentry.InboundMessage],
-) ([]*types.Header, error) {
-	ctx, cancel := context.WithTimeout(ctx, f.config.responseTimeout)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
-		case msg := <-observer.MessageChan():
-			msgPeerId := PeerIdFromH512(msg.PeerId)
-			if msgPeerId != peerId {
-				continue
-			}
-
-			var pkt eth.BlockHeadersPacket66
-			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-				return nil, fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
-			}
-
-			if pkt.RequestId != requestId {
-				continue
-			}
-
-			return pkt.BlockHeadersPacket, nil
-		}
-	}
 }
 
 func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
@@ -209,6 +215,67 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 	}
 
 	return nil
+}
+
+func fetchWithRetry[T any](config FetcherConfig, fetch func() (T, error)) (T, error) {
+	data, err := backoff.RetryWithData(func() (T, error) {
+		data, err := fetch()
+		if err != nil {
+			var nilData T
+			// retry timeouts
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nilData, err
+			}
+
+			// permanent errors are not retried
+			return nilData, backoff.Permanent(err)
+		}
+
+		return data, nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(config.retryBackOff), config.maxRetries))
+	if err != nil {
+		var nilData T
+		return nilData, err
+	}
+
+	return data, nil
+}
+
+func awaitResponse[T any](
+	ctx context.Context,
+	requestId uint64,
+	peerId PeerId,
+	observer ChanMessageObserver[*sentry.InboundMessage],
+	responseTimeout time.Duration,
+	decode func([]byte) (T, uint64, error),
+) (T, error) {
+	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			var nilData T
+			return nilData, fmt.Errorf("await response interrupted: %w", ctx.Err())
+		case msg := <-observer.MessageChan():
+			msgPeerId := PeerIdFromH512(msg.PeerId)
+			if msgPeerId != peerId {
+				continue
+			}
+
+			data, responseId, err := decode(msg.Data)
+			if err != nil {
+				var nilData T
+				return nilData, err
+			}
+
+			if responseId != requestId {
+				continue
+			}
+
+			return data, nil
+		}
+	}
 }
 
 type ErrInvalidFetchHeadersRange struct {

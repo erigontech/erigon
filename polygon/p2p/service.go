@@ -20,6 +20,8 @@ type Service interface {
 	ListPeersMayHaveBlockNum(blockNum uint64) []PeerId
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
+	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId PeerId) ([]*types.Body, error)
 	Penalize(ctx context.Context, peerId PeerId) error
 }
 
@@ -82,6 +84,10 @@ func (s *service) MaxPeers() int {
 
 func (s *service) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
 	return s.fetcher.FetchHeaders(ctx, start, end, peerId)
+}
+
+func (s *service) FetchBodies(ctx context.Context, headers []*types.Header, peerId PeerId) ([]*types.Body, error) {
+	return s.fetcher.FetchBodies(ctx, headers, peerId)
 }
 
 func (s *service) Penalize(ctx context.Context, peerId PeerId) error {

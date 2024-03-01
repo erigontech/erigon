@@ -17,6 +17,8 @@ type MessageListener interface {
 	Stop()
 	RegisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage])
 	UnregisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage])
+	RegisterBlockBodiesObserver(observer MessageObserver[*sentry.InboundMessage])
+	UnregisterBlockBodiesObserver(observer MessageObserver[*sentry.InboundMessage])
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent])
 	UnregisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent])
 }
@@ -48,6 +50,7 @@ func (ml *messageListener) Start(ctx context.Context) {
 
 		backgroundLoops := []func(){
 			ml.listenBlockHeaders66,
+			ml.listenBlockBodies66,
 			ml.listenPeerEvents,
 		}
 
@@ -75,6 +78,14 @@ func (ml *messageListener) RegisterBlockHeadersObserver(observer MessageObserver
 
 func (ml *messageListener) UnregisterBlockHeadersObserver(observer MessageObserver[*sentry.InboundMessage]) {
 	ml.unregisterInboundMessageObserver(observer, sentry.MessageId_BLOCK_HEADERS_66)
+}
+
+func (ml *messageListener) RegisterBlockBodiesObserver(observer MessageObserver[*sentry.InboundMessage]) {
+	ml.registerInboundMessageObserver(observer, sentry.MessageId_BLOCK_BODIES_66)
+}
+
+func (ml *messageListener) UnregisterBlockBodiesObserver(observer MessageObserver[*sentry.InboundMessage]) {
+	ml.unregisterInboundMessageObserver(observer, sentry.MessageId_BLOCK_BODIES_66)
 }
 
 func (ml *messageListener) RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) {
@@ -115,6 +126,10 @@ func (ml *messageListener) unregisterInboundMessageObserver(observer MessageObse
 
 func (ml *messageListener) listenBlockHeaders66() {
 	ml.listenInboundMessage("BlockHeaders66", sentry.MessageId_BLOCK_HEADERS_66)
+}
+
+func (ml *messageListener) listenBlockBodies66() {
+	ml.listenInboundMessage("BlockBodies66", sentry.MessageId_BLOCK_BODIES_66)
 }
 
 func (ml *messageListener) listenInboundMessage(name string, msgId sentry.MessageId) {

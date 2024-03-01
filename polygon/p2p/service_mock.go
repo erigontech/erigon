@@ -35,6 +35,21 @@ func (m *MockService) EXPECT() *MockServiceMockRecorder {
 	return m.recorder
 }
 
+// FetchBodies mocks base method.
+func (m *MockService) FetchBodies(arg0 context.Context, arg1 []*types.Header, arg2 PeerId) ([]*types.Body, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchBodies", arg0, arg1, arg2)
+	ret0, _ := ret[0].([]*types.Body)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchBodies indicates an expected call of FetchBodies.
+func (mr *MockServiceMockRecorder) FetchBodies(arg0, arg1, arg2 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBodies", reflect.TypeOf((*MockService)(nil).FetchBodies), arg0, arg1, arg2)
+}
+
 // FetchHeaders mocks base method.
 func (m *MockService) FetchHeaders(arg0 context.Context, arg1, arg2 uint64, arg3 PeerId) ([]*types.Header, error) {
 	m.ctrl.T.Helper()
