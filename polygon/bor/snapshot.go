@@ -112,7 +112,7 @@ func (s *Snapshot) Store(db kv.RwDB) error {
 			if s.Number > progress {
 				updateBytes := make([]byte, 8)
 				binary.BigEndian.PutUint64(updateBytes, s.Number)
-				if err = tx.Put(kv.BorSeparate, []byte("bor-snapshot-progress"), updateBytes[:]); err != nil {
+				if err = tx.Put(kv.BorSeparate, []byte("bor-snapshot-progress"), updateBytes); err != nil {
 					return err
 				}
 			}
