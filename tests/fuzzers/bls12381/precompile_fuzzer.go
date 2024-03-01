@@ -82,7 +82,7 @@ func checkInput(id byte, inputLen int) bool {
 // other values are reserved for future use.
 func fuzz(id byte, data []byte) int {
 	// Even on bad input, it should not crash, so we still test the gas calc
-	precompile := vm.PrecompiledContractsBLS[libcommon.BytesToAddress([]byte{id})]
+	precompile := vm.PrecompiledContractsPrague[libcommon.BytesToAddress([]byte{id})]
 	gas := precompile.RequiredGas(data)
 	if !checkInput(id, len(data)) {
 		return 0

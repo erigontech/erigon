@@ -125,9 +125,17 @@ var PrecompiledContractsNapoli = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
 
-// PrecompiledContractsBLS contains the set of pre-compiled Ethereum
-// contracts specified in EIP-2537. These are exported for testing purposes.
-var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
+var PrecompiledContractsPrague = map[libcommon.Address]PrecompiledContract{
+	libcommon.BytesToAddress([]byte{0x01}): &ecrecover{},
+	libcommon.BytesToAddress([]byte{0x02}): &sha256hash{},
+	libcommon.BytesToAddress([]byte{0x03}): &ripemd160hash{},
+	libcommon.BytesToAddress([]byte{0x04}): &dataCopy{},
+	libcommon.BytesToAddress([]byte{0x05}): &bigModExp{eip2565: true},
+	libcommon.BytesToAddress([]byte{0x06}): &bn256AddIstanbul{},
+	libcommon.BytesToAddress([]byte{0x07}): &bn256ScalarMulIstanbul{},
+	libcommon.BytesToAddress([]byte{0x08}): &bn256PairingIstanbul{},
+	libcommon.BytesToAddress([]byte{0x09}): &blake2F{},
+	libcommon.BytesToAddress([]byte{0x0a}): &pointEvaluation{},
 	libcommon.BytesToAddress([]byte{0x0c}): &bls12381G1Add{},
 	libcommon.BytesToAddress([]byte{0x0d}): &bls12381G1Mul{},
 	libcommon.BytesToAddress([]byte{0x0e}): &bls12381G1MultiExp{},
@@ -140,6 +148,7 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 }
 
 var (
+	PrecompiledAddressesPrague    []libcommon.Address
 	PrecompiledAddressesNapoli    []libcommon.Address
 	PrecompiledAddressesCancun    []libcommon.Address
 	PrecompiledAddressesBerlin    []libcommon.Address
@@ -167,11 +176,16 @@ func init() {
 	for k := range PrecompiledContractsNapoli {
 		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
 	}
+	for k := range PrecompiledContractsPrague {
+		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
+	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
+	case rules.IsPrague:
+		return PrecompiledAddressesPrague
 	case rules.IsNapoli:
 		return PrecompiledAddressesNapoli
 	case rules.IsCancun:
