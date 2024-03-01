@@ -100,7 +100,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 			if err == errEIP4844DataNotAvailable {
 				log.Info("Blob data is not available, the block will be scheduled for later processing", "slot", block.Block.Slot, "blockRoot", libcommon.Hash(blockRoot))
 				f.scheduleBlockForLaterProcessing(block)
-				return nil
+				return err
 			}
 			return fmt.Errorf("OnBlock: data is not available for block %x: %v", blockRoot, err)
 		}
