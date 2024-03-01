@@ -39,15 +39,15 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type filesItem struct {
-	decompressor *compress.Decompressor
+	decompressor *seg.Decompressor
 	index        *recsplit.Index
 	bindex       *BtIndex
 	startTxNum   uint64
@@ -322,7 +322,7 @@ func (d *Domain) openFiles() (err error) {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
 			}
-			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 				return false
 			}
 
@@ -515,8 +515,8 @@ const (
 // over storage of a given account
 type CursorItem struct {
 	c        kv.CursorDupSort
-	dg       *compress.Getter
-	dg2      *compress.Getter
+	dg       *seg.Getter
+	dg2      *seg.Getter
 	key      []byte
 	val      []byte
 	endTxNum uint64
@@ -561,7 +561,7 @@ func (ch *CursorHeap) Pop() interface{} {
 
 // filesItem corresponding to a pair of files (.dat and .idx)
 type ctxItem struct {
-	getter     *compress.Getter
+	getter     *seg.Getter
 	reader     *recsplit.IndexReader
 	startTxNum uint64
 	endTxNum   uint64
@@ -587,16 +587,16 @@ func ctxItemLess(i, j ctxItem) bool { //nolint
 type DomainContext struct {
 	d       *Domain
 	files   []ctxItem
-	getters []*compress.Getter
+	getters []*seg.Getter
 	readers []*BtIndex
 	hc      *HistoryContext
 	keyBuf  [60]byte // 52b key and 8b for inverted step
 	numBuf  [8]byte
 }
 
-func (dc *DomainContext) statelessGetter(i int) *compress.Getter {
+func (dc *DomainContext) statelessGetter(i int) *seg.Getter {
 	if dc.getters == nil {
-		dc.getters = make([]*compress.Getter, len(dc.files))
+		dc.getters = make([]*seg.Getter, len(dc.files))
 	}
 	r := dc.getters[i]
 	if r == nil {
@@ -668,8 +668,8 @@ func (d *Domain) MakeContext() *DomainContext {
 
 // Collation is the set of compressors created after aggregation
 type Collation struct {
-	valuesComp   *compress.Compressor
-	historyComp  *compress.Compressor
+	valuesComp   *seg.Compressor
+	historyComp  *seg.Compressor
 	indexBitmaps map[string]*roaring64.Bitmap
 	valuesPath   string
 	historyPath  string
@@ -690,7 +690,7 @@ type kvpair struct {
 	k, v []byte
 }
 
-func (d *Domain) writeCollationPair(valuesComp *compress.Compressor, pairs chan kvpair) (count int, err error) {
+func (d *Domain) writeCollationPair(valuesComp *seg.Compressor, pairs chan kvpair) (count int, err error) {
 	for kv := range pairs {
 		if err = valuesComp.AddUncompressedWord(kv.k); err != nil {
 			return count, fmt.Errorf("add %s values key [%x]: %w", d.filenameBase, kv.k, err)
@@ -755,7 +755,7 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 		return Collation{}, err
 	}
 
-	var valuesComp *compress.Compressor
+	var valuesComp *seg.Compressor
 	closeComp := true
 	defer func() {
 		if closeComp {
@@ -766,7 +766,7 @@ func (d *Domain) collateStream(ctx context.Context, step, txFrom, txTo uint64, r
 	}()
 
 	valuesPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, step, step+1))
-	if valuesComp, err = compress.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, compress.MinPatternScore, 1, log.LvlTrace, d.logger); err != nil {
+	if valuesComp, err = seg.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, seg.MinPatternScore, 1, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 
@@ -859,7 +859,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 	if err != nil {
 		return Collation{}, err
 	}
-	var valuesComp *compress.Compressor
+	var valuesComp *seg.Compressor
 	closeComp := true
 	defer func() {
 		if closeComp {
@@ -870,7 +870,7 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 		}
 	}()
 	valuesPath := filepath.Join(d.dir, fmt.Sprintf("%s.%d-%d.kv", d.filenameBase, step, step+1))
-	if valuesComp, err = compress.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, compress.MinPatternScore, 1, log.LvlTrace, d.logger); err != nil {
+	if valuesComp, err = seg.NewCompressor(context.Background(), "collate values", valuesPath, d.tmpdir, seg.MinPatternScore, 1, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.filenameBase, err)
 	}
 	keysCursor, err := roTx.CursorDupSort(d.keysTable)
@@ -939,12 +939,12 @@ func (d *Domain) collate(ctx context.Context, step, txFrom, txTo uint64, roTx kv
 }
 
 type StaticFiles struct {
-	valuesDecomp    *compress.Decompressor
+	valuesDecomp    *seg.Decompressor
 	valuesIdx       *recsplit.Index
 	valuesBt        *BtIndex
-	historyDecomp   *compress.Decompressor
+	historyDecomp   *seg.Decompressor
 	historyIdx      *recsplit.Index
-	efHistoryDecomp *compress.Decompressor
+	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
 }
 
@@ -985,7 +985,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 		return StaticFiles{}, err
 	}
 	valuesComp := collation.valuesComp
-	var valuesDecomp *compress.Decompressor
+	var valuesDecomp *seg.Decompressor
 	var valuesIdx *recsplit.Index
 	closeComp := true
 	defer func() {
@@ -1010,7 +1010,7 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 	}
 	valuesComp.Close()
 	valuesComp = nil
-	if valuesDecomp, err = compress.NewDecompressor(collation.valuesPath); err != nil {
+	if valuesDecomp, err = seg.NewDecompressor(collation.valuesPath); err != nil {
 		return StaticFiles{}, fmt.Errorf("open %s values decompressor: %w", d.filenameBase, err)
 	}
 
@@ -1083,14 +1083,14 @@ func (d *Domain) BuildMissedIndices(ctx context.Context, g *errgroup.Group, ps *
 	return nil
 }
 
-func buildIndexThenOpen(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
+func buildIndexThenOpen(ctx context.Context, d *seg.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) (*recsplit.Index, error) {
 	if err := buildIndex(ctx, d, idxPath, tmpdir, count, values, p, logger, noFsync); err != nil {
 		return nil, err
 	}
 	return recsplit.OpenIndex(idxPath)
 }
 
-func buildIndex(ctx context.Context, d *compress.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) error {
+func buildIndex(ctx context.Context, d *seg.Decompressor, idxPath, tmpdir string, count int, values bool, p *background.Progress, logger log.Logger, noFsync bool) error {
 	var rs *recsplit.RecSplit
 	var err error
 	if rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{

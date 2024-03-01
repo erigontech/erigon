@@ -1,12 +1,11 @@
 package handler
 
 import (
+	_ "embed"
 	"testing"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beacontest"
 	"github.com/ledgerwatch/erigon/cl/clparams"
-
-	_ "embed"
 )
 
 func TestHarnessPhase0(t *testing.T) {

@@ -143,7 +143,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
 		for i := 0; i < len(keyWords); i++ {
-			offset := r.Lookup([]byte(keyWords[i]))
+			offset, _ := r.Lookup([]byte(keyWords[i]))
 			g.Reset(offset)
 			w, _ := g.Next(nil)
 			require.Equal(keyWords[i], string(w))
@@ -156,7 +156,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 			for j := 0; j < len(ints); j++ {
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], ints[j])
-				offset := r.Lookup2(txKey[:], []byte(keyWords[i]))
+				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
+				if !ok {
+					continue
+				}
 				g.Reset(offset)
 				w, _ := g.Next(nil)
 				require.Equal(valWords[vi], string(w))

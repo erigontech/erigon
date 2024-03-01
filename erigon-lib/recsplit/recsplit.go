@@ -66,10 +66,14 @@ func remix(z uint64) uint64 {
 type RecSplit struct {
 	hasher          murmur3.Hash128 // Salted hash function to use for splitting into initial buckets and mapping to 64-bit fingerprints
 	offsetCollector *etl.Collector  // Collector that sorts by offsets
+
 	indexW          *bufio.Writer
 	indexF          *os.File
 	offsetEf        *eliasfano32.EliasFano // Elias Fano instance for encoding the offsets
 	bucketCollector *etl.Collector         // Collector that sorts by buckets
+
+	existenceF *os.File
+	existenceW *bufio.Writer
 
 	indexFileName          string
 	indexFile, tmpFilePath string
@@ -108,6 +112,7 @@ type RecSplit struct {
 	numBuf             [8]byte
 	collision          bool
 	enums              bool // Whether to build two level index with perfect hash table pointing to enumeration and enumeration pointing to offsets
+	lessFalsePositives bool
 	built              bool // Flag indicating that the hash function has been built and no more keys can be added
 	trace              bool
 	logger             log.Logger
@@ -119,7 +124,8 @@ type RecSplitArgs struct {
 	// Whether two level index needs to be built, where perfect hash map points to an enumeration, and enumeration points to offsets
 	// if Enum=false: can have unsorted and duplicated values
 	// if Enum=true:  must have sorted values (can have duplicates) - monotonically growing sequence
-	Enums bool
+	Enums              bool
+	LessFalsePositives bool
 
 	IndexFile   string // File name where the index and the minimal perfect hash function will be written to
 	TmpDir      string
@@ -174,6 +180,15 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		rs.offsetCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 		rs.offsetCollector.LogLvl(log.LvlDebug)
 	}
+	rs.lessFalsePositives = args.LessFalsePositives
+	if rs.enums && args.KeyCount > 0 && rs.lessFalsePositives {
+		bufferFile, err := os.CreateTemp(rs.tmpDir, "erigon-lfp-buf-")
+		if err != nil {
+			return nil, err
+		}
+		rs.existenceF = bufferFile
+		rs.existenceW = bufio.NewWriter(rs.existenceF)
+	}
 	rs.currentBucket = make([]uint64, 0, args.BucketSize)
 	rs.currentBucketOffs = make([]uint64, 0, args.BucketSize)
 	rs.maxOffset = 0
@@ -198,6 +213,9 @@ func (rs *RecSplit) Close() {
 	if rs.indexF != nil {
 		rs.indexF.Close()
 	}
+	if rs.existenceF != nil {
+		rs.existenceF.Close()
+	}
 	if rs.bucketCollector != nil {
 		rs.bucketCollector.Close()
 	}
@@ -214,8 +232,8 @@ func (rs *RecSplit) SetTrace(trace bool) {
 
 // remap converts the number x which is assumed to be uniformly distributed over the range [0..2^64) to the number that is uniformly
 // distributed over the range [0..n)
-func remap(x uint64, n uint64) uint64 {
-	hi, _ := bits.Mul64(x, n)
+func remap(x uint64, n uint64) (hi uint64) {
+	hi, _ = bits.Mul64(x, n)
 	return hi
 }
 
@@ -264,6 +282,8 @@ func splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound uint16) (fano
 	return
 }
 
+var golombBaseLog2 = -math.Log((math.Sqrt(5) + 1.0) / 2.0)
+
 func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, secondaryAggrBound uint16) {
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	k := make([]uint16, fanout)
@@ -277,7 +297,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 		sqrtProd *= math.Sqrt(float64(k[i]))
 	}
 	p := math.Sqrt(float64(m)) / (math.Pow(2*math.Pi, (float64(fanout)-1.)/2.0) * sqrtProd)
-	golombRiceLength := uint32(math.Ceil(math.Log2(-math.Log((math.Sqrt(5)+1.0)/2.0) / math.Log1p(-p)))) // log2 Golomb modulus
+	golombRiceLength := uint32(math.Ceil(math.Log2(golombBaseLog2 / math.Log1p(-p)))) // log2 Golomb modulus
 	if golombRiceLength > 0x1F {
 		panic("golombRiceLength > 0x1F")
 	}
@@ -303,8 +323,7 @@ func computeGolombRice(m uint16, table []uint32, leafSize, primaryAggrBound, sec
 // salt for the part of the hash function separating m elements. It is based on
 // calculations with assumptions that we draw hash functions at random
 func (rs *RecSplit) golombParam(m uint16) int {
-	s := uint16(len(rs.golombRice))
-	for m >= s {
+	for s := uint16(len(rs.golombRice)); m >= s; s++ {
 		rs.golombRice = append(rs.golombRice, 0)
 		// For the case where bucket is larger than planned
 		if s == 0 {
@@ -314,7 +333,6 @@ func (rs *RecSplit) golombParam(m uint16) int {
 		} else {
 			computeGolombRice(s, rs.golombRice, rs.leafSize, rs.primaryAggrBound, rs.secondaryAggrBound)
 		}
-		s++
 	}
 	return int(rs.golombRice[m] >> 27)
 }
@@ -349,6 +367,12 @@ func (rs *RecSplit) AddKey(key []byte, offset uint64) error {
 		binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
 			return err
+		}
+		if rs.lessFalsePositives {
+			//1 byte from each hashed key
+			if err := rs.existenceW.WriteByte(byte(hi)); err != nil {
+				return err
+			}
 		}
 	} else {
 		if err := rs.bucketCollector.Collect(rs.bucketKeyBuf[:], rs.numBuf[:]); err != nil {
@@ -561,7 +585,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return fmt.Errorf("create index file %s: %w", rs.indexFile, err)
 	}
 
-	rs.logger.Debug("[index] created", "file", rs.tmpFilePath, "fs", rs.indexF)
+	rs.logger.Debug("[index] created", "file", rs.tmpFilePath)
 
 	defer rs.indexF.Close()
 	rs.indexW = bufio.NewWriterSize(rs.indexF, etl.BufIOSize)
@@ -607,7 +631,7 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 	if rs.lvl < log.LvlTrace {
 		log.Log(rs.lvl, "[index] write", "file", rs.indexFileName)
 	}
-	if rs.enums {
+	if rs.enums && rs.keysAdded > 0 {
 		rs.offsetEf = eliasfano32.NewEliasFano(rs.keysAdded, rs.maxOffset)
 		defer rs.offsetCollector.Close()
 		if err := rs.offsetCollector.Load(nil, "", rs.loadFuncOffset, etl.TransformArgs{}); err != nil {
@@ -649,21 +673,26 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		}
 	}
 
+	var features Features
 	if rs.enums {
-		if err := rs.indexW.WriteByte(1); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
-		}
-	} else {
-		if err := rs.indexW.WriteByte(0); err != nil {
-			return fmt.Errorf("writing enums = true: %w", err)
+		features |= Enums
+		if rs.lessFalsePositives {
+			features |= LessFalsePositives
 		}
 	}
-	if rs.enums {
+	if err := rs.indexW.WriteByte(byte(features)); err != nil {
+		return fmt.Errorf("writing enums = true: %w", err)
+	}
+	if rs.enums && rs.keysAdded > 0 {
 		// Write out elias fano for offsets
 		if err := rs.offsetEf.Write(rs.indexW); err != nil {
 			return fmt.Errorf("writing elias fano for offsets: %w", err)
 		}
 	}
+	if err := rs.flushExistenceFilter(); err != nil {
+		return err
+	}
+
 	// Write out the size of golomb rice params
 	binary.BigEndian.PutUint16(rs.numBuf[:], uint16(len(rs.golombRice)))
 	if _, err := rs.indexW.Write(rs.numBuf[:4]); err != nil {
@@ -693,6 +722,31 @@ func (rs *RecSplit) Build(ctx context.Context) error {
 		return err
 	}
 
+	return nil
+}
+
+func (rs *RecSplit) flushExistenceFilter() error {
+	if !rs.enums || rs.keysAdded == 0 || !rs.lessFalsePositives {
+		return nil
+	}
+	defer rs.existenceF.Close()
+
+	//Write len of array
+	binary.BigEndian.PutUint64(rs.numBuf[:], rs.keysAdded)
+	if _, err := rs.indexW.Write(rs.numBuf[:]); err != nil {
+		return err
+	}
+
+	// flush bufio and rewind before io.Copy, but no reason to fsync the file - it temporary
+	if err := rs.existenceW.Flush(); err != nil {
+		return err
+	}
+	if _, err := rs.existenceF.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	if _, err := io.CopyN(rs.indexW, rs.existenceF, int64(rs.keysAdded)); err != nil {
+		return err
+	}
 	return nil
 }
 

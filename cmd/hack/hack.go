@@ -28,13 +28,13 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
 	"github.com/ledgerwatch/erigon-lib/kv/temporal/historyv2"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 
 	hackdb "github.com/ledgerwatch/erigon/cmd/hack/db"
 	"github.com/ledgerwatch/erigon/cmd/hack/flow"
@@ -1271,7 +1271,7 @@ func iterate(filename string, prefix string) error {
 	efFilename := filename + ".ef"
 	viFilename := filename + ".vi"
 	vFilename := filename + ".v"
-	efDecomp, err := compress.NewDecompressor(efFilename)
+	efDecomp, err := seg.NewDecompressor(efFilename)
 	if err != nil {
 		return err
 	}
@@ -1282,7 +1282,7 @@ func iterate(filename string, prefix string) error {
 	}
 	defer viIndex.Close()
 	r := recsplit.NewIndexReader(viIndex)
-	vDecomp, err := compress.NewDecompressor(vFilename)
+	vDecomp, err := seg.NewDecompressor(vFilename)
 	if err != nil {
 		return err
 	}
@@ -1301,7 +1301,10 @@ func iterate(filename string, prefix string) error {
 				txNum, _ := efIt.Next()
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], txNum)
-				offset := r.Lookup2(txKey[:], key)
+				offset, ok := r.Lookup2(txKey[:], key)
+				if !ok {
+					continue
+				}
 				gv.Reset(offset)
 				v, _ := gv.Next(nil)
 				fmt.Printf(" %d", txNum)
@@ -1323,7 +1326,7 @@ func iterate(filename string, prefix string) error {
 }
 
 func readSeg(chaindata string) error {
-	vDecomp, err := compress.NewDecompressor(chaindata)
+	vDecomp, err := seg.NewDecompressor(chaindata)
 	if err != nil {
 		return err
 	}

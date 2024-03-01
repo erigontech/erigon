@@ -67,6 +67,7 @@ type Config struct {
 	ShanghaiTime *big.Int `json:"shanghaiTime,omitempty"`
 	CancunTime   *big.Int `json:"cancunTime,omitempty"`
 	PragueTime   *big.Int `json:"pragueTime,omitempty"`
+	OsakaTime    *big.Int `json:"osakaTime,omitempty"`
 
 	// Optional EIP-4844 parameters
 	MinBlobGasPrice            *uint64 `json:"minBlobGasPrice,omitempty"`
@@ -84,6 +85,11 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
+
+	// For not pruning the logs of these contracts
+	// For deposit contract logs are needed by CL to validate/produce blocks.
+	// All logs should be available to a validating node through eth_getLogs
+	NoPruneContracts map[common.Address]bool `json:"noPruneContracts,omitempty"`
 }
 
 type BorConfig interface {
@@ -97,7 +103,7 @@ type BorConfig interface {
 func (c *Config) String() string {
 	engine := c.getEngine()
 
-	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Engine: %v}",
+	return fmt.Sprintf("{ChainID: %v, Homestead: %v, DAO: %v, Tangerine Whistle: %v, Spurious Dragon: %v, Byzantium: %v, Constantinople: %v, Petersburg: %v, Istanbul: %v, Muir Glacier: %v, Berlin: %v, London: %v, Arrow Glacier: %v, Gray Glacier: %v, Terminal Total Difficulty: %v, Merge Netsplit: %v, Shanghai: %v, Cancun: %v, Prague: %v, Osaka: %v, Engine: %v, NoPruneContracts: %v}",
 		c.ChainID,
 		c.HomesteadBlock,
 		c.DAOForkBlock,
@@ -117,7 +123,9 @@ func (c *Config) String() string {
 		c.ShanghaiTime,
 		c.CancunTime,
 		c.PragueTime,
+		c.OsakaTime,
 		engine,
+		c.NoPruneContracts,
 	)
 }
 
@@ -229,6 +237,11 @@ func (c *Config) IsCancun(time uint64) bool {
 // IsPrague returns whether time is either equal to the Prague fork time or greater.
 func (c *Config) IsPrague(time uint64) bool {
 	return isForked(c.PragueTime, time)
+}
+
+// IsOsaka returns whether time is either equal to the Osaka fork time or greater.
+func (c *Config) IsOsaka(time uint64) bool {
+	return isForked(c.OsakaTime, time)
 }
 
 func (c *Config) GetBurntContract(num uint64) *common.Address {
@@ -496,7 +509,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli                                bool
-	IsPrague                                          bool
+	IsPrague, isOsaka                                 bool
 	IsAura                                            bool
 }
 
@@ -522,6 +535,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsCancun:           c.IsCancun(time),
 		IsNapoli:           c.IsNapoli(num),
 		IsPrague:           c.IsPrague(time),
+		isOsaka:            c.IsOsaka(time),
 		IsAura:             c.Aura != nil,
 	}
 }

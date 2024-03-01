@@ -1343,6 +1343,9 @@ func (c *MdbxCursor) Next() (k, v []byte, err error) {
 	b := c.bucketCfg
 	if b.AutoDupSortKeysConversion && len(k) == b.DupToLen {
 		keyPart := b.DupFromLen - b.DupToLen
+		if len(v) == 0 {
+			return nil, nil, fmt.Errorf("key with empty value: k=%x, len(k)=%d, v=%x", k, len(k), v)
+		}
 		k = append(k, v[:keyPart]...)
 		v = v[keyPart:]
 	}

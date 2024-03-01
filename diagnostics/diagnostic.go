@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -73,9 +74,18 @@ func interfaceToJSONString(i interface{}) string {
 	return string(b)
 }*/
 
+func (d *DiagnosticClient) findNodeDisk() string {
+	dirPath := d.node.Backend().DataDir()
+	mountPoint := diskutils.MountPointForDirPath(dirPath)
+
+	return mountPoint
+}
+
 func (d *DiagnosticClient) getSysInfo() {
+	nodeDisk := d.findNodeDisk()
+
 	ramInfo := GetRAMInfo()
-	diskInfo := GetDiskInfo()
+	diskInfo := GetDiskInfo(nodeDisk)
 	cpuInfo := GetCPUInfo()
 
 	d.mu.Lock()
@@ -103,7 +113,7 @@ func GetRAMInfo() diaglib.RAMInfo {
 	}
 }
 
-func GetDiskInfo() diaglib.DiskInfo {
+func GetDiskInfo(nodeDisk string) diaglib.DiskInfo {
 	fsType := ""
 	total := uint64(0)
 	free := uint64(0)
@@ -112,7 +122,7 @@ func GetDiskInfo() diaglib.DiskInfo {
 
 	if err == nil {
 		for _, partition := range partitions {
-			if partition.Mountpoint == "/" {
+			if partition.Mountpoint == nodeDisk {
 				iocounters, err := disk.Usage(partition.Mountpoint)
 				if err == nil {
 					fsType = partition.Fstype

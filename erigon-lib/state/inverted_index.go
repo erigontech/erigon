@@ -32,10 +32,14 @@ import (
 
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	btree2 "github.com/tidwall/btree"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -43,10 +47,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
-	"github.com/ledgerwatch/log/v3"
-	btree2 "github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sync/errgroup"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type InvertedIndex struct {
@@ -308,7 +309,7 @@ func (ii *InvertedIndex) openFiles() error {
 				continue
 			}
 
-			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 				ii.logger.Debug("InvertedIndex.openFiles: %w, %s", err, datPath)
 				continue
 			}
@@ -555,14 +556,14 @@ func (ic *InvertedIndexContext) Close() {
 type InvertedIndexContext struct {
 	ii      *InvertedIndex
 	files   []ctxItem // have no garbage (overlaps, etc...)
-	getters []*compress.Getter
+	getters []*seg.Getter
 	readers []*recsplit.IndexReader
 	loc     *ctxLocalityIdx
 }
 
-func (ic *InvertedIndexContext) statelessGetter(i int) *compress.Getter {
+func (ic *InvertedIndexContext) statelessGetter(i int) *seg.Getter {
 	if ic.getters == nil {
-		ic.getters = make([]*compress.Getter, len(ic.files))
+		ic.getters = make([]*seg.Getter, len(ic.files))
 	}
 	r := ic.getters[i]
 	if r == nil {
@@ -764,7 +765,10 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset := item.reader.Lookup(it.key)
+			offset, ok := item.reader.Lookup(it.key)
+			if !ok {
+				continue
+			}
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
@@ -1155,7 +1159,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, txFrom, txTo uint64, roTx 
 }
 
 type InvertedFiles struct {
-	decomp *compress.Decompressor
+	decomp *seg.Decompressor
 	index  *recsplit.Index
 }
 
@@ -1169,9 +1173,9 @@ func (sf InvertedFiles) Close() {
 }
 
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
-	var decomp *compress.Decompressor
+	var decomp *seg.Decompressor
 	var index *recsplit.Index
-	var comp *compress.Compressor
+	var comp *seg.Compressor
 	var err error
 	closeComp := true
 	defer func() {
@@ -1199,7 +1203,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 	{
 		p := ps.AddNew(datFileName, 1)
 		defer ps.Delete(p)
-		comp, err = compress.NewCompressor(ctx, "ef", datPath, ii.tmpdir, compress.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
+		comp, err = seg.NewCompressor(ctx, "ef", datPath, ii.tmpdir, seg.MinPatternScore, ii.compressWorkers, log.LvlTrace, ii.logger)
 		if err != nil {
 			return InvertedFiles{}, fmt.Errorf("create %s compressor: %w", ii.filenameBase, err)
 		}
@@ -1227,7 +1231,7 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		comp = nil
 		ps.Delete(p)
 	}
-	if decomp, err = compress.NewDecompressor(datPath); err != nil {
+	if decomp, err = seg.NewDecompressor(datPath); err != nil {
 		return InvertedFiles{}, fmt.Errorf("open %s decompressor: %w", ii.filenameBase, err)
 	}
 

@@ -39,7 +39,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -47,6 +46,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
+	"github.com/ledgerwatch/erigon-lib/seg"
 )
 
 type History struct {
@@ -215,7 +215,7 @@ func (h *History) openFiles() error {
 				invalidFileItems = append(invalidFileItems, item)
 				continue
 			}
-			if item.decompressor, err = compress.NewDecompressor(datPath); err != nil {
+			if item.decompressor, err = seg.NewDecompressor(datPath); err != nil {
 				h.logger.Debug("Hisrory.openFiles: %w, %s", err, datPath)
 				return false
 			}
@@ -636,7 +636,7 @@ func (h *historyWAL) addPrevValue(key1, key2, original []byte) error {
 }
 
 type HistoryCollation struct {
-	historyComp  *compress.Compressor
+	historyComp  *seg.Compressor
 	indexBitmaps map[string]*roaring64.Bitmap
 	historyPath  string
 	historyCount int
@@ -652,7 +652,7 @@ func (c HistoryCollation) Close() {
 }
 
 func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollation, error) {
-	var historyComp *compress.Compressor
+	var historyComp *seg.Compressor
 	var err error
 	closeComp := true
 	defer func() {
@@ -663,7 +663,7 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 		}
 	}()
 	historyPath := filepath.Join(h.dir, fmt.Sprintf("%s.%d-%d.v", h.filenameBase, step, step+1))
-	if historyComp, err = compress.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger); err != nil {
+	if historyComp, err = seg.NewCompressor(context.Background(), "collate history", historyPath, h.tmpdir, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger); err != nil {
 		return HistoryCollation{}, fmt.Errorf("create %s history compressor: %w", h.filenameBase, err)
 	}
 	keysCursor, err := roTx.CursorDupSort(h.indexKeysTable)
@@ -761,9 +761,9 @@ func (h *History) collate(step, txFrom, txTo uint64, roTx kv.Tx) (HistoryCollati
 }
 
 type HistoryFiles struct {
-	historyDecomp   *compress.Decompressor
+	historyDecomp   *seg.Decompressor
 	historyIdx      *recsplit.Index
-	efHistoryDecomp *compress.Decompressor
+	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
 }
 
@@ -793,9 +793,9 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	if h.noFsync {
 		historyComp.DisableFsync()
 	}
-	var historyDecomp, efHistoryDecomp *compress.Decompressor
+	var historyDecomp, efHistoryDecomp *seg.Decompressor
 	var historyIdx, efHistoryIdx *recsplit.Index
-	var efHistoryComp *compress.Compressor
+	var efHistoryComp *seg.Compressor
 	var rs *recsplit.RecSplit
 	closeComp := true
 	defer func() {
@@ -847,7 +847,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 
 	{
 		var err error
-		if historyDecomp, err = compress.NewDecompressor(collation.historyPath); err != nil {
+		if historyDecomp, err = seg.NewDecompressor(collation.historyPath); err != nil {
 			return HistoryFiles{}, fmt.Errorf("open %s history decompressor: %w", h.filenameBase, err)
 		}
 
@@ -857,7 +857,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		p := ps.AddNew(efHistoryFileName, 1)
 		defer ps.Delete(p)
 		efHistoryPath = filepath.Join(h.dir, efHistoryFileName)
-		efHistoryComp, err = compress.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, compress.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
+		efHistoryComp, err = seg.NewCompressor(ctx, "ef history", efHistoryPath, h.tmpdir, seg.MinPatternScore, h.compressWorkers, log.LvlTrace, h.logger)
 		if err != nil {
 			return HistoryFiles{}, fmt.Errorf("create %s ef history compressor: %w", h.filenameBase, err)
 		}
@@ -891,7 +891,7 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	}
 
 	var err error
-	if efHistoryDecomp, err = compress.NewDecompressor(efHistoryPath); err != nil {
+	if efHistoryDecomp, err = seg.NewDecompressor(efHistoryPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s ef history decompressor: %w", h.filenameBase, err)
 	}
 	efHistoryIdxFileName := fmt.Sprintf("%s.%d-%d.efi", h.filenameBase, step, step+1)
@@ -1121,7 +1121,7 @@ type HistoryContext struct {
 	ic *InvertedIndexContext
 
 	files   []ctxItem // have no garbage (canDelete=true, overlaps, etc...)
-	getters []*compress.Getter
+	getters []*seg.Getter
 	readers []*recsplit.IndexReader
 
 	trace bool
@@ -1145,9 +1145,9 @@ func (h *History) MakeContext() *HistoryContext {
 	return &hc
 }
 
-func (hc *HistoryContext) statelessGetter(i int) *compress.Getter {
+func (hc *HistoryContext) statelessGetter(i int) *seg.Getter {
 	if hc.getters == nil {
-		hc.getters = make([]*compress.Getter, len(hc.files))
+		hc.getters = make([]*seg.Getter, len(hc.files))
 	}
 	r := hc.getters[i]
 	if r == nil {
@@ -1211,7 +1211,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		if reader.Empty() {
 			return true
 		}
-		offset := reader.Lookup(key)
+		offset, ok := reader.Lookup(key)
+		if !ok {
+			return false
+		}
 		g := hc.ic.statelessGetter(item.i)
 		g.Reset(offset)
 		k, _ := g.NextUncompressed()
@@ -1294,7 +1297,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 		var txKey [8]byte
 		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
 		reader := hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(txKey[:], key)
+		offset, ok := reader.Lookup2(txKey[:], key)
+		if !ok {
+			return nil, false, nil
+		}
 		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 		g := hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
@@ -1313,7 +1319,10 @@ func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint6
 	if hs.indexFile.reader.Empty() {
 		return nil, false, txNum
 	}
-	offset := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.Lookup(key)
+	if !ok {
+		return nil, false, txNum
+	}
 	g := hs.indexFile.getter
 	g.Reset(offset)
 	k, _ := g.NextUncompressed()
@@ -1329,7 +1338,10 @@ func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint6
 	}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], n)
-	offset = hs.historyFile.reader.Lookup2(txKey[:], key)
+	offset, ok = hs.historyFile.reader.Lookup2(txKey[:], key)
+	if !ok {
+		return nil, false, txNum
+	}
 	//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 	g = hs.historyFile.getter
 	g.Reset(offset)
@@ -1345,7 +1357,10 @@ func (hs *HistoryStep) MaxTxNum(key []byte) (bool, uint64) {
 	if hs.indexFile.reader.Empty() {
 		return false, 0
 	}
-	offset := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.Lookup(key)
+	if !ok {
+		return false, 0
+	}
 	g := hs.indexFile.getter
 	g.Reset(offset)
 	k, _ := g.NextUncompressed()
@@ -1516,7 +1531,10 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		if !ok {
+			continue
+		}
 		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		if hi.compressVals {
@@ -1826,7 +1844,10 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		if !ok {
+			continue
+		}
 		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		if hi.compressVals {

@@ -32,11 +32,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/compress"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -68,7 +68,7 @@ func (r Ranges) String() string {
 
 type Segment struct {
 	Range
-	*compress.Decompressor
+	*seg.Decompressor
 	indexes []*recsplit.Index
 	segType snaptype.Type
 	version snaptype.Version
@@ -114,7 +114,7 @@ func (s Segment) FileName() string {
 
 func (s *Segment) reopenSeg(dir string) (err error) {
 	s.closeSeg()
-	s.Decompressor, err = compress.NewDecompressor(filepath.Join(dir, s.FileName()))
+	s.Decompressor, err = seg.NewDecompressor(filepath.Join(dir, s.FileName()))
 	if err != nil {
 		return fmt.Errorf("%w, fileName: %s", err, s.FileName())
 	}
@@ -255,6 +255,7 @@ type RoSnapshots struct {
 	indicesReady  atomic.Bool
 	segmentsReady atomic.Bool
 
+	types    []snaptype.Type
 	segments btree.Map[snaptype.Enum, *segments]
 
 	dir         string
@@ -283,7 +284,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		segs.Set(snapType.Enum(), &segments{})
 	}
 
-	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger}
+	s := &RoSnapshots{dir: snapDir, cfg: cfg, segments: segs, logger: logger, types: types}
 	s.segmentsMin.Store(segmentsMin)
 
 	return s
@@ -320,15 +321,14 @@ func (s *RoSnapshots) EnsureExpectedBlocksAreAvailable(cfg *snapcfg.Cfg) error {
 	return nil
 }
 
-func (s *RoSnapshots) Types() []snaptype.Type {
-	types := make([]snaptype.Type, 0, s.segments.Len())
-
-	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
-		types = append(types, segtype.Type())
-		return true
-	})
-
-	return types
+func (s *RoSnapshots) Types() []snaptype.Type { return s.types }
+func (s *RoSnapshots) HasType(in snaptype.Type) bool {
+	for _, t := range s.types {
+		if t.Enum() == in.Enum() {
+			return true
+		}
+	}
+	return false
 }
 
 // DisableReadAhead - usage: `defer d.EnableReadAhead().DisableReadAhead()`. Please don't use this funcs without `defer` to avoid leak.
@@ -383,11 +383,12 @@ func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
-	max := make([]uint64, s.segments.Len())
-
+	max := make([]uint64, len(s.Types()))
 	i := 0
-
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
+		if !s.HasType(segtype.Type()) {
+			return true
+		}
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
 				break
@@ -400,9 +401,8 @@ func (s *RoSnapshots) idxAvailability() uint64 {
 	})
 
 	var min uint64 = math.MaxUint64
-
-	for _, max := range max {
-		min = cmp.Min(min, max)
+	for _, maxEl := range max {
+		min = cmp.Min(min, maxEl)
 	}
 
 	return min
@@ -460,11 +460,17 @@ func (s *RoSnapshots) OpenFiles() (list []string) {
 
 // ReopenList stops on optimistic=false, continue opening files on optimistic=true
 func (s *RoSnapshots) ReopenList(fileNames []string, optimistic bool) error {
-	return s.rebuildSegments(fileNames, true, optimistic)
+	if err := s.rebuildSegments(fileNames, true, optimistic); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *RoSnapshots) InitSegments(fileNames []string) error {
-	return s.rebuildSegments(fileNames, false, true)
+	if err := s.rebuildSegments(fileNames, false, true); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *RoSnapshots) lockSegments() {
@@ -490,13 +496,16 @@ func (s *RoSnapshots) rebuildSegments(fileNames []string, open bool, optimistic 
 	var segmentsMaxSet bool
 
 	for _, fName := range fileNames {
-		f, ok := snaptype.ParseFileName(s.dir, fName)
+		f, _, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok {
 			continue
 		}
 
-		segtype, ok := s.segments.Get(f.Type.Enum())
+		if !s.HasType(f.Type) {
+			continue
+		}
 
+		segtype, ok := s.segments.Get(f.Type.Enum())
 		if !ok {
 			segtype = &segments{}
 			s.segments.Set(f.Type.Enum(), segtype)
@@ -1390,7 +1399,7 @@ type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, b
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
 
-	sn, err := compress.NewCompressor(ctx, "Snapshot "+f.Type.String(), f.Path, tmpDir, compress.MinPatternScore, workers, log.LvlTrace, logger)
+	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.String(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
 
 	if err != nil {
 		return lastKeyValue, err
@@ -1776,7 +1785,7 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 
 var EmptyTxHash = common2.Hash{}
 
-func txsAmountBasedOnBodiesSnapshots(bodiesSegment *compress.Decompressor, len uint64) (firstTxID uint64, expectedCount int, err error) {
+func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (firstTxID uint64, expectedCount int, err error) {
 	gg := bodiesSegment.MakeGetter()
 	buf, _ := gg.Next(nil)
 	firstBody := &types.BodyForStorage{}
@@ -1814,7 +1823,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}()
 	firstBlockNum := sn.From
 
-	bodiesSegment, err := compress.NewDecompressor(sn.As(snaptype.Bodies).Path)
+	bodiesSegment, err := seg.NewDecompressor(sn.As(snaptype.Bodies).Path)
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", sn.Name(), err)
 	}
@@ -1825,7 +1834,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 		return err
 	}
 
-	d, err := compress.NewDecompressor(sn.Path)
+	d, err := seg.NewDecompressor(sn.Path)
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", sn.Path, err)
 	}
@@ -1841,8 +1850,11 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
+		KeyCount: d.Count(),
+
+		Enums:              true,
+		LessFalsePositives: true,
+
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
@@ -2011,7 +2023,7 @@ func Idx(ctx context.Context, info snaptype.FileInfo, firstDataID uint64, tmpDir
 		}
 	}()
 
-	d, err := compress.NewDecompressor(info.Path)
+	d, err := seg.NewDecompressor(info.Path)
 
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
@@ -2228,9 +2240,9 @@ func (m *Merger) Merge(ctx context.Context, snapshots *RoSnapshots, snapTypes []
 func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string, logEvery *time.Ticker) error {
 	var word = make([]byte, 0, 4096)
 	var expectedTotal int
-	cList := make([]*compress.Decompressor, len(toMerge))
+	cList := make([]*seg.Decompressor, len(toMerge))
 	for i, cFile := range toMerge {
-		d, err := compress.NewDecompressor(cFile)
+		d, err := seg.NewDecompressor(cFile)
 		if err != nil {
 			return err
 		}
@@ -2239,7 +2251,7 @@ func (m *Merger) merge(ctx context.Context, toMerge []string, targetFile string,
 		expectedTotal += d.Count()
 	}
 
-	f, err := compress.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, compress.MinPatternScore, m.compressWorkers, log.LvlTrace, m.logger)
+	f, err := seg.NewCompressor(ctx, "Snapshots merge", targetFile, m.tmpDir, seg.MinPatternScore, m.compressWorkers, log.LvlTrace, m.logger)
 	if err != nil {
 		return err
 	}
@@ -2355,4 +2367,28 @@ func (v *View) BodiesSegment(blockNum uint64) (*Segment, bool) {
 }
 func (v *View) TxsSegment(blockNum uint64) (*Segment, bool) {
 	return v.Segment(snaptype.Transactions, blockNum)
+}
+
+func RemoveIncompatibleIndices(snapsDir string) error {
+	l, err := dir2.ListFiles(snapsDir, ".idx")
+	if err != nil {
+		return err
+	}
+	for _, fPath := range l {
+		index, err := recsplit.OpenIndex(fPath)
+		if err != nil {
+			if errors.Is(err, recsplit.IncompatibleErr) {
+				_, fName := filepath.Split(fPath)
+				if err = os.Remove(fPath); err != nil {
+					log.Warn("Removing incompatible index", "file", fName, "err", err)
+				} else {
+					log.Info("Removing incompatible index", "file", fName)
+				}
+				continue
+			}
+			return fmt.Errorf("%w, %s", err, fPath)
+		}
+		index.Close()
+	}
+	return nil
 }

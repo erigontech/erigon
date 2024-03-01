@@ -436,6 +436,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 		stream.WriteNil()
 		return err
 	}
+	if block == nil {
+		stream.WriteNil()
+		return fmt.Errorf("block %d not found", blockNum)
+	}
 
 	// -1 is a default value for transaction index.
 	// If it's -1, we will try to replay every single transaction in that block
