@@ -411,15 +411,16 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 				break
 			}
 		}
-		if item == nil {
-			for _, f := range dc.d.files.Items() {
-				if f.startTxNum == txFrom && f.endTxNum == txTo {
-					item = f
-					break
-				}
+	}
+	if item == nil {
+		for _, f := range dc.d.files.Items() {
+			if f.startTxNum == txFrom && f.endTxNum == txTo {
+				item = f
+				break
 			}
 		}
 	}
+
 	if item == nil {
 		fileStepsss := ""
 		for _, item := range dc.d.files.Items() {
