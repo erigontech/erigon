@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
@@ -221,15 +222,18 @@ func ConsensusClStages(ctx context.Context,
 ) *clstages.StageGraph[*Cfg, Args] {
 
 	rpcSource := persistence.NewBeaconRpcSource(cfg.rpc)
-	processBlock := func(tx kv.RwTx, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
-		if err := cfg.forkChoice.OnBlock(block, newPayload, fullValidation, checkDataAvaiability); err != nil {
+	processBlock := func(db kv.RwDB, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+		if err := db.Update(ctx, func(tx kv.RwTx) error {
+			if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
+				return err
+			}
+			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+		}); err != nil {
 			return err
 		}
-		if err := beacon_indicies.WriteHighestFinalized(tx, cfg.forkChoice.FinalizedSlot()); err != nil {
-			return err
-		}
-		// Write block to database optimistically if we are very behind.
-		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+
+		return cfg.forkChoice.OnBlock(block, newPayload, fullValidation, checkDataAvaiability)
+
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -291,11 +295,7 @@ func ConsensusClStages(ctx context.Context,
 				},
 				ActionFunc: func(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
 					shouldInsert := cfg.executionClient != nil && cfg.executionClient.SupportInsertion()
-					tx, err := cfg.indiciesDB.BeginRw(ctx)
-					if err != nil {
-						return err
-					}
-					defer tx.Rollback()
+
 					downloader := network2.NewForwardBeaconDownloader(ctx, cfg.rpc)
 					finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 					var currentSlot atomic.Uint64
@@ -314,7 +314,7 @@ func ConsensusClStages(ctx context.Context,
 						})
 
 						for i, block := range blocks {
-							if err := processBlock(tx, block, false, true, false); err != nil {
+							if err := processBlock(cfg.indiciesDB, block, false, true, false); err != nil {
 								log.Warn("bad blocks segment received", "err", err)
 								blocks = blocks[i:]
 								break
@@ -407,9 +407,7 @@ func ConsensusClStages(ctx context.Context,
 						default:
 						}
 					}
-					if err := tx.Commit(); err != nil {
-						return err
-					}
+
 					return nil
 				},
 			},
@@ -448,7 +446,9 @@ func ConsensusClStages(ctx context.Context,
 						}
 					}
 
-					tx, err := cfg.indiciesDB.BeginRw(ctx)
+					tmpDB := memdb.New(cfg.tmpdir)
+					defer tmpDB.Close()
+					tx, err := tmpDB.BeginRw(ctx)
 					if err != nil {
 						return err
 					}
@@ -632,14 +632,8 @@ func ConsensusClStages(ctx context.Context,
 									continue
 								}
 								seenBlockRoots[blockRoot] = struct{}{}
-								tx, err := cfg.indiciesDB.BeginRw(ctx)
-								if err != nil {
-									return err
-								}
-								defer tx.Rollback()
-								if err := processBlock(tx, block, true, true, true); err != nil {
+								if err := processBlock(cfg.indiciesDB, block, true, true, true); err != nil {
 									log.Debug("bad blocks segment received", "err", err)
-									tx.Rollback()
 									continue
 								}
 								if err := tx.Commit(); err != nil {
