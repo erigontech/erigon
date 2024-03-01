@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -175,77 +174,78 @@ type snapshotLock struct {
 func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
 	//TODO: snapshots-lock.json is not compatible with E3 .kv files - because they are not immutable (merging to infinity)
 	return initSnapshotLock(ctx, cfg, db, logger)
-
-	if !cfg.SnapshotLock {
-		return initSnapshotLock(ctx, cfg, db, logger)
-	}
-
-	snapDir := cfg.Dirs.Snap
-
-	lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
-
-	file, err := os.Open(lockPath)
-	if err != nil {
-		if !errors.Is(err, os.ErrNotExist) {
-			return nil, err
+	/*
+		if !cfg.SnapshotLock {
+			return initSnapshotLock(ctx, cfg, db, logger)
 		}
-	}
 
-	var data []byte
+		snapDir := cfg.Dirs.Snap
 
-	if file != nil {
-		defer file.Close()
+		lockPath := filepath.Join(snapDir, SnapshotsLockFileName)
 
-		data, err = io.ReadAll(file)
-
+		file, err := os.Open(lockPath)
 		if err != nil {
-			return nil, err
-		}
-	}
-
-	if file == nil || len(data) == 0 {
-		f, err := os.Create(lockPath)
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-
-		lock, err := initSnapshotLock(ctx, cfg, db, logger)
-
-		if err != nil {
-			return nil, err
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
 		}
 
-		data, err := json.Marshal(lock)
+		var data []byte
 
-		if err != nil {
+		if file != nil {
+			defer file.Close()
+
+			data, err = io.ReadAll(file)
+
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		if file == nil || len(data) == 0 {
+			f, err := os.Create(lockPath)
+			if err != nil {
+				return nil, err
+			}
+			defer f.Close()
+
+			lock, err := initSnapshotLock(ctx, cfg, db, logger)
+
+			if err != nil {
+				return nil, err
+			}
+
+			data, err := json.Marshal(lock)
+
+			if err != nil {
+				return nil, err
+			}
+
+			_, err = f.Write(data)
+
+			if err != nil {
+				return nil, err
+			}
+
+			if err := f.Sync(); err != nil {
+				return nil, err
+			}
+
+			return lock, nil
+		}
+
+		var lock snapshotLock
+
+		if err = json.Unmarshal(data, &lock); err != nil {
 			return nil, err
 		}
 
-		_, err = f.Write(data)
-
-		if err != nil {
-			return nil, err
+		if lock.Chain != cfg.ChainName {
+			return nil, fmt.Errorf("unexpected chain name:%q expecting: %q", lock.Chain, cfg.ChainName)
 		}
 
-		if err := f.Sync(); err != nil {
-			return nil, err
-		}
-
-		return lock, nil
-	}
-
-	var lock snapshotLock
-
-	if err = json.Unmarshal(data, &lock); err != nil {
-		return nil, err
-	}
-
-	if lock.Chain != cfg.ChainName {
-		return nil, fmt.Errorf("unexpected chain name:%q expecting: %q", lock.Chain, cfg.ChainName)
-	}
-
-	return &lock, nil
+		return &lock, nil
+	*/
 }
 
 func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {

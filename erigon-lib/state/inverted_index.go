@@ -1170,7 +1170,6 @@ func (it *FrozenInvertedIdxIter) advanceInFiles() {
 			if !ok {
 				continue
 			}
-
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()

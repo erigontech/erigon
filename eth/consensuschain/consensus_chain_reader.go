@@ -56,7 +56,7 @@ func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
 func (cr Reader) GetTd(hash common.Hash, number uint64) *big.Int {
 	td, err := rawdb.ReadTd(cr.tx, hash, number)
 	if err != nil {
-		cr.logger.Error("ReadTd failed", "err", err)
+		cr.logger.Warn("ReadTd failed", "err", err)
 		return nil
 	}
 	return td
@@ -73,7 +73,7 @@ func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
 func (cr Reader) BorStartEventID(hash common.Hash, number uint64) uint64 {
 	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, hash, number)
 	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
+		cr.logger.Warn("BorEventsByBlock failed", "err", err)
 		return 0
 	}
 	return id
@@ -82,7 +82,7 @@ func (cr Reader) BorStartEventID(hash common.Hash, number uint64) uint64 {
 func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValue {
 	events, err := cr.blockReader.EventsByBlock(context.Background(), cr.tx, hash, number)
 	if err != nil {
-		cr.logger.Error("BorEventsByBlock failed", "err", err)
+		cr.logger.Warn("BorEventsByBlock failed", "err", err)
 		return nil
 	}
 	return events
@@ -91,7 +91,7 @@ func (cr Reader) BorEventsByBlock(hash common.Hash, number uint64) []rlp.RawValu
 func (cr Reader) BorSpan(spanId uint64) []byte {
 	span, err := cr.blockReader.Span(context.Background(), cr.tx, spanId)
 	if err != nil {
-		log.Error("BorSpan failed", "err", err)
+		log.Warn("BorSpan failed", "err", err)
 		return nil
 	}
 	return span

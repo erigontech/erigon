@@ -814,7 +814,6 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 
 		reader := recsplit.NewIndexReader(idxTxnHash)
 		txnId, ok := reader.Lookup(txnHash[:])
-		fmt.Printf("[dbg] txnByHash: sn=%d-%d, esists=%t, txnId=%d", sn.from, sn.to, ok, txnId)
 		if !ok {
 			continue
 		}
