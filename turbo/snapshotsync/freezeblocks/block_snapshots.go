@@ -1850,8 +1850,11 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
+		KeyCount: d.Count(),
+
+		Enums:              true,
+		LessFalsePositives: true,
+
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
