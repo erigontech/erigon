@@ -1283,6 +1283,16 @@ func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo
 }
 
 func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloadStatus, sem *semaphore.Weighted) {
+
+	d.lock.Lock()
+	d.downloading[t.Name()] = struct{}{}
+	d.lock.Unlock()
+
+	if err := sem.Acquire(d.ctx, 1); err != nil {
+		d.logger.Warn("Failed to acquire download semaphore", "err", err)
+		return
+	}
+
 	t.AllowDataDownload()
 
 	select {
@@ -1292,17 +1302,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 	}
 
 	t.DownloadAll()
-
-	d.lock.Lock()
-	d.downloading[t.Name()] = struct{}{}
-	d.lock.Unlock()
-
 	d.wg.Add(1)
-
-	if err := sem.Acquire(d.ctx, 1); err != nil {
-		d.logger.Warn("Failed to acquire download semaphore", "err", err)
-		return
-	}
 
 	go func(t *torrent.Torrent) {
 		defer d.wg.Done()
