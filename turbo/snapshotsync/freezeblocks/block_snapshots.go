@@ -1014,10 +1014,6 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 			var m []Range
 			for _, f := range list {
 				if f.Type.Enum() != segType.Enum() {
-					if len(list) > 0 {
-						lst := list[len(list)-1]
-						log.Warn("[dbg] list last", "name", lst.Name())
-					}
 					continue
 				}
 				l = append(l, f)
