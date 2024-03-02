@@ -1160,9 +1160,9 @@ func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId, ok := reader.Lookup(borTxHash[:])
-		if !ok {
-			return 0, fmt.Errorf("block event id not found in snaps: %d, %x, %x", blockHeight, hash, idxBorTxnHash)
+		blockEventId, found := reader.Lookup(borTxHash[:])
+		if !found {
+			return 0, fmt.Errorf("borTxHash %x not found in snapshot %s", borTxHash, sn.FilePath())
 		}
 		return idxBorTxnHash.BaseDataID() + blockEventId, nil
 	}
