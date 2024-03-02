@@ -189,6 +189,7 @@ Loop:
 			if !exists {
 				sn = &Segment{segType: snaptype.BlobSidecars, version: f.Version, Range: Range{f.From, f.To}}
 			}
+			fmt.Println(sn.from, sn.to, sn.FilePath())
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
@@ -613,7 +614,7 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 			foundMinSeg = true
 		}
 		ret = utils.Max64(ret, seg.to)
-		fmt.Println(seg.from, seg.to)
+		fmt.Println(seg.from, seg.to, ret, minSegFrom)
 	}
 	if !foundMinSeg {
 		return 0
