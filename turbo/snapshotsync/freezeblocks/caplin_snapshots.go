@@ -76,7 +76,7 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, snapDir string, logger log.Logger) *CaplinSnapshots {
-	return &CaplinSnapshots{dir: snapDir, cfg: cfg, BeaconBlocks: &segments{}, logger: logger, beaconCfg: beaconCfg}
+	return &CaplinSnapshots{dir: snapDir, cfg: cfg, BeaconBlocks: &segments{}, BlobSidecars: &segments{}, logger: logger, beaconCfg: beaconCfg}
 }
 
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
@@ -467,7 +467,7 @@ func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage,
 			break
 		}
 		to := chooseSegmentEnd(i, toSlot, nil)
-		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
+		logger.Log(lvl, "Dumping blobs sidecars", "from", i, "to", to)
 		if err := dumpBlobSidecarsRange(ctx, db, blobStorage, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err
 		}
