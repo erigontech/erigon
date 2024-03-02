@@ -297,3 +297,15 @@ func (*BeaconBlock) Static() bool {
 func (b *BeaconBody) ExecutionPayloadMerkleProof() ([][32]byte, error) {
 	return merkle_tree.MerkleProof(4, 9, b.getSchema(false)...)
 }
+
+func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
+	if index >= b.BlobKzgCommitments.Len() {
+		return nil, fmt.Errorf("index out of range")
+	}
+	kzgCommitmentsProof, err := merkle_tree.MerkleProof(4, 11, b.getSchema(false)...)
+	if err != nil {
+		return nil, err
+	}
+	branch := b.BlobKzgCommitments.ElementProof(index)
+	return append(branch, kzgCommitmentsProof...), nil
+}
