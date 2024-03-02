@@ -1035,7 +1035,6 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	c.To = utils.Max64(c.To, beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch)
 	var to uint64
 	db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -1045,6 +1044,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 		to = c.To
 		return
 	})
+	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, 0, to, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }
