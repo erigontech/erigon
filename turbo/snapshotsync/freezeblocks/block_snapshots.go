@@ -994,7 +994,10 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 			}
 			l = append(l, f)
 		}
+		fmt.Println(l)
+		fmt.Println("*****")
 		l, m = noGaps(noOverlaps(l), minBlock)
+		fmt.Println(l)
 		res = append(res, l...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}
