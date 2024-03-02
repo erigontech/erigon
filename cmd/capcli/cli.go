@@ -252,7 +252,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false), csn, db, nil, genesisConfig, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false), csn, db, nil, genesisConfig, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -1071,24 +1071,18 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	var to uint64
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	to, err = beacon_indicies.ReadHighestFinalized(tx)
-	if err != nil {
-		return err
-	}
-
-	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
-
 	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
+	to := csn.FrozenBlobs()
+	fmt.Println(to)
 
 	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
 		sds, err := csn.ReadBlobSidecars(i)

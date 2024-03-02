@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/persistence/format/snapshot_format"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
@@ -597,4 +598,20 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 		}
 	}
 	return sidecars, nil
+}
+
+func (s *CaplinSnapshots) FrozenBlobs() uint64 {
+	minSegFrom := ((s.beaconCfg.SlotsPerEpoch * s.beaconCfg.DenebForkEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	foundMinSeg := false
+	ret := uint64(0)
+	for _, seg := range s.BlobSidecars.segments {
+		if seg.from == minSegFrom {
+			foundMinSeg = true
+		}
+		ret = utils.Max64(ret, seg.to)
+	}
+	if !foundMinSeg {
+		return 0
+	}
+	return ret
 }

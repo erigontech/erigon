@@ -18,30 +18,33 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-const safetyMargin = 10_000 // We retire snapshots 10k blocks after the finalized head
+const safetyMargin = 2_000 // We retire snapshots 2k blocks after the finalized head
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
-	mainDB          kv.RwDB // this is the main DB
-	dirs            datadir.Dirs
-	downloader      proto_downloader.DownloaderClient
-	logger          log.Logger
-	sn              *freezeblocks.CaplinSnapshots
-	snReader        freezeblocks.BeaconSnapshotReader
-	ctx             context.Context
-	backfilled      *atomic.Bool
-	cfg             *clparams.BeaconChainConfig
-	states, blocks  bool
-	validatorsTable *state_accessors.StaticValidatorTable
-	genesisState    *state.CachingBeaconState
+	mainDB                kv.RwDB // this is the main DB
+	dirs                  datadir.Dirs
+	downloader            proto_downloader.DownloaderClient
+	logger                log.Logger
+	sn                    *freezeblocks.CaplinSnapshots
+	snReader              freezeblocks.BeaconSnapshotReader
+	ctx                   context.Context
+	backfilled            *atomic.Bool
+	blobBackfilled        *atomic.Bool
+	cfg                   *clparams.BeaconChainConfig
+	states, blocks, blobs bool
+	validatorsTable       *state_accessors.StaticValidatorTable
+	genesisState          *state.CachingBeaconState
 	// set to nil
 	currentState *state.CachingBeaconState
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks bool) *Antiquary {
+func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs bool) *Antiquary {
 	backfilled := &atomic.Bool{}
+	blobBackfilled := &atomic.Bool{}
 	backfilled.Store(false)
+	blobBackfilled.Store(false)
 	return &Antiquary{
 		mainDB:          mainDB,
 		dirs:            dirs,
@@ -50,12 +53,14 @@ func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, v
 		sn:              sn,
 		ctx:             ctx,
 		backfilled:      backfilled,
+		blobBackfilled:  blobBackfilled,
 		cfg:             cfg,
 		states:          states,
 		snReader:        reader,
 		validatorsTable: validatorsTable,
 		genesisState:    genesisState,
 		blocks:          blocks,
+		blobs:           blobs,
 	}
 }
 
@@ -155,6 +160,9 @@ func (a *Antiquary) Loop() error {
 
 	if a.states {
 		go a.loopStates(a.ctx)
+	}
+	if a.blobs {
+		go a.loopBlobs(a.ctx)
 	}
 
 	// write the indicies
@@ -258,4 +266,23 @@ func (a *Antiquary) antiquate(from, to uint64) error {
 func (a *Antiquary) NotifyBackfilled() {
 	// we set up the range for [lowestRawSlot, finalized]
 	a.backfilled.Store(true) // this is the lowest slot not in snapshots
+}
+
+func (a *Antiquary) NotifyBlobBackfilled() {
+	a.blobBackfilled.Store(true)
+}
+
+func (a *Antiquary) loopBlobs(ctx context.Context) {
+	blobAntiquationTicker := time.NewTicker(10 * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-blobAntiquationTicker.C:
+			if !a.blobBackfilled.Load() {
+				continue
+			}
+			// perform blob antiquation if it is time to.
+		}
+	}
 }
