@@ -30,6 +30,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
+var sidecarSSZSize = (&cltypes.BlobSidecar{}).EncodingSizeSSZ()
+
 func BeaconSimpleIdx(ctx context.Context, sn snaptype.FileInfo, segmentFilePath string, blockFrom, blockTo uint64, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	if err := Idx(ctx, sn, sn.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 		if i%20_000 == 0 {
@@ -334,6 +336,16 @@ func (v *CaplinView) BeaconBlocksSegment(slot uint64) (*Segment, bool) {
 	return nil, false
 }
 
+func (v *CaplinView) BlobSidecarsSegment(slot uint64) (*Segment, bool) {
+	for _, seg := range v.BlobSidecars() {
+		if !(slot >= seg.from && slot < seg.to) {
+			continue
+		}
+		return seg, true
+	}
+	return nil, false
+}
+
 func dumpBeaconBlocksRange(ctx context.Context, db kv.RoDB, fromSlot uint64, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 	segName := snaptype.BeaconBlocks.FileName(0, fromSlot, toSlot)
 	f, _, _ := snaptype.ParseFileName(snapDir, segName)
@@ -544,4 +556,45 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64) (*cltypes.SignedBeaconBlockHea
 
 	// Use pooled buffers and readers to avoid allocations.
 	return snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)
+}
+
+func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar, error) {
+	view := s.View()
+	defer view.Close()
+
+	var buf []byte
+
+	seg, ok := view.BlobSidecarsSegment(slot)
+	if !ok {
+		return nil, nil
+	}
+
+	idxSlot := seg.Index()
+
+	if idxSlot == nil {
+		return nil, nil
+	}
+	blockOffset := idxSlot.OrdinalLookup(slot - idxSlot.BaseDataID())
+
+	gg := seg.MakeGetter()
+	gg.Reset(blockOffset)
+	if !gg.HasNext() {
+		return nil, nil
+	}
+
+	buf, _ = gg.Next(buf)
+	if len(buf) == 0 {
+		return nil, nil
+	}
+	if len(buf)%sidecarSSZSize != 0 {
+		return nil, fmt.Errorf("invalid sidecar list length")
+	}
+	sidecars := make([]*cltypes.BlobSidecar, len(buf)/sidecarSSZSize)
+	for i := 0; i < len(buf); i += sidecarSSZSize {
+		sidecars[i/sidecarSSZSize] = &cltypes.BlobSidecar{}
+		if err := sidecars[i/sidecarSSZSize].DecodeSSZ(buf[i:i+sidecarSSZSize], int(clparams.DenebVersion)); err != nil {
+			return nil, err
+		}
+	}
+	return sidecars, nil
 }

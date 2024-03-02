@@ -79,6 +79,7 @@ var CLI struct {
 	BenchmarkNode           BenchmarkNode           `cmd:"" help:"benchmark node"`
 	BlobArchiveStoreCheck   BlobArchiveStoreCheck   `cmd:"" help:"blob archive store check"`
 	DumpBlobsSnapshots      DumpBlobsSnapshots      `cmd:"" help:"dump blobs snapshots"`
+	CheckBlobsSnapshots     CheckBlobsSnapshots     `cmd:"" help:"check blobs snapshots"`
 }
 
 type chainCfg struct {
@@ -1047,4 +1048,70 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	from := ((beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
 	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, from, to, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
+}
+
+type CheckBlobsSnapshots struct {
+	chainCfg
+	outputFolder
+	withPPROF
+}
+
+func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	c.withProfile()
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started the checking process", "chain", c.Chain)
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	tx, err := db.BeginRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	to, err = beacon_indicies.ReadHighestFinalized(tx)
+	if err != nil {
+		return err
+	}
+
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	if err := csn.ReopenFolder(); err != nil {
+		return err
+	}
+
+	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
+		sds, err := csn.ReadBlobSidecars(i)
+		if err != nil {
+			return err
+		}
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
+		if err != nil {
+			return err
+		}
+
+		haveSds, _, err := blobStorage.ReadBlobSidecars(ctx, i, blockRoot)
+		if err != nil {
+			return err
+		}
+		for i, sd := range sds {
+			if sd.Blob != haveSds[i].Blob {
+				return fmt.Errorf("slot %d: blob %d mismatch", i, i)
+			}
+		}
+		if i%2000 == 0 {
+			log.Info("Successfully checked", "slot", i)
+		}
+	}
+	return nil
 }
