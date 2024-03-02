@@ -2,6 +2,7 @@ package antiquary
 
 import (
 	"context"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -276,6 +277,9 @@ func (a *Antiquary) NotifyBlobBackfilled() {
 }
 
 func (a *Antiquary) loopBlobs(ctx context.Context) {
+	if a.cfg.DenebForkEpoch == math.MaxUint64 {
+		return
+	}
 	blobAntiquationTicker := time.NewTicker(10 * time.Second)
 	for {
 		select {
@@ -300,6 +304,8 @@ func (a *Antiquary) antiquateBlobs() error {
 	defer roTx.Rollback()
 	// perform blob antiquation if it is time to.
 	currentBlobsProgress := a.sn.FrozenBlobs()
+	minimunBlobsProgress := ((a.cfg.DenebForkEpoch * a.cfg.SlotsPerEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
+	currentBlobsProgress = utils.Max64(currentBlobsProgress, minimunBlobsProgress)
 	// read the finalized head
 	to, err := beacon_indicies.ReadHighestFinalized(roTx)
 	if err != nil {
