@@ -348,5 +348,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		currentSlot = lastProcessed
 	}
 	log.Info("Blob history download finished successfully")
+	cfg.antiquary.NotifyBlobBackfilled()
 	return nil
 }

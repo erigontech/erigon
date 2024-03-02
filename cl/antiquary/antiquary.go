@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -22,7 +23,8 @@ const safetyMargin = 2_000 // We retire snapshots 2k blocks after the finalized 
 
 // Antiquary is where the snapshots go, aka old history, it is what keep track of the oldest records.
 type Antiquary struct {
-	mainDB                kv.RwDB // this is the main DB
+	mainDB                kv.RwDB                  // this is the main DB
+	blobStorage           blob_storage.BlobStorage // this is the blob storage
 	dirs                  datadir.Dirs
 	downloader            proto_downloader.DownloaderClient
 	logger                log.Logger
@@ -40,13 +42,14 @@ type Antiquary struct {
 	balances32   []byte
 }
 
-func NewAntiquary(ctx context.Context, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs bool) *Antiquary {
+func NewAntiquary(ctx context.Context, blobStorage blob_storage.BlobStorage, genesisState *state.CachingBeaconState, validatorsTable *state_accessors.StaticValidatorTable, cfg *clparams.BeaconChainConfig, dirs datadir.Dirs, downloader proto_downloader.DownloaderClient, mainDB kv.RwDB, sn *freezeblocks.CaplinSnapshots, reader freezeblocks.BeaconSnapshotReader, logger log.Logger, states, blocks, blobs bool) *Antiquary {
 	backfilled := &atomic.Bool{}
 	blobBackfilled := &atomic.Bool{}
 	backfilled.Store(false)
 	blobBackfilled.Store(false)
 	return &Antiquary{
 		mainDB:          mainDB,
+		blobStorage:     blobStorage,
 		dirs:            dirs,
 		downloader:      downloader,
 		logger:          logger,
@@ -282,7 +285,46 @@ func (a *Antiquary) loopBlobs(ctx context.Context) {
 			if !a.blobBackfilled.Load() {
 				continue
 			}
-			// perform blob antiquation if it is time to.
+			if err := a.antiquateBlobs(); err != nil {
+				log.Error("[Antiquary]: Failed to antiquate blobs", "err", err)
+			}
 		}
 	}
+}
+
+func (a *Antiquary) antiquateBlobs() error {
+	roTx, err := a.mainDB.BeginRo(a.ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+	// perform blob antiquation if it is time to.
+	currentBlobsProgress := a.sn.FrozenBlobs()
+	// read the finalized head
+	to, err := beacon_indicies.ReadHighestFinalized(roTx)
+	if err != nil {
+		return err
+	}
+	if to <= currentBlobsProgress || to-currentBlobsProgress < snaptype.Erigon2MergeLimit {
+		return nil
+	}
+	roTx.Rollback()
+	// now, we need to retire the blobs
+	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
+		return err
+	}
+	roTx, err = a.mainDB.BeginRo(a.ctx)
+	if err != nil {
+		return err
+	}
+	defer roTx.Rollback()
+	// now prune blobs from the database
+	for i := currentBlobsProgress; i < to; i++ {
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(roTx, i)
+		if err != nil {
+			return err
+		}
+		a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot)
+	}
+	return nil
 }

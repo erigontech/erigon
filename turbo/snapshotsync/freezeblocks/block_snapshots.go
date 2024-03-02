@@ -993,7 +993,7 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 				continue
 			}
 			if f.Type.Enum() == snaptype.Enums.BlobSidecars {
-				lSidecars = append(lSidecars, f)
+				lSidecars = append(lSidecars, f) // blobs are an exception
 				continue
 			}
 			l = append(l, f)
