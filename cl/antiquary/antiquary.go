@@ -320,6 +320,7 @@ func (a *Antiquary) antiquateBlobs() error {
 	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
+	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 	a.logger.Info("[Antiquary]: Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
 	if err := a.sn.ReopenFolder(); err != nil {
 		return err
