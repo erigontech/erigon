@@ -315,6 +315,22 @@ func (a *Antiquary) antiquateBlobs() error {
 		return err
 	}
 	a.logger.Info("[Antiquary]: Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
+	if err := a.sn.ReopenFolder(); err != nil {
+		return err
+	}
+
+	paths := a.sn.SegFilePaths(currentBlobsProgress, to)
+	downloadItems := make([]*proto_downloader.AddItem, len(paths))
+	for i, path := range paths {
+		downloadItems[i] = &proto_downloader.AddItem{
+			Path: path,
+		}
+	}
+	// Notify bittorent to seed the new snapshots
+	if _, err := a.downloader.Add(a.ctx, &proto_downloader.AddRequest{Items: downloadItems}); err != nil {
+		log.Warn("[Antiquary]: Failed to add items to bittorent", "err", err)
+	}
+
 	roTx, err = a.mainDB.BeginRo(a.ctx)
 	if err != nil {
 		return err
