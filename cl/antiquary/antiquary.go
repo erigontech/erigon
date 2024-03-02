@@ -309,10 +309,12 @@ func (a *Antiquary) antiquateBlobs() error {
 		return nil
 	}
 	roTx.Rollback()
+	a.logger.Info("[Antiquary]: Antiquating blobs", "from", currentBlobsProgress, "to", to)
 	// now, we need to retire the blobs
 	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.dirs.Tmp, a.dirs.Snap, 1, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
+	a.logger.Info("[Antiquary]: Finished Antiquating blobs", "from", currentBlobsProgress, "to", to)
 	roTx, err = a.mainDB.BeginRo(a.ctx)
 	if err != nil {
 		return err
