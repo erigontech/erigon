@@ -78,6 +78,7 @@ var CLI struct {
 	ArchiveSanitizer        ArchiveSanitizer        `cmd:"" help:"archive sanitizer"`
 	BenchmarkNode           BenchmarkNode           `cmd:"" help:"benchmark node"`
 	BlobArchiveStoreCheck   BlobArchiveStoreCheck   `cmd:"" help:"blob archive store check"`
+	DumpBlobsSnapshots      DumpBlobsSnapshots      `cmd:"" help:"dump blobs snapshots"`
 }
 
 type chainCfg struct {
@@ -1010,4 +1011,39 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	log.Info("Blob archive store check passed")
 	return nil
+}
+
+type DumpBlobsSnapshots struct {
+	chainCfg
+	outputFolder
+
+	To uint64 `name:"to" help:"slot to dump"`
+}
+
+func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
+	genesisConfig, _, beaconConfig, _, err := clparams.GetConfigsByNetworkName(c.Chain)
+	if err != nil {
+		return err
+	}
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
+	log.Info("Started chain download", "chain", c.Chain)
+
+	dirs := datadir.New(c.Datadir)
+	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
+
+	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DatabaseConfiguration{PruneDepth: math.MaxUint64}, beaconConfig, genesisConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false, 0)
+	if err != nil {
+		return err
+	}
+	var to uint64
+	db.View(ctx, func(tx kv.Tx) (err error) {
+		if c.To == 0 {
+			to, err = beacon_indicies.ReadHighestFinalized(tx)
+			return
+		}
+		to = c.To
+		return
+	})
+
+	return freezeblocks.DumpBlobsSidecar(ctx, blobStorage, db, 0, to, dirs.Tmp, dirs.Snap, estimate.CompressSnapshot.Workers(), log.LvlInfo, log.Root())
 }

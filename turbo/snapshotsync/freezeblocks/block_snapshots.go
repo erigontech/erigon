@@ -989,7 +989,7 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 		var l []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.Type.Enum() != snaptype.Enums.BeaconBlocks {
+			if f.Type.Enum() != snaptype.Enums.BeaconBlocks && f.Type.Enum() != snaptype.Enums.BlobSidecars {
 				continue
 			}
 			l = append(l, f)
