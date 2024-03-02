@@ -176,14 +176,11 @@ Loop:
 		case snaptype.Enums.BlobSidecars:
 			var sn *Segment
 			var exists bool
-			fmt.Println("b", fName)
 			for _, sn2 := range s.BlobSidecars.segments {
 				if sn2.Decompressor == nil { // it's ok if some segment was not able to open
-					fmt.Println("d", fName)
 					continue
 				}
 				if fName == sn2.FileName() {
-					fmt.Println("c", fName)
 					sn = sn2
 					exists = true
 					break
@@ -192,7 +189,6 @@ Loop:
 			if !exists {
 				sn = &Segment{segType: snaptype.BlobSidecars, version: f.Version, Range: Range{f.From, f.To}}
 			}
-			fmt.Println("a", sn.from, sn.to, fName)
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
