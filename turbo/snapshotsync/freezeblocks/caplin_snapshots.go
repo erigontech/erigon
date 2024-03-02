@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -601,6 +602,9 @@ func (s *CaplinSnapshots) ReadBlobSidecars(slot uint64) ([]*cltypes.BlobSidecar,
 }
 
 func (s *CaplinSnapshots) FrozenBlobs() uint64 {
+	if s.beaconCfg.DenebForkEpoch == math.MaxUint64 {
+		return 0
+	}
 	minSegFrom := ((s.beaconCfg.SlotsPerEpoch * s.beaconCfg.DenebForkEpoch) / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 	foundMinSeg := false
 	ret := uint64(0)

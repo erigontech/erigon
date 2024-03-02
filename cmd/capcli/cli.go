@@ -1081,6 +1081,7 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
+	csn.ReopenFolder()
 	to := csn.FrozenBlobs()
 	fmt.Println(to)
 
