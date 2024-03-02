@@ -189,7 +189,7 @@ Loop:
 			if !exists {
 				sn = &Segment{segType: snaptype.BlobSidecars, version: f.Version, Range: Range{f.From, f.To}}
 			}
-			fmt.Println(sn.from, sn.to)
+			fmt.Println(sn.from, sn.to, fName)
 			if err := sn.reopenSeg(s.dir); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					if optimistic {
