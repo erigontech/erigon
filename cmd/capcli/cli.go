@@ -1035,6 +1035,7 @@ func (c *DumpBlobsSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	c.To = utils.Max64(c.To, beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch)
 	var to uint64
 	db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {

@@ -84,6 +84,8 @@ func (i Index) String() string {
 		return Enums.BorSpans.String()
 	case Indexes.BeaconBlockSlot:
 		return Enums.BeaconBlocks.String()
+	case Indexes.BlobSidecarSlot:
+		return Enums.BlobSidecars.String()
 	default:
 		panic(fmt.Sprintf("unknown index: %d", i))
 	}
