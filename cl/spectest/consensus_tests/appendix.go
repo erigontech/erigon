@@ -49,6 +49,8 @@ func init() {
 		With("", spectest.UnimplementedHandler)
 	TestFormats.Add("light_client").
 		WithFn("single_merkle_proof", LightClientBeaconBlockBodyExecutionMerkleProof)
+	TestFormats.Add("merkle_proof").
+		With("single_merkle_proof", Eip4844MerkleProof)
 	TestFormats.Add("operations").
 		WithFn("attestation", operationAttestationHandler).
 		WithFn("attester_slashing", operationAttesterSlashingHandler).

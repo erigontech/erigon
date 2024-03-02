@@ -164,3 +164,23 @@ func (l *ListSSZ[T]) Truncate(length int) {
 	l.list = l.list[:length]
 	l.root = libcommon.Hash{}
 }
+
+func (l *ListSSZ[T]) ElementProof(i int) [][32]byte {
+	leaves := make([]interface{}, l.limit)
+	for i := range leaves {
+		leaves[i] = make([]byte, 32)
+	}
+	for i, element := range l.list {
+		root, err := element.HashSSZ()
+		if err != nil {
+			panic(err)
+		}
+		leaves[i] = root[:]
+	}
+	d := GetDepth(uint64(l.limit))
+	branch, err := merkle_tree.MerkleProof(int(d), i, leaves...)
+	if err != nil {
+		panic(err)
+	}
+	return append(branch, merkle_tree.Uint64Root(uint64(len(l.list))))
+}

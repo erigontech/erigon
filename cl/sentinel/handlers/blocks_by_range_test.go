@@ -66,7 +66,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		genesisCfg,
-		nil, &forkchoice.ForkChoiceStorageMock{}, true,
+		nil, &forkchoice.ForkChoiceStorageMock{}, nil, true,
 	)
 	c.Start()
 	req := &cltypes.BeaconBlocksByRangeRequest{

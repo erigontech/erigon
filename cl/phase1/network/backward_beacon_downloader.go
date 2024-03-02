@@ -82,6 +82,10 @@ func (b *BackwardBeaconDownloader) SetOnNewBlock(onNewBlock OnNewBlock) {
 	b.onNewBlock = onNewBlock
 }
 
+func (b *BackwardBeaconDownloader) RPC() *rpc.BeaconRpcP2P {
+	return b.rpc
+}
+
 // HighestProcessedRoot returns the highest processed block root so far.
 func (b *BackwardBeaconDownloader) Finished() bool {
 	b.mu.Lock()
