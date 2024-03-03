@@ -34,6 +34,7 @@ type ApiHandler struct {
 	stateReader     *historical_states_reader.HistoricalStatesReader
 	sentinel        sentinel.SentinelClient
 	blobStoage      blob_storage.BlobStorage
+	caplinSnapshots *freezeblocks.CaplinSnapshots
 
 	version string // Node's version
 
@@ -47,10 +48,10 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters, blobStoage blob_storage.BlobStorage) *ApiHandler {
+func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters, blobStoage blob_storage.BlobStorage, caplinSnapshots *freezeblocks.CaplinSnapshots) *ApiHandler {
 	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
 		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
-	}}, sentinel: sentinel, version: version, routerCfg: routerCfg, emitters: emitters, blobStoage: blobStoage}
+	}}, sentinel: sentinel, version: version, routerCfg: routerCfg, emitters: emitters, blobStoage: blobStoage, caplinSnapshots: caplinSnapshots}
 }
 
 func (a *ApiHandler) Init() {

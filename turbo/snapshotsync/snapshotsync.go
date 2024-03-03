@@ -68,7 +68,7 @@ func RequestSnapshotsDownload(ctx context.Context, downloadRequest []services.Do
 
 // WaitForDownloader - wait for Downloader service to download all expected snapshots
 // for MVP we sync with Downloader only once, in future will send new snapshots also
-func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
+func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool, caplin CaplinMode, agg *state.AggregatorV3, tx kv.RwTx, blockReader services.FullBlockReader, cc *chain.Config, snapshotDownloader proto_downloader.DownloaderClient, stagesIdsList []string) error {
 	snapshots := blockReader.Snapshots()
 	borSnapshots := blockReader.BorSnapshots()
 	if blockReader.FreezingCfg().NoDownloader {
@@ -110,10 +110,13 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3 bool, capli
 					continue
 				}
 			}
-			if caplin == NoCaplin && strings.Contains(p.Name, "beaconblocks") {
+			if caplin == NoCaplin && (strings.Contains(p.Name, "beaconblocks") || strings.Contains(p.Name, "blobsidecars")) {
 				continue
 			}
-			if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") {
+			if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") {
+				continue
+			}
+			if !blobs && strings.Contains(p.Name, "blobsidecars") {
 				continue
 			}
 

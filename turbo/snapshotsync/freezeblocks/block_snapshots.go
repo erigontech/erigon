@@ -986,16 +986,21 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 	}
 
 	{
-		var l []snaptype.FileInfo
+		var l, lSidecars []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.Type.Enum() != snaptype.Enums.BeaconBlocks {
+			if f.Type.Enum() != snaptype.Enums.BeaconBlocks && f.Type.Enum() != snaptype.Enums.BlobSidecars {
+				continue
+			}
+			if f.Type.Enum() == snaptype.Enums.BlobSidecars {
+				lSidecars = append(lSidecars, f) // blobs are an exception
 				continue
 			}
 			l = append(l, f)
 		}
 		l, m = noGaps(noOverlaps(l), minBlock)
 		res = append(res, l...)
+		res = append(res, lSidecars...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}
 	return res, missingSnapshots, nil

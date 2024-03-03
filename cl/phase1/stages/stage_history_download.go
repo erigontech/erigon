@@ -264,6 +264,9 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 	prevTime := time.Now()
 	targetSlot := cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 	for currentSlot >= targetSlot {
+		if currentSlot <= cfg.sn.FrozenBlobs() {
+			break
+		}
 
 		batch := make([]*cltypes.SignedBlindedBeaconBlock, 0, blocksBatchSize)
 		visited := uint64(0)
@@ -348,5 +351,6 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 		currentSlot = lastProcessed
 	}
 	log.Info("Blob history download finished successfully")
+	cfg.antiquary.NotifyBlobBackfilled()
 	return nil
 }
