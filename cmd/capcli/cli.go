@@ -252,7 +252,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, db)
-	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false), csn, db, nil, genesisConfig, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
+	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, false, false, false), csn, db, nil, genesisConfig, beaconConfig, true, false, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root())
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }
 
@@ -592,7 +592,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 		return fmt.Errorf("new server: %w", err)
 	}
 
-	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, snapshotsync.OnlyCaplin, s, tx,
+	return snapshotsync.WaitForDownloader(ctx, "CapCliDownloader", false, false, snapshotsync.OnlyCaplin, s, tx,
 		freezeblocks.NewBlockReader(
 			freezeblocks.NewRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, 0, log.Root()),
 			freezeblocks.NewBorRoSnapshots(ethconfig.NewSnapCfg(false, false, false), dirs.Snap, 0, log.Root())),

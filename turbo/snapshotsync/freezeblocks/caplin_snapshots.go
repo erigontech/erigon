@@ -613,7 +613,6 @@ func (s *CaplinSnapshots) FrozenBlobs() uint64 {
 			foundMinSeg = true
 		}
 		ret = utils.Max64(ret, seg.to)
-		fmt.Println(seg.from, seg.to, ret, minSegFrom)
 	}
 	if !foundMinSeg {
 		return 0
