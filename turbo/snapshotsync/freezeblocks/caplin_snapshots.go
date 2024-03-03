@@ -290,7 +290,7 @@ Loop2:
 		sn.close()
 		s.BlobSidecars.segments[i] = nil
 	}
-	i = 0
+
 	for i = 0; i < len(s.BlobSidecars.segments) && s.BlobSidecars.segments[i] != nil && s.BlobSidecars.segments[i].Decompressor != nil; i++ {
 	}
 	tail = s.BlobSidecars.segments[i:]
@@ -406,6 +406,8 @@ func dumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 	if err != nil {
 		return err
 	}
+	defer tx.Rollback()
+
 	reusableBuf := []byte{}
 
 	// Generate .seg file, which is just the list of beacon blocks.

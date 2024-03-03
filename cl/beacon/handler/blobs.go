@@ -35,7 +35,7 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
 	}
-	if *slot <= a.caplinSnapshots.FrozenBlobs() {
+	if a.caplinSnapshots != nil && *slot <= a.caplinSnapshots.FrozenBlobs() {
 		out, err := a.caplinSnapshots.ReadBlobSidecars(*slot)
 		if err != nil {
 			return nil, err
