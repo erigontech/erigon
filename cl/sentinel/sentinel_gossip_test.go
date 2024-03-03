@@ -34,7 +34,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		IpAddr:        listenAddrHost,
 		Port:          7070,
 		EnableBlocks:  true,
-	}, reader, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel1.Stop()
 
@@ -49,7 +49,7 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 		Port:          7077,
 		EnableBlocks:  true,
 		TCPPort:       9123,
-	}, reader, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
+	}, reader, nil, db, log.New(), &forkchoice.ForkChoiceStorageMock{})
 	require.NoError(t, err)
 	defer sentinel2.Stop()
 
