@@ -167,7 +167,7 @@ func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
 	err = s.reopenIdx(dir)
 
 	if err != nil {
-		if !(errors.Is(err, os.ErrNotExist) || errors.Is(err, ErrIndexModifiedBeforeSegment)) {
+		if !errors.Is(err, os.ErrNotExist) {
 			if optimistic {
 				log.Warn("[snapshots] open index", "err", err)
 			} else {
@@ -178,8 +178,6 @@ func (s *Segment) reopenIdxIfNeed(dir string, optimistic bool) (err error) {
 
 	return nil
 }
-
-var ErrIndexModifiedBeforeSegment = errors.New("index modified before segment")
 
 func (s *Segment) reopenIdx(dir string) (err error) {
 	s.closeIdx()
@@ -194,12 +192,7 @@ func (s *Segment) reopenIdx(dir string) (err error) {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
 
-		if s.Decompressor.ModTime().After(index.ModTime()) {
-			s.closeIdx()
-			return fmt.Errorf("%w, fileName: %s: file mod:%s, index mod: %s", ErrIndexModifiedBeforeSegment, fileName, s.Decompressor.ModTime(), index.ModTime())
-		} else {
-			s.indexes = append(s.indexes, index)
-		}
+		s.indexes = append(s.indexes, index)
 	}
 
 	return nil
