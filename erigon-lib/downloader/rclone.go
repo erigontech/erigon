@@ -325,10 +325,12 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 		}{}
 
 		if err := json.NewDecoder(response.Body).Decode(&responseBody); err == nil && len(responseBody.Error) > 0 {
-			u.logger.Warn("[rclone] cmd failed", "path", path, "status", response.Status, "err", responseBody.Error)
+			argsJson, _ := json.Marshal(args)
+			u.logger.Warn("[rclone] cmd failed", "path", path, "args", string(argsJson), "status", response.Status, "err", responseBody.Error)
 			return nil, fmt.Errorf("cmd: %s failed: %s: %s", path, response.Status, responseBody.Error)
 		} else {
-			u.logger.Warn("[rclone] cmd failed", "path", path, "status", response.Status)
+			argsJson, _ := json.Marshal(args)
+			u.logger.Warn("[rclone] cmd failed", "path", path, "args", string(argsJson), "status", response.Status)
 			return nil, fmt.Errorf("cmd: %s failed: %s", path, response.Status)
 		}
 	}
