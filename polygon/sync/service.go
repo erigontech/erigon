@@ -25,6 +25,7 @@ type service struct {
 	sync *Sync
 
 	p2pService p2p.Service
+	storage    Storage
 }
 
 func NewService(
@@ -36,8 +37,8 @@ func NewService(
 	sentryClient direct.SentryClient,
 	logger log.Logger,
 ) Service {
-	storage := NewStorage()
 	execution := NewExecutionClient(engine)
+	storage := NewStorage(execution, maxPeers)
 	verify := VerifyAccumulatedHeaders
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
@@ -86,6 +87,7 @@ func NewService(
 	return &service{
 		sync:       sync,
 		p2pService: p2pService,
+		storage:    storage,
 	}
 }
 
@@ -93,8 +95,27 @@ func (s *service) GetSync() *Sync {
 	return s.sync
 }
 
-func (s *service) Run(ctx context.Context) {
+func (s *service) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var serviceErr error
+
 	s.p2pService.Start(ctx)
+	defer s.p2pService.Stop()
+
+	go func() {
+		err := s.storage.Run(ctx)
+		if (err != nil) && (ctx.Err() == nil) {
+			serviceErr = err
+			cancel()
+		}
+	}()
+
 	<-ctx.Done()
-	s.p2pService.Stop()
+
+	if serviceErr != nil {
+		return serviceErr
+	}
+	return ctx.Err()
 }
