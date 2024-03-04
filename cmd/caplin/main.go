@@ -128,7 +128,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 			Root: cfg.RecordDir,
 		}
 	}
-	indiciesDB, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.Dirs.CaplinIndexing, executionEngine, false)
+	indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.GenesisCfg, cfg.Dirs.CaplinIndexing, cfg.Dirs.CaplinBlobs, executionEngine, false, 100_000)
 	if err != nil {
 		return err
 	}
@@ -138,5 +138,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, rcfg, nil, nil, false, false, indiciesDB, nil, blockSnapBuildSema)
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, rcfg, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema)
 }

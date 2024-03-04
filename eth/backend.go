@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"math/big"
 	"net"
 	"os"
@@ -842,14 +843,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return nil, err
 		}
 
-		indiciesDB, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, dirs.CaplinIndexing, engine, false)
+		pruneBlobDistance := uint64(128600)
+		if config.CaplinConfig.BlobBackfilling {
+			pruneBlobDistance = math.MaxUint64
+		}
+
+		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, genesisCfg, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false, pruneBlobDistance)
 		if err != nil {
 			return nil, err
 		}
 
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, engine, config, networkCfg, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive, indiciesDB, creds, blockSnapBuildSema); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, engine, config, networkCfg, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds, blockSnapBuildSema); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()

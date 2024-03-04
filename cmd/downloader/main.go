@@ -81,7 +81,8 @@ func init() {
 	utils.CobraFlags(rootCmd, debug.Flags, utils.MetricFlags, logging.Flags)
 
 	withDataDir(rootCmd)
-	rootCmd.Flags().StringVar(&chain, utils.ChainFlag.Name, utils.ChainFlag.Value, utils.ChainFlag.Usage)
+	withChainFlag(rootCmd)
+
 	rootCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	rootCmd.Flags().StringVar(&natSetting, "nat", utils.NATFlag.Value, utils.NATFlag.Usage)
 	rootCmd.Flags().StringVar(&downloaderApiAddr, "downloader.api.addr", "127.0.0.1:9093", "external downloader api network address, for example: 127.0.0.1:9093 serves remote downloader interface")
@@ -102,6 +103,7 @@ func init() {
 
 	withDataDir(createTorrent)
 	withFile(createTorrent)
+	withChainFlag(createTorrent)
 	rootCmd.AddCommand(createTorrent)
 
 	rootCmd.AddCommand(torrentCat)
@@ -111,6 +113,7 @@ func init() {
 	rootCmd.AddCommand(manifestCmd)
 
 	withDataDir(printTorrentHashes)
+	withChainFlag(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
 	printTorrentHashes.Flags().StringVar(&targetFile, "targetfile", "", "write output to file")
 	if err := printTorrentHashes.MarkFlagFilename("targetfile"); err != nil {
@@ -122,13 +125,22 @@ func init() {
 
 func withDataDir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
-	if err := cmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
-		panic(err)
-	}
+	must(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
+	must(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
+}
+func withChainFlag(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&chain, utils.ChainFlag.Name, utils.ChainFlag.Value, utils.ChainFlag.Usage)
+	must(cmd.MarkFlagRequired(utils.ChainFlag.Name))
 }
 func withFile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&filePath, "file", "", "")
 	if err := cmd.MarkFlagFilename(utils.DataDirFlag.Name); err != nil {
+		panic(err)
+	}
+}
+
+func must(err error) {
+	if err != nil {
 		panic(err)
 	}
 }
@@ -243,7 +255,7 @@ var createTorrent = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
-		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), "", nil)
+		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), chain, nil)
 		if err != nil {
 			return err
 		}
@@ -380,7 +392,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 				return err
 			}
 		}
-		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, "", nil); err != nil {
+		if err := downloader.BuildTorrentFilesIfNeed(ctx, dirs, tf, chain, nil); err != nil {
 			return fmt.Errorf("BuildTorrentFilesIfNeed: %w", err)
 		}
 	}

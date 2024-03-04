@@ -132,7 +132,6 @@ COMMANDS += verkle
 COMMANDS += evm
 COMMANDS += sentinel
 COMMANDS += caplin
-COMMANDS += tooling
 COMMANDS += snapshots
 
 
