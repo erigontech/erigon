@@ -423,12 +423,12 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 				break
 			}
 		}
-	}
-	if item == nil {
-		for _, f := range dc.files {
-			if f.startTxNum == txFrom && f.endTxNum == txTo {
-				item = f.src
-				break
+		if item == nil {
+			for _, f := range dc.files {
+				if f.startTxNum == txFrom && f.endTxNum == txTo {
+					item = f.src
+					break
+				}
 			}
 		}
 	}
