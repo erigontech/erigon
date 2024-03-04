@@ -138,7 +138,7 @@ func (f *ForkChoiceStorageMock) OnAttesterSlashing(attesterSlashing *cltypes.Att
 	return nil
 }
 
-func (f *ForkChoiceStorageMock) OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error {
+func (f *ForkChoiceStorageMock) OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaiability bool) error {
 	panic("implement me")
 }
 
@@ -231,5 +231,9 @@ func (f *ForkChoiceStorageMock) GetValidatorSet(blockRoot libcommon.Hash) (*soli
 }
 
 func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
+	panic("implement me")
+}
+
+func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error) {
 	panic("implement me")
 }

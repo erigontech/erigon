@@ -9,8 +9,6 @@ tests:
 	rm -rf tests/minimal
 	# not needed for now
 	rm -rf tests/mainnet/eip6110
-	# FIXME: Add fork choice coverage for deneb
-	rm -rf tests/mainnet/deneb/fork_choice
 clean:
 	rm -rf tests
 

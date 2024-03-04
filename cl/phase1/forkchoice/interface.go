@@ -50,6 +50,7 @@ type ForkChoiceStorageReader interface {
 	GetPreviousPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
 	GetValidatorSet(blockRoot libcommon.Hash) (*solid.ValidatorSet, error)
 	GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error)
+	GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error)
 }
 
 type ForkChoiceStorageWriter interface {
@@ -59,7 +60,7 @@ type ForkChoiceStorageWriter interface {
 	OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVoluntaryExit, test bool) error
 	OnProposerSlashing(proposerSlashing *cltypes.ProposerSlashing, test bool) error
 	OnBlsToExecutionChange(signedChange *cltypes.SignedBLSToExecutionChange, test bool) error
-	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool) error
+	OnBlock(block *cltypes.SignedBeaconBlock, newPayload bool, fullValidation bool, checkDataAvaibility bool) error
 	OnTick(time uint64)
 	SetSynced(synced bool)
 }

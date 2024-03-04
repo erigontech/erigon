@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"math"
 	"testing"
 
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -13,6 +14,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -39,14 +42,17 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	}
 	fcu = forkchoice.NewForkChoiceStorageMock()
 	db = memdb.NewTestDB(t)
+	blobDb := memdb.NewTestDB(t)
 	var reader *tests.MockBlockReader
 	reader = tests.LoadChain(blocks, postState, db, t)
+	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
+	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
 
 	bcfg.InitializeForkSchedule()
 
 	ctx := context.Background()
 	vt := state_accessors.NewStaticValidatorTable()
-	a := antiquary.NewAntiquary(ctx, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true)
+	a := antiquary.NewAntiquary(ctx, nil, preState, vt, &bcfg, datadir.New("/tmp"), nil, db, nil, reader, logger, true, true, false)
 	require.NoError(t, a.IncrementBeaconState(ctx, blocks[len(blocks)-1].Block.Slot+33))
 	// historical states reader below
 	statesReader := historical_states_reader.NewHistoricalStatesReader(&bcfg, reader, vt, preState)
@@ -54,6 +60,23 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	fcu.Pool = opPool
 	syncedData = synced_data.NewSyncedDataManager(true, &bcfg)
 	gC := clparams.GenesisConfigs[clparams.MainnetNetwork]
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, &gC)
+	blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
+		{
+			Index:                    0,
+			Blob:                     cltypes.Blob{byte(1)},
+			SignedBlockHeader:        firstBlockHeader,
+			KzgCommitment:            [48]byte{69},
+			CommitmentInclusionProof: solid.NewHashVector(17),
+		},
+		{
+			Index:                    1,
+			Blob:                     cltypes.Blob{byte(2)},
+			SignedBlockHeader:        firstBlockHeader,
+			KzgCommitment:            [48]byte{1},
+			CommitmentInclusionProof: solid.NewHashVector(17),
+		},
+	})
 	h = NewApiHandler(
 		&gC,
 		&bcfg,
@@ -73,7 +96,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil)
+		}, nil, blobStorage, nil)
 	h.Init()
 	return
 }
