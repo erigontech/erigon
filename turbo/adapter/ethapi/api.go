@@ -403,7 +403,7 @@ type RPCTransaction struct {
 	Type             hexutil.Uint64     `json:"type"`
 	Accesses         *types2.AccessList `json:"accessList,omitempty"`
 	ChainID          *hexutil.Big       `json:"chainId,omitempty"`
-	V                *hexutil.Big       `json:"v,omitempty"`
+	V                *hexutil.Big       `json:"v"`
 	YParity          *hexutil.Big       `json:"yParity,omitempty"`
 	R                *hexutil.Big       `json:"r"`
 	S                *hexutil.Big       `json:"s"`
@@ -444,6 +444,7 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		result.ChainID = (*hexutil.Big)(chainId.ToBig())
 		result.GasPrice = (*hexutil.Big)(t.GasPrice.ToBig())
 		result.YParity = (*hexutil.Big)(t.V.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
@@ -453,6 +454,7 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
 		result.YParity = (*hexutil.Big)(t.V.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
@@ -464,6 +466,7 @@ func newRPCTransaction(tx types.Transaction, blockHash libcommon.Hash, blockNumb
 		result.Tip = (*hexutil.Big)(t.Tip.ToBig())
 		result.FeeCap = (*hexutil.Big)(t.FeeCap.ToBig())
 		result.YParity = (*hexutil.Big)(t.V.ToBig())
+		result.V = (*hexutil.Big)(t.V.ToBig())
 		result.R = (*hexutil.Big)(t.R.ToBig())
 		result.S = (*hexutil.Big)(t.S.ToBig())
 		result.Accesses = &t.AccessList
