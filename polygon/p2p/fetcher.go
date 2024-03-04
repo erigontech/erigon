@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/ledgerwatch/log/v3"
 	"modernc.org/mathutil"
 
@@ -16,15 +17,20 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const responseTimeout = 5 * time.Second
-
 type RequestIdGenerator func() uint64
+
+type FetcherConfig struct {
+	responseTimeout time.Duration
+	retryBackOff    time.Duration
+	maxRetries      uint64
+}
 
 type Fetcher interface {
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 }
 
 func NewFetcher(
+	config FetcherConfig,
 	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
@@ -32,6 +38,7 @@ func NewFetcher(
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
 	return &fetcher{
+		config:             config,
 		logger:             logger,
 		messageListener:    messageListener,
 		messageSender:      messageSender,
@@ -41,6 +48,7 @@ func NewFetcher(
 }
 
 type fetcher struct {
+	config             FetcherConfig
 	logger             log.Logger
 	messageListener    MessageListener
 	messageSender      MessageSender
@@ -63,35 +71,14 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	// A header is approximately 500 bytes, hence 1024 headers should be less than 2 MB.
 	// As a simplification we can only use MaxHeadersServe for chunking.
 	amount := end - start
-	chunks := amount / eth.MaxHeadersServe
+	numChunks := amount / eth.MaxHeadersServe
 	if amount%eth.MaxHeadersServe > 0 {
-		chunks++
+		numChunks++
 	}
 
 	headers := make([]*types.Header, 0, amount)
-	observer := make(ChanMessageObserver[*sentry.InboundMessage])
-	f.messageListener.RegisterBlockHeadersObserver(observer)
-	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
-
-	for i := uint64(0); i < chunks; i++ {
-		chunkStart := start + i*eth.MaxHeadersServe
-		chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
-		requestId := f.requestIdGenerator()
-
-		err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
-			RequestId: requestId,
-			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
-				Origin: eth.HashOrNumber{
-					Number: chunkStart,
-				},
-				Amount: chunkAmount,
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		headerChunk, err := f.awaitHeadersResponse(ctx, requestId, peerId, observer)
+	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
+		headerChunk, err := f.fetchHeaderChunkWithRetry(ctx, start, end, chunkNum, peerId)
 		if err != nil {
 			return nil, err
 		}
@@ -119,20 +106,76 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	return headers, nil
 }
 
+func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+	headers, err := backoff.RetryWithData(func() ([]*types.Header, error) {
+		headers, err := f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId)
+		if err != nil {
+			// retry timeouts
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+
+			// permanent errors are not retried
+			return nil, backoff.Permanent(err)
+		}
+
+		return headers, nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(f.config.retryBackOff), f.config.maxRetries))
+	if err != nil {
+		return nil, err
+	}
+
+	return headers, nil
+}
+
+func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+	// cleanup for the chan message observer
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx)
+	f.messageListener.RegisterBlockHeadersObserver(observer)
+	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
+
+	chunkStart := start + chunkNum*eth.MaxHeadersServe
+	chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
+	requestId := f.requestIdGenerator()
+
+	err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
+		RequestId: requestId,
+		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+			Origin: eth.HashOrNumber{
+				Number: chunkStart,
+			},
+			Amount: chunkAmount,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	headers, err := f.awaitHeadersResponse(ctx, requestId, peerId, observer)
+	if err != nil {
+		return nil, err
+	}
+
+	return headers, nil
+}
+
 func (f *fetcher) awaitHeadersResponse(
 	ctx context.Context,
 	requestId uint64,
 	peerId PeerId,
 	observer ChanMessageObserver[*sentry.InboundMessage],
 ) ([]*types.Header, error) {
-	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, f.config.responseTimeout)
 	defer cancel()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
-		case msg := <-observer:
+		case msg := <-observer.MessageChan():
 			msgPeerId := PeerIdFromH512(msg.PeerId)
 			if msgPeerId != peerId {
 				continue
