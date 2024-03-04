@@ -34,7 +34,6 @@ func NewFetcher(
 	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
-	peerPenalizer PeerPenalizer,
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
 	return &fetcher{
@@ -42,7 +41,6 @@ func NewFetcher(
 		logger:             logger,
 		messageListener:    messageListener,
 		messageSender:      messageSender,
-		peerPenalizer:      peerPenalizer,
 		requestIdGenerator: requestIdGenerator,
 	}
 }
@@ -52,7 +50,6 @@ type fetcher struct {
 	logger             log.Logger
 	messageListener    MessageListener
 	messageSender      MessageSender
-	peerPenalizer      PeerPenalizer
 	requestIdGenerator RequestIdGenerator
 }
 
@@ -87,19 +84,6 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	}
 
 	if err := f.validateHeadersResponse(headers, start, end, amount); err != nil {
-		shouldPenalize := errors.Is(err, &ErrIncorrectOriginHeader{}) ||
-			errors.Is(err, &ErrTooManyHeaders{}) ||
-			errors.Is(err, &ErrDisconnectedHeaders{})
-
-		if shouldPenalize {
-			f.logger.Debug("penalizing peer", "peerId", peerId, "err", err.Error())
-
-			penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
-			if penalizeErr != nil {
-				err = fmt.Errorf("%w: %w", penalizeErr, err)
-			}
-		}
-
 		return nil, err
 	}
 
@@ -183,14 +167,6 @@ func (f *fetcher) awaitHeadersResponse(
 
 			var pkt eth.BlockHeadersPacket66
 			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-				if rlp.IsInvalidRLPError(err) {
-					f.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
-					penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
-					if penalizeErr != nil {
-						err = fmt.Errorf("%w: %w", penalizeErr, err)
-					}
-				}
-
 				return nil, fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
 			}
 
