@@ -82,20 +82,12 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId PeerId, update func(psp *pe
 }
 
 func NewPeerEventObserver(peerTracker PeerTracker) MessageObserver[*sentry.PeerEvent] {
-	return &peerEventObserver{
-		peerTracker: peerTracker,
-	}
-}
-
-type peerEventObserver struct {
-	peerTracker PeerTracker
-}
-
-func (peo *peerEventObserver) Notify(msg *sentry.PeerEvent) {
-	switch msg.EventId {
-	case sentry.PeerEvent_Connect:
-		peo.peerTracker.PeerConnected(PeerIdFromH512(msg.PeerId))
-	case sentry.PeerEvent_Disconnect:
-		peo.peerTracker.PeerDisconnected(PeerIdFromH512(msg.PeerId))
+	return func(message *sentry.PeerEvent) {
+		switch message.EventId {
+		case sentry.PeerEvent_Connect:
+			peerTracker.PeerConnected(PeerIdFromH512(message.PeerId))
+		case sentry.PeerEvent_Disconnect:
+			peerTracker.PeerDisconnected(PeerIdFromH512(message.PeerId))
+		}
 	}
 }

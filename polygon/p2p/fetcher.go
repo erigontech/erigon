@@ -10,10 +10,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"modernc.org/mathutil"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type RequestIdGenerator func() uint64
@@ -112,13 +110,22 @@ func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chu
 }
 
 func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
-	// cleanup for the chan message observer
+	// cleanup for the messages chan
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx)
-	f.messageListener.RegisterBlockHeadersObserver(observer)
-	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
+	messages := make(chan *DecodedInboundMessage[*eth.BlockHeadersPacket66])
+	observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
+		select {
+		case <-ctx.Done():
+			return
+		case messages <- message:
+			// no-op
+		}
+	}
+
+	unregister := f.messageListener.RegisterBlockHeadersObserver(observer)
+	defer unregister()
 
 	chunkStart := start + chunkNum*eth.MaxHeadersServe
 	chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
@@ -137,7 +144,7 @@ func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uin
 		return nil, err
 	}
 
-	headers, err := f.awaitHeadersResponse(ctx, requestId, peerId, observer)
+	headers, err := f.awaitHeadersResponse(ctx, requestId, peerId, messages)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +156,7 @@ func (f *fetcher) awaitHeadersResponse(
 	ctx context.Context,
 	requestId uint64,
 	peerId PeerId,
-	observer ChanMessageObserver[*sentry.InboundMessage],
+	messages <-chan *DecodedInboundMessage[*eth.BlockHeadersPacket66],
 ) ([]*types.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, f.config.responseTimeout)
 	defer cancel()
@@ -158,22 +165,20 @@ func (f *fetcher) awaitHeadersResponse(
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
-		case msg := <-observer.MessageChan():
-			msgPeerId := PeerIdFromH512(msg.PeerId)
-			if msgPeerId != peerId {
+		case message := <-messages:
+			if PeerIdFromH512(message.Raw.PeerId) != peerId {
 				continue
 			}
 
-			var pkt eth.BlockHeadersPacket66
-			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-				return nil, fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
+			if message.DecodeErr != nil {
+				return nil, message.DecodeErr
 			}
 
-			if pkt.RequestId != requestId {
+			if message.Decoded.RequestId != requestId {
 				continue
 			}
 
-			return pkt.BlockHeadersPacket, nil
+			return message.Decoded.BlockHeadersPacket, nil
 		}
 	}
 }
