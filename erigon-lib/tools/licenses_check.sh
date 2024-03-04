@@ -25,7 +25,7 @@ output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     -not -name ".*" \
     -not -name tools \
     -not -name build \
-    | xargs go-licenses report 2>&1 \
+    | xargs go-licenses report  --ignore github.com/pion/transport/v2/utils/xor 2>&1 \
     `# exceptions` \
     | grep -v "erigon-lib has empty version"        `# self` \
     | grep -v "golang.org/x/"                       `# a part of Go` \
