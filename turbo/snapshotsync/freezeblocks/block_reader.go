@@ -260,7 +260,7 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	}
 	return result, nil
 }
-func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
+func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
 	panic("not implemented")
 }
 
@@ -662,7 +662,10 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *Segment, bu
 	}
 
 	reader := recsplit.NewIndexReader(index)
-	localID := reader.Lookup(hash[:])
+	localID, ok := reader.Lookup(hash[:])
+	if !ok {
+		return nil, nil
+	}
 	headerOffset := index.OrdinalLookup(localID)
 	gg := sn.MakeGetter()
 	gg.Reset(headerOffset)
@@ -812,7 +815,10 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		}
 
 		reader := recsplit.NewIndexReader(idxTxnHash)
-		txnId := reader.Lookup(txnHash[:])
+		txnId, ok := reader.Lookup(txnHash[:])
+		if !ok {
+			continue
+		}
 		offset := idxTxnHash.OrdinalLookup(txnId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -832,7 +838,10 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
-		blockNum := reader2.Lookup(txnHash[:])
+		blockNum, ok := reader2.Lookup(txnHash[:])
+		if !ok {
+			continue
+		}
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
@@ -1096,7 +1105,10 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(txnHash[:])
+		blockEventId, exists := reader.Lookup(txnHash[:])
+		if !exists {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -1111,13 +1123,47 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 	return
 }
 
-func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
-	v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
-	if err != nil {
-		return 0, err
+func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
+	maxBlockNumInFiles := r.FrozenBorBlocks()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
+		if err != nil {
+			return 0, err
+		}
+		startEventId := binary.BigEndian.Uint64(v)
+		return startEventId, nil
 	}
-	startEventId := binary.BigEndian.Uint64(v)
-	return startEventId, nil
+
+	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	view := r.borSn.View()
+	defer view.Close()
+
+	segments := view.Events()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.from > blockHeight {
+			continue
+		}
+		if sn.to <= blockHeight {
+			break
+		}
+
+		idxBorTxnHash := sn.Index()
+
+		if idxBorTxnHash == nil {
+			continue
+		}
+		if idxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
+		reader := recsplit.NewIndexReader(idxBorTxnHash)
+		blockEventId, found := reader.Lookup(borTxHash[:])
+		if !found {
+			return 0, fmt.Errorf("borTxHash %x not found in snapshot %s", borTxHash, sn.FilePath())
+		}
+		return idxBorTxnHash.BaseDataID() + blockEventId, nil
+	}
+	return 0, nil
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
@@ -1190,7 +1236,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(borTxHash[:])
+		blockEventId, ok := reader.Lookup(borTxHash[:])
+		if !ok {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)

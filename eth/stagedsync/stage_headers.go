@@ -604,8 +604,8 @@ func (cr ChainReaderImpl) BorEventsByBlock(hash libcommon.Hash, number uint64) [
 	}
 	return events
 }
-func (cr ChainReaderImpl) BorStartEventID(blockNum uint64) uint64 {
-	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, blockNum)
+func (cr ChainReaderImpl) BorStartEventID(hash libcommon.Hash, blockNum uint64) uint64 {
+	id, err := cr.blockReader.BorStartEventID(context.Background(), cr.tx, hash, blockNum)
 	if err != nil {
 		cr.logger.Error("BorEventsByBlock failed", "err", err)
 		return 0

@@ -1,13 +1,16 @@
 package sync
 
 import (
+	"context"
+
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type ExecutionClient interface {
-	InsertBlocks(headers []*types.Header) error
-	UpdateForkChoice(tip *types.Header) error
+	InsertBlocks(ctx context.Context, headers []*types.Header) error
+	UpdateForkChoice(ctx context.Context, tip *types.Header) error
+	CurrentHeader(ctx context.Context) (*types.Header, error)
 }
 
 type executionClient struct {
@@ -18,12 +21,16 @@ func NewExecutionClient(engine execution_client.ExecutionEngine) ExecutionClient
 	return &executionClient{engine}
 }
 
-func (e *executionClient) InsertBlocks(headers []*types.Header) error {
+func (e *executionClient) InsertBlocks(ctx context.Context, headers []*types.Header) error {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (e *executionClient) UpdateForkChoice(tip *types.Header) error {
+func (e *executionClient) UpdateForkChoice(ctx context.Context, tip *types.Header) error {
 	//TODO implement me
+	panic("implement me")
+}
+
+func (e *executionClient) CurrentHeader(ctx context.Context) (*types.Header, error) {
 	panic("implement me")
 }

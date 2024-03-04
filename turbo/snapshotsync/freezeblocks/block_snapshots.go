@@ -986,16 +986,25 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 	}
 
 	{
-		var l []snaptype.FileInfo
+		var l, lSidecars []snaptype.FileInfo
 		var m []Range
 		for _, f := range list {
-			if f.Type.Enum() != snaptype.Enums.BeaconBlocks {
+			if f.Type.Enum() != snaptype.Enums.BeaconBlocks && f.Type.Enum() != snaptype.Enums.BlobSidecars {
+				continue
+			}
+			if f.Type.Enum() == snaptype.Enums.BlobSidecars {
+				lSidecars = append(lSidecars, f) // blobs are an exception
 				continue
 			}
 			l = append(l, f)
 		}
 		l, m = noGaps(noOverlaps(l), minBlock)
+		if len(m) > 0 {
+			lst := m[len(m)-1]
+			log.Debug("[snapshots] see gap", "type", snaptype.Enums.BeaconBlocks, "from", lst.from)
+		}
 		res = append(res, l...)
+		res = append(res, lSidecars...)
 		missingSnapshots = append(missingSnapshots, m...)
 	}
 	return res, missingSnapshots, nil
@@ -1027,6 +1036,10 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 				l = append(l, f)
 			}
 			l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+			if len(m) > 0 {
+				lst := m[len(m)-1]
+				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
+			}
 			res = append(res, l...)
 			missingSnapshots = append(missingSnapshots, m...)
 		}
@@ -1850,8 +1863,11 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}
 
 	txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      true,
+		KeyCount: d.Count(),
+
+		Enums:              true,
+		LessFalsePositives: true,
+
 		BucketSize: 2000,
 		LeafSize:   8,
 		TmpDir:     tmpDir,
