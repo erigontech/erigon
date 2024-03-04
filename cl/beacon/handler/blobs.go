@@ -10,6 +10,8 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 )
 
+var blobSidecarSSZLenght = (*cltypes.BlobSidecar)(nil).EncodingSizeSSZ()
+
 func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
 	tx, err := a.indiciesDB.BeginRo(ctx)
@@ -33,11 +35,24 @@ func (a *ApiHandler) GetEthV1BeaconBlobSidecars(w http.ResponseWriter, r *http.R
 	if slot == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found"))
 	}
+	if a.caplinSnapshots != nil && *slot <= a.caplinSnapshots.FrozenBlobs() {
+		out, err := a.caplinSnapshots.ReadBlobSidecars(*slot)
+		if err != nil {
+			return nil, err
+		}
+		resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
+		for _, v := range out {
+			resp.Append(v)
+		}
+		return beaconhttp.NewBeaconResponse(resp), nil
+
+	}
 	out, found, err := a.blobStoage.ReadBlobSidecars(ctx, *slot, blockRoot)
 	if err != nil {
 		return nil, err
 	}
-	resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, (*cltypes.BlobSidecar)(nil).EncodingSizeSSZ())
+
+	resp := solid.NewStaticListSSZ[*cltypes.BlobSidecar](696969, blobSidecarSSZLenght)
 	if !found {
 		return beaconhttp.NewBeaconResponse(resp), nil
 	}
