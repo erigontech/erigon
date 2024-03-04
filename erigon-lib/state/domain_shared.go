@@ -190,7 +190,7 @@ func (sd *SharedDomains) rebuildCommitment(ctx context.Context, roTx kv.Tx, bloc
 	}
 
 	sd.sdCtx.Reset()
-	return sd.ComputeCommitment(ctx, true, blockNum, "")
+	return sd.ComputeCommitment(ctx, true, blockNum, "rebuild commit")
 }
 
 // SeekCommitment lookups latest available commitment and sets it as current

@@ -332,16 +332,20 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 
 func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, endTxNum uint64, idxList idxList, list ...*filesItem) (shortened []byte, found bool) {
 	for _, item := range list {
+		if item == nil {
+			continue
+		}
 		if item.startTxNum == startTxNum && item.endTxNum == endTxNum {
 			g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
 
 			//TODO: existence filter existence should be checked for domain which filesItem list is provided, not in commitmnet
-			//if idxList&withExistence != 0 {
-			//	hi, lo := ic.hashKey(key)
-			//	if !item.existence.ContainsHash(hi) {
-			//		continue
-			//	}
-			//}
+			if idxList&withExistence != 0 {
+				hi, _ := dc.hc.ic.hashKey(fullKey)
+				if !item.existence.ContainsHash(hi) {
+					continue
+				}
+			}
+
 			var offset uint64
 			if idxList&withHashMap != 0 {
 				reader := recsplit.NewIndexReader(item.index)
@@ -384,8 +388,7 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 			}
 
 			stepFrom, stepTo := item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep
-			shortened := encodeShortenedKey(nil, stepFrom, stepTo, offset)
-			return shortened, true
+			return encodeShortenedKey(nil, stepFrom, stepTo, offset), true
 		}
 	}
 	return nil, false
@@ -396,8 +399,17 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 	stepFrom, stepTo, offset := decodeShortenedKey(shortKey)
 	txFrom, txTo := stepFrom*dc.d.aggregationStep, stepTo*dc.d.aggregationStep
 
+	defer func() {
+		if r := recover(); r != nil {
+			dc.d.logger.Crit("lookupByShortenedKey failed",
+				"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
+				"domain", dc.d.keysTable, "givenListSize", len(list), "roFilesCount", len(dc.files), "filesCount", dc.d.files.Len())
+		}
+	}()
+
 	var item *filesItem
 	if len(list) > 0 {
+		// given list is not from given domain dc. It's from a different domain (account/storage)
 		for _, f := range list {
 			if f.startTxNum == txFrom && f.endTxNum == txTo {
 				item = f
@@ -405,17 +417,17 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 			}
 		}
 	} else {
-		for _, f := range dc.files {
+		for _, f := range dc.d.files.Items() {
 			if f.startTxNum == txFrom && f.endTxNum == txTo {
-				item = f.src
+				item = f
 				break
 			}
 		}
 	}
 	if item == nil {
-		for _, f := range dc.d.files.Items() {
+		for _, f := range dc.files {
 			if f.startTxNum == txFrom && f.endTxNum == txTo {
-				item = f
+				item = f.src
 				break
 			}
 		}
@@ -426,14 +438,19 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 		for _, item := range dc.d.files.Items() {
 			fileStepsss += fmt.Sprintf("%d-%d;", item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep)
 		}
+		roFiles := ""
+		for _, f := range dc.files {
+			roFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
+		}
 		dc.d.logger.Warn("lookupByShortenedKey file not found",
 			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
-			"domain", dc.d.keysTable, "fileSteps", fileStepsss,
-			"listSize", len(list), "filesCount", dc.d.files.Len())
+			"domain", dc.d.keysTable, "files", fileStepsss, "roFiles", roFiles,
+			"listSize", len(list), "roFilesCount", len(dc.files), "filesCount", dc.d.files.Len())
 		return nil, false
 	}
 
 	g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
+
 	g.Reset(offset)
 	if !g.HasNext() {
 		dc.d.logger.Warn("lookupByShortenedKey failed",
@@ -488,25 +505,19 @@ func (dc *DomainContext) commitmentValTransform(
 						// Optimised key referencing a state file record (file number and offset within the file)
 						buf, found = dc.lookupByShortenedKey(key, filesStorage)
 						if !found {
-							s0, s1, of := decodeShortenedKey(key)
-							filesStorageRng := ""
-							for _, f := range filesStorage {
-								filesStorageRng += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
-							}
 							dc.d.logger.Crit("valTransform: lost storage full key",
 								"shortened", fmt.Sprintf("%x", key),
-								"step", fmt.Sprintf("%d-%d", s0, s1), "offset", of,
-								"files",
+								"merging", fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep),
+								"toMerge", len(filesStorage),
 								"startTxNumToReplace", startTxNum, "endTxNumToReplace", endTxNum)
-							panic("lost storage full key")
+							panic(fmt.Sprintf("lost storage full key %x", key))
 						}
 					}
 
 					shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListStorage, mergedStorage)
 					if !found {
-						// if plain key is lost, we can save original fullkey
 						if len(buf) == length.Addr+length.Hash {
-							return nil
+							return nil // if plain key is lost, we can save original fullkey
 						}
 						// if shortened key lost, we can't continue
 						dc.d.logger.Crit("valTransform: replacement for full storage key was not found",
@@ -529,7 +540,10 @@ func (dc *DomainContext) commitmentValTransform(
 				} else {
 					buf, found = dc.lookupByShortenedKey(key, filesAccount)
 					if !found {
-						dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key))
+						dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key),
+							"merging", fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep),
+							"toMerge", len(filesAccount),
+							"startTxNumToReplace", startTxNum, "endTxNumToReplace", endTxNum)
 						panic(fmt.Sprintf("lost account full key: %x", key))
 					}
 				}
