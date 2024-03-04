@@ -6,6 +6,9 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
@@ -13,24 +16,20 @@ import (
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type ChainReaderWriterEth1 struct {
-	ctx             context.Context
 	cfg             *chain.Config
 	executionModule execution.ExecutionClient
 
-	fcuTimoutMillis uint64
+	fcuTimeoutMillis uint64
 }
 
-func NewChainReaderEth1(ctx context.Context, cfg *chain.Config, executionModule execution.ExecutionClient, fcuTimoutMillis uint64) ChainReaderWriterEth1 {
+func NewChainReaderEth1(cfg *chain.Config, executionModule execution.ExecutionClient, fcuTimeoutMillis uint64) ChainReaderWriterEth1 {
 	return ChainReaderWriterEth1{
-		ctx:             ctx,
-		cfg:             cfg,
-		executionModule: executionModule,
-		fcuTimoutMillis: fcuTimoutMillis,
+		cfg:              cfg,
+		executionModule:  executionModule,
+		fcuTimeoutMillis: fcuTimeoutMillis,
 	}
 }
 
@@ -38,8 +37,8 @@ func (c ChainReaderWriterEth1) Config() *chain.Config {
 	return c.cfg
 }
 
-func (c ChainReaderWriterEth1) CurrentHeader() *types.Header {
-	resp, err := c.executionModule.CurrentHeader(c.ctx, &emptypb.Empty{})
+func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header {
+	resp, err := c.executionModule.CurrentHeader(ctx, &emptypb.Empty{})
 	if err != nil {
 		log.Error("GetHeader failed", "err", err)
 		return nil
@@ -55,8 +54,8 @@ func (c ChainReaderWriterEth1) CurrentHeader() *types.Header {
 	return ret
 }
 
-func (c ChainReaderWriterEth1) GetHeader(hash libcommon.Hash, number uint64) *types.Header {
-	resp, err := c.executionModule.GetHeader(c.ctx, &execution.GetSegmentRequest{
+func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash libcommon.Hash, number uint64) *types.Header {
+	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -75,14 +74,14 @@ func (c ChainReaderWriterEth1) GetHeader(hash libcommon.Hash, number uint64) *ty
 	return ret
 }
 
-func (c ChainReaderWriterEth1) GetBlockByHash(hash libcommon.Hash) *types.Block {
-	header := c.GetHeaderByHash(hash)
+func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash libcommon.Hash) *types.Block {
+	header := c.GetHeaderByHash(ctx, hash)
 	if header == nil {
 		return nil
 	}
 
 	number := header.Number.Uint64()
-	resp, err := c.executionModule.GetBody(c.ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetBody(ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -106,13 +105,13 @@ func (c ChainReaderWriterEth1) GetBlockByHash(hash libcommon.Hash) *types.Block 
 	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
 }
 
-func (c ChainReaderWriterEth1) GetBlockByNumber(number uint64) *types.Block {
-	header := c.GetHeaderByNumber(number)
+func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint64) *types.Block {
+	header := c.GetHeaderByNumber(ctx, number)
 	if header == nil {
 		return nil
 	}
 
-	resp, err := c.executionModule.GetBody(c.ctx, &execution.GetSegmentRequest{
+	resp, err := c.executionModule.GetBody(ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
 	})
 	if err != nil {
@@ -135,8 +134,8 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(number uint64) *types.Block {
 	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
 }
 
-func (c ChainReaderWriterEth1) GetHeaderByHash(hash libcommon.Hash) *types.Header {
-	resp, err := c.executionModule.GetHeader(c.ctx, &execution.GetSegmentRequest{
+func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash libcommon.Hash) *types.Header {
+	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
 		BlockNumber: nil,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -155,8 +154,8 @@ func (c ChainReaderWriterEth1) GetHeaderByHash(hash libcommon.Hash) *types.Heade
 	return ret
 }
 
-func (c ChainReaderWriterEth1) GetHeaderByNumber(number uint64) *types.Header {
-	resp, err := c.executionModule.GetHeader(c.ctx, &execution.GetSegmentRequest{
+func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uint64) *types.Header {
+	resp, err := c.executionModule.GetHeader(ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   nil,
 	})
@@ -175,8 +174,8 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(number uint64) *types.Header {
 	return ret
 }
 
-func (c ChainReaderWriterEth1) GetTd(hash libcommon.Hash, number uint64) *big.Int {
-	resp, err := c.executionModule.GetTD(c.ctx, &execution.GetSegmentRequest{
+func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash libcommon.Hash, number uint64) *big.Int {
+	resp, err := c.executionModule.GetTD(ctx, &execution.GetSegmentRequest{
 		BlockNumber: &number,
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
@@ -190,12 +189,12 @@ func (c ChainReaderWriterEth1) GetTd(hash libcommon.Hash, number uint64) *big.In
 	return eth1_utils.ConvertBigIntFromRpc(resp.Td)
 }
 
-func (c ChainReaderWriterEth1) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
+func (c ChainReaderWriterEth1) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
 	grpcHashes := make([]*types2.H256, len(hashes))
 	for i := range grpcHashes {
 		grpcHashes[i] = gointerfaces.ConvertHashToH256(hashes[i])
 	}
-	resp, err := c.executionModule.GetBodiesByHashes(c.ctx, &execution.GetBodiesByHashesRequest{
+	resp, err := c.executionModule.GetBodiesByHashes(ctx, &execution.GetBodiesByHashesRequest{
 		Hashes: grpcHashes,
 	})
 	if err != nil {
@@ -211,8 +210,8 @@ func (c ChainReaderWriterEth1) GetBodiesByHashes(hashes []libcommon.Hash) ([]*ty
 	return ret, nil
 }
 
-func (c ChainReaderWriterEth1) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
-	resp, err := c.executionModule.GetBodiesByRange(c.ctx, &execution.GetBodiesByRangeRequest{
+func (c ChainReaderWriterEth1) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
+	resp, err := c.executionModule.GetBodiesByRange(ctx, &execution.GetBodiesByRangeRequest{
 		Start: start,
 		Count: count,
 	})
@@ -229,16 +228,16 @@ func (c ChainReaderWriterEth1) GetBodiesByRange(start, count uint64) ([]*types.R
 	return ret, nil
 }
 
-func (c ChainReaderWriterEth1) Ready() (bool, error) {
-	resp, err := c.executionModule.Ready(c.ctx, &emptypb.Empty{})
+func (c ChainReaderWriterEth1) Ready(ctx context.Context) (bool, error) {
+	resp, err := c.executionModule.Ready(ctx, &emptypb.Empty{})
 	if err != nil {
 		return false, err
 	}
 	return resp.Ready, nil
 }
 
-func (c ChainReaderWriterEth1) HeaderNumber(hash libcommon.Hash) (*uint64, error) {
-	resp, err := c.executionModule.GetHeaderHashNumber(c.ctx, gointerfaces.ConvertHashToH256(hash))
+func (c ChainReaderWriterEth1) HeaderNumber(ctx context.Context, hash libcommon.Hash) (*uint64, error) {
+	resp, err := c.executionModule.GetHeaderHashNumber(ctx, gointerfaces.ConvertHashToH256(hash))
 	if err != nil {
 		return nil, err
 	}
@@ -248,8 +247,8 @@ func (c ChainReaderWriterEth1) HeaderNumber(hash libcommon.Hash) (*uint64, error
 	return resp.BlockNumber, nil
 }
 
-func (c ChainReaderWriterEth1) IsCanonicalHash(hash libcommon.Hash) (bool, error) {
-	resp, err := c.executionModule.IsCanonicalHash(c.ctx, gointerfaces.ConvertHashToH256(hash))
+func (c ChainReaderWriterEth1) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	resp, err := c.executionModule.IsCanonicalHash(ctx, gointerfaces.ConvertHashToH256(hash))
 	if err != nil {
 		return false, err
 	}
@@ -259,8 +258,8 @@ func (c ChainReaderWriterEth1) IsCanonicalHash(hash libcommon.Hash) (bool, error
 	return resp.Canonical, nil
 }
 
-func (c ChainReaderWriterEth1) FrozenBlocks() uint64 {
-	ret, err := c.executionModule.FrozenBlocks(c.ctx, &emptypb.Empty{})
+func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) uint64 {
+	ret, err := c.executionModule.FrozenBlocks(ctx, &emptypb.Empty{})
 	if err != nil {
 		panic(err)
 	}
@@ -269,11 +268,11 @@ func (c ChainReaderWriterEth1) FrozenBlocks() uint64 {
 
 const retryTimeout = 10 * time.Millisecond
 
-func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error {
+func (c ChainReaderWriterEth1) InsertBlocksAndWait(ctx context.Context, blocks []*types.Block) error {
 	request := &execution.InsertBlocksRequest{
 		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
 	}
-	response, err := c.executionModule.InsertBlocks(c.ctx, request)
+	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -283,12 +282,12 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error 
 	for response.Result == execution.ExecutionStatus_Busy {
 		select {
 		case <-retryInterval.C:
-			response, err = c.executionModule.InsertBlocks(c.ctx, request)
+			response, err = c.executionModule.InsertBlocks(ctx, request)
 			if err != nil {
 				return err
 			}
-		case <-c.ctx.Done():
-			return c.ctx.Err()
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
 	if response.Result != execution.ExecutionStatus_Success {
@@ -297,11 +296,11 @@ func (c ChainReaderWriterEth1) InsertBlocksAndWait(blocks []*types.Block) error 
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlocks(blocks []*types.Block) error {
+func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	request := &execution.InsertBlocksRequest{
 		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
 	}
-	response, err := c.executionModule.InsertBlocks(c.ctx, request)
+	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -315,13 +314,13 @@ func (c ChainReaderWriterEth1) InsertBlocks(blocks []*types.Block) error {
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block) error {
+func (c ChainReaderWriterEth1) InsertBlockAndWait(ctx context.Context, block *types.Block) error {
 	blocks := []*types.Block{block}
 	request := &execution.InsertBlocksRequest{
 		Blocks: eth1_utils.ConvertBlocksToRPC(blocks),
 	}
 
-	response, err := c.executionModule.InsertBlocks(c.ctx, request)
+	response, err := c.executionModule.InsertBlocks(ctx, request)
 	if err != nil {
 		return err
 	}
@@ -330,55 +329,55 @@ func (c ChainReaderWriterEth1) InsertBlockAndWait(block *types.Block) error {
 	for response.Result == execution.ExecutionStatus_Busy {
 		select {
 		case <-retryInterval.C:
-			response, err = c.executionModule.InsertBlocks(c.ctx, request)
+			response, err = c.executionModule.InsertBlocks(ctx, request)
 			if err != nil {
 				return err
 			}
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return context.Canceled
 		}
 	}
 	if response.Result != execution.ExecutionStatus_Success {
 		return fmt.Errorf("insertHeadersAndWait: invalid code recieved from execution module: %s", response.Result.String())
 	}
-	return c.InsertBlocksAndWait([]*types.Block{block})
+	return c.InsertBlocksAndWait(ctx, []*types.Block{block})
 }
 
-func (c ChainReaderWriterEth1) ValidateChain(hash libcommon.Hash, number uint64) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
-	resp, err := c.executionModule.ValidateChain(c.ctx, &execution.ValidationRequest{
+func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash libcommon.Hash, number uint64) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
+	resp, err := c.executionModule.ValidateChain(ctx, &execution.ValidationRequest{
 		Hash:   gointerfaces.ConvertHashToH256(hash),
 		Number: number,
 	})
 	if err != nil {
 		return 0, nil, libcommon.Hash{}, err
 	}
-	var validatonError *string
+	var validationError *string
 	if len(resp.ValidationError) > 0 {
-		validatonError = &resp.ValidationError
+		validationError = &resp.ValidationError
 	}
-	return resp.ValidationStatus, validatonError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	return resp.ValidationStatus, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) UpdateForkChoice(headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
-	resp, err := c.executionModule.UpdateForkChoice(c.ctx, &execution.ForkChoice{
+func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash libcommon.Hash) (execution.ExecutionStatus, *string, libcommon.Hash, error) {
+	resp, err := c.executionModule.UpdateForkChoice(ctx, &execution.ForkChoice{
 		HeadBlockHash:      gointerfaces.ConvertHashToH256(headHash),
 		SafeBlockHash:      gointerfaces.ConvertHashToH256(safeHash),
 		FinalizedBlockHash: gointerfaces.ConvertHashToH256(finalizeHash),
-		Timeout:            c.fcuTimoutMillis,
+		Timeout:            c.fcuTimeoutMillis,
 	})
 	if err != nil {
 		return 0, nil, libcommon.Hash{}, err
 	}
-	var validatonError *string
+	var validationError *string
 	if len(resp.ValidationError) > 0 {
-		validatonError = &resp.ValidationError
+		validationError = &resp.ValidationError
 	}
-	return resp.Status, validatonError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
+	return resp.Status, validationError, gointerfaces.ConvertH256ToHash(resp.LatestValidHash), err
 }
 
-func (c ChainReaderWriterEth1) GetForkchoice() (headHash, finalizedHash, safeHash libcommon.Hash, err error) {
+func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash libcommon.Hash, err error) {
 	var resp *execution.ForkChoice
-	resp, err = c.executionModule.GetForkChoice(c.ctx, &emptypb.Empty{})
+	resp, err = c.executionModule.GetForkChoice(ctx, &emptypb.Empty{})
 	if err != nil {
 		log.Error("GetHeader failed", "err", err)
 		return
