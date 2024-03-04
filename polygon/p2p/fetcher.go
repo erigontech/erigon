@@ -187,8 +187,8 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 		}
 	}
 
-	expectedHeaderNum := start
-	for _, header := range headers {
+	for i, header := range headers {
+		expectedHeaderNum := start + uint64(i)
 		currentHeaderNumber := header.Number.Uint64()
 		if currentHeaderNumber != expectedHeaderNum {
 			return &ErrNonSequentialHeaderNumbers{
