@@ -29,9 +29,8 @@ func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end
 	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
 		shouldPenalize := rlp.IsInvalidRLPError(err) ||
-			errors.Is(err, &ErrIncorrectOriginHeader{}) ||
 			errors.Is(err, &ErrTooManyHeaders{}) ||
-			errors.Is(err, &ErrDisconnectedHeaders{})
+			errors.Is(err, &ErrNonSequentialHeaderNumbers{})
 
 		if shouldPenalize {
 			pf.logger.Debug("penalizing peer", "peerId", peerId, "err", err.Error())

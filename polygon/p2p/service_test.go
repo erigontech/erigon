@@ -668,7 +668,7 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenErrTooManyHeaders(t *testing.T
 	})
 }
 
-func TestServiceFetchHeadersShouldPenalizePeerWhenErrDisconnectedHeaders(t *testing.T) {
+func TestServiceFetchHeadersShouldPenalizePeerWhenErrNonSequentialHeaderNumbers(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -698,16 +698,16 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenErrDisconnectedHeaders(t *test
 	// setup expectation that peer should be penalized
 	test.mockExpectPenalizePeer(peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
-		var errDisconnectedHeaders *ErrDisconnectedHeaders
+		var errNonSequentialHeaderNumbers *ErrNonSequentialHeaderNumbers
 		headers, err := test.service.FetchHeaders(ctx, 1, 4, peerId)
-		require.ErrorAs(t, err, &errDisconnectedHeaders)
-		require.Equal(t, uint64(3), errDisconnectedHeaders.currentNum)
-		require.Equal(t, uint64(1), errDisconnectedHeaders.parentNum)
+		require.ErrorAs(t, err, &errNonSequentialHeaderNumbers)
+		require.Equal(t, uint64(3), errNonSequentialHeaderNumbers.current)
+		require.Equal(t, uint64(2), errNonSequentialHeaderNumbers.expected)
 		require.Nil(t, headers)
 	})
 }
 
-func TestServiceFetchHeadersShouldPenalizePeerWhenErrIncorrectOriginHeader(t *testing.T) {
+func TestServiceFetchHeadersShouldPenalizePeerWhenIncorrectOrigin(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -718,7 +718,7 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenErrIncorrectOriginHeader(t *te
 		{
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
-			// response should contain 2 headers instead we return 5
+			// response headers should be 2 and start at 1 - instead we start at 2
 			Data: blockHeadersPacket66Bytes(t, requestId, incorrectOriginHeaders),
 		},
 	}
@@ -735,11 +735,11 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenErrIncorrectOriginHeader(t *te
 	// setup expectation that peer should be penalized
 	test.mockExpectPenalizePeer(peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
-		var errIncorrectOriginHeader *ErrIncorrectOriginHeader
+		var errNonSequentialHeaderNumbers *ErrNonSequentialHeaderNumbers
 		headers, err := test.service.FetchHeaders(ctx, 1, 3, peerId)
-		require.ErrorAs(t, err, &errIncorrectOriginHeader)
-		require.Equal(t, uint64(1), errIncorrectOriginHeader.requested)
-		require.Equal(t, uint64(2), errIncorrectOriginHeader.received)
+		require.ErrorAs(t, err, &errNonSequentialHeaderNumbers)
+		require.Equal(t, uint64(2), errNonSequentialHeaderNumbers.current)
+		require.Equal(t, uint64(1), errNonSequentialHeaderNumbers.expected)
 		require.Nil(t, headers)
 	})
 }
@@ -801,11 +801,9 @@ func TestListPeersMayHaveBlockNum(t *testing.T) {
 		var errIncompleteHeaders *ErrIncompleteHeaders
 		headers, err = test.service.FetchHeaders(ctx, 3, 5, peerId1) // fetch headers 3 and 4
 		require.ErrorAs(t, err, &errIncompleteHeaders)               // peer 1 does not have headers 3 and 4
-		require.Equal(t, uint64(3), errIncompleteHeaders.requestStart)
-		require.Equal(t, uint64(5), errIncompleteHeaders.requestEnd)
-		require.Equal(t, uint64(0), errIncompleteHeaders.first)
-		require.Equal(t, uint64(0), errIncompleteHeaders.last)
-		require.Equal(t, 0, errIncompleteHeaders.amount)
+		require.Equal(t, uint64(3), errIncompleteHeaders.start)
+		require.Equal(t, uint64(2), errIncompleteHeaders.requested)
+		require.Equal(t, uint64(0), errIncompleteHeaders.received)
 		require.Equal(t, uint64(3), errIncompleteHeaders.LowestMissingBlockNum())
 		require.Nil(t, headers)
 
