@@ -189,6 +189,8 @@ type Ethereum struct {
 
 	// zk
 	dataStream *datastreamer.StreamServer
+	l1Syncer   *syncer.L1Syncer
+	etherMan   *etherman.Client
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -729,10 +731,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		if sequencer.IsSequencer() {
 			// if we are sequencing transactions, we do the sequencing loop...
 
-			etherMan := newEtherMan(cfg)
+			backend.etherMan = newEtherMan(cfg)
 			l1Topics := [][]libcommon.Hash{{contracts.UpdateL1InfoTreeTopic, contracts.InitialSequenceBatchesTopic}}
-			zkL1Syncer := syncer.NewL1Syncer(
-				etherMan.EthClient,
+			backend.l1Syncer = syncer.NewL1Syncer(
+				backend.etherMan.EthClient,
 				[]libcommon.Address{cfg.L1Rollup, cfg.L1PolygonRollupManager},
 				l1Topics,
 				cfg.L1BlockRange,
@@ -766,7 +768,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.chainConfig,
 				backend.chainDB,
 				witnessGenerator,
-				zkL1Syncer,
+				backend.l1Syncer,
 			)
 
 			verifier.StartWork()
@@ -783,7 +785,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 				backend.forkValidator,
 				backend.engine,
 				backend.dataStream,
-				zkL1Syncer,
+				backend.l1Syncer,
 				backend.txPool2,
 				backend.txPool2DB,
 				verifier,
@@ -936,7 +938,7 @@ func (backend *Ethereum) Init(stack *node.Node, config *ethconfig.Config) error 
 	if casted, ok := backend.engine.(*bor.Bor); ok {
 		borDb = casted.DB
 	}
-	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config.Zk.L2RpcUrl)
+	apiList := commands.APIList(chainKv, borDb, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine, config.Zk, backend.l1Syncer)
 	authApiList := commands.AuthAPIList(chainKv, ethRpcClient, txPoolRpcClient, miningRpcClient, ff, stateCache, blockReader, backend.agg, httpRpcCfg, backend.engine)
 	go func() {
 		if err := cli.StartRpcServer(ctx, httpRpcCfg, apiList, authApiList); err != nil {

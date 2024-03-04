@@ -15,17 +15,26 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/rawdb"
 	eritypes "github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/rpchelper"
+	"github.com/ledgerwatch/erigon/zk/datastream/server"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
+	"github.com/ledgerwatch/erigon/zk/sequencer"
+	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/witness"
+	"github.com/ledgerwatch/erigon/zkevm/hex"
 	"github.com/ledgerwatch/erigon/zkevm/jsonrpc/client"
 )
 
 var sha3UncleHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+
+const ApiRollupId = 1 // todo [zkevm] this should be read from config really
 
 // ZkEvmAPI is a collection of functions that are exposed in the
 type ZkEvmAPI interface {
@@ -43,6 +52,7 @@ type ZkEvmAPI interface {
 	GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error)
 	GetBlockRangeWitness(ctx context.Context, startBlockNrOrHash rpc.BlockNumberOrHash, endBlockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error)
 	GetBatchWitness(ctx context.Context, batchNumber uint64) (hexutility.Bytes, error)
+	GetProverInput(ctx context.Context, batchNumber uint64, debug *bool) (*legacy_executor_verifier.RpcPayload, error)
 }
 
 // APIImpl is implementation of the ZkEvmAPI interface based on remote Db access
@@ -51,16 +61,24 @@ type ZkEvmAPIImpl struct {
 
 	db              kv.RoDB
 	ReturnDataLimit int
-	ZkRpcUrl        string
+	config          *ethconfig.Zk
+	l1Syncer        *syncer.L1Syncer
 }
 
 // NewEthAPI returns ZkEvmAPIImpl instance
-func NewZkEvmAPI(base *APIImpl, db kv.RoDB, returnDataLimit int, zkRpcUrl string) *ZkEvmAPIImpl {
+func NewZkEvmAPI(
+    base *APIImpl,
+    db kv.RoDB,
+    returnDataLimit int,
+    zkConfig *ethconfig.Zk,
+    l1Syncer *syncer.L1Syncer,
+) *ZkEvmAPIImpl {
 	return &ZkEvmAPIImpl{
 		ethApi:          base,
 		db:              db,
 		ReturnDataLimit: returnDataLimit,
-		ZkRpcUrl:        zkRpcUrl,
+		config:          zkConfig,
+		l1Syncer:        l1Syncer,
 	}
 }
 
@@ -204,7 +222,7 @@ func (api *ZkEvmAPIImpl) VerifiedBatchNumber(ctx context.Context) (hexutil.Uint6
 // GetBatchByNumber returns a batch from the current canonical chain. If number is nil, the
 // latest known batch is returned.
 func (api *ZkEvmAPIImpl) GetBatchByNumber(ctx context.Context, batchNumber rpc.BlockNumber, fullTx *bool) (json.RawMessage, error) {
-	res, err := client.JSONRPCCall(api.ZkRpcUrl, "zkevm_getBatchByNumber", batchNumber, fullTx)
+	res, err := client.JSONRPCCall(api.ethApi.ZkRpcUrl, "zkevm_getBatchByNumber", batchNumber, fullTx)
 	if err != nil {
 		return nil, err
 	}
@@ -252,10 +270,10 @@ func (api *ZkEvmAPIImpl) GetFullBlockByHash(ctx context.Context, hash libcommon.
 }
 
 func (api *ZkEvmAPIImpl) populateBlockDetail(
-	tx kv.Tx,
-	ctx context.Context,
-	baseBlock *eritypes.Block,
-	fullTx bool,
+    tx kv.Tx,
+    ctx context.Context,
+    baseBlock *eritypes.Block,
+    fullTx bool,
 ) (types.Block, error) {
 	cc, err := api.ethApi.chainConfig(tx)
 	if err != nil {
@@ -295,7 +313,7 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 
 // GetBroadcastURI returns the URI of the broadcaster - the trusted sequencer
 func (api *ZkEvmAPIImpl) GetBroadcastURI(ctx context.Context) (string, error) {
-	return api.ZkRpcUrl, nil
+	return api.ethApi.ZkRpcUrl, nil
 }
 
 func (api *ZkEvmAPIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error) {
@@ -380,6 +398,84 @@ func (api *ZkEvmAPIImpl) GetBatchWitness(ctx context.Context, batchNumber uint64
 	endBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[0]))
 	startBlock := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blocks[len(blocks)-1]))
 	return api.getBlockRangeWitness(ctx, api.db, startBlock, endBlock, false)
+}
+
+func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64, debug *bool) (*legacy_executor_verifier.RpcPayload, error) {
+	if !sequencer.IsSequencer() {
+		return nil, errors.New("method only supported from a sequencer node")
+	}
+
+	useDebug := false
+	if debug != nil {
+		useDebug = *debug
+	}
+
+	tx, err := api.db.BeginRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	hDb := hermez_db.NewHermezDbReader(tx)
+
+	blockNumbers, err := hDb.GetL2BlockNosByBatch(batchNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	lastBlock, err := rawdb.ReadBlockByNumber(tx, blockNumbers[len(blockNumbers)-1])
+	if err != nil {
+		return nil, err
+	}
+
+	start := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumbers[0]))
+	end := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumbers[len(blockNumbers)-1]))
+
+	rangeWitness, err := api.getBlockRangeWitness(ctx, api.db, start, end, useDebug)
+	if err != nil {
+		return nil, err
+	}
+
+	oldAccInputHash, err := api.l1Syncer.GetOldAccInputHash(ctx, &api.config.L1PolygonRollupManager, ApiRollupId, batchNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	timestampLimit := lastBlock.Time()
+
+	return &legacy_executor_verifier.RpcPayload{
+		Witness:           hex.EncodeToHex(rangeWitness),
+		Coinbase:          api.config.SequencerAddress.String(),
+		OldAccInputHash:   oldAccInputHash.String(),
+		TimestampLimit:    timestampLimit,
+		ForcedBlockhashL1: "",
+	}, nil
+}
+
+func getStreamBytes(
+    tx kv.Tx,
+    batchNumber uint64,
+    blockNumbers []uint64,
+    lastBlock *eritypes.Block,
+    hDb *hermez_db.HermezDbReader,
+    chainId uint64,
+) ([]byte, error) {
+	streamServer := server.NewDataStreamServer(nil, chainId, server.ExecutorOperationMode)
+	var streamBytes []byte
+	for _, blockNumber := range blockNumbers {
+		block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+		sBytes, err := streamServer.CreateAndBuildStreamEntryBytes(block, hDb, lastBlock, batchNumber, true)
+		if err != nil {
+			return nil, err
+		}
+		streamBytes = append(streamBytes, sBytes...)
+		lastBlock = block
+	}
+	return streamBytes, nil
+
 }
 
 func getLastBlockInBatchNumber(tx kv.Tx, batchNumber uint64) (uint64, error) {
@@ -511,11 +607,11 @@ func getGlobalExitRoot(tx kv.Tx, l2Block uint64) (common.Hash, error) {
 }
 
 func convertBlockToRpcBlock(
-	orig *eritypes.Block,
-	receipts eritypes.Receipts,
-	senders []common.Address,
-	effectiveGasPricePercentages []uint8,
-	full bool,
+    orig *eritypes.Block,
+    receipts eritypes.Receipts,
+    senders []common.Address,
+    effectiveGasPricePercentages []uint8,
+    full bool,
 ) (types.Block, error) {
 	header := orig.Header()
 
@@ -604,11 +700,11 @@ func convertBlockToRpcBlock(
 }
 
 func convertReceipt(
-	r *eritypes.Receipt,
-	from common.Address,
-	to *common.Address,
-	gasPrice *uint256.Int,
-	effectiveGasPricePercentage uint8,
+    r *eritypes.Receipt,
+    from common.Address,
+    to *common.Address,
+    gasPrice *uint256.Int,
+    effectiveGasPricePercentage uint8,
 ) *types.Receipt {
 	var cAddr *common.Address
 	if r.ContractAddress != (common.Address{}) {

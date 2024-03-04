@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/cobra"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 )
 
 func main() {
@@ -30,7 +31,7 @@ func main() {
 
 		// TODO: Replace with correct consensus Engine
 		engine := ethash.NewFaker()
-		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg, engine, "")
+		apiList := commands.APIList(db, borDb, backend, txPool, mining, ff, stateCache, blockReader, agg, *cfg, engine, &ethconfig.Zk{}, nil)
 		if err := cli.StartRpcServer(ctx, *cfg, apiList, nil); err != nil {
 			log.Error(err.Error())
 			return nil

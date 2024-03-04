@@ -166,7 +166,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		return nil
 	}
 
-	streamBytes, err := v.GetStreamBytes(request, err, tx, blocks, hermezDb)
+	streamBytes, err := v.GetStreamBytes(request, tx, blocks, hermezDb)
 	if err != nil {
 		return err
 	}
@@ -216,7 +216,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	return nil
 }
 
-func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, err error, tx kv.Tx, blocks []uint64, hermezDb *hermez_db.HermezDbReader) ([]byte, error) {
+func (v *LegacyExecutorVerifier) GetStreamBytes(request *VerifierRequest, tx kv.Tx, blocks []uint64, hermezDb *hermez_db.HermezDbReader) ([]byte, error) {
 	lastBlock, err := rawdb.ReadBlockByNumber(tx, blocks[0]-1)
 	if err != nil {
 		return nil, err
