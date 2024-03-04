@@ -42,8 +42,6 @@ func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) Mes
 
 type messageListener struct {
 	once                  sync.Once
-	streamCtx             context.Context
-	streamCtxCancel       context.CancelFunc
 	observerIdSequence    uint64
 	logger                log.Logger
 	sentryClient          direct.SentryClient
@@ -55,22 +53,19 @@ type messageListener struct {
 
 func (ml *messageListener) Start(ctx context.Context) {
 	ml.once.Do(func() {
-		ml.streamCtx, ml.streamCtxCancel = context.WithCancel(ctx)
-
-		backgroundLoops := []func(){
+		backgroundLoops := []func(ctx context.Context){
 			ml.listenBlockHeaders66,
 			ml.listenPeerEvents,
 		}
 
 		ml.stopWg.Add(len(backgroundLoops))
 		for _, loop := range backgroundLoops {
-			go loop()
+			go loop(ctx)
 		}
 	})
 }
 
 func (ml *messageListener) Stop() {
-	ml.streamCtxCancel()
 	ml.stopWg.Wait()
 
 	ml.observersMu.Lock()
@@ -98,11 +93,11 @@ func (ml *messageListener) RegisterPeerEventObserver(observer MessageObserver[*s
 	return unregisterFunc(&ml.observersMu, ml.peerEventObservers, observerId)
 }
 
-func (ml *messageListener) listenBlockHeaders66() {
-	ml.listenInboundMessage("BlockHeaders66", sentry.MessageId_BLOCK_HEADERS_66, ml.notifyBlockHeadersMessageObservers)
+func (ml *messageListener) listenBlockHeaders66(ctx context.Context) {
+	ml.listenInboundMessage(ctx, "BlockHeaders66", sentry.MessageId_BLOCK_HEADERS_66, ml.notifyBlockHeadersMessageObservers)
 }
 
-func (ml *messageListener) listenInboundMessage(name string, msgId sentry.MessageId, handler func(msg *sentry.InboundMessage)) {
+func (ml *messageListener) listenInboundMessage(ctx context.Context, name string, msgId sentry.MessageId, handler func(msg *sentry.InboundMessage)) {
 	defer ml.stopWg.Done()
 
 	messageStreamFactory := func(ctx context.Context, sentryClient direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
@@ -123,7 +118,7 @@ func (ml *messageListener) listenInboundMessage(name string, msgId sentry.Messag
 	}
 
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
-		ml.streamCtx,
+		ctx,
 		ml.sentryClient,
 		ml.statusDataFactory(),
 		name,
@@ -146,7 +141,7 @@ func (ml *messageListener) notifyBlockHeadersMessageObservers(message *sentry.In
 	})
 }
 
-func (ml *messageListener) listenPeerEvents() {
+func (ml *messageListener) listenPeerEvents(ctx context.Context) {
 	defer ml.stopWg.Done()
 
 	peerEventStreamFactory := func(ctx context.Context, sentryClient direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
@@ -163,7 +158,7 @@ func (ml *messageListener) listenPeerEvents() {
 	}
 
 	sentrymulticlient.SentryReconnectAndPumpStreamLoop(
-		ml.streamCtx,
+		ctx,
 		ml.sentryClient,
 		ml.statusDataFactory(),
 		"PeerEvents",

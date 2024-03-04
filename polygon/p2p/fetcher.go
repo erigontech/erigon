@@ -110,7 +110,6 @@ func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chu
 }
 
 func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
-	// cleanup for the messages chan
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
