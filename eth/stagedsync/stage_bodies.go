@@ -231,6 +231,8 @@ func BodiesForward(
 					return true, nil
 				}
 
+				logger.Warn("Writing block body", "hash", header.Hash(), "txs", len(rawBody.Transactions), "time-diff", time.Since(time.Unix(int64(header.Time), 0)))
+
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 				ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
 				if err != nil {

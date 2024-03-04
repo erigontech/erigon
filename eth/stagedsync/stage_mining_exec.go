@@ -147,6 +147,9 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 					break
 				}
 			}
+
+			parent := rawdb.ReadHeaderByNumber(tx, executionAt)
+			logger.Warn("Producing new block", "time-diff", time.Since(time.Unix(int64(parent.Time), 0)))
 		}
 	}
 

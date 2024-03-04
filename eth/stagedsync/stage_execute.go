@@ -484,6 +484,8 @@ Loop:
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 
+		logger.Warn("Starting block execution", "header", blockHash, "time-diff", time.Since(time.Unix(int64(block.Time()), 0)))
+
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
 			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
@@ -533,6 +535,7 @@ Loop:
 			break Loop
 		}
 		stageProgress = blockNum
+		logger.Warn("Finished block execution", "header", blockHash, "time-diff", time.Since(time.Unix(int64(block.Time()), 0)))
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
