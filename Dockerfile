@@ -18,7 +18,7 @@ RUN --mount=type=cache,target=/root/.cache \
     make BUILD_TAGS=nosqlite,noboltdb,nosilkworm all
 
 
-FROM docker.io/library/golang:1.22-alpine3.17 AS tools-builder
+FROM docker.io/library/golang:1.22-alpine3.19 AS tools-builder
 RUN apk --no-cache add build-base linux-headers git bash ca-certificates libstdc++
 WORKDIR /app
 
