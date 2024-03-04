@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -147,7 +148,7 @@ func (st *serviceTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 
 			mock, ok := st.headersRequestResponseMocks[pkt.RequestId]
 			if !ok {
-				return nil, fmt.Errorf("unexpected request id: %d", pkt.RequestId)
+				return &sentry.SentPeers{}, nil
 			}
 
 			delete(st.headersRequestResponseMocks, pkt.RequestId)
@@ -171,7 +172,9 @@ func (st *serviceTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 				}
 			}
 
-			return nil, nil
+			return &sentry.SentPeers{
+				Peers: []*erigonlibtypes.H512{req.PeerId},
+			}, nil
 		}).
 		AnyTimes()
 }
@@ -618,13 +621,14 @@ func TestServiceFetchHeadersShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 		wantRequestAmount:           2,
 	}
 
-	test := newServiceTest(t, newMockRequestGenerator(requestId))
+	test := newServiceTest(t, newMockRequestGenerator(requestId, requestId+1))
 	test.mockSentryStreams(mockRequestResponse)
 	// setup expectation that peer should be penalized
 	test.mockExpectPenalizePeer(peerId)
 	test.run(func(ctx context.Context, t *testing.T) {
 		headers, err := test.service.FetchHeaders(ctx, 1, 3, peerId)
-		require.Error(t, err)
+		// peer gets penalized -> request times out -> retry kicks in but the peer is disconnected
+		require.ErrorIs(t, err, ErrPeerNotFound)
 		require.Nil(t, headers)
 	})
 }
