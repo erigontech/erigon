@@ -27,28 +27,37 @@ type UnregisterFunc func()
 type MessageListener interface {
 	Start(ctx context.Context)
 	Stop()
+
+	RegisterNewBlockObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc
+	RegisterNewBlockHashesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc
 	RegisterBlockHeadersObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
 func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) MessageListener {
 	return &messageListener{
-		logger:                logger,
-		sentryClient:          sentryClient,
-		blockHeadersObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
-		peerEventObservers:    map[uint64]MessageObserver[*sentry.PeerEvent]{},
+		logger:       logger,
+		sentryClient: sentryClient,
+
+		newBlockObservers:       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{},
+		newBlockHashesObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{},
+		blockHeadersObservers:   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
+		peerEventObservers:      map[uint64]MessageObserver[*sentry.PeerEvent]{},
 	}
 }
 
 type messageListener struct {
-	once                  sync.Once
-	observerIdSequence    uint64
-	logger                log.Logger
-	sentryClient          direct.SentryClient
-	observersMu           sync.Mutex
-	blockHeadersObservers map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
-	peerEventObservers    map[uint64]MessageObserver[*sentry.PeerEvent]
-	stopWg                sync.WaitGroup
+	once               sync.Once
+	observerIdSequence uint64
+	logger             log.Logger
+	sentryClient       direct.SentryClient
+	observersMu        sync.Mutex
+	stopWg             sync.WaitGroup
+
+	newBlockObservers       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]
+	newBlockHashesObservers map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
+	blockHeadersObservers   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
+	peerEventObservers      map[uint64]MessageObserver[*sentry.PeerEvent]
 }
 
 func (ml *messageListener) Start(ctx context.Context) {
@@ -71,8 +80,28 @@ func (ml *messageListener) Stop() {
 	ml.observersMu.Lock()
 	defer ml.observersMu.Unlock()
 
+	ml.newBlockObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{}
+	ml.newBlockHashesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{}
 	ml.blockHeadersObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{}
 	ml.peerEventObservers = map[uint64]MessageObserver[*sentry.PeerEvent]{}
+}
+
+func (ml *messageListener) RegisterNewBlockObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc {
+	ml.observersMu.Lock()
+	defer ml.observersMu.Unlock()
+
+	observerId := ml.nextObserverId()
+	ml.newBlockObservers[observerId] = observer
+	return unregisterFunc(&ml.observersMu, ml.newBlockObservers, observerId)
+}
+
+func (ml *messageListener) RegisterNewBlockHashesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc {
+	ml.observersMu.Lock()
+	defer ml.observersMu.Unlock()
+
+	observerId := ml.nextObserverId()
+	ml.newBlockHashesObservers[observerId] = observer
+	return unregisterFunc(&ml.observersMu, ml.newBlockHashesObservers, observerId)
 }
 
 func (ml *messageListener) RegisterBlockHeadersObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc {

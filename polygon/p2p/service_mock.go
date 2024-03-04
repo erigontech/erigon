@@ -78,6 +78,18 @@ func (mr *MockServiceMockRecorder) MaxPeers() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxPeers", reflect.TypeOf((*MockService)(nil).MaxPeers))
 }
 
+// OnNewBlock mocks base method.
+func (m *MockService) OnNewBlock(arg0 context.Context, arg1 func(*types.Block, PeerId)) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "OnNewBlock", arg0, arg1)
+}
+
+// OnNewBlock indicates an expected call of OnNewBlock.
+func (mr *MockServiceMockRecorder) OnNewBlock(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnNewBlock", reflect.TypeOf((*MockService)(nil).OnNewBlock), arg0, arg1)
+}
+
 // Penalize mocks base method.
 func (m *MockService) Penalize(arg0 context.Context, arg1 PeerId) error {
 	m.ctrl.T.Helper()
