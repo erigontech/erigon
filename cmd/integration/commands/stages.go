@@ -1737,8 +1737,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				panic(err)
 			}
 
-			_allSnapshotsSingleton.LogStat("all")
-			_allBorSnapshotsSingleton.LogStat("all")
+			_allSnapshotsSingleton.LogStat("blocks")
+			_allBorSnapshotsSingleton.LogStat("bor")
 			_ = db.View(context.Background(), func(tx kv.Tx) error {
 				ac := _aggSingleton.MakeContext()
 				defer ac.Close()
