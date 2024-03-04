@@ -219,13 +219,12 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	if s == nil {
 		return fmt.Errorf("no head state avaible")
 	}
-	// https: //github.com/ethereum/consensus-specs/blob/dev/specs/altair/p2p-interface.md#sync_committee_contribution_and_proof
 
 	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
 	maximumGossipClockDisparity := uint64(clparams.NetworkConfigs[clparams.MainnetNetwork].MaximumGossipClockDisparity)
 	currentSlot := s.Slot()
 	if contributionAndProof.Contribution.Slot != currentSlot && contributionAndProof.Contribution.Slot > currentSlot+maximumGossipClockDisparity {
-		return nil
+		return fmt.Errorf("contribution's slot is not for the current slot")
 	}
 
 	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
@@ -281,13 +280,55 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// [IGNORE] A valid sync committee contribution with equal slot, beacon_block_root and subcommittee_index whose aggregation_bits is non-strict superset has not already been seen.
+
 	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
+	// TODO: Add the cache check
+	// if f.operationsPool.SignedContributionAndProofPool.Has() {
+	// 	return fmt.Errorf("first valid contribution received for the aggregator")
+	// }
+
 	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
+	selectionDataRoot, err := fork.ComputeSigningRoot(contributionAndProof.Contribution, f.beaconCfg.DomainSyncCommittee[:])
+	if err != nil {
+		return err
+	}
+	valid, err := bls.Verify(selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:])
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("invalid selection_proof signature")
+	}
+
 	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
+	aggregatorSignatureRoot, err := fork.ComputeSigningRoot(contributionAndProof.Contribution, f.beaconCfg.DomainContributionAndProof[:])
+	if err != nil {
+		return err
+	}
+	valid, err = bls.Verify(signiture[:], aggregatorSignatureRoot[:], aggregatorPubKey[:])
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("invalid aggregator signature")
+	}
+
 	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
+	message := contributionAndProof.Contribution.BeaconBlockRoot[:]
+	valid, err = bls.Verify(signiture[:], message, aggregatorPubKey[:])
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return fmt.Errorf("invalid aggregate signature")
+	}
 
 	// Insert in the pool
 	f.operationsPool.SignedContributionAndProofPool.Insert(signedChange.Signature, signedChange)
+
+	//TODO: Store the contribution_and_proof in the pool
+	// Store the contribution_and_proof in the pool
+	// f.operationsPool.ContributionCache.Insert(key)
 
 	// emit contribution_and_proof
 	f.emitters.Publish("contribution_and_proof", signedChange)
