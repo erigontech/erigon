@@ -7,8 +7,10 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
@@ -17,73 +19,34 @@ func setupTestDB(t *testing.T) kv.RwDB {
 	return db
 }
 
-func TestBlobWriterAndReader(t *testing.T) {
+func TestBlobDB(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
-	defer tx.Rollback()
 
-	sidecar := &cltypes.BlobSidecar{
-		Index: 1,
-		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
-			Header: &cltypes.BeaconBlockHeader{
-				Slot: 56,
-				Root: libcommon.Hash{0x01},
-			},
-		},
-		Blob:                     cltypes.Blob{1},
-		KzgCommitment:            libcommon.Bytes48{1},
-		KzgProof:                 libcommon.Bytes48{1},
-		CommitmentInclusionProof: solid.NewHashVector(17),
-	}
+	s1 := cltypes.NewBlobSidecar(0, &cltypes.Blob{1}, libcommon.Bytes48{2}, libcommon.Bytes48{3}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}, solid.NewHashVector(cltypes.CommitmentBranchSize))
+	s2 := cltypes.NewBlobSidecar(1, &cltypes.Blob{3}, libcommon.Bytes48{5}, libcommon.Bytes48{9}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}, solid.NewHashVector(cltypes.CommitmentBranchSize))
 
-	err := WriteBlob(tx, sidecar)
+	//
+	bs := NewBlobStore(db, afero.NewMemMapFs(), 12, &clparams.MainnetBeaconConfig, nil)
+	blockRoot := libcommon.Hash{1}
+	err := bs.WriteBlobSidecars(context.Background(), blockRoot, []*cltypes.BlobSidecar{s1, s2})
 	require.NoError(t, err)
 
-	encoded, _ := sidecar.EncodeSSZ(nil)
-
-	// test ReadBlobByKzgCommitment
-	readBlob, err := ReadBlobSidecarByKzgCommitment(tx, sidecar.KzgCommitment)
+	sidecars, found, err := bs.ReadBlobSidecars(context.Background(), 1, blockRoot)
 	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, sidecars, 2)
 
-	decoded := cltypes.BlobSidecar{}
-	decoded.DecodeSSZ(encoded, 0)
-	require.Equal(t, decoded, readBlob)
-
-	// test ReadKzgCommitmentsByBlockRoot
-	blockRoot, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
-	readCommitments, err := ReadKzgCommitmentsByBlockRoot(tx, blockRoot)
-	require.NoError(t, err)
-	require.Equal(t, []libcommon.Bytes48{sidecar.KzgCommitment}, readCommitments)
-}
-
-func TestRetrieveBlobsAndProofs(t *testing.T) {
-	db := setupTestDB(t)
-	defer db.Close()
-	tx, _ := db.BeginRw(context.Background())
-	defer tx.Rollback()
-
-	sidecar := &cltypes.BlobSidecar{
-		Index: 1,
-		SignedBlockHeader: &cltypes.SignedBeaconBlockHeader{
-			Header: &cltypes.BeaconBlockHeader{
-				Slot: 56,
-				Root: libcommon.Hash{0x01},
-			},
-		},
-		Blob:                     cltypes.Blob{1},
-		KzgCommitment:            libcommon.Bytes48{1},
-		KzgProof:                 libcommon.Bytes48{1},
-		CommitmentInclusionProof: solid.NewHashVector(17),
-	}
-
-	err := WriteBlob(tx, sidecar)
-	require.NoError(t, err)
-
-	// Call retrieveBlobsAndProofs with the block root of the stored sidecar
-	blockRoot, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
-	blobs, proofs, err := RetrieveBlobsAndProofs(tx, blockRoot)
-	require.NoError(t, err)
-	require.Equal(t, []cltypes.Blob{sidecar.Blob}, blobs)
-	require.Equal(t, []libcommon.Bytes48{sidecar.KzgProof}, proofs)
+	require.Equal(t, s1.Blob, sidecars[0].Blob)
+	require.Equal(t, s2.Blob, sidecars[1].Blob)
+	require.Equal(t, s1.Index, sidecars[0].Index)
+	require.Equal(t, s2.Index, sidecars[1].Index)
+	require.Equal(t, s1.CommitmentInclusionProof, sidecars[0].CommitmentInclusionProof)
+	require.Equal(t, s2.CommitmentInclusionProof, sidecars[1].CommitmentInclusionProof)
+	require.Equal(t, s1.KzgCommitment, sidecars[0].KzgCommitment)
+	require.Equal(t, s2.KzgCommitment, sidecars[1].KzgCommitment)
+	require.Equal(t, s1.KzgProof, sidecars[0].KzgProof)
+	require.Equal(t, s2.KzgProof, sidecars[1].KzgProof)
+	require.Equal(t, s1.SignedBlockHeader, sidecars[0].SignedBlockHeader)
+	require.Equal(t, s2.SignedBlockHeader, sidecars[1].SignedBlockHeader)
 }

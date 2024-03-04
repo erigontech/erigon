@@ -70,7 +70,7 @@ func TestLightClientOptimistic(t *testing.T) {
 		nil,
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 
@@ -139,7 +139,7 @@ func TestLightClientFinality(t *testing.T) {
 		nil,
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 
@@ -215,7 +215,7 @@ func TestLightClientBootstrap(t *testing.T) {
 		nil,
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 
@@ -297,7 +297,7 @@ func TestLightClientUpdates(t *testing.T) {
 		nil,
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 

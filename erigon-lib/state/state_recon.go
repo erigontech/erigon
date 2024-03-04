@@ -185,13 +185,15 @@ func (hii *HistoryIteratorInc) advance() {
 		if n, ok := ef.Search(hii.uptoTxNum); ok {
 			var txKey [8]byte
 			binary.BigEndian.PutUint64(txKey[:], n)
-			offset := hii.r.Lookup2(txKey[:], hii.key)
-			hii.historyG.Reset(offset)
-			hii.nextKey = hii.key
-			if hii.compressVals {
-				hii.nextVal, _ = hii.historyG.Next(nil)
-			} else {
-				hii.nextVal, _ = hii.historyG.NextUncompressed()
+			offset, ok := hii.r.Lookup2(txKey[:], hii.key)
+			if ok {
+				hii.historyG.Reset(offset)
+				hii.nextKey = hii.key
+				if hii.compressVals {
+					hii.nextVal, _ = hii.historyG.Next(nil)
+				} else {
+					hii.nextVal, _ = hii.historyG.NextUncompressed()
+				}
 			}
 		}
 		if hii.indexG.HasNext() {

@@ -2,42 +2,67 @@ package sync
 
 import (
 	"context"
+	"sync"
 
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
 type Storage interface {
-	// GetHeadersInRange reads blocks from the local canonical chain.
-	GetHeadersInRange(ctx context.Context, start uint64, end uint64) ([]*types.Header, error)
-	// PutHeaders writes blocks to the local canonical chain.
+	// PutHeaders queues blocks for writing into the local canonical chain.
 	PutHeaders(ctx context.Context, headers []*types.Header) error
-	TipBlockNumber(ctx context.Context) (uint64, error)
-	TipHeader(ctx context.Context) (*types.Header, error)
+	// Flush makes sure that all queued blocks have been written.
+	Flush(ctx context.Context) error
+	// Run performs the block writing.
+	Run(ctx context.Context) error
 }
 
-type storageStub struct {
+type executionClientStorage struct {
+	execution ExecutionClient
+	queue     chan []*types.Header
+	waitGroup sync.WaitGroup
 }
 
-func NewStorage() Storage {
-	return &storageStub{}
+func NewStorage(execution ExecutionClient, queueCapacity int) Storage {
+	return &executionClientStorage{
+		execution: execution,
+		queue:     make(chan []*types.Header, queueCapacity),
+	}
 }
 
-func (s *storageStub) GetHeadersInRange(ctx context.Context, start uint64, end uint64) ([]*types.Header, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *executionClientStorage) PutHeaders(ctx context.Context, headers []*types.Header) error {
+	s.waitGroup.Add(1)
+	select {
+	case s.queue <- headers:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
-func (s *storageStub) PutHeaders(ctx context.Context, headers []*types.Header) error {
-	//TODO implement me
-	panic("implement me")
+func (s *executionClientStorage) Flush(ctx context.Context) error {
+	waitCtx, waitCancel := context.WithCancel(ctx)
+	defer waitCancel()
+
+	go func() {
+		s.waitGroup.Wait()
+		waitCancel()
+	}()
+
+	<-waitCtx.Done()
+	return ctx.Err()
 }
 
-func (s *storageStub) TipBlockNumber(ctx context.Context) (uint64, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *storageStub) TipHeader(ctx context.Context) (*types.Header, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *executionClientStorage) Run(ctx context.Context) error {
+	for {
+		select {
+		case headers := <-s.queue:
+			err := s.execution.InsertBlocks(ctx, headers)
+			s.waitGroup.Done()
+			if err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }

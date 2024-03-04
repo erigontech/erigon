@@ -7,14 +7,14 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
-	polygonP2P "github.com/ledgerwatch/erigon/polygon/p2p"
+	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
 type Service interface {
@@ -24,7 +24,8 @@ type Service interface {
 type service struct {
 	sync *Sync
 
-	p2pService polygonP2P.Service
+	p2pService p2p.Service
+	storage    Storage
 }
 
 func NewService(
@@ -36,10 +37,10 @@ func NewService(
 	sentryClient direct.SentryClient,
 	logger log.Logger,
 ) Service {
-	storage := NewStorage()
 	execution := NewExecutionClient(engine)
+	storage := NewStorage(execution, maxPeers)
 	verify := VerifyAccumulatedHeaders
-	p2pService := polygonP2P.NewService(maxPeers, logger, sentryClient)
+	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
 	downloader := NewHeaderDownloader(
@@ -50,7 +51,7 @@ func NewService(
 		storage,
 	)
 	spansCache := NewSpansCache()
-	signaturesCache, err := lru.NewARC[libcommon.Hash, libcommon.Address](stagedsync.InMemorySignatures)
+	signaturesCache, err := lru.NewARC[common.Hash, common.Address](stagedsync.InMemorySignatures)
 	if err != nil {
 		panic(err)
 	}
@@ -86,6 +87,7 @@ func NewService(
 	return &service{
 		sync:       sync,
 		p2pService: p2pService,
+		storage:    storage,
 	}
 }
 
@@ -93,8 +95,27 @@ func (s *service) GetSync() *Sync {
 	return s.sync
 }
 
-func (s *service) Run(ctx context.Context) {
+func (s *service) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var serviceErr error
+
 	s.p2pService.Start(ctx)
+	defer s.p2pService.Stop()
+
+	go func() {
+		err := s.storage.Run(ctx)
+		if (err != nil) && (ctx.Err() == nil) {
+			serviceErr = err
+			cancel()
+		}
+	}()
+
 	<-ctx.Done()
-	s.p2pService.Stop()
+
+	if serviceErr != nil {
+		return serviceErr
+	}
+	return ctx.Err()
 }

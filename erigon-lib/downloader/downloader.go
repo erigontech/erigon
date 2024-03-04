@@ -403,28 +403,14 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 		return true
 	})
 
-	maxDownloadBlock, _ := downloads.MaxBlock(0)
-
 	for _, item := range snapCfg.Preverified {
-		fileInfo, isStateFile, ok := snaptype.ParseFileName(snapDir, item.Name)
+		_, _, ok := snaptype.ParseFileName(snapDir, item.Name)
 		if !ok {
 			continue
 		}
-		if isStateFile {
-			if !downloads.Contains(item.Name, true) {
-				missingItems = append(missingItems, item)
-			}
-			continue
-		}
 
-		if maxDownloadBlock > 0 {
-			if fileInfo.From > maxDownloadBlock {
-				missingItems = append(missingItems, item)
-			}
-		} else {
-			if !downloads.Contains(item.Name, true) {
-				missingItems = append(missingItems, item)
-			}
+		if !downloads.Contains(item.Name, true) {
+			missingItems = append(missingItems, item)
 		}
 	}
 
