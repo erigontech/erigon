@@ -488,7 +488,16 @@ func (dc *DomainContext) commitmentValTransform(
 						// Optimised key referencing a state file record (file number and offset within the file)
 						buf, found = dc.lookupByShortenedKey(key, filesStorage)
 						if !found {
-							dc.d.logger.Crit("lost storage full key", "shortened", fmt.Sprintf("%x", key))
+							s0, s1, of := decodeShortenedKey(key)
+							filesStorageRng := ""
+							for _, f := range filesStorage {
+								filesStorageRng += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
+							}
+							dc.d.logger.Crit("valTransform: lost storage full key",
+								"shortened", fmt.Sprintf("%x", key),
+								"step", fmt.Sprintf("%d-%d", s0, s1), "offset", of,
+								"files",
+								"startTxNumToReplace", startTxNum, "endTxNumToReplace", endTxNum)
 							panic("lost storage full key")
 						}
 					}
