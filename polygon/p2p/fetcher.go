@@ -196,8 +196,6 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 				expected: expectedHeaderNum,
 			}
 		}
-
-		expectedHeaderNum++
 	}
 
 	if headersLen < amount {
