@@ -356,10 +356,6 @@ func TestServiceFetchHeaders(t *testing.T) {
 			PeerId: PeerIdFromUint64(2).H512(),
 		},
 		{
-			// should get filtered because it is for a different msg id
-			Id: sentry.MessageId_BLOCK_BODIES_66,
-		},
-		{
 			// should get filtered because it is from a different request id
 			Id:     sentry.MessageId_BLOCK_HEADERS_66,
 			PeerId: peerId.H512(),
