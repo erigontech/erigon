@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/ledgerwatch/log/v3"
@@ -15,9 +16,8 @@ import (
 )
 
 type DecodedInboundMessage[T any] struct {
-	Raw       *sentry.InboundMessage
-	Decoded   T
-	DecodeErr error
+	*sentry.InboundMessage
+	Decoded T
 }
 
 type MessageObserver[T any] func(message T)
@@ -31,10 +31,11 @@ type MessageListener interface {
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
-func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient) MessageListener {
+func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) MessageListener {
 	return &messageListener{
 		logger:                logger,
 		sentryClient:          sentryClient,
+		peerPenalizer:         peerPenalizer,
 		blockHeadersObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
 		peerEventObservers:    map[uint64]MessageObserver[*sentry.PeerEvent]{},
 	}
@@ -45,6 +46,7 @@ type messageListener struct {
 	observerIdSequence    uint64
 	logger                log.Logger
 	sentryClient          direct.SentryClient
+	peerPenalizer         PeerPenalizer
 	observersMu           sync.Mutex
 	blockHeadersObservers map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
 	peerEventObservers    map[uint64]MessageObserver[*sentry.PeerEvent]
@@ -97,7 +99,7 @@ func (ml *messageListener) listenBlockHeaders66(ctx context.Context) {
 	ml.listenInboundMessage(ctx, "BlockHeaders66", sentry.MessageId_BLOCK_HEADERS_66, ml.notifyBlockHeadersMessageObservers)
 }
 
-func (ml *messageListener) listenInboundMessage(ctx context.Context, name string, msgId sentry.MessageId, handler func(msg *sentry.InboundMessage)) {
+func (ml *messageListener) listenInboundMessage(ctx context.Context, name string, msgId sentry.MessageId, handler func(*sentry.InboundMessage) error) {
 	defer ml.stopWg.Done()
 
 	messageStreamFactory := func(ctx context.Context, sentryClient direct.SentryClient) (sentrymulticlient.SentryMessageStream, error) {
@@ -112,8 +114,21 @@ func (ml *messageListener) listenInboundMessage(ctx context.Context, name string
 		return new(sentry.InboundMessage)
 	}
 
-	inboundMessageHandler := func(_ context.Context, msg *sentry.InboundMessage, _ direct.SentryClient) error {
-		handler(msg)
+	inboundMessageHandler := func(ctx context.Context, message *sentry.InboundMessage, _ direct.SentryClient) error {
+		err := handler(message)
+		if err != nil {
+			if rlp.IsInvalidRLPError(err) {
+				ml.logger.Debug("penalizing peer", "peerId", message.PeerId, "err", err.Error())
+
+				penalizeErr := ml.peerPenalizer.Penalize(ctx, PeerIdFromH512(message.PeerId))
+				if penalizeErr != nil {
+					err = fmt.Errorf("%w: %w", penalizeErr, err)
+				}
+			}
+
+			return err
+		}
+
 		return nil
 	}
 
@@ -130,15 +145,18 @@ func (ml *messageListener) listenInboundMessage(ctx context.Context, name string
 	)
 }
 
-func (ml *messageListener) notifyBlockHeadersMessageObservers(message *sentry.InboundMessage) {
+func (ml *messageListener) notifyBlockHeadersMessageObservers(message *sentry.InboundMessage) error {
 	var decodedData eth.BlockHeadersPacket66
-	decodeErr := rlp.DecodeBytes(message.Data, &decodedData)
+	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
+		return err
+	}
 
 	notifyObservers(&ml.observersMu, ml.blockHeadersObservers, &DecodedInboundMessage[*eth.BlockHeadersPacket66]{
-		Raw:       message,
-		Decoded:   &decodedData,
-		DecodeErr: decodeErr,
+		InboundMessage: message,
+		Decoded:        &decodedData,
 	})
+
+	return nil
 }
 
 func (ml *messageListener) listenPeerEvents(ctx context.Context) {
