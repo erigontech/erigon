@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"modernc.org/mathutil"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -83,7 +82,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 		headers = append(headers, headerChunk...)
 	}
 
-	if err := f.validateHeadersResponse(headers, start, end, amount); err != nil {
+	if err := f.validateHeadersResponse(headers, start, amount); err != nil {
 		return nil, err
 	}
 
@@ -179,58 +178,32 @@ func (f *fetcher) awaitHeadersResponse(
 	}
 }
 
-func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, end, amount uint64) error {
-	if uint64(len(headers)) < amount {
-		var first, last uint64
-		if len(headers) > 0 {
-			first = headers[0].Number.Uint64()
-			last = headers[len(headers)-1].Number.Uint64()
-		}
-
-		return &ErrIncompleteHeaders{
-			requestStart: start,
-			requestEnd:   end,
-			first:        first,
-			last:         last,
-			amount:       len(headers),
-		}
-	}
-
-	if uint64(len(headers)) > amount {
+func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
+	headersLen := uint64(len(headers))
+	if headersLen > amount {
 		return &ErrTooManyHeaders{
 			requested: int(amount),
 			received:  len(headers),
 		}
 	}
 
-	if start != headers[0].Number.Uint64() {
-		return &ErrIncorrectOriginHeader{
-			requested: start,
-			received:  headers[0].Number.Uint64(),
+	for i, header := range headers {
+		expectedHeaderNum := start + uint64(i)
+		currentHeaderNumber := header.Number.Uint64()
+		if currentHeaderNumber != expectedHeaderNum {
+			return &ErrNonSequentialHeaderNumbers{
+				current:  currentHeaderNumber,
+				expected: expectedHeaderNum,
+			}
 		}
 	}
 
-	var parentHeader *types.Header
-	for _, header := range headers {
-		if parentHeader == nil {
-			parentHeader = header
-			continue
+	if headersLen < amount {
+		return &ErrIncompleteHeaders{
+			start:     start,
+			requested: amount,
+			received:  headersLen,
 		}
-
-		parentHeaderHash := parentHeader.Hash()
-		currentHeaderNum := header.Number.Uint64()
-		parentHeaderNum := parentHeader.Number.Uint64()
-		if header.ParentHash != parentHeaderHash || currentHeaderNum != parentHeaderNum+1 {
-			return &ErrDisconnectedHeaders{
-				currentHash:       header.Hash(),
-				currentParentHash: header.ParentHash,
-				currentNum:        currentHeaderNum,
-				parentHash:        parentHeaderHash,
-				parentNum:         parentHeaderNum,
-			}
-		}
-
-		parentHeader = header
 	}
 
 	return nil
@@ -246,26 +219,20 @@ func (e ErrInvalidFetchHeadersRange) Error() string {
 }
 
 type ErrIncompleteHeaders struct {
-	requestStart uint64
-	requestEnd   uint64
-	first        uint64
-	last         uint64
-	amount       int
+	start     uint64
+	requested uint64
+	received  uint64
 }
 
 func (e ErrIncompleteHeaders) Error() string {
 	return fmt.Sprintf(
-		"incomplete fetch headers response: first=%d, last=%d, amount=%d, requested [%d, %d)",
-		e.first, e.last, e.amount, e.requestStart, e.requestEnd,
+		"incomplete fetch headers response: start=%d, requested=%d, received=%d",
+		e.start, e.requested, e.received,
 	)
 }
 
 func (e ErrIncompleteHeaders) LowestMissingBlockNum() uint64 {
-	if e.last == 0 || e.first == 0 || e.first != e.requestStart {
-		return e.requestStart
-	}
-
-	return e.last + 1
+	return e.start + e.received
 }
 
 type ErrTooManyHeaders struct {
@@ -287,48 +254,22 @@ func (e ErrTooManyHeaders) Is(err error) bool {
 	}
 }
 
-type ErrDisconnectedHeaders struct {
-	currentHash       common.Hash
-	currentParentHash common.Hash
-	currentNum        uint64
-	parentHash        common.Hash
-	parentNum         uint64
+type ErrNonSequentialHeaderNumbers struct {
+	current  uint64
+	expected uint64
 }
 
-func (e ErrDisconnectedHeaders) Error() string {
+func (e ErrNonSequentialHeaderNumbers) Error() string {
 	return fmt.Sprintf(
-		"disconnected headers in fetch headers response: %s, %s, %s, %s, %s",
-		fmt.Sprintf("currentHash=%v", e.currentHash),
-		fmt.Sprintf("currentParentHash=%v", e.currentParentHash),
-		fmt.Sprintf("currentNum=%v", e.currentNum),
-		fmt.Sprintf("parentHash=%v", e.parentHash),
-		fmt.Sprintf("parentNum=%v", e.parentNum),
+		"non sequential header numbers in fetch headers response: current=%d, expected=%d",
+		e.current, e.expected,
 	)
 }
 
-func (e ErrDisconnectedHeaders) Is(err error) bool {
-	var errDisconnectedHeaders *ErrDisconnectedHeaders
+func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
+	var errDisconnectedHeaders *ErrNonSequentialHeaderNumbers
 	switch {
 	case errors.As(err, &errDisconnectedHeaders):
-		return true
-	default:
-		return false
-	}
-}
-
-type ErrIncorrectOriginHeader struct {
-	requested uint64
-	received  uint64
-}
-
-func (e ErrIncorrectOriginHeader) Error() string {
-	return fmt.Sprintf("incorrect origin header: requested=%d, received=%d", e.requested, e.received)
-}
-
-func (e ErrIncorrectOriginHeader) Is(err error) bool {
-	var errIncorrectOriginHeader *ErrIncorrectOriginHeader
-	switch {
-	case errors.As(err, &errIncorrectOriginHeader):
 		return true
 	default:
 		return false
