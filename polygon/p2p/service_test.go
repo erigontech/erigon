@@ -255,7 +255,7 @@ func (s *mockSentryMessagesStream[M]) CloseSend() error {
 }
 
 func (s *mockSentryMessagesStream[M]) Context() context.Context {
-	return context.Background()
+	return s.ctx
 }
 
 func (s *mockSentryMessagesStream[M]) SendMsg(_ any) error {
