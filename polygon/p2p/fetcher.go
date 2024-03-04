@@ -145,6 +145,62 @@ func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uin
 	return headers, nil
 }
 
+func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+	headers, err := backoff.RetryWithData(func() ([]*types.Header, error) {
+		headers, err := f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId)
+		if err != nil {
+			// retry timeouts
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+
+			// permanent errors are not retried
+			return nil, backoff.Permanent(err)
+		}
+
+		return headers, nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(f.config.retryBackOff), f.config.maxRetries))
+	if err != nil {
+		return nil, err
+	}
+
+	return headers, nil
+}
+
+func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+	// cleanup for the chan message observer
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx)
+	f.messageListener.RegisterBlockHeadersObserver(observer)
+	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
+
+	chunkStart := start + chunkNum*eth.MaxHeadersServe
+	chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
+	requestId := f.requestIdGenerator()
+
+	err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
+		RequestId: requestId,
+		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+			Origin: eth.HashOrNumber{
+				Number: chunkStart,
+			},
+			Amount: chunkAmount,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	headers, err := f.awaitHeadersResponse(ctx, requestId, peerId, observer)
+	if err != nil {
+		return nil, err
+	}
+
+	return headers, nil
+}
+
 func (f *fetcher) awaitHeadersResponse(
 	ctx context.Context,
 	requestId uint64,

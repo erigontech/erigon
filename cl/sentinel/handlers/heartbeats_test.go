@@ -81,7 +81,7 @@ func TestPing(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 
@@ -135,7 +135,7 @@ func TestGoodbye(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 
@@ -196,7 +196,7 @@ func TestMetadataV2(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 
@@ -254,7 +254,7 @@ func TestMetadataV1(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		genesisCfg,
-		nil, f, true,
+		nil, f, nil, true,
 	)
 	c.Start()
 
@@ -319,7 +319,7 @@ func TestStatus(t *testing.T) {
 		testLocalNode(),
 		beaconCfg,
 		genesisCfg,
-		hs, f, true,
+		hs, f, nil, true,
 	)
 	c.Start()
 

@@ -5,6 +5,8 @@ import (
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
@@ -45,5 +47,30 @@ func (b *KZGCommitment) EncodingSizeSSZ() int {
 }
 
 func (b *KZGCommitment) HashSSZ() ([32]byte, error) {
+	return merkle_tree.BytesRoot(b[:])
+}
+
+func (b *Blob) MarshalJSON() ([]byte, error) {
+	return json.Marshal(hexutility.Bytes(b[:]))
+}
+
+func (b *Blob) Clone() clonable.Clonable {
+	return &Blob{}
+}
+
+func (b *Blob) DecodeSSZ(buf []byte, version int) error {
+	copy(b[:], buf)
+	return nil
+}
+
+func (b *Blob) EncodeSSZ(buf []byte) ([]byte, error) {
+	return append(buf, b[:]...), nil
+}
+
+func (b *Blob) EncodingSizeSSZ() int {
+	return len(b[:])
+}
+
+func (b *Blob) HashSSZ() ([32]byte, error) {
 	return merkle_tree.BytesRoot(b[:])
 }

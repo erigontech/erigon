@@ -224,10 +224,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				LatestValidHash: &latestValidHash,
 			}, nil
 		}
-		if errors.Is(err, ethutils.ErrMismatchBlobHashes) {
+		if errors.Is(err, ethutils.ErrMismatchBlobHashes) || errors.Is(err, ethutils.ErrInvalidVersiondHash) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString("mismatch in blob hashes"),
+				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 			}, nil
 		}
 	}

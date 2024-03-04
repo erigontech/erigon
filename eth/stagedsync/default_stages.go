@@ -149,7 +149,7 @@ func DefaultStages(ctx context.Context,
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    bodies.historyV3 || ethconfig.EnableHistoryV4InTest || dbg.StagesOnlyBlocks,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsOsaka(0) {
 					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
 					return err
 				}
@@ -157,7 +157,7 @@ func DefaultStages(ctx context.Context,
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsOsaka(0) {
 					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
 				}
 				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
@@ -329,7 +329,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    exec.historyV3 && ethconfig.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsOsaka(0) {
 					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
 					return err
 				}
@@ -337,7 +337,7 @@ func PipelineStages(ctx context.Context, snapshots SnapshotsCfg, blockHashCfg Bl
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsOsaka(0) {
 					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
 				}
 				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)
@@ -538,7 +538,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 			Description: "Generate intermediate hashes and computing state root",
 			Disabled:    exec.historyV3 && ethconfig.EnableHistoryV4InTest,
 			Forward: func(firstCycle bool, badBlockUnwind bool, s *StageState, u Unwinder, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsOsaka(0) {
 					_, err := SpawnVerkleTrie(s, u, txc.Tx, trieCfg, ctx, logger)
 					return err
 				}
@@ -546,7 +546,7 @@ func UploaderPipelineStages(ctx context.Context, snapshots SnapshotsCfg, headers
 				return err
 			},
 			Unwind: func(firstCycle bool, u *UnwindState, s *StageState, txc wrap.TxContainer, logger log.Logger) error {
-				if exec.chainConfig.IsPrague(0) {
+				if exec.chainConfig.IsOsaka(0) {
 					return UnwindVerkleTrie(u, s, txc.Tx, trieCfg, ctx, logger)
 				}
 				return UnwindIntermediateHashesStage(u, s, txc.Tx, trieCfg, ctx, logger)

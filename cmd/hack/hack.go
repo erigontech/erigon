@@ -1301,7 +1301,10 @@ func iterate(filename string, prefix string) error {
 				txNum, _ := efIt.Next()
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], txNum)
-				offset := r.Lookup2(txKey[:], key)
+				offset, ok := r.Lookup2(txKey[:], key)
+				if !ok {
+					continue
+				}
 				gv.Reset(offset)
 				v, _ := gv.Next(nil)
 				fmt.Printf(" %d", txNum)
