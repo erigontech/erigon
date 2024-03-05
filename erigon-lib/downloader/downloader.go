@@ -1499,6 +1499,13 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 	}
 
 	log.Warn("[dbg] len", "len(pending)", len(pending))
+	for i, t := range pending {
+		if t != nil {
+			log.Warn("[dbg] len", "i", i, "nil", t)
+		} else {
+			log.Warn("[dbg] len", "i", i, "nil", t == nil)
+		}
+	}
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
 		in, _, _ := snaptype.ParseFileName("", i.Name())
 		jn, _, _ := snaptype.ParseFileName("", j.Name())
