@@ -854,11 +854,13 @@ func (d *Downloader) mainLoop(silent bool) error {
 			d.lock.RLock()
 			downloadingLen := len(d.downloading)
 			d.stats.Downloading = int32(downloadingLen)
-			d.lock.RUnlock()
 
-			available := availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-downloadingLen)
+			available := func() []*torrent.Torrent {
+				d.lock.RUnlock()
+				defer d.lock.RUnlock()
+				return availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-downloadingLen)
+			}
 
-			d.lock.RLock()
 			for _, webDownload := range d.webDownloadInfo {
 				_, downloading := d.downloading[webDownload.torrent.Name()]
 
