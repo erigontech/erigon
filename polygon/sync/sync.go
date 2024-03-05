@@ -59,17 +59,18 @@ func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header) error 
 
 func (s *Sync) onMilestoneEvent(
 	ctx context.Context,
-	event Event,
+	event EventNewMilestone,
 	ccBuilder CanonicalChainBuilder,
 ) error {
-	if event.Milestone.EndBlock().Uint64() <= ccBuilder.Root().Number.Uint64() {
+	milestone := event
+	if milestone.EndBlock().Uint64() <= ccBuilder.Root().Number.Uint64() {
 		return nil
 	}
 
-	milestoneHeaders := ccBuilder.HeadersInRange(event.Milestone.StartBlock().Uint64(), event.Milestone.Length())
-	err := s.verify(event.Milestone, milestoneHeaders)
+	milestoneHeaders := ccBuilder.HeadersInRange(milestone.StartBlock().Uint64(), milestone.Length())
+	err := s.verify(milestone, milestoneHeaders)
 	if err == nil {
-		if err = ccBuilder.Prune(event.Milestone.EndBlock().Uint64()); err != nil {
+		if err = ccBuilder.Prune(milestone.EndBlock().Uint64()); err != nil {
 			return err
 		}
 	}
@@ -106,7 +107,7 @@ func (s *Sync) onMilestoneEvent(
 
 func (s *Sync) onNewHeaderEvent(
 	ctx context.Context,
-	event Event,
+	event EventNewHeader,
 	ccBuilder CanonicalChainBuilder,
 ) error {
 	if event.NewHeader.Number.Uint64() <= ccBuilder.Root().Number.Uint64() {
@@ -122,7 +123,7 @@ func (s *Sync) onNewHeaderEvent(
 			ctx,
 			ccBuilder.Root().Number.Uint64(),
 			event.NewHeader.Number.Uint64()+1,
-			event.PeerId)
+			*event.PeerId)
 		if err != nil {
 			return err
 		}
@@ -145,6 +146,15 @@ func (s *Sync) onNewHeaderEvent(
 		}
 	}
 
+	return nil
+}
+
+func (s *Sync) onNewHeaderHashesEvent(
+	ctx context.Context,
+	event EventNewHeaderHashes,
+	ccBuilder CanonicalChainBuilder,
+) error {
+	// TODO
 	return nil
 }
 
@@ -182,16 +192,20 @@ func (s *Sync) Run(ctx context.Context) error {
 		select {
 		case event := <-s.events:
 			switch event.Type {
-			case EventTypeMilestone:
-				if err = s.onMilestoneEvent(ctx, event, ccBuilder); err != nil {
+			case EventTypeNewMilestone:
+				if err = s.onMilestoneEvent(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewHeader:
-				if err = s.onNewHeaderEvent(ctx, event, ccBuilder); err != nil {
+				if err = s.onNewHeaderEvent(ctx, event.AsNewHeader(), ccBuilder); err != nil {
+					return err
+				}
+			case EventTypeNewHeaderHashes:
+				if err = s.onNewHeaderHashesEvent(ctx, event.AsNewHeaderHashes(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewSpan:
-				s.spansCache.Add(event.NewSpan)
+				s.spansCache.Add(event.AsNewSpan())
 			}
 		case <-ctx.Done():
 			return ctx.Err()
