@@ -480,22 +480,9 @@ func (dc *DomainContext) commitmentValTransform(
 			return valBuf, nil
 		}
 
-		//type pair struct {
-		//	b []byte
-		//	d string
-		//	o []byte
-		//}
-
-		//seen := make(map[string]struct{})
-		//shortens := make(map[string]pair)
-
 		return commitment.BranchData(valBuf).
 			ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
 				var found bool
-				//if _, ok := seen[string(key)]; ok {
-				//	fmt.Printf("key %x already seen\n", key)
-				//}
-				//seen[string(key)] = struct{}{}
 				var buf []byte
 				if isStorage {
 					if len(key) == length.Addr+length.Hash {
@@ -523,14 +510,8 @@ func (dc *DomainContext) commitmentValTransform(
 						dc.d.logger.Crit("valTransform: replacement for full storage key was not found",
 							"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
 							"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
-						panic("valTransform: replacement for full storage key was not found")
+						panic(fmt.Sprintf("vt: replacement not found for storage  %x", buf))
 					}
-					//if s, seen := shortens[string(shortened)]; seen {
-					//	fmt.Printf("short key %x already seen (%s)\n", shortened, s.d)
-					//	shortened1, found1 := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListStorage, mergedStorage)
-					//	fmt.Printf("shor1 %x, %t", shortened1, found1)
-					//}
-					//shortens[string(shortened)] = pair{shortened, "sto", buf}
 					return shortened
 				}
 
@@ -544,24 +525,20 @@ func (dc *DomainContext) commitmentValTransform(
 							"merging", fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep),
 							"toMerge", len(filesAccount),
 							"startTxNumToReplace", startTxNum, "endTxNumToReplace", endTxNum)
-						panic(fmt.Sprintf("lost account full key: %x", key))
+						panic(fmt.Sprintf("vt: lost account full key: %x", key))
 					}
 				}
 
 				shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListAccount, mergedAccount)
 				if !found {
 					if len(buf) == length.Addr {
-						return nil
+						return nil // if plain key is lost, we can save original fullkey
 					}
 					dc.d.logger.Crit("valTransform: replacement for full account key was not found",
 						"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
-						"shortened", fmt.Sprintf("%x", shortened))
-					panic("valTransform: replacement for full account key was not found")
+						"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
+					panic(fmt.Sprintf("vt: replacement not found for account  %x", buf))
 				}
-				//if s, seen := shortens[string(shortened)]; seen {
-				//	fmt.Printf("short key %x already seen (%s)\n", shortened, s.d)
-				//}
-				//shortens[string(shortened)] = pair{shortened, "acc", buf}
 				return shortened
 			})
 	}
