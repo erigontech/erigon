@@ -435,7 +435,7 @@ func IsLocal(path string) bool {
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
-	wg, ctx := errgroup.WithContext(ctx)
+	wg, _ := errgroup.WithContext(ctx)
 	wg.SetLimit(16)
 	for i := 0; i < t.NumPieces(); i++ {
 		i := i
