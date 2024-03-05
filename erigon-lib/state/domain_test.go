@@ -2300,3 +2300,19 @@ func TestShortenedKeyEncodeDecode(t *testing.T) {
 		require.EqualValues(t, offset, rofft)
 	})
 }
+
+func TestDomainContext_findShortenedKey(t *testing.T) {
+
+	db, d := testDbAndDomain(t, log.New())
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = true
+	dc := d.MakeContext()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+}

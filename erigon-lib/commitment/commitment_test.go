@@ -136,7 +136,7 @@ func unfoldBranchDataFromString(t *testing.T, encs string) (row []*Cell, am uint
 	return origins[:], am
 }
 
-func TestBranchData_ReplacePlainKeysIter(t *testing.T) {
+func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
 	cg := func(nibble int, skip bool) (*Cell, error) {
@@ -151,7 +151,7 @@ func TestBranchData_ReplacePlainKeysIter(t *testing.T) {
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
-	replaced, err := enc.ReplacePlainKeysIter(target, func(key []byte, isStorage bool) []byte {
+	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) []byte {
 		oldKeys = append(oldKeys, key)
 		if isStorage {
 			return key[:8]
@@ -162,7 +162,54 @@ func TestBranchData_ReplacePlainKeysIter(t *testing.T) {
 	require.Truef(t, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
 
 	keyI := 0
-	replacedBack, err := replaced.ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
+	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) []byte {
+		require.EqualValues(t, oldKeys[keyI][:4], key[:4])
+		defer func() { keyI++ }()
+		return oldKeys[keyI]
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, original, replacedBack)
+
+	t.Run("merge replaced and original back", func(t *testing.T) {
+		orig := common.Copy(original)
+
+		merged, err := replaced.MergeHexBranches(original, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, orig, merged)
+
+		merged, err = merged.MergeHexBranches(replacedBack, nil)
+		require.NoError(t, err)
+		require.EqualValues(t, orig, merged)
+	})
+}
+
+func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
+	row, bm := generateCellRow(t, 16)
+
+	cg := func(nibble int, skip bool) (*Cell, error) {
+		return row[nibble], nil
+	}
+
+	be := NewBranchEncoder(1024, t.TempDir())
+	enc, _, err := be.EncodeBranch(bm, bm, bm, cg)
+	require.NoError(t, err)
+
+	original := common.Copy(enc)
+
+	target := make([]byte, 0, len(enc))
+	oldKeys := make([][]byte, 0)
+	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) []byte {
+		oldKeys = append(oldKeys, key)
+		if isStorage {
+			return nil
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.EqualValuesf(t, len(enc), len(replaced), "replaced expected to be equal to origin (since no replacements were made)")
+
+	keyI := 0
+	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) []byte {
 		require.EqualValues(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
 		return oldKeys[keyI]

@@ -424,6 +424,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 			}
 		}
 		if item == nil {
+			dc.d.logger.Warn("shortened key not found in all files, trying roFiles")
 			for _, f := range dc.files {
 				if f.startTxNum == txFrom && f.endTxNum == txTo {
 					item = f.src
@@ -481,7 +482,7 @@ func (dc *DomainContext) commitmentValTransform(
 		}
 
 		return commitment.BranchData(valBuf).
-			ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
+			ReplacePlainKeys(nil, func(key []byte, isStorage bool) []byte {
 				var found bool
 				var buf []byte
 				if isStorage {

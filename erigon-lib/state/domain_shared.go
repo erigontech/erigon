@@ -967,7 +967,7 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 		return branch, nil
 	}
 
-	return branch.ReplacePlainKeysIter(nil, func(key []byte, isStorage bool) []byte {
+	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) []byte {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
 				return nil
