@@ -3,7 +3,6 @@ package p2p
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -44,7 +43,7 @@ func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId PeerId,
 		return err
 	}
 	if len(sent.Peers) == 0 {
-		return fmt.Errorf("%w", ErrPeerNotFound)
+		return ErrPeerNotFound
 	}
 
 	return nil
