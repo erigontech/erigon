@@ -200,7 +200,7 @@ func writeGenesisToStream(
 		return err
 	}
 
-	ger, _, err := reader.GetBlockGlobalExitRoot(genesis.NumberU64())
+	ger, err := reader.GetBlockGlobalExitRoot(genesis.NumberU64())
 	if err != nil {
 		return err
 	}

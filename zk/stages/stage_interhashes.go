@@ -796,13 +796,12 @@ func verifyStateRoot(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, cfg *ZkIn
 	//psr := state2.NewPlainStateReader(tx)
 
 	if cfg.checkRoot && hash != *expectedRootHash {
+		log.Error("wrong root", "blockNumber", blockNo, "expected root", expectedRootHash.Hex(), "actual root", hash.Hex())
+		log.Info("Checking root with RPC...")
+
 		// convert txno to big int
 		bigTxNo := big.NewInt(0)
 		bigTxNo.SetUint64(blockNo)
-
-		log.Error("[zkevm] - txno: ", bigTxNo)
-		log.Error("[zkevm] - expected root: ", expectedRootHash.Hex())
-		log.Error("[zkevm] - actual root: ", hash.Hex())
 
 		sr, err := stateRootByTxNo(bigTxNo, cfg.zk.L2RpcUrl)
 		if err != nil {
@@ -810,7 +809,6 @@ func verifyStateRoot(dbSmt *smt.SMT, expectedRootHash *libcommon.Hash, cfg *ZkIn
 		}
 
 		if hash != *sr {
-			log.Warn(fmt.Sprintf("[%s] Wrong trie root: %x, expected (from header): %x, from rpc: %x", logPrefix, hash, expectedRootHash, *sr))
 			return fmt.Errorf("wrong trie root at %d: %x, expected (from header): %x, from rpc: %x", blockNo, hash, expectedRootHash, *sr)
 		}
 

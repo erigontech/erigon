@@ -98,7 +98,12 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}
 
-	blockGer, l1BlockHash, err := hermezReader.GetBlockGlobalExitRoot(BlockContext.BlockNumber)
+	blockGer, err := hermezReader.GetBlockGlobalExitRoot(BlockContext.BlockNumber)
+	if err != nil {
+		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
+	}
+
+	l1BlockHash, err := hermezReader.GetBlockL1BlockHash(BlockContext.BlockNumber)
 	if err != nil {
 		return nil, evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, nil, err
 	}

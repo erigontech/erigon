@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -176,7 +177,7 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 			globalExitRoots = append(globalExitRoots, gersInBetween...)
 		}
 
-		blockGer, _, err := hermezDb.GetBlockGlobalExitRoot(blockNum)
+		blockGer, err := hermezDb.GetBlockGlobalExitRoot(blockNum)
 		if err != nil {
 			return nil, err
 		}
