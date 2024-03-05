@@ -213,12 +213,12 @@ func SpawnStageBatches(
 			if lastHash != emptyHash {
 				l2Block.ParentHash = lastHash
 			} else {
-				// block 1 so get genesis detail
-				genesisHash, err := eriDb.ReadCanonicalHash(0)
+				// first block in the loop so read the parent hash
+				previousHash, err := eriDb.ReadCanonicalHash(l2Block.L2BlockNumber - 1)
 				if err != nil {
 					return fmt.Errorf("failed to get genesis header: %v", err)
 				}
-				l2Block.ParentHash = genesisHash
+				l2Block.ParentHash = previousHash
 			}
 
 			if err := writeL2Block(eriDb, hermezDb, &l2Block); err != nil {
