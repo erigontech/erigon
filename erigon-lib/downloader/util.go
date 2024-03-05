@@ -33,9 +33,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/mmap_span"
-	"github.com/anacrolix/torrent/storage"
-	"github.com/edsrzf/mmap-go"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -438,41 +435,39 @@ func IsLocal(path string) bool {
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
+	wg, ctx := errgroup.WithContext(ctx)
+	wg.SetLimit(16)
 	for i := 0; i < t.NumPieces(); i++ {
-		t.Piece(i).VerifyData()
+		i := i
+		wg.Go(func() error {
+			t.Piece(i).VerifyData()
 
-		completePieces.Add(1)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+			completePieces.Add(1)
+			return nil
+		})
 	}
-	return nil
+	return wg.Wait()
 }
 
 func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
-	span := new(mmap_span.MMapSpan)
-	defer span.Close()
 	info := t.Info()
-	for _, file := range info.UpvertedFiles() {
-		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
-		mm, err := mmapFile(filename)
-		if err != nil {
-			return err
-		}
-		if int64(len(mm.Bytes())) != file.Length {
-			return fmt.Errorf("file %q has wrong length", filename)
-		}
-		span.Append(mm)
+	file := info.UpvertedFiles()[0]
+	fPath := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
+	f, err := os.Open(fPath)
+	if err != nil {
+		return err
 	}
-	span.InitIndex()
+	defer func() {
+		if err != nil {
+			f.Close()
+		}
+	}()
 
 	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {
 		p := info.Piece(i)
 		hasher.Reset()
-		_, err := io.Copy(hasher, io.NewSectionReader(span, p.Offset(), p.Length()))
+		_, err := io.Copy(hasher, io.NewSectionReader(f, p.Offset(), p.Length()))
 		if err != nil {
 			return err
 		}
@@ -489,28 +484,4 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		}
 	}
 	return nil
-}
-
-func mmapFile(name string) (mm storage.FileMapping, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return
-	}
-	defer func() {
-		if err != nil {
-			f.Close()
-		}
-	}()
-	fi, err := f.Stat()
-	if err != nil {
-		return
-	}
-	if fi.Size() == 0 {
-		return
-	}
-	reg, err := mmap.MapRegion(f, -1, mmap.RDONLY, mmap.COPY, 0)
-	if err != nil {
-		return
-	}
-	return storage.WrapFileMapping(reg, f), nil
 }
