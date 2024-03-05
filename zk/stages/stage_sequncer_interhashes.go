@@ -86,9 +86,6 @@ func SpawnSequencerInterhashesStage(
 
 	// update the details related to anything that may have changed after figuring out the root
 	header.Root = newRoot
-	for _, r := range receipts {
-		r.PostState = newRoot.Bytes()
-	}
 	header.ReceiptHash = types.DeriveSha(receipts)
 	header.Bloom = types.CreateBloom(receipts)
 	newHash := header.Hash()
