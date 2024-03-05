@@ -155,7 +155,30 @@ func (s *Sync) onNewHeaderHashesEvent(
 	event EventNewHeaderHashes,
 	ccBuilder CanonicalChainBuilder,
 ) error {
-	// TODO
+	for _, headerHashNum := range event.NewHeaderHashes {
+		if (headerHashNum.Number <= ccBuilder.Root().Number.Uint64()) || ccBuilder.ContainsHash(headerHashNum.Hash) {
+			continue
+		}
+
+		newHeaders, err := s.p2pService.FetchHeaders(
+			ctx,
+			headerHashNum.Number,
+			headerHashNum.Number+1,
+			*event.PeerId)
+		if err != nil {
+			return err
+		}
+
+		newHeaderEvent := EventNewHeader{
+			NewHeader: newHeaders[0],
+			PeerId:    event.PeerId,
+		}
+
+		err = s.onNewHeaderEvent(ctx, newHeaderEvent, ccBuilder)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
