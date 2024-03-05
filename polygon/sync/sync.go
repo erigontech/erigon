@@ -123,7 +123,8 @@ func (s *Sync) onNewHeaderEvent(
 			ctx,
 			ccBuilder.Root().Number.Uint64(),
 			event.NewHeader.Number.Uint64()+1,
-			*event.PeerId)
+			event.PeerId,
+		)
 		if err != nil {
 			return err
 		}

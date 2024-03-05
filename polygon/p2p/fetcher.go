@@ -165,7 +165,7 @@ func (f *fetcher) awaitHeadersResponse(
 		case <-ctx.Done():
 			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
 		case message := <-messages:
-			if PeerIdFromH512(message.PeerId) != peerId {
+			if message.PeerId != peerId {
 				continue
 			}
 

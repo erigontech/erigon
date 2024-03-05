@@ -18,6 +18,7 @@ import (
 type DecodedInboundMessage[TPacket any] struct {
 	*sentry.InboundMessage
 	Decoded TPacket
+	PeerId  PeerId
 }
 
 type MessageObserver[TMessage any] func(message TMessage)
@@ -210,10 +211,11 @@ func notifyInboundMessageObservers[TPacket any](
 	observers map[uint64]MessageObserver[*DecodedInboundMessage[TPacket]],
 	message *sentry.InboundMessage,
 ) error {
+	peerId := PeerIdFromH512(message.PeerId)
+
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			peerId := PeerIdFromH512(message.PeerId)
 			ml.logger.Debug("penalizing peer", "peerId", peerId, "err", err)
 
 			penalizeErr := ml.peerPenalizer.Penalize(ctx, peerId)
@@ -228,6 +230,7 @@ func notifyInboundMessageObservers[TPacket any](
 	notifyObservers(&ml.observersMu, observers, &DecodedInboundMessage[TPacket]{
 		InboundMessage: message,
 		Decoded:        decodedData,
+		PeerId:         peerId,
 	})
 
 	return nil
