@@ -289,6 +289,26 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			to:             "0x0000000000000000000000000000000000000004",
 			from:           "0x5751D5b29dA14d5C334A9453cF04181f417aBe4c",
 			expectedTxHash: "0x3fc26004cfe8bc6c3078fddace50c5d073109d18fc9095d37e60c471ffa1a075",
+		}, {
+			chainId:        big.NewInt(0),
+			nonce:          1559,
+			gasPrice:       uint256.NewInt(127000000),
+			gasLimit:       21000,
+			value:          uint256.NewInt(1309095483099999),
+			data:           "",
+			to:             "0xf71dbFcE95e6093b4876482A215b6C94a4787C3B",
+			from:           "0x229A5bDBb09d8555f9214F7a6784804999BA4E0D",
+			expectedTxHash: "0x6dc15c9aca6b03d7326ea26a9850fda56f75c1c4a560b63a9fa08cc5283e050b",
+		}, {
+			chainId:        big.NewInt(-1),
+			nonce:          1559,
+			gasPrice:       uint256.NewInt(127000000),
+			gasLimit:       21000,
+			value:          uint256.NewInt(1309095483099999),
+			data:           "",
+			to:             "0xf71dbFcE95e6093b4876482A215b6C94a4787C3B",
+			from:           "0x229A5bDBb09d8555f9214F7a6784804999BA4E0D",
+			expectedTxHash: "0x6dc15c9aca6b03d7326ea26a9850fda56f75c1c4a560b63a9fa08cc5283e050b",
 		},
 	}
 
@@ -307,8 +327,14 @@ func TestComputeL2TxHashScenarios(t *testing.T) {
 			a := common.HexToAddress(test.from)
 			from = &a
 		}
+
+		var chainId *big.Int
+		if test.chainId.Cmp(big.NewInt(-1)) != 0 {
+			chainId = test.chainId
+		}
+
 		result, err := ComputeL2TxHash(
-			test.chainId,
+			chainId,
 			test.value,
 			test.gasPrice,
 			test.nonce,

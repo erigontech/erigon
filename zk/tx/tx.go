@@ -328,7 +328,7 @@ func ComputeL2TxHash(
 ) (common.Hash, error) {
 
 	txType := "01"
-	if chainId != nil && chainId.Cmp(big.NewInt(0)) == 0 {
+	if chainId == nil || chainId.Cmp(big.NewInt(0)) == 0 {
 		txType = "00"
 	}
 
@@ -388,7 +388,7 @@ func ComputeL2TxHash(
 	}
 
 	// add chainID
-	if chainId != nil {
+	if chainId != nil && chainId.Cmp(big.NewInt(0)) != 0 {
 		chainIDPart, err := formatL2TxHashParam(chainId, 8)
 		if err != nil {
 			return common.Hash{}, err
