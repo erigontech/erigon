@@ -38,7 +38,8 @@ type Pool struct {
 	// allowedPeers are the peers that are allowed.
 	// peers not on this list will be silently discarded
 	// when returned, and skipped when requesting
-	peerData map[peer.ID]*Item
+	peerData         map[peer.ID]*Item
+	bannedPeersCount atomic.Int32
 
 	bannedPeers sync.Map
 	queue       *ring.Buffer[*Item]
@@ -56,6 +57,10 @@ func NewPool() *Pool {
 func (p *Pool) BanStatus(pid peer.ID) bool {
 	_, ok := p.bannedPeers.Load(pid)
 	return ok
+}
+
+func (p *Pool) LenBannedPeers() int {
+	return int(p.bannedPeersCount.Load())
 }
 
 func (p *Pool) AddPeer(pid peer.ID) {
@@ -82,6 +87,7 @@ func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
 	defer p.mu.Unlock()
 	if banned {
 		p.bannedPeers.Store(pid, struct{}{})
+		p.bannedPeersCount.Add(1)
 		delete(p.peerData, pid)
 	} else {
 		p.bannedPeers.Delete(pid)
