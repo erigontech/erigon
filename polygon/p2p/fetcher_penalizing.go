@@ -31,7 +31,7 @@ func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end
 			errors.Is(err, &ErrNonSequentialHeaderNumbers{})
 
 		if shouldPenalize {
-			pf.logger.Debug("penalizing peer", "peerId", peerId, "err", err.Error())
+			pf.logger.Debug("penalizing peer", "peerId", peerId, "err", err)
 
 			penalizeErr := pf.peerPenalizer.Penalize(ctx, peerId)
 			if penalizeErr != nil {

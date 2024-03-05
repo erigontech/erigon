@@ -21,6 +21,7 @@ type Service interface {
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 	Penalize(ctx context.Context, peerId PeerId) error
+	GetMessageListener() MessageListener
 }
 
 func NewService(maxPeers int, logger log.Logger, sentryClient direct.SentryClient) Service {
@@ -54,6 +55,7 @@ func newService(
 		messageListener: messageListener,
 		peerPenalizer:   peerPenalizer,
 		peerTracker:     peerTracker,
+		logger:          logger,
 	}
 }
 
@@ -64,6 +66,7 @@ type service struct {
 	messageListener MessageListener
 	peerPenalizer   PeerPenalizer
 	peerTracker     PeerTracker
+	logger          log.Logger
 }
 
 func (s *service) Start(ctx context.Context) {
@@ -90,4 +93,8 @@ func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
 
 func (s *service) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
 	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
+}
+
+func (s *service) GetMessageListener() MessageListener {
+	return s.messageListener
 }

@@ -26,6 +26,7 @@ type service struct {
 
 	p2pService p2p.Service
 	storage    Storage
+	events     *TipEvents
 }
 
 func NewService(
@@ -71,7 +72,7 @@ func NewService(
 			headerValidator,
 			spansCache)
 	}
-	events := NewSyncToTipEvents()
+	events := NewTipEvents(p2pService, heimdallService)
 	sync := NewSync(
 		storage,
 		execution,
@@ -88,6 +89,7 @@ func NewService(
 		sync:       sync,
 		p2pService: p2pService,
 		storage:    storage,
+		events:     events,
 	}
 }
 
@@ -106,6 +108,14 @@ func (s *service) Run(ctx context.Context) error {
 
 	go func() {
 		err := s.storage.Run(ctx)
+		if (err != nil) && (ctx.Err() == nil) {
+			serviceErr = err
+			cancel()
+		}
+	}()
+
+	go func() {
+		err := s.events.Run(ctx)
 		if (err != nil) && (ctx.Err() == nil) {
 			serviceErr = err
 			cancel()
