@@ -115,7 +115,7 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 		return sentryClient.Messages(ctx, &messagesRequest, grpc.WaitForReady(true))
 	}
 
-	streamEvents(ctx, ml, "InboundMessages", streamFactory, func(message *sentry.InboundMessage) error {
+	streamMessages(ctx, ml, "InboundMessages", streamFactory, func(message *sentry.InboundMessage) error {
 		switch message.Id {
 		case sentry.MessageId_NEW_BLOCK_66:
 			return notifyInboundMessageObservers(ctx, ml, ml.newBlockObservers, message)
@@ -134,7 +134,7 @@ func (ml *messageListener) listenPeerEvents(ctx context.Context) {
 		return sentryClient.PeerEvents(ctx, &sentry.PeerEventsRequest{}, grpc.WaitForReady(true))
 	}
 
-	streamEvents(ctx, ml, "PeerEvents", streamFactory, ml.notifyPeerEventObservers)
+	streamMessages(ctx, ml, "PeerEvents", streamFactory, ml.notifyPeerEventObservers)
 }
 
 func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentry.PeerEvent) error {
@@ -178,7 +178,7 @@ func unregisterFunc[TMessage any](mu *sync.Mutex, observers map[uint64]MessageOb
 	}
 }
 
-func streamEvents[TMessage any](
+func streamMessages[TMessage any](
 	ctx context.Context,
 	ml *messageListener,
 	name string,
@@ -207,7 +207,7 @@ func streamEvents[TMessage any](
 func notifyInboundMessageObservers[TPacket any](
 	ctx context.Context,
 	ml *messageListener,
-	observers map[uint64]MessageObserver[*DecodedInboundMessage[*TPacket]],
+	observers map[uint64]MessageObserver[*DecodedInboundMessage[TPacket]],
 	message *sentry.InboundMessage,
 ) error {
 	var decodedData TPacket
@@ -221,12 +221,13 @@ func notifyInboundMessageObservers[TPacket any](
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
 			}
 		}
+
 		return err
 	}
 
-	notifyObservers(&ml.observersMu, observers, &DecodedInboundMessage[*TPacket]{
+	notifyObservers(&ml.observersMu, observers, &DecodedInboundMessage[TPacket]{
 		InboundMessage: message,
-		Decoded:        &decodedData,
+		Decoded:        decodedData,
 	})
 
 	return nil
