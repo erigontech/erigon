@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"math/big"
 	"net"
 	"os"
@@ -489,7 +490,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	// setup periodic logging and prometheus updates
-	go mem.LogVirtualMemStats(ctx, logger)
+	go mem.LogMemStats(ctx, logger)
 
 	var currentBlock *types.Block
 	if err := chainKv.View(context.Background(), func(tx kv.Tx) error {
@@ -784,12 +785,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.eth1ExecutionServer = eth1.NewEthereumExecutionModule(blockReader, chainKv, backend.pipelineStagedSync, backend.forkValidator, chainConfig, assembleBlockPOS, hook, backend.notifications.Accumulator, backend.notifications.StateChangesConsumer, logger, backend.engine, config.HistoryV3, config.Sync)
 	executionRpc := direct.NewExecutionClientDirect(backend.eth1ExecutionServer)
 	engineBackendRPC := engineapi.NewEngineServer(
-		ctx,
 		logger,
 		chainConfig,
 		executionRpc,
 		backend.sentriesClient.Hd,
-		engine_block_downloader.NewEngineBlockDownloader(ctx, logger, backend.sentriesClient.Hd, executionRpc,
+		engine_block_downloader.NewEngineBlockDownloader(
+			logger, backend.sentriesClient.Hd, executionRpc,
 			backend.sentriesClient.Bd, backend.sentriesClient.BroadcastNewBlock, backend.sentriesClient.SendBodyRequest, blockReader,
 			chainKv, chainConfig, tmpdir, config.Sync.BodyDownloadTimeoutSeconds),
 		false,
@@ -805,12 +806,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
-		engine, err = execution_client.NewExecutionClientRPC(ctx, jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
+		engine, err = execution_client.NewExecutionClientRPC(jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		engine, err = execution_client.NewExecutionClientDirect(ctx, eth1_chain_reader.NewChainReaderEth1(ctx, chainConfig, executionRpc, 1000))
+		engine, err = execution_client.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
 		if err != nil {
 			return nil, err
 		}
@@ -828,14 +829,19 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return nil, err
 		}
 
-		indiciesDB, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, dirs.CaplinIndexing, engine, false)
+		pruneBlobDistance := uint64(128600)
+		if config.CaplinConfig.BlobBackfilling {
+			pruneBlobDistance = math.MaxUint64
+		}
+
+		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, genesisCfg, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false, pruneBlobDistance)
 		if err != nil {
 			return nil, err
 		}
 
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, engine, config, networkCfg, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.Archive, indiciesDB, creds); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, engine, config, networkCfg, beaconCfg, genesisCfg, state, nil, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
@@ -909,7 +915,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	}
 
 	if chainConfig.Bor == nil {
-		go s.engineBackendRPC.Start(&httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
+		go s.engineBackendRPC.Start(ctx, &httpRpcCfg, s.chainDB, s.blockReader, ff, stateCache, s.agg, s.engine, ethRpcClient, txPoolRpcClient, miningRpcClient)
 	}
 
 	// Register the backend on the node

@@ -169,13 +169,11 @@ func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gas
 func (tx LegacyTx) copy() *LegacyTx {
 	cpy := &LegacyTx{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{
-				time: tx.time,
-			},
-			Nonce: tx.Nonce,
-			To:    tx.To, // TODO: copy pointed-to address
-			Data:  libcommon.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
+			TransactionMisc: TransactionMisc{},
+			Nonce:           tx.Nonce,
+			To:              tx.To, // TODO: copy pointed-to address
+			Data:            libcommon.CopyBytes(tx.Data),
+			Gas:             tx.Gas,
 			// These are initialized below.
 			Value: new(uint256.Int),
 		},

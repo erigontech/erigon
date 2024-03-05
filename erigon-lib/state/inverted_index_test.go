@@ -126,7 +126,7 @@ func TestInvIndexCollationBuild(t *testing.T) {
 	require.Equal(t, [][]uint64{{2, 6}, {3}, {6}}, intArrs)
 	r := recsplit.NewIndexReader(sf.index)
 	for i := 0; i < len(words); i++ {
-		offset := r.Lookup([]byte(words[i]))
+		offset, _ := r.Lookup([]byte(words[i]))
 		g.Reset(offset)
 		w, _ := g.Next(nil)
 		require.Equal(t, words[i], string(w))

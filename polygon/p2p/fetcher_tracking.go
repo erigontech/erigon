@@ -4,21 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func NewTrackingFetcher(
-	logger log.Logger,
-	messageListener MessageListener,
-	messageSender MessageSender,
-	peerPenalizer PeerPenalizer,
-	requestIdGenerator RequestIdGenerator,
-	peerTracker PeerTracker,
-) Fetcher {
+func NewTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) Fetcher {
 	return &trackingFetcher{
-		Fetcher:     NewFetcher(logger, messageListener, messageSender, peerPenalizer, requestIdGenerator),
+		Fetcher:     fetcher,
 		peerTracker: peerTracker,
 	}
 }
@@ -31,7 +22,7 @@ type trackingFetcher struct {
 func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
 	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
-		var errIncompleteResponse *ErrIncompleteFetchHeadersResponse
+		var errIncompleteResponse *ErrIncompleteHeaders
 		if errors.As(err, &errIncompleteResponse) {
 			tf.peerTracker.BlockNumMissing(peerId, errIncompleteResponse.LowestMissingBlockNum())
 		} else if errors.Is(err, context.DeadlineExceeded) {
