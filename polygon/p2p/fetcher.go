@@ -169,10 +169,6 @@ func (f *fetcher) awaitHeadersResponse(
 				continue
 			}
 
-			if message.DecodeErr != nil {
-				return nil, message.DecodeErr
-			}
-
 			if message.Decoded.RequestId != requestId {
 				continue
 			}
