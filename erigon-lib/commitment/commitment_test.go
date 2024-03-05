@@ -151,21 +151,21 @@ func TestBranchData_ReplacePlainKeys(t *testing.T) {
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
-	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) []byte {
+	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
 		oldKeys = append(oldKeys, key)
 		if isStorage {
-			return key[:8]
+			return key[:8], nil
 		}
-		return key[:4]
+		return key[:4], nil
 	})
 	require.NoError(t, err)
 	require.Truef(t, len(replaced) < len(enc), "replaced expected to be shorter than original enc")
 
 	keyI := 0
-	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) []byte {
+	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		require.EqualValues(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
-		return oldKeys[keyI]
+		return oldKeys[keyI], nil
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, original, replacedBack)
@@ -198,21 +198,21 @@ func TestBranchData_ReplacePlainKeys_WithEmpty(t *testing.T) {
 
 	target := make([]byte, 0, len(enc))
 	oldKeys := make([][]byte, 0)
-	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) []byte {
+	replaced, err := enc.ReplacePlainKeys(target, func(key []byte, isStorage bool) ([]byte, error) {
 		oldKeys = append(oldKeys, key)
 		if isStorage {
-			return nil
+			return nil, nil
 		}
-		return nil
+		return nil, nil
 	})
 	require.NoError(t, err)
 	require.EqualValuesf(t, len(enc), len(replaced), "replaced expected to be equal to origin (since no replacements were made)")
 
 	keyI := 0
-	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) []byte {
+	replacedBack, err := replaced.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		require.EqualValues(t, oldKeys[keyI][:4], key[:4])
 		defer func() { keyI++ }()
-		return oldKeys[keyI]
+		return oldKeys[keyI], nil
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, original, replacedBack)

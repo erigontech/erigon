@@ -967,10 +967,10 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 		return branch, nil
 	}
 
-	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) []byte {
+	return branch.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
 			if len(key) == length.Addr+length.Hash {
-				return nil
+				return nil, nil
 			}
 			// Optimised key referencing a state file record (file number and offset within the file)
 			storagePlainKey, found := sdc.sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, nil)
@@ -978,11 +978,12 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 				s0, s1, oft := decodeShortenedKey(key)
 				sdc.sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
+				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
 			}
-			return storagePlainKey
+			return storagePlainKey, nil
 		}
 		if len(key) == length.Addr {
-			return nil
+			return nil, nil
 		}
 
 		apkBuf, found := sdc.sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, nil)
@@ -990,8 +991,9 @@ func (sdc *SharedDomainsCommitmentContext) replaceShortenedKeysInBranch(branch c
 			s0, s1, oft := decodeShortenedKey(key)
 			sdc.sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
+			return nil, fmt.Errorf("replace back lost account full key: %x", key)
 		}
-		return apkBuf
+		return apkBuf, nil
 	})
 }
 
