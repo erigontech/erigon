@@ -20,7 +20,7 @@ type Sync struct {
 	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
 	spansCache       *SpansCache
 	fetchLatestSpan  func(ctx context.Context) (*heimdall.Span, error)
-	events           chan Event
+	events           <-chan Event
 	logger           log.Logger
 }
 
@@ -33,7 +33,7 @@ func NewSync(
 	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder,
 	spansCache *SpansCache,
 	fetchLatestSpan func(ctx context.Context) (*heimdall.Span, error),
-	events chan Event,
+	events <-chan Event,
 	logger log.Logger,
 ) *Sync {
 	return &Sync{
