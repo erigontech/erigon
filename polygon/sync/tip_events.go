@@ -34,7 +34,7 @@ type Event struct {
 	NewSpan *heimdall.Span
 }
 
-type SyncToTipEvents struct {
+type TipEvents struct {
 	events    chan Event
 	pollDelay time.Duration
 
@@ -46,11 +46,11 @@ type SyncToTipEvents struct {
 	heimdallService heimdall.HeimdallNoStore
 }
 
-func NewSyncToTipEvents(
+func NewTipEvents(
 	p2pService p2p.Service,
 	heimdallService heimdall.HeimdallNoStore,
-) *SyncToTipEvents {
-	return &SyncToTipEvents{
+) *TipEvents {
+	return &TipEvents{
 		events:    make(chan Event),
 		pollDelay: time.Second,
 
@@ -62,40 +62,40 @@ func NewSyncToTipEvents(
 	}
 }
 
-func (se *SyncToTipEvents) Events() chan Event {
-	return se.events
+func (te *TipEvents) Events() chan Event {
+	return te.events
 }
 
-func (se *SyncToTipEvents) pushEvent(e Event) {
-	se.queueMutex.Lock()
-	defer se.queueMutex.Unlock()
+func (te *TipEvents) pushEvent(e Event) {
+	te.queueMutex.Lock()
+	defer te.queueMutex.Unlock()
 
-	if se.queue.Len() == se.queueCap {
-		se.queue.Remove(se.queue.Front())
+	if te.queue.Len() == te.queueCap {
+		te.queue.Remove(te.queue.Front())
 	}
 
-	se.queue.PushBack(e)
+	te.queue.PushBack(e)
 }
 
-func (se *SyncToTipEvents) takeEvent() (Event, bool) {
-	se.queueMutex.Lock()
-	defer se.queueMutex.Unlock()
+func (te *TipEvents) takeEvent() (Event, bool) {
+	te.queueMutex.Lock()
+	defer te.queueMutex.Unlock()
 
-	if elem := se.queue.Front(); elem != nil {
-		e := se.queue.Remove(elem).(Event)
+	if elem := te.queue.Front(); elem != nil {
+		e := te.queue.Remove(elem).(Event)
 		return e, true
 	} else {
 		return Event{}, false
 	}
 }
 
-func (se *SyncToTipEvents) Run(ctx context.Context) error {
-	newBlockObserverCancel := se.p2pService.GetMessageListener().RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+func (te *TipEvents) Run(ctx context.Context) error {
+	newBlockObserverCancel := te.p2pService.GetMessageListener().RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		if message.Decoded == nil {
 			return
 		}
 		block := message.Decoded.Block
-		se.pushEvent(Event{
+		te.pushEvent(Event{
 			Type:      EventTypeNewHeader,
 			NewHeader: block.Header(),
 			PeerId:    message.PeerId,
@@ -103,11 +103,11 @@ func (se *SyncToTipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockObserverCancel()
 
-	newBlockHashesObserverCancel := se.p2pService.GetMessageListener().RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+	newBlockHashesObserverCancel := te.p2pService.GetMessageListener().RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		if message.Decoded == nil {
 			return
 		}
-		se.pushEvent(Event{
+		te.pushEvent(Event{
 			Type:            EventTypeNewHeaderHashes,
 			NewHeaderHashes: *message.Decoded,
 			PeerId:          message.PeerId,
@@ -115,8 +115,8 @@ func (se *SyncToTipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockHashesObserverCancel()
 
-	err := se.heimdallService.OnMilestoneEvent(ctx, func(milestone *heimdall.Milestone) {
-		se.pushEvent(Event{
+	err := te.heimdallService.OnMilestoneEvent(ctx, func(milestone *heimdall.Milestone) {
+		te.pushEvent(Event{
 			Type:      EventTypeMilestone,
 			Milestone: milestone,
 		})
@@ -125,8 +125,8 @@ func (se *SyncToTipEvents) Run(ctx context.Context) error {
 		return err
 	}
 
-	err = se.heimdallService.OnSpanEvent(ctx, func(span *heimdall.Span) {
-		se.pushEvent(Event{
+	err = te.heimdallService.OnSpanEvent(ctx, func(span *heimdall.Span) {
+		te.pushEvent(Event{
 			Type:    EventTypeNewSpan,
 			NewSpan: span,
 		})
@@ -137,9 +137,9 @@ func (se *SyncToTipEvents) Run(ctx context.Context) error {
 
 	// pump events from the ring buffer to the events channel
 	for {
-		e, ok := se.takeEvent()
+		e, ok := te.takeEvent()
 		if !ok {
-			pollDelayTimer := time.NewTimer(se.pollDelay)
+			pollDelayTimer := time.NewTimer(te.pollDelay)
 			select {
 			case <-pollDelayTimer.C:
 				continue
@@ -149,7 +149,7 @@ func (se *SyncToTipEvents) Run(ctx context.Context) error {
 		}
 
 		select {
-		case se.events <- e:
+		case te.events <- e:
 		case <-ctx.Done():
 			return ctx.Err()
 		}

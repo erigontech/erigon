@@ -26,7 +26,7 @@ type service struct {
 
 	p2pService p2p.Service
 	storage    Storage
-	events     *SyncToTipEvents
+	events     *TipEvents
 }
 
 func NewService(
@@ -72,7 +72,7 @@ func NewService(
 			headerValidator,
 			spansCache)
 	}
-	events := NewSyncToTipEvents(p2pService, heimdallService)
+	events := NewTipEvents(p2pService, heimdallService)
 	sync := NewSync(
 		storage,
 		execution,
