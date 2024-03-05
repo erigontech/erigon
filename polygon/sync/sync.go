@@ -164,7 +164,8 @@ func (s *Sync) onNewHeaderHashesEvent(
 			ctx,
 			headerHashNum.Number,
 			headerHashNum.Number+1,
-			*event.PeerId)
+			event.PeerId,
+		)
 		if err != nil {
 			return err
 		}
