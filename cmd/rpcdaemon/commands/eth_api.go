@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	ethFilters "github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -322,32 +323,36 @@ func (api *BaseAPI) getEffectiveGasPricePercentage(tx kv.Tx, txHash common.Hash)
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
 	*BaseAPI
-	ethBackend      rpchelper.ApiBackend
-	txPool          txpool.TxpoolClient
-	mining          txpool.MiningClient
-	gasCache        *GasPriceCache
-	db              kv.RoDB
-	GasCap          uint64
-	ReturnDataLimit int
-	ZkRpcUrl        string
+	ethBackend                 rpchelper.ApiBackend
+	txPool                     txpool.TxpoolClient
+	mining                     txpool.MiningClient
+	gasCache                   *GasPriceCache
+	db                         kv.RoDB
+	GasCap                     uint64
+	ReturnDataLimit            int
+	ZkRpcUrl                   string
+	AllowFreeTransactions      bool
+	AllowPreEIP155Transactions bool
 }
 
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, zkRpcUrl string) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, mining txpool.MiningClient, gascap uint64, returnDataLimit int, zkConfig *ethconfig.Zk) *APIImpl {
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)
 	}
 
 	return &APIImpl{
-		BaseAPI:         base,
-		db:              db,
-		ethBackend:      eth,
-		txPool:          txPool,
-		mining:          mining,
-		gasCache:        NewGasPriceCache(),
-		GasCap:          gascap,
-		ReturnDataLimit: returnDataLimit,
-		ZkRpcUrl:        zkRpcUrl,
+		BaseAPI:                    base,
+		db:                         db,
+		ethBackend:                 eth,
+		txPool:                     txPool,
+		mining:                     mining,
+		gasCache:                   NewGasPriceCache(),
+		GasCap:                     gascap,
+		ReturnDataLimit:            returnDataLimit,
+		ZkRpcUrl:                   "",
+		AllowFreeTransactions:      zkConfig.AllowFreeTransactions,
+		AllowPreEIP155Transactions: zkConfig.AllowPreEIP155Transactions,
 	}
 }
 

@@ -39,6 +39,7 @@ import (
 	"github.com/hashicorp/golang-lru/v2/simplelru"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -292,6 +293,7 @@ type TxPool struct {
 	blockGasLimit           atomic.Uint64
 	shanghaiTime            *big.Int
 	isPostShanghai          atomic.Bool
+	allowFreeTransactions   bool
 
 	// we cannot be in a flushing state whilst getting transactions from the pool, so we have this mutex which is
 	// exposed publicly so anything wanting to get "best" transactions can ensure a flush isn't happening and
@@ -299,7 +301,7 @@ type TxPool struct {
 	flushMtx *sync.Mutex
 }
 
-func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
+func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, zkCfg *ethconfig.Zk, cache kvcache.Cache, chainID uint256.Int, shanghaiTime *big.Int) (*TxPool, error) {
 	var err error
 	localsHistory, err := simplelru.NewLRU[string, struct{}](10_000, nil)
 	if err != nil {
@@ -338,6 +340,7 @@ func New(newTxs chan types.Announcements, coreDB kv.RoDB, cfg txpoolcfg.Config, 
 		unprocessedRemoteTxs:    &types.TxSlots{},
 		unprocessedRemoteByHash: map[string]int{},
 		shanghaiTime:            shanghaiTime,
+		allowFreeTransactions:   zkCfg.AllowFreeTransactions,
 		flushMtx:                &sync.Mutex{},
 	}, nil
 }
@@ -377,7 +380,13 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remote.StateChang
 	if err := minedTxs.Valid(); err != nil {
 		return err
 	}
-	baseFee := stateChanges.PendingBlockBaseFee
+
+	var baseFee uint64
+	if !p.allowFreeTransactions {
+		baseFee = stateChanges.PendingBlockBaseFee
+	} else {
+		baseFee = uint64(0)
+	}
 
 	pendingBaseFee, baseFeeChanged := p.setBaseFee(baseFee)
 	// Update pendingBase for all pool queues and slices

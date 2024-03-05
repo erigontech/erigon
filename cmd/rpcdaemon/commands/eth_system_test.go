@@ -12,6 +12,7 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon/core"
@@ -47,7 +48,7 @@ func TestGasPrice(t *testing.T) {
 			defer m.DB.Close()
 			stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 			base := NewBaseApi(nil, stateCache, snapshotsync.NewBlockReaderWithSnapshots(m.BlockSnapshots, m.TransactionsV3), nil, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
-			eth := NewEthAPI(base, m.DB, nil, nil, nil, 5000000, 100_000, "")
+			eth := NewEthAPI(base, m.DB, nil, nil, nil, 5000000, 100_000, ethconfig.DefaultZkConfig)
 
 			ctx := context.Background()
 			result, err := eth.GasPrice(ctx)

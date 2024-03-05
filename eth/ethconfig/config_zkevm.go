@@ -22,6 +22,10 @@ type Zk struct {
 	SequencerAddress            common.Address
 	ExecutorUrls                []string
 	ExecutorStrictMode          bool
+	AllowFreeTransactions       bool
+	AllowPreEIP155Transactions  bool
 
 	RebuildTreeAfter uint64
 }
+
+var DefaultZkConfig = &Zk{}

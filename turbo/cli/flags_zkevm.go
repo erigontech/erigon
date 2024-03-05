@@ -3,12 +3,13 @@ package cli
 import (
 	"fmt"
 
+	"strings"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/urfave/cli/v2"
-	"strings"
 )
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -46,6 +47,8 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		SequencerAddress:            libcommon.HexToAddress(ctx.String(utils.SequencerAddressFlag.Name)),
 		ExecutorUrls:                strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
 		ExecutorStrictMode:          ctx.Bool(utils.ExecutorStrictMode.Name),
+		AllowFreeTransactions:       ctx.Bool(utils.AllowFreeTransactions.Name),
+		AllowPreEIP155Transactions:  ctx.Bool(utils.AllowPreEIP155Transactions.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)

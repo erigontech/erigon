@@ -59,9 +59,9 @@ func main() {
 			return
 		}
 
-		if err = os.Remove("./traces/" + traceFile); err != nil {
-			fmt.Println(err)
-		}
+		// if err = os.Remove("./traces/" + traceFile); err != nil {
+		// 	fmt.Println(err)
+		// }
 	}
 
 	fmt.Println("Check finished.")

@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/eth/filters"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/rpc"
@@ -37,7 +38,7 @@ func TestGetLogs(t *testing.T) {
 	agg := m.HistoryV3Components()
 	baseApi := NewBaseApi(nil, kvcache.New(kvcache.DefaultCoherentConfig), br, agg, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs)
 	{
-		ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, "")
+		ethApi := NewEthAPI(baseApi, m.DB, nil, nil, nil, 5000000, 100_000, ethconfig.DefaultZkConfig)
 
 		logs, err := ethApi.GetLogs(context.Background(), filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(10)})
 		assert.NoError(err)
