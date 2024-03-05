@@ -7,6 +7,8 @@ import (
 	"path"
 	"time"
 
+	"google.golang.org/grpc/credentials"
+
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/semaphore"
 
@@ -30,7 +32,8 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"google.golang.org/grpc/credentials"
+
+	"github.com/spf13/afero"
 
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
@@ -45,7 +48,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/phase1/stages"
 	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/spf13/afero"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -131,7 +133,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	syncedDataManager := synced_data.NewSyncedDataManager(true, beaconConfig)
 
 	emitters := beaconevents.NewEmitters()
-	forkChoice, err := forkchoice.NewForkChoiceStore(ctx, state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager, blobStorage)
+	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, caplinFreezer, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager, blobStorage)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -261,7 +263,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		log.Info("Beacon API started", "addr", cfg.Address)
 	}
 
-	forkChoice.StartJobsRTT()
+	forkChoice.StartJobsRTT(ctx)
 
 	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, gossipSource, blobStorage)
 	sync := stages.ConsensusClStages(ctx, stageCfg)

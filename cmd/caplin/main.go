@@ -114,7 +114,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 	var executionEngine execution_client2.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client2.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client2.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
 		}
