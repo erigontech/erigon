@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -23,11 +24,18 @@ type Service interface {
 }
 
 func NewService(maxPeers int, logger log.Logger, sentryClient direct.SentryClient) Service {
-	return newService(maxPeers, logger, sentryClient, rand.Uint64)
+	fetcherConfig := FetcherConfig{
+		responseTimeout: 5 * time.Second,
+		retryBackOff:    10 * time.Second,
+		maxRetries:      2,
+	}
+
+	return newService(maxPeers, fetcherConfig, logger, sentryClient, rand.Uint64)
 }
 
 func newService(
 	maxPeers int,
+	fetcherConfig FetcherConfig,
 	logger log.Logger,
 	sentryClient direct.SentryClient,
 	requestIdGenerator RequestIdGenerator,
@@ -37,7 +45,9 @@ func newService(
 	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
 	messageSender := NewMessageSender(sentryClient)
 	peerPenalizer := NewPeerPenalizer(sentryClient)
-	fetcher := NewTrackingFetcher(logger, messageListener, messageSender, peerPenalizer, requestIdGenerator, peerTracker)
+	fetcher := NewFetcher(fetcherConfig, logger, messageListener, messageSender, requestIdGenerator)
+	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
+	fetcher = NewTrackingFetcher(fetcher, peerTracker)
 	return &service{
 		maxPeers:        maxPeers,
 		fetcher:         fetcher,

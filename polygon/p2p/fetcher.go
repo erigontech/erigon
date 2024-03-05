@@ -6,45 +6,47 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/ledgerwatch/log/v3"
 	"modernc.org/mathutil"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const responseTimeout = 5 * time.Second
-
 type RequestIdGenerator func() uint64
+
+type FetcherConfig struct {
+	responseTimeout time.Duration
+	retryBackOff    time.Duration
+	maxRetries      uint64
+}
 
 type Fetcher interface {
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 }
 
 func NewFetcher(
+	config FetcherConfig,
 	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
-	peerPenalizer PeerPenalizer,
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
 	return &fetcher{
+		config:             config,
 		logger:             logger,
 		messageListener:    messageListener,
 		messageSender:      messageSender,
-		peerPenalizer:      peerPenalizer,
 		requestIdGenerator: requestIdGenerator,
 	}
 }
 
 type fetcher struct {
+	config             FetcherConfig
 	logger             log.Logger
 	messageListener    MessageListener
 	messageSender      MessageSender
-	peerPenalizer      PeerPenalizer
 	requestIdGenerator RequestIdGenerator
 }
 
@@ -63,35 +65,14 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	// A header is approximately 500 bytes, hence 1024 headers should be less than 2 MB.
 	// As a simplification we can only use MaxHeadersServe for chunking.
 	amount := end - start
-	chunks := amount / eth.MaxHeadersServe
+	numChunks := amount / eth.MaxHeadersServe
 	if amount%eth.MaxHeadersServe > 0 {
-		chunks++
+		numChunks++
 	}
 
 	headers := make([]*types.Header, 0, amount)
-	observer := make(ChanMessageObserver[*sentry.InboundMessage])
-	f.messageListener.RegisterBlockHeadersObserver(observer)
-	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
-
-	for i := uint64(0); i < chunks; i++ {
-		chunkStart := start + i*eth.MaxHeadersServe
-		chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
-		requestId := f.requestIdGenerator()
-
-		err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
-			RequestId: requestId,
-			GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
-				Origin: eth.HashOrNumber{
-					Number: chunkStart,
-				},
-				Amount: chunkAmount,
-			},
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		headerChunk, err := f.awaitHeadersResponse(ctx, requestId, peerId, observer)
+	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
+		headerChunk, err := f.fetchHeaderChunkWithRetry(ctx, start, end, chunkNum, peerId)
 		if err != nil {
 			return nil, err
 		}
@@ -99,20 +80,71 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 		headers = append(headers, headerChunk...)
 	}
 
-	if err := f.validateHeadersResponse(headers, start, end, amount); err != nil {
-		shouldPenalize := errors.Is(err, &ErrIncorrectOriginHeader{}) ||
-			errors.Is(err, &ErrTooManyHeaders{}) ||
-			errors.Is(err, &ErrDisconnectedHeaders{})
+	if err := f.validateHeadersResponse(headers, start, amount); err != nil {
+		return nil, err
+	}
 
-		if shouldPenalize {
-			f.logger.Debug("penalizing peer", "peerId", peerId, "err", err.Error())
+	return headers, nil
+}
 
-			penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
-			if penalizeErr != nil {
-				err = fmt.Errorf("%w: %w", penalizeErr, err)
+func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+	headers, err := backoff.RetryWithData(func() ([]*types.Header, error) {
+		headers, err := f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId)
+		if err != nil {
+			// retry timeouts
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
 			}
+
+			// permanent errors are not retried
+			return nil, backoff.Permanent(err)
 		}
 
+		return headers, nil
+	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(f.config.retryBackOff), f.config.maxRetries))
+	if err != nil {
+		return nil, err
+	}
+
+	return headers, nil
+}
+
+func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	messages := make(chan *DecodedInboundMessage[*eth.BlockHeadersPacket66])
+	observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
+		select {
+		case <-ctx.Done():
+			return
+		case messages <- message:
+			// no-op
+		}
+	}
+
+	unregister := f.messageListener.RegisterBlockHeadersObserver(observer)
+	defer unregister()
+
+	chunkStart := start + chunkNum*eth.MaxHeadersServe
+	chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
+	requestId := f.requestIdGenerator()
+
+	err := f.messageSender.SendGetBlockHeaders(ctx, peerId, eth.GetBlockHeadersPacket66{
+		RequestId: requestId,
+		GetBlockHeadersPacket: &eth.GetBlockHeadersPacket{
+			Origin: eth.HashOrNumber{
+				Number: chunkStart,
+			},
+			Amount: chunkAmount,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	headers, err := f.awaitHeadersResponse(ctx, requestId, peerId, messages)
+	if err != nil {
 		return nil, err
 	}
 
@@ -123,95 +155,59 @@ func (f *fetcher) awaitHeadersResponse(
 	ctx context.Context,
 	requestId uint64,
 	peerId PeerId,
-	observer ChanMessageObserver[*sentry.InboundMessage],
+	messages <-chan *DecodedInboundMessage[*eth.BlockHeadersPacket66],
 ) ([]*types.Header, error) {
-	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, f.config.responseTimeout)
 	defer cancel()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
-		case msg := <-observer:
-			msgPeerId := PeerIdFromH512(msg.PeerId)
-			if msgPeerId != peerId {
+		case message := <-messages:
+			if PeerIdFromH512(message.Raw.PeerId) != peerId {
 				continue
 			}
 
-			var pkt eth.BlockHeadersPacket66
-			if err := rlp.DecodeBytes(msg.Data, &pkt); err != nil {
-				if rlp.IsInvalidRLPError(err) {
-					f.logger.Debug("penalizing peer for invalid rlp response", "peerId", peerId)
-					penalizeErr := f.peerPenalizer.Penalize(ctx, peerId)
-					if penalizeErr != nil {
-						err = fmt.Errorf("%w: %w", penalizeErr, err)
-					}
-				}
-
-				return nil, fmt.Errorf("failed to decode BlockHeadersPacket66: %w", err)
+			if message.DecodeErr != nil {
+				return nil, message.DecodeErr
 			}
 
-			if pkt.RequestId != requestId {
+			if message.Decoded.RequestId != requestId {
 				continue
 			}
 
-			return pkt.BlockHeadersPacket, nil
+			return message.Decoded.BlockHeadersPacket, nil
 		}
 	}
 }
 
-func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, end, amount uint64) error {
-	if uint64(len(headers)) < amount {
-		var first, last uint64
-		if len(headers) > 0 {
-			first = headers[0].Number.Uint64()
-			last = headers[len(headers)-1].Number.Uint64()
-		}
-
-		return &ErrIncompleteHeaders{
-			requestStart: start,
-			requestEnd:   end,
-			first:        first,
-			last:         last,
-			amount:       len(headers),
-		}
-	}
-
-	if uint64(len(headers)) > amount {
+func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
+	headersLen := uint64(len(headers))
+	if headersLen > amount {
 		return &ErrTooManyHeaders{
 			requested: int(amount),
 			received:  len(headers),
 		}
 	}
 
-	if start != headers[0].Number.Uint64() {
-		return &ErrIncorrectOriginHeader{
-			requested: start,
-			received:  headers[0].Number.Uint64(),
+	for i, header := range headers {
+		expectedHeaderNum := start + uint64(i)
+		currentHeaderNumber := header.Number.Uint64()
+		if currentHeaderNumber != expectedHeaderNum {
+			return &ErrNonSequentialHeaderNumbers{
+				current:  currentHeaderNumber,
+				expected: expectedHeaderNum,
+			}
 		}
 	}
 
-	var parentHeader *types.Header
-	for _, header := range headers {
-		if parentHeader == nil {
-			parentHeader = header
-			continue
+	if headersLen < amount {
+		return &ErrIncompleteHeaders{
+			start:     start,
+			requested: amount,
+			received:  headersLen,
 		}
-
-		parentHeaderHash := parentHeader.Hash()
-		currentHeaderNum := header.Number.Uint64()
-		parentHeaderNum := parentHeader.Number.Uint64()
-		if header.ParentHash != parentHeaderHash || currentHeaderNum != parentHeaderNum+1 {
-			return &ErrDisconnectedHeaders{
-				currentHash:       header.Hash(),
-				currentParentHash: header.ParentHash,
-				currentNum:        currentHeaderNum,
-				parentHash:        parentHeaderHash,
-				parentNum:         parentHeaderNum,
-			}
-		}
-
-		parentHeader = header
 	}
 
 	return nil
@@ -227,26 +223,20 @@ func (e ErrInvalidFetchHeadersRange) Error() string {
 }
 
 type ErrIncompleteHeaders struct {
-	requestStart uint64
-	requestEnd   uint64
-	first        uint64
-	last         uint64
-	amount       int
+	start     uint64
+	requested uint64
+	received  uint64
 }
 
 func (e ErrIncompleteHeaders) Error() string {
 	return fmt.Sprintf(
-		"incomplete fetch headers response: first=%d, last=%d, amount=%d, requested [%d, %d)",
-		e.first, e.last, e.amount, e.requestStart, e.requestEnd,
+		"incomplete fetch headers response: start=%d, requested=%d, received=%d",
+		e.start, e.requested, e.received,
 	)
 }
 
 func (e ErrIncompleteHeaders) LowestMissingBlockNum() uint64 {
-	if e.last == 0 || e.first == 0 || e.first != e.requestStart {
-		return e.requestStart
-	}
-
-	return e.last + 1
+	return e.start + e.received
 }
 
 type ErrTooManyHeaders struct {
@@ -268,48 +258,22 @@ func (e ErrTooManyHeaders) Is(err error) bool {
 	}
 }
 
-type ErrDisconnectedHeaders struct {
-	currentHash       common.Hash
-	currentParentHash common.Hash
-	currentNum        uint64
-	parentHash        common.Hash
-	parentNum         uint64
+type ErrNonSequentialHeaderNumbers struct {
+	current  uint64
+	expected uint64
 }
 
-func (e ErrDisconnectedHeaders) Error() string {
+func (e ErrNonSequentialHeaderNumbers) Error() string {
 	return fmt.Sprintf(
-		"disconnected headers in fetch headers response: %s, %s, %s, %s, %s",
-		fmt.Sprintf("currentHash=%v", e.currentHash),
-		fmt.Sprintf("currentParentHash=%v", e.currentParentHash),
-		fmt.Sprintf("currentNum=%v", e.currentNum),
-		fmt.Sprintf("parentHash=%v", e.parentHash),
-		fmt.Sprintf("parentNum=%v", e.parentNum),
+		"non sequential header numbers in fetch headers response: current=%d, expected=%d",
+		e.current, e.expected,
 	)
 }
 
-func (e ErrDisconnectedHeaders) Is(err error) bool {
-	var errDisconnectedHeaders *ErrDisconnectedHeaders
+func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
+	var errDisconnectedHeaders *ErrNonSequentialHeaderNumbers
 	switch {
 	case errors.As(err, &errDisconnectedHeaders):
-		return true
-	default:
-		return false
-	}
-}
-
-type ErrIncorrectOriginHeader struct {
-	requested uint64
-	received  uint64
-}
-
-func (e ErrIncorrectOriginHeader) Error() string {
-	return fmt.Sprintf("incorrect origin header: requested=%d, received=%d", e.requested, e.received)
-}
-
-func (e ErrIncorrectOriginHeader) Is(err error) bool {
-	var errIncorrectOriginHeader *ErrIncorrectOriginHeader
-	switch {
-	case errors.As(err, &errIncorrectOriginHeader):
 		return true
 	default:
 		return false
