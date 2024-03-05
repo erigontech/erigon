@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -12,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
+	rawdbZk "github.com/ledgerwatch/erigon/zk/rawdb"
 )
 
 type SequencerInterhashesCfg struct {
@@ -79,7 +81,13 @@ func SpawnSequencerInterhashesStage(
 	}
 	header := latest.Header()
 
-	receipts, err := rawdb.ReadReceiptsByHash(tx, header.Hash())
+	blockNum := header.Number.Uint64()
+	preExecuteHeaderHash := header.Hash()
+	receipts, err := rawdb.ReadReceiptsByHash(tx, preExecuteHeaderHash)
+	if err != nil {
+		return err
+	}
+	senders, err := rawdb.ReadSenders(tx, preExecuteHeaderHash, header.Number.Uint64())
 	if err != nil {
 		return err
 	}
@@ -94,11 +102,11 @@ func SpawnSequencerInterhashesStage(
 	if err := rawdb.WriteHeadHeaderHash(tx, newHash); err != nil {
 		return err
 	}
-	if err := rawdb.WriteCanonicalHash(tx, newHash, header.Number.Uint64()); err != nil {
+	if err := rawdb.WriteCanonicalHash(tx, newHash, blockNum); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
 	}
 
-	err = rawdb.WriteReceipts(tx, header.Number.Uint64(), receipts)
+	err = rawdb.WriteReceipts(tx, blockNum, receipts)
 	if err != nil {
 		return fmt.Errorf("failed to write receipts: %v", err)
 	}
@@ -107,6 +115,21 @@ func SpawnSequencerInterhashesStage(
 	if err != nil {
 		return fmt.Errorf("failed to write body: %v", err)
 	}
+
+	if err := rawdb.WriteSenders(tx, newHash, blockNum, senders); err != nil {
+		return fmt.Errorf("failed to write senders: %v", err)
+	}
+
+	if err := rawdbZk.DeleteSenders(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete senders: %v", err)
+	}
+
+	if err := rawdbZk.DeleteHeader(tx, preExecuteHeaderHash, blockNum); err != nil {
+		return fmt.Errorf("failed to delete header: %v", err)
+	}
+
+	//TODO: Consider deleting something else rather than only senders and headers
+	//TODO: Consider offloading deleting to a thread that runs in a parallel to stages
 
 	// write the new block lookup entries
 	rawdb.WriteTxLookupEntries(tx, latest)
