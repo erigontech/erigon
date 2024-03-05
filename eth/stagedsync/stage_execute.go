@@ -486,17 +486,31 @@ Loop:
 
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
-			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
-			// Recreate tx because Silkworm has just done commit or abort on passed one
-			var tx_err error
-			txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
-			if tx_err != nil {
-				return tx_err
+			// In case of internal tx we must close it (no changes, so commit not needed) before Silkworm starts
+			if !useExternalTx {
+				txc.Tx.Rollback()
+				txc.Tx = nil
 			}
-			defer txc.Tx.Rollback()
-			// Recreate memory batch because underlying tx has changed
-			batch.Close()
-			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
+			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, cfg.db, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			if err != nil {
+				// In case of any error we need to increment to have the failed block number
+				blockNum++
+			}
+			if !useExternalTx {
+				/*if err = txc.Tx.Commit(); err != nil {
+					return err
+				}*/
+				// Recreate internal tx after Silkworm has finished
+				var tx_err error
+				txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
+				if tx_err != nil {
+					return tx_err
+				}
+				defer txc.Tx.Rollback()
+				// Recreate memory batch because underlying tx has changed
+				batch.Close()
+				batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
+			}
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
