@@ -241,9 +241,9 @@ func verify(cliCtx *cli.Context) error {
 		srcSession = dstSession
 	}
 
-	return verfifySnapshots(srcSession, dstSession, firstBlock, lastBlock, snapTypes, torrents, hashes, manifest)
+	return verifySnapshots(srcSession, dstSession, firstBlock, lastBlock, snapTypes, torrents, hashes, manifest)
 }
 
-func verfifySnapshots(srcSession sync.DownloadSession, rcSession sync.DownloadSession, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
+func verifySnapshots(srcSession sync.DownloadSession, rcSession sync.DownloadSession, from uint64, to uint64, snapTypes []snaptype.Type, torrents, hashes, manifest bool) error {
 	return fmt.Errorf("TODO")
 }
