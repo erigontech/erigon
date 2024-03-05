@@ -91,7 +91,7 @@ type threadSafeTx struct {
 	sync.Mutex
 }
 
-//go:generate mockgen -destination=./mock/snapshots_mock.go -package=mock . Snapshots
+//go:generate mockgen -destination=./snapshots_mock.go -package=remotedbserver . Snapshots
 type Snapshots interface {
 	Files() []string
 }

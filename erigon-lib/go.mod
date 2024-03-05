@@ -23,7 +23,6 @@ require (
 	github.com/edsrzf/mmap-go v1.1.0
 	github.com/go-stack/stack v1.8.1
 	github.com/gofrs/flock v0.8.1
-	github.com/golang/mock v1.6.0
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0
 	github.com/hashicorp/golang-lru/v2 v2.0.6
@@ -38,6 +37,7 @@ require (
 	github.com/spaolacci/murmur3 v1.1.0
 	github.com/stretchr/testify v1.8.4
 	github.com/tidwall/btree v1.6.0
+	go.uber.org/mock v0.4.0
 	golang.org/x/crypto v0.18.0
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/sync v0.6.0
