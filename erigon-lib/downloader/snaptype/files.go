@@ -218,6 +218,12 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 		return res
 	}
 
+	if f.Type == nil {
+		panic(fmt.Sprintf("%#v", f))
+	}
+	if o.Type == nil {
+		panic(fmt.Sprintf("%#v", o))
+	}
 	return strings.Compare(f.Type.String(), o.Type.String())
 }
 
