@@ -611,6 +611,9 @@ func (s *RoSnapshots) ReopenWithDB(db kv.RoDB) error {
 }
 
 func (s *RoSnapshots) Close() {
+	if s == nil {
+		return
+	}
 	s.lockSegments()
 	defer s.unlockSegments()
 	s.closeWhatNotInList(nil)
