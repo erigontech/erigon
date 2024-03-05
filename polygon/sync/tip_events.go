@@ -14,24 +14,58 @@ import (
 
 const EventTypeNewHeader = "new-header"
 const EventTypeNewHeaderHashes = "new-header-hashes"
-const EventTypeMilestone = "milestone"
+const EventTypeNewMilestone = "new-milestone"
 const EventTypeNewSpan = "new-span"
+
+type EventNewHeader struct {
+	NewHeader *types.Header
+	PeerId    *p2p.PeerId
+}
+
+type EventNewHeaderHashes struct {
+	NewHeaderHashes eth.NewBlockHashesPacket
+	PeerId          *p2p.PeerId
+}
+
+type EventNewMilestone = *heimdall.Milestone
+
+type EventNewSpan = *heimdall.Span
 
 type Event struct {
 	Type string
 
-	// EventTypeNewHeader
-	NewHeader *types.Header
-	PeerId    p2p.PeerId
+	newHeader       EventNewHeader
+	newHeaderHashes EventNewHeaderHashes
+	newMilestone    EventNewMilestone
+	newSpan         EventNewSpan
+}
 
-	// EventTypeNewHeaderHashes
-	NewHeaderHashes eth.NewBlockHashesPacket
+func (e Event) AsNewHeader() EventNewHeader {
+	if e.Type != EventTypeNewHeader {
+		panic("Event type mismatch")
+	}
+	return e.newHeader
+}
 
-	// EventTypeMilestone
-	Milestone *heimdall.Milestone
+func (e Event) AsNewHeaderHashes() EventNewHeaderHashes {
+	if e.Type != EventTypeNewHeaderHashes {
+		panic("Event type mismatch")
+	}
+	return e.newHeaderHashes
+}
 
-	// EventTypeNewSpan
-	NewSpan *heimdall.Span
+func (e Event) AsNewMilestone() EventNewMilestone {
+	if e.Type != EventTypeNewMilestone {
+		panic("Event type mismatch")
+	}
+	return e.newMilestone
+}
+
+func (e Event) AsNewSpan() EventNewSpan {
+	if e.Type != EventTypeNewSpan {
+		panic("Event type mismatch")
+	}
+	return e.newSpan
 }
 
 type TipEvents struct {
@@ -96,9 +130,11 @@ func (te *TipEvents) Run(ctx context.Context) error {
 		}
 		block := message.Decoded.Block
 		te.pushEvent(Event{
-			Type:      EventTypeNewHeader,
-			NewHeader: block.Header(),
-			PeerId:    message.PeerId,
+			Type: EventTypeNewHeader,
+			newHeader: EventNewHeader{
+				NewHeader: block.Header(),
+				PeerId:    &message.PeerId,
+			},
 		})
 	})
 	defer newBlockObserverCancel()
@@ -108,17 +144,19 @@ func (te *TipEvents) Run(ctx context.Context) error {
 			return
 		}
 		te.pushEvent(Event{
-			Type:            EventTypeNewHeaderHashes,
-			NewHeaderHashes: *message.Decoded,
-			PeerId:          message.PeerId,
+			Type: EventTypeNewHeaderHashes,
+			newHeaderHashes: EventNewHeaderHashes{
+				NewHeaderHashes: *message.Decoded,
+				PeerId:          &message.PeerId,
+			},
 		})
 	})
 	defer newBlockHashesObserverCancel()
 
 	err := te.heimdallService.OnMilestoneEvent(ctx, func(milestone *heimdall.Milestone) {
 		te.pushEvent(Event{
-			Type:      EventTypeMilestone,
-			Milestone: milestone,
+			Type:         EventTypeNewMilestone,
+			newMilestone: milestone,
 		})
 	})
 	if err != nil {
@@ -128,7 +166,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	err = te.heimdallService.OnSpanEvent(ctx, func(span *heimdall.Span) {
 		te.pushEvent(Event{
 			Type:    EventTypeNewSpan,
-			NewSpan: span,
+			newSpan: span,
 		})
 	})
 	if err != nil {
