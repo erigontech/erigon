@@ -14,14 +14,14 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-type DecodedInboundMessage[T any] struct {
+type DecodedInboundMessage[TPacket any] struct {
 	Raw       *sentry.InboundMessage
-	Decoded   T
+	Decoded   TPacket
 	DecodeErr error
 	PeerId    PeerId
 }
 
-type MessageObserver[T any] func(message T)
+type MessageObserver[TMessage any] func(message TMessage)
 
 type UnregisterFunc func()
 
@@ -103,7 +103,7 @@ func (ml *messageListener) RegisterPeerEventObserver(observer MessageObserver[*s
 	return registerEventObserver(ml, ml.peerEventObservers, observer)
 }
 
-func registerEventObserver[TEvent any](ml *messageListener, observers map[uint64]MessageObserver[*TEvent], observer MessageObserver[*TEvent]) UnregisterFunc {
+func registerEventObserver[TMessage any](ml *messageListener, observers map[uint64]MessageObserver[*TMessage], observer MessageObserver[*TMessage]) UnregisterFunc {
 	ml.observersMu.Lock()
 	defer ml.observersMu.Unlock()
 
@@ -145,16 +145,16 @@ func (ml *messageListener) listenPeerEvents(ctx context.Context) {
 	streamEvents(ctx, ml, "PeerEvents", streamFactory, ml.notifyPeerEventObservers)
 }
 
-func streamEvents[TEvent any](
+func streamEvents[TMessage any](
 	ctx context.Context,
 	ml *messageListener,
 	name string,
 	streamFactory func(ctx context.Context, sentryClient direct.SentryClient) (sentrymulticlient.SentryMessageStream, error),
-	handler func(event *TEvent),
+	handler func(event *TMessage),
 ) {
 	defer ml.stopWg.Done()
 
-	eventHandler := func(_ context.Context, event *TEvent, _ direct.SentryClient) error {
+	eventHandler := func(_ context.Context, event *TMessage, _ direct.SentryClient) error {
 		handler(event)
 		return nil
 	}
@@ -165,7 +165,7 @@ func streamEvents[TEvent any](
 		ml.statusDataFactory(),
 		name,
 		streamFactory,
-		func() *TEvent { return new(TEvent) },
+		func() *TMessage { return new(TMessage) },
 		eventHandler,
 		nil,
 		ml.logger,
@@ -202,7 +202,7 @@ func (ml *messageListener) nextObserverId() uint64 {
 	return id
 }
 
-func notifyObservers[T any](mu *sync.Mutex, observers map[uint64]MessageObserver[T], message T) {
+func notifyObservers[TMessage any](mu *sync.Mutex, observers map[uint64]MessageObserver[TMessage], message TMessage) {
 	mu.Lock()
 	defer mu.Unlock()
 
@@ -211,7 +211,7 @@ func notifyObservers[T any](mu *sync.Mutex, observers map[uint64]MessageObserver
 	}
 }
 
-func unregisterFunc[T any](mu *sync.Mutex, observers map[uint64]MessageObserver[T], observerId uint64) UnregisterFunc {
+func unregisterFunc[TMessage any](mu *sync.Mutex, observers map[uint64]MessageObserver[TMessage], observerId uint64) UnregisterFunc {
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
