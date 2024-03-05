@@ -148,6 +148,15 @@ func (s *Sync) onNewHeaderEvent(
 	return nil
 }
 
+func (s *Sync) onNewHeaderHashesEvent(
+	ctx context.Context,
+	event Event,
+	ccBuilder CanonicalChainBuilder,
+) error {
+	// TODO
+	return nil
+}
+
 func (s *Sync) Run(ctx context.Context) error {
 	tip, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
@@ -188,6 +197,10 @@ func (s *Sync) Run(ctx context.Context) error {
 				}
 			case EventTypeNewHeader:
 				if err = s.onNewHeaderEvent(ctx, event, ccBuilder); err != nil {
+					return err
+				}
+			case EventTypeNewHeaderHashes:
+				if err = s.onNewHeaderHashesEvent(ctx, event, ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewSpan:

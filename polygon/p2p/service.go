@@ -9,10 +9,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 //go:generate mockgen -destination=./service_mock.go -package=p2p . Service
@@ -24,7 +21,7 @@ type Service interface {
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 	Penalize(ctx context.Context, peerId PeerId) error
-	OnNewBlock(ctx context.Context, callback func(*types.Block, PeerId))
+	GetMessageListener() MessageListener
 }
 
 func NewService(maxPeers int, logger log.Logger, sentryClient direct.SentryClient) Service {
@@ -98,33 +95,6 @@ func (s *service) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
 	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
 }
 
-// TODO(taratorio): move inside MessageListener
-func (s *service) OnNewBlock(ctx context.Context, callback func(*types.Block, PeerId)) {
-	observer := make(ChanMessageObserver[*sentry.InboundMessage])
-	s.messageListener.RegisterNewBlockObserver(observer)
-
-	decodeMessage := func(message *sentry.InboundMessage) (*types.Block, PeerId, error) {
-		var packet eth.NewBlockPacket
-		if err := rlp.DecodeBytes(message.Data, &packet); err != nil {
-			return nil, PeerId{}, err
-		}
-		return packet.Block, PeerIdFromH512(message.PeerId), nil
-	}
-
-	go func() {
-		defer s.messageListener.UnregisterNewBlockObserver(observer)
-
-		for {
-			select {
-			case message := <-observer:
-				if block, peerId, err := decodeMessage(message); err == nil {
-					go callback(block, peerId)
-				} else {
-					s.logger.Debug("failed to decode NewBlock message", "err", err)
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+func (s *service) GetMessageListener() MessageListener {
+	return s.messageListener
 }

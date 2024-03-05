@@ -50,6 +50,20 @@ func (mr *MockServiceMockRecorder) FetchHeaders(arg0, arg1, arg2, arg3 interface
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchHeaders", reflect.TypeOf((*MockService)(nil).FetchHeaders), arg0, arg1, arg2, arg3)
 }
 
+// GetMessageListener mocks base method.
+func (m *MockService) GetMessageListener() MessageListener {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetMessageListener")
+	ret0, _ := ret[0].(MessageListener)
+	return ret0
+}
+
+// GetMessageListener indicates an expected call of GetMessageListener.
+func (mr *MockServiceMockRecorder) GetMessageListener() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMessageListener", reflect.TypeOf((*MockService)(nil).GetMessageListener))
+}
+
 // ListPeersMayHaveBlockNum mocks base method.
 func (m *MockService) ListPeersMayHaveBlockNum(arg0 uint64) []PeerId {
 	m.ctrl.T.Helper()
@@ -76,18 +90,6 @@ func (m *MockService) MaxPeers() int {
 func (mr *MockServiceMockRecorder) MaxPeers() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "MaxPeers", reflect.TypeOf((*MockService)(nil).MaxPeers))
-}
-
-// OnNewBlock mocks base method.
-func (m *MockService) OnNewBlock(arg0 context.Context, arg1 func(*types.Block, PeerId)) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "OnNewBlock", arg0, arg1)
-}
-
-// OnNewBlock indicates an expected call of OnNewBlock.
-func (mr *MockServiceMockRecorder) OnNewBlock(arg0, arg1 interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "OnNewBlock", reflect.TypeOf((*MockService)(nil).OnNewBlock), arg0, arg1)
 }
 
 // Penalize mocks base method.

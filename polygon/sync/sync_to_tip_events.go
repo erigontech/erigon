@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
 
 const EventTypeNewHeader = "new-header"
+const EventTypeNewHeaderHashes = "new-header-hashes"
 const EventTypeMilestone = "milestone"
 const EventTypeNewSpan = "new-span"
 
@@ -21,6 +23,9 @@ type Event struct {
 	// EventTypeNewHeader
 	NewHeader *types.Header
 	PeerId    p2p.PeerId
+
+	// EventTypeNewHeaderHashes
+	NewHeaderHashes eth.NewBlockHashesPacket
 
 	// EventTypeMilestone
 	Milestone *heimdall.Milestone
@@ -85,13 +90,30 @@ func (se *SyncToTipEvents) takeEvent() (Event, bool) {
 }
 
 func (se *SyncToTipEvents) Run(ctx context.Context) error {
-	se.p2pService.OnNewBlock(ctx, func(block *types.Block, peerId p2p.PeerId) {
+	newBlockObserverCancel := se.p2pService.GetMessageListener().RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+		if message.Decoded == nil {
+			return
+		}
+		block := message.Decoded.Block
 		se.pushEvent(Event{
 			Type:      EventTypeNewHeader,
 			NewHeader: block.Header(),
-			PeerId:    peerId,
+			PeerId:    message.PeerId,
 		})
 	})
+	defer newBlockObserverCancel()
+
+	newBlockHashesObserverCancel := se.p2pService.GetMessageListener().RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+		if message.Decoded == nil {
+			return
+		}
+		se.pushEvent(Event{
+			Type:            EventTypeNewHeaderHashes,
+			NewHeaderHashes: *message.Decoded,
+			PeerId:          message.PeerId,
+		})
+	})
+	defer newBlockHashesObserverCancel()
 
 	err := se.heimdallService.OnMilestoneEvent(ctx, func(milestone *heimdall.Milestone) {
 		se.pushEvent(Event{
