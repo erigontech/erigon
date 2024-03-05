@@ -1498,14 +1498,19 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 		}
 	}
 
-	log.Warn("[dbg] len", "len(pending)", len(pending))
-	for i, t := range pending {
-		if t != nil {
-			log.Warn("[dbg] len", "i", i, "nil", t.Name())
+	var pendingStateFiles []*torrent.Torrent
+	var pendingBlocksFiles []*torrent.Torrent
+
+	for _, t := range pending {
+		_, isStateFile, _ := snaptype.ParseFileName("", t.Name())
+		if isStateFile {
+			pendingStateFiles = append(pendingStateFiles, t)
 		} else {
-			log.Warn("[dbg] len", "i", i, "nil", t == nil)
+			pendingBlocksFiles = append(pendingBlocksFiles, t)
 		}
 	}
+	pending = pendingBlocksFiles
+
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
 		in, _, ok1 := snaptype.ParseFileName("", i.Name())
 		jn, _, ok2 := snaptype.ParseFileName("", j.Name())
@@ -1560,7 +1565,7 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 		case len(cases) - 2:
 			return nil
 		case len(cases) - 1:
-			return available
+			return append(available, pendingStateFiles...)
 		default:
 			available = append(available, pending[selected])
 
