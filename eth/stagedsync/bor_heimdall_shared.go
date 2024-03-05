@@ -36,7 +36,7 @@ func FetchSpanZeroForMiningIfNeeded(
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		_, err := blockReader.Span(ctx, tx, 0)
 		if err != nil {
-			if errors.Is(err, freezeblocks.SpanNotFoundErr) {
+			if errors.Is(err, freezeblocks.ErrSpanNotFound) {
 				_, err = fetchAndWriteHeimdallSpan(ctx, 0, tx, heimdallClient, "FetchSpanZeroForMiningIfNeeded", logger)
 				return err
 			}

@@ -178,7 +178,13 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	for _, file := range files {
 		file := file
 
-		if ignore.Contains(file) {
+		if item, ok := ignore.Get(file); ok {
+			ts, _ := torrentFiles.LoadByPath(filepath.Join(dirs.Snap, file))
+
+			if ts == nil || item.Hash != ts.InfoHash.AsString() {
+				torrentFiles.Delete(file)
+			}
+
 			i.Add(1)
 			continue
 		}
@@ -318,6 +324,7 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	}()
 
 	t, ok, err = _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
+
 	if err != nil {
 		ts.ChunkSize = 0
 		return _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
@@ -344,32 +351,31 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool())); err != nil {
+		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil)); err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
 		return t, true, nil
 	}
 
-	select {
-	case <-t.GotInfo():
+	if t.Info() != nil {
 		t.AddWebSeeds(ts.Webseeds)
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info(), t.Complete.Bool())); err != nil {
+		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info().Length, nil)); err != nil {
 			return nil, false, fmt.Errorf("update torrent info %s: %w", ts.DisplayName, err)
 		}
-	default:
+	} else {
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
 			return t, true, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
 		}
 
-		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool()))
+		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil))
 	}
 
 	return t, true, nil
 }
 
-func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Info, completed bool) func(tx kv.RwTx) error {
+func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completionTime *time.Time) func(tx kv.RwTx) error {
 	return func(tx kv.RwTx) error {
 		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileName))
 
@@ -381,25 +387,56 @@ func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Inf
 
 		err = json.Unmarshal(infoBytes, &info)
 
+		changed := false
+
 		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) {
 			now := time.Now()
 			info.Name = fileName
 			info.Hash = infoHash
 			info.Created = &now
 			info.Completed = nil
+			changed = true
 		}
 
-		if fileInfo != nil {
-			length := fileInfo.Length
+		if length > 0 && (info.Length == nil || *info.Length != length) {
 			info.Length = &length
+			changed = true
 		}
 
-		if completed && info.Completed == nil {
-			now := time.Now()
-			info.Completed = &now
+		if completionTime != nil {
+			info.Completed = completionTime
+			changed = true
+		}
+
+		if !changed {
+			return nil
 		}
 
 		infoBytes, err = json.Marshal(info)
+
+		if err != nil {
+			return err
+		}
+
+		return tx.Put(kv.BittorrentInfo, []byte(fileName), infoBytes)
+	}
+}
+
+func torrentInfoReset(fileName string, infoHash []byte, length int64) func(tx kv.RwTx) error {
+	return func(tx kv.RwTx) error {
+		now := time.Now()
+
+		info := torrentInfo{
+			Name:    fileName,
+			Hash:    infoHash,
+			Created: &now,
+		}
+
+		if length > 0 {
+			info.Length = &length
+		}
+
+		infoBytes, err := json.Marshal(info)
 
 		if err != nil {
 			return err
