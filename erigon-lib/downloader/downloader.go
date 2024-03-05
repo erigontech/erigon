@@ -468,9 +468,6 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, l
 						return err
 					}
 
-					downloadsMutex.Lock()
-					defer downloadsMutex.Unlock()
-
 					if preverified, ok := versioned.Preverified.Get(fileInfo.Name()); ok {
 						if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 							downloadMap.Set(preverified.Name, preverified)
