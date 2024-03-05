@@ -40,7 +40,7 @@ type Pool struct {
 	// when returned, and skipped when requesting
 	peerData map[peer.ID]*Item
 
-	bannedPeers map[peer.ID]struct{}
+	bannedPeers sync.Map
 	queue       *ring.Buffer[*Item]
 
 	mu sync.Mutex
@@ -48,20 +48,13 @@ type Pool struct {
 
 func NewPool() *Pool {
 	return &Pool{
-		peerData:    make(map[peer.ID]*Item),
-		bannedPeers: map[peer.ID]struct{}{},
-		queue:       ring.NewBuffer[*Item](0, 1024),
+		peerData: make(map[peer.ID]*Item),
+		queue:    ring.NewBuffer[*Item](0, 1024),
 	}
 }
 
-func (p *Pool) LenBannedPeers() int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return len(p.bannedPeers)
-}
-
 func (p *Pool) BanStatus(pid peer.ID) bool {
-	_, ok := p.bannedPeers[pid]
+	_, ok := p.bannedPeers.Load(pid)
 	return ok
 }
 
@@ -69,7 +62,7 @@ func (p *Pool) AddPeer(pid peer.ID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	// if peer banned, return immediately
-	if _, ok := p.bannedPeers[pid]; ok {
+	if _, ok := p.bannedPeers.Load(pid); ok {
 		return
 	}
 	// if peer already here, return immediately
@@ -88,10 +81,10 @@ func (p *Pool) SetBanStatus(pid peer.ID, banned bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if banned {
-		p.bannedPeers[pid] = struct{}{}
+		p.bannedPeers.Store(pid, struct{}{})
 		delete(p.peerData, pid)
 	} else {
-		delete(p.bannedPeers, pid)
+		p.bannedPeers.Delete(pid)
 	}
 }
 
@@ -118,7 +111,7 @@ func (p *Pool) nextPeer() (i *Item, ok bool) {
 		return nil, false
 	}
 	// if peer been banned, get next peer
-	if _, ok := p.bannedPeers[val.id]; ok {
+	if _, ok := p.bannedPeers.Load(val.id); ok {
 		return p.nextPeer()
 	}
 	// if peer not in set, get next peer
