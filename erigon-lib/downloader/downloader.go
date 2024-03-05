@@ -42,6 +42,7 @@ import (
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/c2h5oh/datasize"
+	dir2 "github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/tidwall/btree"
 	"golang.org/x/exp/slices"
@@ -80,7 +81,9 @@ type Downloader struct {
 	stopMainLoop context.CancelFunc
 	wg           sync.WaitGroup
 
-	webseeds  *WebSeeds
+	webseeds         *WebSeeds
+	webseedsDiscover bool
+
 	logger    log.Logger
 	verbosity log.Lvl
 
@@ -152,6 +155,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		webDownloadInfo:     map[string]webDownloadInfo{},
 		webDownloadSessions: map[string]*RCloneSession{},
 		downloading:         map[string]struct{}{},
+		webseedsDiscover:    discover,
 	}
 
 	if cfg.ClientConfig.DownloadRateLimiter != nil {
@@ -212,21 +216,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		}
 	}
 
-	// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
-	// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
-	d.wg.Add(1)
-
-	go func() {
-		defer d.wg.Done()
-		if !discover {
-			return
-		}
-		d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
-		// webseeds.Discover may create new .torrent files on disk
-		if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
-			d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
-		}
-	}()
 	return d, nil
 }
 
@@ -645,6 +634,20 @@ type seedHash struct {
 }
 
 func (d *Downloader) mainLoop(silent bool) error {
+	if d.webseedsDiscover {
+		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
+		// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+			// webseeds.Discover may create new .torrent files on disk
+			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
+				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
+			}
+		}()
+	}
+
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
 	d.webDownloadClient, _ = NewRCloneClient(d.logger)
@@ -1923,6 +1926,10 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			return ctx.Err()
 		}
 
+		if !dir2.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
+			continue
+		}
+
 		if len(whiteList) > 0 {
 			name := t.Name()
 			exactOrPartialMatch := slices.ContainsFunc(whiteList, func(s string) bool {
@@ -1938,7 +1945,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	d.logger.Info("[snapshots] Verify start")
 	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
 
-	completedPieces := &atomic.Uint64{}
+	completedPieces, completedFiles := &atomic.Uint64{}, &atomic.Uint64{}
 
 	{
 		logEvery := time.NewTicker(20 * time.Second)
@@ -1951,7 +1958,11 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 				case <-ctx.Done():
 					return
 				case <-logEvery.C:
-					d.logger.Info("[snapshots] Verify", "progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)))
+					d.logger.Info("[snapshots] Verify",
+						"progress", fmt.Sprintf("%.2f%%", 100*float64(completedPieces.Load())/float64(total)),
+						"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
+						"sz_gb", downloadercfg.DefaultPieceSize*completedPieces.Load()/1024/1024/1024,
+					)
 				}
 			}
 		}()
@@ -1964,6 +1975,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	for _, t := range toVerify {
 		t := t
 		g.Go(func() error {
+			defer completedFiles.Add(1)
 			if failFast {
 				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
 			}
