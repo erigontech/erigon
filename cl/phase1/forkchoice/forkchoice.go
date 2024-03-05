@@ -8,7 +8,6 @@ import (
 	"sync/atomic"
 
 	"github.com/Giulio2002/bls"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
