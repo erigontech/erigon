@@ -10,6 +10,9 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
+// Generate all mocks in file
+//go:generate mockgen -destination=./storage_mock.go -package=heimdall -source=./storage.go
+
 type SpanReader interface {
 	LastSpanId(ctx context.Context) (SpanId, bool, error)
 	GetSpan(ctx context.Context, spanId SpanId) (*Span, error)

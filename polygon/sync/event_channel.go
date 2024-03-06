@@ -4,56 +4,57 @@ import (
 	"container/list"
 	"context"
 	"sync"
-	"time"
 )
 
 // EventChannel is a buffered channel that drops oldest events when full.
 type EventChannel[TEvent any] struct {
-	events    chan TEvent
-	pollDelay time.Duration
+	events chan TEvent
 
 	queue      *list.List
 	queueCap   uint
 	queueMutex sync.Mutex
+	queueCond  *sync.Cond
 }
 
-func NewEventChannel[TEvent any](capacity uint, pollDelay time.Duration) *EventChannel[TEvent] {
+func NewEventChannel[TEvent any](capacity uint) *EventChannel[TEvent] {
 	if capacity == 0 {
 		panic("NewEventChannel: capacity must be > 0")
 	}
-	return &EventChannel[TEvent]{
-		events:    make(chan TEvent),
-		pollDelay: pollDelay,
+
+	ec := &EventChannel[TEvent]{
+		events: make(chan TEvent),
 
 		queue:    list.New(),
 		queueCap: capacity,
 	}
+
+	ec.queueCond = sync.NewCond(&ec.queueMutex)
+
+	return ec
 }
 
 // Events returns a channel for reading events.
-func (te *EventChannel[TEvent]) Events() <-chan TEvent {
-	return te.events
+func (ec *EventChannel[TEvent]) Events() <-chan TEvent {
+	return ec.events
 }
 
 // PushEvent queues an event. If the queue is full, it drops the oldest event to make space.
-func (te *EventChannel[TEvent]) PushEvent(e TEvent) {
-	te.queueMutex.Lock()
-	defer te.queueMutex.Unlock()
+func (ec *EventChannel[TEvent]) PushEvent(e TEvent) {
+	ec.queueMutex.Lock()
+	defer ec.queueMutex.Unlock()
 
-	if uint(te.queue.Len()) == te.queueCap {
-		te.queue.Remove(te.queue.Front())
+	if uint(ec.queue.Len()) == ec.queueCap {
+		ec.queue.Remove(ec.queue.Front())
 	}
 
-	te.queue.PushBack(e)
+	ec.queue.PushBack(e)
+	ec.queueCond.Signal()
 }
 
 // takeEvent dequeues an event. If the queue was empty, it returns false.
-func (te *EventChannel[TEvent]) takeEvent() (TEvent, bool) {
-	te.queueMutex.Lock()
-	defer te.queueMutex.Unlock()
-
-	if elem := te.queue.Front(); elem != nil {
-		e := te.queue.Remove(elem).(TEvent)
+func (ec *EventChannel[TEvent]) takeEvent() (TEvent, bool) {
+	if elem := ec.queue.Front(); elem != nil {
+		e := ec.queue.Remove(elem).(TEvent)
 		return e, true
 	} else {
 		var emptyEvent TEvent
@@ -61,22 +62,41 @@ func (te *EventChannel[TEvent]) takeEvent() (TEvent, bool) {
 	}
 }
 
+// takeEvent dequeues an event. If the queue was empty, it blocks.
+func (ec *EventChannel[TEvent]) waitForEvent(ctx context.Context) (TEvent, error) {
+	waitCtx, waitCancel := context.WithCancel(ctx)
+	defer waitCancel()
+
+	var e TEvent
+
+	go func() {
+		ec.queueMutex.Lock()
+		defer ec.queueMutex.Unlock()
+
+		var ok bool
+		for e, ok = ec.takeEvent(); !ok && (waitCtx.Err() == nil); e, ok = ec.takeEvent() {
+			ec.queueCond.Wait()
+		}
+
+		waitCancel()
+	}()
+
+	<-waitCtx.Done()
+	// if the parent context is done, force the waiting goroutine to exit
+	ec.queueCond.Signal()
+	return e, ctx.Err()
+}
+
 // Run pumps events from the queue to the events channel.
-func (te *EventChannel[TEvent]) Run(ctx context.Context) error {
+func (ec *EventChannel[TEvent]) Run(ctx context.Context) error {
 	for {
-		e, ok := te.takeEvent()
-		if !ok {
-			pollDelayTimer := time.NewTimer(te.pollDelay)
-			select {
-			case <-pollDelayTimer.C:
-				continue
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+		e, err := ec.waitForEvent(ctx)
+		if err != nil {
+			return err
 		}
 
 		select {
-		case te.events <- e:
+		case ec.events <- e:
 		case <-ctx.Done():
 			return ctx.Err()
 		}

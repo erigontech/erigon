@@ -24,7 +24,7 @@ type penalizingFetcher struct {
 	peerPenalizer PeerPenalizer
 }
 
-func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+func (pf *penalizingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	headers, err := pf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
 		shouldPenalize := errors.Is(err, &ErrTooManyHeaders{}) ||

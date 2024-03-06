@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"time"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -17,12 +16,12 @@ const EventTypeNewSpan = "new-span"
 
 type EventNewHeader struct {
 	NewHeader *types.Header
-	PeerId    p2p.PeerId
+	PeerId    *p2p.PeerId
 }
 
 type EventNewHeaderHashes struct {
 	NewHeaderHashes eth.NewBlockHashesPacket
-	PeerId          p2p.PeerId
+	PeerId          *p2p.PeerId
 }
 
 type EventNewMilestone = *heimdall.Milestone
@@ -80,7 +79,7 @@ func NewTipEvents(
 	eventsCapacity := uint(1000) // more than 3 milestones
 
 	return &TipEvents{
-		events: NewEventChannel[Event](eventsCapacity, time.Second),
+		events: NewEventChannel[Event](eventsCapacity),
 
 		p2pService:      p2pService,
 		heimdallService: heimdallService,
@@ -92,7 +91,7 @@ func (te *TipEvents) Events() <-chan Event {
 }
 
 func (te *TipEvents) Run(ctx context.Context) error {
-	newBlockObserverCancel := te.p2pService.GetMessageListener().RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
+	newBlockObserverCancel := te.p2pService.RegisterNewBlockObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockPacket]) {
 		block := message.Decoded.Block
 		te.events.PushEvent(Event{
 			Type: EventTypeNewHeader,
@@ -104,7 +103,7 @@ func (te *TipEvents) Run(ctx context.Context) error {
 	})
 	defer newBlockObserverCancel()
 
-	newBlockHashesObserverCancel := te.p2pService.GetMessageListener().RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
+	newBlockHashesObserverCancel := te.p2pService.RegisterNewBlockHashesObserver(func(message *p2p.DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
 		te.events.PushEvent(Event{
 			Type: EventTypeNewHeaderHashes,
 			newHeaderHashes: EventNewHeaderHashes{

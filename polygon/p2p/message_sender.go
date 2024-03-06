@@ -13,7 +13,7 @@ import (
 var ErrPeerNotFound = errors.New("peer not found")
 
 type MessageSender interface {
-	SendGetBlockHeaders(ctx context.Context, peerId PeerId, req eth.GetBlockHeadersPacket66) error
+	SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error
 }
 
 func NewMessageSender(sentryClient direct.SentryClient) MessageSender {
@@ -26,7 +26,7 @@ type messageSender struct {
 	sentryClient direct.SentryClient
 }
 
-func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId PeerId, req eth.GetBlockHeadersPacket66) error {
+func (ms *messageSender) SendGetBlockHeaders(ctx context.Context, peerId *PeerId, req eth.GetBlockHeadersPacket66) error {
 	data, err := rlp.EncodeToBytes(req)
 	if err != nil {
 		return err

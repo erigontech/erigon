@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -22,7 +22,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/consensus"
-	consensusmock "github.com/ledgerwatch/erigon/consensus/mock"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -537,7 +536,7 @@ func (h *Harness) saveHeaders(ctx context.Context, t *testing.T, headers []*type
 }
 
 func (h *Harness) mockChainHeaderReader(ctrl *gomock.Controller) consensus.ChainHeaderReader {
-	mockChainHR := consensusmock.NewMockChainHeaderReader(ctrl)
+	mockChainHR := consensus.NewMockChainHeaderReader(ctrl)
 	mockChainHR.
 		EXPECT().
 		GetHeader(gomock.Any(), gomock.Any()).
