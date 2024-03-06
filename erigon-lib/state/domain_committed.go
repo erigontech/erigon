@@ -445,6 +445,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 		}
 		dc.d.logger.Warn("lookupByShortenedKey file not found",
 			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
+			"shortened", fmt.Sprintf("%x", shortKey),
 			"domain", dc.d.keysTable, "files", fileStepsss, "roFiles", roFiles,
 			"listSize", len(list), "roFilesCount", len(dc.files), "filesCount", dc.d.files.Len())
 		return nil, false
@@ -476,6 +477,18 @@ func (dc *DomainContext) commitmentValTransform(
 
 ) valueTransformer {
 
+	accsToMerge := ""
+	for _, f := range filesAccount {
+		accsToMerge += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
+	}
+	storToMerge := ""
+	for _, f := range filesStorage {
+		storToMerge += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
+	}
+
+	accMerged := fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep)
+	stoMerged := fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep)
+
 	return func(valBuf []byte) (transValBuf []byte, err error) {
 		if !dc.d.replaceKeysInValues || len(valBuf) == 0 {
 			return valBuf, nil
@@ -495,9 +508,9 @@ func (dc *DomainContext) commitmentValTransform(
 						if !found {
 							dc.d.logger.Crit("valTransform: lost storage full key",
 								"shortened", fmt.Sprintf("%x", key),
-								"merging", fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep),
-								"toMerge", len(filesStorage),
-								"startTxNumToReplace", startTxNum, "endTxNumToReplace", endTxNum)
+								"merged", stoMerged,
+								"toMerge", storToMerge,
+								"toMergeCount", len(filesStorage))
 							//panic(fmt.Sprintf("lost storage full key %x", key))
 							return nil, fmt.Errorf("valTransform: lookup lost storage full key %x", key)
 						}
@@ -526,9 +539,9 @@ func (dc *DomainContext) commitmentValTransform(
 					buf, found = dc.lookupByShortenedKey(key, filesAccount)
 					if !found {
 						dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key),
-							"merging", fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep),
-							"toMerge", len(filesAccount),
-							"startTxNumToReplace", startTxNum, "endTxNumToReplace", endTxNum)
+							"merged", accMerged,
+							"toMerge", accsToMerge,
+							"toMergeCount", len(filesAccount))
 						//panic(fmt.Sprintf("vt: lost account full key: %x", key))
 						return nil, fmt.Errorf("valTransform: lookup account full key: %x", key)
 					}
