@@ -29,6 +29,14 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
+type PeerStatisticUpdate struct {
+	PeerID  string
+	Inbound bool
+	MsgType string
+	MsgCap  string
+	Bytes   int
+}
+
 type SyncStatistics struct {
 	SyncStages       SyncStages                 `json:"syncStages"`
 	SnapshotDownload SnapshotDownloadStatistics `json:"snapshotDownload"`
@@ -164,5 +172,9 @@ func (ti SyncStagesList) Type() Type {
 }
 
 func (ti CurrentSyncStage) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti PeerStatisticUpdate) Type() Type {
 	return TypeOf(ti)
 }

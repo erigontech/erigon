@@ -25,6 +25,7 @@ type DiagnosticClient struct {
 	snapshotFileList diaglib.SnapshoFilesList
 	mu               sync.Mutex
 	hardwareInfo     diaglib.HardwareInfo
+	peerStatistics   map[string]*diaglib.PeerStatistics
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
@@ -41,6 +42,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runBlockExecutionListener()
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
+	d.runCollectPeersStatistics()
 
 	//d.logDiagMsgs()
 }
@@ -213,6 +215,16 @@ func (d *DiagnosticClient) SnapshotFilesList() diaglib.SnapshoFilesList {
 
 func (d *DiagnosticClient) HardwareInfo() diaglib.HardwareInfo {
 	return d.hardwareInfo
+}
+
+func (d *DiagnosticClient) Peers() map[string]*diaglib.PeerStatistics {
+	stats := make(map[string]*diaglib.PeerStatistics)
+	for k, v := range d.peerStatistics {
+		stats[k] = v
+		delete(d.peerStatistics, k)
+	}
+
+	return stats
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener() {
@@ -419,6 +431,52 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 				if len(info.Files) > 0 {
 					return
 				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runCollectPeersStatistics() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.PeerStatisticUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.PeerStatisticUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				if d.peerStatistics == nil {
+					d.peerStatistics = make(map[string]*diaglib.PeerStatistics)
+				}
+
+				if _, exists := d.peerStatistics[info.PeerID]; !exists {
+					d.peerStatistics[info.PeerID] = &diaglib.PeerStatistics{
+						CapBytesIn:   make(map[string]uint64),
+						CapBytesOut:  make(map[string]uint64),
+						TypeBytesIn:  make(map[string]uint64),
+						TypeBytesOut: make(map[string]uint64),
+					}
+				}
+
+				stats := d.peerStatistics[info.PeerID]
+
+				if info.Inbound {
+					stats.BytesIn += uint64(info.Bytes)
+					stats.CapBytesIn[info.MsgCap] += uint64(info.Bytes)
+					stats.TypeBytesIn[info.MsgType] += uint64(info.Bytes)
+				} else {
+					stats.BytesOut += uint64(info.Bytes)
+					stats.CapBytesOut[info.MsgCap] += uint64(info.Bytes)
+					stats.TypeBytesOut[info.MsgType] += uint64(info.Bytes)
+				}
+
+				d.mu.Unlock()
 			}
 		}
 	}()

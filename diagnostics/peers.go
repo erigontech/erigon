@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 
-	diagnint "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/urfave/cli/v2"
 )
@@ -36,16 +35,16 @@ type PeerResponse struct {
 	Protocols     map[string]interface{} `json:"protocols"` // Sub-protocol specific metadata fields
 }
 
-func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
+func SetupPeersAccess(ctxclient *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, diag *DiagnosticClient) {
 	metricsMux.HandleFunc("/peers", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writePeers(w, ctxclient, node)
+		writePeers(w, ctxclient, node, diag)
 	})
 }
 
-func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) {
-	sentinelPeers, err := sentinelPeers(node)
+func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode, diag *DiagnosticClient) {
+	sentinelPeers, err := sentinelPeers(diag)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -62,43 +61,39 @@ func writePeers(w http.ResponseWriter, ctx *cli.Context, node *node.ErigonNode) 
 	json.NewEncoder(w).Encode(allPeers)
 }
 
-func sentinelPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
-	if diag, ok := node.Backend().Sentinel().(diagnint.PeerStatisticsGetter); ok {
+func sentinelPeers(diag *DiagnosticClient) ([]*PeerResponse, error) {
 
-		statisticsArray := diag.GetPeersStatistics()
-		peers := make([]*PeerResponse, 0, len(statisticsArray))
+	statisticsArray := diag.Peers()
+	peers := make([]*PeerResponse, 0, len(statisticsArray))
 
-		for key, value := range statisticsArray {
-			peer := PeerResponse{
-				ENR:   "", //TODO: find a way how to get missing data
-				Enode: "",
-				ID:    key,
-				Name:  "",
-				Type:  "Sentinel",
-				Caps:  []string{},
-				Network: PeerNetworkInfo{
-					LocalAddress:  "",
-					RemoteAddress: "",
-					Inbound:       false,
-					Trusted:       false,
-					Static:        false,
-					BytesIn:       value.BytesIn,
-					BytesOut:      value.BytesOut,
-					CapBytesIn:    value.CapBytesIn,
-					CapBytesOut:   value.CapBytesOut,
-					TypeBytesIn:   value.TypeBytesIn,
-					TypeBytesOut:  value.TypeBytesOut,
-				},
-				Protocols: nil,
-			}
-
-			peers = append(peers, &peer)
+	for key, value := range statisticsArray {
+		peer := PeerResponse{
+			ENR:   "", //TODO: find a way how to get missing data
+			Enode: "",
+			ID:    key,
+			Name:  "",
+			Type:  "Sentinel",
+			Caps:  []string{},
+			Network: PeerNetworkInfo{
+				LocalAddress:  "",
+				RemoteAddress: "",
+				Inbound:       false,
+				Trusted:       false,
+				Static:        false,
+				BytesIn:       value.BytesIn,
+				BytesOut:      value.BytesOut,
+				CapBytesIn:    value.CapBytesIn,
+				CapBytesOut:   value.CapBytesOut,
+				TypeBytesIn:   value.TypeBytesIn,
+				TypeBytesOut:  value.TypeBytesOut,
+			},
+			Protocols: nil,
 		}
 
-		return peers, nil
-	} else {
-		return []*PeerResponse{}, nil
+		peers = append(peers, &peer)
 	}
+
+	return peers, nil
 }
 
 func sentryPeers(node *node.ErigonNode) ([]*PeerResponse, error) {
