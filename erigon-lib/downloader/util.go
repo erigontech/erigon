@@ -33,9 +33,6 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/anacrolix/torrent/mmap_span"
-	"github.com/anacrolix/torrent/storage"
-	"github.com/edsrzf/mmap-go"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -181,7 +178,13 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	for _, file := range files {
 		file := file
 
-		if ignore.Contains(file) {
+		if item, ok := ignore.Get(file); ok {
+			ts, _ := torrentFiles.LoadByPath(filepath.Join(dirs.Snap, file))
+
+			if ts == nil || item.Hash != ts.InfoHash.AsString() {
+				torrentFiles.Delete(file)
+			}
+
 			i.Add(1)
 			continue
 		}
@@ -321,6 +324,7 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 	}()
 
 	t, ok, err = _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
+
 	if err != nil {
 		ts.ChunkSize = 0
 		return _addTorrentFile(ctx, ts, torrentClient, db, webseeds)
@@ -347,32 +351,31 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool())); err != nil {
+		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil)); err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
 		}
 
 		return t, true, nil
 	}
 
-	select {
-	case <-t.GotInfo():
+	if t.Info() != nil {
 		t.AddWebSeeds(ts.Webseeds)
-		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info(), t.Complete.Bool())); err != nil {
+		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info().Length, nil)); err != nil {
 			return nil, false, fmt.Errorf("update torrent info %s: %w", ts.DisplayName, err)
 		}
-	default:
+	} else {
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
 			return t, true, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
 		}
 
-		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), nil, t.Complete.Bool()))
+		db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), 0, nil))
 	}
 
 	return t, true, nil
 }
 
-func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Info, completed bool) func(tx kv.RwTx) error {
+func torrentInfoUpdater(fileName string, infoHash []byte, length int64, completionTime *time.Time) func(tx kv.RwTx) error {
 	return func(tx kv.RwTx) error {
 		infoBytes, err := tx.GetOne(kv.BittorrentInfo, []byte(fileName))
 
@@ -384,25 +387,56 @@ func torrentInfoUpdater(fileName string, infoHash []byte, fileInfo *metainfo.Inf
 
 		err = json.Unmarshal(infoBytes, &info)
 
+		changed := false
+
 		if err != nil || (len(infoHash) > 0 && !bytes.Equal(info.Hash, infoHash)) {
 			now := time.Now()
 			info.Name = fileName
 			info.Hash = infoHash
 			info.Created = &now
 			info.Completed = nil
+			changed = true
 		}
 
-		if fileInfo != nil {
-			length := fileInfo.Length
+		if length > 0 && (info.Length == nil || *info.Length != length) {
 			info.Length = &length
+			changed = true
 		}
 
-		if completed && info.Completed == nil {
-			now := time.Now()
-			info.Completed = &now
+		if completionTime != nil {
+			info.Completed = completionTime
+			changed = true
+		}
+
+		if !changed {
+			return nil
 		}
 
 		infoBytes, err = json.Marshal(info)
+
+		if err != nil {
+			return err
+		}
+
+		return tx.Put(kv.BittorrentInfo, []byte(fileName), infoBytes)
+	}
+}
+
+func torrentInfoReset(fileName string, infoHash []byte, length int64) func(tx kv.RwTx) error {
+	return func(tx kv.RwTx) error {
+		now := time.Now()
+
+		info := torrentInfo{
+			Name:    fileName,
+			Hash:    infoHash,
+			Created: &now,
+		}
+
+		if length > 0 {
+			info.Length = &length
+		}
+
+		infoBytes, err := json.Marshal(info)
 
 		if err != nil {
 			return err
@@ -438,41 +472,39 @@ func IsLocal(path string) bool {
 }
 
 func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces *atomic.Uint64) error {
+	wg, _ := errgroup.WithContext(ctx)
+	wg.SetLimit(16)
 	for i := 0; i < t.NumPieces(); i++ {
-		t.Piece(i).VerifyData()
+		i := i
+		wg.Go(func() error {
+			t.Piece(i).VerifyData()
 
-		completePieces.Add(1)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+			completePieces.Add(1)
+			return nil
+		})
 	}
-	return nil
+	return wg.Wait()
 }
 
 func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, completePieces *atomic.Uint64) error {
-	span := new(mmap_span.MMapSpan)
-	defer span.Close()
 	info := t.Info()
-	for _, file := range info.UpvertedFiles() {
-		filename := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
-		mm, err := mmapFile(filename)
-		if err != nil {
-			return err
-		}
-		if int64(len(mm.Bytes())) != file.Length {
-			return fmt.Errorf("file %q has wrong length", filename)
-		}
-		span.Append(mm)
+	file := info.UpvertedFiles()[0]
+	fPath := filepath.Join(append([]string{root, info.Name}, file.Path...)...)
+	f, err := os.Open(fPath)
+	if err != nil {
+		return err
 	}
-	span.InitIndex()
+	defer func() {
+		if err != nil {
+			f.Close()
+		}
+	}()
 
 	hasher := sha1.New()
 	for i := 0; i < info.NumPieces(); i++ {
 		p := info.Piece(i)
 		hasher.Reset()
-		_, err := io.Copy(hasher, io.NewSectionReader(span, p.Offset(), p.Length()))
+		_, err := io.Copy(hasher, io.NewSectionReader(f, p.Offset(), p.Length()))
 		if err != nil {
 			return err
 		}
@@ -489,28 +521,4 @@ func VerifyFileFailFast(ctx context.Context, t *torrent.Torrent, root string, co
 		}
 	}
 	return nil
-}
-
-func mmapFile(name string) (mm storage.FileMapping, err error) {
-	f, err := os.Open(name)
-	if err != nil {
-		return
-	}
-	defer func() {
-		if err != nil {
-			f.Close()
-		}
-	}()
-	fi, err := f.Stat()
-	if err != nil {
-		return
-	}
-	if fi.Size() == 0 {
-		return
-	}
-	reg, err := mmap.MapRegion(f, -1, mmap.RDONLY, mmap.COPY, 0)
-	if err != nil {
-		return
-	}
-	return storage.WrapFileMapping(reg, f), nil
 }

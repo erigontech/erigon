@@ -4,6 +4,7 @@ import (
 	"context"
 	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -20,30 +21,41 @@ type Service interface {
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
 	Penalize(ctx context.Context, peerId PeerId) error
+	GetMessageListener() MessageListener
 }
 
 func NewService(maxPeers int, logger log.Logger, sentryClient direct.SentryClient) Service {
-	return newService(maxPeers, logger, sentryClient, rand.Uint64)
+	fetcherConfig := FetcherConfig{
+		responseTimeout: 5 * time.Second,
+		retryBackOff:    10 * time.Second,
+		maxRetries:      2,
+	}
+
+	return newService(maxPeers, fetcherConfig, logger, sentryClient, rand.Uint64)
 }
 
 func newService(
 	maxPeers int,
+	fetcherConfig FetcherConfig,
 	logger log.Logger,
 	sentryClient direct.SentryClient,
 	requestIdGenerator RequestIdGenerator,
 ) Service {
 	peerTracker := NewPeerTracker()
-	messageListener := NewMessageListener(logger, sentryClient)
+	peerPenalizer := NewPeerPenalizer(sentryClient)
+	messageListener := NewMessageListener(logger, sentryClient, peerPenalizer)
 	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
 	messageSender := NewMessageSender(sentryClient)
-	peerPenalizer := NewPeerPenalizer(sentryClient)
-	fetcher := NewTrackingFetcher(logger, messageListener, messageSender, peerPenalizer, requestIdGenerator, peerTracker)
+	fetcher := NewFetcher(fetcherConfig, logger, messageListener, messageSender, requestIdGenerator)
+	fetcher = NewPenalizingFetcher(logger, fetcher, peerPenalizer)
+	fetcher = NewTrackingFetcher(fetcher, peerTracker)
 	return &service{
 		maxPeers:        maxPeers,
 		fetcher:         fetcher,
 		messageListener: messageListener,
 		peerPenalizer:   peerPenalizer,
 		peerTracker:     peerTracker,
+		logger:          logger,
 	}
 }
 
@@ -54,6 +66,7 @@ type service struct {
 	messageListener MessageListener
 	peerPenalizer   PeerPenalizer
 	peerTracker     PeerTracker
+	logger          log.Logger
 }
 
 func (s *service) Start(ctx context.Context) {
@@ -80,4 +93,8 @@ func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
 
 func (s *service) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
 	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
+}
+
+func (s *service) GetMessageListener() MessageListener {
+	return s.messageListener
 }

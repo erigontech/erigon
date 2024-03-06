@@ -223,6 +223,15 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	defer d.Close()
 	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
+	if len(_verifyFiles) > 0 {
+		verifyFiles = strings.Split(_verifyFiles, ",")
+	}
+	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
+		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+			return err
+		}
+	}
+
 	d.MainLoopInBackground(false)
 
 	bittorrentServer, err := downloader.NewGrpcServer(d)
@@ -236,15 +245,6 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 	}
 	defer grpcServer.GracefulStop()
 
-	if len(_verifyFiles) > 0 {
-		verifyFiles = strings.Split(_verifyFiles, ",")
-	}
-	if verify || verifyFailfast || len(verifyFiles) > 0 { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
-			return err
-		}
-	}
-
 	<-ctx.Done()
 	return nil
 }
@@ -253,7 +253,6 @@ var createTorrent = &cobra.Command{
 	Use:     "torrent_create",
 	Example: "go run ./cmd/downloader torrent_create --datadir=<your_datadir> --file=<relative_file_path>",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		//logger := debug.SetupCobra(cmd, "integration")
 		dirs := datadir.New(datadirCli)
 		err := downloader.BuildTorrentFilesIfNeed(cmd.Context(), dirs, downloader.NewAtomicTorrentFiles(dirs.Snap), chain, nil)
 		if err != nil {

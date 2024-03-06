@@ -1,13 +1,15 @@
 package forkchoice
 
 import (
+	"context"
 	"fmt"
 	"time"
+
+	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/log/v3"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 )
@@ -157,12 +159,12 @@ func (f *ForkChoiceStore) scheduleBlockForLaterProcessing(block *cltypes.SignedB
 	})
 }
 
-func (f *ForkChoiceStore) StartJobsRTT() {
+func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
 	go func() {
 		interval := time.NewTicker(500 * time.Millisecond)
 		for {
 			select {
-			case <-f.ctx.Done():
+			case <-ctx.Done():
 				return
 			case <-interval.C:
 				f.attestationSet.Range(func(key, value interface{}) bool {
@@ -188,7 +190,7 @@ func (f *ForkChoiceStore) StartJobsRTT() {
 		interval := time.NewTicker(50 * time.Millisecond)
 		for {
 			select {
-			case <-f.ctx.Done():
+			case <-ctx.Done():
 				return
 			case <-interval.C:
 				f.blocksSet.Range(func(key, value interface{}) bool {
@@ -199,13 +201,13 @@ func (f *ForkChoiceStore) StartJobsRTT() {
 					}
 
 					f.mu.Lock()
-					if err := f.isDataAvailable(job.block.Block.Slot, job.blockRoot, job.block.Block.Body.BlobKzgCommitments); err != nil {
+					if err := f.isDataAvailable(ctx, job.block.Block.Slot, job.blockRoot, job.block.Block.Body.BlobKzgCommitments); err != nil {
 						f.mu.Unlock()
 						return true
 					}
 					f.mu.Unlock()
 
-					if err := f.OnBlock(job.block, true, true, true); err != nil {
+					if err := f.OnBlock(ctx, job.block, true, true, true); err != nil {
 						log.Warn("failed to process attestation", "err", err)
 					}
 					f.blocksSet.Delete(key)

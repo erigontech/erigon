@@ -13,17 +13,15 @@ import (
 
 type ExecutionClientDirect struct {
 	chainRW eth1_chain_reader.ChainReaderWriterEth1
-	ctx     context.Context
 }
 
-func NewExecutionClientDirect(ctx context.Context, chainRW eth1_chain_reader.ChainReaderWriterEth1) (*ExecutionClientDirect, error) {
+func NewExecutionClientDirect(chainRW eth1_chain_reader.ChainReaderWriterEth1) (*ExecutionClientDirect, error) {
 	return &ExecutionClientDirect{
 		chainRW: chainRW,
-		ctx:     ctx,
 	}, nil
 }
 
-func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
+func (cc *ExecutionClientDirect) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (invalid bool, err error) {
 	if payload == nil {
 		return
 	}
@@ -39,11 +37,11 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 		return true, err
 	}
 
-	if err := cc.chainRW.InsertBlockAndWait(types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
+	if err := cc.chainRW.InsertBlockAndWait(ctx, types.NewBlockFromStorage(payload.BlockHash, header, txs, nil, body.Withdrawals)); err != nil {
 		return false, err
 	}
 
-	status, _, _, err := cc.chainRW.ValidateChain(payload.BlockHash, payload.BlockNumber)
+	status, _, _, err := cc.chainRW.ValidateChain(ctx, payload.BlockHash, payload.BlockNumber)
 	if err != nil {
 		return false, err
 	}
@@ -52,8 +50,8 @@ func (cc *ExecutionClientDirect) NewPayload(payload *cltypes.Eth1Block, beaconPa
 	return
 }
 
-func (cc *ExecutionClientDirect) ForkChoiceUpdate(finalized libcommon.Hash, head libcommon.Hash) error {
-	status, _, _, err := cc.chainRW.UpdateForkChoice(head, head, finalized)
+func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash) error {
+	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, head, finalized)
 	if err != nil {
 		return fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
@@ -70,35 +68,35 @@ func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) InsertBlocks(blks []*types.Block, wait bool) error {
+func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error {
 	if !wait {
-		return cc.chainRW.InsertBlocksAndWait(blks)
+		return cc.chainRW.InsertBlocksAndWait(ctx, blocks)
 	}
-	return cc.chainRW.InsertBlocks(blks)
+	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
 
-func (cc *ExecutionClientDirect) InsertBlock(blk *types.Block) error {
-	return cc.chainRW.InsertBlockAndWait(blk)
+func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Block) error {
+	return cc.chainRW.InsertBlockAndWait(ctx, blk)
 }
 
-func (cc *ExecutionClientDirect) IsCanonicalHash(hash libcommon.Hash) (bool, error) {
-	return cc.chainRW.IsCanonicalHash(hash)
+func (cc *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	return cc.chainRW.IsCanonicalHash(ctx, hash)
 }
 
-func (cc *ExecutionClientDirect) Ready() (bool, error) {
-	return cc.chainRW.Ready()
+func (cc *ExecutionClientDirect) Ready(ctx context.Context) (bool, error) {
+	return cc.chainRW.Ready(ctx)
 }
 
 // GetBodiesByRange gets block bodies in given block range
-func (cc *ExecutionClientDirect) GetBodiesByRange(start, count uint64) ([]*types.RawBody, error) {
-	return cc.chainRW.GetBodiesByRange(start, count)
+func (cc *ExecutionClientDirect) GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error) {
+	return cc.chainRW.GetBodiesByRange(ctx, start, count)
 }
 
 // GetBodiesByHashes gets block bodies with given hashes
-func (cc *ExecutionClientDirect) GetBodiesByHashes(hashes []libcommon.Hash) ([]*types.RawBody, error) {
-	return cc.chainRW.GetBodiesByHashes(hashes)
+func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error) {
+	return cc.chainRW.GetBodiesByHashes(ctx, hashes)
 }
 
-func (cc *ExecutionClientDirect) FrozenBlocks() uint64 {
-	return cc.chainRW.FrozenBlocks()
+func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
+	return cc.chainRW.FrozenBlocks(ctx)
 }

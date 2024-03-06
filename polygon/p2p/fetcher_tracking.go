@@ -4,21 +4,12 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ledgerwatch/log/v3"
-
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
-func NewTrackingFetcher(
-	logger log.Logger,
-	messageListener MessageListener,
-	messageSender MessageSender,
-	peerPenalizer PeerPenalizer,
-	requestIdGenerator RequestIdGenerator,
-	peerTracker PeerTracker,
-) Fetcher {
+func NewTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) Fetcher {
 	return &trackingFetcher{
-		Fetcher:     NewFetcher(logger, messageListener, messageSender, peerPenalizer, requestIdGenerator),
+		Fetcher:     fetcher,
 		peerTracker: peerTracker,
 	}
 }

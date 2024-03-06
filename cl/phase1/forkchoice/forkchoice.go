@@ -1,7 +1,6 @@
 package forkchoice
 
 import (
-	"context"
 	"fmt"
 	"slices"
 	"sort"
@@ -9,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/Giulio2002/bls"
+
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
@@ -80,7 +81,6 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	ctx         context.Context
 	time        atomic.Uint64
 	highestSeen atomic.Uint64
 	// all of *solid.Checkpoint type
@@ -152,7 +152,7 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -225,7 +225,6 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	headSet := make(map[libcommon.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		ctx:                   ctx,
 		forkGraph:             forkGraph,
 		equivocatingIndicies:  make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
 		latestMessages:        make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
