@@ -1543,7 +1543,7 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 			pendingBlocksFiles = append(pendingBlocksFiles, t)
 		}
 	}
-	fmt.Printf("[dbg] pendingBlocksFiles: %s\n", pending)
+	fmt.Printf("[dbg] pendingBlocksFiles: %s\n", pendingBlocksFiles)
 	fmt.Printf("[dbg] pendingStateFiles: %s\n", pendingStateFiles)
 	pending = pendingBlocksFiles
 
