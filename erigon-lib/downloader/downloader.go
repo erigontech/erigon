@@ -731,10 +731,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 						}
 					}
 				}
-				fmt.Printf("[dbg] downloading add %s\n", t.Name())
 				d.lock.RLock()
 				_, downloading := d.downloading[t.Name()]
 				d.lock.RUnlock()
+
+				fmt.Printf("[dbg] downloading add %s, %d\n", t.Name(), len(d.downloading))
 
 				if downloading && t.Complete.Bool() {
 					select {
@@ -1302,7 +1303,6 @@ func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo
 }
 
 func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloadStatus, sem *semaphore.Weighted) {
-
 	d.lock.Lock()
 	d.downloading[t.Name()] = struct{}{}
 	d.lock.Unlock()
