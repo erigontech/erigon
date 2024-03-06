@@ -351,13 +351,13 @@ func (v ConfigForkVersion) MarshalJSON() ([]byte, error) {
 // BeaconChainConfig contains constant configs for node to participate in beacon chain.
 type BeaconChainConfig struct {
 	// Constants (non-configurable)
-	GenesisSlot              uint64 `yaml:"GENESIS_SLOT" json:"GENESIS_SLOT"`                               // GenesisSlot represents the first canonical slot number of the beacon chain.
-	GenesisEpoch             uint64 `yaml:"GENESIS_EPOCH" json:"GENESIS_EPOCH"`                             // GenesisEpoch represents the first canonical epoch number of the beacon chain.
-	FarFutureEpoch           uint64 `yaml:"FAR_FUTURE_EPOCH" json:"FAR_FUTURE_EPOCH"`                       // FarFutureEpoch represents a epoch extremely far away in the future used as the default penalization epoch for validators.
-	FarFutureSlot            uint64 `yaml:"FAR_FUTURE_SLOT" json:"FAR_FUTURE_SLOT"`                         // FarFutureSlot represents a slot extremely far away in the future.
-	BaseRewardsPerEpoch      uint64 `yaml:"BASE_REWARDS_PER_EPOCH" json:"BASE_REWARDS_PER_EPOCH"`           // BaseRewardsPerEpoch is used to calculate the per epoch rewards.
-	DepositContractTreeDepth uint64 `yaml:"DEPOSIT_CONTRACT_TREE_DEPTH" json:"DEPOSIT_CONTRACT_TREE_DEPTH"` // DepositContractTreeDepth depth of the Merkle trie of deposits in the validator deposit contract on the PoW chain.
-	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH" json:"JUSTIFICATION_BITS_LENGTH"`     // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
+	GenesisSlot              uint64 `yaml:"GENESIS_SLOT" json:"GENESIS_SLOT,string"`                               // GenesisSlot represents the first canonical slot number of the beacon chain.
+	GenesisEpoch             uint64 `yaml:"GENESIS_EPOCH" json:"GENESIS_EPOCH,string"`                             // GenesisEpoch represents the first canonical epoch number of the beacon chain.
+	FarFutureEpoch           uint64 `yaml:"FAR_FUTURE_EPOCH" json:"FAR_FUTURE_EPOCH,string"`                       // FarFutureEpoch represents a epoch extremely far away in the future used as the default penalization epoch for validators.
+	FarFutureSlot            uint64 `yaml:"FAR_FUTURE_SLOT" json:"FAR_FUTURE_SLOT,string"`                         // FarFutureSlot represents a slot extremely far away in the future.
+	BaseRewardsPerEpoch      uint64 `yaml:"BASE_REWARDS_PER_EPOCH" json:"BASE_REWARDS_PER_EPOCH,string"`           // BaseRewardsPerEpoch is used to calculate the per epoch rewards.
+	DepositContractTreeDepth uint64 `yaml:"DEPOSIT_CONTRACT_TREE_DEPTH" json:"DEPOSIT_CONTRACT_TREE_DEPTH,string"` // DepositContractTreeDepth depth of the Merkle trie of deposits in the validator deposit contract on the PoW chain.
+	JustificationBitsLength  uint64 `yaml:"JUSTIFICATION_BITS_LENGTH" json:"JUSTIFICATION_BITS_LENGTH,string"`     // JustificationBitsLength defines number of epochs to track when implementing k-finality in Casper FFG.
 
 	// Misc constants.
 	PresetBase                       string `yaml:"PRESET_BASE" spec:"true" json:"PRESET_BASE"`                                                            // PresetBase represents the underlying spec preset this config is based on.
