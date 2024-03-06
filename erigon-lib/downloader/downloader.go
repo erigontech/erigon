@@ -172,7 +172,10 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 			if info, err := d.torrentInfo(download.Name); err == nil {
 				if info.Completed != nil {
 					if hash := hex.EncodeToString(info.Hash); download.Hash != hash {
-						fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), download.Name)
+						fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), download.Name)
+						if !ok {
+							continue
+						}
 
 						// this is lazy as it can be expensive for large files
 						fileHashBytes, err := fileHashBytes(d.ctx, fileInfo)
