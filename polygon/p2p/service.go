@@ -17,10 +17,10 @@ type Service interface {
 	Start(ctx context.Context)
 	Stop()
 	MaxPeers() int
-	ListPeersMayHaveBlockNum(blockNum uint64) []PeerId
+	ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
-	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
-	Penalize(ctx context.Context, peerId PeerId) error
+	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error)
+	Penalize(ctx context.Context, peerId *PeerId) error
 	GetMessageListener() MessageListener
 }
 
@@ -83,15 +83,15 @@ func (s *service) MaxPeers() int {
 	return s.maxPeers
 }
 
-func (s *service) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+func (s *service) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	return s.fetcher.FetchHeaders(ctx, start, end, peerId)
 }
 
-func (s *service) Penalize(ctx context.Context, peerId PeerId) error {
+func (s *service) Penalize(ctx context.Context, peerId *PeerId) error {
 	return s.peerPenalizer.Penalize(ctx, peerId)
 }
 
-func (s *service) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
+func (s *service) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 	return s.peerTracker.ListPeersMayHaveBlockNum(blockNum)
 }
 

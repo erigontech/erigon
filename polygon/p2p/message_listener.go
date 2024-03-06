@@ -18,7 +18,7 @@ import (
 type DecodedInboundMessage[TPacket any] struct {
 	*sentry.InboundMessage
 	Decoded TPacket
-	PeerId  PeerId
+	PeerId  *PeerId
 }
 
 type MessageObserver[TMessage any] func(message TMessage)

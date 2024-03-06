@@ -144,7 +144,7 @@ func (hd *headerDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 		for i, waypoint := range waypointsBatch {
 			maxWaypointLength = math.Max(float64(waypoint.Length()), maxWaypointLength)
 			wg.Add(1)
-			go func(i int, waypoint heimdall.Waypoint, peerId p2p.PeerId) {
+			go func(i int, waypoint heimdall.Waypoint, peerId *p2p.PeerId) {
 				defer wg.Done()
 
 				if headers, ok := waypointHeadersMemo.Get(waypoint.RootHash()); ok {
