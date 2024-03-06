@@ -1301,6 +1301,8 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 	d.downloading[t.Name()] = struct{}{}
 	d.lock.Unlock()
 
+	fmt.Printf("[dbg] torrentDownload: %s\n", t.Name())
+
 	if err := sem.Acquire(d.ctx, 1); err != nil {
 		d.logger.Warn("Failed to acquire download semaphore", "err", err)
 		return
