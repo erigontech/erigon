@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"runtime"
 	"strings"
 	"time"
@@ -81,6 +80,11 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 			}
 		}
 		return nil
+	}
+
+	snapshots.Close()
+	if cc.Bor != nil {
+		borSnapshots.Close()
 	}
 
 	//Corner cases:
@@ -266,16 +270,18 @@ func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime
 		}
 
 		dbg.ReadMemStats(&m)
-		downloadTimeLeft := calculateTime(stats.BytesTotal-stats.BytesCompleted, stats.DownloadRate)
 
-		progress := float64(stats.Progress)
+		var remainingBytes uint64
 
-		if math.Ceil(progress*1000)/1000 > 99.995 {
-			progress = 100
+		if stats.BytesTotal > stats.BytesCompleted {
+			remainingBytes = stats.BytesTotal - stats.BytesCompleted
 		}
 
+		downloadTimeLeft := calculateTime(remainingBytes, stats.DownloadRate)
+
 		log.Info(fmt.Sprintf("[%s] %s", logPrefix, logReason),
-			"progress", fmt.Sprintf("%.2f%% %s/%s", progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+			"progress", fmt.Sprintf("%.2f%% %s/%s", stats.Progress, common.ByteCount(stats.BytesCompleted), common.ByteCount(stats.BytesTotal)),
+			// TODO: "downloading", stats.Downloading,
 			"time-left", downloadTimeLeft,
 			"total-time", time.Since(startTime).Round(time.Second).String(),
 			"download", common.ByteCount(stats.DownloadRate)+"/s",
