@@ -409,9 +409,9 @@ type BeaconChainConfig struct {
 	IntervalsPerSlot   uint64 `yaml:"INTERVALS_PER_SLOT" spec:"true" json:"INTERVALS_PER_SLOT,string"`     // IntervalsPerSlot defines the number of fork choice intervals in a slot defined in the fork choice spec.
 
 	// Ethereum PoW parameters.
-	DepositChainID         uint64 `yaml:"DEPOSIT_CHAIN_ID" spec:"true" json:"DEPOSIT_CHAIN_ID,string"`                 // DepositChainID of the eth1 network. This used for replay protection.
-	DepositNetworkID       uint64 `yaml:"DEPOSIT_NETWORK_ID" spec:"true" json:"DEPOSIT_NETWORK_ID,string"`             // DepositNetworkID of the eth1 network. This used for replay protection.
-	DepositContractAddress string `yaml:"DEPOSIT_CONTRACT_ADDRESS" spec:"true" json:"DEPOSIT_CONTRACT_ADDRESS,string"` // DepositContractAddress is the address of the deposit contract.
+	DepositChainID         uint64 `yaml:"DEPOSIT_CHAIN_ID" spec:"true" json:"DEPOSIT_CHAIN_ID,string"`          // DepositChainID of the eth1 network. This used for replay protection.
+	DepositNetworkID       uint64 `yaml:"DEPOSIT_NETWORK_ID" spec:"true" json:"DEPOSIT_NETWORK_ID,string"`      // DepositNetworkID of the eth1 network. This used for replay protection.
+	DepositContractAddress string `yaml:"DEPOSIT_CONTRACT_ADDRESS" spec:"true" json:"DEPOSIT_CONTRACT_ADDRESS"` // DepositContractAddress is the address of the deposit contract.
 
 	// Validator parameters.
 	RandomSubnetsPerValidator         uint64 `yaml:"RANDOM_SUBNETS_PER_VALIDATOR" spec:"true" json:"RANDOM_SUBNETS_PER_VALIDATOR,string"`                   // RandomSubnetsPerValidator specifies the amount of subnets a validator has to be subscribed to at one time.
