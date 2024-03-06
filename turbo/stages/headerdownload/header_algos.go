@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"golang.org/x/exp/slices"
@@ -504,6 +505,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 	var returnTd *big.Int
 	var lastD *big.Int
 	var lastTime uint64
+	var times []time.Duration
 	if hd.insertQueue.Len() > 0 {
 		link := hd.insertQueue[0]
 		_, bad := hd.badHeaders[link.hash]
@@ -550,6 +552,8 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 
 		hd.logger.Warn("Received header", "header", link.header.Hash(), "time-diff", time.Since(time.Unix(int64(link.header.Time), 0)))
+		times = append(times, time.Since(time.Unix(int64(link.header.Time), 0)))
+
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
 			return false, false, 0, lastTime, err
@@ -610,6 +614,14 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 			blocksToTTD = x.Uint64()
 		}
 	}
+
+	if len(times) != 0 {
+		err := diagnostics.Send(diagnostics.BlockHeaderMetrics{Header: times})
+		if err != nil {
+			hd.logger.Error("Error sending metric", "err", err)
+		}
+	}
+
 	return hd.insertQueue.Len() > 0 && hd.insertQueue[0].blockHeight <= hd.highestInDb+1, false, blocksToTTD, lastTime, nil
 }
 

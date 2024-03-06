@@ -16,6 +16,12 @@
 
 package diagnostics
 
+import (
+	"time"
+
+	erigon_lib "github.com/ledgerwatch/erigon-lib"
+)
+
 type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics
 }
@@ -133,6 +139,22 @@ type CPUInfo struct {
 	Cores     int     `json:"cores"`
 	ModelName string  `json:"modelName"`
 	Mhz       float64 `json:"mhz"`
+}
+
+type BlockMetrics struct {
+	Header *erigon_lib.Queue `json:"header"`
+}
+
+type BlockHeaderMetrics struct {
+	Header []time.Duration
+}
+
+func (ti BlockHeaderMetrics) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BlockMetrics) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti SnapshoFilesList) Type() Type {

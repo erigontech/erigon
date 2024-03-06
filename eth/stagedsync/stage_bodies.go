@@ -232,6 +232,10 @@ func BodiesForward(
 				}
 
 				logger.Warn("Writing block body", "hash", header.Hash(), "txs", len(rawBody.Transactions), "time-diff", time.Since(time.Unix(int64(header.Time), 0)))
+				//err := diagnostics.Send(diagnostics.BlockProducerMetrics{Header: int64(12341)})
+				//if err != nil {
+				//	logger.Error("Error sending metric", "err", err)
+				//}
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 				ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)

@@ -5,15 +5,17 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
-	"github.com/ledgerwatch/erigon-lib/diskutils"
-	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/urfave/cli/v2"
+
+	erigon_lib "github.com/ledgerwatch/erigon-lib"
+	"github.com/ledgerwatch/erigon-lib/common"
+	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
+	"github.com/ledgerwatch/erigon-lib/diskutils"
+	"github.com/ledgerwatch/erigon/turbo/node"
 )
 
 type DiagnosticClient struct {
@@ -23,12 +25,13 @@ type DiagnosticClient struct {
 
 	syncStats        diaglib.SyncStatistics
 	snapshotFileList diaglib.SnapshoFilesList
+	blockMetrics     diaglib.BlockMetrics
 	mu               sync.Mutex
 	hardwareInfo     diaglib.HardwareInfo
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}}
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.BlockMetrics{Header: erigon_lib.NewQueue(200)}}
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -41,6 +44,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runBlockExecutionListener()
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
+	d.runBlockHeaderMetricsListener()
 
 	//d.logDiagMsgs()
 }
@@ -422,4 +426,31 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 			}
 		}
 	}()
+}
+
+func (d *DiagnosticClient) runBlockHeaderMetricsListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.BlockHeaderMetrics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockHeaderMetrics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				//d.mu.Lock()
+				d.blockMetrics.Header.Enqueue(info.Header)
+				//d.mu.Unlock()
+			}
+		}
+
+	}()
+}
+
+func (d *DiagnosticClient) BlockMetrics() diaglib.BlockMetrics {
+	return d.blockMetrics
 }
