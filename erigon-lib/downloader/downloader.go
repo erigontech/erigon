@@ -735,8 +735,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 				_, downloading := d.downloading[t.Name()]
 				d.lock.RUnlock()
 
-				fmt.Printf("[dbg] downloading add %s, %d\n", t.Name(), len(d.downloading))
-
 				if downloading && t.Complete.Bool() {
 					select {
 					case <-d.ctx.Done():
@@ -969,7 +967,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				switch {
 				case len(t.PeerConns()) > 0:
 					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
-					fmt.Printf("[dbg] torrentDownload1: %s\n", t.Name())
+					fmt.Printf("[dbg] downloading add1: %s\n", t.Name())
 					d.torrentDownload(t, downloadComplete, sem)
 				case len(t.WebseedPeerConns()) > 0:
 					if d.webDownloadClient != nil {
@@ -987,10 +985,11 @@ func (d *Downloader) mainLoop(silent bool) error {
 						if err != nil {
 							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
 
-							fmt.Printf("[dbg] torrentDownload2: %s\n", t.Name())
-
 							if session == nil {
+								fmt.Printf("[dbg] downloading add2: %s\n", t.Name())
 								d.torrentDownload(t, downloadComplete, sem)
+							} else {
+								fmt.Printf("[dbg] whyyy: %s\n", t.Name())
 							}
 
 							continue
@@ -998,7 +997,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 					} else {
 						d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
-						fmt.Printf("[dbg] torrentDownload3: %s\n", t.Name())
+						fmt.Printf("[dbg] downloading add3: %s\n", t.Name())
 						d.torrentDownload(t, downloadComplete, sem)
 					}
 				default:
