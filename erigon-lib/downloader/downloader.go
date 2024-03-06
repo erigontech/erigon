@@ -868,7 +868,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 			d.stats.Downloading = int32(downloadingLen)
 			d.lock.RUnlock()
 
+			fmt.Printf("[dbg] pending: %s\n", pending)
+
 			available := availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-downloadingLen)
+			fmt.Printf("[dbg] available0: %s\n", available)
 
 			d.lock.RLock()
 			for _, webDownload := range d.webDownloadInfo {
