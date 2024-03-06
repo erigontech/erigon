@@ -359,13 +359,11 @@ type Domain struct {
 
 	replaceKeysInValues bool
 
-	keysTable string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
-	valsTable string // key + invertedStep -> values
-	stats     DomainStats
-
-	compression        FileCompression
-	indexList          idxList
-	withExistenceIndex bool
+	keysTable   string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
+	valsTable   string // key + invertedStep -> values
+	stats       DomainStats
+	compression FileCompression
+	indexList   idxList
 }
 
 type domainCfg struct {
@@ -388,7 +386,6 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 
 		indexList:           withBTree | withExistence,
 		replaceKeysInValues: cfg.replaceKeysInValues, // for commitment domain only
-		withExistenceIndex:  true,
 	}
 
 	d.roFiles.Store(&[]ctxItem{})
@@ -1594,7 +1591,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 	hi, _ := dc.hc.ic.hashKey(filekey)
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
-		if dc.d.withExistenceIndex {
+		if dc.d.indexList&withExistence != 0 {
 			//if dc.files[i].src.existence == nil {
 			//	panic(dc.files[i].src.decompressor.FileName())
 			//}

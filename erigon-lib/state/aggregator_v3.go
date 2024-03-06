@@ -1305,9 +1305,19 @@ func (ac *AggregatorV3Context) integrateMergedFiles(outs SelectedStaticFilesV3, 
 	defer ac.a.needSaveFilesListInDB.Store(true)
 	defer ac.a.recalcMaxTxNum()
 
-	for id, d := range ac.a.d {
-		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+	if ac.a.commitmentValuesTransform && outs.d[kv.CommitmentDomain] != nil && in.d[kv.CommitmentDomain] == nil {
+		// todo: we already merged everything else, would be a waste to do it again so integrate what we can
+		code := ac.a.d[kv.CodeDomain]
+		if code != nil {
+			id := kv.CodeDomain
+			code.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+		}
+	} else {
+		for id, d := range ac.a.d {
+			d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+		}
 	}
+
 	ac.a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)
 	ac.a.logTopics.integrateMergedFiles(outs.logTopics, in.logTopics)
 	ac.a.tracesFrom.integrateMergedFiles(outs.tracesFrom, in.tracesFrom)
