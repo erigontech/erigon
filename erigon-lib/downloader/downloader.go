@@ -966,6 +966,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				switch {
 				case len(t.PeerConns()) > 0:
 					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
+					fmt.Printf("[dbg] torrentDownload1: %s\n", t.Name())
 					d.torrentDownload(t, downloadComplete, sem)
 				case len(t.WebseedPeerConns()) > 0:
 					if d.webDownloadClient != nil {
@@ -983,6 +984,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 						if err != nil {
 							d.logger.Warn("Can't complete web download", "file", t.Info().Name, "err", err)
 
+							fmt.Printf("[dbg] torrentDownload2: %s\n", t.Name())
+
 							if session == nil {
 								d.torrentDownload(t, downloadComplete, sem)
 							}
@@ -992,6 +995,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 					} else {
 						d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
+						fmt.Printf("[dbg] torrentDownload3: %s\n", t.Name())
 						d.torrentDownload(t, downloadComplete, sem)
 					}
 				default:
@@ -1300,8 +1304,6 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 	d.lock.Lock()
 	d.downloading[t.Name()] = struct{}{}
 	d.lock.Unlock()
-
-	fmt.Printf("[dbg] torrentDownload: %s\n", t.Name())
 
 	if err := sem.Acquire(d.ctx, 1); err != nil {
 		d.logger.Warn("Failed to acquire download semaphore", "err", err)
