@@ -21,14 +21,13 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/golang/mock/gomock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver/mock"
 )
 
 func TestKvServer_renew(t *testing.T) {
@@ -103,9 +102,9 @@ func TestKvServer_renew(t *testing.T) {
 func TestKVServerSnapshotsReturnsSnapshots(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	blockSnapshots := mock.NewMockSnapshots(ctrl)
+	blockSnapshots := NewMockSnapshots(ctrl)
 	blockSnapshots.EXPECT().Files().Return([]string{"headers.seg", "bodies.seg"}).Times(1)
-	historySnapshots := mock.NewMockSnapshots(ctrl)
+	historySnapshots := NewMockSnapshots(ctrl)
 	historySnapshots.EXPECT().Files().Return([]string{"history"}).Times(1)
 
 	s := NewKvServer(ctx, nil, blockSnapshots, nil, historySnapshots, log.New())
@@ -118,11 +117,11 @@ func TestKVServerSnapshotsReturnsSnapshots(t *testing.T) {
 func TestKVServerSnapshotsReturnsBorSnapshots(t *testing.T) {
 	ctx := context.Background()
 	ctrl := gomock.NewController(t)
-	blockSnapshots := mock.NewMockSnapshots(ctrl)
+	blockSnapshots := NewMockSnapshots(ctrl)
 	blockSnapshots.EXPECT().Files().Return([]string{"headers.seg", "bodies.seg"}).Times(1)
-	borSnapshots := mock.NewMockSnapshots(ctrl)
+	borSnapshots := NewMockSnapshots(ctrl)
 	borSnapshots.EXPECT().Files().Return([]string{"borevents.seg", "borspans.seg"}).Times(1)
-	historySnapshots := mock.NewMockSnapshots(ctrl)
+	historySnapshots := NewMockSnapshots(ctrl)
 	historySnapshots.EXPECT().Files().Return([]string{"history"}).Times(1)
 
 	s := NewKvServer(ctx, nil, blockSnapshots, borSnapshots, historySnapshots, log.New())
