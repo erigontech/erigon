@@ -680,7 +680,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if isComplete, length, completionTime := d.checkComplete(t.Name()); isComplete && completionTime != nil {
 					if _, ok := checking[t.Name()]; !ok {
-						fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+						fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
+						if !ok {
+							continue
+						}
 
 						stat, err := os.Stat(fileInfo.Path)
 
@@ -738,7 +741,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 					}
 
 					var completionTime *time.Time
-					fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+					fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
+					if !ok {
+						continue
+					}
 
 					info, err := d.torrentInfo(t.Name())
 
@@ -801,7 +807,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if status.err == nil {
 					var completionTime *time.Time
-					fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), status.name)
+					fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), status.name)
+					if !ok {
+						continue
+					}
 
 					if info, err := d.torrentInfo(status.name); err == nil {
 						completionTime = info.Completed
@@ -880,10 +889,22 @@ func (d *Downloader) mainLoop(silent bool) error {
 						available = append(available, webDownload.torrent)
 					}
 				} else {
-					wi, _, _ := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name())
+					wi, isStateFile, ok := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name())
+					if !ok {
+						continue
+					}
+					if isStateFile {
+						continue
+					}
 
 					for i, t := range available {
-						ai, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+						ai, isStateFile, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
+						if !ok {
+							continue
+						}
+						if isStateFile {
+							continue
+						}
 
 						if ai.CompareTo(wi) > 0 {
 							available[i] = webDownload.torrent
@@ -897,7 +918,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 			for _, t := range available {
 
 				torrentInfo, _ := d.torrentInfo(t.Name())
-				fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
+				fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
+				if !ok {
+					continue
+				}
 
 				if torrentInfo != nil && torrentInfo.Completed != nil {
 					if bytes.Equal(t.InfoHash().Bytes(), torrentInfo.Hash) {
