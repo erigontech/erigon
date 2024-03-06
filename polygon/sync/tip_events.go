@@ -17,12 +17,12 @@ const EventTypeNewSpan = "new-span"
 
 type EventNewHeader struct {
 	NewHeader *types.Header
-	PeerId    p2p.PeerId
+	PeerId    *p2p.PeerId
 }
 
 type EventNewHeaderHashes struct {
 	NewHeaderHashes eth.NewBlockHashesPacket
-	PeerId          p2p.PeerId
+	PeerId          *p2p.PeerId
 }
 
 type EventNewMilestone = *heimdall.Milestone

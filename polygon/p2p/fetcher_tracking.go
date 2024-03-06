@@ -19,7 +19,7 @@ type trackingFetcher struct {
 	peerTracker PeerTracker
 }
 
-func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
 		var errIncompleteResponse *ErrIncompleteHeaders
