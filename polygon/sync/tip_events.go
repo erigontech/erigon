@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"time"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -80,7 +79,7 @@ func NewTipEvents(
 	eventsCapacity := uint(1000) // more than 3 milestones
 
 	return &TipEvents{
-		events: NewEventChannel[Event](eventsCapacity, time.Second),
+		events: NewEventChannel[Event](eventsCapacity),
 
 		p2pService:      p2pService,
 		heimdallService: heimdallService,
