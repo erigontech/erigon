@@ -68,8 +68,8 @@ type headerDownloaderTest struct {
 	headersWriter    *MockHeadersWriter
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int) []p2p.PeerId {
-	peers := make([]p2p.PeerId, count)
+func (hdt headerDownloaderTest) fakePeers(count int) []*p2p.PeerId {
+	peers := make([]*p2p.PeerId, count)
 	for i := range peers {
 		peers[i] = p2p.PeerIdFromUint64(uint64(i) + 1)
 	}
@@ -109,11 +109,11 @@ func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
 	return milestones
 }
 
-type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error)
+type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId *p2p.PeerId) ([]*types.Header, error)
 
 func (hdt headerDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	// p2p.Service.FetchHeaders interface is using [start, end) so we stick to that
-	return func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error) {
+	return func(ctx context.Context, start uint64, end uint64, _ *p2p.PeerId) ([]*types.Header, error) {
 		if start >= end {
 			return nil, fmt.Errorf("unexpected start >= end in test: start=%d, end=%d", start, end)
 		}

@@ -41,7 +41,7 @@ func (m *MockService) EXPECT() *MockServiceMockRecorder {
 }
 
 // FetchHeaders mocks base method.
-func (m *MockService) FetchHeaders(arg0 context.Context, arg1, arg2 uint64, arg3 PeerId) ([]*types.Header, error) {
+func (m *MockService) FetchHeaders(arg0 context.Context, arg1, arg2 uint64, arg3 *PeerId) ([]*types.Header, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchHeaders", arg0, arg1, arg2, arg3)
 	ret0, _ := ret[0].([]*types.Header)
@@ -70,10 +70,10 @@ func (mr *MockServiceMockRecorder) GetMessageListener() *gomock.Call {
 }
 
 // ListPeersMayHaveBlockNum mocks base method.
-func (m *MockService) ListPeersMayHaveBlockNum(arg0 uint64) []PeerId {
+func (m *MockService) ListPeersMayHaveBlockNum(arg0 uint64) []*PeerId {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "ListPeersMayHaveBlockNum", arg0)
-	ret0, _ := ret[0].([]PeerId)
+	ret0, _ := ret[0].([]*PeerId)
 	return ret0
 }
 
@@ -98,7 +98,7 @@ func (mr *MockServiceMockRecorder) MaxPeers() *gomock.Call {
 }
 
 // Penalize mocks base method.
-func (m *MockService) Penalize(arg0 context.Context, arg1 PeerId) error {
+func (m *MockService) Penalize(arg0 context.Context, arg1 *PeerId) error {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "Penalize", arg0, arg1)
 	ret0, _ := ret[0].(error)
