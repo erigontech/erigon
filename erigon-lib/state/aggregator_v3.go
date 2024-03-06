@@ -1243,16 +1243,17 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			g.Go(func() (err error) {
 				var vt valueTransformer
 				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-					vt = ac.d[id].commitmentValTransform(
+					valReplaceWg.Wait()
+
+					vt = ac.d[kv.CommitmentDomain].commitmentValTransform(
 						files.d[kv.AccountsDomain], mf.d[kv.AccountsDomain], ac.d[kv.AccountsDomain].d.indexList,
 						files.d[kv.StorageDomain], mf.d[kv.StorageDomain], ac.d[kv.StorageDomain].d.indexList,
 						r.d[kv.AccountsDomain].valuesStartTxNum, r.d[kv.AccountsDomain].valuesEndTxNum,
 					)
-					valReplaceWg.Wait()
 				}
 
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
-				if ac.a.commitmentValuesTransform && kid == kv.AccountsDomain || kid == kv.StorageDomain {
+				if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 					valReplaceWg.Done()
 				}
 				return err
