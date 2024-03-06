@@ -338,7 +338,7 @@ func (b *BeaconChainConfig) MinEpochsForBlockRequests() uint64 {
 
 type ConfigByte byte
 
-func (b ConfigByte) MarshalJson() ([]byte, error) {
+func (b ConfigByte) MarshalJSON() ([]byte, error) {
 	return []byte(fmt.Sprintf("\"0x%x\"", b)), nil
 }
 
