@@ -906,6 +906,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							continue
 						}
 						if isStateFile {
+							available[i] = webDownload.torrent
 							continue
 						}
 
