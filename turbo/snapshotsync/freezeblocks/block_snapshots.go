@@ -828,7 +828,7 @@ func buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				defer notifySegmentIndexingFinished(info.Name())
 				defer ps.Delete(p)
 				if err := buildIdx(gCtx, info, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
-					return fmt.Errorf("%s: %w", segment.FileName(), err)
+					return fmt.Errorf("%s: %w", info.Name(), err)
 				}
 				return nil
 			})
