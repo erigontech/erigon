@@ -731,7 +731,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 						}
 					}
 				}
-
+				fmt.Printf("[dbg] downloading add %s\n", t.Name())
 				d.lock.RLock()
 				_, downloading := d.downloading[t.Name()]
 				d.lock.RUnlock()
