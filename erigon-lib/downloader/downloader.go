@@ -1574,7 +1574,7 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 		pendingStateFiles = pendingStateFiles[1:]
 	}
 
-	if len(pending) == 0 {
+	if len(pending) == 0 && pendingStateFiles == 0 {
 		return available
 	}
 
