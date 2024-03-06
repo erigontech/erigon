@@ -1542,8 +1542,6 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 			pendingBlocksFiles = append(pendingBlocksFiles, t)
 		}
 	}
-	fmt.Printf("[dbg] pendingBlocksFiles: %s\n", pendingBlocksFiles)
-	fmt.Printf("[dbg] pendingStateFiles: %s\n", pendingStateFiles)
 	pending = pendingBlocksFiles
 
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
@@ -1565,6 +1563,15 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 		}
 
 		pending = pending[1:]
+	}
+	for len(pendingStateFiles) > 0 && pendingStateFiles[0].Info() != nil {
+		available = append(available, pendingStateFiles[0])
+
+		if len(available) == slots {
+			return available
+		}
+
+		pendingStateFiles = pendingStateFiles[1:]
 	}
 
 	if len(pending) == 0 {
@@ -1600,7 +1607,7 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 		case len(cases) - 2:
 			return nil
 		case len(cases) - 1:
-			return append(available, pendingStateFiles...)
+			return available
 		default:
 			available = append(available, pending[selected])
 
