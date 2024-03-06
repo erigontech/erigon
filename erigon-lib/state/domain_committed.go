@@ -424,7 +424,6 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem
 			}
 		}
 		if item == nil {
-			dc.d.logger.Warn("shortened key not found in all files, trying roFiles")
 			for _, f := range dc.files {
 				if f.startTxNum == txFrom && f.endTxNum == txTo {
 					item = f.src

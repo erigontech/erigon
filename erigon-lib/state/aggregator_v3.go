@@ -1291,9 +1291,9 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 	err := g.Wait()
 	if err == nil {
 		closeFiles = false
-		ac.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
-	} else {
 		ac.a.logger.Info(fmt.Sprintf("[snapshots] state merge done %s", r.String()))
+	} else {
+		ac.a.logger.Warn(fmt.Sprintf("[snapshots] state merge failed err=%v %s", err, r.String()))
 	}
 	return mf, err
 }
