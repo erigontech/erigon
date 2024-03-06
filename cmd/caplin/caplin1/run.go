@@ -50,6 +50,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 
 	"github.com/Giulio2002/bls"
+
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
