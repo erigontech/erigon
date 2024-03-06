@@ -868,10 +868,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 			d.stats.Downloading = int32(downloadingLen)
 			d.lock.RUnlock()
 
-			fmt.Printf("[dbg] pending: %s\n", pending)
-
 			available := availableTorrents(d.ctx, pending, d.cfg.DownloadSlots-downloadingLen)
-			fmt.Printf("[dbg] available0: %s\n", available)
 
 			d.lock.RLock()
 			for _, webDownload := range d.webDownloadInfo {
@@ -1546,6 +1543,8 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 			pendingBlocksFiles = append(pendingBlocksFiles, t)
 		}
 	}
+	fmt.Printf("[dbg] pendingBlocksFiles: %s\n", pending)
+	fmt.Printf("[dbg] pendingStateFiles: %s\n", pendingStateFiles)
 	pending = pendingBlocksFiles
 
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
