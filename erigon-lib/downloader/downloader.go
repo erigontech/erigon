@@ -924,8 +924,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 				torrentInfo, _ := d.torrentInfo(t.Name())
 				fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
 				if !ok {
+					fmt.Printf("[dbg] skip1: %s\n", t.Name())
 					continue
 				}
+				fmt.Printf("[dbg] available: %s\n", t.Name())
 
 				if torrentInfo != nil && torrentInfo.Completed != nil {
 					if bytes.Equal(t.InfoHash().Bytes(), torrentInfo.Hash) {
