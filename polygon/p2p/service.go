@@ -34,7 +34,7 @@ func newService(
 	logger log.Logger,
 	sentryClient direct.SentryClient,
 	requestIdGenerator RequestIdGenerator,
-) Service {
+) *service {
 	peerTracker := NewPeerTracker()
 	peerPenalizer := NewPeerPenalizer(sentryClient)
 	messageListener := NewMessageListener(logger, sentryClient, peerPenalizer)

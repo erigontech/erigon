@@ -33,6 +33,16 @@ func NewFetcher(
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
+	return newFetcher(config, logger, messageListener, messageSender, requestIdGenerator)
+}
+
+func newFetcher(
+	config FetcherConfig,
+	logger log.Logger,
+	messageListener MessageListener,
+	messageSender MessageSender,
+	requestIdGenerator RequestIdGenerator,
+) *fetcher {
 	return &fetcher{
 		config:             config,
 		logger:             logger,
