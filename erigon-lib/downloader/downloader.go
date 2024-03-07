@@ -1970,6 +1970,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		case <-t.GotInfo():
 		case <-ctx.Done():
 			return ctx.Err()
+		default:
 		}
 
 		if !dir2.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
