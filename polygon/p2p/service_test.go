@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -80,12 +80,12 @@ func (st *serviceTest) run(f func(ctx context.Context, t *testing.T)) {
 	})
 }
 
-func (st *serviceTest) mockExpectPenalizePeer(peerId PeerId) {
+func (st *serviceTest) mockExpectPenalizePeer(peerId *PeerId) {
 	st.sentryClient.
 		EXPECT().
 		PenalizePeer(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, req *sentry.PenalizePeerRequest, _ ...grpc.CallOption) (*emptypb.Empty, error) {
-			if peerId.H512() != req.PeerId {
+			if !peerId.Equal(PeerIdFromH512(req.PeerId)) {
 				return nil, fmt.Errorf("peerId != req.PeerId - %v vs %v", peerId.H512(), req.PeerId)
 			}
 
@@ -153,7 +153,7 @@ func (st *serviceTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 
 			delete(st.headersRequestResponseMocks, pkt.RequestId)
 			reqPeerId := PeerIdFromH512(req.PeerId)
-			if mock.wantRequestPeerId != reqPeerId {
+			if !mock.wantRequestPeerId.Equal(reqPeerId) {
 				return nil, fmt.Errorf("wantRequestPeerId != reqPeerId - %v vs %v", mock.wantRequestPeerId, reqPeerId)
 			}
 
@@ -209,7 +209,7 @@ func (st *serviceTest) mockSentryPeerEventsStream() {
 		AnyTimes()
 }
 
-func (st *serviceTest) mockDisconnectPeerEvent(peerId PeerId) {
+func (st *serviceTest) mockDisconnectPeerEvent(peerId *PeerId) {
 	st.peerEvents <- &delayedMessage[*sentry.PeerEvent]{
 		message: &sentry.PeerEvent{
 			EventId: sentry.PeerEvent_Disconnect,
@@ -221,7 +221,7 @@ func (st *serviceTest) mockDisconnectPeerEvent(peerId PeerId) {
 type requestResponseMock struct {
 	requestId                   uint64
 	mockResponseInboundMessages []*sentry.InboundMessage
-	wantRequestPeerId           PeerId
+	wantRequestPeerId           *PeerId
 	wantRequestOriginNumber     uint64
 	wantRequestAmount           uint64
 	responseDelay               time.Duration
@@ -783,7 +783,7 @@ func TestListPeersMayHaveBlockNum(t *testing.T) {
 	test := newServiceTest(t, newMockRequestGenerator(requestId1, requestId2))
 	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
-		var peerIds []PeerId // peers which may have blocks 1 and 2
+		var peerIds []*PeerId // peers which may have blocks 1 and 2
 		require.Eventuallyf(t, func() bool {
 			peerIds = test.service.ListPeersMayHaveBlockNum(2)
 			return len(peerIds) == 2
@@ -822,7 +822,7 @@ func TestListPeersMayHaveBlockNumDoesNotReturnPeerIdAfterDisconnect(t *testing.T
 	test.run(func(ctx context.Context, t *testing.T) {
 		wantPeerCount := 2
 
-		var peerIds []PeerId
+		var peerIds []*PeerId
 		require.Eventuallyf(t, func() bool {
 			peerIds = test.service.ListPeersMayHaveBlockNum(2)
 			return len(peerIds) == 2

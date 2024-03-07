@@ -23,7 +23,7 @@ type FetcherConfig struct {
 }
 
 type Fetcher interface {
-	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
+	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error)
 }
 
 func NewFetcher(
@@ -50,7 +50,7 @@ type fetcher struct {
 	requestIdGenerator RequestIdGenerator
 }
 
-func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	if start >= end {
 		return nil, &ErrInvalidFetchHeadersRange{
 			start: start,
@@ -87,7 +87,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	return headers, nil
 }
 
-func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chunkNum uint64, peerId *PeerId) ([]*types.Header, error) {
 	headers, err := backoff.RetryWithData(func() ([]*types.Header, error) {
 		headers, err := f.fetchHeaderChunk(ctx, start, end, chunkNum, peerId)
 		if err != nil {
@@ -109,7 +109,7 @@ func (f *fetcher) fetchHeaderChunkWithRetry(ctx context.Context, start, end, chu
 	return headers, nil
 }
 
-func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
+func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId *PeerId) ([]*types.Header, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -154,7 +154,7 @@ func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uin
 func (f *fetcher) awaitHeadersResponse(
 	ctx context.Context,
 	requestId uint64,
-	peerId PeerId,
+	peerId *PeerId,
 	messages <-chan *DecodedInboundMessage[*eth.BlockHeadersPacket66],
 ) ([]*types.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, f.config.responseTimeout)
@@ -165,7 +165,7 @@ func (f *fetcher) awaitHeadersResponse(
 		case <-ctx.Done():
 			return nil, fmt.Errorf("await headers response interrupted: %w", ctx.Err())
 		case message := <-messages:
-			if message.PeerId != peerId {
+			if !message.PeerId.Equal(peerId) {
 				continue
 			}
 

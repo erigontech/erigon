@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"io/fs"
 	"math/big"
 	"math/rand"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	types2 "github.com/ledgerwatch/erigon-lib/types"
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
@@ -101,7 +102,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
 
@@ -213,7 +215,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 
 	//{
@@ -246,7 +249,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriterV4(domains)
 
@@ -305,7 +309,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
 
-	domains := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetTxNum(0)
 
@@ -395,7 +400,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 
 	_, err = domains.SeekCommitment(ctx, tx)
@@ -414,7 +420,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 	defer tx.Rollback()
 	domCtx = agg.MakeContext()
 	defer domCtx.Close()
-	domains = state.NewSharedDomains(tx, log.New())
+	domains, err = state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 
 	writer = state2.NewWriterV4(domains)
@@ -480,7 +487,8 @@ func TestCommit(t *testing.T) {
 
 	domCtx := agg.MakeContext()
 	defer domCtx.Close()
-	domains := state.NewSharedDomains(tx, log.New())
+	domains, err := state.NewSharedDomains(tx, log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 
 	buf := types2.EncodeAccountBytesV3(0, uint256.NewInt(7), nil, 1)

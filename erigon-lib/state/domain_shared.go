@@ -13,20 +13,18 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ledgerwatch/erigon-lib/common/assert"
-	"github.com/ledgerwatch/erigon-lib/common/length"
-
-	"github.com/ledgerwatch/log/v3"
-
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/ledgerwatch/erigon-lib/commitment"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/assert"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
 	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 // KvList sort.Interface to sort write list by keys
@@ -84,16 +82,16 @@ type HasAggCtx interface {
 	AggCtx() interface{}
 }
 
-func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
+func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	var ac *AggregatorV3Context
 	if casted, ok := tx.(HasAggCtx); ok {
 		ac = casted.AggCtx().(*AggregatorV3Context)
 	} else {
-		panic(fmt.Sprintf("type %T need AggCtx method", tx))
+		return nil, fmt.Errorf("type %T need AggCtx method", tx)
 	}
 	if tx == nil {
-		panic(fmt.Sprintf("tx is nil"))
+		return nil, fmt.Errorf("tx is nil")
 	}
 
 	sd := &SharedDomains{
@@ -119,9 +117,9 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("SeekCommitment: %w", err)
 	}
-	return sd
+	return sd, nil
 }
 
 func (sd *SharedDomains) AggCtx() interface{} { return sd.aggCtx }
@@ -1221,7 +1219,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	// IdxRange: looking into DB and Files (.ef). Using `order.Desc` to find latest txNum with commitment
 	it, err := cd.hc.IdxRange(keyCommitmentState, int(untilTx), int(sinceTx)-1, order.Desc, -1, tx) //[from, to)
 	if err != nil {
-		return 0, 0, nil, err
+		return 0, 0, nil, fmt.Errorf("IdxRange: %w", err)
 	}
 	if it.HasNext() {
 		txn, err := it.Next()

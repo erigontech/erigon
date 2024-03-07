@@ -116,7 +116,7 @@ func (e *EngineBlockDownloader) StartDownloading(ctx context.Context, requestId 
 		return false
 	}
 	e.status.Store(headerdownload.Syncing)
-	go e.download(ctx, hashToDownload, requestId, blockTip)
+	go e.download(e.bacgroundCtx, hashToDownload, requestId, blockTip)
 	return true
 }
 

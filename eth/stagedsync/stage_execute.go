@@ -346,7 +346,10 @@ func unwindExec3(u *UnwindState, s *StageState, txc wrap.TxContainer, ctx contex
 
 	var domains *libstate.SharedDomains
 	if txc.Doms == nil {
-		domains = libstate.NewSharedDomains(txc.Tx, logger)
+		domains, err = libstate.NewSharedDomains(txc.Tx, logger)
+		if err != nil {
+			return err
+		}
 		defer domains.Close()
 	} else {
 		domains = txc.Doms

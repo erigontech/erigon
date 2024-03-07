@@ -1452,7 +1452,8 @@ func (c *Bor) CommitStates(
 ) error {
 	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
 
-	if len(events) == 50 || len(events) == 0 {
+	//if len(events) == 50 || len(events) == 0 {
+	if len(events) == 50 {
 		blockNum := header.Number.Uint64()
 
 		var to time.Time
