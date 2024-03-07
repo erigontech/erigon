@@ -52,7 +52,8 @@ func TestRebuildPatriciaTrieBasedOnFiles(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	domains := state.NewSharedDomains(tx, logger)
+	domains, err := state.NewSharedDomains(tx, logger)
+	require.NoError(t, err)
 	defer domains.Close()
 	domains.SetBlockNum(blocksTotal)
 	domains.SetTxNum(blocksTotal - 1) // generated 1tx per block

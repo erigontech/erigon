@@ -161,7 +161,8 @@ func TestCreateGas(t *testing.T) {
 		var txc wrap.TxContainer
 		txc.Tx = tx
 		if ethconfig.EnableHistoryV4InTest {
-			domains = state2.NewSharedDomains(tx, log.New())
+			domains, err = state2.NewSharedDomains(tx, log.New())
+			require.NoError(t, err)
 			defer domains.Close()
 			txc.Doms = domains
 		}
