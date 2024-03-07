@@ -79,6 +79,10 @@ func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, blk *types.Blo
 	return cc.chainRW.InsertBlockAndWait(ctx, blk)
 }
 
+func (cc *ExecutionClientDirect) CurrentHeader(ctx context.Context) (*types.Header, error) {
+	return cc.chainRW.CurrentHeader(ctx), nil
+}
+
 func (cc *ExecutionClientDirect) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
 	return cc.chainRW.IsCanonicalHash(ctx, hash)
 }

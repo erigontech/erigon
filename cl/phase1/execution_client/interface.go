@@ -19,6 +19,7 @@ type ExecutionEngine interface {
 	SupportInsertion() bool
 	InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error
 	InsertBlock(ctx context.Context, block *types.Block) error
+	CurrentHeader(ctx context.Context) (*types.Header, error)
 	IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error)
 	Ready(ctx context.Context) (bool, error)
 	// Range methods
