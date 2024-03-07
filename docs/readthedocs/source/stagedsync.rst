@@ -77,7 +77,7 @@ This stage takes the data written in stage 1, and by using the ETL framework, it
 
     func extractHeaders(k []byte, v []byte, next etl.ExtractNextFunc) error
 
-The function above its used with ETL to extract blockHashes and blockNumber from the key of the headers bucket. In fact, since the key of the headers bucket are a concatenation of blockNumber and blockHash, they can be used in such process.
+The function above is used with ETL to extract blockHashes and blockNumber from the key of the headers bucket. In fact, since the key of the headers bucket are a concatenation of blockNumber and blockHash, they can be used in such process.
 
 Changes in DB:
 
@@ -116,12 +116,12 @@ This stage, downloads block bodies and put them into the database. This stage is
 
 `processBodiesStage` takes the bodies downloaded and those the following with them:
 
-	* Verifiy them.
+	* Verify them.
 	* RLP-encode them.
 	* compress the rlp-encoded bodies using `snappy`.
-	* put the commpressed RLP into the database.
+	* put the compressed RLP into the database.
 
-in order for Erigon to reaccess the block bodies, it decompress the and rlp-decode them. the entries in the db for block bodies are a concatenation of [block number] + [block hash] in order to pre-sort them before inserting them into the database.
+in order for Erigon to reaccess the block bodies, it decompresses them and rlp-decode them. the entries in the db for block bodies are a concatenation of [block number] + [block hash] in order to pre-sort them before inserting them into the database.
 
 Changes in DB:
 
