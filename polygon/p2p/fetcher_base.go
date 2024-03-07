@@ -105,7 +105,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 
 func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
 	//
-	// TODO 1. chunking
+	// TODO 1. chunking + paging
 	//      2. retrying
 	//      3. validation?
 	//      4. penalizing?
@@ -143,16 +143,12 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 		return nil, err
 	}
 
-	messageFilter := func(packet *eth.BlockBodiesPacket66) bool {
-		return packet.RequestId != requestId
-	}
-
-	packet, err := awaitResponse(ctx, f.config.responseTimeout, peerId, messages, messageFilter)
+	message, err := awaitResponse(ctx, f.config.responseTimeout, messages, filterBlockBodies(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
 
-	return packet.BlockBodiesPacket, nil
+	return message.BlockBodiesPacket, nil
 }
 
 func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId *PeerId) ([]*types.Header, error) {
@@ -189,16 +185,12 @@ func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uin
 		return nil, err
 	}
 
-	messageFilter := func(packet *eth.BlockHeadersPacket66) bool {
-		return packet.RequestId != requestId
-	}
-
-	packet, err := awaitResponse(ctx, f.config.responseTimeout, peerId, messages, messageFilter)
+	message, err := awaitResponse(ctx, f.config.responseTimeout, messages, filterBlockHeaders(peerId, requestId))
 	if err != nil {
 		return nil, err
 	}
 
-	return packet.BlockHeadersPacket, nil
+	return message.BlockHeadersPacket, nil
 }
 
 func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
@@ -232,11 +224,11 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 	return nil
 }
 
-func fetchWithRetry[T any](config FetcherConfig, fetch func() (T, error)) (T, error) {
-	data, err := backoff.RetryWithData(func() (T, error) {
+func fetchWithRetry[TData any](config FetcherConfig, fetch func() (TData, error)) (TData, error) {
+	data, err := backoff.RetryWithData(func() (TData, error) {
 		data, err := fetch()
 		if err != nil {
-			var nilData T
+			var nilData TData
 			// retry timeouts
 			if errors.Is(err, context.DeadlineExceeded) {
 				return nilData, err
@@ -249,40 +241,51 @@ func fetchWithRetry[T any](config FetcherConfig, fetch func() (T, error)) (T, er
 		return data, nil
 	}, backoff.WithMaxRetries(backoff.NewConstantBackOff(config.retryBackOff), config.maxRetries))
 	if err != nil {
-		var nilData T
+		var nilData TData
 		return nilData, err
 	}
 
 	return data, nil
 }
 
-func awaitResponse[T any](
+func awaitResponse[TPacket any](
 	ctx context.Context,
-	responseTimeout time.Duration,
-	peerId *PeerId,
-	messages chan *DecodedInboundMessage[T],
-	messageFilter func(T) bool,
-) (T, error) {
-	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
+	timeout time.Duration,
+	messages chan *DecodedInboundMessage[TPacket],
+	filter func(*DecodedInboundMessage[TPacket]) bool,
+) (TPacket, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	for {
 		select {
 		case <-ctx.Done():
-			var nilData T
-			return nilData, fmt.Errorf("await response interrupted: %w", ctx.Err())
+			var nilPacket TPacket
+			return nilPacket, fmt.Errorf("await response interrupted: %w", ctx.Err())
 		case message := <-messages:
-			if !message.PeerId.Equal(peerId) {
-				continue
-			}
-
-			if messageFilter(message.Decoded) {
+			if filter(message) {
 				continue
 			}
 
 			return message.Decoded, nil
 		}
 	}
+}
+
+func filterBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
+	return func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) bool {
+		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+	}
+}
+
+func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
+	return func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
+		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
+	}
+}
+
+func filter(requestPeerId, responsePeerId *PeerId, requestId, responseId uint64) bool {
+	return !requestPeerId.Equal(responsePeerId) && requestId != responseId
 }
 
 type ErrInvalidFetchHeadersRange struct {
