@@ -228,7 +228,7 @@ var (
 	withExistence idxList = 0b100
 )
 
-func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems []ctxItem) {
+func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool, leaveSubsets bool) (roItems []ctxItem) {
 	roFiles := make([]ctxItem, 0, files.Len())
 	if trace {
 		log.Warn("[dbg] roFiles01", "amount", files.Len())
@@ -273,7 +273,7 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems 
 
 			// `kill -9` may leave small garbage files, but if big one already exists we assume it's good(fsynced) and no reason to merge again
 			// see super-set file, just drop sub-set files from list
-			for len(roFiles) > 0 && roFiles[len(roFiles)-1].src.isSubsetOf(item) {
+			for !leaveSubsets && len(roFiles) > 0 && roFiles[len(roFiles)-1].src.isSubsetOf(item) {
 				if trace {
 					log.Warn("[dbg] roFiles5", "f", roFiles[len(roFiles)-1].src.decompressor.FileName())
 				}
@@ -296,7 +296,7 @@ func ctxFiles(files *btree2.BTreeG[*filesItem], l idxList, trace bool) (roItems 
 }
 
 func (ii *InvertedIndex) reCalcRoFiles() {
-	roFiles := ctxFiles(ii.files, ii.indexList, false)
+	roFiles := ctxFiles(ii.files, ii.indexList, false, false)
 	ii.roFiles.Store(&roFiles)
 }
 

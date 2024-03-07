@@ -357,7 +357,11 @@ type Domain struct {
 	files   *btree2.BTreeG[*filesItem]
 	roFiles atomic.Pointer[[]ctxItem]
 
+	// replaceKeysInValues allows to replace commitment branch values with shorter keys.
+	// for commitment domain only
 	replaceKeysInValues bool
+	// restricts subset file deletions on open/close. Needed to hold files until commitment is merged
+	restrictSubsetFileDeletions bool
 
 	keysTable   string // key -> invertedStep , invertedStep = ^(txNum / aggregationStep), Needs to be table with DupSort
 	valsTable   string // key + invertedStep -> values
@@ -684,7 +688,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files, d.indexList, false)
+	roFiles := ctxFiles(d.files, d.indexList, false, d.restrictSubsetFileDeletions)
 	d.roFiles.Store(&roFiles)
 }
 
