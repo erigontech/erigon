@@ -50,11 +50,11 @@ func NewSync(
 	}
 }
 
-func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header) error {
+func (s *Sync) commitExecution(ctx context.Context, newTip *types.Header, finalizedHeader *types.Header) error {
 	if err := s.storage.Flush(ctx); err != nil {
 		return err
 	}
-	return s.execution.UpdateForkChoice(ctx, newTip)
+	return s.execution.UpdateForkChoice(ctx, newTip, finalizedHeader)
 }
 
 func (s *Sync) onMilestoneEvent(
@@ -84,7 +84,7 @@ func (s *Sync) onMilestoneEvent(
 	// unwind to the previous verified milestone
 	oldTip := ccBuilder.Root()
 	oldTipNum := oldTip.Number.Uint64()
-	if err = s.execution.UpdateForkChoice(ctx, oldTip); err != nil {
+	if err = s.execution.UpdateForkChoice(ctx, oldTip, oldTip); err != nil {
 		return err
 	}
 
@@ -96,7 +96,7 @@ func (s *Sync) onMilestoneEvent(
 		return errors.New("sync.Sync.onMilestoneEvent: unexpected to have no milestone headers since the last milestone after receiving a new milestone event")
 	}
 
-	if err = s.commitExecution(ctx, newTip); err != nil {
+	if err = s.commitExecution(ctx, newTip, newTip); err != nil {
 		return err
 	}
 
@@ -142,7 +142,7 @@ func (s *Sync) onNewHeaderEvent(
 			return err
 		}
 
-		if err = s.execution.UpdateForkChoice(ctx, newTip); err != nil {
+		if err = s.execution.UpdateForkChoice(ctx, newTip, ccBuilder.Root()); err != nil {
 			return err
 		}
 	}
@@ -201,7 +201,7 @@ func (s *Sync) Run(ctx context.Context) error {
 		tip = newTip
 	}
 
-	if err = s.commitExecution(ctx, tip); err != nil {
+	if err = s.commitExecution(ctx, tip, tip); err != nil {
 		return err
 	}
 

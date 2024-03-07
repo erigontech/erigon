@@ -11,7 +11,7 @@ func TestEventChannel(t *testing.T) {
 	t.Parallel()
 
 	t.Run("PushEvent1", func(t *testing.T) {
-		ch := NewEventChannel[string](2, 0)
+		ch := NewEventChannel[string](2)
 
 		ch.PushEvent("event1")
 		e, ok := ch.takeEvent()
@@ -23,7 +23,7 @@ func TestEventChannel(t *testing.T) {
 	})
 
 	t.Run("PushEvent3", func(t *testing.T) {
-		ch := NewEventChannel[string](2, 0)
+		ch := NewEventChannel[string](2)
 
 		ch.PushEvent("event1")
 		ch.PushEvent("event2")
@@ -45,7 +45,7 @@ func TestEventChannel(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
-		ch := NewEventChannel[string](2, 0)
+		ch := NewEventChannel[string](2)
 
 		go func() {
 			err := ch.Run(ctx)
