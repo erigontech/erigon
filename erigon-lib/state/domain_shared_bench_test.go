@@ -25,7 +25,8 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 	maxTx := stepSize * 258
 
