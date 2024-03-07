@@ -5,10 +5,10 @@ import (
 	"encoding/hex"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 )
 
-func PeerIdFromH512(h512 *types.H512) *PeerId {
+func PeerIdFromH512(h512 *erigonlibtypes.H512) *PeerId {
 	peerId := PeerId(gointerfaces.ConvertH512ToHash(h512))
 	return &peerId
 }
@@ -22,7 +22,7 @@ func PeerIdFromUint64(num uint64) *PeerId {
 
 type PeerId [64]byte
 
-func (pid *PeerId) H512() *types.H512 {
+func (pid *PeerId) H512() *erigonlibtypes.H512 {
 	return gointerfaces.ConvertHashToH512(*pid)
 }
 
