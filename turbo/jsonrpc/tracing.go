@@ -43,30 +43,19 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		return err
 	}
 	defer tx.Rollback()
-	var (
-		block    *types.Block
-		number   rpc.BlockNumber
-		numberOk bool
-		hash     common.Hash
-		hashOk   bool
-	)
-	if number, numberOk = blockNrOrHash.Number(); numberOk {
-		block, err = api.blockByRPCNumber(number, tx)
-	} else if hash, hashOk = blockNrOrHash.Hash(); hashOk {
-		block, err = api.blockByHashWithSenders(tx, hash)
-	} else {
-		return fmt.Errorf("invalid arguments; neither block nor hash specified")
-	}
 
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(blockNrOrHash, tx, api.filters)
 	if err != nil {
 		stream.WriteNil()
 		return err
 	}
-
+	block, err := api.blockWithSenders(tx, hash, blockNumber)
+	if err != nil {
+		stream.WriteNil()
+		return err
+	}
 	if block == nil {
-		if numberOk {
-			return fmt.Errorf("invalid arguments; block with number %d not found", number)
-		}
+		stream.WriteNil()
 		return fmt.Errorf("invalid arguments; block with hash %x not found", hash)
 	}
 
@@ -435,6 +424,10 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	if err != nil {
 		stream.WriteNil()
 		return err
+	}
+	if block == nil {
+		stream.WriteNil()
+		return fmt.Errorf("block %d not found", blockNum)
 	}
 
 	// -1 is a default value for transaction index.

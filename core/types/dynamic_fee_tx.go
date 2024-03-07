@@ -61,13 +61,6 @@ func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint25
 	}
 }
 
-func (tx DynamicFeeTransaction) Cost() *uint256.Int {
-	total := new(uint256.Int).SetUint64(tx.Gas)
-	total.Mul(total, tx.Tip)
-	total.Add(total, tx.Value)
-	return total
-}
-
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
 }
@@ -76,13 +69,11 @@ func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 func (tx DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 	cpy := &DynamicFeeTransaction{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{
-				time: tx.time,
-			},
-			Nonce: tx.Nonce,
-			To:    tx.To, // TODO: copy pointed-to address
-			Data:  libcommon.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
+			TransactionMisc: TransactionMisc{},
+			Nonce:           tx.Nonce,
+			To:              tx.To, // TODO: copy pointed-to address
+			Data:            libcommon.CopyBytes(tx.Data),
+			Gas:             tx.Gas,
 			// These are copied below.
 			Value: new(uint256.Int),
 		},

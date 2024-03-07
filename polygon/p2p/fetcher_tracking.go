@@ -8,6 +8,10 @@ import (
 )
 
 func NewTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) Fetcher {
+	return newTrackingFetcher(fetcher, peerTracker)
+}
+
+func newTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) *trackingFetcher {
 	return &trackingFetcher{
 		Fetcher:     fetcher,
 		peerTracker: peerTracker,
@@ -19,7 +23,7 @@ type trackingFetcher struct {
 	peerTracker PeerTracker
 }
 
-func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
 		var errIncompleteResponse *ErrIncompleteHeaders

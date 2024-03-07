@@ -43,6 +43,7 @@ func TestHarnessBellatrix(t *testing.T) {
 			beacontest.WithTestFromFs(Harnesses, "lightclient"),
 			beacontest.WithTestFromFs(Harnesses, "validators"),
 			beacontest.WithTestFromFs(Harnesses, "lighthouse"),
+			beacontest.WithTestFromFs(Harnesses, "blob_sidecars"),
 		)...,
 	)
 }

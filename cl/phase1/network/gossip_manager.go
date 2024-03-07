@@ -166,6 +166,44 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding blob sidecar"
 				return err
 			}
+			// [REJECT] The sidecar's index is consistent with MAX_BLOBS_PER_BLOCK -- i.e. blob_sidecar.index < MAX_BLOBS_PER_BLOCK.
+			if blobSideCar.Index >= g.beaconConfig.MaxBlobsPerBlock {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("blob index out of range")
+			}
+			sidecarSubnetIndex := blobSideCar.Index % g.beaconConfig.MaxBlobsPerBlock
+			if sidecarSubnetIndex != *data.SubnetId {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("blob index mismatch")
+			}
+			currentSlot := utils.GetCurrentSlot(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot)
+			// [REJECT] The sidecar's slot is consistent with the current slot -- i.e. blob_sidecar.slot == current_slot.
+			if blobSideCar.SignedBlockHeader.Header.Slot > currentSlot+1 {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return fmt.Errorf("blob slot too far ahead")
+			}
+			// [IGNORE] The sidecar's block's parent (defined by block_header.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue sidecars for processing once the parent block is retrieved).
+			if _, has := g.forkChoice.GetHeader(blobSideCar.SignedBlockHeader.Header.ParentRoot); !has {
+				return nil
+			}
+			blockRoot, err := blobSideCar.SignedBlockHeader.Header.HashSSZ()
+			if err != nil {
+				return err
+			}
+			// Do not bother with blocks processed by fork choice already.
+			if _, has := g.forkChoice.GetHeader(blockRoot); has {
+				return nil
+			}
+			// The background checks above are enough for now.
+			if err := g.forkChoice.OnBlobSidecar(blobSideCar, false); err != nil {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				return err
+			}
+
+			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+				log.Debug("failed publish gossip", "err", err)
+			}
+
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		default:
 		}
@@ -179,6 +217,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 		return
 	}
 	operationsCh := make(chan *sentinel.GossipData, 1<<16)
+	blobsCh := make(chan *sentinel.GossipData, 1<<16)
 	blocksCh := make(chan *sentinel.GossipData, 1<<16)
 
 	// Start a goroutine that listens for new gossip messages and sends them to the operations processor.
@@ -212,6 +251,21 @@ func (g *GossipManager) Start(ctx context.Context) {
 		}
 	}()
 
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case data := <-blobsCh:
+				l := log.Ctx{}
+				err = g.onRecv(ctx, data, l)
+				if err != nil {
+					log.Warn("[Beacon Gossip] Recoverable Error", "err", err)
+				}
+			}
+		}
+	}()
+
 	for {
 		data, err := subscription.Recv()
 		if err != nil {
@@ -221,6 +275,8 @@ func (g *GossipManager) Start(ctx context.Context) {
 
 		if data.Name == gossip.TopicNameBeaconBlock {
 			blocksCh <- data
+		} else if gossip.IsTopicBlobSidecar(data.Name) {
+			blobsCh <- data
 		} else {
 			operationsCh <- data
 		}

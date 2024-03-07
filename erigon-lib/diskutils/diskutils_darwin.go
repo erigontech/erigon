@@ -18,8 +18,8 @@ func MountPointForDirPath(dirPath string) string {
 		return "/"
 	}
 
-	var mountPointBytes []byte
-	for _, b := range stat.Mntonname {
+	mountPointBytes := []byte{}
+	for _, b := range &stat.Mntonname {
 		if b == 0 {
 			break
 		}

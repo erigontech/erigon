@@ -11,10 +11,8 @@ import (
 	"modernc.org/mathutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
-	"github.com/ledgerwatch/erigon/rlp"
 )
 
 type RequestIdGenerator func() uint64
@@ -26,8 +24,10 @@ type FetcherConfig struct {
 }
 
 type Fetcher interface {
-	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error)
-	FetchBodies(ctx context.Context, headers []*types.Header, peerId PeerId) ([]*types.Body, error)
+	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
+	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error)
+	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error)
 }
 
 func NewFetcher(
@@ -37,6 +37,16 @@ func NewFetcher(
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
+	return newFetcher(config, logger, messageListener, messageSender, requestIdGenerator)
+}
+
+func newFetcher(
+	config FetcherConfig,
+	logger log.Logger,
+	messageListener MessageListener,
+	messageSender MessageSender,
+	requestIdGenerator RequestIdGenerator,
+) *fetcher {
 	return &fetcher{
 		config:             config,
 		logger:             logger,
@@ -54,7 +64,7 @@ type fetcher struct {
 	requestIdGenerator RequestIdGenerator
 }
 
-func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId PeerId) ([]*types.Header, error) {
+func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	if start >= end {
 		return nil, &ErrInvalidFetchHeadersRange{
 			start: start,
@@ -93,7 +103,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	return headers, nil
 }
 
-func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId PeerId) ([]*types.Body, error) {
+func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
 	//
 	// TODO 1. chunking
 	//      2. retrying
@@ -106,9 +116,18 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx, 1)
-	f.messageListener.RegisterBlockBodiesObserver(observer)
-	defer f.messageListener.UnregisterBlockBodiesObserver(observer)
+	messages := make(chan *DecodedInboundMessage[*eth.BlockBodiesPacket66])
+	observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+		select {
+		case <-ctx.Done():
+			return
+		case messages <- message:
+			// no-op
+		}
+	}
+
+	unregister := f.messageListener.RegisterBlockBodiesObserver(observer)
+	defer unregister()
 
 	requestId := f.requestIdGenerator()
 	hashes := make([]common.Hash, len(headers))
@@ -124,31 +143,34 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 		return nil, err
 	}
 
-	decode := func(data []byte) ([]*types.Body, uint64, error) {
-		var packet eth.BlockBodiesPacket66
-		if err := rlp.DecodeBytes(data, &packet); err != nil {
-			return nil, 0, err
-		}
-
-		return packet.BlockBodiesPacket, packet.RequestId, nil
+	messageFilter := func(packet *eth.BlockBodiesPacket66) bool {
+		return packet.RequestId != requestId
 	}
 
-	bodies, err := awaitResponse(ctx, requestId, peerId, observer, f.config.responseTimeout, decode)
+	packet, err := awaitResponse(ctx, f.config.responseTimeout, peerId, messages, messageFilter)
 	if err != nil {
 		return nil, err
 	}
 
-	return bodies, nil
+	return packet.BlockBodiesPacket, nil
 }
 
-func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId PeerId) ([]*types.Header, error) {
-	// cleanup for the chan message observer
+func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uint64, peerId *PeerId) ([]*types.Header, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	observer := NewChanMessageObserver[*sentry.InboundMessage](ctx, 1)
-	f.messageListener.RegisterBlockHeadersObserver(observer)
-	defer f.messageListener.UnregisterBlockHeadersObserver(observer)
+	messages := make(chan *DecodedInboundMessage[*eth.BlockHeadersPacket66])
+	observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
+		select {
+		case <-ctx.Done():
+			return
+		case messages <- message:
+			// no-op
+		}
+	}
+
+	unregister := f.messageListener.RegisterBlockHeadersObserver(observer)
+	defer unregister()
 
 	chunkStart := start + chunkNum*eth.MaxHeadersServe
 	chunkAmount := mathutil.MinUint64(end-chunkStart, eth.MaxHeadersServe)
@@ -167,21 +189,16 @@ func (f *fetcher) fetchHeaderChunk(ctx context.Context, start, end, chunkNum uin
 		return nil, err
 	}
 
-	decode := func(data []byte) ([]*types.Header, uint64, error) {
-		var packet eth.BlockHeadersPacket66
-		if err := rlp.DecodeBytes(data, &packet); err != nil {
-			return nil, 0, err
-		}
-
-		return packet.BlockHeadersPacket, packet.RequestId, nil
+	messageFilter := func(packet *eth.BlockHeadersPacket66) bool {
+		return packet.RequestId != requestId
 	}
 
-	headers, err := awaitResponse(ctx, requestId, peerId, observer, f.config.responseTimeout, decode)
+	packet, err := awaitResponse(ctx, f.config.responseTimeout, peerId, messages, messageFilter)
 	if err != nil {
 		return nil, err
 	}
 
-	return headers, nil
+	return packet.BlockHeadersPacket, nil
 }
 
 func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount uint64) error {
@@ -193,8 +210,8 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 		}
 	}
 
-	expectedHeaderNum := start
-	for _, header := range headers {
+	for i, header := range headers {
+		expectedHeaderNum := start + uint64(i)
 		currentHeaderNumber := header.Number.Uint64()
 		if currentHeaderNumber != expectedHeaderNum {
 			return &ErrNonSequentialHeaderNumbers{
@@ -202,8 +219,6 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 				expected: expectedHeaderNum,
 			}
 		}
-
-		expectedHeaderNum++
 	}
 
 	if headersLen < amount {
@@ -243,11 +258,10 @@ func fetchWithRetry[T any](config FetcherConfig, fetch func() (T, error)) (T, er
 
 func awaitResponse[T any](
 	ctx context.Context,
-	requestId uint64,
-	peerId PeerId,
-	observer ChanMessageObserver[*sentry.InboundMessage],
 	responseTimeout time.Duration,
-	decode func([]byte) (T, uint64, error),
+	peerId *PeerId,
+	messages chan *DecodedInboundMessage[T],
+	messageFilter func(T) bool,
 ) (T, error) {
 	ctx, cancel := context.WithTimeout(ctx, responseTimeout)
 	defer cancel()
@@ -257,23 +271,16 @@ func awaitResponse[T any](
 		case <-ctx.Done():
 			var nilData T
 			return nilData, fmt.Errorf("await response interrupted: %w", ctx.Err())
-		case msg := <-observer.MessageChan():
-			msgPeerId := PeerIdFromH512(msg.PeerId)
-			if msgPeerId != peerId {
+		case message := <-messages:
+			if !message.PeerId.Equal(peerId) {
 				continue
 			}
 
-			data, responseId, err := decode(msg.Data)
-			if err != nil {
-				var nilData T
-				return nilData, err
-			}
-
-			if responseId != requestId {
+			if messageFilter(message.Decoded) {
 				continue
 			}
 
-			return data, nil
+			return message.Decoded, nil
 		}
 	}
 }

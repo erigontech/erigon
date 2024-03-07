@@ -124,7 +124,7 @@ func TestCollationBuild(t *testing.T) {
 	r := recsplit.NewIndexReader(sf.valuesIdx)
 	defer r.Close()
 	for i := 0; i < len(words); i += 2 {
-		offset := r.Lookup([]byte(words[i]))
+		offset, _ := r.Lookup([]byte(words[i]))
 		g.Reset(offset)
 		w, _ := g.Next(nil)
 		require.Equal(t, words[i], string(w))

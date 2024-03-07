@@ -34,7 +34,7 @@ import (
 // ChainHeaderReader defines a small collection of methods needed to access the local
 // blockchain during header verification.
 //
-//go:generate mockgen -destination=./mock/chain_header_reader_mock.go -package=mock . ChainHeaderReader
+//go:generate mockgen -destination=./chain_header_reader_mock.go -package=consensus . ChainHeaderReader
 type ChainHeaderReader interface {
 	// Config retrieves the blockchain's chain configuration.
 	Config() *chain.Config
@@ -72,7 +72,7 @@ type ChainReader interface {
 	HasBlock(hash libcommon.Hash, number uint64) bool
 
 	BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue
-	BorStartEventID(number uint64) uint64
+	BorStartEventID(hash libcommon.Hash, number uint64) uint64
 }
 
 type SystemCall func(contract libcommon.Address, data []byte) ([]byte, error)

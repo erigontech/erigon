@@ -3,6 +3,7 @@ package bor
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"time"
 
@@ -97,7 +98,29 @@ func (s *Snapshot) Store(db kv.RwDB) error {
 	}
 
 	return db.Update(context.Background(), func(tx kv.RwTx) error {
-		return tx.Put(kv.BorSeparate, append([]byte("bor-"), s.Hash[:]...), blob)
+		err := tx.Put(kv.BorSeparate, append([]byte("bor-"), s.Hash[:]...), blob)
+		if err != nil {
+			return err
+		}
+		progressBytes, err := tx.GetOne(kv.BorSeparate, []byte("bor-snapshot-progress"))
+		if err != nil {
+			return err
+		}
+
+		var progress uint64
+
+		if len(progressBytes) == 8 {
+			progress = binary.BigEndian.Uint64(progressBytes)
+		}
+
+		if s.Number > progress {
+			updateBytes := make([]byte, 8)
+			binary.BigEndian.PutUint64(updateBytes, s.Number)
+			if err = tx.Put(kv.BorSeparate, []byte("bor-snapshot-progress"), updateBytes); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

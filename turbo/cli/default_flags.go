@@ -180,6 +180,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiIdleTimeoutFlag,
 
 	&utils.CaplinBackfillingFlag,
+	&utils.CaplinBlobBackfillingFlag,
 	&utils.CaplinArchiveFlag,
 
 	&utils.TrustedSetupFile,

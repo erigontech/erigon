@@ -55,8 +55,8 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		BeaconConfig:   cfg.BeaconCfg,
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
-		EnableBlocks:   true,
-	}, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil, forkchoice.NewForkChoiceStorageMock(), log.Root())
+		EnableBlocks:   false,
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil, forkchoice.NewForkChoiceStorageMock(), log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err
