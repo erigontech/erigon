@@ -81,20 +81,6 @@ func (mr *MockServiceMockRecorder) FetchHeaders(ctx, start, end, peerId any) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchHeaders", reflect.TypeOf((*MockService)(nil).FetchHeaders), ctx, start, end, peerId)
 }
 
-// GetMessageListener mocks base method.
-func (m *MockService) GetMessageListener() MessageListener {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetMessageListener")
-	ret0, _ := ret[0].(MessageListener)
-	return ret0
-}
-
-// GetMessageListener indicates an expected call of GetMessageListener.
-func (mr *MockServiceMockRecorder) GetMessageListener() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMessageListener", reflect.TypeOf((*MockService)(nil).GetMessageListener))
-}
-
 // ListPeersMayHaveBlockNum mocks base method.
 func (m *MockService) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 	m.ctrl.T.Helper()
