@@ -370,7 +370,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				continue
 			}
 			s.ch <- &GossipMessage{
-				From:      peer.ID(msg.ReceivedFrom),
+				From:      msg.ReceivedFrom,
 				TopicName: topicName,
 				Data:      common.Copy(msg.Data),
 			}
