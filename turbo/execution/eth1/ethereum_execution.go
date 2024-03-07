@@ -34,7 +34,7 @@ const maxBlocksLookBehind = 32
 
 // EthereumExecutionModule describes ethereum execution logic and indexing.
 type EthereumExecutionModule struct {
-	ctx context.Context
+	bacgroundCtx context.Context
 	// Snapshots + MDBX
 	blockReader services.FullBlockReader
 
@@ -90,9 +90,9 @@ func NewEthereumExecutionModule(blockReader services.FullBlockReader, db kv.RwDB
 		stateChangeConsumer: stateChangeConsumer,
 		engine:              engine,
 
-		historyV3: historyV3,
-		syncCfg:   syncCfg,
-		ctx:       ctx,
+		historyV3:    historyV3,
+		syncCfg:      syncCfg,
+		bacgroundCtx: ctx,
 	}
 }
 
