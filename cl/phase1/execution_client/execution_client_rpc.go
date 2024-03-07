@@ -181,6 +181,10 @@ func (cc *ExecutionClientRpc) InsertBlock(ctx context.Context, block *types.Bloc
 	panic("unimplemented")
 }
 
+func (cc *ExecutionClientRpc) CurrentHeader(ctx context.Context) (*types.Header, error) {
+	panic("unimplemented")
+}
+
 func (cc *ExecutionClientRpc) IsCanonicalHash(ctx context.Context, hash libcommon.Hash) (bool, error) {
 	panic("unimplemented")
 }
