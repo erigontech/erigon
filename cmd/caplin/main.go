@@ -72,8 +72,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
+
 	// Either start from genesis or a checkpoint
-	ctx, cn := context.WithCancel(context.Background())
+	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
 	var state *state.CachingBeaconState
 	if cfg.InitialSync {
