@@ -29,6 +29,16 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
+type PeerDataUpdate struct {
+	PeerID string
+	ENR    string
+	Enode  string
+	ID     string
+	Name   string
+	Type   string
+	Caps   []string
+}
+
 type PeerStatisticMsgUpdate struct {
 	PeerID  string
 	Inbound bool
