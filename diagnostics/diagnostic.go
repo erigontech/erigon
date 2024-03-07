@@ -368,6 +368,7 @@ func (d *DiagnosticClient) runCurrentSyncStageListener() {
 				d.mu.Lock()
 				d.syncStats.SyncStages.CurrentStage = info.Stage
 				if int(d.syncStats.SyncStages.CurrentStage) >= len(d.syncStats.SyncStages.StagesList) {
+					d.mu.Unlock()
 					return
 				}
 				d.mu.Unlock()
@@ -442,9 +443,9 @@ func (d *DiagnosticClient) runBlockHeaderMetricsListener() {
 				cancel()
 				return
 			case info := <-ch:
-				//d.mu.Lock()
+				d.mu.Lock()
 				d.blockMetrics.Header.Enqueue(info.Header)
-				//d.mu.Unlock()
+				d.mu.Unlock()
 			}
 		}
 
