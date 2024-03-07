@@ -36,6 +36,10 @@ type MessageListener interface {
 }
 
 func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) MessageListener {
+	return newMessageListener(logger, sentryClient, peerPenalizer)
+}
+
+func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) *messageListener {
 	return &messageListener{
 		logger:                  logger,
 		sentryClient:            sentryClient,
