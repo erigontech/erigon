@@ -29,7 +29,7 @@ type PeerStatistics struct {
 	TypeBytesOut map[string]uint64
 }
 
-type PeerStatisticUpdate struct {
+type PeerStatisticMsgUpdate struct {
 	PeerID  string
 	Inbound bool
 	MsgType string
@@ -175,6 +175,6 @@ func (ti CurrentSyncStage) Type() Type {
 	return TypeOf(ti)
 }
 
-func (ti PeerStatisticUpdate) Type() Type {
+func (ti PeerStatisticMsgUpdate) Type() Type {
 	return TypeOf(ti)
 }

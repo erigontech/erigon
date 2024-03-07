@@ -438,12 +438,12 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 
 func (d *DiagnosticClient) runCollectPeersStatistics() {
 	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.PeerStatisticUpdate](context.Background(), 1)
+		ctx, ch, cancel := diaglib.Context[diaglib.PeerStatisticMsgUpdate](context.Background(), 1)
 		defer cancel()
 
 		rootCtx, _ := common.RootContext()
 
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.PeerStatisticUpdate{}), log.Root())
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():

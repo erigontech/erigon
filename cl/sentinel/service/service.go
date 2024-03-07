@@ -379,9 +379,9 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 }
 
 func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticUpdate{}).Enabled()
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
-		diagnostics.Send(diagnostics.PeerStatisticUpdate{
+		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
 			PeerID:  peerID,
 			Inbound: inbound,
 			MsgType: msgType,
