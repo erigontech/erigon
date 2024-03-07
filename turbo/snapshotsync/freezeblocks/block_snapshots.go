@@ -1192,7 +1192,7 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 		if err := snapshots.ReopenFolder(); err != nil {
 			return ok, fmt.Errorf("reopen: %w", err)
 		}
-		snapshots.LogStat("retire")
+		snapshots.LogStat("blocks:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
 		}
