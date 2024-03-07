@@ -209,6 +209,18 @@ func (f FileInfo) Name() string {
 func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
 func (f FileInfo) Len() uint64 { return f.To - f.From }
 
+func (f FileInfo) CompareTo(o FileInfo) int {
+	if res := cmp.Compare(f.From, o.From); res != 0 {
+		return res
+	}
+
+	if res := cmp.Compare(f.To, o.To); res != 0 {
+		return res
+	}
+
+	return strings.Compare(f.Type.String(), o.Type.String())
+}
+
 func (f FileInfo) As(t Type) FileInfo {
 	as := FileInfo{
 		Version: f.Version,

@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/mock/gomock"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -68,8 +68,8 @@ type headerDownloaderTest struct {
 	headersWriter    *MockHeadersWriter
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int) []p2p.PeerId {
-	peers := make([]p2p.PeerId, count)
+func (hdt headerDownloaderTest) fakePeers(count int) []*p2p.PeerId {
+	peers := make([]*p2p.PeerId, count)
 	for i := range peers {
 		peers[i] = p2p.PeerIdFromUint64(uint64(i) + 1)
 	}
@@ -109,11 +109,11 @@ func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
 	return milestones
 }
 
-type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error)
+type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId *p2p.PeerId) ([]*types.Header, error)
 
 func (hdt headerDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	// p2p.Service.FetchHeaders interface is using [start, end) so we stick to that
-	return func(ctx context.Context, start uint64, end uint64, peerId p2p.PeerId) ([]*types.Header, error) {
+	return func(ctx context.Context, start uint64, end uint64, _ *p2p.PeerId) ([]*types.Header, error) {
 		if start >= end {
 			return nil, fmt.Errorf("unexpected start >= end in test: start=%d, end=%d", start, end)
 		}
@@ -156,7 +156,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(1)
 
-	err := test.headerDownloader.DownloadUsingMilestones(context.Background(), 1)
+	lastHeader, err := test.headerDownloader.DownloadUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 4)
 	// check headers are written in order
@@ -164,6 +164,7 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 	require.Equal(t, uint64(2), persistedHeaders[1].Number.Uint64())
 	require.Equal(t, uint64(3), persistedHeaders[2].Number.Uint64())
 	require.Equal(t, uint64(4), persistedHeaders[3].Number.Uint64())
+	require.Equal(t, persistedHeaders[len(persistedHeaders)-1], lastHeader)
 }
 
 func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
@@ -186,7 +187,7 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
 		Times(4)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	lastHeader, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
 	// check headers are written in order
@@ -198,6 +199,7 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 	require.Equal(t, uint64(6), persistedHeaders[5].Number.Uint64())
 	require.Equal(t, uint64(7), persistedHeaders[6].Number.Uint64())
 	require.Equal(t, uint64(8), persistedHeaders[7].Number.Uint64())
+	require.Equal(t, persistedHeaders[len(persistedHeaders)-1], lastHeader)
 }
 
 func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.T) {
@@ -246,7 +248,7 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 			Times(2),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeadersFirstTime, 1)
 	require.Len(t, persistedHeadersRemaining, 5)
@@ -280,7 +282,8 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 			Times(4),
 	)
 
-	err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	lastHeader, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, persistedHeaders, 8)
+	require.Equal(t, persistedHeaders[len(persistedHeaders)-1], lastHeader)
 }

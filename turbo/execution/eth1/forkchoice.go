@@ -74,7 +74,7 @@ func (e *EthereumExecutionModule) UpdateForkChoice(ctx context.Context, req *exe
 	outcomeCh := make(chan forkchoiceOutcome, 1)
 
 	// So we wait at most the amount specified by req.Timeout before just sending out
-	go e.updateForkChoice(ctx, blockHash, safeHash, finalizedHash, outcomeCh)
+	go e.updateForkChoice(e.bacgroundCtx, blockHash, safeHash, finalizedHash, outcomeCh)
 	fcuTimer := time.NewTimer(time.Duration(req.Timeout) * time.Millisecond)
 
 	select {

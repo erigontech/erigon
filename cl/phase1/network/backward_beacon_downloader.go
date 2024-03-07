@@ -5,10 +5,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
@@ -206,7 +207,7 @@ Loop:
 				return err
 			}
 			if blockHash != (libcommon.Hash{}) && !b.elFound {
-				bodyChainHeader, err := b.engine.GetBodiesByHashes([]libcommon.Hash{blockHash})
+				bodyChainHeader, err := b.engine.GetBodiesByHashes(ctx, []libcommon.Hash{blockHash})
 				if err != nil {
 					return err
 				}

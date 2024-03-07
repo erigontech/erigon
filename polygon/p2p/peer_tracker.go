@@ -7,14 +7,18 @@ import (
 )
 
 type PeerTracker interface {
-	ListPeersMayHaveBlockNum(blockNum uint64) []PeerId
-	BlockNumPresent(peerId PeerId, blockNum uint64)
-	BlockNumMissing(peerId PeerId, blockNum uint64)
-	PeerConnected(peerId PeerId)
-	PeerDisconnected(peerId PeerId)
+	ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId
+	BlockNumPresent(peerId *PeerId, blockNum uint64)
+	BlockNumMissing(peerId *PeerId, blockNum uint64)
+	PeerConnected(peerId *PeerId)
+	PeerDisconnected(peerId *PeerId)
 }
 
 func NewPeerTracker() PeerTracker {
+	return newPeerTracker()
+}
+
+func newPeerTracker() *peerTracker {
 	return &peerTracker{
 		peerSyncProgresses: map[PeerId]*peerSyncProgress{},
 	}
@@ -25,11 +29,11 @@ type peerTracker struct {
 	peerSyncProgresses map[PeerId]*peerSyncProgress
 }
 
-func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
+func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []*PeerId {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	var peerIds []PeerId
+	var peerIds []*PeerId
 	for _, peerSyncProgress := range pt.peerSyncProgresses {
 		if peerSyncProgress.peerMayHaveBlockNum(blockNum) {
 			peerIds = append(peerIds, peerSyncProgress.peerId)
@@ -39,41 +43,42 @@ func (pt *peerTracker) ListPeersMayHaveBlockNum(blockNum uint64) []PeerId {
 	return peerIds
 }
 
-func (pt *peerTracker) BlockNumPresent(peerId PeerId, blockNum uint64) {
+func (pt *peerTracker) BlockNumPresent(peerId *PeerId, blockNum uint64) {
 	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
 		psp.blockNumPresent(blockNum)
 	})
 }
 
-func (pt *peerTracker) BlockNumMissing(peerId PeerId, blockNum uint64) {
+func (pt *peerTracker) BlockNumMissing(peerId *PeerId, blockNum uint64) {
 	pt.updatePeerSyncProgress(peerId, func(psp *peerSyncProgress) {
 		psp.blockNumMissing(blockNum)
 	})
 }
 
-func (pt *peerTracker) PeerDisconnected(peerId PeerId) {
+func (pt *peerTracker) PeerDisconnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	delete(pt.peerSyncProgresses, peerId)
+	delete(pt.peerSyncProgresses, *peerId)
 }
 
-func (pt *peerTracker) PeerConnected(peerId PeerId) {
+func (pt *peerTracker) PeerConnected(peerId *PeerId) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	if _, ok := pt.peerSyncProgresses[peerId]; !ok {
-		pt.peerSyncProgresses[peerId] = &peerSyncProgress{
+	peerIdVal := *peerId
+	if _, ok := pt.peerSyncProgresses[peerIdVal]; !ok {
+		pt.peerSyncProgresses[peerIdVal] = &peerSyncProgress{
 			peerId: peerId,
 		}
 	}
 }
 
-func (pt *peerTracker) updatePeerSyncProgress(peerId PeerId, update func(psp *peerSyncProgress)) {
+func (pt *peerTracker) updatePeerSyncProgress(peerId *PeerId, update func(psp *peerSyncProgress)) {
 	pt.mu.Lock()
 	defer pt.mu.Unlock()
 
-	peerSyncProgress, ok := pt.peerSyncProgresses[peerId]
+	peerSyncProgress, ok := pt.peerSyncProgresses[*peerId]
 	if !ok {
 		return
 	}
@@ -82,20 +87,12 @@ func (pt *peerTracker) updatePeerSyncProgress(peerId PeerId, update func(psp *pe
 }
 
 func NewPeerEventObserver(peerTracker PeerTracker) MessageObserver[*sentry.PeerEvent] {
-	return &peerEventObserver{
-		peerTracker: peerTracker,
-	}
-}
-
-type peerEventObserver struct {
-	peerTracker PeerTracker
-}
-
-func (peo *peerEventObserver) Notify(msg *sentry.PeerEvent) {
-	switch msg.EventId {
-	case sentry.PeerEvent_Connect:
-		peo.peerTracker.PeerConnected(PeerIdFromH512(msg.PeerId))
-	case sentry.PeerEvent_Disconnect:
-		peo.peerTracker.PeerDisconnected(PeerIdFromH512(msg.PeerId))
+	return func(message *sentry.PeerEvent) {
+		switch message.EventId {
+		case sentry.PeerEvent_Connect:
+			peerTracker.PeerConnected(PeerIdFromH512(message.PeerId))
+		case sentry.PeerEvent_Disconnect:
+			peerTracker.PeerDisconnected(PeerIdFromH512(message.PeerId))
+		}
 	}
 }

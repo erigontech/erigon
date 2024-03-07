@@ -62,6 +62,7 @@ type SnapshotsCfg struct {
 
 	historyV3        bool
 	caplin           bool
+	blobs            bool
 	agg              *state.AggregatorV3
 	silkworm         *silkworm.Silkworm
 	snapshotUploader *snapshotUploader
@@ -79,6 +80,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 	historyV3 bool,
 	agg *state.AggregatorV3,
 	caplin bool,
+	blobs bool,
 	silkworm *silkworm.Silkworm,
 ) SnapshotsCfg {
 	cfg := SnapshotsCfg{
@@ -94,6 +96,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		agg:                agg,
 		silkworm:           silkworm,
 		syncConfig:         syncConfig,
+		blobs:              blobs,
 	}
 
 	if uploadFs := cfg.syncConfig.UploadLocation; len(uploadFs) > 0 {
@@ -230,10 +233,11 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			cfg.notifier.Events.OnNewSnapshot()
 		}
 	} else {
-		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
+		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cfg.blobs, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
 	}
+
 	// It's ok to notify before tx.Commit(), because RPCDaemon does read list of files by gRPC (not by reading from db)
 	if cfg.notifier.Events != nil {
 		cfg.notifier.Events.OnNewSnapshot()

@@ -185,7 +185,8 @@ func TestCreation(t *testing.T) {
 				{3395000, 0, ID{Hash: checksumToBytes(0x27806576), Next: 14750000}},  // First Istanbul block
 				{14750000, 0, ID{Hash: checksumToBytes(0x66e26adb), Next: 23850000}}, // First Berlin block
 				{23850000, 0, ID{Hash: checksumToBytes(0x4f2f71cc), Next: 50523000}}, // First London block
-				{50523000, 0, ID{Hash: checksumToBytes(0xdc08865c), Next: 0}},        // First Agra block
+				{50523000, 0, ID{Hash: checksumToBytes(0xdc08865c), Next: 54876000}}, // First Agra block
+				{54876000, 0, ID{Hash: checksumToBytes(0xf097bc13), Next: 0}},        // First Napoli block
 			},
 		},
 	}
