@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -223,12 +222,11 @@ type messageListenerTest struct {
 // If changing the behaviour here please run "go test -v -count=1000" and "go test -v -count=1 -race" to confirm there
 // are no regressions.
 func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var done atomic.Bool
 	mlt.t.Run("start", func(_ *testing.T) {
 		go func() {
 			mlt.messageListener.Run(mlt.ctx)
-			wg.Done()
+			done.Store(true)
 		}()
 	})
 
@@ -236,9 +234,9 @@ func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 		f(mlt.ctx, t)
 	})
 
-	mlt.t.Run("stop", func(_ *testing.T) {
+	mlt.t.Run("stop", func(t *testing.T) {
 		mlt.ctxCancel()
-		wg.Wait()
+		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
 	})
 }
 
