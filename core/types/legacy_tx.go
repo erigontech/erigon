@@ -117,13 +117,6 @@ func (tx LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	}
 }
 
-func (tx LegacyTx) Cost() *uint256.Int {
-	total := new(uint256.Int).SetUint64(tx.Gas)
-	total.Mul(total, tx.GasPrice)
-	total.Add(total, tx.Value)
-	return total
-}
-
 func (tx LegacyTx) GetAccessList() types2.AccessList {
 	return types2.AccessList{}
 }
