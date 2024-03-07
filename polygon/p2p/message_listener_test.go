@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ func TestMessageListenerRegisterBlockHeadersObserver(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	test := newMessageListenerTest(t)
-
+	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
 		observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
@@ -61,7 +62,7 @@ func TestMessageListenerRegisterPeerEventObserver(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	test := newMessageListenerTest(t)
-
+	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
 		observer := func(message *sentry.PeerEvent) {
@@ -89,7 +90,7 @@ func TestMessageListenerRegisterNewBlockObserver(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	test := newMessageListenerTest(t)
-
+	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
 		observer := func(message *DecodedInboundMessage[*eth.NewBlockPacket]) {
@@ -118,7 +119,7 @@ func TestMessageListenerRegisterNewBlockHashesObserver(t *testing.T) {
 
 	peerId := PeerIdFromUint64(1)
 	test := newMessageListenerTest(t)
-
+	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
 		observer := func(message *DecodedInboundMessage[*eth.NewBlockHashesPacket]) {
@@ -149,8 +150,8 @@ func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	peerId1 := PeerIdFromUint64(1)
 	peerId2 := PeerIdFromUint64(2)
 	test := newMessageListenerTest(t)
+	test.mockSentryStreams()
 	mockExpectPenalizePeer(t, test.sentryClient, peerId1)
-
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
 		observer := func(message *DecodedInboundMessage[*eth.BlockHeadersPacket66]) {
@@ -188,37 +189,6 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 	inboundMessagesStream := make(chan *delayedMessage[*sentry.InboundMessage])
 	peerEventsStream := make(chan *delayedMessage[*sentry.PeerEvent])
 	sentryClient := direct.NewMockSentryClient(ctrl)
-	sentryClient.
-		EXPECT().
-		HandShake(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil).
-		AnyTimes()
-	sentryClient.
-		EXPECT().
-		SetStatus(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil).
-		AnyTimes()
-	sentryClient.
-		EXPECT().
-		MarkDisconnected().
-		AnyTimes()
-	sentryClient.
-		EXPECT().
-		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&mockSentryMessagesStream[*sentry.InboundMessage]{
-			ctx:    ctx,
-			stream: inboundMessagesStream,
-		}, nil).
-		AnyTimes()
-	sentryClient.
-		EXPECT().
-		PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(&mockSentryMessagesStream[*sentry.PeerEvent]{
-			ctx:    ctx,
-			stream: peerEventsStream,
-		}, nil).
-		AnyTimes()
-
 	return &messageListenerTest{
 		ctx:                   ctx,
 		ctxCancel:             cancel,
@@ -253,8 +223,13 @@ type messageListenerTest struct {
 // If changing the behaviour here please run "go test -v -count=1000" and "go test -v -count=1 -race" to confirm there
 // are no regressions.
 func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
+	var wg sync.WaitGroup
+	wg.Add(1)
 	mlt.t.Run("start", func(_ *testing.T) {
-		mlt.messageListener.Start(mlt.ctx)
+		go func() {
+			mlt.messageListener.Run(mlt.ctx)
+			wg.Done()
+		}()
 	})
 
 	mlt.t.Run("test", func(t *testing.T) {
@@ -263,8 +238,41 @@ func (mlt *messageListenerTest) run(f func(ctx context.Context, t *testing.T)) {
 
 	mlt.t.Run("stop", func(_ *testing.T) {
 		mlt.ctxCancel()
-		mlt.messageListener.Stop()
+		wg.Wait()
 	})
+}
+
+func (mlt *messageListenerTest) mockSentryStreams() {
+	mlt.sentryClient.
+		EXPECT().
+		HandShake(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil).
+		AnyTimes()
+	mlt.sentryClient.
+		EXPECT().
+		SetStatus(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil).
+		AnyTimes()
+	mlt.sentryClient.
+		EXPECT().
+		MarkDisconnected().
+		AnyTimes()
+	mlt.sentryClient.
+		EXPECT().
+		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&mockSentryMessagesStream[*sentry.InboundMessage]{
+			ctx:    mlt.ctx,
+			stream: mlt.inboundMessagesStream,
+		}, nil).
+		AnyTimes()
+	mlt.sentryClient.
+		EXPECT().
+		PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(&mockSentryMessagesStream[*sentry.PeerEvent]{
+			ctx:    mlt.ctx,
+			stream: mlt.peerEventsStream,
+		}, nil).
+		AnyTimes()
 }
 
 type delayedMessage[M any] struct {
