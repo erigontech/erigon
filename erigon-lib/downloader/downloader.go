@@ -1967,10 +1967,11 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
 	for _, t := range allTorrents {
 		select {
-		case <-t.GotInfo():
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
+		case <-t.GotInfo(): // files to verify already have .torrent on disk
+		default: //skip other files
+			continue
 		}
 
 		if !dir2.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
