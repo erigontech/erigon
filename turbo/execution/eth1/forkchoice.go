@@ -115,8 +115,6 @@ func (e *EthereumExecutionModule) updateForkChoice(ctx context.Context, original
 		return
 	}
 	defer e.semaphore.Release(1)
-	log.Info("[dbg] updateForkChoice start")
-	defer func() { log.Info("[dbg] updateForkChoice end") }()
 	var validationError string
 	type canonicalEntry struct {
 		hash   common.Hash
