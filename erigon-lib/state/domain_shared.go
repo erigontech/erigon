@@ -83,16 +83,16 @@ type HasAggCtx interface {
 	AggCtx() interface{}
 }
 
-func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
+func NewSharedDomains(tx kv.Tx, logger log.Logger) (*SharedDomains, error) {
 
 	var ac *AggregatorV3Context
 	if casted, ok := tx.(HasAggCtx); ok {
 		ac = casted.AggCtx().(*AggregatorV3Context)
 	} else {
-		panic(fmt.Sprintf("type %T need AggCtx method", tx))
+		return nil, fmt.Errorf("type %T need AggCtx method", tx)
 	}
 	if tx == nil {
-		panic(fmt.Sprintf("tx is nil"))
+		return nil, fmt.Errorf("tx is nil")
 	}
 
 	sd := &SharedDomains{
@@ -118,7 +118,7 @@ func NewSharedDomains(tx kv.Tx, logger log.Logger) *SharedDomains {
 	sd.sdCtx = NewSharedDomainsCommitmentContext(sd, CommitmentModeDirect, commitment.VariantHexPatriciaTrie)
 
 	if _, err := sd.SeekCommitment(context.Background(), tx); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("SeekCommitment: %w", err)
 	}
 	return sd, nil
 }
