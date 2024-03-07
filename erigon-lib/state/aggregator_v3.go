@@ -1246,6 +1246,10 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			g.Go(func() (err error) {
 				var vt valueTransformer
 				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
+					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = true
+					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = true
+					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = true
+
 					valReplaceWg.Wait()
 
 					vt = ac.d[kv.CommitmentDomain].commitmentValTransform(
@@ -1258,6 +1262,11 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
 				if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 					valReplaceWg.Done()
+				}
+				if err == nil {
+					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
+					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
+					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
 				}
 				return err
 			})
