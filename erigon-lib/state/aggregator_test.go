@@ -158,7 +158,8 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	}()
 	ac := agg.MakeContext()
 	defer ac.Close()
-	domains := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(rwTx, ac), log.New())
+	require.NoError(t, err)
 	defer domains.Close()
 
 	txs := uint64(100000)
