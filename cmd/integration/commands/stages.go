@@ -730,7 +730,10 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
 
-		domains := libstate.NewSharedDomains(tx, logger)
+		domains, err := libstate.NewSharedDomains(tx, logger)
+		if err != nil {
+			return err
+		}
 		defer domains.Close()
 		//txnUm := domains.TxNum()
 		blockNum := domains.BlockNum()
