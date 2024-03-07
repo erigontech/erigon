@@ -682,7 +682,9 @@ func (t *UDPv5) handlePacket(rawpacket []byte, fromAddr *net.UDPAddr) error {
 	}
 	if packet.Kind() != v5wire.WhoareyouPacket {
 		// WHOAREYOU logged separately to report errors.
-		t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", addr)
+		if t.trace {
+			t.log.Trace("<< "+packet.Name(), "id", fromID, "addr", addr)
+		}
 	}
 	t.handle(packet, fromID, fromAddr)
 	return nil
@@ -768,7 +770,9 @@ func (t *UDPv5) handleWhoareyou(p *v5wire.Whoareyou, fromID enode.ID, fromAddr *
 	}
 
 	// Resend the call that was answered by WHOAREYOU.
-	t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	if t.trace {
+		t.log.Trace("<< "+p.Name(), "id", c.node.ID(), "addr", fromAddr)
+	}
 	c.handshakeCount++
 	c.challenge = p
 	p.Node = c.node
