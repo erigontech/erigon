@@ -88,6 +88,8 @@ func NewGossipSource(ctx context.Context) *GossipSource {
 }
 
 func (b *GossipSource) InsertBlock(ctx context.Context, block *peers.PeeredObject[*cltypes.SignedBeaconBlock]) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	current, ok := b.blocks.Get(block.Data.Block.Slot)
 	if !ok {
 		current = make([]*peers.PeeredObject[*cltypes.SignedBeaconBlock], 0, 1)
@@ -97,6 +99,8 @@ func (b *GossipSource) InsertBlock(ctx context.Context, block *peers.PeeredObjec
 }
 
 func (b *GossipSource) GetRange(ctx context.Context, _ kv.Tx, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	out := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}
 	for i := from; i < from+count; i++ {
 		current, ok := b.blocks.Get(i)

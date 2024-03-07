@@ -47,7 +47,7 @@ func (f *ForkChoiceStore) OnVoluntaryExit(signedVoluntaryExit *cltypes.SignedVol
 	if s.Version() < clparams.DenebVersion {
 		domain, err = s.GetDomain(domainType, voluntaryExit.Epoch)
 	} else if s.Version() >= clparams.DenebVersion {
-		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(s.BeaconConfig().CapellaForkVersion), s.GenesisValidatorsRoot())
+		domain, err = fork.ComputeDomain(domainType[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
 	}
 	if err != nil {
 		return err
@@ -165,7 +165,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 	}
 	wc := validator.WithdrawalCredentials()
 
-	if wc[0] != f.beaconCfg.BLSWithdrawalPrefixByte {
+	if wc[0] != byte(f.beaconCfg.BLSWithdrawalPrefixByte) {
 		return fmt.Errorf("invalid withdrawal credentials prefix")
 	}
 	genesisValidatorRoot := s.GenesisValidatorsRoot()
@@ -178,7 +178,7 @@ func (f *ForkChoiceStore) OnBlsToExecutionChange(signedChange *cltypes.SignedBLS
 		}
 
 		// Compute the signing domain and verify the message signature.
-		domain, err := fork.ComputeDomain(f.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(f.beaconCfg.GenesisForkVersion), genesisValidatorRoot)
+		domain, err := fork.ComputeDomain(f.beaconCfg.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(f.beaconCfg.GenesisForkVersion)), genesisValidatorRoot)
 		if err != nil {
 			return err
 		}
