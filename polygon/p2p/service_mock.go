@@ -203,26 +203,14 @@ func (mr *MockServiceMockRecorder) RegisterPeerEventObserver(observer any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterPeerEventObserver", reflect.TypeOf((*MockService)(nil).RegisterPeerEventObserver), observer)
 }
 
-// Start mocks base method.
-func (m *MockService) Start(ctx context.Context) {
+// Run mocks base method.
+func (m *MockService) Run(ctx context.Context) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Start", ctx)
+	m.ctrl.Call(m, "Run", ctx)
 }
 
-// Start indicates an expected call of Start.
-func (mr *MockServiceMockRecorder) Start(ctx any) *gomock.Call {
+// Run indicates an expected call of Run.
+func (mr *MockServiceMockRecorder) Run(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockService)(nil).Start), ctx)
-}
-
-// Stop mocks base method.
-func (m *MockService) Stop() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Stop")
-}
-
-// Stop indicates an expected call of Stop.
-func (mr *MockServiceMockRecorder) Stop() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockService)(nil).Stop))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*MockService)(nil).Run), ctx)
 }

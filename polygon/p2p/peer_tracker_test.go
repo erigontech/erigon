@@ -51,6 +51,7 @@ func TestPeerTrackerPeerEventObserver(t *testing.T) {
 	peerTracker := newPeerTracker()
 	peerTrackerPeerEventObserver := NewPeerEventObserver(peerTracker)
 	messageListenerTest := newMessageListenerTest(t)
+	messageListenerTest.mockSentryStreams()
 	messageListenerTest.run(func(ctx context.Context, t *testing.T) {
 		unregister := messageListenerTest.messageListener.RegisterPeerEventObserver(peerTrackerPeerEventObserver)
 		t.Cleanup(unregister)

@@ -18,7 +18,7 @@ import (
 )
 
 type Service interface {
-	GetSync() *Sync
+	Run(ctx context.Context) error
 }
 
 type service struct {
@@ -93,18 +93,15 @@ func NewService(
 	}
 }
 
-func (s *service) GetSync() *Sync {
-	return s.sync
-}
-
 func (s *service) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var serviceErr error
 
-	s.p2pService.Start(ctx)
-	defer s.p2pService.Stop()
+	go func() {
+		s.p2pService.Run(ctx)
+	}()
 
 	go func() {
 		err := s.storage.Run(ctx)
@@ -122,10 +119,19 @@ func (s *service) Run(ctx context.Context) error {
 		}
 	}()
 
+	go func() {
+		err := s.sync.Run(ctx)
+		if (err != nil) && (ctx.Err() == nil) {
+			serviceErr = err
+			cancel()
+		}
+	}()
+
 	<-ctx.Done()
 
 	if serviceErr != nil {
 		return serviceErr
 	}
+
 	return ctx.Err()
 }
