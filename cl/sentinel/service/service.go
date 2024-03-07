@@ -354,6 +354,7 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("textPid", string(textPid))
 
 	// msgType, msgCap := parseTopic(topic)
 	// s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
