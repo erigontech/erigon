@@ -1065,17 +1065,6 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) error {
 	return nil
 }
 
-func ReadFirstNonGenesisBorEventBlockNum(tx kv.Tx) (uint64, bool, error) {
-	v, err := kv.FirstKey(tx, kv.BorEventNums)
-	if err != nil {
-		return 0, false, err
-	}
-	if len(v) == 0 {
-		return 0, false, nil
-	}
-	return binary.BigEndian.Uint64(v), true, nil
-}
-
 // PruneBorBlocks - delete [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db: [1, to)
 // doesn't change sequences of kv.EthTx and kv.NonCanonicalTxs
