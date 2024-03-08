@@ -374,7 +374,8 @@ type domainCfg struct {
 	hist     histCfg
 	compress FileCompression
 
-	replaceKeysInValues bool
+	replaceKeysInValues         bool
+	restrictSubsetFileDeletions bool
 }
 
 func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, valsTable, indexKeysTable, historyValsTable, indexTable string, logger log.Logger) (*Domain, error) {
@@ -388,8 +389,9 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
-		indexList:           withBTree | withExistence,
-		replaceKeysInValues: cfg.replaceKeysInValues, // for commitment domain only
+		indexList:                   withBTree | withExistence,
+		replaceKeysInValues:         cfg.replaceKeysInValues,         // for commitment domain only
+		restrictSubsetFileDeletions: cfg.restrictSubsetFileDeletions, // to prevent not merged 'garbage' to delete on start
 	}
 
 	d.roFiles.Store(&[]ctxItem{})

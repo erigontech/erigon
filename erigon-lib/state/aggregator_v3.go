@@ -136,6 +136,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
 		},
+		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
 	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
 		return nil, err
@@ -145,6 +146,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 			iiCfg:             iiCfg{salt: salt, dirs: dirs},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
 		},
+		restrictSubsetFileDeletions: a.commitmentValuesTransform,
 	}
 	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
 		return nil, err
@@ -164,8 +166,9 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
 			dontProduceHistoryFiles: true,
 		},
-		replaceKeysInValues: a.commitmentValuesTransform,
-		compress:            CompressNone,
+		replaceKeysInValues:         a.commitmentValuesTransform,
+		restrictSubsetFileDeletions: a.commitmentValuesTransform,
+		compress:                    CompressNone,
 	}
 	if a.d[kv.CommitmentDomain], err = NewDomain(cfg, aggregationStep, "commitment", kv.TblCommitmentKeys, kv.TblCommitmentVals, kv.TblCommitmentHistoryKeys, kv.TblCommitmentHistoryVals, kv.TblCommitmentIdx, logger); err != nil {
 		return nil, err
