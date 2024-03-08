@@ -9,6 +9,8 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 )
 
+const maxLightClientsPerRequest = 100
+
 func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream) error {
 	peerId := s.Conn().RemotePeer().String()
 	if err := c.checkRateLimit(peerId, "light_client", rateLimits.lightClientLimit, 1); err != nil {
@@ -106,7 +108,7 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 		return err
 	}
 
-	lightClientUpdates := make([]*cltypes.LightClientUpdate, 0, c.beaconConfig.MaxRequestLightClientUpdates)
+	lightClientUpdates := make([]*cltypes.LightClientUpdate, 0, maxLightClientsPerRequest)
 
 	endPeriod := req.StartPeriod + req.Count
 	currentSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
@@ -128,7 +130,7 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 		}
 
 		lightClientUpdates = append(lightClientUpdates, update)
-		if uint64(len(lightClientUpdates)) >= c.beaconConfig.MaxRequestLightClientUpdates {
+		if uint64(len(lightClientUpdates)) >= maxLightClientsPerRequest {
 			break
 		}
 	}

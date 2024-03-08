@@ -26,9 +26,7 @@ type MessageObserver[TMessage any] func(message TMessage)
 type UnregisterFunc func()
 
 type MessageListener interface {
-	Start(ctx context.Context)
-	Stop()
-
+	Run(ctx context.Context)
 	RegisterNewBlockObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc
 	RegisterNewBlockHashesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc
 	RegisterBlockHeadersObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc
@@ -36,6 +34,10 @@ type MessageListener interface {
 }
 
 func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) MessageListener {
+	return newMessageListener(logger, sentryClient, peerPenalizer)
+}
+
+func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) *messageListener {
 	return &messageListener{
 		logger:                  logger,
 		sentryClient:            sentryClient,
@@ -61,26 +63,24 @@ type messageListener struct {
 	stopWg                  sync.WaitGroup
 }
 
-func (ml *messageListener) Start(ctx context.Context) {
-	ml.once.Do(func() {
-		backgroundLoops := []func(ctx context.Context){
-			ml.listenInboundMessages,
-			ml.listenPeerEvents,
-		}
+func (ml *messageListener) Run(ctx context.Context) {
+	backgroundLoops := []func(ctx context.Context){
+		ml.listenInboundMessages,
+		ml.listenPeerEvents,
+	}
 
-		ml.stopWg.Add(len(backgroundLoops))
-		for _, loop := range backgroundLoops {
-			go loop(ctx)
-		}
-	})
-}
+	ml.stopWg.Add(len(backgroundLoops))
+	for _, loop := range backgroundLoops {
+		go loop(ctx)
+	}
 
-func (ml *messageListener) Stop() {
+	<-ctx.Done()
+	// once context has been cancelled wait for the background loops to stop
 	ml.stopWg.Wait()
 
+	// unregister all observers
 	ml.observersMu.Lock()
 	defer ml.observersMu.Unlock()
-
 	ml.newBlockObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{}
 	ml.newBlockHashesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{}
 	ml.blockHeadersObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{}

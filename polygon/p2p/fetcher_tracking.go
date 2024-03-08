@@ -8,6 +8,10 @@ import (
 )
 
 func NewTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) Fetcher {
+	return newTrackingFetcher(fetcher, peerTracker)
+}
+
+func newTrackingFetcher(fetcher Fetcher, peerTracker PeerTracker) *trackingFetcher {
 	return &trackingFetcher{
 		Fetcher:     fetcher,
 		peerTracker: peerTracker,
