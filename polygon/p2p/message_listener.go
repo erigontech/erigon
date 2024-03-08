@@ -46,6 +46,7 @@ func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, pee
 		newBlockObservers:       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{},
 		newBlockHashesObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{},
 		blockHeadersObservers:   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
+		blockBodiesObservers:    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{},
 		peerEventObservers:      map[uint64]MessageObserver[*sentry.PeerEvent]{},
 	}
 }
@@ -132,6 +133,8 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 			return notifyInboundMessageObservers(ctx, ml, ml.newBlockHashesObservers, message)
 		case sentry.MessageId_BLOCK_HEADERS_66:
 			return notifyInboundMessageObservers(ctx, ml, ml.blockHeadersObservers, message)
+		case sentry.MessageId_BLOCK_BODIES_66:
+			return notifyInboundMessageObservers(ctx, ml, ml.blockBodiesObservers, message)
 		default:
 			return nil
 		}

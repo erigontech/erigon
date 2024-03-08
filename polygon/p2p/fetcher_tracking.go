@@ -26,9 +26,9 @@ type trackingFetcher struct {
 func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	res, err := tf.Fetcher.FetchHeaders(ctx, start, end, peerId)
 	if err != nil {
-		var errIncompleteResponse *ErrIncompleteHeaders
-		if errors.As(err, &errIncompleteResponse) {
-			tf.peerTracker.BlockNumMissing(peerId, errIncompleteResponse.LowestMissingBlockNum())
+		var errIncompleteHeaders *ErrIncompleteHeaders
+		if errors.As(err, &errIncompleteHeaders) {
+			tf.peerTracker.BlockNumMissing(peerId, errIncompleteHeaders.LowestMissingBlockNum())
 		} else if errors.Is(err, context.DeadlineExceeded) {
 			tf.peerTracker.BlockNumMissing(peerId, start)
 		}
@@ -38,4 +38,20 @@ func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end u
 
 	tf.peerTracker.BlockNumPresent(peerId, res[len(res)-1].Number.Uint64())
 	return res, nil
+}
+
+func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
+	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId)
+	if err != nil {
+		var errMissingBodies *ErrMissingBodies
+		if errors.As(err, &errMissingBodies) {
+			tf.peerTracker.BlockNumMissing(peerId, errMissingBodies.LowestMissingBlockNum())
+		} else if errors.Is(err, context.DeadlineExceeded) {
+			tf.peerTracker.BlockNumMissing(peerId, lowestHeadersNum(headers))
+		}
+
+		return nil, err
+	}
+
+	return bodies, nil
 }
