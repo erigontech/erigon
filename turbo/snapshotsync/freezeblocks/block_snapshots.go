@@ -1175,6 +1175,26 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 }
 
 func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+	{ // runtime assert: if db has no data to create new files - detect it and early exit
+		var haveGap bool
+		if err := br.db.View(ctx, func(tx kv.Tx) error {
+			firstNonGenesisBlockNumber, err := br.blockReader.FirstNonGenesisHeaderInDB(ctx, tx)
+			if err != nil {
+				return err
+			}
+			haveGap = br.snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
+			if haveGap {
+				log.Debug("[snapshots] gap between files and db detected, can't create new files")
+			}
+			return nil
+		}); err != nil {
+			return false, err
+		}
+		if haveGap {
+			return false, nil
+		}
+	}
+
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.snapshots()
 
