@@ -3,6 +3,9 @@ package legacy_executor_verifier
 import (
 	"context"
 	"encoding/hex"
+	"strconv"
+	"sync"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/chain"
@@ -13,8 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier/proto/github.com/0xPolygonHermez/zkevm-node/state/runtime/executor"
 	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/log/v3"
-	"strconv"
-	"sync"
 )
 
 const (
@@ -269,9 +270,11 @@ func (v *LegacyExecutorVerifier) RemoveResponse(batchNumber uint64) {
 	v.responseMutex.Lock()
 	defer v.responseMutex.Unlock()
 
-	for index, response := range v.responses {
-		if response.BatchNumber == batchNumber {
-			v.responses = append(v.responses[:index], v.responses[index+1:]...)
+	result := make([]*VerifierResponse, 0, len(v.responses))
+	for _, response := range v.responses {
+		if response.BatchNumber != batchNumber {
+			result = append(result, response)
 		}
 	}
+	v.responses = result
 }

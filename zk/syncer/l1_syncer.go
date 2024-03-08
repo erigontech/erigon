@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"encoding/binary"
+
 	ethTypes "github.com/ledgerwatch/erigon/core/types"
 	types "github.com/ledgerwatch/erigon/zk/rpcdaemon"
 )
@@ -19,6 +20,9 @@ import (
 var (
 	batchWorkers = 2
 )
+
+var errorShortResponseLT32 = fmt.Errorf("response too short to contain hash data")
+var errorShortResponseLT96 = fmt.Errorf("response too short to contain last batch number data")
 
 const rollupSequencedBatchesSignature = "0x25280169" // hardcoded abi signature
 
@@ -145,6 +149,12 @@ func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address,
 
 		h, previousBatch, err := s.callGetRollupSequencedBatches(ctx, addr, rollupId, batchNum)
 		if err != nil {
+			// if there is an error previousBatch value is incorrect so we can just try a single batch behind
+			if batchNum > 0 && (err == errorShortResponseLT32 || err == errorShortResponseLT96) {
+				batchNum--
+				continue
+			}
+
 			log.Debug("Error getting rollup sequenced batch", "err", err)
 			time.Sleep(time.Duration(loopCount*2) * time.Second)
 			loopCount++
@@ -153,6 +163,12 @@ func (s *L1Syncer) GetOldAccInputHash(ctx context.Context, addr *common.Address,
 
 		if h != types.ZeroHash {
 			return h, nil
+		}
+
+		// h is 0 and if previousBatch is 0 then we can just try a single batch behind
+		if batchNum > 0 && previousBatch == 0 {
+			batchNum--
+			continue
 		}
 
 		// if the hash is zero, we need to go back to the previous batch
@@ -308,13 +324,13 @@ func (s *L1Syncer) callGetRollupSequencedBatches(ctx context.Context, addr *comm
 	}
 
 	if len(resp) < 32 {
-		return common.Hash{}, 0, fmt.Errorf("response too short to contain hash data")
+		return common.Hash{}, 0, errorShortResponseLT32
 	}
 	h := common.BytesToHash(resp[:32])
 	fmt.Printf("hash: %s\n", h.String())
 
 	if len(resp) < 96 {
-		return common.Hash{}, 0, fmt.Errorf("response too short to contain last batch number data")
+		return common.Hash{}, 0, errorShortResponseLT96
 	}
 	lastBatchNumber := binary.BigEndian.Uint64(resp[88:96])
 
