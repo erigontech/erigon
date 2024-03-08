@@ -38,7 +38,7 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 		err                                                                                         error
 	)
 	phase0ForkDigest, err = ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(b.GenesisForkVersion),
+		utils.Uint32ToBytes4(uint32(b.GenesisForkVersion)),
 		genesisValidatorRoot,
 	)
 	if err != nil {
@@ -46,7 +46,7 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 	}
 
 	altairForkDigest, err = ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(b.AltairForkVersion),
+		utils.Uint32ToBytes4(uint32(b.AltairForkVersion)),
 		genesisValidatorRoot,
 	)
 	if err != nil {
@@ -54,7 +54,7 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 	}
 
 	bellatrixForkDigest, err = ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(b.BellatrixForkVersion),
+		utils.Uint32ToBytes4(uint32(b.BellatrixForkVersion)),
 		genesisValidatorRoot,
 	)
 	if err != nil {
@@ -62,7 +62,7 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 	}
 
 	capellaForkDigest, err = ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(b.CapellaForkVersion),
+		utils.Uint32ToBytes4(uint32(b.CapellaForkVersion)),
 		genesisValidatorRoot,
 	)
 	if err != nil {
@@ -70,7 +70,7 @@ func ForkDigestVersion(digest [4]byte, b *clparams.BeaconChainConfig, genesisVal
 	}
 
 	denebForkDigest, err = ComputeForkDigestForVersion(
-		utils.Uint32ToBytes4(b.DenebForkVersion),
+		utils.Uint32ToBytes4(uint32(b.DenebForkVersion)),
 		genesisValidatorRoot,
 	)
 	if err != nil {
@@ -104,7 +104,7 @@ func ComputeForkDigest(
 
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve current fork version.
-	currentForkVersion := utils.Uint32ToBytes4(beaconConfig.GenesisForkVersion)
+	currentForkVersion := utils.Uint32ToBytes4(uint32(beaconConfig.GenesisForkVersion))
 	for _, fork := range forkList(beaconConfig.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
 			currentForkVersion = fork.version
@@ -209,7 +209,7 @@ func GetLastFork(
 ) [4]byte {
 	currentEpoch := utils.GetCurrentEpoch(genesisConfig.GenesisTime, beaconConfig.SecondsPerSlot, beaconConfig.SlotsPerEpoch)
 	// Retrieve current fork version.
-	currentFork := utils.Uint32ToBytes4(beaconConfig.GenesisForkVersion)
+	currentFork := utils.Uint32ToBytes4(uint32(beaconConfig.GenesisForkVersion))
 	for _, fork := range forkList(beaconConfig.ForkVersionSchedule) {
 		if currentEpoch >= fork.epoch {
 			currentFork = fork.version

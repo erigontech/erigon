@@ -528,7 +528,6 @@ func ConsensusClStages(ctx context.Context,
 						sourceFunc := v.GetRange
 						go func(source persistence.BlockSource) {
 							if _, ok := source.(*persistence.BeaconRpcSource); ok {
-								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 
 								select {
 								case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 4):
@@ -537,6 +536,7 @@ func ConsensusClStages(ctx context.Context,
 								}
 
 								for {
+									var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 									var err error
 									from := cfg.forkChoice.HighestSeen() - 2
 									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)

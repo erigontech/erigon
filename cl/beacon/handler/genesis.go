@@ -24,6 +24,6 @@ func (a *ApiHandler) GetEthV1BeaconGenesis(w http.ResponseWriter, r *http.Reques
 	return newBeaconResponse(&genesisResponse{
 		GenesisTime:          a.genesisCfg.GenesisTime,
 		GenesisValidatorRoot: a.genesisCfg.GenesisValidatorRoot,
-		GenesisForkVersion:   utils.Uint32ToBytes4(a.beaconChainCfg.GenesisForkVersion),
+		GenesisForkVersion:   utils.Uint32ToBytes4(uint32(a.beaconChainCfg.GenesisForkVersion)),
 	}), nil
 }

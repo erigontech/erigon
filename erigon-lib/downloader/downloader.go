@@ -791,6 +791,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 
 			select {
+			case <-d.ctx.Done():
+				return
 			case status := <-downloadComplete:
 				d.lock.Lock()
 				delete(d.downloading, status.name)
@@ -2181,6 +2183,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
 				_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
+				fmt.Println(info.Name)
 
 				if serr != nil {
 					if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
