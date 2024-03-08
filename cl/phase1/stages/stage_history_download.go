@@ -202,6 +202,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			case <-finishCh:
 				return
 			case <-ctx.Done():
+				return
 			}
 		}
 	}()
