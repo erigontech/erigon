@@ -366,11 +366,11 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
 			}
-			if msg.GetFrom() == s.host {
+			if msg.ReceivedFrom == s.host {
 				continue
 			}
 			s.ch <- &GossipMessage{
-				From:      msg.GetFrom(),
+				From:      msg.ReceivedFrom,
 				TopicName: topicName,
 				Data:      common.Copy(msg.Data),
 			}
