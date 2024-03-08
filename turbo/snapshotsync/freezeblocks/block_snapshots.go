@@ -1178,9 +1178,12 @@ func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, max
 	{ // runtime assert: if db has no data to create new files - detect it and early exit
 		var haveGap bool
 		if err := br.db.View(ctx, func(tx kv.Tx) error {
-			firstNonGenesisBlockNumber, err := br.blockReader.FirstNonGenesisHeaderInDB(ctx, tx)
+			firstNonGenesisBlockNumber, ok, err := rawdb.ReadFirstNonGenesisHeaderNumber(tx)
 			if err != nil {
 				return err
+			}
+			if ok {
+				return nil
 			}
 			haveGap = br.snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
 			if haveGap {
