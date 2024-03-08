@@ -854,6 +854,7 @@ type CursorItem struct {
 	key          []byte
 	val          []byte
 	step         uint64
+	startTxNum   uint64
 	endTxNum     uint64
 	latestOffset uint64     // offset of the latest value in the file
 	t            CursorType // Whether this item represents state file or DB record, or tree
@@ -918,8 +919,7 @@ type DomainContext struct {
 	readers    []*BtIndex
 	idxReaders []*recsplit.IndexReader
 
-	keyBuf    [60]byte // 52b key and 8b for inverted step
-	valKeyBuf [60]byte // 52b key and 8b for inverted step
+	keyBuf [60]byte // 52b key and 8b for inverted step
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor
@@ -1593,7 +1593,7 @@ var (
 	UseBtree = true // if true, will use btree for all files
 )
 
-func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
+func (dc *DomainContext) getFromFiles(filekey []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	hi, _ := dc.hc.ic.hashKey(filekey)
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
@@ -1622,7 +1622,7 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 		//t := time.Now()
 		v, found, err = dc.getFromFile(i, filekey)
 		if err != nil {
-			return nil, false, err
+			return nil, false, 0, 0, err
 		}
 		if !found {
 			if traceGetLatest == dc.d.filenameBase {
@@ -1635,13 +1635,13 @@ func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found boo
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 		}
 		//LatestStateReadGrind.ObserveDuration(t)
-		return v, true, nil
+		return v, true, dc.files[i].startTxNum, dc.files[i].startTxNum, nil
 	}
 	if traceGetLatest == dc.d.filenameBase {
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dc.d.filenameBase, filekey, len(dc.files))
 	}
 
-	return nil, false, nil
+	return nil, false, 0, 0, nil
 }
 
 // GetAsOf does not always require usage of roTx. If it is possible to determine
@@ -1752,6 +1752,50 @@ func (dc *DomainContext) keysCursor(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	return dc.keysC, nil
 }
 
+func (dc *DomainContext) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
+	keysC, err := dc.keysCursor(roTx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	var v, foundInvStep []byte
+	_, foundInvStep, err = keysC.SeekExact(key)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if foundInvStep != nil {
+		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
+		if LastTxNumOfStep(foundStep, dc.d.aggregationStep) >= dc.maxTxNumInDomainFiles(false) {
+			valsC, err := dc.valsCursor(roTx)
+			if err != nil {
+				return nil, foundStep, false, err
+			}
+			_, v, err = valsC.SeekExact(append(append(dc.keyBuf[:0], key...), foundInvStep...))
+			if err != nil {
+				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
+			}
+			return v, foundStep, true, nil
+		}
+	}
+	//if traceGetLatest == dc.d.filenameBase {
+	//	it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	l := iter.ToArrU64Must(it)
+	//	fmt.Printf("L: %d\n", l)
+	//	it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
+	//	if err != nil {
+	//		panic(err)
+	//	}
+	//	l2 := iter.ToArrU64Must(it2)
+	//	fmt.Printf("K: %d\n", l2)
+	//	panic(1)
+	//
+	//	fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
+	//}
+	return nil, 0, false, nil
+}
+
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint64, bool, error) {
@@ -1760,66 +1804,35 @@ func (dc *DomainContext) GetLatest(key1, key2 []byte, roTx kv.Tx) ([]byte, uint6
 		key = append(append(dc.keyBuf[:0], key1...), key2...)
 	}
 
-	keysC, err := dc.keysCursor(roTx)
-	if err != nil {
-		return nil, 0, false, err
-	}
+	var v []byte
+	var foundStep uint64
+	var found bool
+	var err error
 
-	var v, foundInvStep []byte
 	if traceGetLatest == dc.d.filenameBase {
 		defer func() {
 			fmt.Printf("GetLatest(%s, '%x' -> '%x') (from db=%t; istep=%x stepInFiles=%d)\n",
-				dc.d.filenameBase, key, v, foundInvStep != nil, foundInvStep, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
+				dc.d.filenameBase, key, v, found, foundStep, dc.maxTxNumInDomainFiles(false)/dc.d.aggregationStep)
 		}()
 	}
 
-	_, foundInvStep, err = keysC.SeekExact(key) // reads first DupSort value -- biggest available step
+	v, foundStep, found, err = dc.getLatestFromDb(key, roTx)
 	if err != nil {
 		return nil, 0, false, err
 	}
-
-	if foundInvStep != nil {
-		foundStep := ^binary.BigEndian.Uint64(foundInvStep)
-		if LastTxNumOfStep(foundStep, dc.d.aggregationStep) >= dc.maxTxNumInDomainFiles(false) {
-			copy(dc.valKeyBuf[:], key)
-			copy(dc.valKeyBuf[len(key):], foundInvStep)
-
-			valsC, err := dc.valsCursor(roTx)
-			if err != nil {
-				return nil, foundStep, false, err
-			}
-			_, v, err = valsC.SeekExact(dc.valKeyBuf[:len(key)+8])
-			if err != nil {
-				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
-			}
-			//LatestStateReadDB.ObserveDuration(t)
-			return v, foundStep, true, nil
-		}
-		//if traceGetLatest == dc.d.filenameBase {
-		//	it, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), 1390000, -1, order.Asc, -1, roTx) //[from, to)
-		//	if err != nil {
-		//		panic(err)
-		//	}
-		//	l := iter.ToArrU64Must(it)
-		//	fmt.Printf("L: %d\n", l)
-		//	it2, err := dc.hc.IdxRange(common.FromHex("0x105083929bF9bb22C26cB1777Ec92661170D4285"), -1, 1390000, order.Desc, -1, roTx) //[from, to)
-		//	if err != nil {
-		//		panic(err)
-		//	}
-		//	l2 := iter.ToArrU64Must(it2)
-		//	fmt.Printf("K: %d\n", l2)
-		//	panic(1)
-		//
-		//	fmt.Printf("GetLatest(%s, %x) -> not found in db\n", dc.d.filenameBase, key)
-		//}
+	if found {
+		return v, foundStep, true, nil
 	}
-	//LatestStateReadDBNotFound.ObserveDuration(t)
 
-	v, found, err := dc.getLatestFromFiles(key)
+	v, foundInFile, _, endTxNum, err := dc.getFromFiles(key)
 	if err != nil {
 		return nil, 0, false, err
 	}
-	return v, 0, found, nil
+	return v, endTxNum / dc.d.aggregationStep, foundInFile, nil
+}
+
+func (dc *DomainContext) GetLatestFromFiles(key []byte) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	return dc.getFromFiles(key)
 }
 
 func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []byte, v []byte) error) error {

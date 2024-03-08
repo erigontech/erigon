@@ -1266,7 +1266,7 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 					valReplaceWg.Done()
 				}
-				if err == nil {
+				if ac.a.commitmentValuesTransform && err == nil {
 					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
 					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
 					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false

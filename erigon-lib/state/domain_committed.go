@@ -313,7 +313,7 @@ func decodeShortenedKey(shortened []byte) (stepFrom, stepTo, offset uint64) {
 	s0 := int((encoded>>6)&0x07) + 1
 	s1 := int((encoded>>3)&0x07) + 1
 	of := int(encoded&0x07) + 1
-	// denormalize lengths
+	//denormalize lengths
 
 	shortened = shortened[2:]
 	return decodeU64(shortened[:s0]),
@@ -395,9 +395,16 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 }
 
 // searches in given list of files for a key or searches in domain files if list is empty
-func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, list []*filesItem) (fullKey []byte, found bool) {
-	stepFrom, stepTo, offset := decodeShortenedKey(shortKey)
-	txFrom, txTo := stepFrom*dc.d.aggregationStep, stepTo*dc.d.aggregationStep
+func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, txTo uint64, list []*filesItem) (fullKey []byte, found bool) {
+	//stepFrom, stepTo, offset := decodeShortenedKey(shortKey)
+	//txFrom, txTo := stepFrom*dc.d.aggregationStep, stepTo*dc.d.aggregationStep
+	stepFrom, stepTo := txFrom/dc.d.aggregationStep, txTo/dc.d.aggregationStep
+
+	if len(shortKey) < 1 {
+		return nil, false
+	}
+
+	offset := decodeU64(shortKey)
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -488,7 +495,7 @@ func (dc *DomainContext) commitmentValTransform(
 	accMerged := fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep)
 	stoMerged := fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep)
 
-	return func(valBuf []byte) (transValBuf []byte, err error) {
+	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dc.d.replaceKeysInValues || len(valBuf) == 0 {
 			return valBuf, nil
 		}
@@ -503,7 +510,7 @@ func (dc *DomainContext) commitmentValTransform(
 						buf = append(buf[:0], key...)
 					} else {
 						// Optimised key referencing a state file record (file number and offset within the file)
-						buf, found = dc.lookupByShortenedKey(key, filesStorage)
+						buf, found = dc.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, filesStorage)
 						if !found {
 							dc.d.logger.Crit("valTransform: lost storage full key",
 								"shortened", fmt.Sprintf("%x", key),
@@ -535,7 +542,7 @@ func (dc *DomainContext) commitmentValTransform(
 					// Non-optimised key originating from a database record
 					buf = append(buf[:0], key...)
 				} else {
-					buf, found = dc.lookupByShortenedKey(key, filesAccount)
+					buf, found = dc.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, filesAccount)
 					if !found {
 						dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key),
 							"merged", accMerged,

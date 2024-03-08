@@ -493,7 +493,7 @@ func mergeEfs(preval, val, buf []byte) ([]byte, error) {
 	return newEf.AppendBytes(buf), nil
 }
 
-type valueTransformer func(val []byte) ([]byte, error)
+type valueTransformer func(val []byte, startTxNum, endTxNum uint64) ([]byte, error)
 
 func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles, historyFiles []*filesItem, r DomainRanges, vt valueTransformer, ps *background.ProgressSet) (valuesIn, indexIn, historyIn *filesItem, err error) {
 	if !r.any() {
@@ -561,12 +561,13 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			key, _ := g.Next(nil)
 			val, _ := g.Next(nil)
 			heap.Push(&cp, &CursorItem{
-				t:        FILE_CURSOR,
-				dg:       g,
-				key:      key,
-				val:      val,
-				endTxNum: item.endTxNum,
-				reverse:  true,
+				t:          FILE_CURSOR,
+				dg:         g,
+				key:        key,
+				val:        val,
+				startTxNum: item.startTxNum,
+				endTxNum:   item.endTxNum,
+				reverse:    true,
 			})
 		}
 	}
@@ -576,6 +577,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 	// to `lastKey` and `lastVal` correspondingly, and the next step of multi-way merge happens. Therefore, after the multi-way merge loop
 	// (when CursorHeap cp is empty), there is a need to process the last pair `keyBuf=>valBuf`, because it was one step behind
 	var keyBuf, valBuf []byte
+	var keyFileStartTxNum, keyFileEndTxNum uint64
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
@@ -595,7 +597,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			if keyBuf != nil {
 				if vt != nil {
 					if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
-						valBuf, err = vt(valBuf)
+						valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 						if err != nil {
 							return nil, nil, nil, fmt.Errorf("merge: valTransform [%x] %w", valBuf, err)
 						}
@@ -610,12 +612,13 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
+			keyFileStartTxNum, keyFileEndTxNum = cp[0].startTxNum, cp[0].endTxNum
 		}
 	}
 	if keyBuf != nil {
 		if vt != nil {
 			if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
-				valBuf, err = vt(valBuf)
+				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
 					return nil, nil, nil, fmt.Errorf("merge: valTransform [%x] %w", valBuf, err)
 				}
