@@ -784,6 +784,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 
 			select {
+			case <-d.ctx.Done():
+				return
 			case status := <-downloadComplete:
 				d.lock.Lock()
 				delete(d.downloading, status.name)
