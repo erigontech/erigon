@@ -1966,8 +1966,8 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-t.GotInfo(): // files to verify already have .torrent on disk
-		default: //skip other files
+		case <-t.GotInfo(): //files to verify already have .torrent on disk. means must have `Info()` already
+		default: // skip other files
 			continue
 		}
 

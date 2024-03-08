@@ -79,16 +79,21 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 	}
 
 	var txIndex int
-	for idx := 0; idx < block.Transactions().Len() && !isBorStateSyncTxn; idx++ {
-		txn := block.Transactions()[idx]
-		if txn.Hash() == txHash {
-			txIndex = idx
-			break
-		}
-	}
-
 	if isBorStateSyncTxn {
 		txIndex = block.Transactions().Len()
+	} else {
+		var found bool
+		for idx := 0; idx < block.Transactions().Len(); idx++ {
+			txn := block.Transactions()[idx]
+			if txn.Hash() == txHash {
+				txIndex = idx
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("txn with hash %x belongs to currentely non-canonical block %d. only canonical blocks can be traced", txHash, block.NumberU64())
+		}
 	}
 
 	bn := hexutil.Uint64(blockNumber)

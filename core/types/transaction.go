@@ -112,10 +112,6 @@ func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(t[i])
 }
 
-func (tm TransactionMisc) From() *atomic.Value {
-	return &tm.from
-}
-
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {
 	kind, size, err := s.Kind()
 	if err != nil {
