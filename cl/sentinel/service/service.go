@@ -79,7 +79,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
 
-	trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
+	//trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
 
 	var subscription *sentinel.GossipSubscription
 
@@ -382,11 +382,12 @@ func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap str
 	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
 	if isDiagEnabled {
 		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
-			PeerID:  peerID,
-			Inbound: inbound,
-			MsgType: msgType,
-			MsgCap:  msgCap,
-			Bytes:   bytes,
+			PeerType: "Sentinel",
+			PeerID:   peerID,
+			Inbound:  inbound,
+			MsgType:  msgType,
+			MsgCap:   msgCap,
+			Bytes:    bytes,
 		})
 	}
 }

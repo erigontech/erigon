@@ -21,6 +21,7 @@ type PeerStatisticsGetter interface {
 }
 
 type PeerStatistics struct {
+	PeerType     string
 	BytesIn      uint64
 	BytesOut     uint64
 	CapBytesIn   map[string]uint64
@@ -40,11 +41,12 @@ type PeerDataUpdate struct {
 }
 
 type PeerStatisticMsgUpdate struct {
-	PeerID  string
-	Inbound bool
-	MsgType string
-	MsgCap  string
-	Bytes   int
+	PeerType string
+	PeerID   string
+	Inbound  bool
+	MsgType  string
+	MsgCap   string
+	Bytes    int
 }
 
 type SyncStatistics struct {
