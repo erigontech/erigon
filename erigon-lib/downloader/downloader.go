@@ -205,9 +205,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
 		}
 
-		if err := d.addPreConfiguredHashes(ctx, lock.Downloads); err != nil {
-			return nil, err
-		}
+		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
+		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
+		//TODO: even if hash is saved in "snapshots-lock.json" - it still must preserve `prohibit_new_downloads.lock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
+		//for _, it := range lock.Downloads {
+		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
+		//		return nil, err
+		//	}
+		//}
 
 		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
 			return nil, err
@@ -594,16 +599,6 @@ func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo) ([]byte, err
 	}
 
 	return spec.InfoHash.Bytes(), nil
-}
-
-// Add pre-configured
-func (d *Downloader) addPreConfiguredHashes(ctx context.Context, snapshots snapcfg.Preverified) error {
-	for _, it := range snapshots {
-		if err := d.addMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name, true); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (d *Downloader) MainLoopInBackground(silent bool) {
@@ -2085,10 +2080,6 @@ func (d *Downloader) alreadyHaveThisName(name string) bool {
 }
 
 func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
-	return d.addMagnetLink(ctx, infoHash, name, false)
-}
-
-func (d *Downloader) addMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string, force bool) error {
 	// Paranoic Mode on: if same file changed infoHash - skip it
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
@@ -2096,7 +2087,7 @@ func (d *Downloader) addMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return nil
 	}
 
-	if !force && d.torrentFiles.newDownloadsAreProhibited() {
+	if d.torrentFiles.newDownloadsAreProhibited() {
 		return nil
 	}
 
