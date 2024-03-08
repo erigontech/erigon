@@ -1191,7 +1191,7 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 		lastInFiles := br.snapshots().SegmentsMax() + 1
 		haveGap = lastInFiles < firstInDB
 		if haveGap {
-			log.Debug("[snapshots] not enuogh blocks in db to create files", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB)
+			log.Debug("[snapshots] not enuogh blocks in db to create snapshots. it's ok to ignore this message, can fix by: downloading more files `rm datadir/snapshots/prohibit_new_downloads.lock datdir/snapshots/snapshots-lock.json`, or downloading old blocks to db `integration stage_headers --reset`", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB)
 		}
 		return nil
 	}); err != nil {
