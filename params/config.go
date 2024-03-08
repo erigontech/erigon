@@ -59,13 +59,13 @@ var (
 	BorDevnetGenesisHash               = libcommon.HexToHash("0x5a06b25b0c6530708ea0b98a3409290e39dce6be7f558493aeb6e4b99a172a87")
 	GnosisGenesisHash                  = libcommon.HexToHash("0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756")
 	ChiadoGenesisHash                  = libcommon.HexToHash("0xada44fd8d2ecab8b08f256af07ad3e777f17fb434f8f8e678b312f576212ba9a")
-	HermezMainnetGenesisHash           = libcommon.HexToHash("0x3f86b09b43e3e49a41fc20a07579b79eba044253367817d5c241d23c0e2bc5c9")
-	HermezMainnetShadowforkGenesisHash = libcommon.HexToHash("0x3f86b09b43e3e49a41fc20a07579b79eba044253367817d5c241d23c0e2bc5c9")
-	HermezLocalDevnetGenesisHash       = libcommon.HexToHash("0x65531c46ddeb39ba78d50f4eb6b87a279fa28bb6f683b327779392a4cd4770f3")
-	HermezCardonaGenesisHash           = libcommon.HexToHash("0xf1a89745a08cfd1af739b93f960ad89546e3cec2a7babe8607703eb1e4e94b4d")
-	HermezCardonaInternalGenesisHash   = libcommon.HexToHash("0x676657dd8a7dce782f4fe8a97ba794de3ff732b40233fce01da77d1ba1a24ee1")
-	X1TestnetGenesisHash               = libcommon.HexToHash("0xb2fbff62137228e52809081a425bfcd30c0fdc8c1213085278c739676a7669b8")
-	HermezEtrogGenesisHash             = libcommon.HexToHash("0xe5ce2305f2ec92fa22130f6eb2345ad66037b657b44b183c0f55a9439409123d")
+	HermezMainnetGenesisHash           = libcommon.HexToHash("0x81005434635456a16f74ff7023fbe0bf423abbc8a8deb093ffff455c0ad3b741")
+	HermezMainnetShadowforkGenesisHash = libcommon.HexToHash("0xe54709058a084845156393707161a7b3347859b1796167ca014354841f68373c")
+	HermezLocalDevnetGenesisHash       = libcommon.HexToHash("0x433043a1b0948d109cd92a6b7e0e5a3f011c761d70eebe3135ec8f7a39815a65")
+	HermezCardonaGenesisHash           = libcommon.HexToHash("0x676c1a76a6c5855a32bdf7c61977a0d1510088a4eeac1330466453b3d08b60b9")
+	HermezCardonaInternalGenesisHash   = libcommon.HexToHash("0xe65e09471025d299d0fd5b57e9ae325ecf16037cbd2f456db435b6bb1369154d")
+	X1TestnetGenesisHash               = libcommon.HexToHash("0x0ffb92e130f1acaabd8b12aa1bb409b46561ef7568cb8aa7eb8d102a6ab76566")
+	HermezEtrogGenesisHash             = libcommon.HexToHash("0xccfed260e3ef666b058dcd577551de8e00c743c47774a39ca7dbcd9214ba370a")
 )
 
 var (
@@ -318,6 +318,7 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 	case genesisHash == HermezCardonaInternalGenesisHash:
 		return HermezCardonaInternalChainConfig
 	default:
+		panic(fmt.Sprintf("Unknown genesis hash: %s", genesisHash.Hex()))
 		return nil
 	}
 }

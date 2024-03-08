@@ -1,5 +1,5 @@
 {
-  "ChainName": "etrog",
+  "ChainName": "hermez-etrog",
   "chainId": 10010,
   "consensus": "ethash",
   "homesteadBlock": 0,

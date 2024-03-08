@@ -36,6 +36,8 @@ import (
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/log/v3"
 
+	"os"
+
 	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/hexutil"
 	"github.com/ledgerwatch/erigon/consensus/ethash"
@@ -49,6 +51,7 @@ import (
 	"github.com/ledgerwatch/erigon/params/networkname"
 	"github.com/ledgerwatch/erigon/smt/pkg/db"
 	"github.com/ledgerwatch/erigon/smt/pkg/smt"
+	"golang.org/x/exp/slices"
 )
 
 // CommitGenesisBlock writes or updates the genesis block in db.
@@ -107,6 +110,15 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, overrideShanghaiTime 
 			log.Info("Writing main-net genesis block")
 			genesis = MainnetGenesisBlock()
 			custom = false
+		}
+		// clear tmpDir
+		if tmpDir != "" {
+			if err := os.RemoveAll(tmpDir); err != nil {
+				return genesis.Config, nil, err
+			}
+			if err := os.MkdirAll(tmpDir, 0755); err != nil {
+				return genesis.Config, nil, err
+			}
 		}
 		applyOverrides(genesis.Config)
 		block, _, err1 := write(tx, genesis, tmpDir)
@@ -460,8 +472,8 @@ func DeveloperGenesisBlock(period uint64, faucet libcommon.Address) *types.Genes
 	}
 }
 
-var genesisTmpDB kv.RwDB
-var genesisDBLock sync.Mutex
+var GenesisTmpDB kv.RwDB
+var GenesisDBLock sync.Mutex
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
@@ -514,13 +526,17 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 	go func() { // we may run inside write tx, can't open 2nd write tx in same goroutine
 		// TODO(yperbasis): use memdb.MemoryMutation instead
 		defer wg.Done()
-		genesisDBLock.Lock()
-		defer genesisDBLock.Unlock()
-		if genesisTmpDB == nil {
-			genesisTmpDB = mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).MustOpen()
+		GenesisDBLock.Lock()
+		defer GenesisDBLock.Unlock()
+		if GenesisTmpDB == nil {
+			GenesisTmpDB = mdbx.NewMDBX(log.New()).InMem(tmpDir).MapSize(2 * datasize.GB).MustOpen()
+			defer func() {
+				GenesisTmpDB.Close()
+				GenesisTmpDB = nil
+			}()
 		}
 		var tx kv.RwTx
-		if tx, err = genesisTmpDB.BeginRw(context.Background()); err != nil {
+		if tx, err = GenesisTmpDB.BeginRw(context.Background()); err != nil {
 			return
 		}
 		defer tx.Rollback()
@@ -557,10 +573,9 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			statedb.SetCode(addr, account.Code)
 			statedb.SetNonce(addr, account.Nonce)
 
-			for key, value := range account.Storage {
-				key := key
+			for k, value := range account.Storage {
 				val := uint256.NewInt(0).SetBytes(value.Bytes())
-				statedb.SetState(addr, &key, *val)
+				statedb.SetState(addr, &k, *val)
 			}
 
 			if len(account.Constructor) > 0 {
@@ -582,11 +597,9 @@ func GenesisToBlock(g *types.Genesis, tmpDir string) (*types.Block, *state.Intra
 			return
 		}
 
-		//if root, err = trie.CalcRoot("genesis", tx); err != nil {
-		//	return
-		//}
-
 		root = libcommon.BigToHash(ro)
+		s = nil
+		db = nil
 	}()
 	wg.Wait()
 	if err != nil {
@@ -605,7 +618,7 @@ func sortedAllocKeys(m types.GenesisAlloc) []string {
 		keys[i] = string(k.Bytes())
 		i++
 	}
-	//slices.Sort(keys)
+	slices.Sort(keys)
 	return keys
 }
 
