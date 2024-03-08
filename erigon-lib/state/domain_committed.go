@@ -283,6 +283,14 @@ func encodeU64(i uint64, to []byte) (int, []byte) {
 	}
 }
 
+func encodeShorterKey(buf []byte, offset uint64) []byte {
+	if len(buf) == 0 {
+		buf = make([]byte, 0, 8)
+	}
+	_, buf = encodeU64(offset, buf)
+	return buf
+}
+
 func encodeShortenedKey(buf []byte, stepFrom uint64, stepTo uint64, offset uint64) []byte {
 	if len(buf) < 2 {
 		buf = make([]byte, 2)
@@ -387,8 +395,9 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 				offset = cur.offsetInFile()
 			}
 
-			stepFrom, stepTo := item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep
-			return encodeShortenedKey(nil, stepFrom, stepTo, offset), true
+			//stepFrom, stepTo := item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep
+			//return encodeShortenedKey(nil, stepFrom, stepTo, offset), true
+			return encodeShorterKey(nil, offset), true
 		}
 	}
 	return nil, false

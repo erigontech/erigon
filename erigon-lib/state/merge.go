@@ -581,6 +581,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
+		keyFileStartTxNum, keyFileEndTxNum = cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
@@ -612,7 +613,6 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
-			keyFileStartTxNum, keyFileEndTxNum = cp[0].startTxNum, cp[0].endTxNum
 		}
 	}
 	if keyBuf != nil {
