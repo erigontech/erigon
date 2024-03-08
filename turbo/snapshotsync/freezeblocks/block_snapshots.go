@@ -1181,16 +1181,17 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 	// pre-check if db has enough data
 	var haveGap bool
 	if err := br.db.View(ctx, func(tx kv.Tx) error {
-		firstNonGenesisBlockNumber, ok, err := rawdb.ReadFirstNonGenesisHeaderNumber(tx)
+		firstInDB, ok, err := rawdb.ReadFirstNonGenesisHeaderNumber(tx)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return nil
 		}
-		haveGap = br.snapshots().SegmentsMax()+1 < firstNonGenesisBlockNumber
+		lastInFiles := br.snapshots().SegmentsMax() + 1
+		haveGap = lastInFiles < firstInDB
 		if haveGap {
-			log.Debug("[snapshots] gap between files and db detected, can't create new files", "lastBlockInFiles", br.snapshots().SegmentsMax(), " firstBlockInDB", firstNonGenesisBlockNumber)
+			log.Debug("[snapshots] not enuogh blocks in db to create files", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB)
 		}
 		return nil
 	}); err != nil {
