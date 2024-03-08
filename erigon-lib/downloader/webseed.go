@@ -205,7 +205,8 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	e.SetLimit(1024)
 	urlsByName := d.TorrentUrls()
 
-	for name, tUrls := range urlsByName {
+	for fileName, tUrls := range urlsByName {
+		name := fileName
 		tPath := filepath.Join(rootDir, name)
 		if dir.FileExist(tPath) {
 			continue
