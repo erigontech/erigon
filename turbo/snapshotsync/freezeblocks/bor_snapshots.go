@@ -32,31 +32,6 @@ import (
 )
 
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
-	/*
-		// pre-check if db has enough data
-		var haveGap bool
-		if err := br.db.View(ctx, func(tx kv.Tx) error {
-			firstInDB, ok, err := rawdb.ReadFirstNonGenesisBorEventBlockNum(tx)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
-			lastInFiles := br.borSnapshots().SegmentsMax() + 1
-			haveGap = lastInFiles < firstInDB
-			if haveGap {
-				log.Debug("[snapshots] not enough data in db to gen files", "lastInFiles", lastInFiles, "firstInDB", firstInDB)
-			}
-			return nil
-		}); err != nil {
-			return false, err
-		}
-		if haveGap {
-			return false, nil
-		}
-			return true, nil
-	*/
 	return true, nil
 }
 
