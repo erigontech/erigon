@@ -203,8 +203,8 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
 		}
 
-		//TODO: why do we need it if we have `addTorrentFilesFromDisk`?
-		//TODO: why it's before `BuildTorrentFilesIfNeed`?
+		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
+		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
 		//for _, it := range lock.Downloads {
 		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
 		//		return nil, err
