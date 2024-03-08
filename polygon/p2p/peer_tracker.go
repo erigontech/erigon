@@ -15,6 +15,10 @@ type PeerTracker interface {
 }
 
 func NewPeerTracker() PeerTracker {
+	return newPeerTracker()
+}
+
+func newPeerTracker() *peerTracker {
 	return &peerTracker{
 		peerSyncProgresses: map[PeerId]*peerSyncProgress{},
 	}

@@ -58,7 +58,7 @@ func ReadFinality[T BlockFinality[T]](db kv.RwDB) (uint64, libcommon.Hash, error
 
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		res, err := tx.GetOne(kv.BorFinality, key)
-		data = res
+		data = libcommon.Copy(res)
 		return err
 	})
 
@@ -166,7 +166,7 @@ func ReadLockField(db kv.RwDB) (bool, uint64, libcommon.Hash, map[string]struct{
 	var data []byte
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		res, err := tx.GetOne(kv.BorFinality, key)
-		data = res
+		data = libcommon.Copy(res)
 		return err
 	})
 
@@ -225,7 +225,7 @@ func ReadFutureMilestoneList(db kv.RwDB) ([]uint64, map[uint64]libcommon.Hash, e
 	var data []byte
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		res, err := tx.GetOne(kv.BorFinality, key)
-		data = res
+		data = libcommon.Copy(res)
 		return err
 	})
 
