@@ -94,7 +94,7 @@ func (d *WebSeeds) makeTorrentUrls(listsOfFiles []snaptype.WebSeedsFromProvider)
 				continue
 			}
 			torrentUrls[name] = append(torrentUrls[name], uri)
-			torrentMap[*uri] = name[:len(name)-len(".torrent")]
+			torrentMap[*uri] = strings.TrimSuffix(name, ".torrent")
 		}
 	}
 
@@ -216,13 +216,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 			d.logger.Log(d.verbosity, "[snapshots] webseed has .torrent, but we skip it because this file-type not supported yet", "name", fName)
 			continue
 		}
-		name := name
-		fOriginName := name[:len(name)-len(".torrent")]
-		item, ok := d.torrentsWhitelist.Get(fOriginName)
-		if !ok {
-			d.logger.Info("Skipping torrent as file not in the whitelist", "torrent name", name, "name", fOriginName)
-			continue
-		}
 
 		tUrls := tUrls
 		e.Go(func() error {
@@ -231,16 +224,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 				if err != nil {
 					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
-				}
-				// Compute info-hash before creating the file
-				mi, err := metainfo.Load(bytes.NewReader(res))
-				if err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] could not parse torrent to get infohash", "name", name, "err", err, "url", url)
-					continue
-				}
-				infoHash := mi.HashInfoBytes().HexString()
-				if infoHash != item.Hash {
-					d.logger.Info("Skipping torrent due to infohash mismatch", "name", name, "err", err, "url", url, "infohash", infoHash, "expected", item.Hash)
 				}
 				if err := d.torrentFiles.Create(tPath, res); err != nil {
 					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
@@ -304,6 +287,7 @@ func nameWhitelisted(fileName string, whitelist snapcfg.Preverified) bool {
 
 func nameAndHashWhitelisted(fileName, fileHash string, whitelist snapcfg.Preverified) bool {
 	fileName = strings.TrimSuffix(fileName, ".torrent")
+
 	for i := 0; i < len(whitelist); i++ {
 		if whitelist[i].Name == fileName && whitelist[i].Hash == fileHash {
 			return true
