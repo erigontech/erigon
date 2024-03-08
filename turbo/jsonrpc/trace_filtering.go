@@ -91,7 +91,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 			}
 		}
 		if !found {
-			return nil, fmt.Errorf("block with hash %x is not currently canonical. blockNum=%d, txnHash=%x", block.Hash(), block.NumberU64(), txHash)
+			return nil, fmt.Errorf("txn with hash %x belongs to currentely non-canonical block %d. only canonical blocks can be traced", txHash, block.NumberU64())
 		}
 	}
 
