@@ -304,6 +304,7 @@ func TestFetcherFetchBodies(t *testing.T) {
 	mockRequestResponse := requestResponseMock{
 		requestId:                   requestId,
 		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
 
@@ -335,12 +336,14 @@ func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
 		requestId:                   requestId1,
 		responseDelay:               600 * time.Millisecond,
 		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
 	mockRequestResponse2 := requestResponseMock{
 		requestId:                   requestId2,
 		responseDelay:               600 * time.Millisecond,
 		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
 
@@ -372,6 +375,7 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 		requestId:                   requestId1,
 		responseDelay:               600 * time.Millisecond,
 		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
 	mockInboundMessages2 := []*sentry.InboundMessage{
@@ -398,6 +402,7 @@ func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
 	mockRequestResponse2 := requestResponseMock{
 		requestId:                   requestId2,
 		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
 
@@ -427,6 +432,7 @@ func TestFetcherFetchBodiesErrEmptyBody(t *testing.T) {
 	mockRequestResponse := requestResponseMock{
 		requestId:                   requestId,
 		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
 
@@ -456,6 +462,7 @@ func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 	mockRequestResponse := requestResponseMock{
 		requestId:                   requestId,
 		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
 
@@ -465,7 +472,9 @@ func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
 		var errMissingBlocks *ErrMissingBodies
 		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.ErrorAs(t, err, &errMissingBlocks)
-		require.Equal(t, uint64(1), errMissingBlocks.LowestMissingBlockNum())
+		lowest, exists := errMissingBlocks.LowestMissingBlockNum()
+		require.Equal(t, uint64(1), lowest)
+		require.True(t, exists)
 		require.Nil(t, bodies)
 	})
 }

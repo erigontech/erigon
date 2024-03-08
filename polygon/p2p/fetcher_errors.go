@@ -102,10 +102,11 @@ type ErrMissingBodies struct {
 }
 
 func (e ErrMissingBodies) Error() string {
-	return fmt.Sprintf("missing bodies: lowest=%d, total=%d", e.LowestMissingBlockNum(), len(e.headers))
+	lowest, exists := e.LowestMissingBlockNum()
+	return fmt.Sprintf("missing bodies: lowest=%d, exists=%v, total=%d", lowest, exists, len(e.headers))
 }
 
-func (e ErrMissingBodies) LowestMissingBlockNum() uint64 {
+func (e ErrMissingBodies) LowestMissingBlockNum() (uint64, bool) {
 	return lowestHeadersNum(e.headers)
 }
 
@@ -119,10 +120,14 @@ func (e ErrMissingBodies) Is(err error) bool {
 	}
 }
 
-func lowestHeadersNum(headers []*types.Header) uint64 {
+func lowestHeadersNum(headers []*types.Header) (uint64, bool) {
+	if len(headers) == 0 {
+		return 0, false
+	}
+
 	sort.Slice(headers, func(i, j int) bool {
 		return headers[i].Number.Uint64() < headers[j].Number.Uint64()
 	})
 
-	return headers[0].Number.Uint64()
+	return headers[0].Number.Uint64(), true
 }

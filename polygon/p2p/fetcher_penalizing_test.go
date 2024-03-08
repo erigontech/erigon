@@ -140,6 +140,7 @@ func TestPenalizingFetcherFetchBodiesShouldPenalizePeerWhenErrEmptyBody(t *testi
 	mockRequestResponse := requestResponseMock{
 		requestId:                   requestId,
 		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
 		wantRequestHashes:           hashes,
 	}
 

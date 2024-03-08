@@ -45,9 +45,15 @@ func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Hea
 	if err != nil {
 		var errMissingBodies *ErrMissingBodies
 		if errors.As(err, &errMissingBodies) {
-			tf.peerTracker.BlockNumMissing(peerId, errMissingBodies.LowestMissingBlockNum())
+			lowest, exists := errMissingBodies.LowestMissingBlockNum()
+			if exists {
+				tf.peerTracker.BlockNumMissing(peerId, lowest)
+			}
 		} else if errors.Is(err, context.DeadlineExceeded) {
-			tf.peerTracker.BlockNumMissing(peerId, lowestHeadersNum(headers))
+			lowest, exists := lowestHeadersNum(headers)
+			if exists {
+				tf.peerTracker.BlockNumMissing(peerId, lowest)
+			}
 		}
 
 		return nil, err
