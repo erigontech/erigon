@@ -120,10 +120,6 @@ func (e ErrMissingBodies) Is(err error) bool {
 }
 
 func lowestHeadersNum(headers []*types.Header) uint64 {
-	if len(headers) == 0 {
-		return 0
-	}
-
 	sort.Slice(headers, func(i, j int) bool {
 		return headers[i].Number.Uint64() < headers[j].Number.Uint64()
 	})
