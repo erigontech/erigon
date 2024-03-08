@@ -344,7 +344,6 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	ts.Webseeds, _ = webseeds.ByFileName(ts.DisplayName)
 	var have bool
 	t, have = torrentClient.Torrent(ts.InfoHash)
-	log.Info("Added torrent", "name", ts.DisplayName, "hash", ts.InfoHash, "webseeds", ts.Webseeds)
 
 	if !have {
 		t, _, err := torrentClient.AddTorrentSpec(ts)
