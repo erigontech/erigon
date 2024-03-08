@@ -693,7 +693,7 @@ var ChaindataTables = []string{
 
 const (
 	RecentLocalTransaction = "RecentLocalTransaction" // sequence_u64 -> tx_hash
-	PoolTransaction        = "PoolTransaction"        // txHash -> sender_id_u64+tx_rlp
+	PoolTransaction        = "PoolTransaction"        // txHash -> sender+tx_rlp
 	PoolInfo               = "PoolInfo"               // option_key -> option_value
 )
 
