@@ -649,6 +649,8 @@ func GenesisBlockByChainName(chain string) *types.Genesis {
 		return ChiadoGenesisBlock()
 	case networkname.HermezMainnetChainName:
 		return HermezMainnetGenesisBlock()
+	case networkname.HermezMainnetShadowforkChainName:
+		return HermezMainnetShadowforkGenesisBlock()
 	case networkname.HermezLocalDevnetChainName:
 		return HermezLocalDevnetGenesisBlock()
 	case networkname.HermezEtrogChainName:

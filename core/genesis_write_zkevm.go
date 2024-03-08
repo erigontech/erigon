@@ -20,6 +20,16 @@ func HermezMainnetGenesisBlock() *types.Genesis {
 	}
 }
 
+func HermezMainnetShadowforkGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HermezMainnetChainConfig,
+		Timestamp:  1679653163,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/hermez-shadowfork.json"),
+	}
+}
+
 func HermezEtrogGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.HermezEtrogChainConfig,
