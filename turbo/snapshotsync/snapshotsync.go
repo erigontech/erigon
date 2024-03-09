@@ -175,6 +175,10 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		}
 	}
 
+	log.Warn("[dbg] stats.Complete",
+		"stats.FilesTotal", stats.FilesTotal,
+		"stats.Completed", stats.Completed,
+	)
 	if blockReader.FreezingCfg().Verify {
 		if _, err := snapshotDownloader.Verify(ctx, &proto_downloader.VerifyRequest{}); err != nil {
 			return err
