@@ -2093,12 +2093,10 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
-		log.Warn("[dbg] AddMagnetLink", "skip_already_have", name)
 		return nil
 	}
 
 	if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
-		log.Warn("[dbg] AddMagnetLink", "skip_prohibit", name)
 		return nil
 	}
 
