@@ -206,6 +206,7 @@ func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".tor
 func (f FileInfo) Name() string {
 	if f.Type == nil {
 		_, name := filepath.Split(f.Path)
+		fmt.Printf("[dbg] alex: %s, %s\n", f.Path, name)
 		return name
 	}
 	return fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
