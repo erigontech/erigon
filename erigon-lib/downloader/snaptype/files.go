@@ -107,6 +107,7 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		return res, false, true
 	}
 	isStateFile := IsStateFile(fileName)
+	res.Path = filepath.Join(dir, fileName)
 	return res, isStateFile, isStateFile
 }
 
