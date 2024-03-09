@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/types/ssz"
@@ -274,7 +275,7 @@ Reconnect:
 		default:
 		}
 
-		subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.SubscriptionData{})
+		subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.SubscriptionData{}, grpc.WaitForReady(true))
 		if err != nil {
 			return
 		}
