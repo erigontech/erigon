@@ -1159,6 +1159,7 @@ func localHashCompletionCheck(ctx context.Context, t *torrent.Torrent, fileInfo 
 		}
 	}
 
+	panic(err)
 	return localHash, false
 }
 
