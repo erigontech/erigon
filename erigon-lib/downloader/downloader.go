@@ -1784,6 +1784,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			}
 		}
 
+		log.Warn("[dbg] stats.Completed", "stats.Completed", stats.Completed, "t", torrentName, "t.Complete.Bool()", t.Complete.Bool())
 		stats.Completed = stats.Completed && torrentComplete
 	}
 
