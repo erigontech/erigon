@@ -2041,7 +2041,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return nil
 	}
 
-	if d.torrentFiles.newDownloadsAreProhibited() {
+	if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
 		return nil
 	}
 
