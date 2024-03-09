@@ -1630,6 +1630,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	for _, t := range torrents {
+		if t.Info() == nil {
+			stats.Completed = false
+			continue
+		}
+
 		var torrentComplete bool
 		torrentName := t.Name()
 
@@ -1638,11 +1643,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		var progress float32
-
-		if t.Info() == nil {
-			stats.Completed = false
-			continue
-		}
 
 		torrentInfo++
 		stats.MetadataReady++
