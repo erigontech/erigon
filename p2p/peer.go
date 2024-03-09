@@ -28,7 +28,6 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	"github.com/ledgerwatch/erigon/common/debug"
 	"github.com/ledgerwatch/erigon/common/mclock"
@@ -123,14 +122,6 @@ type Peer struct {
 	events         *event.Feed
 	pubkey         [64]byte
 	metricsEnabled bool
-
-	//diagnostics info
-	BytesIn      uint64
-	BytesOut     uint64
-	CapBytesIn   map[string]uint64
-	CapBytesOut  map[string]uint64
-	TypeBytesIn  map[string]uint64
-	TypeBytesOut map[string]uint64
 }
 
 // NewPeer returns a peer for testing purposes.
@@ -236,12 +227,6 @@ func newPeer(logger log.Logger, conn *conn, protocols []Protocol, pubkey [64]byt
 		log:            log,
 		pubkey:         pubkey,
 		metricsEnabled: metricsEnabled,
-		CapBytesIn:     make(map[string]uint64),
-		CapBytesOut:    make(map[string]uint64),
-		TypeBytesIn:    make(map[string]uint64),
-		TypeBytesOut:   make(map[string]uint64),
-		BytesIn:        0,
-		BytesOut:       0,
 	}
 	return p
 }
@@ -273,20 +258,6 @@ func convertToCamelCase(input string) string {
 	}
 
 	return result
-}
-
-func (p *Peer) CountBytesTransfered(msgType string, msgCap string, bytes uint64, inbound bool) {
-	messageType := convertToCamelCase(msgType)
-
-	if inbound {
-		p.BytesIn += bytes
-		p.CapBytesIn[msgCap] += bytes
-		p.TypeBytesIn[messageType] += bytes
-	} else {
-		p.BytesOut += bytes
-		p.CapBytesOut[msgCap] += bytes
-		p.TypeBytesOut[messageType] += bytes
-	}
 }
 
 func (p *Peer) run() (peerErr *PeerError) {
@@ -400,16 +371,6 @@ func (p *Peer) handle(msg Msg) error {
 		if err != nil {
 			return fmt.Errorf("msg code out of range: %v", msg.Code)
 		}
-		//msgType := "unknown"
-
-		//var dds uint64 = msg.Code
-
-		//dds -= proto.offset
-		//msgCode := msg.Code - proto.offset
-		//msgType = eth.ToProto[proto.cap().Version][dds].String()
-		//msgType := eth.ToProto[proto.cap().Version][msgCode].String()
-
-		//p.CountBytesTransfered(msgType, proto.cap().String(), uint64(msg.Size), true)
 
 		if p.metricsEnabled {
 			m := fmt.Sprintf("%s_%s_%d_%#02x", ingressMeterName, proto.Name, proto.Version, msg.Code-proto.offset)
@@ -614,24 +575,4 @@ func (p *Peer) Info() *PeerInfo {
 		info.Protocols[proto.Name] = protoInfo
 	}
 	return info
-}
-
-func (p *Peer) DiagInfo() *diagnostics.PeerStatistics {
-	return &diagnostics.PeerStatistics{
-		BytesIn:      p.BytesIn,
-		BytesOut:     p.BytesOut,
-		CapBytesIn:   p.CapBytesIn,
-		CapBytesOut:  p.CapBytesOut,
-		TypeBytesIn:  p.TypeBytesIn,
-		TypeBytesOut: p.TypeBytesOut,
-	}
-}
-
-func (p *Peer) ResetDiagnosticsCounters() {
-	p.BytesIn = 0
-	p.BytesOut = 0
-	p.CapBytesIn = make(map[string]uint64)
-	p.CapBytesOut = make(map[string]uint64)
-	p.TypeBytesIn = make(map[string]uint64)
-	p.TypeBytesOut = make(map[string]uint64)
 }
