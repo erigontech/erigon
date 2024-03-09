@@ -107,6 +107,8 @@ func ParseFileName(dir, fileName string) (res FileInfo, isE3Seedable bool, ok bo
 		return res, false, true
 	}
 	isStateFile := IsStateFile(fileName)
+	res.name = fileName
+	res.Path = filepath.Join(dir, fileName)
 	return res, isStateFile, isStateFile
 }
 
@@ -136,7 +138,7 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 		return res, ok
 	}
 
-	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), Type: ft, Ext: ext}, ok
+	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), name: fileName, Type: ft, Ext: ext}, ok
 }
 
 var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
@@ -195,19 +197,17 @@ var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	Version   Version
-	From, To  uint64
-	Path, Ext string
-	Type      Type
+	Version         Version
+	From, To        uint64
+	name, Path, Ext string
+	Type            Type
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
 
-func (f FileInfo) Name() string {
-	return fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
-}
-func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
-func (f FileInfo) Len() uint64 { return f.To - f.From }
+func (f FileInfo) Name() string { return f.name }
+func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
+func (f FileInfo) Len() uint64  { return f.To - f.From }
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {
