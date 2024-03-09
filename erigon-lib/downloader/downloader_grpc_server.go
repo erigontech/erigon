@@ -56,6 +56,7 @@ func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.Pro
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
 func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddRequest) (*emptypb.Empty, error) {
+	log.Warn("[dbg] GrpcServer.Add", "l", len(request.Items))
 	defer s.d.ReCalcStats(10 * time.Second) // immediately call ReCalc to set stat.Complete flag
 
 	logEvery := time.NewTicker(20 * time.Second)
@@ -63,6 +64,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 
 	for i, it := range request.Items {
 		if it.Path == "" {
+			panic(1)
 			return nil, fmt.Errorf("field 'path' is required")
 		}
 
@@ -75,12 +77,14 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 		if it.TorrentHash == nil {
 			// if we don't have the torrent hash then we seed a new snapshot
 			if err := s.d.AddNewSeedableFile(ctx, it.Path); err != nil {
+				panic(2)
 				return nil, err
 			}
 			continue
 		}
 
 		if err := s.d.AddMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
+			panic(3)
 			return nil, err
 		}
 	}
