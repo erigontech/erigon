@@ -204,6 +204,10 @@ type FileInfo struct {
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
 
 func (f FileInfo) Name() string {
+	if f.Type == nil {
+		_, name := filepath.Split(f.Path)
+		return name
+	}
 	return fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
 }
 func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
