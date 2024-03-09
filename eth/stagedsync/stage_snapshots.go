@@ -185,6 +185,7 @@ func SpawnStageSnapshots(
 }
 
 func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.RwTx, cfg SnapshotsCfg, initialCycle bool, logger log.Logger) error {
+	log.Warn("[dbg] DownloadAndIndexSnapshotsIfNeed", "initialCycle", initialCycle, "cfg.blockReader.FreezingCfg().Enabled ", cfg.blockReader.FreezingCfg().Enabled)
 	if !initialCycle {
 		return nil
 	}
@@ -231,6 +232,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 			}
 		}
 	} else {
+		log.Warn("[dbg] before WaitForDownloader")
 		if err := snapshotsync.WaitForDownloader(ctx, s.LogPrefix(), cfg.historyV3, cfg.blobs, cstate, cfg.agg, tx, cfg.blockReader, &cfg.chainConfig, cfg.snapshotDownloader, s.state.StagesIdsList()); err != nil {
 			return err
 		}
