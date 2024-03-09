@@ -1534,10 +1534,16 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 	pending = pendingBlocksFiles
 
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
-		in, _, ok1 := snaptype.ParseFileName("", i.Name())
-		jn, _, ok2 := snaptype.ParseFileName("", j.Name())
+		in, isS1, ok1 := snaptype.ParseFileName("", i.Name())
+		jn, isS2, ok2 := snaptype.ParseFileName("", j.Name())
 		if ok1 && ok2 {
 			return in.CompareTo(jn)
+		}
+		if isS1 {
+			panic(i.Name())
+		}
+		if isS2 {
+			panic(j.Name())
 		}
 		return strings.Compare(i.Name(), j.Name())
 	})
