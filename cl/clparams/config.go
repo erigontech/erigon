@@ -31,9 +31,10 @@ import (
 )
 
 type CaplinConfig struct {
-	Backfilling     bool
-	BlobBackfilling bool
-	Archive         bool
+	Backfilling         bool
+	BlobBackfilling     bool
+	BlobPruningDisabled bool
+	Archive             bool
 }
 
 type NetworkType int

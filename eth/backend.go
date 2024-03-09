@@ -829,7 +829,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 
 		pruneBlobDistance := uint64(128600)
-		if config.CaplinConfig.BlobBackfilling {
+		if config.CaplinConfig.BlobBackfilling || config.CaplinConfig.BlobPruningDisabled {
 			pruneBlobDistance = math.MaxUint64
 		}
 
