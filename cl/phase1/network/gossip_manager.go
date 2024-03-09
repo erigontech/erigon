@@ -4,10 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
-
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/gossip"
@@ -212,13 +213,12 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 }
 
 func (g *GossipManager) Start(ctx context.Context) {
-	subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.SubscriptionData{})
-	if err != nil {
-		return
-	}
 	operationsCh := make(chan *sentinel.GossipData, 1<<16)
 	blobsCh := make(chan *sentinel.GossipData, 1<<16)
 	blocksCh := make(chan *sentinel.GossipData, 1<<16)
+	defer close(operationsCh)
+	defer close(blobsCh)
+	defer close(blocksCh)
 
 	// Start a goroutine that listens for new gossip messages and sends them to the operations processor.
 	go func() {
@@ -228,7 +228,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				return
 			case data := <-operationsCh:
 				l := log.Ctx{}
-				err = g.onRecv(ctx, data, l)
+				err := g.onRecv(ctx, data, l)
 				if err != nil {
 					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 				}
@@ -243,7 +243,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				return
 			case data := <-blocksCh:
 				l := log.Ctx{}
-				err = g.onRecv(ctx, data, l)
+				err := g.onRecv(ctx, data, l)
 				if err != nil {
 					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 				}
@@ -258,7 +258,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 				return
 			case data := <-blobsCh:
 				l := log.Ctx{}
-				err = g.onRecv(ctx, data, l)
+				err := g.onRecv(ctx, data, l)
 				if err != nil {
 					log.Warn("[Beacon Gossip] Recoverable Error", "err", err)
 				}
@@ -266,19 +266,37 @@ func (g *GossipManager) Start(ctx context.Context) {
 		}
 	}()
 
+Reconnect:
 	for {
-		data, err := subscription.Recv()
-		if err != nil {
-			log.Warn("[Beacon Gossip] Fatal error receiving gossip", "err", err)
-			break
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
 
-		if data.Name == gossip.TopicNameBeaconBlock {
-			blocksCh <- data
-		} else if gossip.IsTopicBlobSidecar(data.Name) {
-			blobsCh <- data
-		} else {
-			operationsCh <- data
+		subscription, err := g.sentinel.SubscribeGossip(ctx, &sentinel.SubscriptionData{})
+		if err != nil {
+			return
+		}
+
+		for {
+			data, err := subscription.Recv()
+			if err != nil {
+				if grpcutil.IsRetryLater(err) || grpcutil.IsEndOfStream(err) {
+					time.Sleep(3 * time.Second)
+					continue Reconnect
+				}
+				log.Warn("[Beacon Gossip] Fatal error receiving gossip", "err", err)
+				continue Reconnect
+			}
+
+			if data.Name == gossip.TopicNameBeaconBlock {
+				blocksCh <- data
+			} else if gossip.IsTopicBlobSidecar(data.Name) {
+				blobsCh <- data
+			} else {
+				operationsCh <- data
+			}
 		}
 	}
 }
