@@ -1524,7 +1524,10 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 	var pendingBlocksFiles []*torrent.Torrent
 
 	for _, t := range pending {
-		_, isStateFile, _ := snaptype.ParseFileName("", t.Name())
+		_, isStateFile, ok := snaptype.ParseFileName("", t.Name())
+		if !ok {
+			panic(t.Name())
+		}
 		if isStateFile {
 			pendingStateFiles = append(pendingStateFiles, t)
 		} else {
