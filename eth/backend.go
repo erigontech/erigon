@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/wrap"
@@ -1337,19 +1336,6 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 	}
 
 	return &reply, nil
-}
-
-func (s *Ethereum) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics {
-	var reply = make(map[string]*diagnostics.PeerStatistics)
-	for _, sentryServer := range s.sentryServers {
-		peers := sentryServer.DiagnosticsPeersData()
-
-		for key, value := range peers {
-			reply[key] = value
-		}
-	}
-
-	return reply
 }
 
 func (s *Ethereum) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
