@@ -1630,7 +1630,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	for _, t := range torrents {
-		if t.Info() == nil {
+		select {
+		case <-t.GotInfo():
+		default:
 			stats.Completed = false
 			continue
 		}
