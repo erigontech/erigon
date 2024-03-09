@@ -682,6 +682,14 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 
 func (d *Domain) reCalcRoFiles() {
 	roFiles := ctxFiles(d.files, d.indexList, false)
+	for i := range roFiles {
+		if roFiles[i].src == nil {
+			panic(fmt.Sprintf("nil-src: %#v", roFiles[i]))
+		}
+		if roFiles[i].src.decompressor == nil {
+			panic(fmt.Sprintf("nil-src-decompressor: %#v", roFiles[i].src.decompressor))
+		}
+	}
 	d.roFiles.Store(&roFiles)
 }
 

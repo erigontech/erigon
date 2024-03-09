@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -167,7 +168,7 @@ Loop:
 		}
 		// No? Reject.
 		if blockRoot != b.expectedRoot {
-			log.Debug("Gotten unexpected root", "got", blockRoot, "expected", b.expectedRoot)
+			log.Debug("Gotten unexpected root", "got", fmt.Sprintf("%x", blockRoot), "expected", b.expectedRoot)
 			continue
 		}
 		// Yes? then go for the callback.
