@@ -1630,6 +1630,13 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	for _, t := range torrents {
+		select {
+		case <-t.GotInfo():
+		default: // if some torrents have no metadata, we are for-sure uncomplete
+			stats.Completed = false
+			continue
+		}
+
 		var torrentComplete bool
 		torrentName := t.Name()
 
@@ -1639,55 +1646,53 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		var progress float32
 
-		if t.Info() != nil {
-			torrentInfo++
-			stats.MetadataReady++
+		torrentInfo++
+		stats.MetadataReady++
 
-			// call methods once - to reduce internal mutex contention
-			peersOfThisFile := t.PeerConns()
-			weebseedPeersOfThisFile := t.WebseedPeerConns()
+		// call methods once - to reduce internal mutex contention
+		peersOfThisFile := t.PeerConns()
+		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
-			bytesRead := t.Stats().BytesReadData
-			tLen := t.Length()
+		bytesRead := t.Stats().BytesReadData
+		tLen := t.Length()
 
-			var bytesCompleted int64
+		var bytesCompleted int64
 
-			if torrentComplete {
-				tComplete++
-				bytesCompleted = t.Length()
-			} else {
-				bytesCompleted = bytesRead.Int64()
-			}
-
-			delete(downloading, torrentName)
-
-			for _, peer := range peersOfThisFile {
-				stats.ConnectionsTotal++
-				peers[peer.PeerID] = struct{}{}
-			}
-
-			stats.BytesCompleted += uint64(bytesCompleted)
-			stats.BytesTotal += uint64(tLen)
-
-			progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-
-			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
-			rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
-			// more detailed statistic: download rate of each peer (for each file)
-			if !torrentComplete && progress != 0 {
-				d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-				d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
-				d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
-			}
-
-			diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-				Name:            torrentName,
-				TotalBytes:      uint64(tLen),
-				DownloadedBytes: uint64(bytesCompleted),
-				Webseeds:        webseeds,
-				Peers:           peers,
-			})
+		if torrentComplete {
+			tComplete++
+			bytesCompleted = t.Length()
+		} else {
+			bytesCompleted = bytesRead.Int64()
 		}
+
+		delete(downloading, torrentName)
+
+		for _, peer := range peersOfThisFile {
+			stats.ConnectionsTotal++
+			peers[peer.PeerID] = struct{}{}
+		}
+
+		stats.BytesCompleted += uint64(bytesCompleted)
+		stats.BytesTotal += uint64(tLen)
+
+		progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
+
+		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
+		rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
+		// more detailed statistic: download rate of each peer (for each file)
+		if !torrentComplete && progress != 0 {
+			d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+			d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
+			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
+		}
+
+		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+			Name:            torrentName,
+			TotalBytes:      uint64(tLen),
+			DownloadedBytes: uint64(bytesCompleted),
+			Webseeds:        webseeds,
+			Peers:           peers,
+		})
 
 		if !torrentComplete {
 			if info, err := d.torrentInfo(torrentName); err == nil {
@@ -2038,7 +2043,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return nil
 	}
 
-	if d.torrentFiles.newDownloadsAreProhibited() {
+	if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
 		return nil
 	}
 
