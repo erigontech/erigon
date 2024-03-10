@@ -644,7 +644,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
-	d.webDownloadClient, _ = NewRCloneClient(d.logger)
+	//TODO: feature is not ready yet
+	//d.webDownloadClient, _ = NewRCloneClient(d.logger)
+	d.webDownloadClient = nil
 
 	d.wg.Add(1)
 	go func() {
