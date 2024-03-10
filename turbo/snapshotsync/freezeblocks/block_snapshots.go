@@ -682,7 +682,7 @@ func (s *RoSnapshots) PrintDebug() {
 	defer s.unlockSegments()
 
 	s.segments.Scan(func(key snaptype.Enum, value *segments) bool {
-		fmt.Println("    == Snapshots,", key.String())
+		fmt.Println("    == [dbg] Snapshots,", key.String())
 		for _, sn := range value.segments {
 			args := make([]any, 0, len(sn.Type().Indexes())+1)
 			args = append(args, sn.from)
@@ -1209,16 +1209,13 @@ func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool
 		lastInFiles := br.snapshots().SegmentsMax() + 1
 		haveGap = lastInFiles < firstInDB
 		if haveGap {
-			log.Debug("[snapshots] not enuogh blocks in db to create snapshots", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB, "recommendations", "it's ok to ignore this message. can fix by: downloading more files `rm datadir/snapshots/prohibit_new_downloads.lock datdir/snapshots/snapshots-lock.json`, or downloading old blocks to db `integration stage_headers --reset`")
+			log.Debug("[snapshots] not enough blocks in db to create snapshots", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB, "recommendations", "it's ok to ignore this message. can fix by: downloading more files `rm datadir/snapshots/prohibit_new_downloads.lock datdir/snapshots/snapshots-lock.json`, or downloading old blocks to db `integration stage_headers --reset`")
 		}
 		return nil
 	}); err != nil {
 		return false, err
 	}
-	if haveGap {
-		return false, nil
-	}
-	return true, nil
+	return !haveGap, nil
 }
 
 func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
