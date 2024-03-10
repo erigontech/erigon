@@ -1646,6 +1646,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	defer d.lock.Unlock()
 	//Call this methods outside of `lock` critical section, because they have own locks with contention
 	torrents := d.torrentClient.Torrents()
+	log.Warn("[dbg] ReCalcStats", "l", len(torrents))
 	connStats := d.torrentClient.ConnStats()
 	peers := make(map[torrent.PeerID]struct{}, 16)
 
