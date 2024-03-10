@@ -165,6 +165,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
+	log.Warn("[dbg] alex", "cfg.AddTorrentsFromDisk", cfg.AddTorrentsFromDisk)
 	if cfg.AddTorrentsFromDisk {
 		var downloadMismatches []string
 
