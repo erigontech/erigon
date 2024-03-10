@@ -2003,7 +2003,7 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 		total += t.NumPieces()
 	}
 	d.logger.Info("[snapshots] Verify start")
-	defer d.logger.Info("[snapshots] Verify done", "files", len(toVerify), "whiteList", whiteList)
+	defer d.logger.Info("[snapshots] Verify done", "all", len(allTorrents), "toVerify", len(toVerify), "whiteList", whiteList)
 
 	completedPieces, completedFiles := &atomic.Uint64{}, &atomic.Uint64{}
 
