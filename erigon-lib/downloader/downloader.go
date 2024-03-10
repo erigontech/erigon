@@ -1683,6 +1683,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	for _, t := range torrents {
+		select {
+		case <-t.GotInfo():
+		default: // if some torrents have no metadata, we are for-sure uncomplete
+			stats.Completed = false
+			noMetadata = append(noMetadata, t.Name())
+			continue
+		}
+
 		var torrentComplete bool
 		torrentName := t.Name()
 
