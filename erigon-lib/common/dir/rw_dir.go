@@ -143,7 +143,6 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 			}
 		}
 		if !match {
-			fmt.Printf("[dbg] ListFiles skip %s\n", f.Name())
 			continue
 		}
 		paths = append(paths, filepath.Join(dir, f.Name()))
