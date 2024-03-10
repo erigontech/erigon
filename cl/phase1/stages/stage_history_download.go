@@ -140,7 +140,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 
-		return !cfg.backfilling || slot <= destinationSlotForCL || slot <= destinationSlotForEL, tx.Commit()
+		return (!cfg.backfilling || slot <= destinationSlotForCL) && slot <= destinationSlotForEL, tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
