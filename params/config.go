@@ -311,6 +311,8 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 		return ChiadoChainConfig
 	case genesisHash == HermezMainnetGenesisHash:
 		return HermezMainnetChainConfig
+	case genesisHash == HermezMainnetShadowforkGenesisHash:
+		return HermezMainnetShadowforkChainConfig
 	case genesisHash == HermezLocalDevnetGenesisHash:
 		return HermezLocalDevnetChainConfig
 	case genesisHash == HermezCardonaGenesisHash:
