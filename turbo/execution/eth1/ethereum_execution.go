@@ -9,6 +9,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
+	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/log/v3"
@@ -276,4 +277,33 @@ func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execu
 	}
 	defer e.semaphore.Release(1)
 	return &execution.ReadyResponse{Ready: true}, nil
+}
+
+func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.GetSegmentRequest) (*execution.HasBlockResponse, error) {
+	tx, err := e.db.BeginRw(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if in.BlockHash == nil {
+		return nil, errors.New("block hash is nil, hasBlock support only by hash")
+	}
+	blockHash := gointerfaces.ConvertH256ToHash(in.BlockHash)
+
+	num := rawdb.ReadHeaderNumber(tx, blockHash)
+	if num == nil {
+		return &execution.HasBlockResponse{HasBlock: false}, nil
+	}
+	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	if !has {
+		return &execution.HasBlockResponse{HasBlock: false}, nil
+	}
+	has, err = tx.Has(kv.BlockBody, dbutils.HeaderKey(*num, blockHash))
+	if err != nil {
+		return nil, err
+	}
+	return &execution.HasBlockResponse{HasBlock: has}, nil
 }

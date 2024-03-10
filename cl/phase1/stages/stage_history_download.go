@@ -87,11 +87,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
-	foundLatestEth1ValidBlock := &atomic.Bool{}
-	foundLatestEth1ValidBlock.Store(false)
-	if cfg.engine == nil || !cfg.engine.SupportInsertion() {
-		foundLatestEth1ValidBlock.Store(true) // skip this if we are not using an engine supporting direct insertion
-	}
 
 	var currEth1Progress atomic.Int64
 
@@ -117,18 +112,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				return false, err
 			}
 		}
-		if !foundLatestEth1ValidBlock.Load() && blk.Version() >= clparams.BellatrixVersion {
+		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
 			payload := blk.Block.Body.ExecutionPayload
-			bodyChainHeader, err := cfg.engine.GetBodiesByHashes(ctx, []libcommon.Hash{payload.BlockHash})
+			hasELBlock, err := cfg.engine.HasBlock(ctx, payload.BlockHash)
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
-			foundLatestEth1ValidBlock.Store((len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks(ctx) > payload.BlockNumber)
-			if foundLatestEth1ValidBlock.Load() {
-				logger.Info("Found latest eth1 valid block", "blockNumber", payload.BlockNumber, "blockHash", payload.BlockHash)
-			}
 
-			if !foundLatestEth1ValidBlock.Load() {
+			if !hasELBlock {
 				payloadRoot, err := payload.HashSSZ()
 				if err != nil {
 					return false, fmt.Errorf("error hashing execution payload during download: %s", err)
@@ -147,11 +138,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 		}
-		if blk.Version() <= clparams.AltairVersion {
-			foundLatestEth1ValidBlock.Store(true)
-		}
 
-		return foundLatestEth1ValidBlock.Load() && (!cfg.backfilling || slot <= destinationSlot), tx.Commit()
+		return !cfg.backfilling || slot <= destinationSlot, tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 

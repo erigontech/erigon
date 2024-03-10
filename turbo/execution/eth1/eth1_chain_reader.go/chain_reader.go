@@ -385,3 +385,13 @@ func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, fin
 	return gointerfaces.ConvertH256ToHash(resp.HeadBlockHash), gointerfaces.ConvertH256ToHash(resp.FinalizedBlockHash),
 		gointerfaces.ConvertH256ToHash(resp.SafeBlockHash), nil
 }
+
+func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	resp, err := c.executionModule.HasBlock(ctx, &execution.GetSegmentRequest{
+		BlockHash: gointerfaces.ConvertHashToH256(hash),
+	})
+	if err != nil {
+		return false, err
+	}
+	return resp.HasBlock, nil
+}
