@@ -103,7 +103,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
-		destinationSlot := cfg.sn.SegmentsMax()
+		destinationSlot := uint64(0)
 		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
