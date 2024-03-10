@@ -1145,6 +1145,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 }
 
 func localHashCompletionCheck(ctx context.Context, t *torrent.Torrent, fileInfo snaptype.FileInfo, statusChan chan downloadStatus) ([]byte, bool) {
+	defer func(t time.Time) { fmt.Printf("downloader.go:1148: %s\n", time.Since(t)) }(time.Now())
 	localHash, err := fileHashBytes(ctx, fileInfo)
 
 	if err == nil {
