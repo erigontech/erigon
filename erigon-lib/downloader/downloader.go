@@ -2122,6 +2122,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	}
 	for i, ts := range files {
 		//TODO: why we depend on Stat? Did you mean `dir.FileExist()` ? How it can be false here?
+		//TODO: What this code doing? Why delete something from db?
 		//if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 		//	if info.Completed != nil {
 		//		_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
