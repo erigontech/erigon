@@ -92,7 +92,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	var currEth1Progress atomic.Int64
 
 	bytesReadInTotal := atomic.Uint64{}
-
+	destinationSlotForEL := uint64(math.MaxUint64)
+	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
+		destinationSlotForEL = cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
+	}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
@@ -105,10 +108,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		destinationSlotForCL := cfg.sn.SegmentsMax()
-		destinationSlotForEL := uint64(math.MaxUint64)
-		if cfg.engine != nil && cfg.engine.SupportInsertion() {
-			destinationSlotForEL = cfg.engine.FrozenBlocks(ctx)
-		}
+
 		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
@@ -220,7 +220,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 	}()
 	// We block until we are done with the EL side of the backfilling with 2000 blocks of safety margin.
-	for cfg.waitForAllRoutines && !cfg.downloader.Finished() && (cfg.engine == nil || cfg.downloader.Progress()+2000 <= cfg.engine.FrozenBlocks(ctx)) {
+	for cfg.waitForAllRoutines && !cfg.downloader.Finished() && (cfg.engine == nil || cfg.downloader.Progress()+2000 <= destinationSlotForEL) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
