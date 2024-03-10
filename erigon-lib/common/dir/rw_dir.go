@@ -17,11 +17,9 @@
 package dir
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -130,10 +128,8 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 		return nil, err
 	}
 	paths = make([]string, 0, len(files))
-	fmt.Printf("[dbg] and??? %s, %s, %s, %s\n", dir, extensions, files, dbg.Stack())
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
-			fmt.Printf("[dbg] skip1 %s\n", f.Name())
 			continue
 		}
 		match := false
@@ -150,6 +146,5 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 		}
 		paths = append(paths, filepath.Join(dir, f.Name()))
 	}
-	fmt.Printf("[dbg] ListFiles %s, %s, %d, %d\n", dir, extensions, len(files), len(paths))
 	return paths, nil
 }
