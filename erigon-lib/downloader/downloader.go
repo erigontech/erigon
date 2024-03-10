@@ -179,7 +179,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 
 						// this is lazy as it can be expensive for large files
 						fileHashBytes, err := fileHashBytes(d.ctx, fileInfo)
-						fmt.Printf("[dbg] fileHashBytes: %s, %s, %x\n", err, fileInfo.Name(), fileHashBytes)
 						if errors.Is(err, os.ErrNotExist) {
 							hashBytes, _ := hex.DecodeString(download.Hash)
 							if err := d.db.Update(d.ctx, torrentInfoReset(download.Name, hashBytes, 0)); err != nil {

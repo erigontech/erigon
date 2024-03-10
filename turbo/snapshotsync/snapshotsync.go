@@ -118,7 +118,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	}
 
 	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
-
 	for {
 		select {
 		case <-ctx.Done():
