@@ -1396,16 +1396,19 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 
 	if _, err = dumpRange(ctx, snaptype.Headers.FileInfo(snapDir, blockFrom, blockTo),
 		DumpHeaders, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		panic(err)
 		return 0, err
 	}
 
 	if lastTxNum, err = dumpRange(ctx, snaptype.Bodies.FileInfo(snapDir, blockFrom, blockTo),
 		DumpBodies, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		panic(err)
 		return lastTxNum, err
 	}
 
 	if _, err = dumpRange(ctx, snaptype.Transactions.FileInfo(snapDir, blockFrom, blockTo),
 		DumpTxs, func(context.Context) uint64 { return firstTxNum }, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
+		panic(err)
 		return lastTxNum, err
 	}
 
@@ -1417,10 +1420,11 @@ type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, b
 
 func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstKey firstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	var lastKeyValue uint64
-
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.String(), f.Path, tmpDir, seg.MinPatternScore, workers, log.LvlTrace, logger)
 
 	if err != nil {
+		fmt.Printf("a: %s\n", f.Path)
+		panic(err)
 		return lastKeyValue, err
 	}
 	defer sn.Close()
@@ -1430,6 +1434,8 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	}, workers, lvl, logger)
 
 	if err != nil {
+		fmt.Printf("b: %s\n", f.Path)
+		panic(err)
 		return lastKeyValue, fmt.Errorf("DumpBodies: %w", err)
 	}
 
@@ -1443,6 +1449,8 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 	p := &background.Progress{}
 
 	if err := buildIdx(ctx, f, chainConfig, tmpDir, p, lvl, logger); err != nil {
+		fmt.Printf("c: %s\n", f.Path)
+		panic(err)
 		return lastKeyValue, err
 	}
 
@@ -1864,9 +1872,9 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}()
 	firstBlockNum := sn.From
 
-	bodiesSegment, err := seg.NewDecompressor(sn.Path)
+	bodiesSegment, err := seg.NewDecompressor(sn.As(snaptype.Bodies).Path)
 	if err != nil {
-		return fmt.Errorf("can't open %s for indexing: %w", sn.Name(), err)
+		return fmt.Errorf("can't open %s for indexing: %w", sn.As(snaptype.Bodies).Name(), err)
 	}
 	defer bodiesSegment.Close()
 

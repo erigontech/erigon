@@ -130,6 +130,7 @@ func (s snapType) FileName(version Version, from uint64, to uint64) string {
 
 func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	f, _, _ := ParseFileName(dir, s.FileName(s.versions.Current, from, to))
+	fmt.Printf("alex: %s, %#v\n", s.FileName(s.versions.Current, from, to), f)
 	return f
 }
 

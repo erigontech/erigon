@@ -222,6 +222,19 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 	return strings.Compare(f.Type.String(), o.Type.String())
 }
 
+func (f FileInfo) As(t Type) FileInfo {
+	name := fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
+	return FileInfo{
+		Version: f.Version,
+		From:    f.From,
+		To:      f.To,
+		Ext:     f.Ext,
+		Type:    t,
+		name:    name,
+		Path:    filepath.Join(f.Dir(), name),
+	}
+}
+
 func IdxFiles(dir string) (res []FileInfo, err error) {
 	return FilesWithExt(dir, ".idx")
 }
