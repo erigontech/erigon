@@ -103,11 +103,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
-		destinationSlot := uint64(0)
+		destinationSlotForCL := cfg.sn.SegmentsMax()
+		destinationSlotForEL := uint64(0)
 		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
-		if destinationSlot <= blk.Block.Slot {
+		if destinationSlotForCL <= blk.Block.Slot {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
@@ -139,7 +140,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 
-		return !cfg.backfilling || slot <= destinationSlot, tx.Commit()
+		return !cfg.backfilling || slot <= destinationSlotForCL || slot <= destinationSlotForEL, tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
