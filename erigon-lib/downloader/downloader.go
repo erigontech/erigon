@@ -910,7 +910,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 
 							failed[t.Name()] = struct{}{}
-							d.logger.Warn("[snapshots] file hash does not match download", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+							d.logger.Debug("[snapshots] NonCanonical hash", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
 							continue
 
 						} else {
