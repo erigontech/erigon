@@ -87,6 +87,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
+	foundLatestEth1ValidBlock := &atomic.Bool{}
+	foundLatestEth1ValidBlock.Store(false)
+	if cfg.engine == nil || !cfg.engine.SupportInsertion() {
+		foundLatestEth1ValidBlock.Store(true) // skip this if we are not using an engine supporting direct insertion
+	}
 
 	var currEth1Progress atomic.Int64
 
@@ -117,6 +122,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			hasELBlock, err := cfg.engine.HasBlock(ctx, payload.BlockHash)
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+			}
+			if hasELBlock {
+				foundLatestEth1ValidBlock.Store(true)
 			}
 
 			if !hasELBlock {
