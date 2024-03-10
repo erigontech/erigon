@@ -143,6 +143,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 		}
+		fmt.Println(slot, destinationSlotForCL, destinationSlotForEL)
 
 		return (!cfg.backfilling || slot <= destinationSlotForCL) && slot <= destinationSlotForEL, tx.Commit()
 	})
