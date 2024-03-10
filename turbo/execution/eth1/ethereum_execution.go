@@ -294,6 +294,9 @@ func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.Ge
 	if num == nil {
 		return &execution.HasBlockResponse{HasBlock: false}, nil
 	}
+	if *num <= e.blockReader.FrozenBlocks() {
+		return &execution.HasBlockResponse{HasBlock: true}, nil
+	}
 	has, err := tx.Has(kv.Headers, dbutils.HeaderKey(*num, blockHash))
 	if err != nil {
 		return nil, err
