@@ -188,6 +188,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	if !initialCycle {
 		return nil
 	}
+	log.Warn("[dbg] initialCycle", "initialCycle", initialCycle, "stack", dbg.Stack())
 	if !cfg.blockReader.FreezingCfg().Enabled {
 		return nil
 	}
