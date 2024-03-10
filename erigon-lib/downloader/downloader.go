@@ -1886,17 +1886,17 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		d.logger.Info("[snapshots] no progress yet", "files", amount, "list", strings.Join(zeroProgress, ","))
 	}
 
-	if len(d.downloading) > 0 {
-		amount := len(d.downloading)
-
-		files := make([]string, 0, len(downloading))
-
-		for file := range d.downloading {
-			files = append(files, file)
-		}
-
-		d.logger.Log(d.verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ","))
-	}
+	//if len(d.downloading) > 0 {
+	//	amount := len(d.downloading)
+	//
+	//	files := make([]string, 0, len(downloading))
+	//
+	//	for file := range d.downloading {
+	//		files = append(files, file)
+	//	}
+	//
+	//	d.logger.Log(d.verbosity, "[snapshots] downloading", "files", amount, "list", strings.Join(files, ","))
+	//}
 
 	if stats.BytesDownload > prevStats.BytesDownload {
 		stats.DownloadRate = (stats.BytesDownload - prevStats.BytesDownload) / uint64(interval.Seconds())
