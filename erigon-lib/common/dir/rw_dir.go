@@ -129,6 +129,7 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 		return nil, err
 	}
 	paths = make([]string, 0, len(files))
+	fmt.Printf("[dbg] and??? %s, %s, %s\n", dir, extensions, files)
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
 			continue
@@ -141,7 +142,6 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 			if filepath.Ext(f.Name()) == ext { // filter out only compressed files
 				match = true
 			} else {
-				fmt.Printf("[dbg] skip???? %s, %#v, %#v\n", f.Name(), filepath.Ext(f.Name()), ext)
 			}
 		}
 		if !match {
