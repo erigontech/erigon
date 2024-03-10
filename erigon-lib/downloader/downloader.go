@@ -1731,6 +1731,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
 		}
 
+		if progress > 100 {
+			d.logger.Warn("[dbg] still?", "t.complete", t.Complete.Bool(), "torrentComplete", torrentComplete)
+		}
 		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
 			Name:            torrentName,
 			TotalBytes:      uint64(tLen),
