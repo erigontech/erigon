@@ -1453,7 +1453,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 				err = fmt.Errorf("hash mismatch: expected: 0x%x, got: 0x%x", infoHash.Bytes(), localHash)
 
 				d.logger.Error("Web download failed", "file", name, "url", peerUrl, "err", err)
-
+				panic(info.Path)
 				if ferr := os.Remove(info.Path); ferr != nil {
 					d.logger.Warn("Couldn't remove invalid file", "file", name, "path", info.Path, "err", ferr)
 				}
