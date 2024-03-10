@@ -2121,17 +2121,19 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
-			if info.Completed != nil {
-				if dir.FileExist(filepath.Join(d.SnapDir(), info.Name)) {
-					if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-						return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
-					}); err != nil {
-						log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
-					}
-				}
-			}
-		}
+		//TODO: why we depend on Stat? Did you mean `dir.FileExist()` ? How it can be false here?
+		//if info, err := d.torrentInfo(ts.DisplayName); err == nil {
+		//	if info.Completed != nil {
+		//		_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
+		//		if serr != nil {
+		//			if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		//				return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
+		//			}); err != nil {
+		//				log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
+		//			}
+		//		}
+		//	}
+		//}
 
 		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 
