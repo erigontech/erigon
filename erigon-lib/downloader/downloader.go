@@ -1537,8 +1537,6 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 	}
 	pending = pendingBlocksFiles
 
-	//app=caplin stage=ForkChoice err="execution Client RPC failed to retrieve ForkChoiceUpdate response, err: updateForkChoice: [1/12 Snapshots] can't build missed indices: v1-000000-000500-transactions.seg: can't open v1-000000-000500-transactions.seg for indexing: no such device"
-
 	slices.SortFunc(pending, func(i, j *torrent.Torrent) int {
 		in, _, ok1 := snaptype.ParseFileName("", i.Name())
 		jn, _, ok2 := snaptype.ParseFileName("", j.Name())
@@ -1685,13 +1683,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	for _, t := range torrents {
-		select {
-		case <-t.GotInfo():
-		default: // if some torrents have no metadata, we are for-sure uncomplete
-			stats.Completed = false
-			continue
-		}
-
 		var torrentComplete bool
 		torrentName := t.Name()
 
