@@ -2179,14 +2179,6 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		//d.lock.RLock()
-		//_, downloading := d.downloading[ts.DisplayName]
-		//d.lock.RUnlock()
-		//
-		//if downloading {
-		//	continue
-		//}
-
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
 				_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
@@ -2202,6 +2194,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 
 		if whitelisted, ok := d.webseeds.torrentsWhitelist.Get(ts.DisplayName); ok {
 			if ts.InfoHash.HexString() != whitelisted.Hash {
+				log.Warn("[dbg] aaaa", "f", ts.DisplayName)
 				continue
 			}
 		}
