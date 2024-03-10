@@ -178,13 +178,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	for _, file := range files {
 		file := file
 
-		if item, ok := ignore.Get(file); ok {
-			ts, _ := torrentFiles.LoadByPath(filepath.Join(dirs.Snap, file))
-
-			if ts == nil || item.Hash != ts.InfoHash.AsString() {
-				torrentFiles.Delete(file)
-			}
-
+		if ignore.Contains(file) {
 			i.Add(1)
 			continue
 		}
