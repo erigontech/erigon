@@ -215,15 +215,17 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		//	}
 		//}
 
-		log.Warn("[dbg] t2", "t", time.Since(t))
+		t = time.Now()
 		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
 			return nil, err
 		}
+		log.Warn("[dbg] t2", "t", time.Since(t))
 
-		log.Warn("[dbg] t3", "t", time.Since(t))
+		t = time.Now()
 		if err := d.addTorrentFilesFromDisk(false); err != nil {
 			return nil, err
 		}
+		log.Warn("[dbg] t3", "t", time.Since(t))
 	}
 
 	return d, nil
