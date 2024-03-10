@@ -234,12 +234,13 @@ type snapshotLock struct {
 }
 
 func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
+	//TODO: snapshots-lock.json must be created after 1-st download done
 	//TODO: snapshots-lock.json is not compatible with E3 .kv files - because they are not immutable (merging to infinity)
 	return initSnapshotLock(ctx, cfg, db, logger)
 	/*
-			if !cfg.SnapshotLock {
-				return initSnapshotLock(ctx, cfg, db, logger)
-			}
+		if !cfg.SnapshotLock {
+			return initSnapshotLock(ctx, cfg, db, logger)
+		}
 
 			snapDir := cfg.Dirs.Snap
 
@@ -1679,11 +1680,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	for _, t := range torrents {
-		if t.Info() == nil {
-			stats.Completed = false
-			continue
-		}
-
 		var torrentComplete bool
 		torrentName := t.Name()
 
