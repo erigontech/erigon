@@ -1691,15 +1691,11 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			continue
 		}
 
+		var torrentComplete bool
 		torrentName := t.Name()
 
-		var torrentComplete bool
 		if _, ok := downloading[torrentName]; ok {
 			torrentComplete = t.Complete.Bool()
-		}
-		if torrentComplete {
-			tComplete++
-			delete(downloading, torrentName)
 		}
 
 		var progress float32
@@ -1711,9 +1707,19 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
+		bytesRead := t.Stats().BytesReadData
 		tLen := t.Length()
 
-		bytesCompleted := t.BytesCompleted()
+		var bytesCompleted int64
+
+		if torrentComplete {
+			tComplete++
+			bytesCompleted = t.Length()
+		} else {
+			bytesCompleted = bytesRead.Int64()
+		}
+
+		delete(downloading, torrentName)
 
 		for _, peer := range peersOfThisFile {
 			stats.ConnectionsTotal++
