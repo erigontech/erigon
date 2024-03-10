@@ -201,6 +201,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		}
 
 		if len(downloadMismatches) > 0 {
+			panic(downloadMismatches)
 			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
 		}
 
