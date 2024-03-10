@@ -767,7 +767,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 		}
 	case snaptype.Enums.Transactions:
 		if err := TransactionsIdx(ctx, chainConfig, sn, tmpDir, p, lvl, logger); err != nil {
-			return err
+			return fmt.Errorf("TransactionsIdx: %s", err)
 		}
 	case snaptype.Enums.BorEvents:
 		if err := BorEventsIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
@@ -1913,7 +1913,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 
 	bodiesSegment, err := seg.NewDecompressor(sn.As(snaptype.Bodies).Path)
 	if err != nil {
-		return fmt.Errorf("can't open %s for indexing: %w", sn.Name(), err)
+		return fmt.Errorf("can't open %s for indexing: %w", sn.As(snaptype.Bodies).Name(), err)
 	}
 	defer bodiesSegment.Close()
 
