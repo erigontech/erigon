@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -104,7 +105,10 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		destinationSlotForCL := cfg.sn.SegmentsMax()
-		destinationSlotForEL := cfg.engine.FrozenBlocks(ctx)
+		destinationSlotForEL := uint64(math.MaxUint64)
+		if cfg.engine != nil && cfg.engine.SupportInsertion() {
+			destinationSlotForEL = cfg.engine.FrozenBlocks(ctx)
+		}
 		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
