@@ -198,19 +198,17 @@ var MergeSteps = []uint64{100_000, 10_000}
 
 // FileInfo - parsed file metadata
 type FileInfo struct {
-	Version   Version
-	From, To  uint64
-	Path, Ext string
-	Type      Type
+	Version         Version
+	From, To        uint64
+	name, Path, Ext string
+	Type            Type
 }
 
 func (f FileInfo) TorrentFileExists() bool { return dir.FileExist(f.Path + ".torrent") }
 
-func (f FileInfo) Name() string {
-	return fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, f.Type, f.Ext)
-}
-func (f FileInfo) Dir() string { return filepath.Dir(f.Path) }
-func (f FileInfo) Len() uint64 { return f.To - f.From }
+func (f FileInfo) Name() string { return f.name }
+func (f FileInfo) Dir() string  { return filepath.Dir(f.Path) }
+func (f FileInfo) Len() uint64  { return f.To - f.From }
 
 func (f FileInfo) CompareTo(o FileInfo) int {
 	if res := cmp.Compare(f.From, o.From); res != 0 {
