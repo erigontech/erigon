@@ -166,6 +166,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if cfg.AddTorrentsFromDisk {
+		t := time.Now()
 		var downloadMismatches []string
 
 		for _, download := range lock.Downloads {
@@ -200,6 +201,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 			}
 		}
 
+		log.Warn("[dbg] t1", "t", time.Since(t))
 		if len(downloadMismatches) > 0 {
 			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
 		}
@@ -213,10 +215,12 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		//	}
 		//}
 
+		log.Warn("[dbg] t2", "t", time.Since(t))
 		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
 			return nil, err
 		}
 
+		log.Warn("[dbg] t3", "t", time.Since(t))
 		if err := d.addTorrentFilesFromDisk(false); err != nil {
 			return nil, err
 		}
