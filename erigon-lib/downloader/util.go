@@ -257,6 +257,7 @@ func AllTorrentPaths(dirs datadir.Dirs) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Warn("[dbg] alllll", "dirs.Snap", dirs.Snap, "l", len(files))
 	if dbg.DownloaderOnlyBlocks {
 		return files, nil
 	}
