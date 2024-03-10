@@ -80,6 +80,7 @@ func (s *GrpcServer) Add(ctx context.Context, request *proto_downloader.AddReque
 			continue
 		}
 
+		log.Warn("[dbg] adding10", "n", it.Path)
 		if err := s.d.AddMagnetLink(ctx, Proto2InfoHash(it.TorrentHash), it.Path); err != nil {
 			return nil, err
 		}

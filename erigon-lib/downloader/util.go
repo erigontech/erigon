@@ -346,7 +346,6 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	t, have = torrentClient.Torrent(ts.InfoHash)
 
 	if !have {
-		log.Warn("[dbg] adding1", "n", ts.DisplayName)
 		t, _, err := torrentClient.AddTorrentSpec(ts)
 		if err != nil {
 			return nil, false, fmt.Errorf("addTorrentFile %s: %w", ts.DisplayName, err)
@@ -360,13 +359,11 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 	}
 
 	if t.Info() != nil {
-		log.Warn("[dbg] adding2", "n", ts.DisplayName)
 		t.AddWebSeeds(ts.Webseeds)
 		if err := db.Update(ctx, torrentInfoUpdater(ts.DisplayName, ts.InfoHash.Bytes(), t.Info().Length, nil)); err != nil {
 			return nil, false, fmt.Errorf("update torrent info %s: %w", ts.DisplayName, err)
 		}
 	} else {
-		log.Warn("[dbg] adding3", "n", ts.DisplayName)
 		t, _, err = torrentClient.AddTorrentSpec(ts)
 		if err != nil {
 			return t, true, fmt.Errorf("add torrent file %s: %w", ts.DisplayName, err)
