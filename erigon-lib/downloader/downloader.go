@@ -2178,6 +2178,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	if err != nil {
 		return err
 	}
+	log.Warn("[dbg] AllTorrentSpecs", "l", len(files))
 	for i, ts := range files {
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
