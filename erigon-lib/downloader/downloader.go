@@ -2121,18 +2121,9 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		//d.lock.RLock()
-		//_, downloading := d.downloading[ts.DisplayName]
-		//d.lock.RUnlock()
-		//
-		//if downloading {
-		//	continue
-		//}
-
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
-				_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
-				if serr != nil {
+				if dir.FileExist(filepath.Join(d.SnapDir(), info.Name)) {
 					if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
 						return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
 					}); err != nil {
