@@ -1408,6 +1408,7 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
 	if err := buildMissedIndices(logPrefix, ctx, br.dirs, snapshots, cc, indexWorkers, br.logger); err != nil {
+		panic(fmt.Errorf("can't build missed indices: %w", err))
 		return fmt.Errorf("can't build missed indices: %w", err)
 	}
 
