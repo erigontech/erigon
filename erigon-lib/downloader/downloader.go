@@ -2142,11 +2142,6 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 			}
 		}
 
-		if whitelisted, ok := d.webseeds.torrentsWhitelist.Get(ts.DisplayName); ok {
-			if ts.InfoHash.HexString() != whitelisted.Hash {
-				continue
-			}
-		}
 		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 
 		if err != nil {
