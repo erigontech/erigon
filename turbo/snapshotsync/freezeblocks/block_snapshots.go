@@ -1910,6 +1910,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 
 	bodiesSegment, err := seg.NewDecompressor(sn.Path)
 	if err != nil {
+		panic(fmt.Errorf("can't open %s for indexing: %w", sn.Path, err))
 		return fmt.Errorf("can't open %s for indexing: %w", sn.Path, err)
 	}
 	defer bodiesSegment.Close()
