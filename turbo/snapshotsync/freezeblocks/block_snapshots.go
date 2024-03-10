@@ -778,7 +778,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 		}
 	case snaptype.Enums.Transactions:
 		if err := TransactionsIdx(ctx, chainConfig, sn, tmpDir, p, lvl, logger); err != nil {
-			return err
+			return fmt.Errorf("TransactionsIdx: %s", err)
 		}
 	case snaptype.Enums.BorEvents:
 		if err := BorEventsIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
@@ -1864,12 +1864,14 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 	}()
 	firstBlockNum := sn.From
 
+	fmt.Printf("[dbg] here1 %s %s\n", sn.Path, sn.As(snaptype.Bodies).Path)
 	bodiesSegment, err := seg.NewDecompressor(sn.As(snaptype.Bodies).Path)
 	if err != nil {
 		return fmt.Errorf("can't open %s for indexing: %w", sn.As(snaptype.Bodies).Name(), err)
 	}
 	defer bodiesSegment.Close()
 
+	fmt.Printf("[dbg] here2 %s\n", bodiesSegment.FileName())
 	firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
 	if err != nil {
 		return err
@@ -1877,6 +1879,8 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 
 	d, err := seg.NewDecompressor(sn.Path)
 	if err != nil {
+		fmt.Printf("[dbg] %s %s\n", sn.Path, sn.As(snaptype.Bodies).Path)
+		panic(3)
 		return fmt.Errorf("can't open %s for indexing: %w", sn.Path, err)
 	}
 	defer d.Close()
