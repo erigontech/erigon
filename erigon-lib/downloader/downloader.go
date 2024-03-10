@@ -1742,7 +1742,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		}
 
 		if progress > 100 {
-			d.logger.Warn("[dbg] still?", "t.complete", t.Complete.Bool(), "torrentComplete", torrentComplete)
+			d.logger.Warn("[dbg] still?", "t.complete", t.Complete.Bool(), "torrentComplete", torrentComplete, "f", torrentName)
 		}
 		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
 			Name:            torrentName,
