@@ -1686,6 +1686,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		case <-t.GotInfo():
 		default: // if some torrents have no metadata, we are for-sure uncomplete
 			stats.Completed = false
+			noMetadata = append(noMetadata, t.Name())
 			continue
 		}
 
