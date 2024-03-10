@@ -165,7 +165,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
-	log.Warn("[dbg] alex", "cfg.AddTorrentsFromDisk", cfg.AddTorrentsFromDisk)
 	if cfg.AddTorrentsFromDisk {
 		var downloadMismatches []string
 
@@ -202,7 +201,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		}
 
 		if len(downloadMismatches) > 0 {
-			panic(downloadMismatches)
 			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
 		}
 
