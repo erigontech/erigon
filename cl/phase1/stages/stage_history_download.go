@@ -104,7 +104,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		destinationSlotForCL := cfg.sn.SegmentsMax()
-		destinationSlotForEL := uint64(0)
+		destinationSlotForEL := cfg.engine.FrozenBlocks(ctx)
 		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
