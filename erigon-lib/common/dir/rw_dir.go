@@ -132,6 +132,7 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 	fmt.Printf("[dbg] and??? %s, %s, %s\n", dir, extensions, files)
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
+			fmt.Printf("[dbg] skip1 %s\n", f.Name())
 			continue
 		}
 		match := false
