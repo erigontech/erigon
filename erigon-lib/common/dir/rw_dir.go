@@ -141,7 +141,7 @@ func ListFiles(dir string, extensions ...string) (paths []string, err error) {
 			if filepath.Ext(f.Name()) == ext { // filter out only compressed files
 				match = true
 			} else {
-				fmt.Printf("[dbg] skip???? %s, %s, %s\n", f.Name(), filepath.Ext(f.Name()), ext)
+				fmt.Printf("[dbg] skip???? %s, %#v, %#v\n", f.Name(), filepath.Ext(f.Name()), ext)
 			}
 		}
 		if !match {
