@@ -219,8 +219,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}()
 		}
 	}()
-	// Lets wait for the latestValidHash to be turned on
-	for cfg.waitForAllRoutines && !cfg.downloader.Finished() {
+	// We block until we are done with the EL side of the backfilling with 2000 blocks of safety margin.
+	for cfg.waitForAllRoutines && !cfg.downloader.Finished() && (cfg.engine == nil || cfg.downloader.Progress()+2000 <= cfg.engine.FrozenBlocks(ctx)) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
