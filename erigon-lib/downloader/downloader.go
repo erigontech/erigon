@@ -2175,13 +2175,13 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		d.lock.RLock()
-		_, downloading := d.downloading[ts.DisplayName]
-		d.lock.RUnlock()
-
-		if downloading {
-			continue
-		}
+		//d.lock.RLock()
+		//_, downloading := d.downloading[ts.DisplayName]
+		//d.lock.RUnlock()
+		//
+		//if downloading {
+		//	continue
+		//}
 
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
