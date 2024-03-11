@@ -317,7 +317,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
-		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
+		//"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
 	},
 	ChiadoNetwork: {
