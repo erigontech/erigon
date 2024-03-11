@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -22,6 +23,7 @@ type DiagnosticClient struct {
 	ctx        *cli.Context
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
+	log        log.Logger
 
 	syncStats        diaglib.SyncStatistics
 	snapshotFileList diaglib.SnapshoFilesList
@@ -30,8 +32,8 @@ type DiagnosticClient struct {
 	hardwareInfo     diaglib.HardwareInfo
 }
 
-func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.BlockMetrics{Header: erigon_lib.NewQueue(200)}}
+func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, log log.Logger) *DiagnosticClient {
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, log: log, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.BlockMetrics{Header: erigon_lib.NewQueue(200), Bodies: erigon_lib.NewQueue(200), ExecutionStart: erigon_lib.NewQueue(200), ExecutionEnd: erigon_lib.NewQueue(200)}}
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -45,6 +47,10 @@ func (d *DiagnosticClient) Setup() {
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
 	d.runBlockHeaderMetricsListener()
+	d.runBlockBodyMetricsListener()
+	d.runBlockExecutionMetricsListener()
+
+	go d.LogBlockMetrics(d.ctx, d.log)
 
 	//d.logDiagMsgs()
 }
@@ -452,6 +458,93 @@ func (d *DiagnosticClient) runBlockHeaderMetricsListener() {
 	}()
 }
 
+func (d *DiagnosticClient) runBlockBodyMetricsListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.BlockBodyMetrics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockBodyMetrics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.blockMetrics.Bodies.Enqueue(info.Bodies)
+				d.mu.Unlock()
+			}
+		}
+
+	}()
+}
+
+func (d *DiagnosticClient) runBlockExecutionMetricsListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.BlockExecutionMetrics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockExecutionMetrics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.blockMetrics.ExecutionStart.Enqueue(info.Start)
+				d.blockMetrics.ExecutionEnd.Enqueue(info.End)
+				d.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runBlockProducerMetricsListener() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.BlockProducerMetrics](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockProducerMetrics{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.blockMetrics.Production.Enqueue(info.Start)
+				d.mu.Unlock()
+			}
+		}
+	}()
+}
+
 func (d *DiagnosticClient) BlockMetrics() diaglib.BlockMetrics {
 	return d.blockMetrics
+}
+
+func (d *DiagnosticClient) LogBlockMetrics(ctx *cli.Context, logger log.Logger) {
+	logEvery := time.NewTicker(180 * time.Second)
+	defer logEvery.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-logEvery.C:
+			_, _, headers := d.blockMetrics.Header.Stats()
+			_, _, bodies := d.blockMetrics.Bodies.Stats()
+			_, _, execStart := d.blockMetrics.ExecutionStart.Stats()
+			_, _, execEnd := d.blockMetrics.ExecutionEnd.Stats()
+
+			logger.Info("Average block delay", "header", headers, "body", bodies, "exec-start", execStart, "exec-end", execEnd)
+		}
+	}
 }

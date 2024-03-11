@@ -2,7 +2,6 @@ package erigon_lib
 
 import (
 	"fmt"
-	"math"
 	"time"
 )
 
@@ -60,17 +59,20 @@ func (q *Queue) Enqueue(values []time.Duration) error {
 	return nil
 }
 
-func (q *Queue) Stats() (time.Duration, time.Duration, float64) {
+func (q *Queue) Stats() (time.Duration, time.Duration, time.Duration) {
 	if q.IsEmpty() {
 		return q.max, q.min, 0
 	}
 
-	sum := 0.0
-	for _, v := range q.Items {
-		sum += float64(v)
+	var sum time.Duration
+	count := 0
+
+	for i := q.head; i != q.tail; i = (i + 1) % q.maxSize {
+		sum += q.Items[i]
+		count++
 	}
 
-	average := sum / math.Abs(float64(q.head-q.tail))
+	average := sum / time.Duration(count)
 
 	return q.max, q.min, average
 }

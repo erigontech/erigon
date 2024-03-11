@@ -551,7 +551,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		default:
 		}
 
-		hd.logger.Warn("Received header", "header", link.header.Hash(), "time-diff", time.Since(time.Unix(int64(link.header.Time), 0)))
 		times = append(times, time.Since(time.Unix(int64(link.header.Time), 0)))
 
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
@@ -616,8 +615,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 	}
 
 	if len(times) != 0 {
-		err := diagnostics.Send(diagnostics.BlockHeaderMetrics{Header: times})
-		if err != nil {
+		if err := diagnostics.Send(diagnostics.BlockHeaderMetrics{Header: times}); err != nil {
 			hd.logger.Error("Error sending metric", "err", err)
 		}
 	}

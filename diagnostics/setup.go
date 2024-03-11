@@ -4,15 +4,16 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon/turbo/node"
 )
 
-func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
+func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, logger log.Logger) {
 	debugMux := http.NewServeMux()
 
-	diagnostic := NewDiagnosticClient(ctx, debugMux, node)
+	diagnostic := NewDiagnosticClient(ctx, debugMux, node, logger)
 	diagnostic.Setup()
 
 	metricsMux.HandleFunc("/debug/", func(w http.ResponseWriter, r *http.Request) {

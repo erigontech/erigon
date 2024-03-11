@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -139,6 +140,7 @@ func BodiesForward(
 	var prevWastedCount float64 = 0
 	timer := time.NewTimer(1 * time.Second) // Check periodically even in the abseence of incoming messages
 	var req *bodydownload.BodyRequest
+	var times []time.Duration
 	var peer [64]byte
 	var sentToPeer bool
 	stopped := false
@@ -231,11 +233,7 @@ func BodiesForward(
 					return true, nil
 				}
 
-				logger.Warn("Writing block body", "hash", header.Hash(), "txs", len(rawBody.Transactions), "time-diff", time.Since(time.Unix(int64(header.Time), 0)))
-				//err := diagnostics.Send(diagnostics.BlockProducerMetrics{Header: int64(12341)})
-				//if err != nil {
-				//	logger.Error("Error sending metric", "err", err)
-				//}
+				times = append(times, time.Since(time.Unix(int64(header.Time), 0)))
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 				ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)
@@ -263,6 +261,10 @@ func BodiesForward(
 			if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(i)) {
 				return true, nil
 			}
+		}
+
+		if err := diagnostics.Send(diagnostics.BlockBodyMetrics{Bodies: times}); err != nil {
+			logger.Error("Error sending metric", "err", err)
 		}
 
 		d5 += time.Since(start)

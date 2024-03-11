@@ -142,11 +142,40 @@ type CPUInfo struct {
 }
 
 type BlockMetrics struct {
-	Header *erigon_lib.Queue `json:"header"`
+	Header         *erigon_lib.Queue
+	Bodies         *erigon_lib.Queue
+	ExecutionStart *erigon_lib.Queue
+	ExecutionEnd   *erigon_lib.Queue
+	Production     *erigon_lib.Queue
 }
 
 type BlockHeaderMetrics struct {
 	Header []time.Duration
+}
+
+type BlockBodyMetrics struct {
+	Bodies []time.Duration
+}
+
+func (ti BlockBodyMetrics) Type() Type {
+	return TypeOf(ti)
+}
+
+type BlockExecutionMetrics struct {
+	Start []time.Duration
+	End   []time.Duration
+}
+
+func (ti BlockExecutionMetrics) Type() Type {
+	return TypeOf(ti)
+}
+
+type BlockProducerMetrics struct {
+	Start []time.Duration
+}
+
+func (ti BlockProducerMetrics) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti BlockHeaderMetrics) Type() Type {
