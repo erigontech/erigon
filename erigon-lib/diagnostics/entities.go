@@ -169,6 +169,16 @@ type BlockMetrics struct {
 	Production     *erigon_lib.Queue
 }
 
+func NewBlockMetrics() BlockMetrics {
+	return BlockMetrics{
+		Header:         erigon_lib.NewQueue(200),
+		Bodies:         erigon_lib.NewQueue(200),
+		ExecutionStart: erigon_lib.NewQueue(200),
+		ExecutionEnd:   erigon_lib.NewQueue(200),
+		Production:     erigon_lib.NewQueue(200),
+	}
+}
+
 type BlockHeaderMetrics struct {
 	Header []time.Duration
 }
@@ -177,24 +187,16 @@ type BlockBodyMetrics struct {
 	Bodies []time.Duration
 }
 
-func (ti BlockBodyMetrics) Type() Type {
-	return TypeOf(ti)
-}
-
 type BlockExecutionMetrics struct {
 	Start []time.Duration
 	End   []time.Duration
-}
-
-func (ti BlockExecutionMetrics) Type() Type {
-	return TypeOf(ti)
 }
 
 type BlockProducerMetrics struct {
 	Start []time.Duration
 }
 
-func (ti BlockProducerMetrics) Type() Type {
+func (ti BlockMetrics) Type() Type {
 	return TypeOf(ti)
 }
 
@@ -202,7 +204,15 @@ func (ti BlockHeaderMetrics) Type() Type {
 	return TypeOf(ti)
 }
 
-func (ti BlockMetrics) Type() Type {
+func (ti BlockBodyMetrics) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BlockExecutionMetrics) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BlockProducerMetrics) Type() Type {
 	return TypeOf(ti)
 }
 

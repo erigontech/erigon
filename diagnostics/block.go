@@ -56,7 +56,9 @@ func writeHeader(w http.ResponseWriter, diag *DiagnosticClient) {
 		Data:    raw.Items,
 	}
 
-	json.NewEncoder(w).Encode(res)
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func writeBody(w http.ResponseWriter, diag *DiagnosticClient) {
@@ -70,7 +72,9 @@ func writeBody(w http.ResponseWriter, diag *DiagnosticClient) {
 		Data:    raw.Items,
 	}
 
-	json.NewEncoder(w).Encode(res)
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func writeExecutionStart(w http.ResponseWriter, diag *DiagnosticClient) {
@@ -84,7 +88,9 @@ func writeExecutionStart(w http.ResponseWriter, diag *DiagnosticClient) {
 		Data:    raw.Items,
 	}
 
-	json.NewEncoder(w).Encode(res)
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func writeExecutionEnd(w http.ResponseWriter, diag *DiagnosticClient) {
@@ -98,7 +104,9 @@ func writeExecutionEnd(w http.ResponseWriter, diag *DiagnosticClient) {
 		Data:    raw.Items,
 	}
 
-	json.NewEncoder(w).Encode(res)
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func writeProducer(w http.ResponseWriter, diag *DiagnosticClient) {
@@ -112,5 +120,7 @@ func writeProducer(w http.ResponseWriter, diag *DiagnosticClient) {
 		Data:    raw.Items,
 	}
 
-	json.NewEncoder(w).Encode(res)
+	if err := json.NewEncoder(w).Encode(res); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }

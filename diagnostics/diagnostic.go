@@ -12,7 +12,6 @@ import (
 	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/urfave/cli/v2"
 
-	erigon_lib "github.com/ledgerwatch/erigon-lib"
 	"github.com/ledgerwatch/erigon-lib/common"
 	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/diskutils"
@@ -34,7 +33,7 @@ type DiagnosticClient struct {
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, log log.Logger) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, log: log, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.BlockMetrics{Header: erigon_lib.NewQueue(200), Bodies: erigon_lib.NewQueue(200), ExecutionStart: erigon_lib.NewQueue(200), ExecutionEnd: erigon_lib.NewQueue(200)}}
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, log: log, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.NewBlockMetrics()}
 }
 
 func (d *DiagnosticClient) Setup() {
