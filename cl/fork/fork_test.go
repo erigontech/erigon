@@ -73,7 +73,7 @@ func TestSepoliaForkDigest(t *testing.T) {
 func TestMainnetForkDigestPhase0Version(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(beaconCfg.GenesisForkVersion), genesisCfg.GenesisValidatorRoot)
+	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(beaconCfg.GenesisForkVersion)), genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
 	version, err := ForkDigestVersion(digest, &beaconCfg, genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestMainnetForkDigestPhase0Version(t *testing.T) {
 func TestMainnetForkDigestAltairVersion(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(beaconCfg.AltairForkVersion), genesisCfg.GenesisValidatorRoot)
+	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(beaconCfg.AltairForkVersion)), genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
 	version, err := ForkDigestVersion(digest, &beaconCfg, genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
@@ -93,7 +93,7 @@ func TestMainnetForkDigestAltairVersion(t *testing.T) {
 func TestMainnetForkDigestBellatrixVersion(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(beaconCfg.BellatrixForkVersion), genesisCfg.GenesisValidatorRoot)
+	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(beaconCfg.BellatrixForkVersion)), genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
 	version, err := ForkDigestVersion(digest, &beaconCfg, genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
@@ -103,7 +103,7 @@ func TestMainnetForkDigestBellatrixVersion(t *testing.T) {
 func TestMainnetForkDigestCapellaVersion(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(beaconCfg.CapellaForkVersion), genesisCfg.GenesisValidatorRoot)
+	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(beaconCfg.CapellaForkVersion)), genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
 	version, err := ForkDigestVersion(digest, &beaconCfg, genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
@@ -113,7 +113,7 @@ func TestMainnetForkDigestCapellaVersion(t *testing.T) {
 func TestMainnetForkDigestDenebVersion(t *testing.T) {
 	beaconCfg := clparams.BeaconConfigs[clparams.MainnetNetwork]
 	genesisCfg := clparams.GenesisConfigs[clparams.MainnetNetwork]
-	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(beaconCfg.DenebForkVersion), genesisCfg.GenesisValidatorRoot)
+	digest, err := ComputeForkDigestForVersion(utils.Uint32ToBytes4(uint32(beaconCfg.DenebForkVersion)), genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)
 	version, err := ForkDigestVersion(digest, &beaconCfg, genesisCfg.GenesisValidatorRoot)
 	require.NoError(t, err)

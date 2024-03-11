@@ -11,6 +11,10 @@ import (
 )
 
 func NewPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer PeerPenalizer) Fetcher {
+	return newPenalizingFetcher(logger, fetcher, peerPenalizer)
+}
+
+func newPenalizingFetcher(logger log.Logger, fetcher Fetcher, peerPenalizer PeerPenalizer) *penalizingFetcher {
 	return &penalizingFetcher{
 		Fetcher:       fetcher,
 		logger:        logger,

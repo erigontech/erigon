@@ -36,8 +36,6 @@ type SentinelServer struct {
 
 	mu     sync.RWMutex
 	logger log.Logger
-
-	peerStatistics map[string]*diagnostics.PeerStatistics
 }
 
 func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger log.Logger) *SentinelServer {
@@ -46,7 +44,6 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 		ctx:            ctx,
 		gossipNotifier: newGossipNotifier(),
 		logger:         logger,
-		peerStatistics: make(map[string]*diagnostics.PeerStatistics),
 	}
 }
 
@@ -82,7 +79,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	// Snappify payload before sending it to gossip
 	compressedData := utils.CompressSnappy(msg.Data)
 
-	//s.trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
+	//trackPeerStatistics(msg.GetPeer().Pid, false, msg.Name, "unknown", len(compressedData))
 
 	var subscription *sentinel.GossipSubscription
 
@@ -355,8 +352,8 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 		return err
 	}
 
-	// msgType, msgCap := parseTopic(topic)
-	// s.trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
+	msgType, msgCap := parseTopic(topic)
+	trackPeerStatistics(string(textPid), true, msgType, msgCap, len(data))
 
 	// Check to which gossip it belongs to.
 	if strings.Contains(topic, string(gossip.TopicNameBeaconBlock)) {
@@ -381,40 +378,17 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	return nil
 }
 
-func (s *SentinelServer) GetPeersStatistics() map[string]*diagnostics.PeerStatistics {
-	stats := make(map[string]*diagnostics.PeerStatistics)
-	for k, v := range s.peerStatistics {
-		stats[k] = v
-		delete(s.peerStatistics, k)
-	}
-
-	return stats
-}
-
-func (s *SentinelServer) trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
-	if s.peerStatistics == nil {
-		s.peerStatistics = make(map[string]*diagnostics.PeerStatistics)
-	}
-
-	if _, exists := s.peerStatistics[peerID]; !exists {
-		s.peerStatistics[peerID] = &diagnostics.PeerStatistics{
-			CapBytesIn:   make(map[string]uint64),
-			CapBytesOut:  make(map[string]uint64),
-			TypeBytesIn:  make(map[string]uint64),
-			TypeBytesOut: make(map[string]uint64),
-		}
-	}
-
-	stats := s.peerStatistics[peerID]
-
-	if inbound {
-		stats.BytesIn += uint64(bytes)
-		stats.CapBytesIn[msgCap] += uint64(bytes)
-		stats.TypeBytesIn[msgType] += uint64(bytes)
-	} else {
-		stats.BytesOut += uint64(bytes)
-		stats.CapBytesOut[msgCap] += uint64(bytes)
-		stats.TypeBytesOut[msgType] += uint64(bytes)
+func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
+	if isDiagEnabled {
+		diagnostics.Send(diagnostics.PeerStatisticMsgUpdate{
+			PeerType: "Sentinel",
+			PeerID:   peerID,
+			Inbound:  inbound,
+			MsgType:  msgType,
+			MsgCap:   msgCap,
+			Bytes:    bytes,
+		})
 	}
 }
 

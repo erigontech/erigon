@@ -681,14 +681,15 @@ func (p *TxPool) getCachedBlobTxnLocked(tx kv.Tx, hash []byte) (*metaTx, error) 
 		return nil, nil
 	}
 
-	txn, err := tx.GetOne(kv.PoolTransaction, hash)
+	v, err := tx.GetOne(kv.PoolTransaction, hash)
 	if err != nil {
 		return nil, err
 	}
+	txRlp := common.Copy(v[20:])
 	parseCtx := types.NewTxParseContext(p.chainID)
 	parseCtx.WithSender(false)
 	txSlot := &types.TxSlot{}
-	parseCtx.ParseTransaction(txn, 0, txSlot, nil, false, true, nil)
+	parseCtx.ParseTransaction(txRlp, 0, txSlot, nil, false, true, nil)
 	return newMetaTx(txSlot, false, 0), nil
 }
 
@@ -2064,7 +2065,7 @@ func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.Tx) error {
 		p.lastSeenBlock.Store(lastSeenBlock)
 	}
 
-	// this is neccessary as otherwise best - which waits for sync events
+	// this is necessary as otherwise best - which waits for sync events
 	// may wait for ever if blocks have been process before the txpool
 	// starts with an empty db
 	lastSeenProgress, err := getExecutionProgress(coreTx)
