@@ -210,7 +210,7 @@ func (s *Sync) fetchNewBlocks(
 }
 
 //
-// TODO - unit test initial sync + on new event cases
+// TODO (subsequent PRs) - unit test initial sync + on new event cases
 //
 
 func (s *Sync) Run(ctx context.Context) error {

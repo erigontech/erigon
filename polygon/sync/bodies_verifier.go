@@ -6,7 +6,7 @@ type BodiesVerifier func(headers []*types.Header, bodies []*types.Body) error
 
 func VerifyBodies(_ []*types.Header, _ []*types.Body) error {
 	//
-	// TODO
+	// TODO (subsequent PRs)
 	//
 	return nil
 }

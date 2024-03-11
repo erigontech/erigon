@@ -276,24 +276,33 @@ func TestDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testin
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
-		ListPeersMayHaveBlockNum(gomock.Any()).
-		Return(test.fakePeers(3)).
-		Times(3)
-	test.p2pService.EXPECT().
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultFetchHeadersMock()).
-		// request 1,2,3 in parallel
-		// -> 2 fails
-		// requests 2,3,4 in parallel
-		// 3 is cached
-		// requests 5,6 in parallel
-		// in total 6 requests + 1 request for re-requesting checkpoint 2
-		// total = 7 (note this also tests caching works)
+		// request checkpoints 1,2,3 in parallel (we have 3 peers)
+		// -> verifications for checkpoint 2 headers fails, checkpoints 1 and 3 pass verifications
+		// requests 2,3 in parallel (now we have only 2 peers)
+		// -> checkpoint 3 blocks are cached, checkpoint 2 is re-requested from another peer and passes verifications
+		// requests 4,5 in parallel
+		// request 6
+		// in total 6 requests + 1 request for re-requesting checkpoint 2 headers
+		// total = 7 (note this also tests blocks caching works)
 		Times(7)
 	test.p2pService.EXPECT().
 		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultFetchBodiesMock()).
+		// 1 less than FetchHeaders since checkpoint 2 from peer 2 did not pass headers verification
 		Times(6)
+	fakePeers := test.fakePeers(3)
+	gomock.InOrder(
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return(fakePeers). // 3 initially
+			Times(1),
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return([]*p2p.PeerId{fakePeers[0], fakePeers[2]}). // but then peer 2 gets penalized
+			Times(3),
+	)
 	test.p2pService.EXPECT().
 		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
 		Times(1)
@@ -306,12 +315,12 @@ func TestDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testin
 		test.storage.EXPECT().
 			InsertBlocks(gomock.Any(), gomock.Any()).
 			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
-			Times(2),
+			Times(3),
 	)
 	test.storage.EXPECT().
 		Flush(gomock.Any()).
 		Return(nil).
-		Times(3)
+		Times(4)
 
 	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
@@ -359,4 +368,138 @@ func TestDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, blocks, 8)
 	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+}
+
+func TestDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+	var firstTimeInvalidReturned bool
+	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
+	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
+		bodiesVerifier: func(headers []*types.Header, bodies []*types.Body) error {
+			if headers[0].Number.Uint64() == 2 && !*firstTimeInvalidReturnedPtr {
+				*firstTimeInvalidReturnedPtr = true
+				return errors.New("invalid block body")
+			}
+			return nil
+		},
+	})
+	test.heimdall.EXPECT().
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeCheckpoints(6), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		// request checkpoints 1,2,3 in parallel (we have 3 peers)
+		// -> verifications for checkpoint 2 bodies fails, checkpoints 1 and 3 pass verifications
+		// requests 2,3 in parallel (now we have only 2 peers)
+		// -> checkpoint 3 blocks are cached, checkpoint 2 is re-requested from another peer and passes verifications
+		// requests 4,5 in parallel
+		// request 6
+		// in total 6 requests + 1 request for re-requesting checkpoint 2 headers + bodies
+		// total = 7 (note this also tests blocks caching works)
+		Times(7)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		// same explanation as above for FetchHeaders.Times(7)
+		Times(7)
+	fakePeers := test.fakePeers(3)
+	gomock.InOrder(
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return(fakePeers). // 3 initially
+			Times(1),
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return([]*p2p.PeerId{fakePeers[0], fakePeers[2]}). // but then peer 2 gets penalized
+			Times(3),
+	)
+	test.p2pService.EXPECT().
+		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
+		Times(1)
+	var blocksBatch1, blocksBatch2 []*types.Block
+	gomock.InOrder(
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
+			Times(1),
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
+			Times(3),
+	)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
+		Times(4)
+
+	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, blocksBatch1, 1)
+	require.Len(t, blocksBatch2, 5)
+}
+
+func TestDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{})
+	test.heimdall.EXPECT().
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeCheckpoints(6), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId) ([]*types.Body, error) {
+			if peerId.Equal(p2p.PeerIdFromUint64(2)) {
+				return nil, p2p.NewErrMissingBodies(headers)
+			}
+
+			return test.defaultFetchBodiesMock()(ctx, headers, peerId)
+		}).
+		// request checkpoints 1,2,3 in parallel (we have 3 peers)
+		// -> peer 2 returns missing bodies error, checkpoints 1 and 3 fetch succeeds
+		// requests 2,3 in parallel (now we have only 2 peers)
+		// -> checkpoint 3 blocks are cached, checkpoint 2 is re-requested from another peer and passes verifications
+		// requests 4,5 in parallel
+		// request 6
+		// in total 6 requests + 1 request for re-requesting checkpoint 2 headers + bodies
+		// total = 7 (note this also tests blocks caching works)
+		Times(7)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		// same explanation as above for FetchBodies.Times(7)
+		Times(7)
+	fakePeers := test.fakePeers(3)
+	gomock.InOrder(
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return(fakePeers). // 3 initially
+			Times(1),
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return([]*p2p.PeerId{fakePeers[0], fakePeers[2]}). // but then peer 2 gets penalized
+			Times(3),
+	)
+	test.p2pService.EXPECT().
+		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
+		Times(1)
+	var blocksBatch1, blocksBatch2 []*types.Block
+	gomock.InOrder(
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
+			Times(1),
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
+			Times(3),
+	)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
+		Times(4)
+
+	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, blocksBatch1, 1)
+	require.Len(t, blocksBatch2, 5)
 }

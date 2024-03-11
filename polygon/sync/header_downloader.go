@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
@@ -103,15 +104,8 @@ func (hd *headerDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 		return nil, nil
 	}
 
-	maxPeers := hd.p2pService.MaxPeers()
-	// waypoint rootHash->[headers part of waypoint]
-	waypointHeadersMemo, err := lru.New[common.Hash, []*types.Header](maxPeers)
-	if err != nil {
-		return nil, err
-	}
-
 	// waypoint rootHash->[blocks part of waypoint]
-	waypointBlocksMemo, err := lru.New[common.Hash, []*types.Block](maxPeers)
+	waypointBlocksMemo, err := lru.New[common.Hash, []*types.Block](hd.p2pService.MaxPeers())
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +167,7 @@ func (hd *headerDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 					return
 				}
 
-				headers, err := hd.fetchVerifiedHeaders(ctx, waypoint, peerId, waypointHeadersMemo)
+				headers, err := hd.fetchVerifiedHeaders(ctx, waypoint, peerId)
 				if err != nil {
 					hd.logger.Debug(
 						fmt.Sprintf("[%s] issue downloading headers - will try again", headerDownloaderLogPrefix),
@@ -190,9 +184,16 @@ func (hd *headerDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 
 				bodies, err := hd.fetchVerifiedBodies(ctx, headers, peerId)
 				if err != nil {
-					//
-					// TODO log
-					//
+					hd.logger.Debug(
+						fmt.Sprintf("[%s] issue downloading bodies - will try again", headerDownloaderLogPrefix),
+						"err", err,
+						"start", waypoint.StartBlock(),
+						"end", waypoint.EndBlock(),
+						"rootHash", waypoint.RootHash(),
+						"kind", reflect.TypeOf(waypoint),
+						"peerId", peerId,
+					)
+
 					return
 				}
 
@@ -260,12 +261,7 @@ func (hd *headerDownloader) fetchVerifiedHeaders(
 	ctx context.Context,
 	waypoint heimdall.Waypoint,
 	peerId *p2p.PeerId,
-	memo *lru.Cache[common.Hash, []*types.Header],
 ) ([]*types.Header, error) {
-	if headers, ok := memo.Get(waypoint.RootHash()); ok {
-		return headers, nil
-	}
-
 	start := waypoint.StartBlock().Uint64()
 	end := waypoint.EndBlock().Uint64() + 1 // waypoint end is inclusive, fetch headers is [start, end)
 	headers, err := hd.p2pService.FetchHeaders(ctx, start, end, peerId)
@@ -299,7 +295,6 @@ func (hd *headerDownloader) fetchVerifiedHeaders(
 		return nil, err
 	}
 
-	memo.Add(waypoint.RootHash(), headers)
 	return headers, nil
 }
 
@@ -310,16 +305,24 @@ func (hd *headerDownloader) fetchVerifiedBodies(
 ) ([]*types.Body, error) {
 	bodies, err := hd.p2pService.FetchBodies(ctx, headers, peerId)
 	if err != nil {
-		//
-		// TODO - log & penalize on certain errors
-		//
+		if errors.Is(err, &p2p.ErrMissingBodies{}) {
+			hd.logger.Debug("penalizing peer", "peerId", peerId, "err", err)
+			penalizeErr := hd.p2pService.Penalize(ctx, peerId)
+			if penalizeErr != nil {
+				err = fmt.Errorf("%w: %w", penalizeErr, err)
+			}
+		}
+
 		return nil, err
 	}
 
 	if err := hd.bodiesVerifier(headers, bodies); err != nil {
-		//
-		// TODO - log & penalize
-		//
+		hd.logger.Debug("penalizing peer", "peerId", peerId, "err", err)
+		penalizeErr := hd.p2pService.Penalize(ctx, peerId)
+		if penalizeErr != nil {
+			err = fmt.Errorf("%w: %w", penalizeErr, err)
+		}
+
 		return nil, err
 	}
 

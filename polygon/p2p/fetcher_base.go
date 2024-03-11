@@ -127,9 +127,7 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 			return nil, err
 		}
 		if len(bodiesChunk) == 0 {
-			return nil, &ErrMissingBodies{
-				headers: headersChunk,
-			}
+			return nil, NewErrMissingBodies(headers)
 		}
 
 		bodies = append(bodies, bodiesChunk...)
