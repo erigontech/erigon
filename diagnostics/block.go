@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-type BlockHeaderResponse struct {
+type BlockMetricsResponse struct {
 	Max     time.Duration   `json:"max"`
 	Min     time.Duration   `json:"min"`
 	Average time.Duration   `json:"average"`
@@ -46,7 +46,7 @@ func SetupBlockMetricsAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) 
 	})
 }
 
-func stats(list *list.List) BlockHeaderResponse {
+func stats(list *list.List) BlockMetricsResponse {
 	var slice []time.Duration
 	var maxValue, minValue, sum time.Duration
 	for e := list.Front(); e != nil; e = e.Next() {
@@ -69,7 +69,7 @@ func stats(list *list.List) BlockHeaderResponse {
 
 	average := sum / time.Duration(list.Len())
 
-	return BlockHeaderResponse{
+	return BlockMetricsResponse{
 		Max:     maxValue,
 		Min:     minValue,
 		Average: average,
