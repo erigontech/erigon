@@ -1722,16 +1722,16 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
-		bytesRead := t.Stats().BytesReadData
+		//bytesRead := t.Stats().BytesReadData
 		tLen := t.Length()
 
-		var bytesCompleted int64
+		var bytesCompleted int64 = t.BytesCompleted()
 
 		if torrentComplete {
 			tComplete++
-			bytesCompleted = t.Length()
+			//bytesCompleted = t.Length()
 		} else {
-			bytesCompleted = bytesRead.Int64()
+			//bytesCompleted = bytesRead.Int64()
 		}
 
 		delete(downloading, torrentName)
