@@ -2,7 +2,6 @@ package types
 
 import (
 	"bytes"
-	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -36,7 +35,7 @@ func randDeposit(rnd *rand.Rand) *Deposit {
 
 func isEqualBytes(a, b []byte) bool {
 
-	for i, _ := range a {
+	for i := range a {
 		if a[i] != b[i] {
 			return false
 		}
@@ -94,7 +93,7 @@ func TestDepositEncodeDecodeRLP(t *testing.T) {
 		if err := enc.EncodeRLP(&buf); err != nil {
 			t.Error(err)
 		}
-		fmt.Println("BUF LENGTH: ", buf.Len())
+
 		dec := Deposit{}
 
 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)

@@ -23,24 +23,13 @@ type Deposit struct {
 }
 
 func (d *Deposit) EncodingSize() (encodingSize int) {
-	// // pubkey
-	// encodingSize++       // 0x80..0xb7 1
-	// encodingSize += pLen // string itself 48
-	// // withdrawalCredentials
-	// encodingSize++       // 0x80..0xb7 1
-	// encodingSize += wLen // string itself 32
-	// amount
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(d.Amount)
-	// // signature
-	// encodingSize++       // 0xb8..0xbf 1
-	// encodingSize++       // string size (1 byte) 1
-	// encodingSize += sLen // 96
-	// index
+
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(d.Index)
 
-	encodingSize += 1 + 48 + 1 + 32 + 1 + 1 + 96
+	encodingSize += 180 // 1 + 48 + 1 + 32 + 1 + 1 + 96 (0x80 + pLen, 0x80 + wLen, 0xb8 + 2 + sLen)
 	return encodingSize
 }
 
