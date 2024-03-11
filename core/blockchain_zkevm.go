@@ -61,6 +61,12 @@ func ExecuteBlockEphemerallyZk(
 	header := block.Header()
 	blockTransactions := block.Transactions()
 	blockGasLimit := block.GasLimit()
+
+	//[hack] - on forkid7 this gas limit was used for execution but rpc is now returning forkid8 gas limit
+	if !chainConfig.IsForkID8(block.NumberU64()) {
+		blockGasLimit = 18446744073709551615
+	}
+
 	gp := new(GasPool)
 	gp.AddGas(blockGasLimit)
 
@@ -173,6 +179,9 @@ func ExecuteBlockEphemerallyZk(
 		}
 
 		receipt, execResult, err := ApplyTransaction_zkevm(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, *vmConfig, excessDataGas, effectiveGasPricePercentage)
+		if err != nil {
+			return nil, err
+		}
 		if writeTrace {
 			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
 				ftracer.Flush(tx)
@@ -185,6 +194,35 @@ func ExecuteBlockEphemerallyZk(
 		localReceipt := *receipt
 		if execResult.Err == vm.ErrUnsupportedPrecompile {
 			localReceipt.Status = 1
+		}
+
+		// receipt root holds the intermediate stateroot after the tx
+		intermediateState, err := roHermezDb.GetIntermediateTxStateRoot(blockNum, tx.Hash())
+		if err != nil {
+			return nil, err
+		}
+
+		// the stateroot in the transactions that comes from the datastream
+		// is the one after smart contract writes so it can't be used
+		// but since pre forkid7 blocks have 1 tx only, we can use the block root
+		if chainConfig.IsForkID7Etrog(blockNum) {
+			receipt.PostState = intermediateState.Bytes()
+		} else {
+			receipt.PostState = header.Root.Bytes()
+		}
+
+		//[hack] log0 pre forkid8 are not included in the rpc logs
+		// also pre forkid8 comulative gas used is same as gas used
+		var fixedLogs types.Logs
+		if !chainConfig.IsForkID8(blockNum) {
+			for _, l := range receipt.Logs {
+				if len(l.Topics) == 0 && len(l.Data) == 0 {
+					continue
+				}
+				fixedLogs = append(fixedLogs, l)
+			}
+			receipt.Logs = fixedLogs
+			receipt.CumulativeGasUsed = receipt.GasUsed
 		}
 
 		if err != nil {
@@ -234,7 +272,7 @@ func ExecuteBlockEphemerallyZk(
 
 		// increment logIndex for next turn
 		// log idex counts all the logs in all txs in the block
-		logIndex += int64(len(receipt.Logs))
+		logIndex += int64(len(localReceipt.Logs))
 	}
 
 	var l2InfoRoot libcommon.Hash

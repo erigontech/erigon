@@ -82,27 +82,33 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 	var receipt *types.Receipt
 	if !cfg.NoReceipts {
 		// by the tx.
-		receipt = &types.Receipt{Type: tx.Type(), CumulativeGasUsed: *usedGas}
+		status := types.ReceiptStatusSuccessful
 		if result.Failed() {
-			receipt.Status = types.ReceiptStatusFailed
-		} else {
-			receipt.Status = types.ReceiptStatusSuccessful
+			status = types.ReceiptStatusFailed
 		}
-		receipt.TxHash = tx.Hash()
-		receipt.GasUsed = result.UsedGas
 		// if the transaction created a contract, store the creation address in the receipt.
-		if msg.To() == nil {
-			receipt.ContractAddress = crypto.CreateAddress(evm.TxContext().Origin, tx.GetNonce())
-		}
-		// Set the receipt logs and create a bloom for filtering
-		receipt.Logs = ibs.GetLogs(tx.Hash())
+		var contractAddress libcommon.Address
 
-		// [zkevm] - ignore the bloom at this point due to a bug in zknode where the bloom is not included
+		if msg.To() == nil {
+			contractAddress = crypto.CreateAddress(evm.TxContext().Origin, tx.GetNonce())
+		}
+
+		// [hack][zkevm] - ignore the bloom at this point due to a bug in zknode where the bloom is not included
 		// in the block during execution
 		//receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 
-		receipt.BlockNumber = header.Number
-		receipt.TransactionIndex = uint(ibs.TxIndex())
+		// by the tx.
+		receipt = &types.Receipt{
+			Type:              tx.Type(),
+			CumulativeGasUsed: *usedGas,
+			TxHash:            tx.Hash(),
+			GasUsed:           result.UsedGas,
+			Status:            status,
+			ContractAddress:   contractAddress,
+			Logs:              ibs.GetLogs(tx.Hash()),
+			BlockNumber:       header.Number,
+			TransactionIndex:  uint(ibs.TxIndex()),
+		}
 	}
 
 	return receipt, result, err

@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"os"
 
-	"gopkg.in/yaml.v2"
+	"github.com/ledgerwatch/erigon/zk/debug_tools"
 )
 
 func main() {
-	rpcConfig, err := getConf()
+	rpcConfig, err := debug_tools.GetConf()
 	if err != nil {
 		panic(fmt.Sprintf("error RPGCOnfig: %s", err))
 	}
@@ -67,7 +67,7 @@ func main() {
 	fmt.Println("Check finished.")
 }
 
-func getRpcTrace(txHash string, cfg RpcConfig) ([]OpContext, error) {
+func getRpcTrace(txHash string, cfg debug_tools.RpcConfig) ([]OpContext, error) {
 	fmt.Println(txHash)
 	payloadbytecode := RequestData{
 		Method:  "debug_traceTransaction",
@@ -126,25 +126,6 @@ func compareTraces(localTrace, rpcTrace []OpContext) error {
 	}
 
 	return nil
-}
-
-func getConf() (RpcConfig, error) {
-	yamlFile, err := os.ReadFile("debugToolsConfig.yaml")
-	if err != nil {
-		return RpcConfig{}, err
-	}
-
-	c := RpcConfig{}
-	err = yaml.Unmarshal(yamlFile, &c)
-	if err != nil {
-		return RpcConfig{}, err
-	}
-
-	return c, nil
-}
-
-type RpcConfig struct {
-	Url string `yaml:"url"`
 }
 
 type HTTPResponse struct {
