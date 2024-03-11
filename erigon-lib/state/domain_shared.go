@@ -361,6 +361,9 @@ func (sd *SharedDomains) LatestCommitment(prefix []byte) ([]byte, uint64, error)
 
 // replaceShortenedKeysInBranch replaces shortened keys in the branch with full keys
 func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch commitment.BranchData, fStartTxNum uint64, fEndTxNum uint64) (commitment.BranchData, error) {
+	if !sd.aggCtx.d[kv.CommitmentDomain].d.replaceKeysInValues && sd.aggCtx.a.commitmentValuesTransform {
+		panic("domain.replaceKeysInValues is disabled, but agg.commitmentValuesTransform is enabled")
+	}
 	if !sd.aggCtx.a.commitmentValuesTransform || sd.aggCtx.maxTxNumInDomainFiles(false) == 0 || bytes.Equal(prefix, keyCommitmentState) {
 		return branch, nil // do not transform, return as is
 	}
