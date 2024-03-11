@@ -143,6 +143,36 @@ func TestMessageListenerRegisterNewBlockHashesObserver(t *testing.T) {
 	})
 }
 
+func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	test := newMessageListenerTest(t)
+	test.mockSentryStreams()
+	test.run(func(ctx context.Context, t *testing.T) {
+		var done atomic.Bool
+		observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+			require.Equal(t, peerId, message.PeerId)
+			require.Equal(t, uint64(23), message.Decoded.RequestId)
+			require.Len(t, message.Decoded.BlockBodiesPacket, 1)
+			done.Store(true)
+		}
+
+		unregister := test.messageListener.RegisterBlockBodiesObserver(observer)
+		t.Cleanup(unregister)
+
+		test.inboundMessagesStream <- &delayedMessage[*sentry.InboundMessage]{
+			message: &sentry.InboundMessage{
+				Id:     sentry.MessageId_BLOCK_BODIES_66,
+				PeerId: peerId.H512(),
+				Data:   newMockBlockBodiesPacketBytes(t, 23, &types.Body{}),
+			},
+		}
+
+		require.Eventually(t, func() bool { return done.Load() }, time.Second, 5*time.Millisecond)
+	})
+}
+
 func TestMessageListenerShouldPenalizePeerWhenErrInvalidRlp(t *testing.T) {
 	t.Parallel()
 
@@ -394,6 +424,16 @@ func newMockNewBlockHashesPacketBytes(t *testing.T) []byte {
 		{
 			Number: 1,
 		},
+	}
+	newBlockHashesPacketBytes, err := rlp.EncodeToBytes(&newBlockHashesPacket)
+	require.NoError(t, err)
+	return newBlockHashesPacketBytes
+}
+
+func newMockBlockBodiesPacketBytes(t *testing.T, requestId uint64, bodies ...*types.Body) []byte {
+	newBlockHashesPacket := eth.BlockBodiesPacket66{
+		RequestId:         requestId,
+		BlockBodiesPacket: bodies,
 	}
 	newBlockHashesPacketBytes, err := rlp.EncodeToBytes(&newBlockHashesPacket)
 	require.NoError(t, err)
