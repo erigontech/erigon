@@ -377,13 +377,15 @@ func ConsensusClStages(ctx context.Context,
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
 						fmt.Println("B", len(blobs.Responses))
-						var highestProcessed uint64
-						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
+						var highestProcessed, inserted uint64
+						if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
 							cfg.rpc.BanPeer(blobs.Peer)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
-						fmt.Println("C", highestProcessed)
+						if inserted == uint64(ids.Len()) {
+							return highestSlotProcessed, highestBlockRootProcessed, nil
+						}
 
 						if highestProcessed <= initialHighestSlotProcessed {
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, nil
@@ -566,7 +568,7 @@ func ConsensusClStages(ctx context.Context,
 										errCh <- err
 										return
 									}
-									if _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+									if _, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
 										errCh <- err
 										return
 									}
