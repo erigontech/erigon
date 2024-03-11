@@ -579,7 +579,7 @@ Loop:
 		}
 	}
 
-	if err = diagnostics.Send(diagnostics.BlockExecutionMetrics{Start: executionStartTimes, End: executionEndTimes}); err != nil {
+	if err = diagnostics.Send(diagnostics.AppendBlockMetrics{ExecutionStart: executionStartTimes, ExecutionEnd: executionEndTimes}); err != nil {
 		logger.Error("Error sending metric", "err", err)
 	}
 

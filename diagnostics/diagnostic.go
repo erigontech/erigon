@@ -47,9 +47,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
 	d.runCollectPeersStatistics()
-	d.runBlockHeaderMetricsListener()
-	d.runBlockBodyMetricsListener()
-	d.runBlockExecutionMetricsListener()
+	d.runBlockMetricsListener()
 
 	//d.logDiagMsgs()
 }
@@ -486,14 +484,14 @@ func appendWithCap(list *list.List, cap int, items []time.Duration) {
 	}
 }
 
-func (d *DiagnosticClient) runBlockHeaderMetricsListener() {
+func (d *DiagnosticClient) runBlockMetricsListener() {
 	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.BlockHeaderMetrics](context.Background(), 1)
+		ctx, ch, cancel := diaglib.Context[diaglib.AppendBlockMetrics](context.Background(), 1)
 		defer cancel()
 
 		rootCtx, _ := common.RootContext()
 
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockHeaderMetrics{}), log.Root())
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.AppendBlockMetrics{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
@@ -501,79 +499,27 @@ func (d *DiagnosticClient) runBlockHeaderMetricsListener() {
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				appendWithCap(d.blockMetrics.Header, 200, info.Header)
+
+				if info.Header != nil {
+					appendWithCap(d.blockMetrics.Header, 200, info.Header)
+				}
+				if info.Bodies != nil {
+					appendWithCap(d.blockMetrics.Bodies, 200, info.Bodies)
+				}
+				if info.ExecutionStart != nil {
+					appendWithCap(d.blockMetrics.ExecutionStart, 200, info.ExecutionStart)
+				}
+				if info.ExecutionEnd != nil {
+					appendWithCap(d.blockMetrics.ExecutionStart, 200, info.ExecutionEnd)
+				}
+				if info.Production != nil {
+					appendWithCap(d.blockMetrics.Production, 200, info.Production)
+				}
+
 				d.mu.Unlock()
 			}
 		}
 
-	}()
-}
-
-func (d *DiagnosticClient) runBlockBodyMetricsListener() {
-	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.BlockBodyMetrics](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
-
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockBodyMetrics{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				cancel()
-				return
-			case info := <-ch:
-				d.mu.Lock()
-				appendWithCap(d.blockMetrics.Bodies, 200, info.Bodies)
-				d.mu.Unlock()
-			}
-		}
-
-	}()
-}
-
-func (d *DiagnosticClient) runBlockExecutionMetricsListener() {
-	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.BlockExecutionMetrics](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
-
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockExecutionMetrics{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				cancel()
-				return
-			case info := <-ch:
-				d.mu.Lock()
-				appendWithCap(d.blockMetrics.ExecutionStart, 200, info.Start)
-				appendWithCap(d.blockMetrics.ExecutionEnd, 200, info.End)
-				d.mu.Unlock()
-			}
-		}
-	}()
-}
-
-func (d *DiagnosticClient) runBlockProducerMetricsListener() {
-	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.BlockProducerMetrics](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
-
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.BlockProducerMetrics{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				cancel()
-				return
-			case info := <-ch:
-				d.mu.Lock()
-				appendWithCap(d.blockMetrics.Production, 200, info.Start)
-				d.mu.Unlock()
-			}
-		}
 	}()
 }
 

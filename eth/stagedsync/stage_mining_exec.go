@@ -15,6 +15,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -149,7 +150,10 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 			}
 
 			parent := rawdb.ReadHeaderByNumber(tx, executionAt)
-			logger.Warn("Producing new block", "time-diff", time.Since(time.Unix(int64(parent.Time), 0)))
+
+			if err = diagnostics.Send(diagnostics.AppendBlockMetrics{Production: []time.Duration{time.Since(time.Unix(int64(parent.Time), 0))}}); err != nil {
+				logger.Error("Error sending metric", "err", err)
+			}
 		}
 	}
 

@@ -178,6 +178,18 @@ func NewBlockMetrics() BlockMetrics {
 	}
 }
 
+type AppendBlockMetrics struct {
+	Header         []time.Duration
+	Bodies         []time.Duration
+	ExecutionStart []time.Duration
+	ExecutionEnd   []time.Duration
+	Production     []time.Duration
+}
+
+func (ti AppendBlockMetrics) Type() Type {
+	return TypeOf(ti)
+}
+
 type BlockHeaderMetrics struct {
 	Header []time.Duration
 }

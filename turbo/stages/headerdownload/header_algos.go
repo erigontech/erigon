@@ -615,7 +615,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 	}
 
 	if len(times) != 0 {
-		if err := diagnostics.Send(diagnostics.BlockHeaderMetrics{Header: times}); err != nil {
+		if err := diagnostics.Send(diagnostics.AppendBlockMetrics{Header: times}); err != nil {
 			hd.logger.Error("Error sending metric", "err", err)
 		}
 	}

@@ -263,7 +263,7 @@ func BodiesForward(
 			}
 		}
 
-		if err := diagnostics.Send(diagnostics.BlockBodyMetrics{Bodies: times}); err != nil {
+		if err := diagnostics.Send(diagnostics.AppendBlockMetrics{Bodies: times}); err != nil {
 			logger.Error("Error sending metric", "err", err)
 		}
 
