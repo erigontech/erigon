@@ -1,6 +1,7 @@
 package diagnostics
 
 import (
+	"container/list"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -45,16 +46,40 @@ func SetupBlockMetricsAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) 
 	})
 }
 
+func stats(list *list.List) BlockHeaderResponse {
+	var slice []time.Duration
+	var maxValue, minValue, sum time.Duration
+	for e := list.Front(); e != nil; e = e.Next() {
+		v, ok := e.Value.(time.Duration)
+		if !ok {
+			continue
+		}
+
+		slice = append(slice, v)
+		sum += v
+
+		if maxValue < v {
+			maxValue = v
+		}
+
+		if minValue == 0 || minValue > v {
+			minValue = v
+		}
+	}
+
+	average := sum / time.Duration(list.Len())
+
+	return BlockHeaderResponse{
+		Max:     maxValue,
+		Min:     minValue,
+		Average: average,
+		Data:    slice,
+	}
+}
+
 func writeHeader(w http.ResponseWriter, diag *DiagnosticClient) {
 	raw := diag.BlockMetrics().Header
-	m, n, average := raw.Stats()
-
-	res := BlockHeaderResponse{
-		Max:     m,
-		Min:     n,
-		Average: average,
-		Data:    raw.Items,
-	}
+	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -62,15 +87,8 @@ func writeHeader(w http.ResponseWriter, diag *DiagnosticClient) {
 }
 
 func writeBody(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().Bodies
-	m, n, average := raw.Stats()
-
-	res := BlockHeaderResponse{
-		Max:     m,
-		Min:     n,
-		Average: average,
-		Data:    raw.Items,
-	}
+	raw := diag.BlockMetrics().Header
+	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -78,15 +96,8 @@ func writeBody(w http.ResponseWriter, diag *DiagnosticClient) {
 }
 
 func writeExecutionStart(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().ExecutionStart
-	m, n, average := raw.Stats()
-
-	res := BlockHeaderResponse{
-		Max:     m,
-		Min:     n,
-		Average: average,
-		Data:    raw.Items,
-	}
+	raw := diag.BlockMetrics().Header
+	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -94,15 +105,8 @@ func writeExecutionStart(w http.ResponseWriter, diag *DiagnosticClient) {
 }
 
 func writeExecutionEnd(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().ExecutionEnd
-	m, n, average := raw.Stats()
-
-	res := BlockHeaderResponse{
-		Max:     m,
-		Min:     n,
-		Average: average,
-		Data:    raw.Items,
-	}
+	raw := diag.BlockMetrics().Header
+	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -110,15 +114,8 @@ func writeExecutionEnd(w http.ResponseWriter, diag *DiagnosticClient) {
 }
 
 func writeProducer(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().Production
-	m, n, average := raw.Stats()
-
-	res := BlockHeaderResponse{
-		Max:     m,
-		Min:     n,
-		Average: average,
-		Data:    raw.Items,
-	}
+	raw := diag.BlockMetrics().Header
+	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

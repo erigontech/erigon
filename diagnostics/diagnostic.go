@@ -1,6 +1,7 @@
 package diagnostics
 
 import (
+	"container/list"
 	"context"
 	"net/http"
 	"sync"
@@ -22,7 +23,6 @@ type DiagnosticClient struct {
 	ctx        *cli.Context
 	metricsMux *http.ServeMux
 	node       *node.ErigonNode
-	log        log.Logger
 
 	syncStats        diaglib.SyncStatistics
 	snapshotFileList diaglib.SnapshoFilesList
@@ -32,8 +32,8 @@ type DiagnosticClient struct {
 	peersSyncMap     sync.Map
 }
 
-func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, log log.Logger) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, log: log, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.NewBlockMetrics()}
+func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.NewBlockMetrics()}
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -50,8 +50,6 @@ func (d *DiagnosticClient) Setup() {
 	d.runBlockHeaderMetricsListener()
 	d.runBlockBodyMetricsListener()
 	d.runBlockExecutionMetricsListener()
-
-	go d.LogBlockMetrics(d.ctx, d.log)
 
 	//d.logDiagMsgs()
 }
@@ -478,6 +476,16 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 	}()
 }
 
+func appendWithCap(list *list.List, cap int, items []time.Duration) {
+	if list.Len() == cap {
+		list.Remove(list.Front())
+	}
+
+	for _, v := range items {
+		list.PushBack(v)
+	}
+}
+
 func (d *DiagnosticClient) runBlockHeaderMetricsListener() {
 	go func() {
 		ctx, ch, cancel := diaglib.Context[diaglib.BlockHeaderMetrics](context.Background(), 1)
@@ -493,7 +501,7 @@ func (d *DiagnosticClient) runBlockHeaderMetricsListener() {
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				d.blockMetrics.Header.Enqueue(info.Header)
+				appendWithCap(d.blockMetrics.Header, 200, info.Header)
 				d.mu.Unlock()
 			}
 		}
@@ -516,7 +524,7 @@ func (d *DiagnosticClient) runBlockBodyMetricsListener() {
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				d.blockMetrics.Bodies.Enqueue(info.Bodies)
+				appendWithCap(d.blockMetrics.Bodies, 200, info.Bodies)
 				d.mu.Unlock()
 			}
 		}
@@ -539,8 +547,8 @@ func (d *DiagnosticClient) runBlockExecutionMetricsListener() {
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				d.blockMetrics.ExecutionStart.Enqueue(info.Start)
-				d.blockMetrics.ExecutionEnd.Enqueue(info.End)
+				appendWithCap(d.blockMetrics.ExecutionStart, 200, info.Start)
+				appendWithCap(d.blockMetrics.ExecutionEnd, 200, info.End)
 				d.mu.Unlock()
 			}
 		}
@@ -562,7 +570,7 @@ func (d *DiagnosticClient) runBlockProducerMetricsListener() {
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				d.blockMetrics.Production.Enqueue(info.Start)
+				appendWithCap(d.blockMetrics.Production, 200, info.Start)
 				d.mu.Unlock()
 			}
 		}
@@ -571,25 +579,6 @@ func (d *DiagnosticClient) runBlockProducerMetricsListener() {
 
 func (d *DiagnosticClient) BlockMetrics() diaglib.BlockMetrics {
 	return d.blockMetrics
-}
-
-func (d *DiagnosticClient) LogBlockMetrics(ctx *cli.Context, logger log.Logger) {
-	logEvery := time.NewTicker(180 * time.Second)
-	defer logEvery.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-logEvery.C:
-			_, _, headers := d.blockMetrics.Header.Stats()
-			_, _, bodies := d.blockMetrics.Bodies.Stats()
-			_, _, execStart := d.blockMetrics.ExecutionStart.Stats()
-			_, _, execEnd := d.blockMetrics.ExecutionEnd.Stats()
-
-			logger.Info("Average block delay", "header", headers, "body", bodies, "exec-start", execStart, "exec-end", execEnd)
-		}
-	}
 }
 
 func (d *DiagnosticClient) runCollectPeersStatistics() {

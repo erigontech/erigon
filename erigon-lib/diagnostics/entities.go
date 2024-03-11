@@ -17,9 +17,8 @@
 package diagnostics
 
 import (
+	"container/list"
 	"time"
-
-	erigon_lib "github.com/ledgerwatch/erigon-lib"
 )
 
 type PeerStatisticsGetter interface {
@@ -162,20 +161,20 @@ type CPUInfo struct {
 }
 
 type BlockMetrics struct {
-	Header         *erigon_lib.Queue
-	Bodies         *erigon_lib.Queue
-	ExecutionStart *erigon_lib.Queue
-	ExecutionEnd   *erigon_lib.Queue
-	Production     *erigon_lib.Queue
+	Header         *list.List
+	Bodies         *list.List
+	ExecutionStart *list.List
+	ExecutionEnd   *list.List
+	Production     *list.List
 }
 
 func NewBlockMetrics() BlockMetrics {
 	return BlockMetrics{
-		Header:         erigon_lib.NewQueue(200),
-		Bodies:         erigon_lib.NewQueue(200),
-		ExecutionStart: erigon_lib.NewQueue(200),
-		ExecutionEnd:   erigon_lib.NewQueue(200),
-		Production:     erigon_lib.NewQueue(200),
+		Header:         list.New(),
+		Bodies:         list.New(),
+		ExecutionStart: list.New(),
+		ExecutionEnd:   list.New(),
+		Production:     list.New(),
 	}
 }
 
