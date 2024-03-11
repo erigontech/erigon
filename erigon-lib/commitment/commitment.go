@@ -300,6 +300,10 @@ func RetrieveCellNoop(nibble int, skip bool) (*Cell, error) { return nil, nil }
 
 // if fn returns nil, the original key will be copied from branchData
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
+	if len(branchData) < 4 {
+		return branchData, nil
+	}
+
 	var numBuf [binary.MaxVarintLen64]byte
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
