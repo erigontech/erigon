@@ -116,7 +116,6 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
 	}
 
-
 	log.Info(fmt.Sprintf("[%s] Requesting downloads", logPrefix))
 	for {
 		select {
