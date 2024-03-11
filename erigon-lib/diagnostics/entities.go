@@ -190,40 +190,7 @@ func (ti AppendBlockMetrics) Type() Type {
 	return TypeOf(ti)
 }
 
-type BlockHeaderMetrics struct {
-	Header []time.Duration
-}
-
-type BlockBodyMetrics struct {
-	Bodies []time.Duration
-}
-
-type BlockExecutionMetrics struct {
-	Start []time.Duration
-	End   []time.Duration
-}
-
-type BlockProducerMetrics struct {
-	Start []time.Duration
-}
-
 func (ti BlockMetrics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti BlockHeaderMetrics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti BlockBodyMetrics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti BlockExecutionMetrics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti BlockProducerMetrics) Type() Type {
 	return TypeOf(ti)
 }
 
