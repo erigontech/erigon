@@ -553,8 +553,6 @@ func (dc *DomainContext) commitmentValTransform(
 				} else {
 					buf, found = dc.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, filesAccount)
 					if !found {
-						buf, found = dc.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, filesAccount)
-
 						dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key),
 							"merged", accMerged,
 							"toMerge", accsToMerge,
