@@ -915,6 +915,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -945,6 +946,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
 }
