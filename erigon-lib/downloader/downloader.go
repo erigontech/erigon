@@ -644,7 +644,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
-	d.webDownloadClient, _ = NewRCloneClient(d.logger)
+	//TODO: feature is not ready yet
+	//d.webDownloadClient, _ = NewRCloneClient(d.logger)
+	d.webDownloadClient = nil
 
 	d.wg.Add(1)
 	go func() {
@@ -910,7 +912,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 
 							failed[t.Name()] = struct{}{}
-							d.logger.Warn("[snapshots] file hash does not match download", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+							d.logger.Debug("[snapshots] NonCanonical hash", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
 							continue
 
 						} else {
@@ -1636,6 +1638,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		case <-t.GotInfo():
 		default: // if some torrents have no metadata, we are for-sure uncomplete
 			stats.Completed = false
+			noMetadata = append(noMetadata, t.Name())
 			continue
 		}
 
