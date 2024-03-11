@@ -232,6 +232,13 @@ Loop:
 	if err = s.Update(batch, stageProgress); err != nil {
 		return err
 	}
+
+	// we need to artificially update the headers stage here as well to ensure that notifications
+	// can fire at the end of the stage loop and inform RPC subscriptions of new blocks for example
+	if err = stages.SaveStageProgress(tx, stages.Headers, stageProgress); err != nil {
+		return err
+	}
+
 	if err = batch.Commit(); err != nil {
 		return fmt.Errorf("batch commit: %w", err)
 	}
