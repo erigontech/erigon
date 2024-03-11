@@ -618,14 +618,12 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 
 				g.Go(func() error {
 					info, _, ok := snaptype.ParseFileName(c.session1.LocalFsRoot(), ent1.Transactions.Name())
+					if !ok {
+						return fmt.Errorf("can't parse file name %s", ent1.Transactions.Name())
+					}
 
 					err := func() error {
 						startTime := time.Now()
-
-						if !ok {
-							return fmt.Errorf("can't parse file name %s", ent1.Transactions.Name())
-						}
-
 						defer func() {
 							atomic.AddUint64(&downloadTime, uint64(time.Since(startTime)))
 						}()

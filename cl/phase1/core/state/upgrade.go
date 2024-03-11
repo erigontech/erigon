@@ -14,7 +14,7 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	// update version
 	fork := b.Fork()
 	fork.Epoch = epoch
-	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().AltairForkVersion)
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().AltairForkVersion))
 	b.SetFork(fork)
 	// Process new fields
 	b.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, b.ValidatorLength()))
@@ -67,7 +67,7 @@ func (b *CachingBeaconState) UpgradeToBellatrix() error {
 	fork := b.Fork()
 	fork.Epoch = epoch
 	fork.PreviousVersion = fork.CurrentVersion
-	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().BellatrixForkVersion)
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().BellatrixForkVersion))
 	b.SetFork(fork)
 	b.SetLatestExecutionPayloadHeader(cltypes.NewEth1Header(clparams.BellatrixVersion))
 	// Update the state root cache
@@ -82,7 +82,7 @@ func (b *CachingBeaconState) UpgradeToCapella() error {
 	fork := b.Fork()
 	fork.Epoch = epoch
 	fork.PreviousVersion = fork.CurrentVersion
-	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().CapellaForkVersion)
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().CapellaForkVersion))
 	b.SetFork(fork)
 	// Update the payload header.
 	header := b.LatestExecutionPayloadHeader()
@@ -104,7 +104,7 @@ func (b *CachingBeaconState) UpgradeToDeneb() error {
 	fork := b.Fork()
 	fork.Epoch = epoch
 	fork.PreviousVersion = fork.CurrentVersion
-	fork.CurrentVersion = utils.Uint32ToBytes4(b.BeaconConfig().DenebForkVersion)
+	fork.CurrentVersion = utils.Uint32ToBytes4(uint32(b.BeaconConfig().DenebForkVersion))
 	b.SetFork(fork)
 	// Update the payload header.
 	header := b.LatestExecutionPayloadHeader()

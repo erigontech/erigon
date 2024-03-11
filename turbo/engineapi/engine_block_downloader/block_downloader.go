@@ -38,7 +38,8 @@ type RequestBodyFunction func(context.Context, *bodydownload.BodyRequest) ([64]b
 
 // EngineBlockDownloader is responsible to download blocks in reverse, and then insert them in the database.
 type EngineBlockDownloader struct {
-	ctx context.Context
+	bacgroundCtx context.Context
+
 	// downloaders
 	hd          *headerdownload.HeaderDownload
 	bd          *bodydownload.BodyDownload
@@ -74,7 +75,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
-		ctx:             ctx,
+		bacgroundCtx:    ctx,
 		hd:              hd,
 		bd:              bd,
 		db:              db,
@@ -86,7 +87,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 		blockPropagator: blockPropagator,
 		timeout:         timeout,
 		bodyReqSend:     bodyReqSend,
-		chainRW:         eth1_chain_reader.NewChainReaderEth1(ctx, config, executionClient, 1000),
+		chainRW:         eth1_chain_reader.NewChainReaderEth1(config, executionClient, 1000),
 	}
 }
 
@@ -203,7 +204,7 @@ func saveHeader(db kv.RwTx, header *types.Header, hash libcommon.Hash) error {
 	return nil
 }
 
-func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint64, fromHash libcommon.Hash, toBlock uint64) error {
+func (e *EngineBlockDownloader) insertHeadersAndBodies(ctx context.Context, tx kv.Tx, fromBlock uint64, fromHash libcommon.Hash, toBlock uint64) error {
 	blockBatchSize := 500
 	blockWrittenLogSize := 20_000
 	// We divide them in batches
@@ -221,7 +222,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 			return err
 		}
 		if len(blocksBatch) == blockBatchSize {
-			if err := e.chainRW.InsertBlocksAndWait(blocksBatch); err != nil {
+			if err := e.chainRW.InsertBlocksAndWait(ctx, blocksBatch); err != nil {
 				return err
 			}
 			blocksBatch = blocksBatch[:0]
@@ -233,7 +234,7 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 		}
 		number := header.Number.Uint64()
 		if number > toBlock {
-			return e.chainRW.InsertBlocksAndWait(blocksBatch)
+			return e.chainRW.InsertBlocksAndWait(ctx, blocksBatch)
 		}
 		hash := header.Hash()
 		body, err := rawdb.ReadBodyWithTransactions(tx, hash, number)
@@ -248,6 +249,6 @@ func (e *EngineBlockDownloader) insertHeadersAndBodies(tx kv.Tx, fromBlock uint6
 			e.logger.Info("[insertHeadersAndBodies] Written blocks", "progress", number, "to", toBlock)
 		}
 	}
-	return e.chainRW.InsertBlocksAndWait(blocksBatch)
+	return e.chainRW.InsertBlocksAndWait(ctx, blocksBatch)
 
 }

@@ -27,12 +27,32 @@ type PeerStatisticsGetter interface {
 }
 
 type PeerStatistics struct {
+	PeerType     string
 	BytesIn      uint64
 	BytesOut     uint64
 	CapBytesIn   map[string]uint64
 	CapBytesOut  map[string]uint64
 	TypeBytesIn  map[string]uint64
 	TypeBytesOut map[string]uint64
+}
+
+type PeerDataUpdate struct {
+	PeerID string
+	ENR    string
+	Enode  string
+	ID     string
+	Name   string
+	Type   string
+	Caps   []string
+}
+
+type PeerStatisticMsgUpdate struct {
+	PeerType string
+	PeerID   string
+	Inbound  bool
+	MsgType  string
+	MsgCap   string
+	Bytes    int
 }
 
 type SyncStatistics struct {
@@ -215,5 +235,9 @@ func (ti SyncStagesList) Type() Type {
 }
 
 func (ti CurrentSyncStage) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti PeerStatisticMsgUpdate) Type() Type {
 	return TypeOf(ti)
 }

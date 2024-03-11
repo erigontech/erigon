@@ -1,13 +1,4 @@
 tests:
-  - name: spec
-    actual:
-      handler: i
-      path: /eth/v1/config/spec
-    compare:
-      exprs:
-       - actual_code == 200
-       - actual.data.SlotsPerEpoch == 32
-       - actual.data.SlotsPerHistoricalRoot == 8192
   - name: fork schedule
     actual:
       handler: i

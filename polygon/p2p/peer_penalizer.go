@@ -14,14 +14,14 @@ func NewPeerPenalizer(sentryClient direct.SentryClient) PeerPenalizer {
 }
 
 type PeerPenalizer interface {
-	Penalize(ctx context.Context, peerId PeerId) error
+	Penalize(ctx context.Context, peerId *PeerId) error
 }
 
 type peerPenalizer struct {
 	sentryClient direct.SentryClient
 }
 
-func (pp *peerPenalizer) Penalize(ctx context.Context, peerId PeerId) error {
+func (pp *peerPenalizer) Penalize(ctx context.Context, peerId *PeerId) error {
 	_, err := pp.sentryClient.PenalizePeer(ctx, &sentry.PenalizePeerRequest{
 		PeerId:  peerId.H512(),
 		Penalty: sentry.PenaltyKind_Kick,

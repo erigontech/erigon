@@ -72,8 +72,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
+
 	// Either start from genesis or a checkpoint
-	ctx, cn := context.WithCancel(context.Background())
+	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
 	var state *state.CachingBeaconState
 	if cfg.InitialSync {
@@ -113,7 +114,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 	var executionEngine execution_client2.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client2.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client2.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
 		}

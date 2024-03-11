@@ -47,13 +47,11 @@ func (tx AccessListTx) copy() *AccessListTx {
 	cpy := &AccessListTx{
 		LegacyTx: LegacyTx{
 			CommonTx: CommonTx{
-				TransactionMisc: TransactionMisc{
-					time: tx.time,
-				},
-				Nonce: tx.Nonce,
-				To:    tx.To, // TODO: copy pointed-to address
-				Data:  libcommon.CopyBytes(tx.Data),
-				Gas:   tx.Gas,
+				TransactionMisc: TransactionMisc{},
+				Nonce:           tx.Nonce,
+				To:              tx.To, // TODO: copy pointed-to address
+				Data:            libcommon.CopyBytes(tx.Data),
+				Gas:             tx.Gas,
 				// These are copied below.
 				Value: new(uint256.Int),
 			},

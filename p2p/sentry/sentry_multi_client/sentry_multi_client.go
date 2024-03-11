@@ -208,7 +208,7 @@ func pumpStreamLoop[TMessage interface{}](
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	streamCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
@@ -216,20 +216,23 @@ func pumpStreamLoop[TMessage interface{}](
 	// - can group them or process in batch
 	// - can have slow processing
 	reqs := make(chan TMessage, 256)
-	defer close(reqs)
-
 	go func() {
-		for req := range reqs {
-			if err := handleInboundMessage(ctx, req, sentry); err != nil {
-				logger.Debug("Handling incoming message", "stream", streamName, "err", err)
-			}
-			if wg != nil {
-				wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case req := <-reqs:
+				if err := handleInboundMessage(ctx, req, sentry); err != nil {
+					logger.Debug("Handling incoming message", "stream", streamName, "err", err)
+				}
+				if wg != nil {
+					wg.Done()
+				}
 			}
 		}
 	}()
 
-	stream, err := streamFactory(streamCtx, sentry)
+	stream, err := streamFactory(ctx, sentry)
 	if err != nil {
 		return err
 	}

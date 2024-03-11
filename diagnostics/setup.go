@@ -30,7 +30,7 @@ func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode, l
 	SetupBlockBodyDownload(debugMux)
 	SetupHeaderDownloadStats(debugMux)
 	SetupNodeInfoAccess(debugMux, node)
-	SetupPeersAccess(ctx, debugMux, node)
+	SetupPeersAccess(ctx, debugMux, node, diagnostic)
 	SetupBootnodesAccess(debugMux, node)
 	SetupStagesAccess(debugMux, diagnostic)
 	SetupBlockMetricsAccess(debugMux, diagnostic)
