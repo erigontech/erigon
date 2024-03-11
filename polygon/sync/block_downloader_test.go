@@ -177,7 +177,7 @@ func (hdt blockDownloaderTest) defaultInsertBlocksMock(capture *[]*types.Block) 
 	}
 }
 
-func TestDownloadBlocksUsingMilestones(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
 	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchMilestonesFromBlock(gomock.Any(), gomock.Any()).
@@ -205,7 +205,7 @@ func TestDownloadBlocksUsingMilestones(t *testing.T) {
 		Return(nil).
 		Times(1)
 
-	lastHeader, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocks, 4)
 	// check blocks are written in order
@@ -213,10 +213,10 @@ func TestDownloadBlocksUsingMilestones(t *testing.T) {
 	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
 	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
 	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
-	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
-func TestDownloadBlocksUsingCheckpoints(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
 	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
@@ -244,7 +244,7 @@ func TestDownloadBlocksUsingCheckpoints(t *testing.T) {
 		Return(nil).
 		Times(4)
 
-	lastHeader, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocks, 8)
 	// check blocks are written in order
@@ -256,10 +256,10 @@ func TestDownloadBlocksUsingCheckpoints(t *testing.T) {
 	require.Equal(t, uint64(6), blocks[5].Header().Number.Uint64())
 	require.Equal(t, uint64(7), blocks[6].Header().Number.Uint64())
 	require.Equal(t, uint64(8), blocks[7].Header().Number.Uint64())
-	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
-func TestDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testing.T) {
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
@@ -328,7 +328,7 @@ func TestDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testin
 	require.Len(t, blocksBatch2, 5)
 }
 
-func TestDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
@@ -364,13 +364,13 @@ func TestDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 			Times(4),
 	)
 
-	lastHeader, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocks, 8)
-	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
-func TestDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing.T) {
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
@@ -439,7 +439,7 @@ func TestDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing
 	require.Len(t, blocksBatch2, 5)
 }
 
-func TestDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{})
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).

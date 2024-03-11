@@ -24,8 +24,8 @@ const (
 )
 
 type BlockDownloader interface {
-	DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (latest *types.Header, err error)
-	DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (latest *types.Header, err error)
+	DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (tip *types.Header, err error)
+	DownloadBlocksUsingMilestones(ctx context.Context, start uint64) (tip *types.Header, err error)
 }
 
 func NewBlockDownloader(
