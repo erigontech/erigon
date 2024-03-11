@@ -581,7 +581,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 	for cp.Len() > 0 {
 		lastKey := common.Copy(cp[0].key)
 		lastVal := common.Copy(cp[0].val)
-		keyFileStartTxNum, keyFileEndTxNum = cp[0].startTxNum, cp[0].endTxNum
+		lastFileStartTxNum, lastFileEndTxNum := cp[0].startTxNum, cp[0].endTxNum
 		// Advance all the items that have this key (including the top)
 		for cp.Len() > 0 && bytes.Equal(cp[0].key, lastKey) {
 			ci1 := heap.Pop(&cp).(*CursorItem)
@@ -600,7 +600,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 					if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
 						valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 						if err != nil {
-							return nil, nil, nil, fmt.Errorf("merge: valTransform [%x] %w", valBuf, err)
+							return nil, nil, nil, fmt.Errorf("merge: valTransform '%x' failed: %w", valBuf, err)
 						}
 					}
 				}
@@ -613,6 +613,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			}
 			keyBuf = append(keyBuf[:0], lastKey...)
 			valBuf = append(valBuf[:0], lastVal...)
+			keyFileStartTxNum, keyFileEndTxNum = lastFileStartTxNum, lastFileEndTxNum
 		}
 	}
 	if keyBuf != nil {
@@ -620,7 +621,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
 				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("merge: valTransform [%x] %w", valBuf, err)
+					return nil, nil, nil, fmt.Errorf("merge: valTransform '%x' failed: %w", valBuf, err)
 				}
 			}
 		}

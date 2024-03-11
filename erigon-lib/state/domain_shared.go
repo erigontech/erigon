@@ -962,7 +962,7 @@ func (sdc *SharedDomainsCommitmentContext) GetBranch(pref []byte) ([]byte, uint6
 	if len(v) == 0 {
 		return nil, 0, nil
 	}
-	if sdc.sd.aggCtx.a.commitmentValuesTransform && !bytes.Equal(pref, keyCommitmentState) {
+	if sdc.sd.aggCtx.a.commitmentValuesTransform && !bytes.Equal(pref, keyCommitmentState) && fStartTxNum != fEndTxNum {
 		// todo returned step by LatestCommitment could be used as well, to determine endTxNum of file with that key
 
 		// transfrom shortened keys back to full keys to allow HPH work seamlessly
