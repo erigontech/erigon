@@ -2,4 +2,6 @@
 
 package disk
 
-func UpdatePrometheusDiskStats() error {}
+func UpdatePrometheusDiskStats() error {
+	return nil
+}
