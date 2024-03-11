@@ -68,7 +68,7 @@ func newHeaderDownloader(
 }
 
 //
-// TODO rename to block downloader? revise and update naming in logs, tests, etc.
+// TODO (subsequent PRs) rename to block downloader? revise and update naming in logs, tests, etc.
 //
 
 type headerDownloader struct {
@@ -143,7 +143,8 @@ func (hd *headerDownloader) downloadUsingWaypoints(ctx context.Context, waypoint
 		)
 
 		//
-		// TODO we may 1) need ETL or 2) limit level of parallelism to fit in RAM reasonably
+		// TODO (for discussion and subsequent PRs)
+		//      we may 1) need ETL or 2) limit level of parallelism to fit in RAM reasonably
 		//      if we have 50 peers => that is 50 goroutine parallelism
 		//      => 50 checkpoints => 1024 blocks each in the worst case
 		//      => 512 KB per block in the worst case => 25 GB needed in the worst case
