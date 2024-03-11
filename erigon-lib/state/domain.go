@@ -1635,7 +1635,7 @@ func (dc *DomainContext) getFromFiles(filekey []byte) (v []byte, found bool, fil
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dc.d.filenameBase, filekey, dc.files[i].src.decompressor.FileName())
 		}
 		//LatestStateReadGrind.ObserveDuration(t)
-		return v, true, dc.files[i].startTxNum, dc.files[i].startTxNum, nil
+		return v, true, dc.files[i].startTxNum, dc.files[i].endTxNum, nil
 	}
 	if traceGetLatest == dc.d.filenameBase {
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dc.d.filenameBase, filekey, len(dc.files))
