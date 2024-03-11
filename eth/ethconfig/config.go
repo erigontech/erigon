@@ -93,7 +93,7 @@ var Defaults = Config{
 	DeprecatedTxPool: DeprecatedDefaultTxPoolConfig,
 	RPCGasCap:        50000000,
 	GPO:              FullNodeGPO,
-	RPCTxFeeCap:      1, // 1 ether
+	RPCTxFeeCap:      0, // removed by default
 
 	ImportMode: false,
 	Snapshot: Snapshot{
