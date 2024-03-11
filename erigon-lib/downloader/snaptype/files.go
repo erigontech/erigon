@@ -116,11 +116,13 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	ext := filepath.Ext(fileName)
 	onlyName := fileName[:len(fileName)-len(ext)]
 	parts := strings.Split(onlyName, "-")
+	res = FileInfo{Path: filepath.Join(dir, fileName), name: fileName, Ext: ext}
 	if len(parts) < 4 {
 		return res, ok
 	}
 
-	version, err := ParseVersion(parts[0])
+	var err error
+	res.Version, err = ParseVersion(parts[0])
 	if err != nil {
 		return
 	}
@@ -129,16 +131,17 @@ func parseFileName(dir, fileName string) (res FileInfo, ok bool) {
 	if err != nil {
 		return
 	}
+	res.From = from * 1_000
 	to, err := strconv.ParseUint(parts[2], 10, 64)
 	if err != nil {
 		return
 	}
-	ft, ok := ParseFileType(parts[3])
+	res.To = to * 1_000
+	res.Type, ok = ParseFileType(parts[3])
 	if !ok {
 		return res, ok
 	}
-
-	return FileInfo{Version: version, From: from * 1_000, To: to * 1_000, Path: filepath.Join(dir, fileName), name: fileName, Type: ft, Ext: ext}, ok
+	return res, ok
 }
 
 var stateFileRegex = regexp.MustCompile("^v([0-9]+)-([[:lower:]]+).([0-9]+)-([0-9]+).(.*)$")
@@ -222,17 +225,16 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	as := FileInfo{
+	name := fmt.Sprintf("v%d-%06d-%06d-%s%s", f.Version, f.From/1_000, f.To/1_000, t, f.Ext)
+	return FileInfo{
 		Version: f.Version,
 		From:    f.From,
 		To:      f.To,
 		Ext:     f.Ext,
 		Type:    t,
+		name:    name,
+		Path:    filepath.Join(f.Dir(), name),
 	}
-
-	as.Path = filepath.Join(f.Dir(), as.Name())
-
-	return as
 }
 
 func IdxFiles(dir string) (res []FileInfo, err error) {

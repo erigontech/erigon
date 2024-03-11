@@ -928,7 +928,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if torrentInfo != nil && torrentInfo.Completed != nil {
 					if bytes.Equal(t.InfoHash().Bytes(), torrentInfo.Hash) {
-						if _, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+						if dir.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
+							/* TODO: this method is too heavy for Main loop: "re-read file again and again" will impact sync performance
 							localHash, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete)
 
 							if complete {
@@ -937,7 +938,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 
 							failed[t.Name()] = struct{}{}
-							d.logger.Warn("[snapshots] file hash does not match download", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+							d.logger.Debug("[snapshots] NonCanonical hash", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+							*/
+
 							continue
 
 						} else {
@@ -2175,32 +2178,21 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		d.lock.RLock()
-		_, downloading := d.downloading[ts.DisplayName]
-		d.lock.RUnlock()
+		//TODO: why we depend on Stat? Did you mean `dir.FileExist()` ? How it can be false here?
+		//TODO: What this code doing? Why delete something from db?
+		//if info, err := d.torrentInfo(ts.DisplayName); err == nil {
+		//	if info.Completed != nil {
+		//		_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
+		//		if serr != nil {
+		//			if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		//				return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
+		//			}); err != nil {
+		//				log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
+		//			}
+		//		}
+		//	}
+		//}
 
-		if downloading {
-			continue
-		}
-
-		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
-			if info.Completed != nil {
-				_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
-				if serr != nil {
-					if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-						return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
-					}); err != nil {
-						log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
-					}
-				}
-			}
-		}
-
-		if whitelisted, ok := d.webseeds.torrentsWhitelist.Get(ts.DisplayName); ok {
-			if ts.InfoHash.HexString() != whitelisted.Hash {
-				continue
-			}
-		}
 		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 
 		if err != nil {
