@@ -3,6 +3,9 @@ name: QA - Tip tracking
 on:
   schedule:
     - cron: '0 0 * * *'  # Run every day at 00:00 AM UTC
+  push:
+    branches:
+      - workflow_tip_tracking
 
 jobs:
   long-running-test:
