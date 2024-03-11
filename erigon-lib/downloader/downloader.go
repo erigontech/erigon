@@ -1725,7 +1725,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		bytesRead := t.Stats().BytesReadData
 		tLen := t.Length()
 
-		var bytesCompleted int64 = t.BytesCompleted()
+		var bytesCompleted int64
 
 		if torrentComplete {
 			tComplete++
@@ -1741,7 +1741,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			peers[peer.PeerID] = struct{}{}
 		}
 
-		stats.BytesCompleted += uint64(t.BytesCompleted())
+		stats.BytesCompleted += uint64(bytesCompleted)
 		stats.BytesTotal += uint64(tLen)
 
 		progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
