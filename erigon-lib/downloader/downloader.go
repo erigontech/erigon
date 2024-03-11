@@ -706,6 +706,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 								go func(fileInfo snaptype.FileInfo, infoHash infohash.T, length int64, completionTime time.Time) {
 									checkGroup.Go(func() error {
+										defer func(t time.Time) {
+											log.Warn("[dbg] downloader.go:699: fileHashBytes %s, %s\n", time.Since(t), fileInfo.Name())
+										}(time.Now())
 										fileHashBytes, _ := fileHashBytes(d.ctx, fileInfo)
 
 										if bytes.Equal(infoHash.Bytes(), fileHashBytes) {
