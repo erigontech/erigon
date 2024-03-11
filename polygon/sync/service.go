@@ -45,7 +45,7 @@ func NewService(
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
-	downloader := NewHeaderDownloader(
+	blockDownloader := NewBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
@@ -81,7 +81,7 @@ func NewService(
 		headersVerifier,
 		bodiesVerifier,
 		p2pService,
-		downloader,
+		blockDownloader,
 		ccBuilderFactory,
 		spansCache,
 		heimdallService.FetchLatestSpan,
