@@ -376,7 +376,7 @@ func ConsensusClStages(ctx context.Context,
 							logger.Warn("failed to get blobs", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
-						fmt.Println("B", ids.Len())
+						fmt.Println("B", len(blobs.Responses))
 						var highestProcessed uint64
 						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
