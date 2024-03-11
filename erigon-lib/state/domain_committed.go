@@ -501,8 +501,13 @@ func (dc *DomainContext) commitmentValTransform(
 		storToMerge += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
 	}
 
-	accMerged := fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep)
-	stoMerged := fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep)
+	var accMerged, stoMerged string
+	if mergedAccount != nil {
+		accMerged = fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep)
+	}
+	if mergedStorage != nil {
+		stoMerged = fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep)
+	}
 
 	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
 		if !dc.d.replaceKeysInValues || len(valBuf) == 0 {
