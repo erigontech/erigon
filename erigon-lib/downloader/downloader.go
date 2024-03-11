@@ -928,7 +928,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if torrentInfo != nil && torrentInfo.Completed != nil {
 					if bytes.Equal(t.InfoHash().Bytes(), torrentInfo.Hash) {
-						if _, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+						if dir.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
+							/* TODO: this method is too heavy for Main loop: "re-read file again and again" will impact sync performance
 							localHash, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete)
 
 							if complete {
@@ -938,6 +939,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							failed[t.Name()] = struct{}{}
 							d.logger.Debug("[snapshots] NonCanonical hash", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+							*/
+
 							continue
 
 						} else {
