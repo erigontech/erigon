@@ -360,12 +360,14 @@ func ConsensusClStages(ctx context.Context,
 								}
 							}
 						}
+						fmt.Println("D", "lol")
 						// Do the DA now, first of all see what blobs to retrieve
 						ids, err := network2.BlobsIdentifiersFromBlocks(blocks)
 						if err != nil {
 							logger.Warn("failed to get blob identifiers", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
+						fmt.Println("A", ids.Len())
 						if ids.Len() == 0 { // no blobs, no DA.
 							return highestSlotProcessed, highestBlockRootProcessed, nil
 						}
@@ -374,12 +376,14 @@ func ConsensusClStages(ctx context.Context,
 							logger.Warn("failed to get blobs", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
+						fmt.Println("B", ids.Len())
 						var highestProcessed uint64
 						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
 							cfg.rpc.BanPeer(blobs.Peer)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
+						fmt.Println("C", highestProcessed)
 
 						if highestProcessed <= initialHighestSlotProcessed {
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, nil
