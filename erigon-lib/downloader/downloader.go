@@ -1722,16 +1722,16 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
-		//bytesRead := t.Stats().BytesReadData
+		bytesRead := t.Stats().BytesReadData
 		tLen := t.Length()
 
 		var bytesCompleted int64 = t.BytesCompleted()
 
 		if torrentComplete {
 			tComplete++
-			//bytesCompleted = t.Length()
+			bytesCompleted = t.Length()
 		} else {
-			//bytesCompleted = bytesRead.Int64()
+			bytesCompleted = bytesRead.Int64()
 		}
 
 		delete(downloading, torrentName)
@@ -1741,7 +1741,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			peers[peer.PeerID] = struct{}{}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
+		stats.BytesCompleted += uint64(t.BytesCompleted())
 		stats.BytesTotal += uint64(tLen)
 
 		progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
