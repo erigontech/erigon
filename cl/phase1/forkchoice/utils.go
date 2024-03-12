@@ -142,3 +142,26 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	f.checkpointStates.Store(checkpointComparable(checkpoint), checkpointState)
 	return checkpointState, nil
 }
+
+func isStrictSuperset(a [][]byte, b []byte) bool {
+	for _, item := range a {
+		if len(item) != len(b) {
+			continue
+		}
+		isSuperset := true
+		fmt.Println("item", item)
+		fmt.Println("b", b)
+		for i := range item {
+			if b[i] & ^item[i] != 0 {
+				isSuperset = false
+				break
+			}
+		}
+
+		if isSuperset {
+			fmt.Println("isSuperset", isSuperset)
+			return true
+		}
+	}
+	return false
+}

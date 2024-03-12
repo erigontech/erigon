@@ -221,6 +221,14 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
+	// Fix mainnet network, use one from beacon config
+	// +- maximumGossipClockDisparity
+
+	// maximumGossipClockDisparity := f.beaconCfg.NetworkConfig.MaximumGossipClockDisparity
+	// f.beaconCfg.	currentSlot := s.Slot()
+
+	// s.BeaconConfig().NetworkConfig.MaximumGossipClockDisparity
+
 	maximumGossipClockDisparity := uint64(clparams.NetworkConfigs[clparams.MainnetNetwork].MaximumGossipClockDisparity)
 	currentSlot := s.Slot()
 	if contributionAndProof.Contribution.Slot != currentSlot && contributionAndProof.Contribution.Slot > currentSlot+maximumGossipClockDisparity {
@@ -233,10 +241,13 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
+	// solid.NewBitList(0, 0)
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
-	if aggregationBits == nil {
-		return fmt.Errorf("contribution has no participants")
-	}
+
+	// aggregationBits := solid.BitList(contributionAndProof.Contribution.AggregationBits)
+	// if aggregationBits == nil {
+	// 	return fmt.Errorf("contribution has no participants")
+	// }
 
 	found := false
 	for _, bit := range contributionAndProof.Contribution.AggregationBits {
@@ -245,23 +256,23 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 			break
 		}
 	}
-	if aggregationBits == nil || !found {
+	if !found {
 		return fmt.Errorf("contribution has no participants")
 	}
 
 	// [REJECT] contribution_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_sync_committee_aggregator(contribution_and_proof.selection_proof) returns True.
 	selectionProof := contributionAndProof.SelectionProof
+	// selectionData := contributionAndProof.Contribution
 	if len(selectionProof) != 96 {
 		return fmt.Errorf("incorrect signiture length")
 	}
 	modulo := utils.Max64(1, f.beaconCfg.SyncCommitteeSize/f.beaconCfg.SyncCommitteeSubnetCount/f.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
 	hashSignature := utils.Sha256(selectionProof[:])
-	if binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
+	if binary.LittleEndian.Uint64(hashSignature[:8])%modulo == 0 {
 		return fmt.Errorf("selects the validator as an aggregator")
 	}
 
-	// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee
-	// -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
+	// [REJECT] The aggregator's validator index is in the declared subcommittee of the current sync committee -- i.e. state.validators[contribution_and_proof.aggregator_index].pubkey in get_sync_subcommittee_pubkeys(state, contribution.subcommittee_index).
 	committee := s.CurrentSyncCommittee()
 	committeeKeys := committee.GetCommittee()
 	aggregatorPubKey, err := s.ValidatorPublicKey(int(contributionAndProof.AggregatorIndex))
@@ -280,19 +291,51 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// [IGNORE] A valid sync committee contribution with equal slot, beacon_block_root and subcommittee_index whose aggregation_bits is non-strict superset has not already been seen.
+	contributionKey := cltypes.ContributionKey{
+		Slot:              contributionAndProof.Contribution.Slot,
+		BeaconBlockRoot:   contributionAndProof.Contribution.BeaconBlockRoot,
+		SubcommitteeIndex: contributionAndProof.Contribution.SubcommitteeIndex,
+	}
+	accumulatedBitsList, found := f.operationsPool.ContributionCache.Get(contributionKey)
 
-	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
-	// TODO: Add the cache check
-	// if f.operationsPool.SignedContributionAndProofPool.Has() {
-	// 	return fmt.Errorf("first valid contribution received for the aggregator")
+	fmt.Println("Printing Debug for contributionKey", contributionKey)
+	fmt.Println("Printing Debug for accumulatedBitsList", accumulatedBitsList)
+	fmt.Println("Printing Debug for found", found)
+	fmt.Println("Printing Debug for contributionAndProof.Contribution.AggregationBits", aggregationBits)
+
+	// FIXME
+	// if found && !isStrictSuperset(accumulatedBitsList, aggregationBits) {
+	// 	fmt.Println("seen a non-strict superset sync committee contribution")
+	// 	return nil
 	// }
 
-	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
+	accumulatedBitsList = append(accumulatedBitsList, contributionAndProof.Contribution.AggregationBits)
+	fmt.Println("Printing Debug for aggregationBitsList", accumulatedBitsList)
+
+	f.operationsPool.ContributionCache.Insert(contributionKey, accumulatedBitsList)
+
+	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
+	indexSlotKey := make([]byte, 24)
+	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[0:], uint64(contributionAndProof.AggregatorIndex))
+	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[8:], uint64(contributionAndProof.Contribution.Slot))
+	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[16:], uint64(contributionAndProof.Contribution.SubcommitteeIndex))
+
+	fmt.Println("Printing Debug for indexSlotKey", contributionAndProof.AggregatorIndex, contributionAndProof.Contribution.Slot, contributionAndProof.Contribution.SubcommitteeIndex)
+	fmt.Println("Printing Debug for indexSlotKey", indexSlotKey)
+
+	if f.operationsPool.IndexSlotHasSeen.Has(string(indexSlotKey)) {
+		fmt.Println("seen sync committee contribution")
+		return nil
+	}
+	f.operationsPool.IndexSlotHasSeen.Insert(string(indexSlotKey), true)
+
 	selectionDataRoot, err := fork.ComputeSigningRoot(contributionAndProof.Contribution, f.beaconCfg.DomainSyncCommittee[:])
 	if err != nil {
 		return err
 	}
+
 	valid, err := bls.Verify(selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:])
+	fmt.Println("Printing Debug for selectionProof", selectionProof, selectionDataRoot, aggregatorPubKey, valid, err)
 	if err != nil {
 		return err
 	}
@@ -326,11 +369,8 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	// Insert in the pool
 	f.operationsPool.SignedContributionAndProofPool.Insert(signedChange.Signature, signedChange)
 
-	//TODO: Store the contribution_and_proof in the pool
-	// Store the contribution_and_proof in the pool
-	// f.operationsPool.ContributionCache.Insert(key)
-
 	// emit contribution_and_proof
+	fmt.Println("Published ", signedChange)
 	f.emitters.Publish("contribution_and_proof", signedChange)
 	return nil
 }

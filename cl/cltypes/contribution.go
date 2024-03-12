@@ -73,6 +73,12 @@ type Contribution struct {
 	AggregationBits   hexutility.Bytes `json:"aggregation_bits"`
 }
 
+type ContributionKey struct {
+	Slot              uint64         `json:"slot,string"`
+	BeaconBlockRoot   libcommon.Hash `json:"beacon_block_root"`
+	SubcommitteeIndex uint64         `json:"subcommittee_index,string"`
+}
+
 func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(a.AggregationBits) == 0 {
 		a.AggregationBits = make([]byte, syncCommitteeAggregationBitsSize)

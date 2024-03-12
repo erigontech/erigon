@@ -58,3 +58,7 @@ func (o *OperationPool[K, T]) Has(k K) (hash bool) {
 func (o *OperationPool[K, T]) Raw() []T {
 	return o.pool.Values()
 }
+
+func (o *OperationPool[K, T]) Get(k K) (T, bool) {
+	return o.pool.Get(k)
+}
