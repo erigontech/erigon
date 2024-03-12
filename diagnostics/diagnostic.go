@@ -499,7 +499,6 @@ func (d *DiagnosticClient) runBlockMetricsListener() {
 				return
 			case info := <-ch:
 				d.mu.Lock()
-				defer d.mu.Unlock()
 
 				if len(info.HeaderDelays) > 0 {
 					appendWithCap(d.blockMetrics.HeaderDelays, 200, info.HeaderDelays)
@@ -516,6 +515,8 @@ func (d *DiagnosticClient) runBlockMetricsListener() {
 				if len(info.ProductionDelays) > 0 {
 					appendWithCap(d.blockMetrics.ProductionDelays, 200, info.ProductionDelays)
 				}
+
+				d.mu.Unlock()
 			}
 		}
 
