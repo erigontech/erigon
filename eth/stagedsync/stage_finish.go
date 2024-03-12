@@ -154,7 +154,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			return nil
 		}
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum > finishStageAfterSync {
+		if blockNum > finishStageAfterSync { //[from,to)
 			return nil
 		}
 		notifyTo = blockNum
@@ -186,7 +186,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming, "amount", len(headersRlp))
 	}
 	return nil
 }
