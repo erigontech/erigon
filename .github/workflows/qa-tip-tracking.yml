@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - workflow_tip_tracking
-      - 'release/**'
 
 jobs:
   long-running-test:
