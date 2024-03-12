@@ -29,7 +29,7 @@ func (d *Deposit) EncodingSize() (encodingSize int) {
 	encodingSize++
 	encodingSize += rlp.IntLenExcludingHead(d.Index)
 
-	encodingSize += 180 // 1 + 48 + 1 + 32 + 1 + 1 + 96 (0x80 + pLen, 0x80 + wLen, 0xb8 + 2 + sLen)
+	encodingSize += 180 // 1 + 48 + 1 + 32 + 1 + 1 + 96 (0x80 + pLen, 0x80 + wLen, 0xb8 + 1 + sLen)
 	return encodingSize
 }
 
