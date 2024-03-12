@@ -143,8 +143,12 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 		}
+		isInElSnapshots := true
+		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
+			isInElSnapshots = blk.Block.Body.ExecutionPayload.BlockNumber < cfg.engine.FrozenBlocks(ctx)
+		}
 
-		return (!cfg.backfilling || slot <= destinationSlotForCL) && slot <= destinationSlotForEL, tx.Commit()
+		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
