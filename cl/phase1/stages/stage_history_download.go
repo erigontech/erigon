@@ -94,7 +94,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	bytesReadInTotal := atomic.Uint64{}
 	destinationSlotForEL := uint64(math.MaxUint64)
 	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
-		destinationSlotForEL = cfg.beaconCfg.DenebForkEpoch * cfg.beaconCfg.SlotsPerEpoch
+		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
 	}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
@@ -143,7 +143,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 		}
-		fmt.Println(slot, destinationSlotForCL, destinationSlotForEL)
 
 		return (!cfg.backfilling || slot <= destinationSlotForCL) && slot <= destinationSlotForEL, tx.Commit()
 	})
