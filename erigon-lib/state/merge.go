@@ -600,7 +600,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 					if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
 						valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 						if err != nil {
-							return nil, nil, nil, fmt.Errorf("merge: valTransform '%x' failed: %w", valBuf, err)
+							return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 						}
 					}
 				}
@@ -621,7 +621,7 @@ func (dc *DomainContext) mergeFiles(ctx context.Context, domainFiles, indexFiles
 			if !bytes.Equal(keyBuf, keyCommitmentState) { // no replacement for state key
 				valBuf, err = vt(valBuf, keyFileStartTxNum, keyFileEndTxNum)
 				if err != nil {
-					return nil, nil, nil, fmt.Errorf("merge: valTransform '%x' failed: %w", valBuf, err)
+					return nil, nil, nil, fmt.Errorf("merge: valTransform failed: %w", err)
 				}
 			}
 		}

@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/google/btree"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
@@ -348,6 +349,71 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
+func (dc *DomainContext) findShortenedKeyEasier(fullKey []byte, item *filesItem) (shortened []byte, found bool) {
+	if item == nil {
+		return nil, false
+	}
+
+	if !strings.Contains(item.decompressor.FileName(), dc.d.filenameBase) {
+		panic(fmt.Sprintf("findShortenedKeyEasier of %s called with merged file %s", dc.d.filenameBase, item.decompressor.FileName()))
+	}
+
+	g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
+
+	//if idxList&withExistence != 0 {
+	//	hi, _ := dc.hc.ic.hashKey(fullKey)
+	//	if !item.existence.ContainsHash(hi) {
+	//		continue
+	//	}
+	//}
+
+	if dc.d.indexList&withHashMap != 0 {
+		reader := recsplit.NewIndexReader(item.index)
+		defer reader.Close()
+
+		offset, ok := reader.Lookup(fullKey)
+		if !ok {
+			return nil, false
+		}
+
+		g.Reset(offset)
+		if !g.HasNext() {
+			dc.d.logger.Warn("commitment branch key replacement seek failed",
+				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
+			return nil, false
+		}
+
+		k, _ := g.Next(nil)
+		if !bytes.Equal(fullKey, k) {
+			dc.d.logger.Warn("commitment branch key replacement seek invalid key",
+				"key", fmt.Sprintf("%x", fullKey), "idx", "hash", "file", item.decompressor.FileName())
+
+			return nil, false
+		}
+		return encodeShorterKey(nil, offset), true
+	}
+	if dc.d.indexList&withBTree != 0 {
+		cur, err := item.bindex.Seek(g, fullKey)
+		if err != nil {
+			dc.d.logger.Warn("commitment branch key replacement seek failed",
+				"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
+		}
+
+		if cur == nil || !bytes.Equal(cur.Key(), fullKey) {
+			return nil, false
+		}
+
+		offset := cur.offsetInFile()
+		if uint64(g.Size()) <= offset {
+			dc.d.logger.Warn("commitment branch key replacement seek gone too far",
+				"key", fmt.Sprintf("%x", fullKey), "offset", offset, "size", g.Size(), "file", item.decompressor.FileName())
+			return nil, false
+		}
+		return encodeShorterKey(nil, offset), true
+	}
+	return nil, false
+}
+
 // idxList is a bit mask of indexes to use for lookups in lis of filesItem
 // Those files are not integrated in Domain files (just merged)
 func (dc *DomainContext) findShortenedKey(fullKey []byte, startTxNum uint64, endTxNum uint64, idxList idxList, list ...*filesItem) (shortened []byte, found bool) {
@@ -358,12 +424,12 @@ func (dc *DomainContext) findShortenedKey(fullKey []byte, startTxNum uint64, end
 		if item.startTxNum == startTxNum && item.endTxNum == endTxNum {
 			g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
 
-			if idxList&withExistence != 0 {
-				hi, _ := dc.hc.ic.hashKey(fullKey)
-				if !item.existence.ContainsHash(hi) {
-					continue
-				}
-			}
+			//if idxList&withExistence != 0 {
+			//	hi, _ := dc.hc.ic.hashKey(fullKey)
+			//	if !item.existence.ContainsHash(hi) {
+			//		continue
+			//	}
+			//}
 
 			if idxList&withHashMap != 0 {
 				reader := recsplit.NewIndexReader(item.index)
@@ -596,6 +662,91 @@ func (dc *DomainContext) commitmentValTransform(
 						"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
 						"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
 					//panic(fmt.Sprintf("vt: replacement not found for account  %x", buf))
+					return nil, fmt.Errorf("replacement not found for account  %x", buf)
+				}
+				return shortened, nil
+			})
+	}
+}
+
+func (dc *DomainContext) commitmentValTransformDomain(
+	accounts, storage *DomainContext,
+	mergedAccount, mergedStorage *filesItem,
+
+) valueTransformer {
+
+	var accMerged, stoMerged string
+	if mergedAccount != nil {
+		accMerged = fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep)
+	}
+	if mergedStorage != nil {
+		stoMerged = fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep)
+	}
+
+	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
+		if !dc.d.replaceKeysInValues || len(valBuf) == 0 {
+			return valBuf, nil
+		}
+
+		return commitment.BranchData(valBuf).
+			ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
+				var found bool
+				var buf []byte
+				if isStorage {
+					if len(key) == length.Addr+length.Hash {
+						// Non-optimised key originating from a database record
+						buf = append(buf[:0], key...)
+					} else {
+						// Optimised key referencing a state file record (file number and offset within the file)
+						buf, found = storage.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, nil)
+						if !found {
+							dc.d.logger.Crit("valTransform: lost storage full key",
+								"shortened", fmt.Sprintf("%x", key),
+								"merging", stoMerged,
+								"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
+							)
+							return nil, fmt.Errorf("lookup lost storage full key %x", key)
+						}
+					}
+
+					shortened, found := storage.findShortenedKeyEasier(buf, mergedStorage)
+					if !found {
+						if len(buf) == length.Addr+length.Hash {
+							return nil, nil // if plain key is lost, we can save original fullkey
+						}
+						// if shortened key lost, we can't continue
+						dc.d.logger.Crit("valTransform: replacement for full storage key was not found",
+							"step", fmt.Sprintf("%d-%d", keyFromTxNum/dc.d.aggregationStep, keyEndTxNum/dc.d.aggregationStep),
+							"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
+
+						return nil, fmt.Errorf("replacement not found for storage  %x", buf)
+					}
+					return shortened, nil
+				}
+
+				if len(key) == length.Addr {
+					// Non-optimised key originating from a database record
+					buf = append(buf[:0], key...)
+				} else {
+					buf, found = accounts.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, nil)
+					if !found {
+						dc.d.logger.Crit("valTransform: lost account full key",
+							"shortened", fmt.Sprintf("%x", key),
+							"merging", accMerged,
+							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
+						)
+						return nil, fmt.Errorf("lookup account full key: %x", key)
+					}
+				}
+
+				shortened, found := accounts.findShortenedKeyEasier(buf, mergedAccount)
+				if !found {
+					if len(buf) == length.Addr {
+						return nil, nil // if plain key is lost, we can save original fullkey
+					}
+					dc.d.logger.Crit("valTransform: replacement for full account key was not found",
+						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dc.d.aggregationStep, keyEndTxNum/dc.d.aggregationStep),
+						"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
 					return nil, fmt.Errorf("replacement not found for account  %x", buf)
 				}
 				return shortened, nil
