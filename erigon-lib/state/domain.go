@@ -664,10 +664,14 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 					continue Loop1
 				}
 			}
+			fmt.Printf("about to remove %s\n", item.decompressor.FileName())
 			toDelete = append(toDelete, item)
 		}
 		return true
 	})
+	if d.restrictSubsetFileDeletions {
+		return
+	}
 	for _, item := range toDelete {
 		if item.decompressor != nil {
 			item.decompressor.Close()
@@ -690,7 +694,7 @@ func (d *Domain) closeWhatNotInList(fNames []string) {
 }
 
 func (d *Domain) reCalcRoFiles() {
-	roFiles := ctxFiles(d.files, d.indexList, false, d.restrictSubsetFileDeletions)
+	roFiles := ctxFiles(d.files, d.indexList, false, false)
 	d.roFiles.Store(&roFiles)
 }
 

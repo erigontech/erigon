@@ -472,10 +472,14 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 		for _, f := range dc.files {
 			roFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
 		}
+		listFiles := ""
+		for _, f := range list {
+			listFiles += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
+		}
 		dc.d.logger.Warn("lookupByShortenedKey file not found",
 			"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
 			"shortened", fmt.Sprintf("%x", shortKey),
-			"domain", dc.d.keysTable, "files", fileStepsss, "roFiles", roFiles,
+			"domain", dc.d.keysTable, "files", fileStepsss, "roFiles", roFiles, "list", listFiles,
 			"listSize", len(list), "roFilesCount", len(dc.files), "filesCount", dc.d.files.Len())
 		return nil, false
 	}

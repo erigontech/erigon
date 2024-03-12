@@ -1249,10 +1249,10 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 			g.Go(func() (err error) {
 				var vt valueTransformer
 				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-					//ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = true
-					//ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = true
-					//ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = true
-					//
+					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = true
+					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = true
+					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = true
+
 					accStorageMerged.Wait()
 
 					vt = ac.d[kv.CommitmentDomain].commitmentValTransform(
@@ -1266,11 +1266,11 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 					accStorageMerged.Done()
 				}
-				//if ac.a.commitmentValuesTransform && err == nil {
-				//ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
-				//ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
-				//ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
-				//}
+				if ac.a.commitmentValuesTransform && err == nil && kid == kv.CommitmentDomain {
+					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
+					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
+					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
+				}
 				return err
 			})
 		}
@@ -1319,17 +1319,6 @@ func (ac *AggregatorV3Context) integrateMergedFiles(outs SelectedStaticFilesV3, 
 	defer ac.a.filesMutationLock.Unlock()
 	defer ac.a.needSaveFilesListInDB.Store(true)
 	defer ac.a.recalcMaxTxNum()
-
-	ac.a.logger.Info("[snapshots] integrateMergedFiles", "in", fmt.Sprintf("%+v", in))
-
-	//if ac.a.commitmentValuesTransform && outs.d[kv.CommitmentDomain] != nil && in.d[kv.CommitmentDomain] == nil {
-	//	code := ac.a.d[kv.CodeDomain]
-	//	if code != nil {
-	//		id := kv.CodeDomain
-	//		code.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
-	//	}
-	//} else {
-	//}
 
 	for id, d := range ac.a.d {
 		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
