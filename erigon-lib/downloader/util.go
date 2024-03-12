@@ -482,6 +482,7 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 	for {
 		select {
 		case <-wgctx.Done():
+			cancel()
 			return wg.Wait()
 		case change := <-pieceChanges.Values:
 			if !change.Ok {
@@ -497,12 +498,13 @@ func ScheduleVerifyFile(ctx context.Context, t *torrent.Torrent, completePieces 
 				return fmt.Errorf("piece %s:%d verify failed: %w", t.Name(), change.Index, err)
 			}
 
-			if change.Complete && !(change.Checking || change.Hashing || change.Hashing || change.QueuedForHash || change.Marking) {
+			if change.Complete && !(change.Checking || change.Hashing || change.QueuedForHash || change.Marking) {
 				completePieces.Add(1)
 				delete(inprogress, change.Index)
 			}
 
 			if len(inprogress) == 0 {
+				cancel()
 				return wg.Wait()
 			}
 		}
