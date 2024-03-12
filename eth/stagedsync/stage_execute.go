@@ -502,10 +502,9 @@ Loop:
 			}
 			if !useExternalTx {
 				// Recreate internal tx after Silkworm has finished
-				var tx_err error
-				txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
-				if tx_err != nil {
-					return tx_err
+				var txErr error
+				if txc.Tx, txErr = cfg.db.BeginRw(context.Background()); txErr != nil {
+					return txErr
 				}
 				defer txc.Tx.Rollback()
 				// Recreate memory batch because underlying tx has changed
