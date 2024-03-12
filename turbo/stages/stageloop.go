@@ -278,6 +278,8 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	var headTd *big.Int
 	var plainStateVersion, finalizedBlock uint64
 	head, err := stages.GetStageProgress(tx, stages.Headers)
+	finish, err := stages.GetStageProgress(tx, stages.Finish)
+	log.Warn("[dbg] hook after run", "finishProgressBefore", finishProgressBefore, "head", head, "finish", finish)
 	if err != nil {
 		return err
 	}
