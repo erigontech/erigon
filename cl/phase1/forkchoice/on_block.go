@@ -1,21 +1,22 @@
 package forkchoice
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"time"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/crypto/kzg"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2/statechange"
@@ -63,7 +64,7 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	return ethutils.ValidateBlobs(block.BlobGasUsed, cfg.MaxBlobGasPerBlock, cfg.MaxBlobsPerBlock, expectedBlobHashes, &transactions)
 }
 
-func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
@@ -96,7 +97,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 
 	// Check if blob data is available
 	if block.Version() >= clparams.DenebVersion && checkDataAvaiability {
-		if err := f.isDataAvailable(block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
+		if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
 			if err == errEIP4844DataNotAvailable {
 				log.Debug("Blob data is not available, the block will be scheduled for later processing", "slot", block.Block.Slot, "blockRoot", libcommon.Hash(blockRoot))
 				f.scheduleBlockForLaterProcessing(block)
@@ -114,7 +115,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 			}
 		}
 
-		if invalidBlock, err = f.engine.NewPayload(block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes); err != nil {
+		if invalidBlock, err = f.engine.NewPayload(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes); err != nil {
 			if invalidBlock {
 				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 			}
@@ -159,9 +160,6 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 		f.proposerBoostRoot.Store(libcommon.Hash(blockRoot))
 	}
 	if lastProcessedState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
-		if err := freezer.PutObjectSSZIntoFreezer("beaconState", "caplin_core", lastProcessedState.Slot(), lastProcessedState, f.recorder); err != nil {
-			return err
-		}
 		// Update randao mixes
 		r := solid.NewHashVector(int(f.beaconCfg.EpochsPerHistoricalVector))
 		lastProcessedState.RandaoMixes().CopyTo(r)
@@ -229,7 +227,7 @@ func (f *ForkChoiceStore) OnBlock(block *cltypes.SignedBeaconBlock, newPayload, 
 	return nil
 }
 
-func (f *ForkChoiceStore) isDataAvailable(slot uint64, blockRoot libcommon.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
+func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, blockRoot libcommon.Hash, blobKzgCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) error {
 	if f.blobStorage == nil {
 		return nil
 	}
@@ -240,7 +238,7 @@ func (f *ForkChoiceStore) isDataAvailable(slot uint64, blockRoot libcommon.Hash,
 		return true
 	})
 	// Blobs are preverified so we skip verification, we just need to check if commitments checks out.
-	sidecars, foundOnDisk, err := f.blobStorage.ReadBlobSidecars(f.ctx, slot, blockRoot)
+	sidecars, foundOnDisk, err := f.blobStorage.ReadBlobSidecars(ctx, slot, blockRoot)
 	if err != nil {
 		return fmt.Errorf("cannot check data avaiability. failed to read blob sidecars: %v", err)
 	}
@@ -262,7 +260,7 @@ func (f *ForkChoiceStore) isDataAvailable(slot uint64, blockRoot libcommon.Hash,
 		sort.Slice(sidecars, func(i, j int) bool {
 			return sidecars[i].Index < sidecars[j].Index
 		})
-		if err := f.blobStorage.WriteBlobSidecars(f.ctx, blockRoot, sidecars); err != nil {
+		if err := f.blobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
 			return fmt.Errorf("failed to write blob sidecars: %v", err)
 		}
 	}

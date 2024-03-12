@@ -330,7 +330,7 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 			pendingBlobFee = f.Uint64()
 		}
 
-		h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
+		//h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
 		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
 	// -- send notifications END

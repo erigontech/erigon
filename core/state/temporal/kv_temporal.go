@@ -28,10 +28,10 @@ import (
 
 //Variables Naming:
 //  tx - Database Transaction
-//  txn - Ethereum Transaction (and TxNum - is also number of Etherum Transaction)
+//  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
 //  k, v - key, value
-//  ts - TimeStamp. Usually it's Etherum's TransactionNumber (auto-increment ID). Or BlockNumber.
+//  ts - TimeStamp. Usually it's Ethereum's TransactionNumber (auto-increment ID). Or BlockNumber.
 //  Cursor - low-level mdbx-tide api to navigate over Table
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Has less features than Cursor. See package `iter`
 
@@ -47,7 +47,7 @@ import (
 //              start or auto-generate by moving old data from DB to Snapshots.
 // MediumLevel:
 //      1. TemporalDB - abstracting DB+Snapshots. Target is:
-//              - provide 'time-travel' API for data: consistan snapshot of data as of given Timestamp.
+//              - provide 'time-travel' API for data: consistent snapshot of data as of given Timestamp.
 //              - to keep DB small - only for Hot/Recent data (can be update/delete by re-org).
 //              - using next entities:
 //                      - InvertedIndex: supports range-scans

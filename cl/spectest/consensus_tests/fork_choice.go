@@ -9,6 +9,8 @@ import (
 
 	"github.com/ledgerwatch/erigon/spectest"
 
+	"github.com/spf13/afero"
+
 	"github.com/ledgerwatch/erigon/cl/abstract"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
@@ -18,14 +20,14 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
-	"github.com/spf13/afero"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/memdb"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func (f *ForkChoiceStep) StepType() string {
@@ -163,6 +165,8 @@ func NewForkChoice(fn func(s abstract.BeaconState) error) *ForkChoice {
 }
 
 func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
+	ctx := context.Background()
+
 	anchorBlock, err := spectest.ReadAnchorBlock(root, c.Version(), "anchor_block.ssz_snappy")
 	require.NoError(t, err)
 
@@ -175,7 +179,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	emitters := beaconevents.NewEmitters()
 	genesisConfig, _, _ := clparams.GetConfigsByNetwork(clparams.MainnetNetwork)
 	blobStorage := blob_storage.NewBlobStore(memdb.New("/tmp"), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, genesisConfig)
-	forkStore, err := forkchoice.NewForkChoiceStore(context.Background(), anchorState, nil, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, blobStorage)
+	forkStore, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool.NewOperationsPool(&clparams.MainnetBeaconConfig), fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, nil, blobStorage)
 	require.NoError(t, err)
 	forkStore.SetSynced(true)
 
@@ -233,7 +237,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 
 			}
 
-			err = forkStore.OnBlock(blk, true, true, true)
+			err = forkStore.OnBlock(ctx, blk, true, true, true)
 			if step.GetValid() {
 				require.NoError(t, err, stepstr)
 			} else {

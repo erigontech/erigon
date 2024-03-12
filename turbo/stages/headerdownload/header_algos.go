@@ -685,7 +685,11 @@ func (hd *HeaderDownload) ProcessHeadersPOS(csHeaders []ChainSegmentHeader, tx k
 					//return nil, nil
 				}
 			*/
-			hd.logger.Debug("[downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", common.Bytes2Hex(peerId[:]))
+
+			if hd.posAnchor.blockHeight == header.Number.Uint64()+1 {
+				hd.logger.Debug("[downloader] Unexpected header", "hash", headerHash, "expected", hd.posAnchor.parentHash, "peerID", common.Bytes2Hex(peerId[:]))
+			}
+
 			// Not penalise because we might have sent request twice
 			continue
 		}
