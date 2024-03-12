@@ -20,9 +20,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type StageHistoryReconstructionCfg struct {
@@ -118,11 +119,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 		if !foundLatestEth1ValidBlock.Load() && blk.Version() >= clparams.BellatrixVersion {
 			payload := blk.Block.Body.ExecutionPayload
-			bodyChainHeader, err := cfg.engine.GetBodiesByHashes([]libcommon.Hash{payload.BlockHash})
+			bodyChainHeader, err := cfg.engine.GetBodiesByHashes(ctx, []libcommon.Hash{payload.BlockHash})
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
-			foundLatestEth1ValidBlock.Store((len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks() > payload.BlockNumber)
+			foundLatestEth1ValidBlock.Store((len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks(ctx) > payload.BlockNumber)
 			if foundLatestEth1ValidBlock.Load() {
 				logger.Info("Found latest eth1 valid block", "blockNumber", payload.BlockNumber, "blockHash", payload.BlockHash)
 			}
@@ -166,7 +167,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				logTime := logIntervalTime
 
 				if cfg.engine != nil && cfg.engine.SupportInsertion() {
-					if ready, err := cfg.engine.Ready(); !ready {
+					if ready, err := cfg.engine.Ready(ctx); !ready {
 						if err != nil {
 							log.Warn("could not log progress", "err", err)
 						}
@@ -201,6 +202,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			case <-finishCh:
 				return
 			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -329,7 +331,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Debug("Error requesting blobs", "err", err)
 			continue
 		}
-		lastProcessed, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
+		lastProcessed, _, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
 			// The block is preverified so just check that the signature is correct against the block
 			for _, block := range batch {
 				if block.Block.Slot != header.Header.Slot {

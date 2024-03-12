@@ -35,11 +35,12 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
+	"github.com/ledgerwatch/log/v3"
+
 	network2 "github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type Cfg struct {
@@ -232,7 +233,7 @@ func ConsensusClStages(ctx context.Context,
 			return err
 		}
 
-		return cfg.forkChoice.OnBlock(block, newPayload, fullValidation, checkDataAvaiability)
+		return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
 
 	}
 
@@ -373,11 +374,14 @@ func ConsensusClStages(ctx context.Context,
 							logger.Warn("failed to get blobs", "err", err)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
 						}
-						var highestProcessed uint64
-						if highestProcessed, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
+						var highestProcessed, inserted uint64
+						if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, verifyBlobSigFunc); err != nil {
 							logger.Warn("failed to get verify blobs", "err", err)
 							cfg.rpc.BanPeer(blobs.Peer)
 							return initialHighestSlotProcessed, initialHighestBlockRootProcessed, err
+						}
+						if inserted == uint64(ids.Len()) {
+							return highestSlotProcessed, highestBlockRootProcessed, nil
 						}
 
 						if highestProcessed <= initialHighestSlotProcessed {
@@ -435,7 +439,7 @@ func ConsensusClStages(ctx context.Context,
 								time.Sleep(10 * time.Second)
 								return nil
 							case <-readyInterval.C:
-								ready, err := cfg.executionClient.Ready()
+								ready, err := cfg.executionClient.Ready(ctx)
 								if err != nil {
 									return err
 								}
@@ -485,7 +489,7 @@ func ConsensusClStages(ctx context.Context,
 							}
 							blocksBatch = append(blocksBatch, types.NewBlockFromStorage(executionPayload.BlockHash, header, txs, nil, body.Withdrawals))
 							if len(blocksBatch) >= blocksBatchLimit {
-								if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
+								if err := cfg.executionClient.InsertBlocks(ctx, blocksBatch, true); err != nil {
 									logger.Warn("failed to insert blocks", "err", err)
 								}
 								logger.Info("[Caplin] Inserted blocks", "progress", blocksBatch[len(blocksBatch)-1].NumberU64())
@@ -496,7 +500,7 @@ func ConsensusClStages(ctx context.Context,
 							return err
 						}
 						if len(blocksBatch) > 0 {
-							if err := cfg.executionClient.InsertBlocks(blocksBatch, true); err != nil {
+							if err := cfg.executionClient.InsertBlocks(ctx, blocksBatch, true); err != nil {
 								logger.Warn("failed to insert blocks", "err", err)
 							}
 						}
@@ -527,7 +531,6 @@ func ConsensusClStages(ctx context.Context,
 						sourceFunc := v.GetRange
 						go func(source persistence.BlockSource) {
 							if _, ok := source.(*persistence.BeaconRpcSource); ok {
-								var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 
 								select {
 								case <-time.After((time.Duration(cfg.beaconCfg.SecondsPerSlot) * time.Second) / 4):
@@ -536,6 +539,7 @@ func ConsensusClStages(ctx context.Context,
 								}
 
 								for {
+									var blocks *peers.PeeredObject[[]*cltypes.SignedBeaconBlock]
 									var err error
 									from := cfg.forkChoice.HighestSeen() - 2
 									currentSlot := utils.GetCurrentSlot(cfg.genesisCfg.GenesisTime, cfg.beaconCfg.SecondsPerSlot)
@@ -561,7 +565,7 @@ func ConsensusClStages(ctx context.Context,
 										errCh <- err
 										return
 									}
-									if _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+									if _, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
 										errCh <- err
 										return
 									}
@@ -697,6 +701,7 @@ func ConsensusClStages(ctx context.Context,
 						logger.Debug("Caplin is sending forkchoice")
 						// Run forkchoice
 						if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
+							ctx,
 							cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
 							cfg.forkChoice.GetEth1Hash(headRoot),
 						); err != nil {

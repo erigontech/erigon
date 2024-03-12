@@ -1215,6 +1215,17 @@ func ReadHeaderByNumber(db kv.Getter, number uint64) *types.Header {
 	return ReadHeader(db, hash, number)
 }
 
+func ReadFirstNonGenesisHeaderNumber(tx kv.Tx) (uint64, bool, error) {
+	v, err := rawdbv3.SecondKey(tx, kv.Headers)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(v) == 0 {
+		return 0, false, nil
+	}
+	return binary.BigEndian.Uint64(v), true, nil
+}
+
 func ReadHeaderByHash(db kv.Getter, hash common.Hash) (*types.Header, error) {
 	number := ReadHeaderNumber(db, hash)
 	if number == nil {

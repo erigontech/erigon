@@ -5,7 +5,7 @@ import "time"
 const missingBlockNumExpiry = time.Hour
 
 type peerSyncProgress struct {
-	peerId               PeerId
+	peerId               *PeerId
 	minMissingBlockNum   uint64
 	minMissingBlockNumTs time.Time
 }

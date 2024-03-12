@@ -117,13 +117,6 @@ func (tx LegacyTx) GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int {
 	}
 }
 
-func (tx LegacyTx) Cost() *uint256.Int {
-	total := new(uint256.Int).SetUint64(tx.Gas)
-	total.Mul(total, tx.GasPrice)
-	total.Add(total, tx.Value)
-	return total
-}
-
 func (tx LegacyTx) GetAccessList() types2.AccessList {
 	return types2.AccessList{}
 }
@@ -169,13 +162,11 @@ func NewContractCreation(nonce uint64, amount *uint256.Int, gasLimit uint64, gas
 func (tx LegacyTx) copy() *LegacyTx {
 	cpy := &LegacyTx{
 		CommonTx: CommonTx{
-			TransactionMisc: TransactionMisc{
-				time: tx.time,
-			},
-			Nonce: tx.Nonce,
-			To:    tx.To, // TODO: copy pointed-to address
-			Data:  libcommon.CopyBytes(tx.Data),
-			Gas:   tx.Gas,
+			TransactionMisc: TransactionMisc{},
+			Nonce:           tx.Nonce,
+			To:              tx.To, // TODO: copy pointed-to address
+			Data:            libcommon.CopyBytes(tx.Data),
+			Gas:             tx.Gas,
 			// These are initialized below.
 			Value: new(uint256.Int),
 		},
