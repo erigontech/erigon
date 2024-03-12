@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -25,9 +26,9 @@ func randDeposit(rnd *rand.Rand) *Deposit {
 	d := &Deposit{
 		Pubkey:                [pLen]byte(randBytes(rnd, pLen)),
 		WithdrawalCredentials: [wLen]byte(randBytes(rnd, wLen)),
-		Amount:                rand.Uint64(),
+		Amount:                rnd.Uint64(),
 		Signature:             [sLen]byte(randBytes(rnd, sLen)),
-		Index:                 rand.Uint64(),
+		Index:                 rnd.Uint64(),
 	}
 
 	return d
@@ -83,6 +84,7 @@ func TestDepositEncodeDecodeRLP(t *testing.T) {
 		if enc.Index != dec.Index {
 			t.Errorf("deposit decode: not equal Indexes: expected: %v, got: %v", enc.Index, dec.Index)
 		}
+		fmt.Println("PASS", i)
 	}
 
 	for i := 0; i < RUNS; i++ {
@@ -120,6 +122,6 @@ func TestDepositEncodeDecodeRLP(t *testing.T) {
 		if enc.Index != dec.Index {
 			t.Errorf("deposit decode: not equal Indexes: expected: %v, got: %v", enc.Index, dec.Index)
 		}
+		fmt.Println("PASS", i)
 	}
-
 }

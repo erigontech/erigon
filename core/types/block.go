@@ -1198,18 +1198,18 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	// decode Deposits
 	if _, err = s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
-			bfs.Deposits = nil
+			bb.Deposits = nil
 			return s.ListEnd()
 		}
 		return fmt.Errorf("read Deposits: %w", err)
 	}
-	bfs.Deposits = []*Deposit{}
+	bb.Deposits = []*Deposit{}
 	for err == nil {
 		var deposit Deposit
 		if err = deposit.DecodeRLP(s); err != nil {
 			break
 		}
-		bfs.Deposits = append(bfs.Deposits, &deposit)
+		bb.Deposits = append(bb.Deposits, &deposit)
 	}
 	if !errors.Is(err, rlp.EOL) {
 		return err
