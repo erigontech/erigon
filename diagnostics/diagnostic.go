@@ -523,6 +523,9 @@ func (d *DiagnosticClient) runBlockMetricsListener() {
 }
 
 func (d *DiagnosticClient) BlockMetrics() diaglib.BlockMetrics {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	return d.blockMetrics
 }
 
