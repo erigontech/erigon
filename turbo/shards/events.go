@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type RpcEventType uint64
@@ -115,6 +116,7 @@ func (e *Events) OnNewSnapshot() {
 func (e *Events) OnNewHeader(newHeadersRlp [][]byte) {
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	log.Warn("[dbg] OnNewHeader", "subs", len(e.newSnapshotSubscription), "newHeadersRlp", len(newHeadersRlp))
 	for _, ch := range e.headerSubscriptions {
 		common.PrioritizedSend(ch, newHeadersRlp)
 	}
