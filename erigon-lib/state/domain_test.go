@@ -2301,7 +2301,6 @@ func TestShortenedKeyEncodeDecode(t *testing.T) {
 }
 
 func TestDomainContext_findShortenedKey(t *testing.T) {
-
 	db, d := testDbAndDomain(t, log.New())
 
 	tx, err := db.BeginRw(context.Background())
@@ -2314,4 +2313,72 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 	writer := dc.NewWriter()
 	defer writer.close()
 
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(t, err)
+
+	// aggregate
+	collateAndMerge(t, db, tx, d, totalTx) // expected to left 2 latest steps in db
+
+	require.NoError(t, tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	dc.Close()
+
+	dc = d.MakeContext()
+
+	findFile := func(start, end uint64) *filesItem {
+		var foundFile *filesItem
+		dc.d.files.Walk(func(items []*filesItem) bool {
+			for _, item := range items {
+				if item.startTxNum == start && item.endTxNum == end {
+					foundFile = item
+					return false
+				}
+			}
+			return true
+		})
+		return foundFile
+	}
+
+	var ki int
+	for key, updates := range data {
+
+		v, found, st, en, err := dc.getFromFiles([]byte(key))
+		require.True(t, found)
+		require.NoError(t, err)
+		for i := len(updates) - 1; i >= 0; i-- {
+			if st <= updates[i].txNum && updates[i].txNum < en {
+				require.EqualValues(t, updates[i].value, v)
+				break
+			}
+		}
+
+		lastFile := findFile(st, en)
+		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
+
+		shortenedKey, found := dc.findShortenedKey([]byte(key), lastFile.startTxNum, lastFile.endTxNum, dc.d.indexList, lastFile)
+		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())
+		require.NotNil(t, shortenedKey)
+		ki++
+	}
 }

@@ -1233,9 +1233,9 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 
 	ac.a.logger.Info(fmt.Sprintf("[snapshots] merge state %s", r.String()))
 
-	var valReplaceWg *sync.WaitGroup
+	var accStorageMerged *sync.WaitGroup
 	if ac.a.commitmentValuesTransform {
-		valReplaceWg = new(sync.WaitGroup)
+		accStorageMerged = new(sync.WaitGroup)
 	}
 
 	for id := range ac.d {
@@ -1243,17 +1243,17 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 		if r.d[id].any() {
 			kid := kv.Domain(id)
 			if kid == kv.AccountsDomain || kid == kv.StorageDomain {
-				valReplaceWg.Add(1)
+				accStorageMerged.Add(1)
 			}
 
 			g.Go(func() (err error) {
 				var vt valueTransformer
 				if ac.a.commitmentValuesTransform && kid == kv.CommitmentDomain {
-					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = true
-					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = true
-					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = true
-
-					valReplaceWg.Wait()
+					//ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = true
+					//ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = true
+					//ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = true
+					//
+					accStorageMerged.Wait()
 
 					vt = ac.d[kv.CommitmentDomain].commitmentValTransform(
 						files.d[kv.AccountsDomain], mf.d[kv.AccountsDomain], ac.d[kv.AccountsDomain].d.indexList,
@@ -1264,13 +1264,13 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
 				if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
-					valReplaceWg.Done()
+					accStorageMerged.Done()
 				}
-				if ac.a.commitmentValuesTransform && err == nil {
-					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
-					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
-					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
-				}
+				//if ac.a.commitmentValuesTransform && err == nil {
+				//ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
+				//ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
+				//ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
+				//}
 				return err
 			})
 		}
@@ -1320,17 +1320,19 @@ func (ac *AggregatorV3Context) integrateMergedFiles(outs SelectedStaticFilesV3, 
 	defer ac.a.needSaveFilesListInDB.Store(true)
 	defer ac.a.recalcMaxTxNum()
 
-	if ac.a.commitmentValuesTransform && outs.d[kv.CommitmentDomain] != nil && in.d[kv.CommitmentDomain] == nil {
-		// todo: we already merged everything else, would be a waste to do it again so integrate what we can
-		code := ac.a.d[kv.CodeDomain]
-		if code != nil {
-			id := kv.CodeDomain
-			code.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
-		}
-	} else {
-		for id, d := range ac.a.d {
-			d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
-		}
+	ac.a.logger.Info("[snapshots] integrateMergedFiles", "in", fmt.Sprintf("%+v", in))
+
+	//if ac.a.commitmentValuesTransform && outs.d[kv.CommitmentDomain] != nil && in.d[kv.CommitmentDomain] == nil {
+	//	code := ac.a.d[kv.CodeDomain]
+	//	if code != nil {
+	//		id := kv.CodeDomain
+	//		code.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
+	//	}
+	//} else {
+	//}
+
+	for id, d := range ac.a.d {
+		d.integrateMergedFiles(outs.d[id], outs.dIdx[id], outs.dHist[id], in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	ac.a.logAddrs.integrateMergedFiles(outs.logAddrs, in.logAddrs)

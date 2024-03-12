@@ -338,7 +338,9 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
-func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, endTxNum uint64, idxList idxList, list ...*filesItem) (shortened []byte, found bool) {
+// idxList is a bit mask of indexes to use for lookups in lis of filesItem
+// Those files are not integrated in Domain files (just merged)
+func (dc *DomainContext) findShortenedKey(fullKey []byte, startTxNum uint64, endTxNum uint64, idxList idxList, list ...*filesItem) (shortened []byte, found bool) {
 	for _, item := range list {
 		if item == nil {
 			continue
@@ -346,7 +348,6 @@ func (dc *DomainContext) findKeyReplacement(fullKey []byte, startTxNum uint64, e
 		if item.startTxNum == startTxNum && item.endTxNum == endTxNum {
 			g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
 
-			//TODO: existence filter existence should be checked for domain which filesItem list is provided, not in commitmnet
 			if idxList&withExistence != 0 {
 				hi, _ := dc.hc.ic.hashKey(fullKey)
 				if !item.existence.ContainsHash(hi) {
@@ -414,16 +415,19 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 	}
 
 	offset := decodeU64(shortKey)
+	var item *filesItem
 
 	defer func() {
 		if r := recover(); r != nil {
 			dc.d.logger.Crit("lookupByShortenedKey panics",
+				"err", r,
+				"short", fmt.Sprintf("%x", shortKey),
 				"stepFrom", stepFrom, "stepTo", stepTo, "offset", offset,
-				"domain", dc.d.keysTable, "givenListSize", len(list), "roFilesCount", len(dc.files), "filesCount", dc.d.files.Len())
+				"domain", dc.d.keysTable, "givenListSize", len(list), "roFilesCount", len(dc.files), "filesCount", dc.d.files.Len(),
+				"fileItem", fmt.Sprintf("%+v", item))
 		}
 	}()
 
-	var item *filesItem
 	if len(list) > 0 {
 		// given list is not from given domain dc. It's from a different domain (account/storage)
 		for _, f := range list {
@@ -530,13 +534,15 @@ func (dc *DomainContext) commitmentValTransform(
 								"shortened", fmt.Sprintf("%x", key),
 								"merged", stoMerged,
 								"toMerge", storToMerge,
+								"size", len(valBuf),
+								"valBuf", fmt.Sprintf("%x", valBuf),
 								"toMergeCount", len(filesStorage))
 							//panic(fmt.Sprintf("lost storage full key %x", key))
 							return nil, fmt.Errorf("lookup lost storage full key %x", key)
 						}
 					}
 
-					shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListStorage, mergedStorage)
+					shortened, found := dc.findShortenedKey(buf, startTxNum, endTxNum, idxListStorage, mergedStorage)
 					if !found {
 						if len(buf) == length.Addr+length.Hash {
 							return nil, nil // if plain key is lost, we can save original fullkey
@@ -567,7 +573,7 @@ func (dc *DomainContext) commitmentValTransform(
 					}
 				}
 
-				shortened, found := dc.findKeyReplacement(buf, startTxNum, endTxNum, idxListAccount, mergedAccount)
+				shortened, found := dc.findShortenedKey(buf, startTxNum, endTxNum, idxListAccount, mergedAccount)
 				if !found {
 					if len(buf) == length.Addr {
 						return nil, nil // if plain key is lost, we can save original fullkey
