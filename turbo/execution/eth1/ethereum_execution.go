@@ -280,7 +280,7 @@ func (e *EthereumExecutionModule) Ready(context.Context, *emptypb.Empty) (*execu
 }
 
 func (e *EthereumExecutionModule) HasBlock(ctx context.Context, in *execution.GetSegmentRequest) (*execution.HasBlockResponse, error) {
-	tx, err := e.db.BeginRw(ctx)
+	tx, err := e.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
