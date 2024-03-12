@@ -29,7 +29,7 @@ const (
 	ForkID5Dragonfruit = 5
 	ForkID6IncaBerry   = 6
 	ForkID7Etrog       = 7
-	ForkID8            = 8
+	ForkID88Elderberry = 8
 )
 
 // Config is the core config which determines the blockchain settings.
@@ -88,7 +88,7 @@ type Config struct {
 	ForkID5DragonfruitBlock *big.Int `json:"forkID5DragonfruitBlock,omitempty"`
 	ForkID6IncaBerryBlock   *big.Int `json:"forkID6IncaBerryBlock,omitempty"`
 	ForkID7EtrogBlock       *big.Int `json:"forkID7EtrogBlock,omitempty"`
-	ForkID8Block            *big.Int `json:"forkID8EtrogBlock,omitempty"`
+	ForkID88ElderberryBlock *big.Int `json:"forkID88ElderberryBlock,omitempty"`
 }
 
 func (c *Config) String() string {
@@ -235,8 +235,8 @@ func (c *Config) IsForkID7Etrog(num uint64) bool {
 	return isForked(c.ForkID7EtrogBlock, num)
 }
 
-func (c *Config) IsForkID8(num uint64) bool {
-	return isForked(c.ForkID8Block, num)
+func (c *Config) IsForkID8Elderberry(num uint64) bool {
+	return isForked(c.ForkID88ElderberryBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -408,12 +408,12 @@ func newCompatError(what string, storedblock, newblock *big.Int) *chain.ConfigCo
 // Rules is a one time interface meaning that it shouldn't be used in between transition
 // phases.
 type Rules struct {
-	ChainID                                                                        *big.Int
-	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                              bool
-	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul                        bool
-	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague                             bool
-	IsEip1559FeeCollector, IsAura                                                  bool
-	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8 bool
+	ChainID                                                                                  *big.Int
+	IsHomestead, IsTangerineWhistle, IsSpuriousDragon                                        bool
+	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul                                  bool
+	IsBerlin, IsLondon, IsShanghai, IsCancun, IsPrague                                       bool
+	IsEip1559FeeCollector, IsAura                                                            bool
+	IsForkID4, IsForkID5Dragonfruit, IsForkID6IncaBerry, IsForkID7Etrog, IsForkID8Elderberry bool
 }
 
 // Rules ensures c's ChainID is not nil and returns a new Rules instance
@@ -443,7 +443,7 @@ func (c *Config) Rules(num uint64, time uint64) *Rules {
 		IsForkID5Dragonfruit:  c.IsForkID5Dragonfruit(num),
 		IsForkID6IncaBerry:    c.IsForkID6IncaBerry(num),
 		IsForkID7Etrog:        c.IsForkID7Etrog(num),
-		IsForkID8:             c.IsForkID8(num),
+		IsForkID8Elderberry:   c.IsForkID8Elderberry(num),
 	}
 }
 

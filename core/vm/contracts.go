@@ -111,13 +111,13 @@ var PrecompiledContractsBLS = map[libcommon.Address]PrecompiledContract{
 }
 
 var (
-	PrecompiledAddressesBerlin      []libcommon.Address
-	PrecompiledAddressesIstanbul    []libcommon.Address
-	PrecompiledAddressesByzantium   []libcommon.Address
-	PrecompiledAddressesHomestead   []libcommon.Address
-	PrecompiledAddressesEtrog       []libcommon.Address
-	PrecompiledAddressesDragonfruit []libcommon.Address
-	PrecompiledAddressesForkId8     []libcommon.Address
+	PrecompiledAddressesBerlin             []libcommon.Address
+	PrecompiledAddressesIstanbul           []libcommon.Address
+	PrecompiledAddressesByzantium          []libcommon.Address
+	PrecompiledAddressesHomestead          []libcommon.Address
+	PrecompiledAddressesEtrog              []libcommon.Address
+	PrecompiledAddressesDragonfruit        []libcommon.Address
+	PrecompiledAddressesForkID88Elderberry []libcommon.Address
 )
 
 func init() {
@@ -139,16 +139,16 @@ func init() {
 	for k := range PrecompiledContractForkID7Etrog {
 		PrecompiledAddressesEtrog = append(PrecompiledAddressesEtrog, k)
 	}
-	for k := range PrecompiledContractsForkID8 {
-		PrecompiledAddressesForkId8 = append(PrecompiledAddressesForkId8, k)
+	for k := range PrecompiledContractsForkID88Elderberry {
+		PrecompiledAddressesForkID88Elderberry = append(PrecompiledAddressesForkID88Elderberry, k)
 	}
 }
 
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []libcommon.Address {
 	switch {
-	case rules.IsForkID8:
-		return PrecompiledAddressesForkId8
+	case rules.IsForkID8Elderberry:
+		return PrecompiledAddressesForkID88Elderberry
 	case rules.IsForkID7Etrog:
 		return PrecompiledAddressesEtrog
 	case rules.IsForkID5Dragonfruit:

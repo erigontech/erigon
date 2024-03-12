@@ -22,7 +22,7 @@ func NewZkConfig(config Config, counterCollector *CounterCollector) ZkConfig {
 func getJumpTable(cr *chain.Rules) *JumpTable {
 	var jt *JumpTable
 	switch {
-	case cr.IsForkID5Dragonfruit, cr.IsForkID6IncaBerry, cr.IsForkID7Etrog, cr.IsForkID8:
+	case cr.IsForkID5Dragonfruit, cr.IsForkID6IncaBerry, cr.IsForkID7Etrog, cr.IsForkID8Elderberry:
 		jt = &forkID5DragonfruitInstructionSet
 	case cr.IsBerlin:
 		jt = &forkID4InstructionSet

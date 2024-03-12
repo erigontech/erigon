@@ -543,7 +543,7 @@ func updateZkEVMBlockCfg(cfg *ExecuteBlockCfg, hermezDb *hermez_db.HermezDb, log
 	if err := update(chain.ForkID7Etrog, &cfg.chainConfig.ForkID7EtrogBlock); err != nil {
 		return err
 	}
-	if err := update(chain.ForkID8, &cfg.chainConfig.ForkID8Block); err != nil {
+	if err := update(chain.ForkID88Elderberry, &cfg.chainConfig.ForkID88ElderberryBlock); err != nil {
 		return err
 	}
 	return nil

@@ -63,7 +63,7 @@ func ExecuteBlockEphemerallyZk(
 	blockGasLimit := block.GasLimit()
 
 	//[hack] - on forkid7 this gas limit was used for execution but rpc is now returning forkid8 gas limit
-	if !chainConfig.IsForkID8(block.NumberU64()) {
+	if !chainConfig.IsForkID8Elderberry(block.NumberU64()) {
 		blockGasLimit = 18446744073709551615
 	}
 
@@ -202,19 +202,21 @@ func ExecuteBlockEphemerallyZk(
 			return nil, err
 		}
 
-		// the stateroot in the transactions that comes from the datastream
-		// is the one after smart contract writes so it can't be used
-		// but since pre forkid7 blocks have 1 tx only, we can use the block root
-		if chainConfig.IsForkID7Etrog(blockNum) {
-			receipt.PostState = intermediateState.Bytes()
-		} else {
-			receipt.PostState = header.Root.Bytes()
-		}
+		// forkid8 tje poststate is empty
+		// forkid8 also fixed the bugs with logs and cumulative gas used
+		if !chainConfig.IsForkID8Elderberry(blockNum) {
+			// the stateroot in the transactions that comes from the datastream
+			// is the one after smart contract writes so it can't be used
+			// but since pre forkid7 blocks have 1 tx only, we can use the block root
+			if chainConfig.IsForkID7Etrog(blockNum) {
+				receipt.PostState = intermediateState.Bytes()
+			} else {
+				receipt.PostState = header.Root.Bytes()
+			}
 
-		//[hack] log0 pre forkid8 are not included in the rpc logs
-		// also pre forkid8 comulative gas used is same as gas used
-		var fixedLogs types.Logs
-		if !chainConfig.IsForkID8(blockNum) {
+			//[hack] log0 pre forkid8 are not included in the rpc logs
+			// also pre forkid8 comulative gas used is same as gas used
+			var fixedLogs types.Logs
 			for _, l := range receipt.Logs {
 				if len(l.Topics) == 0 && len(l.Data) == 0 {
 					continue
