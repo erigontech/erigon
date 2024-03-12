@@ -382,7 +382,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 			storagePlainKey, found := sd.aggCtx.d[kv.StorageDomain].lookupByShortenedKey(key, fStartTxNum, fEndTxNum, nil)
 			if !found {
 				s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
-				oft := decodeU64(key)
+				oft := decodeShorterKey(key)
 				sd.logger.Crit("replace back lost storage full key", "shortened", fmt.Sprintf("%x", key),
 					"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))
 				return nil, fmt.Errorf("replace back lost storage full key: %x", key)
@@ -396,7 +396,7 @@ func (sd *SharedDomains) replaceShortenedKeysInBranch(prefix []byte, branch comm
 
 		apkBuf, found := sd.aggCtx.d[kv.AccountsDomain].lookupByShortenedKey(key, fStartTxNum, fEndTxNum, nil)
 		if !found {
-			oft := decodeU64(key)
+			oft := decodeShorterKey(key)
 			s0, s1 := fStartTxNum/sd.aggCtx.a.StepSize(), fEndTxNum/sd.aggCtx.a.StepSize()
 			sd.logger.Crit("replace back lost account full key", "shortened", fmt.Sprintf("%x", key),
 				"decoded", fmt.Sprintf("step %d-%d; offt %d", s0, s1, oft))

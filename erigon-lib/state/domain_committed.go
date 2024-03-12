@@ -283,12 +283,22 @@ func encodeU64(i uint64, to []byte) (int, []byte) {
 	}
 }
 
+func decodeShorterKey(from []byte) uint64 {
+	//return decodeU64(from)
+	of, n := binary.Uvarint(from)
+	if n == 0 {
+		panic(fmt.Sprintf("shorter key %x decode failed", from))
+	}
+	return of
+}
+
 func encodeShorterKey(buf []byte, offset uint64) []byte {
 	if len(buf) == 0 {
 		buf = make([]byte, 0, 8)
 	}
-	_, buf = encodeU64(offset, buf)
-	return buf
+	return binary.AppendUvarint(buf, offset)
+	//_, buf = encodeU64(offset, buf)
+	//return buf
 }
 
 func encodeShortenedKey(buf []byte, stepFrom uint64, stepTo uint64, offset uint64) []byte {
@@ -355,13 +365,12 @@ func (dc *DomainContext) findShortenedKey(fullKey []byte, startTxNum uint64, end
 				}
 			}
 
-			var offset uint64
 			if idxList&withHashMap != 0 {
 				reader := recsplit.NewIndexReader(item.index)
 				defer reader.Close()
 
-				var ok bool
-				if offset, ok = reader.Lookup(fullKey); !ok {
+				offset, ok := reader.Lookup(fullKey)
+				if !ok {
 					return nil, false
 				}
 
@@ -379,6 +388,7 @@ func (dc *DomainContext) findShortenedKey(fullKey []byte, startTxNum uint64, end
 
 					return nil, false
 				}
+				return encodeShorterKey(nil, offset), true
 			}
 			if idxList&withBTree != 0 {
 				cur, err := item.bindex.Seek(g, fullKey)
@@ -387,18 +397,18 @@ func (dc *DomainContext) findShortenedKey(fullKey []byte, startTxNum uint64, end
 						"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
 				}
 
-				if cur == nil {
+				if cur == nil || !bytes.Equal(cur.Key(), fullKey) {
 					return nil, false
 				}
-				if !bytes.Equal(cur.Key(), fullKey) {
-					return nil, false
-				}
-				offset = cur.offsetInFile()
-			}
 
-			//stepFrom, stepTo := item.startTxNum/dc.d.aggregationStep, item.endTxNum/dc.d.aggregationStep
-			//return encodeShortenedKey(nil, stepFrom, stepTo, offset), true
-			return encodeShorterKey(nil, offset), true
+				offset := cur.offsetInFile()
+				if uint64(g.Size()) <= offset {
+					dc.d.logger.Warn("commitment branch key replacement seek gone too far",
+						"key", fmt.Sprintf("%x", fullKey), "offset", offset, "size", g.Size(), "file", item.decompressor.FileName())
+					return nil, false
+				}
+				return encodeShorterKey(nil, offset), true
+			}
 		}
 	}
 	return nil, false
@@ -414,7 +424,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 		return nil, false
 	}
 
-	offset := decodeU64(shortKey)
+	offset := decodeShorterKey(shortKey)
 	var item *filesItem
 
 	defer func() {
