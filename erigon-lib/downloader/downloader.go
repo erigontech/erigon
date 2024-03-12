@@ -1678,27 +1678,8 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			peers[peer.PeerID] = struct{}{}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
-		stats.BytesTotal += uint64(tLen)
-
-		progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-
 		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
 		rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
-		// more detailed statistic: download rate of each peer (for each file)
-		if !torrentComplete && progress != 0 {
-			d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-			d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
-			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
-		}
-
-		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-			Name:            torrentName,
-			TotalBytes:      uint64(tLen),
-			DownloadedBytes: uint64(bytesCompleted),
-			Webseeds:        webseeds,
-			Peers:           peers,
-		})
 
 		if !torrentComplete {
 			if info, err := d.torrentInfo(torrentName); err == nil {
@@ -1737,6 +1718,21 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				zeroProgress = append(zeroProgress, torrentName)
 			}
 		}
+
+		// more detailed statistic: download rate of each peer (for each file)
+		if !torrentComplete && progress != 0 {
+			d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+			d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
+			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
+		}
+
+		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+			Name:            torrentName,
+			TotalBytes:      uint64(tLen),
+			DownloadedBytes: uint64(bytesCompleted),
+			Webseeds:        webseeds,
+			Peers:           peers,
+		})
 
 		stats.Completed = stats.Completed && torrentComplete
 	}
@@ -1810,7 +1806,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = false
 	}
 
-	d.logger.Debug("[snapshots] info", "len", len(torrents), "webTransfers", webTransfers, "torrent", torrentInfo, "db", dbInfo, "t-complete", tComplete, "db-complete", dbComplete)
+	if !stats.Completed {
+		d.logger.Debug("[snapshots] info", "len", len(torrents), "webTransfers", webTransfers, "torrent", torrentInfo, "db", dbInfo, "t-complete", tComplete, "db-complete", dbComplete)
+	}
 
 	if lastMetadataReady != stats.MetadataReady {
 		now := time.Now()
