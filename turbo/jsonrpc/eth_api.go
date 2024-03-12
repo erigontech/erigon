@@ -395,6 +395,9 @@ func NewRPCTransaction(tx types.Transaction, blockHash common.Hash, blockNumber 
 		To:    tx.GetTo(),
 		Value: (*hexutil.Big)(tx.GetValue().ToBig()),
 	}
+	if t, ok := tx.(*types.BlobTxWrapper); ok {
+		tx = &t.Tx
+	}
 	switch t := tx.(type) {
 	case *types.LegacyTx:
 		chainId = types.DeriveChainId(&t.V)

@@ -19,7 +19,7 @@ func (I *impl) VerifyTransition(s abstract.BeaconState, currentBlock *cltypes.Be
 		return fmt.Errorf("unable to generate state root: %v", err)
 	}
 	if expectedStateRoot != currentBlock.StateRoot {
-		return fmt.Errorf("expected state root differs from received state root")
+		return fmt.Errorf("expected state root differs from received state root, slot %d", currentBlock.Slot)
 	}
 	return nil
 }

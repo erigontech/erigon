@@ -57,7 +57,7 @@ func (e *EthereumExecutionModule) GetBody(ctx context.Context, req *execution.Ge
 	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return &execution.GetBodyResponse{Body: nil}, nil
 	}
 	if err != nil {
@@ -94,7 +94,7 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return &execution.GetHeaderResponse{Header: nil}, nil
 	}
 	td, err := rawdb.ReadTd(tx, blockHash, blockNumber)
@@ -103,9 +103,6 @@ func (e *EthereumExecutionModule) GetHeader(ctx context.Context, req *execution.
 	}
 	if td == nil {
 		return &execution.GetHeaderResponse{Header: nil}, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: %s", err)
 	}
 	header, err := e.getHeader(ctx, tx, blockHash, blockNumber)
 	if err != nil {
@@ -261,7 +258,13 @@ func (e *EthereumExecutionModule) CurrentHeader(ctx context.Context, _ *emptypb.
 	defer tx.Rollback()
 	hash := rawdb.ReadHeadHeaderHash(tx)
 	number := rawdb.ReadHeaderNumber(tx, hash)
-	h, _ := e.blockReader.Header(context.Background(), tx, hash, *number)
+	h, err := e.blockReader.Header(context.Background(), tx, hash, *number)
+	if err != nil {
+		return nil, err
+	}
+	if h == nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: no current header yet - probabably node not synced yet")
+	}
 	return &execution.GetHeaderResponse{
 		Header: eth1_utils.HeaderToHeaderRPC(h),
 	}, nil
@@ -279,7 +282,7 @@ func (e *EthereumExecutionModule) GetTD(ctx context.Context, req *execution.GetS
 	defer tx.Rollback()
 
 	blockHash, blockNumber, err := e.parseSegmentRequest(ctx, tx, req)
-	if err == errNotFound {
+	if errors.Is(err, errNotFound) {
 		return &execution.GetTDResponse{Td: nil}, nil
 	}
 	if err != nil {
