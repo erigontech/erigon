@@ -474,7 +474,7 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 	}()
 }
 
-func appendWithCap(list *list.List, cap int, items []time.Duration) {
+func appendWithCap(list *list.List, cap int, items []time.Duration) time.Duration {
 	for _, v := range items {
 		if list.Len() == cap {
 			list.Remove(list.Front())
@@ -482,6 +482,8 @@ func appendWithCap(list *list.List, cap int, items []time.Duration) {
 
 		list.PushBack(v)
 	}
+
+	return time.Duration(stats(list).Average)
 }
 
 func (d *DiagnosticClient) runBlockMetricsListener() {
@@ -501,19 +503,24 @@ func (d *DiagnosticClient) runBlockMetricsListener() {
 				d.mu.Lock()
 
 				if len(info.HeaderDelays) > 0 {
-					appendWithCap(d.blockMetrics.HeaderDelays, 200, info.HeaderDelays)
+					avg := appendWithCap(d.blockMetrics.HeaderDelays, 200, info.HeaderDelays)
+					averageHeaderDelayGauge.SetUint64(uint64(avg.Milliseconds()))
 				}
 				if len(info.BodyDelays) > 0 {
-					appendWithCap(d.blockMetrics.BodyDelays, 200, info.BodyDelays)
+					avg := appendWithCap(d.blockMetrics.BodyDelays, 200, info.BodyDelays)
+					averageBodyDelayGauge.SetUint64(uint64(avg.Milliseconds()))
 				}
 				if len(info.ExecutionStartDelays) > 0 {
-					appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionStartDelays)
+					avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionStartDelays)
+					averageExecutionStartDelayGauge.SetUint64(uint64(avg.Milliseconds()))
 				}
 				if len(info.ExecutionEndDelays) > 0 {
-					appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionEndDelays)
+					avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionEndDelays)
+					averageExectionEndDelayGauge.SetUint64(uint64(avg.Milliseconds()))
 				}
 				if len(info.ProductionDelays) > 0 {
-					appendWithCap(d.blockMetrics.ProductionDelays, 200, info.ProductionDelays)
+					avg := appendWithCap(d.blockMetrics.ProductionDelays, 200, info.ProductionDelays)
+					averageProductionDelayGauge.SetUint64(uint64(avg.Milliseconds()))
 				}
 
 				d.mu.Unlock()

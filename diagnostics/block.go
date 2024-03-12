@@ -5,13 +5,29 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/metrics"
+)
+
+type MilliSeconds time.Duration
+
+func (m MilliSeconds) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(m).Milliseconds())
+}
+
+var (
+	averageHeaderDelayGauge         = metrics.NewGauge(`average_delay{type="header"}`)
+	averageBodyDelayGauge           = metrics.NewGauge(`average_delay{type="body"}`)
+	averageExecutionStartDelayGauge = metrics.NewGauge(`average_delay{type="execution_start"}`)
+	averageExectionEndDelayGauge    = metrics.NewGauge(`average_delay{type="execution_end"}`)
+	averageProductionDelayGauge     = metrics.NewGauge(`average_delay{type="production"}`)
 )
 
 type BlockMetricsResponse struct {
-	Max     time.Duration   `json:"max"`
-	Min     time.Duration   `json:"min"`
-	Average time.Duration   `json:"average"`
-	Data    []time.Duration `json:"data"`
+	Max     MilliSeconds   `json:"max"`
+	Min     MilliSeconds   `json:"min"`
+	Average MilliSeconds   `json:"average"`
+	Data    []MilliSeconds `json:"data"`
 }
 
 func SetupBlockMetricsAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) {
@@ -52,31 +68,33 @@ func stats(list *list.List) BlockMetricsResponse {
 			Max:     0,
 			Min:     0,
 			Average: 0,
-			Data:    []time.Duration{},
+			Data:    []MilliSeconds{},
 		}
 	}
 
-	var slice []time.Duration
-	var maxValue, minValue, sum time.Duration
+	var slice []MilliSeconds
+	var maxValue, minValue, sum MilliSeconds
 	for e := list.Front(); e != nil; e = e.Next() {
 		v, ok := e.Value.(time.Duration)
 		if !ok {
 			continue
 		}
 
-		slice = append(slice, v)
-		sum += v
+		m := MilliSeconds(v)
 
-		if maxValue < v {
-			maxValue = v
+		slice = append(slice, m)
+		sum += m
+
+		if maxValue < m {
+			maxValue = m
 		}
 
-		if minValue == 0 || minValue > v {
-			minValue = v
+		if minValue == 0 || minValue > m {
+			minValue = m
 		}
 	}
 
-	average := sum / time.Duration(list.Len())
+	average := sum / MilliSeconds(list.Len())
 
 	return BlockMetricsResponse{
 		Max:     maxValue,
