@@ -158,11 +158,8 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			return nil
 		}
 		notifyTo = blockNum
-		notifyToHash, err = blockReader.CanonicalHash(ctx, tx, notifyTo)
-		if err != nil {
-			logger.Warn("[Finish] failed checking if header is cannonical")
-		}
-		headerRLP := rawdb.ReadHeaderRLP(tx, libcommon.BytesToHash(hash), notifyTo)
+		notifyToHash = libcommon.BytesToHash(hash)
+		headerRLP := rawdb.ReadHeaderRLP(tx, notifyToHash, notifyTo)
 		if headerRLP != nil {
 			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
 		}
