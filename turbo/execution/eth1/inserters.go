@@ -62,6 +62,8 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 			return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, header.Number.Uint64()-1, err)
 		}
 
+		// write metric here
+
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty)
 		if err := rawdb.WriteHeader(tx, header); err != nil {

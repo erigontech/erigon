@@ -161,29 +161,29 @@ type CPUInfo struct {
 }
 
 type BlockMetrics struct {
-	Header         *list.List
-	Bodies         *list.List
-	ExecutionStart *list.List
-	ExecutionEnd   *list.List
-	Production     *list.List
+	HeaderDelays         *list.List
+	BodyDelays           *list.List
+	ExecutionStartDelays *list.List
+	ExecutionEndDelays   *list.List
+	ProductionDelays     *list.List
 }
 
 func NewBlockMetrics() BlockMetrics {
 	return BlockMetrics{
-		Header:         list.New(),
-		Bodies:         list.New(),
-		ExecutionStart: list.New(),
-		ExecutionEnd:   list.New(),
-		Production:     list.New(),
+		HeaderDelays:         list.New(),
+		BodyDelays:           list.New(),
+		ExecutionStartDelays: list.New(),
+		ExecutionEndDelays:   list.New(),
+		ProductionDelays:     list.New(),
 	}
 }
 
 type AppendBlockMetrics struct {
-	Header         []time.Duration
-	Bodies         []time.Duration
-	ExecutionStart []time.Duration
-	ExecutionEnd   []time.Duration
-	Production     []time.Duration
+	HeaderDelays         []time.Duration
+	BodyDelays           []time.Duration
+	ExecutionStartDelays []time.Duration
+	ExecutionEndDelays   []time.Duration
+	ProductionDelays     []time.Duration
 }
 
 func (ti AppendBlockMetrics) Type() Type {

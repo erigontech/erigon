@@ -475,11 +475,11 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 }
 
 func appendWithCap(list *list.List, cap int, items []time.Duration) {
-	if list.Len() == cap {
-		list.Remove(list.Front())
-	}
-
 	for _, v := range items {
+		if list.Len() == cap {
+			list.Remove(list.Front())
+		}
+
 		list.PushBack(v)
 	}
 }
@@ -499,24 +499,23 @@ func (d *DiagnosticClient) runBlockMetricsListener() {
 				return
 			case info := <-ch:
 				d.mu.Lock()
+				defer d.mu.Unlock()
 
-				if info.Header != nil {
-					appendWithCap(d.blockMetrics.Header, 200, info.Header)
+				if len(info.HeaderDelays) > 0 {
+					appendWithCap(d.blockMetrics.HeaderDelays, 200, info.HeaderDelays)
 				}
-				if info.Bodies != nil {
-					appendWithCap(d.blockMetrics.Bodies, 200, info.Bodies)
+				if len(info.BodyDelays) > 0 {
+					appendWithCap(d.blockMetrics.BodyDelays, 200, info.BodyDelays)
 				}
-				if info.ExecutionStart != nil {
-					appendWithCap(d.blockMetrics.ExecutionStart, 200, info.ExecutionStart)
+				if len(info.ExecutionStartDelays) > 0 {
+					appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionStartDelays)
 				}
-				if info.ExecutionEnd != nil {
-					appendWithCap(d.blockMetrics.ExecutionStart, 200, info.ExecutionEnd)
+				if len(info.ExecutionEndDelays) > 0 {
+					appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionEndDelays)
 				}
-				if info.Production != nil {
-					appendWithCap(d.blockMetrics.Production, 200, info.Production)
+				if len(info.ProductionDelays) > 0 {
+					appendWithCap(d.blockMetrics.ProductionDelays, 200, info.ProductionDelays)
 				}
-
-				d.mu.Unlock()
 			}
 		}
 

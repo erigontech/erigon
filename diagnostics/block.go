@@ -18,35 +18,44 @@ func SetupBlockMetricsAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) 
 	metricsMux.HandleFunc("/block-header", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writeHeader(w, diag)
+		writeHeaderDelays(w, diag)
 	})
 
 	metricsMux.HandleFunc("/block-body", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writeBody(w, diag)
+		writeBodyDelays(w, diag)
 	})
 
 	metricsMux.HandleFunc("/block-execution-start", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writeExecutionStart(w, diag)
+		writeExecutionStartDelays(w, diag)
 	})
 
 	metricsMux.HandleFunc("/block-execution-end", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writeExecutionEnd(w, diag)
+		writeExecutionEndDelays(w, diag)
 	})
 
 	metricsMux.HandleFunc("/block-producer", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
-		writeProducer(w, diag)
+		writeProducerDelays(w, diag)
 	})
 }
 
 func stats(list *list.List) BlockMetricsResponse {
+	if list.Len() == 0 {
+		return BlockMetricsResponse{
+			Max:     0,
+			Min:     0,
+			Average: 0,
+			Data:    []time.Duration{},
+		}
+	}
+
 	var slice []time.Duration
 	var maxValue, minValue, sum time.Duration
 	for e := list.Front(); e != nil; e = e.Next() {
@@ -77,8 +86,8 @@ func stats(list *list.List) BlockMetricsResponse {
 	}
 }
 
-func writeHeader(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().Header
+func writeHeaderDelays(w http.ResponseWriter, diag *DiagnosticClient) {
+	raw := diag.BlockMetrics().HeaderDelays
 	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
@@ -86,8 +95,8 @@ func writeHeader(w http.ResponseWriter, diag *DiagnosticClient) {
 	}
 }
 
-func writeBody(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().Header
+func writeBodyDelays(w http.ResponseWriter, diag *DiagnosticClient) {
+	raw := diag.BlockMetrics().BodyDelays
 	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
@@ -95,8 +104,8 @@ func writeBody(w http.ResponseWriter, diag *DiagnosticClient) {
 	}
 }
 
-func writeExecutionStart(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().Header
+func writeExecutionStartDelays(w http.ResponseWriter, diag *DiagnosticClient) {
+	raw := diag.BlockMetrics().ExecutionStartDelays
 	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
@@ -104,8 +113,8 @@ func writeExecutionStart(w http.ResponseWriter, diag *DiagnosticClient) {
 	}
 }
 
-func writeExecutionEnd(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().Header
+func writeExecutionEndDelays(w http.ResponseWriter, diag *DiagnosticClient) {
+	raw := diag.BlockMetrics().ExecutionEndDelays
 	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
@@ -113,8 +122,8 @@ func writeExecutionEnd(w http.ResponseWriter, diag *DiagnosticClient) {
 	}
 }
 
-func writeProducer(w http.ResponseWriter, diag *DiagnosticClient) {
-	raw := diag.BlockMetrics().Header
+func writeProducerDelays(w http.ResponseWriter, diag *DiagnosticClient) {
+	raw := diag.BlockMetrics().ProductionDelays
 	res := stats(raw)
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {

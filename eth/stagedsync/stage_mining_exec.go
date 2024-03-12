@@ -151,7 +151,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 
 			parent := rawdb.ReadHeaderByNumber(tx, executionAt)
 
-			if err = diagnostics.Send(diagnostics.AppendBlockMetrics{Production: []time.Duration{time.Since(time.Unix(int64(parent.Time), 0))}}); err != nil {
+			if err = diagnostics.Send(diagnostics.AppendBlockMetrics{ProductionDelays: []time.Duration{time.Since(time.Unix(int64(parent.Time), 0))}}); err != nil {
 				logger.Error("Error sending metric", "err", err)
 			}
 		}
