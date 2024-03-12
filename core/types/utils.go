@@ -43,7 +43,7 @@ func withdrawalsPayloadSize(withdrawals []*Withdrawal) (withdrawalsLen int) {
 
 // expects either [][]byte or []Transactions, but not both
 func encodeTxns(byteTxns [][]byte, txns []Transaction, txsLen int, w io.Writer, b []byte) error {
-	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(txsLen, w, b); err != nil {
 		return err
 	}
 
@@ -66,7 +66,7 @@ func encodeTxns(byteTxns [][]byte, txns []Transaction, txsLen int, w io.Writer, 
 }
 
 func encodeUncles(uncles []*Header, unclesLen int, w io.Writer, b []byte) error {
-	if err := EncodeStructSizePrefix(unclesLen, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(unclesLen, w, b); err != nil {
 		return err
 	}
 	for _, uncle := range uncles {
@@ -78,7 +78,7 @@ func encodeUncles(uncles []*Header, unclesLen int, w io.Writer, b []byte) error 
 }
 
 func encodeWithdrawals(withdrawals []*Withdrawal, withdrawalsLen int, w io.Writer, b []byte) error {
-	if err := EncodeStructSizePrefix(withdrawalsLen, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(withdrawalsLen, w, b); err != nil {
 		return err
 	}
 	for _, withdrawal := range withdrawals {
