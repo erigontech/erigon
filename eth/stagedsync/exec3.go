@@ -961,7 +961,7 @@ Loop:
 		}
 	}
 
-	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.GetValueUint64())
+	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.GetValueUint64())
 
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
