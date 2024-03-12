@@ -642,7 +642,7 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  []*Withdrawal
-	Deposits     []*Deposit
+	deposits     []*Deposit
 	// caches
 	hash atomic.Value
 	size atomic.Value
@@ -697,11 +697,9 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
+	// size of Deposits
 	if rb.Deposits != nil {
-		for _, deposit := range rb.Deposits {
-			depositLen := deposit.EncodingSize()
-			depositLen += rlp2.ListPrefixLen(depositLen) + depositLen
-		}
+		depositsLen = depositsPayloadSize(rb.Deposits)
 		payloadSize += rlp2.ListPrefixLen(depositsLen) + depositsLen
 	}
 
@@ -747,13 +745,8 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 
 	// encode Deposits
 	if rb.Deposits != nil {
-		if err := EncodeStructSizePrefix(depositsLen, w, b[:]); err != nil {
+		if err := encodeDeposits(rb.Deposits, depositsLen, w, b[:]); err != nil {
 			return err
-		}
-		for _, deposit := range rb.Deposits {
-			if err := deposit.EncodeRLP(w); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -837,18 +830,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Deposits: %w", err)
 	}
 	rb.Deposits = []*Deposit{}
-	for err == nil {
-		var deposit Deposit
-		if err = deposit.DecodeRLP(s); err != nil {
-			break
-		}
-		rb.Deposits = append(rb.Deposits, &deposit)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Deposits
-	if err = s.ListEnd(); err != nil {
+	if err = decodeDeposits(s, &rb.Deposits); err != nil {
 		return err
 	}
 
@@ -880,10 +862,7 @@ func (bfs BodyForStorage) payloadSize() (payloadSize, unclesLen, withdrawalsLen,
 
 	// size for Deposits
 	if bfs.Deposits != nil {
-		for _, deposit := range bfs.Deposits {
-			depositLen := deposit.EncodingSize()
-			depositLen += rlp2.ListPrefixLen(depositLen) + depositLen
-		}
+		depositsLen = depositsPayloadSize(bfs.Deposits)
 		payloadSize += rlp2.ListPrefixLen(depositsLen) + depositsLen
 	}
 
@@ -933,13 +912,8 @@ func (bfs BodyForStorage) EncodeRLP(w io.Writer) error {
 
 	// encode Deposits
 	if bfs.Deposits != nil {
-		if err := EncodeStructSizePrefix(depositsLen, w, b[:]); err != nil {
+		if err := encodeDeposits(bfs.Deposits, depositsLen, w, b[:]); err != nil {
 			return err
-		}
-		for _, deposit := range bfs.Deposits {
-			if err := deposit.EncodeRLP(w); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -1018,21 +992,9 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Deposits: %w", err)
 	}
 	bfs.Deposits = []*Deposit{}
-	for err == nil {
-		var deposit Deposit
-		if err = deposit.DecodeRLP(s); err != nil {
-			break
-		}
-		bfs.Deposits = append(bfs.Deposits, &deposit)
-	}
-	if !errors.Is(err, rlp.EOL) {
+	if err = decodeDeposits(s, &bfs.Deposits); err != nil {
 		return err
 	}
-	// end of Deposits
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-
 	return s.ListEnd()
 }
 
@@ -1067,10 +1029,7 @@ func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen
 
 	// size for Deposits
 	if bb.Deposits != nil {
-		for _, deposit := range bb.Deposits {
-			depositLen := deposit.EncodingSize()
-			depositLen += rlp2.ListPrefixLen(depositLen) + depositLen
-		}
+		depositsLen = depositsPayloadSize(bb.Deposits)
 		payloadSize += rlp2.ListPrefixLen(depositsLen) + depositsLen
 	}
 
@@ -1116,13 +1075,8 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 
 	// encode Deposits
 	if bb.Deposits != nil {
-		if err := EncodeStructSizePrefix(depositsLen, w, b[:]); err != nil {
+		if err := encodeDeposits(bb.Deposits, depositsLen, w, b[:]); err != nil {
 			return err
-		}
-		for _, deposit := range bb.Deposits {
-			if err := deposit.EncodeRLP(w); err != nil {
-				return err
-			}
 		}
 	}
 
@@ -1204,18 +1158,7 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 		return fmt.Errorf("read Deposits: %w", err)
 	}
 	bb.Deposits = []*Deposit{}
-	for err == nil {
-		var deposit Deposit
-		if err = deposit.DecodeRLP(s); err != nil {
-			break
-		}
-		bb.Deposits = append(bb.Deposits, &deposit)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Deposits
-	if err = s.ListEnd(); err != nil {
+	if err = decodeDeposits(s, &bb.Deposits); err != nil {
 		return err
 	}
 
@@ -1409,10 +1352,23 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
+	// decode Deposits
+	if _, err = s.List(); err != nil {
+		if errors.Is(err, rlp.EOL) {
+			bb.deposits = nil
+			return s.ListEnd()
+		}
+		return fmt.Errorf("read Withdrawals: %w", err)
+	}
+	bb.deposits = []*Deposit{}
+	if err := decodeDeposits(s, &bb.deposits); err != nil {
+		return err
+	}
+
 	return s.ListEnd()
 }
 
-func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
+func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen, depositsLen int) {
 	// size of Header
 	headerLen := bb.header.EncodingSize()
 	payloadSize += rlp2.ListPrefixLen(headerLen) + headerLen
@@ -1440,17 +1396,23 @@ func (bb Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLe
 		payloadSize += rlp2.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
-	return payloadSize, txsLen, unclesLen, withdrawalsLen
+	// size of Deposits
+	if bb.deposits != nil {
+		depositsLen = depositsPayloadSize(bb.deposits)
+		payloadSize += rlp2.ListPrefixLen(depositsLen) + depositsLen
+	}
+
+	return payloadSize, txsLen, unclesLen, withdrawalsLen, depositsLen
 }
 
 func (bb Block) EncodingSize() int {
-	payloadSize, _, _, _ := bb.payloadSize()
+	payloadSize, _, _, _, _ := bb.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
 func (bb Block) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
+	payloadSize, txsLen, unclesLen, withdrawalsLen, depositsLen := bb.payloadSize()
 	var b [33]byte
 	// prefix
 	if err := EncodeStructSizePrefix(payloadSize, w, b[:]); err != nil {
@@ -1489,6 +1451,13 @@ func (bb Block) EncodeRLP(w io.Writer) error {
 			}
 		}
 	}
+	// encode Deposits
+	if bb.deposits != nil {
+		if err := encodeDeposits(bb.deposits, depositsLen, w, b[:]); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
