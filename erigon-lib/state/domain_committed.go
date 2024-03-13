@@ -607,7 +607,7 @@ func (dc *DomainContext) commitmentValTransformDomain(accounts, storage *DomainC
 					shortened, found := storage.findShortenedKeyEasier(buf, mergedStorage)
 					if !found {
 						if len(buf) == length.Addr+length.Hash {
-							return nil, nil // if plain key is lost, we can save original fullkey
+							return buf, nil // if plain key is lost, we can save original fullkey
 						}
 						// if shortened key lost, we can't continue
 						dc.d.logger.Crit("valTransform: replacement for full storage key was not found",
@@ -637,7 +637,7 @@ func (dc *DomainContext) commitmentValTransformDomain(accounts, storage *DomainC
 				shortened, found := accounts.findShortenedKeyEasier(buf, mergedAccount)
 				if !found {
 					if len(buf) == length.Addr {
-						return nil, nil // if plain key is lost, we can save original fullkey
+						return buf, nil // if plain key is lost, we can save original fullkey
 					}
 					dc.d.logger.Crit("valTransform: replacement for full account key was not found",
 						"step", fmt.Sprintf("%d-%d", keyFromTxNum/dc.d.aggregationStep, keyEndTxNum/dc.d.aggregationStep),
