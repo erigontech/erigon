@@ -2185,6 +2185,7 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		}
 
 		ts := ts
+		i := i
 		eg.Go(func() error {
 			_, _, err := addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
 			if err != nil {
