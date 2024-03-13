@@ -568,112 +568,7 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references
-
-func (dc *DomainContext) commitmentValTransform(
-	filesAccount []*filesItem, mergedAccount *filesItem, idxListAccount idxList,
-	filesStorage []*filesItem, mergedStorage *filesItem, idxListStorage idxList,
-	startTxNum, endTxNum uint64,
-
-) valueTransformer {
-
-	accsToMerge := ""
-	for _, f := range filesAccount {
-		accsToMerge += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
-	}
-	storToMerge := ""
-	for _, f := range filesStorage {
-		storToMerge += fmt.Sprintf("%d-%d;", f.startTxNum/dc.d.aggregationStep, f.endTxNum/dc.d.aggregationStep)
-	}
-
-	var accMerged, stoMerged string
-	if mergedAccount != nil {
-		accMerged = fmt.Sprintf("%d-%d", mergedAccount.startTxNum/dc.d.aggregationStep, mergedAccount.endTxNum/dc.d.aggregationStep)
-	}
-	if mergedStorage != nil {
-		stoMerged = fmt.Sprintf("%d-%d", mergedStorage.startTxNum/dc.d.aggregationStep, mergedStorage.endTxNum/dc.d.aggregationStep)
-	}
-
-	return func(valBuf []byte, keyFromTxNum, keyEndTxNum uint64) (transValBuf []byte, err error) {
-		if !dc.d.replaceKeysInValues || len(valBuf) == 0 {
-			return valBuf, nil
-		}
-
-		return commitment.BranchData(valBuf).
-			ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
-				var found bool
-				var buf []byte
-				if isStorage {
-					if len(key) == length.Addr+length.Hash {
-						// Non-optimised key originating from a database record
-						buf = append(buf[:0], key...)
-					} else {
-						// Optimised key referencing a state file record (file number and offset within the file)
-						buf, found = dc.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, filesStorage)
-						if !found {
-							dc.d.logger.Crit("valTransform: lost storage full key",
-								"shortened", fmt.Sprintf("%x", key),
-								"merged", stoMerged,
-								"toMerge", storToMerge,
-								"size", len(valBuf),
-								"valBuf", fmt.Sprintf("%x", valBuf),
-								"toMergeCount", len(filesStorage))
-							//panic(fmt.Sprintf("lost storage full key %x", key))
-							return nil, fmt.Errorf("lookup lost storage full key %x", key)
-						}
-					}
-
-					shortened, found := dc.findShortenedKey(buf, startTxNum, endTxNum, idxListStorage, mergedStorage)
-					if !found {
-						if len(buf) == length.Addr+length.Hash {
-							return nil, nil // if plain key is lost, we can save original fullkey
-						}
-						// if shortened key lost, we can't continue
-						dc.d.logger.Crit("valTransform: replacement for full storage key was not found",
-							"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
-							"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
-						//panic(fmt.Sprintf("vt: replacement not found for storage  %x", buf))
-
-						return nil, fmt.Errorf("replacement not found for storage  %x", buf)
-					}
-					return shortened, nil
-				}
-
-				if len(key) == length.Addr {
-					// Non-optimised key originating from a database record
-					buf = append(buf[:0], key...)
-				} else {
-					buf, found = dc.lookupByShortenedKey(key, keyFromTxNum, keyEndTxNum, filesAccount)
-					if !found {
-						dc.d.logger.Crit("lost account full key", "shortened", fmt.Sprintf("%x", key),
-							"merged", accMerged,
-							"toMerge", accsToMerge,
-							"toMergeCount", len(filesAccount))
-						//panic(fmt.Sprintf("vt: lost account full key: %x", key))
-						return nil, fmt.Errorf("lookup account full key: %x", key)
-					}
-				}
-
-				shortened, found := dc.findShortenedKey(buf, startTxNum, endTxNum, idxListAccount, mergedAccount)
-				if !found {
-					if len(buf) == length.Addr {
-						return nil, nil // if plain key is lost, we can save original fullkey
-					}
-					dc.d.logger.Crit("valTransform: replacement for full account key was not found",
-						"step", fmt.Sprintf("%d-%d", startTxNum/dc.d.aggregationStep, endTxNum/dc.d.aggregationStep),
-						"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
-					//panic(fmt.Sprintf("vt: replacement not found for account  %x", buf))
-					return nil, fmt.Errorf("replacement not found for account  %x", buf)
-				}
-				return shortened, nil
-			})
-	}
-}
-
-func (dc *DomainContext) commitmentValTransformDomain(
-	accounts, storage *DomainContext,
-	mergedAccount, mergedStorage *filesItem,
-
-) valueTransformer {
+func (dc *DomainContext) commitmentValTransformDomain(accounts, storage *DomainContext, mergedAccount, mergedStorage *filesItem) valueTransformer {
 
 	var accMerged, stoMerged string
 	if mergedAccount != nil {
@@ -719,7 +614,7 @@ func (dc *DomainContext) commitmentValTransformDomain(
 							"step", fmt.Sprintf("%d-%d", keyFromTxNum/dc.d.aggregationStep, keyEndTxNum/dc.d.aggregationStep),
 							"shortened", fmt.Sprintf("%x", shortened), "toReplace", fmt.Sprintf("%x", buf))
 
-						return nil, fmt.Errorf("replacement not found for storage  %x", buf)
+						return nil, fmt.Errorf("replacement not found for storage %x", buf)
 					}
 					return shortened, nil
 				}

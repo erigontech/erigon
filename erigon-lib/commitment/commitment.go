@@ -354,7 +354,15 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 			}
 			if newKey == nil {
 				newData = append(newData, branchData[pos-int(l)-n:pos]...)
+				if l != length.Addr+length.Hash {
+					fmt.Printf("COPY %x LEN %d\n", branchData[pos-int(l):pos], l)
+				}
 			} else {
+
+				if len(newKey) > 8 && len(newKey) != length.Addr {
+					fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
+				}
+
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)
@@ -379,8 +387,18 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				return nil, err
 			}
 			if newKey == nil {
-				newData = append(newData, branchData[pos-int(l)-n:pos]...)
+				newData = append(newData, branchData[pos-int(l)-n:pos]...) // -n to include length
+
+				if l != length.Addr+length.Hash {
+					fmt.Printf("COPY %x LEN %d\n", branchData[pos-int(l):pos], l)
+				}
+
 			} else {
+
+				if len(newKey) > 8 && len(newKey) != length.Addr+length.Hash {
+					fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
+				}
+
 				n = binary.PutUvarint(numBuf[:], uint64(len(newKey)))
 				newData = append(newData, numBuf[:n]...)
 				newData = append(newData, newKey...)

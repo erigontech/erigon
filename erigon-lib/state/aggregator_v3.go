@@ -1255,12 +1255,6 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 
 					accStorageMerged.Wait()
 
-					//vt = ac.d[kv.CommitmentDomain].commitmentValTransform(
-					//	files.d[kv.AccountsDomain], mf.d[kv.AccountsDomain], ac.d[kv.AccountsDomain].d.indexList,
-					//	files.d[kv.StorageDomain], mf.d[kv.StorageDomain], ac.d[kv.StorageDomain].d.indexList,
-					//	r.d[kv.AccountsDomain].valuesStartTxNum, r.d[kv.AccountsDomain].valuesEndTxNum,
-					//)
-
 					vt = ac.d[kv.CommitmentDomain].commitmentValTransformDomain(ac.d[kv.AccountsDomain], ac.d[kv.StorageDomain],
 						mf.d[kv.AccountsDomain], mf.d[kv.StorageDomain])
 				}
