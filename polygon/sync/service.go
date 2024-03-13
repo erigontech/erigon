@@ -40,7 +40,8 @@ func NewService(
 ) Service {
 	execution := NewExecutionClient(engine)
 	storage := NewStorage(execution, maxPeers)
-	verify := VerifyAccumulatedHeaders
+	headersVerifier := VerifyAccumulatedHeaders
+	blocksVerifier := VerifyBlocks
 	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
@@ -48,7 +49,8 @@ func NewService(
 		logger,
 		p2pService,
 		heimdallService,
-		verify,
+		headersVerifier,
+		blocksVerifier,
 		storage,
 	)
 	spansCache := NewSpansCache()
@@ -76,7 +78,8 @@ func NewService(
 	sync := NewSync(
 		storage,
 		execution,
-		verify,
+		headersVerifier,
+		blocksVerifier,
 		p2pService,
 		downloader,
 		ccBuilderFactory,

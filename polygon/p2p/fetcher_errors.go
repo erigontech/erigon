@@ -97,6 +97,12 @@ func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
 	}
 }
 
+func NewErrMissingBodies(headers []*types.Header) *ErrMissingBodies {
+	return &ErrMissingBodies{
+		headers: headers,
+	}
+}
+
 type ErrMissingBodies struct {
 	headers []*types.Header
 }

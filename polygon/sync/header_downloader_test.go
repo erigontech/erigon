@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -29,43 +30,56 @@ func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
-	headerVerifier := opts.getOrCreateDefaultHeaderVerifier()
-	headersWriter := NewMockHeadersWriter(ctrl)
+	headersVerifier := opts.getOrCreateDefaultHeadersVerifier()
+	blocksVerifier := opts.getOrCreateDefaultBodiesVerifier()
+	storage := NewMockStorage(ctrl)
 	headerDownloader := newHeaderDownloader(
 		logger,
 		p2pService,
 		heimdallService,
-		headerVerifier,
-		headersWriter,
+		headersVerifier,
+		blocksVerifier,
+		storage,
 		time.Millisecond,
 	)
 	return &headerDownloaderTest{
 		heimdall:         heimdallService,
 		p2pService:       p2pService,
 		headerDownloader: headerDownloader,
-		headersWriter:    headersWriter,
+		storage:          storage,
 	}
 }
 
 type headerDownloaderTestOpts struct {
-	headerVerifier AccumulatedHeadersVerifier
+	headersVerifier AccumulatedHeadersVerifier
+	blocksVerifier  BlocksVerifier
 }
 
-func (opts headerDownloaderTestOpts) getOrCreateDefaultHeaderVerifier() AccumulatedHeadersVerifier {
-	if opts.headerVerifier == nil {
+func (opts headerDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() AccumulatedHeadersVerifier {
+	if opts.headersVerifier == nil {
 		return func(_ heimdall.Waypoint, _ []*types.Header) error {
 			return nil
 		}
 	}
 
-	return opts.headerVerifier
+	return opts.headersVerifier
+}
+
+func (opts headerDownloaderTestOpts) getOrCreateDefaultBodiesVerifier() BlocksVerifier {
+	if opts.blocksVerifier == nil {
+		return func(_ []*types.Block) error {
+			return nil
+		}
+	}
+
+	return opts.blocksVerifier
 }
 
 type headerDownloaderTest struct {
 	heimdall         *heimdall.MockHeimdallNoStore
 	p2pService       *p2p.MockService
 	headerDownloader HeaderDownloader
-	headersWriter    *MockHeadersWriter
+	storage          *MockStorage
 }
 
 func (hdt headerDownloaderTest) fakePeers(count int) []*p2p.PeerId {
@@ -129,14 +143,41 @@ func (hdt headerDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	}
 }
 
-func (hdt headerDownloaderTest) defaultWriteHeadersMock(capture *[]*types.Header) func(context.Context, []*types.Header) error {
-	return func(ctx context.Context, headers []*types.Header) error {
-		*capture = append(*capture, headers...)
+type fetchBodiesMock func(context.Context, []*types.Header, *p2p.PeerId) ([]*types.Body, error)
+
+func (hdt headerDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
+	return func(ctx context.Context, headers []*types.Header, _ *p2p.PeerId) ([]*types.Body, error) {
+		bodies := make([]*types.Body, len(headers))
+		for i := range headers {
+			bodies[i] = &types.Body{
+				Transactions: []types.Transaction{
+					types.NewEIP1559Transaction(
+						*uint256.NewInt(1),
+						1,
+						common.BigToAddress(big.NewInt(123)),
+						uint256.NewInt(55),
+						0,
+						uint256.NewInt(666),
+						uint256.NewInt(777),
+						uint256.NewInt(888),
+						nil,
+					),
+				},
+			}
+		}
+
+		return bodies, nil
+	}
+}
+
+func (hdt headerDownloaderTest) defaultInsertBlocksMock(capture *[]*types.Block) func(context.Context, []*types.Block) error {
+	return func(ctx context.Context, blocks []*types.Block) error {
+		*capture = append(*capture, blocks...)
 		return nil
 	}
 }
 
-func TestHeaderDownloadUsingMilestones(t *testing.T) {
+func TestDownloadBlocksUsingMilestones(t *testing.T) {
 	test := newHeaderDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchMilestonesFromBlock(gomock.Any(), gomock.Any()).
@@ -150,24 +191,32 @@ func TestHeaderDownloadUsingMilestones(t *testing.T) {
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultFetchHeadersMock()).
 		Times(4)
-	var persistedHeaders []*types.Header
-	test.headersWriter.EXPECT().
-		PutHeaders(gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(4)
+	var blocks []*types.Block
+	test.storage.EXPECT().
+		InsertBlocks(gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
+		Times(1)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
 		Times(1)
 
 	lastHeader, err := test.headerDownloader.DownloadUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, persistedHeaders, 4)
-	// check headers are written in order
-	require.Equal(t, uint64(1), persistedHeaders[0].Number.Uint64())
-	require.Equal(t, uint64(2), persistedHeaders[1].Number.Uint64())
-	require.Equal(t, uint64(3), persistedHeaders[2].Number.Uint64())
-	require.Equal(t, uint64(4), persistedHeaders[3].Number.Uint64())
-	require.Equal(t, persistedHeaders[len(persistedHeaders)-1], lastHeader)
+	require.Len(t, blocks, 4)
+	// check blocks are written in order
+	require.Equal(t, uint64(1), blocks[0].Header().Number.Uint64())
+	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
+	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
+	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
+	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
 }
 
-func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
+func TestDownloadBlocksUsingCheckpoints(t *testing.T) {
 	test := newHeaderDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
@@ -181,32 +230,40 @@ func TestHeaderDownloadUsingCheckpoints(t *testing.T) {
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultFetchHeadersMock()).
 		Times(8)
-	var persistedHeaders []*types.Header
-	test.headersWriter.EXPECT().
-		PutHeaders(gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(8)
+	var blocks []*types.Block
+	test.storage.EXPECT().
+		InsertBlocks(gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
+		Times(4)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
 		Times(4)
 
 	lastHeader, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, persistedHeaders, 8)
-	// check headers are written in order
-	require.Equal(t, uint64(1), persistedHeaders[0].Number.Uint64())
-	require.Equal(t, uint64(2), persistedHeaders[1].Number.Uint64())
-	require.Equal(t, uint64(3), persistedHeaders[2].Number.Uint64())
-	require.Equal(t, uint64(4), persistedHeaders[3].Number.Uint64())
-	require.Equal(t, uint64(5), persistedHeaders[4].Number.Uint64())
-	require.Equal(t, uint64(6), persistedHeaders[5].Number.Uint64())
-	require.Equal(t, uint64(7), persistedHeaders[6].Number.Uint64())
-	require.Equal(t, uint64(8), persistedHeaders[7].Number.Uint64())
-	require.Equal(t, persistedHeaders[len(persistedHeaders)-1], lastHeader)
+	require.Len(t, blocks, 8)
+	// check blocks are written in order
+	require.Equal(t, uint64(1), blocks[0].Header().Number.Uint64())
+	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
+	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
+	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
+	require.Equal(t, uint64(5), blocks[4].Header().Number.Uint64())
+	require.Equal(t, uint64(6), blocks[5].Header().Number.Uint64())
+	require.Equal(t, uint64(7), blocks[6].Header().Number.Uint64())
+	require.Equal(t, uint64(8), blocks[7].Header().Number.Uint64())
+	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
 }
 
-func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.T) {
+func TestDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testing.T) {
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
-		headerVerifier: func(waypoint heimdall.Waypoint, headers []*types.Header) error {
+		headersVerifier: func(waypoint heimdall.Waypoint, headers []*types.Header) error {
 			if waypoint.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid checkpoint")
@@ -219,42 +276,59 @@ func TestHeaderDownloadWhenInvalidStateThenPenalizePeerAndReDownload(t *testing.
 		Return(test.fakeCheckpoints(6), nil).
 		Times(1)
 	test.p2pService.EXPECT().
-		ListPeersMayHaveBlockNum(gomock.Any()).
-		Return(test.fakePeers(3)).
-		Times(3)
-	test.p2pService.EXPECT().
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultFetchHeadersMock()).
-		// request 1,2,3 in parallel
-		// -> 2 fails
-		// requests 2,3,4 in parallel
-		// 3 is cached
-		// requests 5,6 in parallel
-		// in total 6 requests + 1 request for re-requesting checkpoint 2
-		// total = 7 (note this also tests caching works)
+		// request checkpoints 1,2,3 in parallel (we have 3 peers)
+		// -> verifications for checkpoint 2 headers fails, checkpoints 1 and 3 pass verifications
+		// requests 2,3 in parallel (now we have only 2 peers)
+		// -> checkpoint 3 blocks are cached, checkpoint 2 is re-requested from another peer and passes verifications
+		// requests 4,5 in parallel
+		// request 6
+		// in total 6 requests + 1 request for re-requesting checkpoint 2 headers
+		// total = 7 (note this also tests blocks caching works)
 		Times(7)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		// 1 less than FetchHeaders since checkpoint 2 from peer 2 did not pass headers verification
+		Times(6)
+	fakePeers := test.fakePeers(3)
+	gomock.InOrder(
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return(fakePeers). // 3 initially
+			Times(1),
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return([]*p2p.PeerId{fakePeers[0], fakePeers[2]}). // but then peer 2 gets penalized
+			Times(3),
+	)
 	test.p2pService.EXPECT().
 		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
 		Times(1)
-	var persistedHeadersFirstTime, persistedHeadersRemaining []*types.Header
+	var blocksBatch1, blocksBatch2 []*types.Block
 	gomock.InOrder(
-		test.headersWriter.EXPECT().
-			PutHeaders(gomock.Any(), gomock.Any()).
-			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersFirstTime)).
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
 			Times(1),
-		test.headersWriter.EXPECT().
-			PutHeaders(gomock.Any(), gomock.Any()).
-			DoAndReturn(test.defaultWriteHeadersMock(&persistedHeadersRemaining)).
-			Times(2),
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
+			Times(3),
 	)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
+		Times(4)
 
 	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, persistedHeadersFirstTime, 1)
-	require.Len(t, persistedHeadersRemaining, 5)
+	require.Len(t, blocksBatch1, 1)
+	require.Len(t, blocksBatch2, 5)
 }
 
-func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
+func TestDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 	test := newHeaderDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
@@ -264,10 +338,18 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(test.defaultFetchHeadersMock()).
 		Times(8)
-	var persistedHeaders []*types.Header
-	test.headersWriter.EXPECT().
-		PutHeaders(gomock.Any(), gomock.Any()).
-		DoAndReturn(test.defaultWriteHeadersMock(&persistedHeaders)).
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		Times(8)
+	var blocks []*types.Block
+	test.storage.EXPECT().
+		InsertBlocks(gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultInsertBlocksMock(&blocks)).
+		Times(4)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
 		Times(4)
 	gomock.InOrder(
 		// first time, no peers at all
@@ -284,6 +366,140 @@ func TestHeaderDownloadWhenZeroPeersTriesAgain(t *testing.T) {
 
 	lastHeader, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
-	require.Len(t, persistedHeaders, 8)
-	require.Equal(t, persistedHeaders[len(persistedHeaders)-1], lastHeader)
+	require.Len(t, blocks, 8)
+	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+}
+
+func TestDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+	var firstTimeInvalidReturned bool
+	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
+	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
+		blocksVerifier: func(blocks []*types.Block) error {
+			if blocks[0].NumberU64() == 2 && !*firstTimeInvalidReturnedPtr {
+				*firstTimeInvalidReturnedPtr = true
+				return errors.New("invalid block body")
+			}
+			return nil
+		},
+	})
+	test.heimdall.EXPECT().
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeCheckpoints(6), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		// request checkpoints 1,2,3 in parallel (we have 3 peers)
+		// -> verifications for checkpoint 2 bodies fails, checkpoints 1 and 3 pass verifications
+		// requests 2,3 in parallel (now we have only 2 peers)
+		// -> checkpoint 3 blocks are cached, checkpoint 2 is re-requested from another peer and passes verifications
+		// requests 4,5 in parallel
+		// request 6
+		// in total 6 requests + 1 request for re-requesting checkpoint 2 headers + bodies
+		// total = 7 (note this also tests blocks caching works)
+		Times(7)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchBodiesMock()).
+		// same explanation as above for FetchHeaders.Times(7)
+		Times(7)
+	fakePeers := test.fakePeers(3)
+	gomock.InOrder(
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return(fakePeers). // 3 initially
+			Times(1),
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return([]*p2p.PeerId{fakePeers[0], fakePeers[2]}). // but then peer 2 gets penalized
+			Times(3),
+	)
+	test.p2pService.EXPECT().
+		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
+		Times(1)
+	var blocksBatch1, blocksBatch2 []*types.Block
+	gomock.InOrder(
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
+			Times(1),
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
+			Times(3),
+	)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
+		Times(4)
+
+	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, blocksBatch1, 1)
+	require.Len(t, blocksBatch2, 5)
+}
+
+func TestDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{})
+	test.heimdall.EXPECT().
+		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
+		Return(test.fakeCheckpoints(6), nil).
+		Times(1)
+	test.p2pService.EXPECT().
+		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId) ([]*types.Body, error) {
+			if peerId.Equal(p2p.PeerIdFromUint64(2)) {
+				return nil, p2p.NewErrMissingBodies(headers)
+			}
+
+			return test.defaultFetchBodiesMock()(ctx, headers, peerId)
+		}).
+		// request checkpoints 1,2,3 in parallel (we have 3 peers)
+		// -> peer 2 returns missing bodies error, checkpoints 1 and 3 fetch succeeds
+		// requests 2,3 in parallel (now we have only 2 peers)
+		// -> checkpoint 3 blocks are cached, checkpoint 2 is re-requested from another peer and passes verifications
+		// requests 4,5 in parallel
+		// request 6
+		// in total 6 requests + 1 request for re-requesting checkpoint 2 headers + bodies
+		// total = 7 (note this also tests blocks caching works)
+		Times(7)
+	test.p2pService.EXPECT().
+		FetchHeaders(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(test.defaultFetchHeadersMock()).
+		// same explanation as above for FetchBodies.Times(7)
+		Times(7)
+	fakePeers := test.fakePeers(3)
+	gomock.InOrder(
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return(fakePeers). // 3 initially
+			Times(1),
+		test.p2pService.EXPECT().
+			ListPeersMayHaveBlockNum(gomock.Any()).
+			Return([]*p2p.PeerId{fakePeers[0], fakePeers[2]}). // but then peer 2 gets penalized
+			Times(3),
+	)
+	test.p2pService.EXPECT().
+		Penalize(gomock.Any(), gomock.Eq(p2p.PeerIdFromUint64(2))).
+		Times(1)
+	var blocksBatch1, blocksBatch2 []*types.Block
+	gomock.InOrder(
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch1)).
+			Times(1),
+		test.storage.EXPECT().
+			InsertBlocks(gomock.Any(), gomock.Any()).
+			DoAndReturn(test.defaultInsertBlocksMock(&blocksBatch2)).
+			Times(3),
+	)
+	test.storage.EXPECT().
+		Flush(gomock.Any()).
+		Return(nil).
+		Times(4)
+
+	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	require.NoError(t, err)
+	require.Len(t, blocksBatch1, 1)
+	require.Len(t, blocksBatch2, 5)
 }
