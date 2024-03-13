@@ -500,30 +500,31 @@ func (d *DiagnosticClient) runBlockMetricsListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				func() {
+					d.mu.Lock()
+					defer d.mu.Unlock()
 
-				if len(info.HeaderDelays) > 0 {
-					avg := appendWithCap(d.blockMetrics.HeaderDelays, 200, info.HeaderDelays)
-					averageHeaderDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-				}
-				if len(info.BodyDelays) > 0 {
-					avg := appendWithCap(d.blockMetrics.BodyDelays, 200, info.BodyDelays)
-					averageBodyDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-				}
-				if len(info.ExecutionStartDelays) > 0 {
-					avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionStartDelays)
-					averageExecutionStartDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-				}
-				if len(info.ExecutionEndDelays) > 0 {
-					avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionEndDelays)
-					averageExectionEndDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-				}
-				if len(info.ProductionDelays) > 0 {
-					avg := appendWithCap(d.blockMetrics.ProductionDelays, 200, info.ProductionDelays)
-					averageProductionDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-				}
-
-				d.mu.Unlock()
+					if len(info.HeaderDelays) > 0 {
+						avg := appendWithCap(d.blockMetrics.HeaderDelays, 200, info.HeaderDelays)
+						averageHeaderDelayGauge.SetUint64(uint64(avg.Milliseconds()))
+					}
+					if len(info.BodyDelays) > 0 {
+						avg := appendWithCap(d.blockMetrics.BodyDelays, 200, info.BodyDelays)
+						averageBodyDelayGauge.SetUint64(uint64(avg.Milliseconds()))
+					}
+					if len(info.ExecutionStartDelays) > 0 {
+						avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionStartDelays)
+						averageExecutionStartDelayGauge.SetUint64(uint64(avg.Milliseconds()))
+					}
+					if len(info.ExecutionEndDelays) > 0 {
+						avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionEndDelays)
+						averageExectionEndDelayGauge.SetUint64(uint64(avg.Milliseconds()))
+					}
+					if len(info.ProductionDelays) > 0 {
+						avg := appendWithCap(d.blockMetrics.ProductionDelays, 200, info.ProductionDelays)
+						averageProductionDelayGauge.SetUint64(uint64(avg.Milliseconds()))
+					}
+				}()
 			}
 		}
 

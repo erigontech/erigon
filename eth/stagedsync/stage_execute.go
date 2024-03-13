@@ -540,7 +540,7 @@ Loop:
 
 		blockFinishTime := time.Since(time.Unix(int64(block.Time()), 0))
 
-		executionStartTimes = append(executionEndTimes, blockStartTime)
+		executionStartTimes = append(executionStartTimes, blockStartTime)
 		executionEndTimes = append(executionEndTimes, blockFinishTime)
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
