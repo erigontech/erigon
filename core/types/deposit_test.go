@@ -91,7 +91,7 @@ func randHeader(rnd *rand.Rand) *Header {
 func randRawTransactions(rnd *rand.Rand, size int) [][]byte {
 	txns := make([][]byte, size)
 	for i := 0; i < size; i++ {
-		txns[i] = randBytes(rnd, randIntMinMax(rnd, 56, 1024))
+		txns[i] = randBytes(rnd, randIntMinMax(rnd, 1, 1023))
 	}
 	return txns
 }
@@ -311,6 +311,15 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 		compareWithdrawals(t, a.Withdrawals[i], b.Withdrawals[i])
 	}
 
+	adLen, bdLen := len(a.Deposits), len(b.Deposits)
+	if adLen != bdLen {
+		return fmt.Errorf("deposits len mismatch: expected: %v, got: %v", adLen, bdLen)
+	}
+
+	for i := 0; i < adLen; i++ {
+		compareDeposits(t, a.Deposits[i], b.Deposits[i])
+	}
+
 	return nil
 }
 
@@ -371,6 +380,5 @@ func TestRawBodyEncodeDecodeRLPWithDeposits(t *testing.T) {
 		if err := compareRawBodies(t, enc, dec); err != nil {
 			t.Errorf("error: compareRawBodies: %v", err)
 		}
-		fmt.Println("PASS", i)
 	}
 }
