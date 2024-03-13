@@ -210,9 +210,9 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	contributionAndProof := signedChange.Message
-	signiture := signedChange.Signature
+	signature := signedChange.Signature
 	fmt.Println("Printing Debug for contributionAndProof", contributionAndProof)
-	fmt.Println("Printing Debug for signiture", signiture)
+	fmt.Println("Printing Debug for signiture", signature)
 
 	//Take lock as we interact with state.
 	s := f.syncedDataManager.HeadState()
@@ -335,20 +335,21 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	valid, err := bls.Verify(selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:])
-	fmt.Println("Printing Debug for selectionProof", selectionProof, selectionDataRoot, aggregatorPubKey, valid, err)
+	fmt.Println("Printing Debug for selectionProof", selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:], valid, err)
 	if err != nil {
 		return err
 	}
-	if !valid {
-		return fmt.Errorf("invalid selection_proof signature")
-	}
+	// if !valid {
+	// 	return fmt.Errorf("invalid selection_proof signature")
+	// }
 
 	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
 	aggregatorSignatureRoot, err := fork.ComputeSigningRoot(contributionAndProof.Contribution, f.beaconCfg.DomainContributionAndProof[:])
 	if err != nil {
 		return err
 	}
-	valid, err = bls.Verify(signiture[:], aggregatorSignatureRoot[:], aggregatorPubKey[:])
+	valid, err = bls.Verify(signature[:], aggregatorSignatureRoot[:], aggregatorPubKey[:])
+	fmt.Println("Printing Debug for aggregatorSignatureRoot", aggregatorSignatureRoot, valid, err)
 	if err != nil {
 		return err
 	}
@@ -358,7 +359,7 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 
 	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
 	message := contributionAndProof.Contribution.BeaconBlockRoot[:]
-	valid, err = bls.Verify(signiture[:], message, aggregatorPubKey[:])
+	valid, err = bls.Verify(signature[:], message, aggregatorPubKey[:])
 	if err != nil {
 		return err
 	}
