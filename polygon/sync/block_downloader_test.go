@@ -31,14 +31,14 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
 	headersVerifier := opts.getOrCreateDefaultHeadersVerifier()
-	bodiesVerifier := opts.getOrCreateDefaultBodiesVerifier()
+	blocksVerifier := opts.getOrCreateDefaultBlocksVerifier()
 	storage := NewMockStorage(ctrl)
 	headerDownloader := newBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
 		headersVerifier,
-		bodiesVerifier,
+		blocksVerifier,
 		storage,
 		time.Millisecond,
 	)
@@ -52,7 +52,7 @@ func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) 
 
 type blockDownloaderTestOpts struct {
 	headersVerifier AccumulatedHeadersVerifier
-	bodiesVerifier  BodiesVerifier
+	blocksVerifier  BlocksVerifier
 }
 
 func (opts blockDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() AccumulatedHeadersVerifier {
@@ -65,14 +65,14 @@ func (opts blockDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() Accumula
 	return opts.headersVerifier
 }
 
-func (opts blockDownloaderTestOpts) getOrCreateDefaultBodiesVerifier() BodiesVerifier {
-	if opts.bodiesVerifier == nil {
-		return func(_ []*types.Header, _ []*types.Body) error {
+func (opts blockDownloaderTestOpts) getOrCreateDefaultBlocksVerifier() BlocksVerifier {
+	if opts.blocksVerifier == nil {
+		return func(_ []*types.Block) error {
 			return nil
 		}
 	}
 
-	return opts.bodiesVerifier
+	return opts.blocksVerifier
 }
 
 type blockDownloaderTest struct {
@@ -374,8 +374,8 @@ func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDown
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
 	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
-		bodiesVerifier: func(headers []*types.Header, bodies []*types.Body) error {
-			if headers[0].Number.Uint64() == 2 && !*firstTimeInvalidReturnedPtr {
+		blocksVerifier: func(blocks []*types.Block) error {
+			if blocks[0].NumberU64() == 2 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
 				return errors.New("invalid block body")
 			}

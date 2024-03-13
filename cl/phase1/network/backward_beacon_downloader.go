@@ -32,7 +32,6 @@ type BackwardBeaconDownloader struct {
 	reqInterval    *time.Ticker
 	db             kv.RwDB
 	neverSkip      bool
-	elFound        bool
 
 	mu sync.Mutex
 }
@@ -206,13 +205,12 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if blockHash != (libcommon.Hash{}) && !b.elFound {
-				bodyChainHeader, err := b.engine.GetBodiesByHashes(ctx, []libcommon.Hash{blockHash})
+			if blockHash != (libcommon.Hash{}) {
+				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
 					return err
 				}
-				b.elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
-				if !b.elFound {
+				if !has {
 					break
 				}
 			}

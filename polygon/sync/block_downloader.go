@@ -33,7 +33,7 @@ func NewBlockDownloader(
 	p2pService p2p.Service,
 	heimdall heimdall.HeimdallNoStore,
 	headersVerifier AccumulatedHeadersVerifier,
-	bodiesVerifier BodiesVerifier,
+	blocksVerifier BlocksVerifier,
 	storage Storage,
 ) BlockDownloader {
 	return newBlockDownloader(
@@ -41,7 +41,7 @@ func NewBlockDownloader(
 		p2pService,
 		heimdall,
 		headersVerifier,
-		bodiesVerifier,
+		blocksVerifier,
 		storage,
 		notEnoughPeersBackOffDuration,
 	)
@@ -52,7 +52,7 @@ func newBlockDownloader(
 	p2pService p2p.Service,
 	heimdall heimdall.HeimdallNoStore,
 	headersVerifier AccumulatedHeadersVerifier,
-	bodiesVerifier BodiesVerifier,
+	blocksVerifier BlocksVerifier,
 	storage Storage,
 	notEnoughPeersBackOffDuration time.Duration,
 ) *blockDownloader {
@@ -61,7 +61,7 @@ func newBlockDownloader(
 		p2pService:                    p2pService,
 		heimdall:                      heimdall,
 		headersVerifier:               headersVerifier,
-		bodiesVerifier:                bodiesVerifier,
+		blocksVerifier:                blocksVerifier,
 		storage:                       storage,
 		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
 	}
@@ -72,7 +72,7 @@ type blockDownloader struct {
 	p2pService                    p2p.Service
 	heimdall                      heimdall.HeimdallNoStore
 	headersVerifier               AccumulatedHeadersVerifier
-	bodiesVerifier                BodiesVerifier
+	blocksVerifier                BlocksVerifier
 	storage                       Storage
 	notEnoughPeersBackOffDuration time.Duration
 }
@@ -164,10 +164,10 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 					return
 				}
 
-				headers, err := d.fetchVerifiedHeaders(ctx, waypoint, peerId)
+				blocks, err := d.fetchVerifiedBlocks(ctx, waypoint, peerId)
 				if err != nil {
 					d.logger.Debug(
-						fmt.Sprintf("[%s] issue downloading headers - will try again", blockDownloaderLogPrefix),
+						fmt.Sprintf("[%s] issue downloading waypoint blocks - will try again", blockDownloaderLogPrefix),
 						"err", err,
 						"start", waypoint.StartBlock(),
 						"end", waypoint.EndBlock(),
@@ -177,27 +177,6 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 					)
 
 					return
-				}
-
-				bodies, err := d.fetchVerifiedBodies(ctx, headers, peerId)
-				if err != nil {
-					d.logger.Debug(
-						fmt.Sprintf("[%s] issue downloading bodies - will try again", blockDownloaderLogPrefix),
-						"err", err,
-						"start", waypoint.StartBlock(),
-						"end", waypoint.EndBlock(),
-						"rootHash", waypoint.RootHash(),
-						"kind", reflect.TypeOf(waypoint),
-						"peerId", peerId,
-					)
-
-					return
-				}
-
-				blocks := make([]*types.Block, len(headers))
-				for i, header := range headers {
-					body := bodies[i]
-					blocks[i] = types.NewBlock(header, body.Transactions, body.Uncles, nil, body.Withdrawals)
 				}
 
 				waypointBlocksMemo.Add(waypoint.RootHash(), blocks)
@@ -254,11 +233,12 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 	return lastBlock.Header(), nil
 }
 
-func (d *blockDownloader) fetchVerifiedHeaders(
+func (d *blockDownloader) fetchVerifiedBlocks(
 	ctx context.Context,
 	waypoint heimdall.Waypoint,
 	peerId *p2p.PeerId,
-) ([]*types.Header, error) {
+) ([]*types.Block, error) {
+	// 1. Fetch headers in waypoint from a peer
 	start := waypoint.StartBlock().Uint64()
 	end := waypoint.EndBlock().Uint64() + 1 // waypoint end is inclusive, fetch headers is [start, end)
 	headers, err := d.p2pService.FetchHeaders(ctx, start, end, peerId)
@@ -266,15 +246,9 @@ func (d *blockDownloader) fetchVerifiedHeaders(
 		return nil, err
 	}
 
-	if err := d.headersVerifier(waypoint, headers); err != nil {
-		d.logger.Debug(
-			fmt.Sprintf("[%s] penalizing peer - bad headers received for waypoint", blockDownloaderLogPrefix),
-			"start", waypoint.StartBlock(),
-			"end", waypoint.EndBlock(),
-			"rootHash", waypoint.RootHash(),
-			"kind", reflect.TypeOf(waypoint),
-			"peerId", peerId,
-		)
+	// 2. Verify headers match waypoint root hash
+	if err = d.headersVerifier(waypoint, headers); err != nil {
+		d.logger.Debug(fmt.Sprintf("[%s] penalizing peer", blockDownloaderLogPrefix), "peerId", peerId, "err", err)
 
 		if penalizeErr := d.p2pService.Penalize(ctx, peerId); penalizeErr != nil {
 			err = fmt.Errorf("%w: %w", penalizeErr, err)
@@ -283,23 +257,11 @@ func (d *blockDownloader) fetchVerifiedHeaders(
 		return nil, err
 	}
 
-	return headers, nil
-}
-
-func (d *blockDownloader) fetchVerifiedBodies(
-	ctx context.Context,
-	headers []*types.Header,
-	peerId *p2p.PeerId,
-) ([]*types.Body, error) {
+	// 3. Fetch bodies for the verified waypoint headers
 	bodies, err := d.p2pService.FetchBodies(ctx, headers, peerId)
 	if err != nil {
 		if errors.Is(err, &p2p.ErrMissingBodies{}) {
-			d.logger.Debug(
-				fmt.Sprintf("[%s] penalizing peer - missing bodies for headers", blockDownloaderLogPrefix),
-				"start", headers[0].Number.Uint64(),
-				"end", headers[len(headers)-1].Number.Uint64(),
-				"peerId", peerId,
-			)
+			d.logger.Debug(fmt.Sprintf("[%s] penalizing peer", blockDownloaderLogPrefix), "peerId", peerId, "err", err)
 
 			if penalizeErr := d.p2pService.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
@@ -309,13 +271,15 @@ func (d *blockDownloader) fetchVerifiedBodies(
 		return nil, err
 	}
 
-	if err := d.bodiesVerifier(headers, bodies); err != nil {
-		d.logger.Debug(
-			fmt.Sprintf("[%s] penalizing peer - bad bodies received for headers", blockDownloaderLogPrefix),
-			"start", headers[0].Number.Uint64(),
-			"end", headers[len(headers)-1].Number.Uint64(),
-			"peerId", peerId,
-		)
+	// 4. Assemble blocks
+	blocks := make([]*types.Block, len(headers))
+	for i, header := range headers {
+		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+	}
+
+	// 5. Verify blocks
+	if err = d.blocksVerifier(blocks); err != nil {
+		d.logger.Debug(fmt.Sprintf("[%s] penalizing peer", blockDownloaderLogPrefix), "peerId", peerId, "err", err)
 
 		if penalizeErr := d.p2pService.Penalize(ctx, peerId); penalizeErr != nil {
 			err = fmt.Errorf("%w: %w", penalizeErr, err)
@@ -324,5 +288,5 @@ func (d *blockDownloader) fetchVerifiedBodies(
 		return nil, err
 	}
 
-	return bodies, nil
+	return blocks, nil
 }

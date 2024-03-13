@@ -15,7 +15,7 @@ type Sync struct {
 	storage          Storage
 	execution        ExecutionClient
 	headersVerifier  AccumulatedHeadersVerifier
-	bodiesVerifier   BodiesVerifier
+	blocksVerifier   BlocksVerifier
 	p2pService       p2p.Service
 	blockDownloader  BlockDownloader
 	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
@@ -29,7 +29,7 @@ func NewSync(
 	storage Storage,
 	execution ExecutionClient,
 	headersVerifier AccumulatedHeadersVerifier,
-	bodiesVerifier BodiesVerifier,
+	blocksVerifier BlocksVerifier,
 	p2pService p2p.Service,
 	blockDownloader BlockDownloader,
 	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder,
@@ -42,7 +42,7 @@ func NewSync(
 		storage:          storage,
 		execution:        execution,
 		headersVerifier:  headersVerifier,
-		bodiesVerifier:   bodiesVerifier,
+		blocksVerifier:   blocksVerifier,
 		p2pService:       p2pService,
 		blockDownloader:  blockDownloader,
 		ccBuilderFactory: ccBuilderFactory,
@@ -120,16 +120,30 @@ func (s *Sync) onNewBlockEvent(
 		return nil
 	}
 
-	var newHeaders []*types.Header
 	var newBlocks []*types.Block
 	var err error
 	if ccBuilder.ContainsHash(newBlockHeader.ParentHash) {
-		newBlocks, newHeaders = []*types.Block{event.NewBlock}, []*types.Header{newBlockHeader}
+		newBlocks = []*types.Block{event.NewBlock}
 	} else {
-		newBlocks, newHeaders, err = s.fetchNewBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
+		newBlocks, err = s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
 		if err != nil {
 			return err
 		}
+	}
+
+	if err := s.blocksVerifier(newBlocks); err != nil {
+		s.logger.Debug("sync.Sync.onNewBlockEvent: invalid new block event from peer, penalizing and ignoring", "err", err)
+
+		if err = s.p2pService.Penalize(ctx, event.PeerId); err != nil {
+			s.logger.Debug("sync.Sync.onNewBlockEvent: issue with penalizing peer", "err", err)
+		}
+
+		return nil
+	}
+
+	newHeaders := make([]*types.Header, len(newBlocks))
+	for i, block := range newBlocks {
+		newHeaders[i] = block.HeaderNoCopy()
 	}
 
 	oldTip := ccBuilder.Tip()
@@ -162,7 +176,7 @@ func (s *Sync) onNewBlockHashesEvent(
 			continue
 		}
 
-		newBlocks, _, err := s.fetchNewBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
+		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
 			return err
 		}
@@ -178,35 +192,6 @@ func (s *Sync) onNewBlockHashesEvent(
 		}
 	}
 	return nil
-}
-
-func (s *Sync) fetchNewBlocks(
-	ctx context.Context,
-	start uint64,
-	end uint64,
-	peerId *p2p.PeerId,
-) ([]*types.Block, []*types.Header, error) {
-	newHeaders, err := s.p2pService.FetchHeaders(ctx, start, end, peerId)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	newBodies, err := s.p2pService.FetchBodies(ctx, newHeaders, peerId)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if err = s.bodiesVerifier(newHeaders, newBodies); err != nil {
-		return nil, nil, err
-	}
-
-	newBlocks := make([]*types.Block, len(newHeaders))
-	for i, header := range newHeaders {
-		newBody := newBodies[i]
-		newBlocks[i] = types.NewBlock(header, newBody.Transactions, newBody.Uncles, nil, newBody.Withdrawals)
-	}
-
-	return newBlocks, newHeaders, nil
 }
 
 //
