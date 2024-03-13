@@ -38,7 +38,7 @@ func (d *Deposit) EncodingSize() (encodingSize int) {
 func (d *Deposit) EncodeRLP(w io.Writer) error {
 	encodingSize := d.EncodingSize()
 
-	var b [128]byte
+	var b [33]byte
 	if err := EncodeStructSizePrefix(encodingSize, w, b[:]); err != nil {
 		return err
 	}
@@ -82,7 +82,7 @@ func (d *Deposit) DecodeRLP(s *rlp.Stream) error {
 
 	_, err := s.List()
 	if err != nil {
-		return fmt.Errorf("list err: %s", err)
+		return err
 	}
 	var b []byte
 	if b, err = s.Bytes(); err != nil {
@@ -129,7 +129,7 @@ func depositsPayloadSize(deposits []*Deposit) (depositsLen int) {
 }
 
 func encodeDeposits(deposits []*Deposit, depositsLen int, w io.Writer, b []byte) error {
-	if err := EncodeStructSizePrefix(depositsLen, w, b[:]); err != nil {
+	if err := EncodeStructSizePrefix(depositsLen, w, b); err != nil {
 		return err
 	}
 	for _, deposit := range deposits {

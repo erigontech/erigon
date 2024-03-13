@@ -623,6 +623,7 @@ func (r RawBlock) AsBlock() (*Block, error) {
 	b := &Block{header: r.Header}
 	b.uncles = r.Body.Uncles
 	b.withdrawals = r.Body.Withdrawals
+	// b.deposits = r.Body.Deposits
 
 	txs := make([]Transaction, len(r.Body.Transactions))
 	for i, tx := range r.Body.Transactions {
@@ -677,7 +678,12 @@ func (rb RawBody) EncodingSize() int {
 func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen, depositsLen int) {
 	// size of Transactions
 	for _, tx := range rb.Transactions {
-		txsLen += len(tx)
+		txLen := len(tx)
+		txsLen += txLen
+		// txsLen += rlp2.ListPrefixLen(txLen)
+		txsLen += 1
+		fmt.Println("Tx LEN: ", txLen)
+		fmt.Println("LIST PREFIX LEN: ", txsLen)
 	}
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
@@ -718,6 +724,10 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range rb.Transactions {
+		b[0] = byte(0x80 + len(tx))
+		if _, err := w.Write(b[:1]); err != nil {
+			return err
+		}
 		if _, err := w.Write(tx); err != nil {
 			return nil
 		}
@@ -742,7 +752,6 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 			}
 		}
 	}
-
 	// encode Deposits
 	if rb.Deposits != nil {
 		if err := encodeDeposits(rb.Deposits, depositsLen, w, b[:]); err != nil {
@@ -814,6 +823,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		rb.Withdrawals = append(rb.Withdrawals, &withdrawal)
 	}
 	if !errors.Is(err, rlp.EOL) {
+		fmt.Println("NOT HITTING THIS")
 		return err
 	}
 	// end of Withdrawals
