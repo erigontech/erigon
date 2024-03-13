@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	erigon_lib "github.com/ledgerwatch/erigon-lib"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
@@ -552,6 +553,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 
 		times = append(times, time.Since(time.Unix(int64(link.header.Time), 0)))
+		erigon_lib.HeaderDelaySummary.ObserveDuration(time.Unix(int64(link.header.Time), 0))
 
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {

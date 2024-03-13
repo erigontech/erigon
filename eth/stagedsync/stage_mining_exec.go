@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
+	erigon_lib "github.com/ledgerwatch/erigon-lib"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
@@ -149,9 +150,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 				}
 			}
 
-			parent := rawdb.ReadHeaderByNumber(tx, executionAt)
-
-			if err = diagnostics.Send(diagnostics.AppendBlockMetrics{ProductionDelays: []time.Duration{time.Since(time.Unix(int64(parent.Time), 0))}}); err != nil {
+			erigon_lib.ProductionDelaySummary.ObserveDuration(time.Unix(int64(current.ParentHeaderTime), 0))
+			if err = diagnostics.Send(diagnostics.AppendBlockMetrics{ProductionDelays: []time.Duration{time.Since(time.Unix(int64(current.ParentHeaderTime), 0))}}); err != nil {
 				logger.Error("Error sending metric", "err", err)
 			}
 		}

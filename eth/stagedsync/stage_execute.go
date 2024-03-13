@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
+	erigon_lib "github.com/ledgerwatch/erigon-lib"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -487,6 +488,7 @@ Loop:
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 
 		blockStartTime := time.Since(time.Unix(int64(block.Time()), 0))
+		erigon_lib.ExecutionStartDelaySummary.ObserveDuration(time.Unix(int64(block.Time()), 0))
 
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
@@ -539,6 +541,7 @@ Loop:
 		stageProgress = blockNum
 
 		blockFinishTime := time.Since(time.Unix(int64(block.Time()), 0))
+		erigon_lib.ExecutionEndDelaySummary.ObserveDuration(time.Unix(int64(block.Time()), 0))
 
 		executionStartTimes = append(executionStartTimes, blockStartTime)
 		executionEndTimes = append(executionEndTimes, blockFinishTime)

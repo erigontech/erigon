@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/log/v3"
 
+	erigon_lib "github.com/ledgerwatch/erigon-lib"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -233,6 +234,7 @@ func BodiesForward(
 					return true, nil
 				}
 
+				erigon_lib.BodyDelaySummary.ObserveDuration(time.Unix(int64(header.Time), 0))
 				times = append(times, time.Since(time.Unix(int64(header.Time), 0)))
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
