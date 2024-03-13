@@ -213,13 +213,14 @@ type sidecarsPayload struct {
 type verifyHeaderSignatureFn func(header *cltypes.SignedBeaconBlockHeader) error
 
 // VerifyAgainstIdentifiersAndInsertIntoTheBlobStore does all due verification for blobs before database insertion. it also returns the latest correctly return blob.
-func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, error) {
+func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, storage BlobStorage, identifiers *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar, verifySignatureFn verifyHeaderSignatureFn) (uint64, uint64, error) {
 	kzgCtx := kzg.Ctx()
+	inserted := atomic.Uint64{}
 	if identifiers.Len() == 0 || len(sidecars) == 0 {
-		return 0, nil
+		return 0, 0, nil
 	}
 	if len(sidecars) > identifiers.Len() {
-		return 0, fmt.Errorf("sidecars length is greater than identifiers length")
+		return 0, 0, fmt.Errorf("sidecars length is greater than identifiers length")
 	}
 	prevBlockRoot := identifiers.Get(0).BlockRoot
 	totalProcessed := 0
@@ -233,7 +234,7 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		// check if the root of the block matches the identifier
 		sidecarBlockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 		if sidecarBlockRoot != identifier.BlockRoot {
 			break
@@ -244,11 +245,11 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 		}
 
 		if !cltypes.VerifyCommitmentInclusionProof(sidecar.KzgCommitment, sidecar.CommitmentInclusionProof, sidecar.Index, clparams.DenebVersion, sidecar.SignedBlockHeader.Header.BodyRoot) {
-			return 0, fmt.Errorf("could not verify blob's inclusion proof")
+			return 0, 0, fmt.Errorf("could not verify blob's inclusion proof")
 		}
 		// verify the signature of the sidecar head, we leave this step up to the caller to define
 		if verifySignatureFn(sidecar.SignedBlockHeader); err != nil {
-			return 0, err
+			return 0, 0, err
 		}
 
 		// if the sidecar is valid, add it to the current payload of sidecars being built.
@@ -292,12 +293,15 @@ func VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx context.Context, stor
 			}
 			if err := storage.WriteBlobSidecars(ctx, sds.blockRoot, sds.sidecars); err != nil {
 				errAtomic.Store(err)
+			} else {
+				inserted.Add(uint64(len(sds.sidecars)))
 			}
+
 		}(sds)
 	}
 	wg.Wait()
 	if err := errAtomic.Load(); err != nil {
-		return 0, err.(error)
+		return 0, 0, err.(error)
 	}
-	return lastProcessed, nil
+	return lastProcessed, inserted.Load(), nil
 }

@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
-	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -25,7 +24,6 @@ import (
 
 // Gossip manager is sending all messages to fork choice or others
 type GossipManager struct {
-	recorder   freezer.Freezer
 	forkChoice *forkchoice.ForkChoiceStore
 	sentinel   sentinel.SentinelClient
 	// configs
@@ -38,14 +36,13 @@ type GossipManager struct {
 }
 
 func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
-	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, recorder freezer.Freezer, emitters *beaconevents.Emitters, gossipSource *persistence.GossipSource) *GossipManager {
+	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, emitters *beaconevents.Emitters, gossipSource *persistence.GossipSource) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
 		forkChoice:    forkChoice,
 		emitters:      emitters,
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
-		recorder:      recorder,
 		gossipSource:  gossipSource,
 	}
 }
