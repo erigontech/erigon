@@ -91,7 +91,7 @@ func randHeader(rnd *rand.Rand) *Header {
 func randRawTransactions(rnd *rand.Rand, size int) [][]byte {
 	txns := make([][]byte, size)
 	for i := 0; i < size; i++ {
-		txns[i] = randBytes(rnd, randIntMinMax(rnd, 1, 55))
+		txns[i] = randBytes(rnd, randIntMinMax(rnd, 56, 1024))
 	}
 	return txns
 }
@@ -151,7 +151,7 @@ func randRawBlock(rnd *rand.Rand, setNil bool) *RawBlock {
 func isEqualBytes(a, b []byte) bool {
 	for i := range a {
 		if a[i] != b[i] {
-			fmt.Printf("%v != %v", a[i], b[i])
+			fmt.Printf("%v != %v at %v", a[i], b[i], i)
 			return false
 		}
 	}
@@ -355,13 +355,11 @@ func TestRawBodyEncodeDecodeRLPWithDeposits(t *testing.T) {
 
 	for i := 0; i < RUNS; i++ {
 		enc := randRawBody(rnd)
-		fmt.Println("DEPOSITS LEN: ", len(enc.Deposits))
-		fmt.Println("TRANSACTIONS LEN: ", len(enc.Transactions))
 		var buf bytes.Buffer
 		if err := enc.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
-		fmt.Println("buf size: ", buf.Len())
+
 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
 
 		dec := &RawBody{}
@@ -373,26 +371,6 @@ func TestRawBodyEncodeDecodeRLPWithDeposits(t *testing.T) {
 		if err := compareRawBodies(t, enc, dec); err != nil {
 			t.Errorf("error: compareRawBodies: %v", err)
 		}
-		// rawBlock := randRawBlock(rnd, false)
-		// enc, err := rawBlock.AsBlock()
-		// if err != nil {
-		// 	t.Error(err)
-		// }
-		// var buf bytes.Buffer
-		// if err := enc.EncodeRLP(&buf); err != nil {
-		// 	t.Error(err)
-		// }
-
-		// s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
-		// dec := &Block{}
-		// if err := dec.DecodeRLP(s); err != nil {
-		// 	t.Errorf("error: Block.DecodeRLP(): %v", err)
-		// 	panic(err)
-		// }
-
-		// if err := compareBlocks(t, enc, dec); err != nil {
-		// 	t.Errorf("error: compareBlocks: %v", err)
-		// }
+		fmt.Println("PASS", i)
 	}
 }

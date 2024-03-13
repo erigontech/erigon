@@ -680,10 +680,7 @@ func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen,
 	for _, tx := range rb.Transactions {
 		txLen := len(tx)
 		txsLen += txLen
-		// txsLen += rlp2.ListPrefixLen(txLen)
-		txsLen += 1
-		fmt.Println("Tx LEN: ", txLen)
-		fmt.Println("LIST PREFIX LEN: ", txsLen)
+		txsLen += rlp2.ListPrefixLen(txLen)
 	}
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
@@ -723,12 +720,10 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 	if err := EncodeStructSizePrefix(txsLen, w, b[:]); err != nil {
 		return err
 	}
+	var buf [1024]byte
 	for _, tx := range rb.Transactions {
-		b[0] = byte(0x80 + len(tx))
-		if _, err := w.Write(b[:1]); err != nil {
-			return err
-		}
-		if _, err := w.Write(tx); err != nil {
+		written := rlp2.EncodeString(tx, buf[:])
+		if _, err := w.Write(buf[:written]); err != nil {
 			return nil
 		}
 	}
@@ -772,10 +767,10 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if _, err = s.List(); err != nil {
 		return err
 	}
-	var tx []byte
-	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
-		if tx == nil {
-			return errors.New("RawBody.DecodeRLP tx nil\n")
+	for err == nil {
+		var tx []byte
+		if err = s.Decode(&tx); err != nil {
+			break
 		}
 		rb.Transactions = append(rb.Transactions, tx)
 	}
@@ -823,7 +818,6 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		rb.Withdrawals = append(rb.Withdrawals, &withdrawal)
 	}
 	if !errors.Is(err, rlp.EOL) {
-		fmt.Println("NOT HITTING THIS")
 		return err
 	}
 	// end of Withdrawals
