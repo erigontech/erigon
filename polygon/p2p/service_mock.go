@@ -66,6 +66,21 @@ func (mr *MockServiceMockRecorder) BlockNumPresent(peerId, blockNum any) *gomock
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BlockNumPresent", reflect.TypeOf((*MockService)(nil).BlockNumPresent), peerId, blockNum)
 }
 
+// FetchBodies mocks base method.
+func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "FetchBodies", ctx, headers, peerId)
+	ret0, _ := ret[0].([]*types.Body)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// FetchBodies indicates an expected call of FetchBodies.
+func (mr *MockServiceMockRecorder) FetchBodies(ctx, headers, peerId any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "FetchBodies", reflect.TypeOf((*MockService)(nil).FetchBodies), ctx, headers, peerId)
+}
+
 // FetchHeaders mocks base method.
 func (m *MockService) FetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Header, error) {
 	m.ctrl.T.Helper()
@@ -147,6 +162,20 @@ func (mr *MockServiceMockRecorder) Penalize(ctx, peerId any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Penalize", reflect.TypeOf((*MockService)(nil).Penalize), ctx, peerId)
 }
 
+// RegisterBlockBodiesObserver mocks base method.
+func (m *MockService) RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RegisterBlockBodiesObserver", observer)
+	ret0, _ := ret[0].(UnregisterFunc)
+	return ret0
+}
+
+// RegisterBlockBodiesObserver indicates an expected call of RegisterBlockBodiesObserver.
+func (mr *MockServiceMockRecorder) RegisterBlockBodiesObserver(observer any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterBlockBodiesObserver", reflect.TypeOf((*MockService)(nil).RegisterBlockBodiesObserver), observer)
+}
+
 // RegisterBlockHeadersObserver mocks base method.
 func (m *MockService) RegisterBlockHeadersObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc {
 	m.ctrl.T.Helper()
@@ -203,26 +232,14 @@ func (mr *MockServiceMockRecorder) RegisterPeerEventObserver(observer any) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterPeerEventObserver", reflect.TypeOf((*MockService)(nil).RegisterPeerEventObserver), observer)
 }
 
-// Start mocks base method.
-func (m *MockService) Start(ctx context.Context) {
+// Run mocks base method.
+func (m *MockService) Run(ctx context.Context) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Start", ctx)
+	m.ctrl.Call(m, "Run", ctx)
 }
 
-// Start indicates an expected call of Start.
-func (mr *MockServiceMockRecorder) Start(ctx any) *gomock.Call {
+// Run indicates an expected call of Run.
+func (mr *MockServiceMockRecorder) Run(ctx any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockService)(nil).Start), ctx)
-}
-
-// Stop mocks base method.
-func (m *MockService) Stop() {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Stop")
-}
-
-// Stop indicates an expected call of Stop.
-func (mr *MockServiceMockRecorder) Stop() *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockService)(nil).Stop))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Run", reflect.TypeOf((*MockService)(nil).Run), ctx)
 }

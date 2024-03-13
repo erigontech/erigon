@@ -62,7 +62,6 @@ type Transaction interface {
 	GetTip() *uint256.Int
 	GetEffectiveGasTip(baseFee *uint256.Int) *uint256.Int
 	GetFeeCap() *uint256.Int
-	Cost() *uint256.Int
 	GetBlobHashes() []libcommon.Hash
 	GetGas() uint64
 	GetBlobGas() uint64
@@ -111,10 +110,6 @@ func (t BinaryTransactions) Len() int {
 
 func (t BinaryTransactions) EncodeIndex(i int, w *bytes.Buffer) {
 	w.Write(t[i])
-}
-
-func (tm TransactionMisc) From() *atomic.Value {
-	return &tm.from
 }
 
 func DecodeRLPTransaction(s *rlp.Stream, blobTxnsAreWrappedWithBlobs bool) (Transaction, error) {

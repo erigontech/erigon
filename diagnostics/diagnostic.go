@@ -10,9 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/urfave/cli/v2"
 )
 
@@ -25,6 +22,7 @@ type DiagnosticClient struct {
 	snapshotFileList diaglib.SnapshoFilesList
 	mu               sync.Mutex
 	hardwareInfo     diaglib.HardwareInfo
+	peersSyncMap     sync.Map
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
@@ -41,6 +39,7 @@ func (d *DiagnosticClient) Setup() {
 	d.runBlockExecutionListener()
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
+	d.runCollectPeersStatistics()
 
 	//d.logDiagMsgs()
 }
@@ -84,9 +83,9 @@ func (d *DiagnosticClient) findNodeDisk() string {
 func (d *DiagnosticClient) getSysInfo() {
 	nodeDisk := d.findNodeDisk()
 
-	ramInfo := GetRAMInfo()
-	diskInfo := GetDiskInfo(nodeDisk)
-	cpuInfo := GetCPUInfo()
+	ramInfo := diaglib.GetRAMInfo()
+	diskInfo := diaglib.GetDiskInfo(nodeDisk)
+	cpuInfo := diaglib.GetCPUInfo()
 
 	d.mu.Lock()
 	d.hardwareInfo = diaglib.HardwareInfo{
@@ -95,74 +94,6 @@ func (d *DiagnosticClient) getSysInfo() {
 		CPU:  cpuInfo,
 	}
 	d.mu.Unlock()
-}
-
-func GetRAMInfo() diaglib.RAMInfo {
-	totalRAM := uint64(0)
-	freeRAM := uint64(0)
-
-	vmStat, err := mem.VirtualMemory()
-	if err == nil {
-		totalRAM = vmStat.Total
-		freeRAM = vmStat.Free
-	}
-
-	return diaglib.RAMInfo{
-		Total: totalRAM,
-		Free:  freeRAM,
-	}
-}
-
-func GetDiskInfo(nodeDisk string) diaglib.DiskInfo {
-	fsType := ""
-	total := uint64(0)
-	free := uint64(0)
-
-	partitions, err := disk.Partitions(false)
-
-	if err == nil {
-		for _, partition := range partitions {
-			if partition.Mountpoint == nodeDisk {
-				iocounters, err := disk.Usage(partition.Mountpoint)
-				if err == nil {
-					fsType = partition.Fstype
-					total = iocounters.Total
-					free = iocounters.Free
-
-					break
-				}
-			}
-		}
-	}
-
-	return diaglib.DiskInfo{
-		FsType: fsType,
-		Total:  total,
-		Free:   free,
-	}
-}
-
-func GetCPUInfo() diaglib.CPUInfo {
-	modelName := ""
-	cores := 0
-	mhz := float64(0)
-
-	cpuInfo, err := cpu.Info()
-	if err == nil {
-		for _, info := range cpuInfo {
-			modelName = info.ModelName
-			cores = int(info.Cores)
-			mhz = info.Mhz
-
-			break
-		}
-	}
-
-	return diaglib.CPUInfo{
-		ModelName: modelName,
-		Cores:     cores,
-		Mhz:       mhz,
-	}
 }
 
 func (d *DiagnosticClient) runSnapshotListener() {
@@ -213,6 +144,48 @@ func (d *DiagnosticClient) SnapshotFilesList() diaglib.SnapshoFilesList {
 
 func (d *DiagnosticClient) HardwareInfo() diaglib.HardwareInfo {
 	return d.hardwareInfo
+}
+
+func (d *DiagnosticClient) Peers() map[string]*diaglib.PeerStatistics {
+	stats := make(map[string]*diaglib.PeerStatistics)
+
+	d.peersSyncMap.Range(func(key, value interface{}) bool {
+
+		if loadedKey, ok := key.(string); ok {
+			if loadedValue, ok := value.(diaglib.PeerStatistics); ok {
+				stats[loadedKey] = &loadedValue
+			} else {
+				log.Debug("Failed to cast value to PeerStatistics struct", value)
+			}
+		} else {
+			log.Debug("Failed to cast key to string", key)
+		}
+
+		return true
+	})
+
+	d.PeerDataResetStatistics()
+
+	return stats
+}
+
+func (d *DiagnosticClient) PeerDataResetStatistics() {
+	d.peersSyncMap.Range(func(key, value interface{}) bool {
+		if stats, ok := value.(diaglib.PeerStatistics); ok {
+			stats.BytesIn = 0
+			stats.BytesOut = 0
+			stats.CapBytesIn = make(map[string]uint64)
+			stats.CapBytesOut = make(map[string]uint64)
+			stats.TypeBytesIn = make(map[string]uint64)
+			stats.TypeBytesOut = make(map[string]uint64)
+
+			d.peersSyncMap.Store(key, stats)
+		} else {
+			log.Debug("Failed to cast value to PeerStatistics struct", value)
+		}
+
+		return true
+	})
 }
 
 func (d *DiagnosticClient) runSegmentDownloadingListener() {
@@ -418,6 +391,50 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 
 				if len(info.Files) > 0 {
 					return
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runCollectPeersStatistics() {
+	go func() {
+		ctx, ch, cancel := diaglib.Context[diaglib.PeerStatisticMsgUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				if value, ok := d.peersSyncMap.Load(info.PeerID); ok {
+					if stats, ok := value.(diaglib.PeerStatistics); ok {
+						if info.Inbound {
+							stats.BytesIn += uint64(info.Bytes)
+							stats.CapBytesIn[info.MsgCap] += uint64(info.Bytes)
+							stats.TypeBytesIn[info.MsgType] += uint64(info.Bytes)
+						} else {
+							stats.BytesOut += uint64(info.Bytes)
+							stats.CapBytesOut[info.MsgCap] += uint64(info.Bytes)
+							stats.TypeBytesOut[info.MsgType] += uint64(info.Bytes)
+						}
+
+						d.peersSyncMap.Store(info.PeerID, stats)
+					} else {
+						log.Debug("Failed to cast value to PeerStatistics struct", value)
+					}
+				} else {
+					d.peersSyncMap.Store(info.PeerID, diaglib.PeerStatistics{
+						PeerType:     info.PeerType,
+						CapBytesIn:   make(map[string]uint64),
+						CapBytesOut:  make(map[string]uint64),
+						TypeBytesIn:  make(map[string]uint64),
+						TypeBytesOut: make(map[string]uint64),
+					})
 				}
 			}
 		}

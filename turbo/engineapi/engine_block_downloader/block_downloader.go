@@ -40,7 +40,7 @@ type RequestBodyFunction func(context.Context, *bodydownload.BodyRequest) ([64]b
 
 // EngineBlockDownloader is responsible to download blocks in reverse, and then insert them in the database.
 type EngineBlockDownloader struct {
-	ctx context.Context
+	bacgroundCtx context.Context
 
 	// downloaders
 	hd          *headerdownload.HeaderDownload
@@ -79,7 +79,7 @@ func NewEngineBlockDownloader(ctx context.Context, logger log.Logger, hd *header
 	var s atomic.Value
 	s.Store(headerdownload.Idle)
 	return &EngineBlockDownloader{
-		ctx:             ctx,
+		bacgroundCtx:    ctx,
 		hd:              hd,
 		bd:              bd,
 		db:              db,

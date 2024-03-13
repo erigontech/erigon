@@ -61,13 +61,6 @@ func (tx DynamicFeeTransaction) GetEffectiveGasTip(baseFee *uint256.Int) *uint25
 	}
 }
 
-func (tx DynamicFeeTransaction) Cost() *uint256.Int {
-	total := new(uint256.Int).SetUint64(tx.Gas)
-	total.Mul(total, tx.Tip)
-	total.Add(total, tx.Value)
-	return total
-}
-
 func (tx *DynamicFeeTransaction) Unwrap() Transaction {
 	return tx
 }

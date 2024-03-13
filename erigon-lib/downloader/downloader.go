@@ -205,9 +205,14 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 			return nil, fmt.Errorf("downloaded files have mismatched hashes: %s", strings.Join(downloadMismatches, ","))
 		}
 
-		if err := d.addPreConfiguredHashes(ctx, lock.Downloads); err != nil {
-			return nil, err
-		}
+		//TODO: why do we need it if we have `addTorrentFilesFromDisk`? what if they are conflict?
+		//TODO: why it's before `BuildTorrentFilesIfNeed`? what if they are conflict?
+		//TODO: even if hash is saved in "snapshots-lock.json" - it still must preserve `prohibit_new_downloads.lock` and don't download new files ("user restart" must be fast, "erigon3 has .kv files which never-ending merge and delete small files")
+		//for _, it := range lock.Downloads {
+		//	if err := d.AddMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name); err != nil {
+		//		return nil, err
+		//	}
+		//}
 
 		if err := d.BuildTorrentFilesIfNeed(d.ctx, lock.Chain, lock.Downloads); err != nil {
 			return nil, err
@@ -229,12 +234,13 @@ type snapshotLock struct {
 }
 
 func getSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, logger log.Logger) (*snapshotLock, error) {
+	//TODO: snapshots-lock.json must be created after 1-st download done
 	//TODO: snapshots-lock.json is not compatible with E3 .kv files - because they are not immutable (merging to infinity)
 	return initSnapshotLock(ctx, cfg, db, logger)
 	/*
-			if !cfg.SnapshotLock {
-				return initSnapshotLock(ctx, cfg, db, logger)
-			}
+		if !cfg.SnapshotLock {
+			return initSnapshotLock(ctx, cfg, db, logger)
+		}
 
 			snapDir := cfg.Dirs.Snap
 
@@ -596,16 +602,6 @@ func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo) ([]byte, err
 	return spec.InfoHash.Bytes(), nil
 }
 
-// Add pre-configured
-func (d *Downloader) addPreConfiguredHashes(ctx context.Context, snapshots snapcfg.Preverified) error {
-	for _, it := range snapshots {
-		if err := d.addMagnetLink(ctx, snaptype.Hex2InfoHash(it.Hash), it.Name, true); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (d *Downloader) MainLoopInBackground(silent bool) {
 	d.wg.Add(1)
 	go func() {
@@ -649,7 +645,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
-	d.webDownloadClient, _ = NewRCloneClient(d.logger)
+	//TODO: feature is not ready yet
+	//d.webDownloadClient, _ = NewRCloneClient(d.logger)
+	d.webDownloadClient = nil
 
 	d.wg.Add(1)
 	go func() {
@@ -791,6 +789,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 			}
 
 			select {
+			case <-d.ctx.Done():
+				return
 			case status := <-downloadComplete:
 				d.lock.Lock()
 				delete(d.downloading, status.name)
@@ -928,7 +928,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				if torrentInfo != nil && torrentInfo.Completed != nil {
 					if bytes.Equal(t.InfoHash().Bytes(), torrentInfo.Hash) {
-						if _, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
+						if dir.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
+							/* TODO: this method is too heavy for Main loop: "re-read file again and again" will impact sync performance
 							localHash, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete)
 
 							if complete {
@@ -937,7 +938,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 
 							failed[t.Name()] = struct{}{}
-							d.logger.Warn("[snapshots] file hash does not match download", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+							d.logger.Debug("[snapshots] NonCanonical hash", "file", t.Name(), "got", hex.EncodeToString(localHash), "expected", t.InfoHash(), "downloaded", *torrentInfo.Completed)
+							*/
+
 							continue
 
 						} else {
@@ -1527,7 +1530,10 @@ func availableTorrents(ctx context.Context, pending []*torrent.Torrent, slots in
 	var pendingBlocksFiles []*torrent.Torrent
 
 	for _, t := range pending {
-		_, isStateFile, _ := snaptype.ParseFileName("", t.Name())
+		_, isStateFile, ok := snaptype.ParseFileName("", t.Name())
+		if !ok {
+			continue
+		}
 		if isStateFile {
 			pendingStateFiles = append(pendingStateFiles, t)
 		} else {
@@ -1682,6 +1688,14 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	var torrentInfo int
 
 	for _, t := range torrents {
+		select {
+		case <-t.GotInfo():
+		default: // if some torrents have no metadata, we are for-sure uncomplete
+			stats.Completed = false
+			noMetadata = append(noMetadata, t.Name())
+			continue
+		}
+
 		var torrentComplete bool
 		torrentName := t.Name()
 
@@ -1691,55 +1705,53 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 		var progress float32
 
-		if t.Info() != nil {
-			torrentInfo++
-			stats.MetadataReady++
+		torrentInfo++
+		stats.MetadataReady++
 
-			// call methods once - to reduce internal mutex contention
-			peersOfThisFile := t.PeerConns()
-			weebseedPeersOfThisFile := t.WebseedPeerConns()
+		// call methods once - to reduce internal mutex contention
+		peersOfThisFile := t.PeerConns()
+		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
-			bytesRead := t.Stats().BytesReadData
-			tLen := t.Length()
+		bytesRead := t.Stats().BytesReadData
+		tLen := t.Length()
 
-			var bytesCompleted int64
+		var bytesCompleted int64
 
-			if torrentComplete {
-				tComplete++
-				bytesCompleted = t.Length()
-			} else {
-				bytesCompleted = bytesRead.Int64()
-			}
-
-			delete(downloading, torrentName)
-
-			for _, peer := range peersOfThisFile {
-				stats.ConnectionsTotal++
-				peers[peer.PeerID] = struct{}{}
-			}
-
-			stats.BytesCompleted += uint64(bytesCompleted)
-			stats.BytesTotal += uint64(tLen)
-
-			progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-
-			webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
-			rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
-			// more detailed statistic: download rate of each peer (for each file)
-			if !torrentComplete && progress != 0 {
-				d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-				d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
-				d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
-			}
-
-			diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-				Name:            torrentName,
-				TotalBytes:      uint64(tLen),
-				DownloadedBytes: uint64(bytesCompleted),
-				Webseeds:        webseeds,
-				Peers:           peers,
-			})
+		if torrentComplete {
+			tComplete++
+			bytesCompleted = t.Length()
+		} else {
+			bytesCompleted = bytesRead.Int64()
 		}
+
+		delete(downloading, torrentName)
+
+		for _, peer := range peersOfThisFile {
+			stats.ConnectionsTotal++
+			peers[peer.PeerID] = struct{}{}
+		}
+
+		stats.BytesCompleted += uint64(bytesCompleted)
+		stats.BytesTotal += uint64(tLen)
+
+		progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
+
+		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
+		rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
+		// more detailed statistic: download rate of each peer (for each file)
+		if !torrentComplete && progress != 0 {
+			d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+			d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
+			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
+		}
+
+		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+			Name:            torrentName,
+			TotalBytes:      uint64(tLen),
+			DownloadedBytes: uint64(bytesCompleted),
+			Webseeds:        webseeds,
+			Peers:           peers,
+		})
 
 		if !torrentComplete {
 			if info, err := d.torrentInfo(torrentName); err == nil {
@@ -1967,9 +1979,11 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
 	for _, t := range allTorrents {
 		select {
-		case <-t.GotInfo():
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-t.GotInfo(): //files to verify already have .torrent on disk. means must have `Info()` already
+		default: // skip other files
+			continue
 		}
 
 		if !dir2.FileExist(filepath.Join(d.SnapDir(), t.Name())) {
@@ -2081,10 +2095,6 @@ func (d *Downloader) alreadyHaveThisName(name string) bool {
 }
 
 func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string) error {
-	return d.addMagnetLink(ctx, infoHash, name, false)
-}
-
-func (d *Downloader) addMagnetLink(ctx context.Context, infoHash metainfo.Hash, name string, force bool) error {
 	// Paranoic Mode on: if same file changed infoHash - skip it
 	// Example:
 	//  - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
@@ -2092,7 +2102,7 @@ func (d *Downloader) addMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return nil
 	}
 
-	if !force && d.torrentFiles.newDownloadsAreProhibited() {
+	if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
 		return nil
 	}
 
@@ -2168,33 +2178,21 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 		return err
 	}
 	for i, ts := range files {
-		d.lock.RLock()
-		_, downloading := d.downloading[ts.DisplayName]
-		d.lock.RUnlock()
+		//TODO: why we depend on Stat? Did you mean `dir.FileExist()` ? How it can be false here?
+		//TODO: What this code doing? Why delete something from db?
+		//if info, err := d.torrentInfo(ts.DisplayName); err == nil {
+		//	if info.Completed != nil {
+		//		_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
+		//		if serr != nil {
+		//			if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
+		//				return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
+		//			}); err != nil {
+		//				log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
+		//			}
+		//		}
+		//	}
+		//}
 
-		if downloading {
-			continue
-		}
-
-		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
-			if info.Completed != nil {
-				_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
-
-				if serr != nil {
-					if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-						return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
-					}); err != nil {
-						log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
-					}
-				}
-			}
-		}
-
-		if whitelisted, ok := d.webseeds.torrentsWhitelist.Get(ts.DisplayName); ok {
-			if ts.InfoHash.HexString() != whitelisted.Hash {
-				continue
-			}
-		}
 		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 
 		if err != nil {

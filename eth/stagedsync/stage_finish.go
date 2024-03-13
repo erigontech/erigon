@@ -154,15 +154,12 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			return nil
 		}
 		blockNum := binary.BigEndian.Uint64(k)
-		if blockNum > finishStageAfterSync {
+		if blockNum > finishStageAfterSync { //[from,to)
 			return nil
 		}
 		notifyTo = blockNum
-		notifyToHash, err = blockReader.CanonicalHash(ctx, tx, notifyTo)
-		if err != nil {
-			logger.Warn("[Finish] failed checking if header is cannonical")
-		}
-		headerRLP := rawdb.ReadHeaderRLP(tx, libcommon.BytesToHash(hash), notifyTo)
+		notifyToHash = libcommon.BytesToHash(hash)
+		headerRLP := rawdb.ReadHeaderRLP(tx, notifyToHash, notifyTo)
 		if headerRLP != nil {
 			headersRlp = append(headersRlp, libcommon.CopyBytes(headerRLP))
 		}
@@ -185,7 +182,7 @@ func NotifyNewHeaders(ctx context.Context, finishStageBeforeSync uint64, finishS
 			notifier.OnLogs(logs)
 		}
 		logTiming := time.Since(t)
-		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
+		logger.Info("RPC Daemon notified of new headers", "from", notifyFrom-1, "to", notifyTo, "amount", len(headersRlp), "hash", notifyToHash, "header sending", headerTiming, "log sending", logTiming)
 	}
 	return nil
 }

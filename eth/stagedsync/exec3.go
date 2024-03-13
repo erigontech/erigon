@@ -315,7 +315,7 @@ func ExecV3(ctx context.Context,
 	}
 
 	if blocksFreezeCfg.Produce {
-		log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
+		//log.Info(fmt.Sprintf("[snapshots] db has steps amount: %s", agg.StepsRangeInDBAsStr(applyTx)))
 		agg.BuildFilesInBackground(outputTxNum.Load())
 	}
 
@@ -961,7 +961,7 @@ Loop:
 		}
 	}
 
-	log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.GetValueUint64())
+	//log.Info("Executed", "blocks", inputBlockNum.Load(), "txs", outputTxNum.Load(), "repeats", execRepeats.GetValueUint64())
 
 	if parallel {
 		logger.Warn("[dbg] all txs sent")
