@@ -17,7 +17,6 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -122,12 +121,6 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		executionEngine = cc
 	}
 
-	var caplinFreezer freezer2.Freezer
-	if cfg.RecordMode {
-		caplinFreezer = &freezer2.RootPathOsFs{
-			Root: cfg.RecordDir,
-		}
-	}
 	indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.GenesisCfg, cfg.Dirs.CaplinIndexing, cfg.Dirs.CaplinBlobs, executionEngine, false, 100_000)
 	if err != nil {
 		return err
@@ -137,5 +130,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, rcfg, nil, nil, false, false, false, indiciesDB, blobStorage, nil)
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, cfg.Dirs, rcfg, nil, nil, false, false, false, indiciesDB, blobStorage, nil)
 }

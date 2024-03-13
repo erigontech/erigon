@@ -40,7 +40,7 @@ func (c ChainReaderWriterEth1) Config() *chain.Config {
 func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header {
 	resp, err := c.executionModule.CurrentHeader(ctx, &emptypb.Empty{})
 	if err != nil {
-		log.Error("GetHeader failed", "err", err)
+		log.Warn("[engine] CurrentHeader", "err", err)
 		return nil
 	}
 	if resp == nil || resp.Header == nil {
@@ -48,7 +48,7 @@ func (c ChainReaderWriterEth1) CurrentHeader(ctx context.Context) *types.Header 
 	}
 	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
 	if err != nil {
-		log.Error("GetHeader decoding", "err", err)
+		log.Warn("[engine] CurrentHeader", "err", err)
 		return nil
 	}
 	return ret
@@ -60,7 +60,7 @@ func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash libcommon.Has
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
 	if err != nil {
-		log.Error("GetHeader failed", "err", err)
+		log.Warn("[engine] GetHeader", "err", err)
 		return nil
 	}
 	if resp == nil || resp.Header == nil {
@@ -68,7 +68,7 @@ func (c ChainReaderWriterEth1) GetHeader(ctx context.Context, hash libcommon.Has
 	}
 	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
 	if err != nil {
-		log.Error("GetHeader decoding", "err", err)
+		log.Warn("[engine] GetHeader", "err", err)
 		return nil
 	}
 	return ret
@@ -86,7 +86,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash libcommo
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
 	if err != nil {
-		log.Error("GetBlockByHash failed", "err", err)
+		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
 	if resp == nil || resp.Body == nil {
@@ -94,12 +94,12 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash libcommo
 	}
 	body, err := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
 	if err != nil {
-		log.Error("GetBlockByHash failed", "err", err)
+		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
-		log.Error("GetBlockByHash failed", "err", err)
+		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
 	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
@@ -115,7 +115,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		BlockNumber: &number,
 	})
 	if err != nil {
-		log.Error("GetBlockByNumber failed", "err", err)
+		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
 	if resp == nil || resp.Body == nil {
@@ -123,12 +123,12 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 	}
 	body, err := eth1_utils.ConvertRawBlockBodyFromRpc(resp.Body)
 	if err != nil {
-		log.Error("GetBlockByNumber failed", "err", err)
+		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
-		log.Error("GetBlockByNumber failed", "err", err)
+		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
 	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
@@ -140,7 +140,7 @@ func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash libcomm
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
 	if err != nil {
-		log.Error("GetHeaderByHash failed", "err", err)
+		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
 	}
 	if resp == nil || resp.Header == nil {
@@ -148,7 +148,7 @@ func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash libcomm
 	}
 	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
 	if err != nil {
-		log.Error("GetHeaderByHash decoding", "err", err)
+		log.Warn("[engine] GetHeaderByHash", "err", err)
 		return nil
 	}
 	return ret
@@ -160,7 +160,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 		BlockHash:   nil,
 	})
 	if err != nil {
-		log.Error("GetHeaderByHash failed", "err", err)
+		log.Warn("[engine] GetHeaderByNumber", "err", err)
 		return nil
 	}
 	if resp == nil || resp.Header == nil {
@@ -168,7 +168,7 @@ func (c ChainReaderWriterEth1) GetHeaderByNumber(ctx context.Context, number uin
 	}
 	ret, err := eth1_utils.HeaderRpcToHeader(resp.Header)
 	if err != nil {
-		log.Error("GetHeaderByHash decoding", "err", err)
+		log.Warn("[engine] GetHeaderByNumber", "err", err)
 		return nil
 	}
 	return ret
@@ -180,7 +180,7 @@ func (c ChainReaderWriterEth1) GetTd(ctx context.Context, hash libcommon.Hash, n
 		BlockHash:   gointerfaces.ConvertHashToH256(hash),
 	})
 	if err != nil {
-		log.Error("GetHeaderByHash failed", "err", err)
+		log.Warn("[engine] GetTd", "err", err)
 		return nil
 	}
 	if resp == nil || resp.Td == nil {
@@ -379,7 +379,7 @@ func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, fin
 	var resp *execution.ForkChoice
 	resp, err = c.executionModule.GetForkChoice(ctx, &emptypb.Empty{})
 	if err != nil {
-		log.Error("GetHeader failed", "err", err)
+		log.Warn("[engine] GetForkChoice", "err", err)
 		return
 	}
 	return gointerfaces.ConvertH256ToHash(resp.HeadBlockHash), gointerfaces.ConvertH256ToHash(resp.FinalizedBlockHash),
