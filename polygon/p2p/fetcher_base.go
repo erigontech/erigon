@@ -28,6 +28,9 @@ type Fetcher interface {
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error)
 	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
 	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error)
+	// FetchBlocks fetches headers and bodies for a given [start, end) range from a peer and
+	// assembles them into blocks. Blocks until data is received.
+	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Block, error)
 }
 
 func NewFetcher(
@@ -135,6 +138,25 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 	}
 
 	return bodies, nil
+}
+
+func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Block, error) {
+	headers, err := f.FetchHeaders(ctx, start, end, peerId)
+	if err != nil {
+		return nil, err
+	}
+
+	bodies, err := f.FetchBodies(ctx, headers, peerId)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks := make([]*types.Block, len(headers))
+	for i, header := range headers {
+		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+	}
+
+	return blocks, nil
 }
 
 func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Header, error) {

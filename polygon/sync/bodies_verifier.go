@@ -2,9 +2,9 @@ package sync
 
 import "github.com/ledgerwatch/erigon/core/types"
 
-type BodiesVerifier func(headers []*types.Header, bodies []*types.Body) error
+type BlocksVerifier func(blocks []*types.Block) error
 
-func VerifyBodies(_ []*types.Header, _ []*types.Body) error {
+func VerifyBlocks(_ []*types.Block) error {
 	//
 	// TODO (subsequent PRs)
 	//
