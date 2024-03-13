@@ -674,10 +674,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 					continue
 				}
 
-				if _, ok := failed[t.Name()]; ok {
-					continue
-				}
-
 				if isComplete, length, completionTime := d.checkComplete(t.Name()); isComplete && completionTime != nil {
 					if _, ok := checking[t.Name()]; !ok {
 						fileInfo, _, _ := snaptype.ParseFileName(d.SnapDir(), t.Name())
@@ -724,6 +720,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 						}
 					}
+				} else {
+					delete(failed, t.Name())
+				}
+
+				if _, ok := failed[t.Name()]; ok {
+					continue
 				}
 
 				d.lock.RLock()
@@ -1658,7 +1660,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		peersOfThisFile := t.PeerConns()
 		weebseedPeersOfThisFile := t.WebseedPeerConns()
 
-		bytesRead := t.Stats().BytesReadData
 		tLen := t.Length()
 
 		var bytesCompleted int64
@@ -1666,38 +1667,19 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		if torrentComplete {
 			tComplete++
 			bytesCompleted = t.Length()
+			delete(downloading, torrentName)
 		} else {
+			bytesRead := t.Stats().BytesReadData
 			bytesCompleted = bytesRead.Int64()
 		}
-
-		delete(downloading, torrentName)
 
 		for _, peer := range peersOfThisFile {
 			stats.ConnectionsTotal++
 			peers[peer.PeerID] = struct{}{}
 		}
 
-		stats.BytesCompleted += uint64(bytesCompleted)
-		stats.BytesTotal += uint64(tLen)
-
-		progress = float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
-
 		webseedRates, webseeds := getWebseedsRatesForlogs(weebseedPeersOfThisFile, torrentName, t.Complete.Bool())
 		rates, peers := getPeersRatesForlogs(peersOfThisFile, torrentName)
-		// more detailed statistic: download rate of each peer (for each file)
-		if !torrentComplete && progress != 0 {
-			d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
-			d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
-			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
-		}
-
-		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
-			Name:            torrentName,
-			TotalBytes:      uint64(tLen),
-			DownloadedBytes: uint64(bytesCompleted),
-			Webseeds:        webseeds,
-			Peers:           peers,
-		})
 
 		if !torrentComplete {
 			if info, err := d.torrentInfo(torrentName); err == nil {
@@ -1736,6 +1718,21 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 				zeroProgress = append(zeroProgress, torrentName)
 			}
 		}
+
+		// more detailed statistic: download rate of each peer (for each file)
+		if !torrentComplete && progress != 0 {
+			d.logger.Log(d.verbosity, "[snapshots] progress", "file", torrentName, "progress", fmt.Sprintf("%.2f%%", progress), "peers", len(peersOfThisFile), "webseeds", len(weebseedPeersOfThisFile))
+			d.logger.Log(d.verbosity, "[snapshots] webseed peers", webseedRates...)
+			d.logger.Log(d.verbosity, "[snapshots] bittorrent peers", rates...)
+		}
+
+		diagnostics.Send(diagnostics.SegmentDownloadStatistics{
+			Name:            torrentName,
+			TotalBytes:      uint64(tLen),
+			DownloadedBytes: uint64(bytesCompleted),
+			Webseeds:        webseeds,
+			Peers:           peers,
+		})
 
 		stats.Completed = stats.Completed && torrentComplete
 	}
@@ -1809,7 +1806,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 		stats.Completed = false
 	}
 
-	d.logger.Debug("[snapshots] info", "len", len(torrents), "webTransfers", webTransfers, "torrent", torrentInfo, "db", dbInfo, "t-complete", tComplete, "db-complete", dbComplete)
+	if !stats.Completed {
+		d.logger.Debug("[snapshots] info", "len", len(torrents), "webTransfers", webTransfers, "torrent", torrentInfo, "db", dbInfo, "t-complete", tComplete, "db-complete", dbComplete)
+	}
 
 	if lastMetadataReady != stats.MetadataReady {
 		now := time.Now()
@@ -1985,7 +1984,16 @@ func (d *Downloader) VerifyData(ctx context.Context, whiteList []string, failFas
 			if failFast {
 				return VerifyFileFailFast(ctx, t, d.SnapDir(), completedPieces)
 			}
-			return ScheduleVerifyFile(ctx, t, completedPieces)
+
+			err := ScheduleVerifyFile(ctx, t, completedPieces)
+
+			if err != nil || !t.Complete.Bool() {
+				if err := d.db.Update(ctx, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
+					return fmt.Errorf("verify data: %s: reset failed: %w", t.Name(), err)
+				}
+			}
+
+			return err
 		})
 	}
 
@@ -2132,14 +2140,20 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 			continue
 		}
 
+		// this check is performed here becuase t.MergeSpec in addTorrentFile will do a file
+		// update in place when it opens its MemMap.  This is non destructive for the data
+		// but casues an update to the file which changes its size to the torrent length which
+		// invalidated the file length check
 		if info, err := d.torrentInfo(ts.DisplayName); err == nil {
 			if info.Completed != nil {
-				_, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
-				if serr != nil {
-					if err := d.db.Update(d.ctx, func(tx kv.RwTx) error {
-						return tx.Delete(kv.BittorrentInfo, []byte(info.Name))
-					}); err != nil {
-						log.Error("[snapshots] Failed to delete db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
+				fi, serr := os.Stat(filepath.Join(d.SnapDir(), info.Name))
+				if serr != nil || fi.Size() != *info.Length || !fi.ModTime().Equal(*info.Completed) {
+					if err := d.db.Update(d.ctx, torrentInfoReset(info.Name, info.Hash, *info.Length)); err != nil {
+						if serr != nil {
+							log.Error("[snapshots] Failed to reset db entry after stat error", "file", info.Name, "err", err, "stat-err", serr)
+						} else {
+							log.Error("[snapshots] Failed to reset db entry after stat mismatch", "file", info.Name, "err", err)
+						}
 					}
 				}
 			}
