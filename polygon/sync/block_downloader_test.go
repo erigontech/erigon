@@ -20,20 +20,20 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/testlog"
 )
 
-func newHeaderDownloaderTest(t *testing.T) *headerDownloaderTest {
-	return newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{})
+func newBlockDownloaderTest(t *testing.T) *blockDownloaderTest {
+	return newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{})
 }
 
-func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts) *headerDownloaderTest {
+func newBlockDownloaderTestWithOpts(t *testing.T, opts blockDownloaderTestOpts) *blockDownloaderTest {
 	ctrl := gomock.NewController(t)
 	heimdallService := heimdall.NewMockHeimdallNoStore(ctrl)
 	p2pService := p2p.NewMockService(ctrl)
 	p2pService.EXPECT().MaxPeers().Return(100).Times(1)
 	logger := testlog.Logger(t, log.LvlDebug)
 	headersVerifier := opts.getOrCreateDefaultHeadersVerifier()
-	blocksVerifier := opts.getOrCreateDefaultBodiesVerifier()
+	blocksVerifier := opts.getOrCreateDefaultBlocksVerifier()
 	storage := NewMockStorage(ctrl)
-	headerDownloader := newHeaderDownloader(
+	headerDownloader := newBlockDownloader(
 		logger,
 		p2pService,
 		heimdallService,
@@ -42,20 +42,20 @@ func newHeaderDownloaderTestWithOpts(t *testing.T, opts headerDownloaderTestOpts
 		storage,
 		time.Millisecond,
 	)
-	return &headerDownloaderTest{
-		heimdall:         heimdallService,
-		p2pService:       p2pService,
-		headerDownloader: headerDownloader,
-		storage:          storage,
+	return &blockDownloaderTest{
+		heimdall:        heimdallService,
+		p2pService:      p2pService,
+		blockDownloader: headerDownloader,
+		storage:         storage,
 	}
 }
 
-type headerDownloaderTestOpts struct {
+type blockDownloaderTestOpts struct {
 	headersVerifier AccumulatedHeadersVerifier
 	blocksVerifier  BlocksVerifier
 }
 
-func (opts headerDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() AccumulatedHeadersVerifier {
+func (opts blockDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() AccumulatedHeadersVerifier {
 	if opts.headersVerifier == nil {
 		return func(_ heimdall.Waypoint, _ []*types.Header) error {
 			return nil
@@ -65,7 +65,7 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultHeadersVerifier() Accumul
 	return opts.headersVerifier
 }
 
-func (opts headerDownloaderTestOpts) getOrCreateDefaultBodiesVerifier() BlocksVerifier {
+func (opts blockDownloaderTestOpts) getOrCreateDefaultBlocksVerifier() BlocksVerifier {
 	if opts.blocksVerifier == nil {
 		return func(_ []*types.Block) error {
 			return nil
@@ -75,14 +75,14 @@ func (opts headerDownloaderTestOpts) getOrCreateDefaultBodiesVerifier() BlocksVe
 	return opts.blocksVerifier
 }
 
-type headerDownloaderTest struct {
-	heimdall         *heimdall.MockHeimdallNoStore
-	p2pService       *p2p.MockService
-	headerDownloader HeaderDownloader
-	storage          *MockStorage
+type blockDownloaderTest struct {
+	heimdall        *heimdall.MockHeimdallNoStore
+	p2pService      *p2p.MockService
+	blockDownloader *blockDownloader
+	storage         *MockStorage
 }
 
-func (hdt headerDownloaderTest) fakePeers(count int) []*p2p.PeerId {
+func (hdt blockDownloaderTest) fakePeers(count int) []*p2p.PeerId {
 	peers := make([]*p2p.PeerId, count)
 	for i := range peers {
 		peers[i] = p2p.PeerIdFromUint64(uint64(i) + 1)
@@ -91,7 +91,7 @@ func (hdt headerDownloaderTest) fakePeers(count int) []*p2p.PeerId {
 	return peers
 }
 
-func (hdt headerDownloaderTest) fakeCheckpoints(count int) heimdall.Waypoints {
+func (hdt blockDownloaderTest) fakeCheckpoints(count int) heimdall.Waypoints {
 	checkpoints := make(heimdall.Waypoints, count)
 	for i := range checkpoints {
 		num := i + 1
@@ -107,7 +107,7 @@ func (hdt headerDownloaderTest) fakeCheckpoints(count int) heimdall.Waypoints {
 	return checkpoints
 }
 
-func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
+func (hdt blockDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
 	milestones := make(heimdall.Waypoints, count)
 	for i := range milestones {
 		num := i + 1
@@ -125,7 +125,7 @@ func (hdt headerDownloaderTest) fakeMilestones(count int) heimdall.Waypoints {
 
 type fetchHeadersMock func(ctx context.Context, start uint64, end uint64, peerId *p2p.PeerId) ([]*types.Header, error)
 
-func (hdt headerDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
+func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	// p2p.Service.FetchHeaders interface is using [start, end) so we stick to that
 	return func(ctx context.Context, start uint64, end uint64, _ *p2p.PeerId) ([]*types.Header, error) {
 		if start >= end {
@@ -145,7 +145,7 @@ func (hdt headerDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 
 type fetchBodiesMock func(context.Context, []*types.Header, *p2p.PeerId) ([]*types.Body, error)
 
-func (hdt headerDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
+func (hdt blockDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
 	return func(ctx context.Context, headers []*types.Header, _ *p2p.PeerId) ([]*types.Body, error) {
 		bodies := make([]*types.Body, len(headers))
 		for i := range headers {
@@ -170,15 +170,15 @@ func (hdt headerDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
 	}
 }
 
-func (hdt headerDownloaderTest) defaultInsertBlocksMock(capture *[]*types.Block) func(context.Context, []*types.Block) error {
+func (hdt blockDownloaderTest) defaultInsertBlocksMock(capture *[]*types.Block) func(context.Context, []*types.Block) error {
 	return func(ctx context.Context, blocks []*types.Block) error {
 		*capture = append(*capture, blocks...)
 		return nil
 	}
 }
 
-func TestDownloadBlocksUsingMilestones(t *testing.T) {
-	test := newHeaderDownloaderTest(t)
+func TestBlockDownloaderDownloadBlocksUsingMilestones(t *testing.T) {
+	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchMilestonesFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeMilestones(4), nil).
@@ -205,7 +205,7 @@ func TestDownloadBlocksUsingMilestones(t *testing.T) {
 		Return(nil).
 		Times(1)
 
-	lastHeader, err := test.headerDownloader.DownloadUsingMilestones(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingMilestones(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocks, 4)
 	// check blocks are written in order
@@ -213,11 +213,11 @@ func TestDownloadBlocksUsingMilestones(t *testing.T) {
 	require.Equal(t, uint64(2), blocks[1].Header().Number.Uint64())
 	require.Equal(t, uint64(3), blocks[2].Header().Number.Uint64())
 	require.Equal(t, uint64(4), blocks[3].Header().Number.Uint64())
-	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
-func TestDownloadBlocksUsingCheckpoints(t *testing.T) {
-	test := newHeaderDownloaderTest(t)
+func TestBlockDownloaderDownloadBlocksUsingCheckpoints(t *testing.T) {
+	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
@@ -244,7 +244,7 @@ func TestDownloadBlocksUsingCheckpoints(t *testing.T) {
 		Return(nil).
 		Times(4)
 
-	lastHeader, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocks, 8)
 	// check blocks are written in order
@@ -256,13 +256,13 @@ func TestDownloadBlocksUsingCheckpoints(t *testing.T) {
 	require.Equal(t, uint64(6), blocks[5].Header().Number.Uint64())
 	require.Equal(t, uint64(7), blocks[6].Header().Number.Uint64())
 	require.Equal(t, uint64(8), blocks[7].Header().Number.Uint64())
-	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
-func TestDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testing.T) {
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
-	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
+	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 		headersVerifier: func(waypoint heimdall.Waypoint, headers []*types.Header) error {
 			if waypoint.StartBlock().Cmp(new(big.Int).SetUint64(2)) == 0 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
@@ -322,14 +322,14 @@ func TestDownloadBlocksWhenInvalidHeadersThenPenalizePeerAndReDownload(t *testin
 		Return(nil).
 		Times(4)
 
-	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1)
 	require.Len(t, blocksBatch2, 5)
 }
 
-func TestDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
-	test := newHeaderDownloaderTest(t)
+func TestBlockDownloaderDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
+	test := newBlockDownloaderTest(t)
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(8), nil).
@@ -364,16 +364,16 @@ func TestDownloadBlocksWhenZeroPeersTriesAgain(t *testing.T) {
 			Times(4),
 	)
 
-	lastHeader, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	tip, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocks, 8)
-	require.Equal(t, blocks[len(blocks)-1].Header(), lastHeader)
+	require.Equal(t, blocks[len(blocks)-1].Header(), tip)
 }
 
-func TestDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+func TestBlockDownloaderDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing.T) {
 	var firstTimeInvalidReturned bool
 	firstTimeInvalidReturnedPtr := &firstTimeInvalidReturned
-	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{
+	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{
 		blocksVerifier: func(blocks []*types.Block) error {
 			if blocks[0].NumberU64() == 2 && !*firstTimeInvalidReturnedPtr {
 				*firstTimeInvalidReturnedPtr = true
@@ -433,14 +433,14 @@ func TestDownloadBlocksWhenInvalidBodiesThenPenalizePeerAndReDownload(t *testing
 		Return(nil).
 		Times(4)
 
-	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1)
 	require.Len(t, blocksBatch2, 5)
 }
 
-func TestDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
-	test := newHeaderDownloaderTestWithOpts(t, headerDownloaderTestOpts{})
+func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing.T) {
+	test := newBlockDownloaderTestWithOpts(t, blockDownloaderTestOpts{})
 	test.heimdall.EXPECT().
 		FetchCheckpointsFromBlock(gomock.Any(), gomock.Any()).
 		Return(test.fakeCheckpoints(6), nil).
@@ -498,7 +498,7 @@ func TestDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDownload(t *testing
 		Return(nil).
 		Times(4)
 
-	_, err := test.headerDownloader.DownloadUsingCheckpoints(context.Background(), 1)
+	_, err := test.blockDownloader.DownloadBlocksUsingCheckpoints(context.Background(), 1)
 	require.NoError(t, err)
 	require.Len(t, blocksBatch1, 1)
 	require.Len(t, blocksBatch2, 5)
