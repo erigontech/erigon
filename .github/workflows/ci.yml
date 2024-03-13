@@ -79,7 +79,7 @@ jobs:
         os: [ windows-2022 ]
     runs-on: ${{ matrix.os }}
     env:
-      GOPRIVATE: "github.com/erigontech/silkworm-go go get github.com/erigontech/silkworm-go@v0.13.0"
+      GOPRIVATE: "github.com/erigontech/silkworm-go"
 
     steps:
       - name: configure Pagefile
@@ -116,7 +116,7 @@ jobs:
     if: (${{ github.event_name == 'push' || !github.event.pull_request.draft }}) && ${{ github.ref != 'refs/heads/devel' }}
     runs-on: ubuntu-22.04
     env:
-      GOPRIVATE: "github.com/erigontech/silkworm-go go get github.com/erigontech/silkworm-go@v0.13.0"
+      GOPRIVATE: "github.com/erigontech/silkworm-go"
     steps:
       - uses: AutoModality/action-clean@v1
       - uses: actions/checkout@v3
