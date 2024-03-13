@@ -168,7 +168,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	gossipManager := network.NewGossipReceiver(sentinel, forkChoice, beaconConfig, genesisConfig, emitters, gossipSource)
 	{ // start ticking forkChoice
 		go func() {
-			tickInterval := time.NewTicker(50 * time.Millisecond)
+			tickInterval := time.NewTicker(2 * time.Millisecond)
 			for {
 				select {
 				case <-tickInterval.C:
@@ -221,7 +221,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	}
 
 	vTables := state_accessors.NewStaticValidatorTable()
-	// Read the the current table
+	// Read the current table
 	if states {
 		if err := state_accessors.ReadValidatorsTable(tx, vTables); err != nil {
 			return err

@@ -10,9 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/shirou/gopsutil/v3/cpu"
-	"github.com/shirou/gopsutil/v3/disk"
-	"github.com/shirou/gopsutil/v3/mem"
 	"github.com/urfave/cli/v2"
 )
 
@@ -86,9 +83,9 @@ func (d *DiagnosticClient) findNodeDisk() string {
 func (d *DiagnosticClient) getSysInfo() {
 	nodeDisk := d.findNodeDisk()
 
-	ramInfo := GetRAMInfo()
-	diskInfo := GetDiskInfo(nodeDisk)
-	cpuInfo := GetCPUInfo()
+	ramInfo := diaglib.GetRAMInfo()
+	diskInfo := diaglib.GetDiskInfo(nodeDisk)
+	cpuInfo := diaglib.GetCPUInfo()
 
 	d.mu.Lock()
 	d.hardwareInfo = diaglib.HardwareInfo{
@@ -97,74 +94,6 @@ func (d *DiagnosticClient) getSysInfo() {
 		CPU:  cpuInfo,
 	}
 	d.mu.Unlock()
-}
-
-func GetRAMInfo() diaglib.RAMInfo {
-	totalRAM := uint64(0)
-	freeRAM := uint64(0)
-
-	vmStat, err := mem.VirtualMemory()
-	if err == nil {
-		totalRAM = vmStat.Total
-		freeRAM = vmStat.Free
-	}
-
-	return diaglib.RAMInfo{
-		Total: totalRAM,
-		Free:  freeRAM,
-	}
-}
-
-func GetDiskInfo(nodeDisk string) diaglib.DiskInfo {
-	fsType := ""
-	total := uint64(0)
-	free := uint64(0)
-
-	partitions, err := disk.Partitions(false)
-
-	if err == nil {
-		for _, partition := range partitions {
-			if partition.Mountpoint == nodeDisk {
-				iocounters, err := disk.Usage(partition.Mountpoint)
-				if err == nil {
-					fsType = partition.Fstype
-					total = iocounters.Total
-					free = iocounters.Free
-
-					break
-				}
-			}
-		}
-	}
-
-	return diaglib.DiskInfo{
-		FsType: fsType,
-		Total:  total,
-		Free:   free,
-	}
-}
-
-func GetCPUInfo() diaglib.CPUInfo {
-	modelName := ""
-	cores := 0
-	mhz := float64(0)
-
-	cpuInfo, err := cpu.Info()
-	if err == nil {
-		for _, info := range cpuInfo {
-			modelName = info.ModelName
-			cores = int(info.Cores)
-			mhz = info.Mhz
-
-			break
-		}
-	}
-
-	return diaglib.CPUInfo{
-		ModelName: modelName,
-		Cores:     cores,
-		Mhz:       mhz,
-	}
 }
 
 func (d *DiagnosticClient) runSnapshotListener() {

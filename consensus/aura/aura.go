@@ -203,7 +203,7 @@ func (e *EpochManager) zoomToAfter(chain consensus.ChainHeaderReader, er *NonTra
 // / or transitions to.
 // / This will give the epoch that any children of this parent belong to.
 // /
-// / The block corresponding the the parent hash must be stored already.
+// / The block corresponding the parent hash must be stored already.
 // nolint
 func epochTransitionFor(chain consensus.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash libcommon.Hash) (transition EpochTransition, ok bool) {
 	//TODO: probably this version of func doesn't support non-canonical epoch transitions
