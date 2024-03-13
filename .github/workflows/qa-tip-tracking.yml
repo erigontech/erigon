@@ -23,11 +23,6 @@ jobs:
       with:
         go-version: '1.21'
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
-
     - name: Restore Erigon Testbed Data Directory
       run: |
         rm -rf $ERIGON_TESTBED_DATA_DIR/chaindata
