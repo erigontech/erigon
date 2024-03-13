@@ -475,15 +475,16 @@ func (api *PrivateDebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bun
 	}
 
 	blockCtx = evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		GetHash:     getHash,
-		Coinbase:    parent.Coinbase,
-		BlockNumber: parent.Number.Uint64(),
-		Time:        parent.Time,
-		Difficulty:  new(big.Int).Set(parent.Difficulty),
-		GasLimit:    parent.GasLimit,
-		BaseFee:     &baseFee,
+		CanTransfer:   core.CanTransfer,
+		Transfer:      core.Transfer,
+		GetHash:       getHash,
+		Coinbase:      parent.Coinbase,
+		BlockNumber:   parent.Number.Uint64(),
+		Time:          parent.Time,
+		Difficulty:    new(big.Int).Set(parent.Difficulty),
+		GasLimit:      parent.GasLimit,
+		BaseFee:       &baseFee,
+		ExcessBlobGas: parent.ExcessBlobGas,
 	}
 
 	// Get a new instance of the EVM
