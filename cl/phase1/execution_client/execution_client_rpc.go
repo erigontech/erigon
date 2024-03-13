@@ -236,3 +236,8 @@ func (cc *ExecutionClientRpc) GetBodiesByHashes(ctx context.Context, hashes []li
 func (cc *ExecutionClientRpc) FrozenBlocks(ctx context.Context) uint64 {
 	panic("unimplemented")
 }
+
+// HasBlock checks if block with given hash is present
+func (cc *ExecutionClientRpc) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	panic("unimplemented")
+}
