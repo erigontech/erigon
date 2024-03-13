@@ -2254,8 +2254,8 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		PageSize(uint64(4 * datasize.KB)).
 		WriteMap().
 		LifoReclaim().
-		RoTxsLimiter(semaphore.NewWeighted(9_000))
-	Path(dbDir).
+		RoTxsLimiter(semaphore.NewWeighted(9_000)).
+		Path(dbDir).
 		Open(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("torrentcfg.openClient: %w", err)
