@@ -17,7 +17,7 @@ type Sync struct {
 	headersVerifier  AccumulatedHeadersVerifier
 	blocksVerifier   BlocksVerifier
 	p2pService       p2p.Service
-	downloader       HeaderDownloader
+	blockDownloader  BlockDownloader
 	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder
 	spansCache       *SpansCache
 	fetchLatestSpan  func(ctx context.Context) (*heimdall.Span, error)
@@ -31,7 +31,7 @@ func NewSync(
 	headersVerifier AccumulatedHeadersVerifier,
 	blocksVerifier BlocksVerifier,
 	p2pService p2p.Service,
-	downloader HeaderDownloader,
+	blockDownloader BlockDownloader,
 	ccBuilderFactory func(root *types.Header, span *heimdall.Span) CanonicalChainBuilder,
 	spansCache *SpansCache,
 	fetchLatestSpan func(ctx context.Context) (*heimdall.Span, error),
@@ -44,7 +44,7 @@ func NewSync(
 		headersVerifier:  headersVerifier,
 		blocksVerifier:   blocksVerifier,
 		p2pService:       p2pService,
-		downloader:       downloader,
+		blockDownloader:  blockDownloader,
 		ccBuilderFactory: ccBuilderFactory,
 		spansCache:       spansCache,
 		fetchLatestSpan:  fetchLatestSpan,
@@ -91,7 +91,7 @@ func (s *Sync) onMilestoneEvent(
 		return err
 	}
 
-	newTip, err := s.downloader.DownloadUsingMilestones(ctx, oldTipNum)
+	newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, oldTipNum)
 	if err != nil {
 		return err
 	}
@@ -204,13 +204,13 @@ func (s *Sync) Run(ctx context.Context) error {
 		return err
 	}
 
-	if newTip, err := s.downloader.DownloadUsingCheckpoints(ctx, tip.Number.Uint64()); err != nil {
+	if newTip, err := s.blockDownloader.DownloadBlocksUsingCheckpoints(ctx, tip.Number.Uint64()); err != nil {
 		return err
 	} else if newTip != nil {
 		tip = newTip
 	}
 
-	if newTip, err := s.downloader.DownloadUsingMilestones(ctx, tip.Number.Uint64()); err != nil {
+	if newTip, err := s.blockDownloader.DownloadBlocksUsingMilestones(ctx, tip.Number.Uint64()); err != nil {
 		return err
 	} else if newTip != nil {
 		tip = newTip
