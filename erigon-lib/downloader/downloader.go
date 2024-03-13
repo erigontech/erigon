@@ -2123,14 +2123,33 @@ func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
 	return files, nil
 }
 
+const ParallelVerifyFiles = 4 // keep it small, to allow big `PieceHashersPerTorrent`. More `PieceHashersPerTorrent` - faster handling of big files.
+
 func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
+
+	eg, ctx := errgroup.WithContext(d.ctx)
+	eg.SetLimit(ParallelVerifyFiles)
 
 	files, err := AllTorrentSpecs(d.cfg.Dirs, d.torrentFiles)
 	if err != nil {
 		return err
 	}
+
+	// reduce mutex contention inside torrentClient - by enabling in/out peers connection after addig all files
+	for _, ts := range files {
+		ts.Trackers = nil
+		ts.DisallowDataDownload = true
+	}
+	defer func() {
+		tl := d.torrentClient.Torrents()
+		for _, t := range tl {
+			t.AllowDataUpload()
+			t.AddTrackers(Trackers)
+		}
+	}()
+
 	for i, ts := range files {
 		d.lock.RLock()
 		_, downloading := d.downloading[ts.DisplayName]
@@ -2164,20 +2183,25 @@ func (d *Downloader) addTorrentFilesFromDisk(quiet bool) error {
 				continue
 			}
 		}
-		_, _, err := addTorrentFile(d.ctx, ts, d.torrentClient, d.db, d.webseeds)
 
-		if err != nil {
-			return err
-		}
-		select {
-		case <-logEvery.C:
-			if !quiet {
-				log.Info("[snapshots] Adding .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+		ts := ts
+		i := i
+		eg.Go(func() error {
+			_, _, err := addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
+			if err != nil {
+				return err
 			}
-		default:
-		}
+			select {
+			case <-logEvery.C:
+				if !quiet {
+					log.Info("[snapshots] Adding .torrent files", "progress", fmt.Sprintf("%d/%d", i, len(files)))
+				}
+			default:
+			}
+			return nil
+		})
 	}
-	return nil
+	return eg.Wait()
 }
 func (d *Downloader) BuildTorrentFilesIfNeed(ctx context.Context, chain string, ignore snapcfg.Preverified) error {
 	return BuildTorrentFilesIfNeed(ctx, d.cfg.Dirs, d.torrentFiles, chain, ignore)
@@ -2229,7 +2253,10 @@ func openClient(ctx context.Context, dbDir, snapDir string, cfg *torrent.ClientC
 		WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg { return kv.DownloaderTablesCfg }).
 		GrowthStep(16 * datasize.MB).
 		MapSize(16 * datasize.GB).
-		PageSize(uint64(8 * datasize.KB)).
+		PageSize(uint64(4 * datasize.KB)).
+		WriteMap().
+		LifoReclaim().
+		RoTxsLimiter(semaphore.NewWeighted(9_000)).
 		Path(dbDir).
 		Open(ctx)
 	if err != nil {
