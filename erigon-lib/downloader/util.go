@@ -327,6 +327,12 @@ func addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient 
 }
 
 func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient *torrent.Client, db kv.RwDB, webseeds *WebSeeds) (t *torrent.Torrent, ok bool, err error) {
+	defer func(t time.Time) {
+		if time.Since(t) > 10*time.Second {
+			fmt.Printf("util.go:330: %s, %s\n", time.Since(t), ts.DisplayName)
+		}
+	}(time.Now())
+
 	select {
 	case <-ctx.Done():
 		return nil, false, ctx.Err()
