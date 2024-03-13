@@ -133,7 +133,7 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 		}
 
 		bodies = append(bodies, bodiesChunk...)
-		headers = headers[len(bodies):]
+		headers = headers[len(bodiesChunk):]
 	}
 
 	return bodies, nil
@@ -246,14 +246,21 @@ func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peer
 		return nil, err
 	}
 
-	if err := f.validateBodies(message.BlockBodiesPacket); err != nil {
+	if err := f.validateBodies(message.BlockBodiesPacket, headers); err != nil {
 		return nil, err
 	}
 
 	return message.BlockBodiesPacket, nil
 }
 
-func (f *fetcher) validateBodies(bodies []*types.Body) error {
+func (f *fetcher) validateBodies(bodies []*types.Body, headers []*types.Header) error {
+	if len(bodies) > len(headers) {
+		return &ErrTooManyBodies{
+			requested: len(headers),
+			received:  len(bodies),
+		}
+	}
+
 	for _, body := range bodies {
 		if len(body.Transactions) == 0 && len(body.Withdrawals) == 0 && len(body.Uncles) == 0 {
 			return ErrEmptyBody
