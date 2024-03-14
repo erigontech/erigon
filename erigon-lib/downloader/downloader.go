@@ -970,7 +970,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 								localHash, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock)
 
 								if complete {
-									d.logger.Debug("[snapshots] Download already complete", "file", t.Name(), "hash", t.InfoHash())
+									d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 									continue
 								}
 
@@ -988,7 +988,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 
 							if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
-								d.logger.Debug("[snapshots] Download already complete", "file", t.Name(), "hash", t.InfoHash())
+								d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 								continue
 							}
 						}
@@ -996,7 +996,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				} else {
 					if _, ok := waiting[t.Name()]; !ok {
 						if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
-							d.logger.Debug("[snapshots] Download already complete", "file", t.Name(), "hash", t.InfoHash())
+							d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 							continue
 						}
 
