@@ -96,7 +96,7 @@ func addSszTests() {
 		With("BlobSidecar", getSSZStaticConsensusTest(&cltypes.BlobSidecar{})).
 		With("BLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.BLSToExecutionChange{})).
 		With("Checkpoint", getSSZStaticConsensusTest(solid.Checkpoint{})).
-		//	With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
+		With("ContributionAndProof", getSSZStaticConsensusTest(&cltypes.ContributionAndProof{})).
 		With("Deposit", getSSZStaticConsensusTest(&cltypes.Deposit{})).
 		With("DepositData", getSSZStaticConsensusTest(&cltypes.DepositData{})).
 		//	With("DepositMessage", getSSZStaticConsensusTest(&cltypes.DepositMessage{})).
@@ -122,7 +122,7 @@ func addSszTests() {
 		With("SignedBeaconBlockHeader", getSSZStaticConsensusTest(&cltypes.SignedBeaconBlockHeader{})).
 		//With("SignedBlobSidecar", getSSZStaticConsensusTest(&cltypes.SignedBlobSideCar{})).
 		With("SignedBLSToExecutionChange", getSSZStaticConsensusTest(&cltypes.SignedBLSToExecutionChange{})).
-		//		With("SignedContributionAndProof", getSSZStaticConsensusTest(&cltypes.SignedContributionAndProof{})).
+		With("SignedContributionAndProof", getSSZStaticConsensusTest(&cltypes.SignedContributionAndProof{})).
 		With("SignedVoluntaryExit", getSSZStaticConsensusTest(&cltypes.SignedVoluntaryExit{})).
 		//	With("SigningData", getSSZStaticConsensusTest(&cltypes.SigningData{})). Not needed.
 		With("SyncAggregate", getSSZStaticConsensusTest(&cltypes.SyncAggregate{})).
