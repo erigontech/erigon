@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	erigon_lib "github.com/ledgerwatch/erigon-lib"
+	"golang.org/x/exp/slices"
+
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
-
-	"golang.org/x/exp/slices"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/etl"
@@ -553,7 +553,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		}
 
 		times = append(times, time.Since(time.Unix(int64(link.header.Time), 0)))
-		erigon_lib.HeaderDelaySummary.ObserveDuration(time.Unix(int64(link.header.Time), 0))
+		metrics.UpdateBlockConsumerHeaderDownloadDelay(link.header.Time, *link.header.Number, hd.logger)
 
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {

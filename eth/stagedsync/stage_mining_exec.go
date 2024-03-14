@@ -13,9 +13,9 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
 
-	erigon_lib "github.com/ledgerwatch/erigon-lib"
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/membatch"
@@ -150,7 +150,7 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, quit <-c
 				}
 			}
 
-			erigon_lib.ProductionDelaySummary.ObserveDuration(time.Unix(int64(current.ParentHeaderTime), 0))
+			metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, *current.Header.Number, logger)
 			if err = diagnostics.Send(diagnostics.AppendBlockMetrics{ProductionDelays: []time.Duration{time.Since(time.Unix(int64(current.ParentHeaderTime), 0))}}); err != nil {
 				logger.Error("Error sending metric", "err", err)
 			}
