@@ -1702,6 +1702,9 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			bytesRead := t.Stats().BytesReadData
 			bytesCompleted = bytesRead.Int64()
 		}
+		stats.BytesCompleted += uint64(bytesCompleted)
+		stats.BytesTotal += uint64(tLen)
+		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 
 		for _, peer := range peersOfThisFile {
 			stats.ConnectionsTotal++
