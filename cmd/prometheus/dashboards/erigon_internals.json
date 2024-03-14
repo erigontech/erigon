@@ -1116,7 +1116,7 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "block_production_delays{type=\"header\", instance=~\"$instance\",quantile=\"$quantile\"}",
+          "expr": "block_consumer_delay{type=\"header_download\",instance=~\"$instance\",quantile=\"$quantile\"}",
           "hide": false,
           "legendFormat": "header: {{instance}}",
           "range": true,
@@ -1127,7 +1127,7 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "block_production_delays{type=\"body\", instance=~\"$instance\",quantile=\"$quantile\"}",
+          "expr": "block_consumer_delay{type=\"body_download\",instance=~\"$instance\",quantile=\"$quantile\"}",
           "hide": false,
           "legendFormat": "body: {{instance}}",
           "range": true,
@@ -1138,7 +1138,7 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "block_production_delays{type=\"execution_start\", instance=~\"$instance\",quantile=\"$quantile\"}",
+          "expr": "block_consumer_delay{type=\"pre_execution\",instance=~\"$instance\",quantile=\"$quantile\"}",
           "hide": false,
           "legendFormat": "execution_start: {{instance}}",
           "range": true,
@@ -1149,7 +1149,7 @@
             "type": "prometheus"
           },
           "editorMode": "code",
-          "expr": "block_production_delays{type=\"execution_end\", instance=~\"$instance\",quantile=\"$quantile\"}",
+          "expr": "block_consumer_delay{type=\"post_execution\",instance=~\"$instance\",quantile=\"$quantile\"}",
           "hide": false,
           "legendFormat": "execution_end: {{instance}}",
           "range": true,
