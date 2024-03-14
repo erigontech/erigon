@@ -28,6 +28,9 @@ type Fetcher interface {
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error)
 	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
 	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error)
+	// FetchBlocks fetches headers and bodies for a given [start, end) range from a peer and
+	// assembles them into blocks. Blocks until data is received.
+	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Block, error)
 }
 
 func NewFetcher(
@@ -127,16 +130,33 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 			return nil, err
 		}
 		if len(bodiesChunk) == 0 {
-			return nil, &ErrMissingBodies{
-				headers: headersChunk,
-			}
+			return nil, NewErrMissingBodies(headers)
 		}
 
 		bodies = append(bodies, bodiesChunk...)
-		headers = headers[len(bodies):]
+		headers = headers[len(bodiesChunk):]
 	}
 
 	return bodies, nil
+}
+
+func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Block, error) {
+	headers, err := f.FetchHeaders(ctx, start, end, peerId)
+	if err != nil {
+		return nil, err
+	}
+
+	bodies, err := f.FetchBodies(ctx, headers, peerId)
+	if err != nil {
+		return nil, err
+	}
+
+	blocks := make([]*types.Block, len(headers))
+	for i, header := range headers {
+		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+	}
+
+	return blocks, nil
 }
 
 func (f *fetcher) fetchHeaders(ctx context.Context, start, end uint64, peerId *PeerId) ([]*types.Header, error) {
@@ -246,14 +266,21 @@ func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peer
 		return nil, err
 	}
 
-	if err := f.validateBodies(message.BlockBodiesPacket); err != nil {
+	if err := f.validateBodies(message.BlockBodiesPacket, headers); err != nil {
 		return nil, err
 	}
 
 	return message.BlockBodiesPacket, nil
 }
 
-func (f *fetcher) validateBodies(bodies []*types.Body) error {
+func (f *fetcher) validateBodies(bodies []*types.Body, headers []*types.Header) error {
+	if len(bodies) > len(headers) {
+		return &ErrTooManyBodies{
+			requested: len(headers),
+			received:  len(bodies),
+		}
+	}
+
 	for _, body := range bodies {
 		if len(body.Transactions) == 0 && len(body.Withdrawals) == 0 && len(body.Uncles) == 0 {
 			return ErrEmptyBody

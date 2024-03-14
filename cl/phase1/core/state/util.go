@@ -24,7 +24,7 @@ func copyLRU[K comparable, V any](dst *lru.Cache[K, V], src *lru.Cache[K, V]) *l
 }
 
 func GetIndexedAttestation(attestation *solid.Attestation, attestingIndicies []uint64) *cltypes.IndexedAttestation {
-	// Sort the the attestation indicies.
+	// Sort the attestation indicies.
 	sort.Slice(attestingIndicies, func(i, j int) bool {
 		return attestingIndicies[i] < attestingIndicies[j]
 	})

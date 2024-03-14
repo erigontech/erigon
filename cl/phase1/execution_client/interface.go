@@ -25,6 +25,7 @@ type ExecutionEngine interface {
 	// Range methods
 	GetBodiesByRange(ctx context.Context, start, count uint64) ([]*types.RawBody, error)
 	GetBodiesByHashes(ctx context.Context, hashes []libcommon.Hash) ([]*types.RawBody, error)
+	HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error)
 	// Snapshots
 	FrozenBlocks(ctx context.Context) uint64
 }
