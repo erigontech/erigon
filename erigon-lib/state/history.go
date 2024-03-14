@@ -716,7 +716,7 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 }
 func (h *History) reCalcRoFiles() {
-	roFiles := ctxFiles(h.files, h.indexList, false, false)
+	roFiles := ctxFiles(h.files, h.indexList, false)
 	h.roFiles.Store(&roFiles)
 }
 

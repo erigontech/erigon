@@ -564,7 +564,7 @@ func TestCtxFiles(t *testing.T) {
 		return true
 	})
 
-	roFiles := ctxFiles(ii.files, 0, false, false)
+	roFiles := ctxFiles(ii.files, 0, false)
 	for i, item := range roFiles {
 		if item.src.canDelete.Load() {
 			require.Failf(t, "deleted file", "%d-%d", item.startTxNum, item.endTxNum)
