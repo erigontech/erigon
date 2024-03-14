@@ -253,39 +253,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// nolint
-func decodeU64(from []byte) uint64 {
-	var i uint64
-	for _, b := range from {
-		i = (i << 8) | uint64(b)
-	}
-	return i
-}
-
-func encodeU64(i uint64, to []byte) (int, []byte) {
-	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
-	switch {
-	case i < (1 << 8):
-		return 1, append(to, byte(i))
-	case i < (1 << 16):
-		return 2, append(to, byte(i>>8), byte(i))
-	case i < (1 << 24):
-		return 3, append(to, byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 32):
-		return 4, append(to, byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 40):
-		return 5, append(to, byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 48):
-		return 6, append(to, byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 56):
-		return 7, append(to, byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	default:
-		return 8, append(to, byte(i>>56), byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	}
-}
-
 func decodeShorterKey(from []byte) uint64 {
-	//return decodeU64(from)
 	of, n := binary.Uvarint(from)
 	if n == 0 {
 		panic(fmt.Sprintf("shorter key %x decode failed", from))
@@ -298,46 +266,6 @@ func encodeShorterKey(buf []byte, offset uint64) []byte {
 		buf = make([]byte, 0, 8)
 	}
 	return binary.AppendUvarint(buf, offset)
-	//_, buf = encodeU64(offset, buf)
-	//return buf
-}
-
-func encodeShortenedKey(buf []byte, stepFrom uint64, stepTo uint64, offset uint64) []byte {
-	if len(buf) < 2 {
-		buf = make([]byte, 2)
-	}
-
-	var s0, s1, of int
-	s0, buf = encodeU64(stepFrom, buf)
-	s1, buf = encodeU64(stepTo, buf)
-	of, buf = encodeU64(offset, buf)
-
-	// to put them into 3 bits each normalized to 0..7
-	s0--
-	s1--
-	of--
-
-	enc := uint16((s0&0x07)<<6 | (s1&0x07)<<3 | (of & 0x07))
-	binary.BigEndian.PutUint16(buf[:2], enc)
-	return buf
-}
-
-// Optimised key referencing a state file record (file number and offset within the file)
-func decodeShortenedKey(shortened []byte) (stepFrom, stepTo, offset uint64) {
-	if len(shortened) < 1 {
-		return 0, 0, 0
-	}
-
-	encoded := binary.BigEndian.Uint16(shortened[:2])
-	s0 := int((encoded>>6)&0x07) + 1
-	s1 := int((encoded>>3)&0x07) + 1
-	of := int(encoded&0x07) + 1
-	//denormalize lengths
-
-	shortened = shortened[2:]
-	return decodeU64(shortened[:s0]),
-		decodeU64(shortened[s0 : s0+s1]),
-		decodeU64(shortened[s0+s1 : s0+s1+of])
 }
 
 type commitmentItem struct {
@@ -349,7 +277,9 @@ func commitmentItemLessPlain(i, j *commitmentItem) bool {
 	return bytes.Compare(i.plainKey, j.plainKey) < 0
 }
 
-func (dc *DomainContext) findShortenedKeyEasier(fullKey []byte, item *filesItem) (shortened []byte, found bool) {
+// Finds shorter replacement for full key in given file item. filesItem -- result of merging of multiple files.
+// If item is nil, or shorter key was not found, or anything else goes wrong, nil key and false returned.
+func (dc *DomainContext) findShortenedKey(fullKey []byte, item *filesItem) (shortened []byte, found bool) {
 	if item == nil {
 		return nil, false
 	}
@@ -410,72 +340,6 @@ func (dc *DomainContext) findShortenedKeyEasier(fullKey []byte, item *filesItem)
 			return nil, false
 		}
 		return encodeShorterKey(nil, offset), true
-	}
-	return nil, false
-}
-
-// idxList is a bit mask of indexes to use for lookups in lis of filesItem
-// Those files are not integrated in Domain files (just merged)
-func (dc *DomainContext) findShortenedKey(fullKey []byte, startTxNum uint64, endTxNum uint64, idxList idxList, list ...*filesItem) (shortened []byte, found bool) {
-	for _, item := range list {
-		if item == nil {
-			continue
-		}
-		if item.startTxNum == startTxNum && item.endTxNum == endTxNum {
-			g := NewArchiveGetter(item.decompressor.MakeGetter(), dc.d.compression)
-
-			//if idxList&withExistence != 0 {
-			//	hi, _ := dc.hc.ic.hashKey(fullKey)
-			//	if !item.existence.ContainsHash(hi) {
-			//		continue
-			//	}
-			//}
-
-			if idxList&withHashMap != 0 {
-				reader := recsplit.NewIndexReader(item.index)
-				defer reader.Close()
-
-				offset, ok := reader.Lookup(fullKey)
-				if !ok {
-					return nil, false
-				}
-
-				g.Reset(offset)
-				if !g.HasNext() {
-					dc.d.logger.Warn("commitment branch key replacement seek failed",
-						"key", fmt.Sprintf("%x", fullKey), "idx", "recsplit", "file", item.decompressor.FileName())
-					return nil, false
-				}
-
-				k, _ := g.Next(nil)
-				if !bytes.Equal(fullKey, k) {
-					dc.d.logger.Warn("commitment branch key replacement seek failed",
-						"key", fmt.Sprintf("%x", fullKey), "idx", "recsplit", "file", item.decompressor.FileName())
-
-					return nil, false
-				}
-				return encodeShorterKey(nil, offset), true
-			}
-			if idxList&withBTree != 0 {
-				cur, err := item.bindex.Seek(g, fullKey)
-				if err != nil {
-					dc.d.logger.Warn("commitment branch key replacement seek failed",
-						"key", fmt.Sprintf("%x", fullKey), "idx", "bt", "err", err, "file", item.decompressor.FileName())
-				}
-
-				if cur == nil || !bytes.Equal(cur.Key(), fullKey) {
-					return nil, false
-				}
-
-				offset := cur.offsetInFile()
-				if uint64(g.Size()) <= offset {
-					dc.d.logger.Warn("commitment branch key replacement seek gone too far",
-						"key", fmt.Sprintf("%x", fullKey), "offset", offset, "size", g.Size(), "file", item.decompressor.FileName())
-					return nil, false
-				}
-				return encodeShorterKey(nil, offset), true
-			}
-		}
 	}
 	return nil, false
 }
@@ -604,7 +468,7 @@ func (dc *DomainContext) commitmentValTransformDomain(accounts, storage *DomainC
 						}
 					}
 
-					shortened, found := storage.findShortenedKeyEasier(buf, mergedStorage)
+					shortened, found := storage.findShortenedKey(buf, mergedStorage)
 					if !found {
 						if len(buf) == length.Addr+length.Hash {
 							return buf, nil // if plain key is lost, we can save original fullkey
@@ -634,7 +498,7 @@ func (dc *DomainContext) commitmentValTransformDomain(accounts, storage *DomainC
 					}
 				}
 
-				shortened, found := accounts.findShortenedKeyEasier(buf, mergedAccount)
+				shortened, found := accounts.findShortenedKey(buf, mergedAccount)
 				if !found {
 					if len(buf) == length.Addr {
 						return buf, nil // if plain key is lost, we can save original fullkey

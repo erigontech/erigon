@@ -2387,7 +2387,7 @@ func TestDomainContext_findShortenedKey(t *testing.T) {
 		lastFile := findFile(st, en)
 		require.NotNilf(t, lastFile, "%d-%d", st/dc.d.aggregationStep, en/dc.d.aggregationStep)
 
-		shortenedKey, found := dc.findShortenedKey([]byte(key), lastFile.startTxNum, lastFile.endTxNum, dc.d.indexList, lastFile)
+		shortenedKey, found := dc.findShortenedKey([]byte(key), lastFile)
 		require.Truef(t, found, "key %d/%d %x file %d %d %s", ki, len(data), []byte(key), lastFile.startTxNum, lastFile.endTxNum, lastFile.decompressor.FileName())
 		require.NotNil(t, shortenedKey)
 		ki++
