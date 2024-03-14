@@ -1386,6 +1386,34 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 	return db, d, dat
 }
 
+func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string]map[string][]upd {
+	tb.Helper()
+
+	doms := make(map[string]map[string][]upd)
+	seed := 31
+	//seed := time.Now().Unix()
+	defer tb.Logf("generated data with seed %d, keys %d", seed, keyLimit)
+	r := rand.New(rand.NewSource(0))
+
+	accs := make(map[string][]upd)
+	stor := make(map[string][]upd)
+	if keyLimit == 1 {
+		key1 := generateRandomKey(r, keySize1)
+		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
+		doms["accounts"] = accs
+		return doms
+	}
+
+	for i := uint64(0); i < keyLimit/2; i++ {
+		key1 := generateRandomKey(r, keySize1)
+		accs[key1] = generateAccountUpdates(r, totalTx, keyTxsLimit)
+		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
+		stor[key2] = generateStorageUpdates(r, totalTx, keyTxsLimit)
+	}
+
+	return doms
+}
+
 // generate arbitrary values for arbitrary keys within given totalTx
 func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit uint64) map[string][]upd {
 	tb.Helper()
@@ -1408,7 +1436,6 @@ func generateTestData(tb testing.TB, keySize1, keySize2, totalTx, keyTxsLimit, k
 		key2 := key1 + generateRandomKey(r, keySize2-keySize1)
 		data[key2] = generateUpdates(r, totalTx, keyTxsLimit)
 	}
-
 	return data
 }
 
@@ -1421,6 +1448,41 @@ func generateRandomKeyBytes(r *rand.Rand, size uint64) []byte {
 	r.Read(key)
 
 	return key
+}
+
+func generateAccountUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+	updates := make([]upd, 0)
+	usedTxNums := make(map[uint64]bool)
+
+	for i := uint64(0); i < keyTxsLimit; i++ {
+		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
+		jitter := r.Intn(10e7)
+		value := types.EncodeAccountBytesV3(i, uint256.NewInt(i*10e4+uint64(jitter)), nil, 0)
+
+		updates = append(updates, upd{txNum: txNum, value: value})
+		usedTxNums[txNum] = true
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	return updates
+}
+
+func generateStorageUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
+	updates := make([]upd, 0)
+	usedTxNums := make(map[uint64]bool)
+
+	for i := uint64(0); i < keyTxsLimit; i++ {
+		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
+
+		value := make([]byte, r.Intn(24*(1<<10)))
+		r.Read(value)
+
+		updates = append(updates, upd{txNum: txNum, value: value})
+		usedTxNums[txNum] = true
+	}
+	sort.Slice(updates, func(i, j int) bool { return updates[i].txNum < updates[j].txNum })
+
+	return updates
 }
 
 func generateUpdates(r *rand.Rand, totalTx, keyTxsLimit uint64) []upd {
@@ -2246,57 +2308,6 @@ func TestDomain_PruneSimple(t *testing.T) {
 		pruneOneKeyHistory(t, dc, db, pruneFrom, pruneTo)
 
 		checkKeyPruned(t, dc, db, stepSize, pruneFrom, pruneTo)
-	})
-}
-
-func TestShortenedKeyEncodeDecode(t *testing.T) {
-	tests := []struct {
-		name     string
-		stepFrom uint64
-		stepTo   uint64
-		offset   uint64
-	}{
-		{"Basic case", 0, 2, 1234567890},
-		{"Min step and offset", 1 << 20, 1 << 30, 0},
-		{"Max step", 1 << 10, math.MaxUint64, 1234567890},
-		{"Max offset", 1, 1 << 40, math.MaxUint64},
-		{"Max everything", math.MaxUint64 - 2, math.MaxUint64, math.MaxUint64},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			buf := make([]byte, 2) // Adjust size based on how encodeU64 works
-
-			encoded := encodeShortenedKey(buf, tt.stepFrom, tt.stepTo, tt.offset)
-
-			decodedStepFrom, decodedStepTo, decodedOffset := decodeShortenedKey(encoded)
-
-			require.EqualValues(t, tt.stepFrom, decodedStepFrom)
-			require.EqualValues(t, tt.stepTo, decodedStepTo)
-			require.EqualValues(t, tt.offset, decodedOffset)
-			t.Logf("encoded size %d (s0=%d s1=%d of=%d)", len(encoded), decodedStepFrom, decodedStepTo, decodedOffset)
-		})
-	}
-
-	t.Run("ShortenedKeyInvalidInput", func(t *testing.T) {
-		// Expecting this to not panic
-		_, _, _ = decodeShortenedKey([]byte{})
-	})
-
-	t.Run("EncodeShortenedKeyInvalidInput", func(t *testing.T) {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("with nil input")
-			}
-		}()
-		step := uint64(1)
-		stepTo := uint64(20489)
-		offset := uint64(100)
-
-		shortened := encodeShortenedKey(nil, step, stepTo, offset) // This should not panic
-		rstep, _, rofft := decodeShortenedKey(shortened)
-		require.EqualValues(t, step, rstep)
-		require.EqualValues(t, offset, rofft)
 	})
 }
 

@@ -392,9 +392,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 				if l != length.Addr+length.Hash {
 					fmt.Printf("COPY %x LEN %d\n", branchData[pos-int(l):pos], l)
 				}
-
 			} else {
-
 				if len(newKey) > 8 && len(newKey) != length.Addr+length.Hash {
 					fmt.Printf("SHORT %x LEN %d\n", newKey, len(newKey))
 				}
@@ -423,6 +421,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 		}
 		bitset ^= bit
 	}
+
 	return newData, nil
 }
 

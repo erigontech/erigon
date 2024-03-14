@@ -1,6 +1,7 @@
 package commitment
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"math/rand"
@@ -136,49 +137,21 @@ func unfoldBranchDataFromString(t *testing.T, encs string) (row []*Cell, am uint
 	return origins[:], am
 }
 
-func decodeU64(from []byte) uint64 {
-	var i uint64
-	for _, b := range from {
-		i = (i << 8) | uint64(b)
-	}
-	return i
-}
-
-func encodeU64(i uint64, to []byte) (int, []byte) {
-	// writes i to b in big endian byte order, using the least number of bytes needed to represent i.
-	switch {
-	case i < (1 << 8):
-		return 1, append(to, byte(i))
-	case i < (1 << 16):
-		return 2, append(to, byte(i>>8), byte(i))
-	case i < (1 << 24):
-		return 3, append(to, byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 32):
-		return 4, append(to, byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 40):
-		return 5, append(to, byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 48):
-		return 6, append(to, byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	case i < (1 << 56):
-		return 7, append(to, byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	default:
-		return 8, append(to, byte(i>>56), byte(i>>48), byte(i>>40), byte(i>>32), byte(i>>24), byte(i>>16), byte(i>>8), byte(i))
-	}
-}
-
 func TestBranchData_ReplacePlainKeys(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 
-	cells, am := unfoldBranchDataFromString(t, "000c000c0403c919d50403c91a0b")
+	cells, am := unfoldBranchDataFromString(t, "86e586e5082035e72a782b51d9c98548467e3f868294d923cdbbdf4ce326c867bd972c4a2395090109203b51781a76dc87640aea038e3fdd8adca94049aaa436735b162881ec159f6fb408201aa2fa41b5fb019e8abf8fc32800805a2743cfa15373cf64ba16f4f70e683d8e0404a192d9050404f993d9050404e594d90508208642542ff3ce7d63b9703e85eb924ab3071aa39c25b1651c6dda4216387478f10404bd96d905")
 	for i, c := range cells {
 		if c == nil {
 			continue
 		}
 		if c.apl > 0 {
-			t.Logf("%d apk %x, offt %d\n", i, c.apk[:c.apl], decodeU64(c.apk[:c.apl]))
+			offt, _ := binary.Uvarint(c.apk[:c.apl])
+			t.Logf("%d apk %x, offt %d\n", i, c.apk[:c.apl], offt)
 		}
 		if c.spl > 0 {
-			t.Logf("%d spk %x offt %d\n", i, c.spk[:c.spl], decodeU64(c.spk[:c.spl]))
+			offt, _ := binary.Uvarint(c.spk[:c.spl])
+			t.Logf("%d spk %x offt %d\n", i, c.spk[:c.spl], offt)
 		}
 
 	}

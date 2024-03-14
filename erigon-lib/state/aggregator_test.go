@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"math"
 	"math/rand"
 	"os"
@@ -579,6 +580,15 @@ func extractKVErrIterator(t *testing.T, it iter.KV) map[string][]byte {
 	}
 
 	return accounts
+}
+
+func fillRawdbTxNumsIndexForSharedDomains(t *testing.T, rwTx kv.RwTx, maxTx, commitEvery uint64) {
+	t.Helper()
+
+	for txn := uint64(1); txn <= maxTx; txn++ {
+		err := rawdbv3.TxNums.Append(rwTx, txn, txn/commitEvery)
+		require.NoError(t, err)
+	}
 }
 
 func generateSharedDomainsUpdates(t *testing.T, domains *SharedDomains, maxTxNum uint64, rnd *rand.Rand, keyMaxLen, keysCount, commitEvery uint64) map[string]struct{} {
