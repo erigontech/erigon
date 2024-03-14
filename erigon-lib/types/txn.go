@@ -181,7 +181,7 @@ func (ctx *TxParseContext) ParseTransaction(payload []byte, pos int, slot *TxSlo
 
 	var wrapperDataPos, wrapperDataLen int
 
-	// If it is non-legacy transaction, the transaction type follows, and then the the list
+	// If it is non-legacy transaction, the transaction type follows, and then the list
 	if !legacy {
 		slot.Type = payload[p]
 		if slot.Type > BlobTxType {

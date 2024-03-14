@@ -1082,7 +1082,6 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	to := csn.FrozenBlobs()
-	fmt.Println(to)
 
 	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
 		sds, err := csn.ReadBlobSidecars(i)
