@@ -223,7 +223,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	}
 
 	vTables := state_accessors.NewStaticValidatorTable()
-	// Read the the current table
+	// Read the current table
 	if states {
 		if err := state_accessors.ReadValidatorsTable(tx, vTables); err != nil {
 			return err
