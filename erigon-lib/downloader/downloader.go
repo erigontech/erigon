@@ -590,6 +590,9 @@ func fileHashBytes(ctx context.Context, fileInfo snaptype.FileInfo, stats *AggSt
 	if !dir.FileExist(fileInfo.Path) {
 		return nil, os.ErrNotExist
 	}
+	defer func(t time.Time) {
+		fmt.Printf("downloader.go:593: %s, %s, %s\n", time.Since(t), fileInfo.Name(), dbg.Stack())
+	}(time.Now())
 
 	defer func(t time.Time) {
 		statsLock.Lock()
