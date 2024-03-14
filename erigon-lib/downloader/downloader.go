@@ -1681,8 +1681,6 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			torrentComplete = t.Complete.Bool()
 		}
 
-		var progress float32
-
 		torrentInfo++
 		stats.MetadataReady++
 
