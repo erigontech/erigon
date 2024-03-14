@@ -16,11 +16,6 @@
 
 package diagnostics
 
-import (
-	"container/list"
-	"time"
-)
-
 type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics
 }
@@ -158,40 +153,6 @@ type CPUInfo struct {
 	Cores     int     `json:"cores"`
 	ModelName string  `json:"modelName"`
 	Mhz       float64 `json:"mhz"`
-}
-
-type BlockMetrics struct {
-	HeaderDelays         *list.List
-	BodyDelays           *list.List
-	ExecutionStartDelays *list.List
-	ExecutionEndDelays   *list.List
-	ProductionDelays     *list.List
-}
-
-func NewBlockMetrics() BlockMetrics {
-	return BlockMetrics{
-		HeaderDelays:         list.New(),
-		BodyDelays:           list.New(),
-		ExecutionStartDelays: list.New(),
-		ExecutionEndDelays:   list.New(),
-		ProductionDelays:     list.New(),
-	}
-}
-
-type AppendBlockMetrics struct {
-	HeaderDelays         []time.Duration
-	BodyDelays           []time.Duration
-	ExecutionStartDelays []time.Duration
-	ExecutionEndDelays   []time.Duration
-	ProductionDelays     []time.Duration
-}
-
-func (ti AppendBlockMetrics) Type() Type {
-	return TypeOf(ti)
-}
-
-func (ti BlockMetrics) Type() Type {
-	return TypeOf(ti)
 }
 
 func (ti SnapshoFilesList) Type() Type {

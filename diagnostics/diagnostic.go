@@ -1,11 +1,9 @@
 package diagnostics
 
 import (
-	"container/list"
 	"context"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/ledgerwatch/log/v3"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -26,14 +24,13 @@ type DiagnosticClient struct {
 
 	syncStats        diaglib.SyncStatistics
 	snapshotFileList diaglib.SnapshoFilesList
-	blockMetrics     diaglib.BlockMetrics
 	mu               sync.Mutex
 	hardwareInfo     diaglib.HardwareInfo
 	peersSyncMap     sync.Map
 }
 
 func NewDiagnosticClient(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) *DiagnosticClient {
-	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}, blockMetrics: diaglib.NewBlockMetrics()}
+	return &DiagnosticClient{ctx: ctx, metricsMux: metricsMux, node: node, syncStats: diaglib.SyncStatistics{}, hardwareInfo: diaglib.HardwareInfo{}, snapshotFileList: diaglib.SnapshoFilesList{}}
 }
 
 func (d *DiagnosticClient) Setup() {
@@ -47,7 +44,6 @@ func (d *DiagnosticClient) Setup() {
 	d.runSnapshotFilesListListener()
 	d.getSysInfo()
 	d.runCollectPeersStatistics()
-	d.runBlockMetricsListener()
 
 	//d.logDiagMsgs()
 }
@@ -472,70 +468,6 @@ func (d *DiagnosticClient) runSnapshotFilesListListener() {
 			}
 		}
 	}()
-}
-
-func appendWithCap(list *list.List, cap int, items []time.Duration) time.Duration {
-	for _, v := range items {
-		if list.Len() == cap {
-			list.Remove(list.Front())
-		}
-
-		list.PushBack(v)
-	}
-
-	return time.Duration(stats(list).Average)
-}
-
-func (d *DiagnosticClient) runBlockMetricsListener() {
-	go func() {
-		ctx, ch, cancel := diaglib.Context[diaglib.AppendBlockMetrics](context.Background(), 1)
-		defer cancel()
-
-		rootCtx, _ := common.RootContext()
-
-		diaglib.StartProviders(ctx, diaglib.TypeOf(diaglib.AppendBlockMetrics{}), log.Root())
-		for {
-			select {
-			case <-rootCtx.Done():
-				cancel()
-				return
-			case info := <-ch:
-				func() {
-					d.mu.Lock()
-					defer d.mu.Unlock()
-
-					if len(info.HeaderDelays) > 0 {
-						avg := appendWithCap(d.blockMetrics.HeaderDelays, 200, info.HeaderDelays)
-						averageHeaderDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-					}
-					if len(info.BodyDelays) > 0 {
-						avg := appendWithCap(d.blockMetrics.BodyDelays, 200, info.BodyDelays)
-						averageBodyDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-					}
-					if len(info.ExecutionStartDelays) > 0 {
-						avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionStartDelays)
-						averageExecutionStartDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-					}
-					if len(info.ExecutionEndDelays) > 0 {
-						avg := appendWithCap(d.blockMetrics.ExecutionStartDelays, 200, info.ExecutionEndDelays)
-						averageExectionEndDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-					}
-					if len(info.ProductionDelays) > 0 {
-						avg := appendWithCap(d.blockMetrics.ProductionDelays, 200, info.ProductionDelays)
-						averageProductionDelayGauge.SetUint64(uint64(avg.Milliseconds()))
-					}
-				}()
-			}
-		}
-
-	}()
-}
-
-func (d *DiagnosticClient) BlockMetrics() diaglib.BlockMetrics {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	return d.blockMetrics
 }
 
 func (d *DiagnosticClient) runCollectPeersStatistics() {

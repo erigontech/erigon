@@ -17,7 +17,6 @@ import (
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -506,7 +505,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 	var returnTd *big.Int
 	var lastD *big.Int
 	var lastTime uint64
-	var times []time.Duration
 	if hd.insertQueue.Len() > 0 {
 		link := hd.insertQueue[0]
 		_, bad := hd.badHeaders[link.hash]
@@ -552,7 +550,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		default:
 		}
 
-		times = append(times, time.Since(time.Unix(int64(link.header.Time), 0)))
 		metrics.UpdateBlockConsumerHeaderDownloadDelay(link.header.Time, *link.header.Number, hd.logger)
 
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
@@ -613,12 +610,6 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		x.Div(&x, lastD)
 		if x.IsUint64() {
 			blocksToTTD = x.Uint64()
-		}
-	}
-
-	if len(times) != 0 {
-		if err := diagnostics.Send(diagnostics.AppendBlockMetrics{HeaderDelays: times}); err != nil {
-			hd.logger.Error("Error sending metric", "err", err)
 		}
 	}
 

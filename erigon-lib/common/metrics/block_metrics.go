@@ -50,10 +50,10 @@ func UpdateBlockConsumerPostExecutionDelay(parentTime uint64, blockNumber uint64
 	}
 }
 
-func UpdateBlockProducerProductionDelay(parentTime uint64, blockNumber big.Int, log log.Logger) {
+func UpdateBlockProducerProductionDelay(parentTime uint64, blockNumber uint64, log log.Logger) {
 	BlockProducerProductionDelay.ObserveDuration(time.Unix(int64(parentTime), 0))
 
 	if DelayLoggingEnabled {
-		log.Info("[producer-delay] Production", "blockNumber", blockNumber.Uint64(), "delay", time.Since(time.Unix(int64(parentTime), 0)))
+		log.Info("[producer-delay] Production", "blockNumber", blockNumber, "delay", time.Since(time.Unix(int64(parentTime), 0)))
 	}
 }

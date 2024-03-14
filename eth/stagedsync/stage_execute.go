@@ -428,8 +428,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	logTx, lastLogTx := uint64(0), uint64(0)
 	logTime := time.Now()
 	startTime := time.Now()
-	var executionStartTimes []time.Duration
-	var executionEndTimes []time.Duration
 	var gas uint64             // used for logs
 	var currentStateGas uint64 // used for batch commits of state
 	// Transform batch_size limit into Ggas
@@ -487,7 +485,6 @@ Loop:
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
 
-		blockStartTime := time.Since(time.Unix(int64(block.Time()), 0))
 		metrics.UpdateBlockConsumerPreExecutionDelay(block.Time(), blockNum, logger)
 
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
@@ -540,11 +537,7 @@ Loop:
 		}
 		stageProgress = blockNum
 
-		blockFinishTime := time.Since(time.Unix(int64(block.Time()), 0))
 		metrics.UpdateBlockConsumerPostExecutionDelay(block.Time(), blockNum, logger)
-
-		executionStartTimes = append(executionStartTimes, blockStartTime)
-		executionEndTimes = append(executionEndTimes, blockFinishTime)
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
@@ -580,10 +573,6 @@ Loop:
 			txc.Tx.CollectMetrics()
 			syncMetrics[stages.Execution].SetUint64(blockNum)
 		}
-	}
-
-	if err = diagnostics.Send(diagnostics.AppendBlockMetrics{ExecutionStartDelays: executionStartTimes, ExecutionEndDelays: executionEndTimes}); err != nil {
-		logger.Error("Error sending metric", "err", err)
 	}
 
 	if err = s.Update(txc.Tx, stageProgress); err != nil {
