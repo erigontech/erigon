@@ -31,9 +31,10 @@ import (
 )
 
 type CaplinConfig struct {
-	Backfilling     bool
-	BlobBackfilling bool
-	Archive         bool
+	Backfilling         bool
+	BlobBackfilling     bool
+	BlobPruningDisabled bool
+	Archive             bool
 }
 
 type NetworkType int
@@ -316,7 +317,7 @@ var CheckpointSyncEndpoints = map[NetworkType][]string{
 		"https://checkpoint-sync.sepolia.ethpandaops.io/eth/v2/debug/beacon/states/finalized",
 	},
 	GnosisNetwork: {
-		"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
+		//"https://checkpoint.gnosis.gateway.fm/eth/v2/debug/beacon/states/finalized",
 		"https://checkpoint.gnosischain.com/eth/v2/debug/beacon/states/finalized",
 	},
 	ChiadoNetwork: {
@@ -914,6 +915,7 @@ func gnosisConfig() BeaconChainConfig {
 	cfg.InactivityScoreBias = 4
 	cfg.MaxWithdrawalsPerPayload = 8
 	cfg.MaxValidatorsPerWithdrawalsSweep = 8192
+	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
 }
@@ -944,6 +946,7 @@ func chiadoConfig() BeaconChainConfig {
 	cfg.BaseRewardFactor = 25
 	cfg.SlotsPerEpoch = 16
 	cfg.EpochsPerSyncCommitteePeriod = 512
+	cfg.MaxPerEpochActivationChurnLimit = 2
 	cfg.InitializeForkSchedule()
 	return cfg
 }

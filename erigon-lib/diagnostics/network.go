@@ -1,21 +1,98 @@
-/*
-   Copyright 2021 Erigon contributors
-
-   Licensed under the Apache License, Version 2.0 (the "License");
-   you may not use this file except in compliance with the License.
-   You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-   Unless required by applicable law or agreed to in writing, software
-   distributed under the License is distributed on an "AS IS" BASIS,
-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-   See the License for the specific language governing permissions and
-   limitations under the License.
-*/
-
 package diagnostics
 
-func (p PeerStatistics) Type() Type {
-	return TypeOf(p)
+import (
+	"context"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/log/v3"
+)
+
+func (d *DiagnosticClient) setupNetworkDiagnostics() {
+	d.runCollectPeersStatistics()
+}
+
+func (d *DiagnosticClient) runCollectPeersStatistics() {
+	go func() {
+		ctx, ch, cancel := Context[PeerStatisticMsgUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		StartProviders(ctx, TypeOf(PeerStatisticMsgUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				if value, ok := d.peersSyncMap.Load(info.PeerID); ok {
+					if stats, ok := value.(PeerStatistics); ok {
+						if info.Inbound {
+							stats.BytesIn += uint64(info.Bytes)
+							stats.CapBytesIn[info.MsgCap] += uint64(info.Bytes)
+							stats.TypeBytesIn[info.MsgType] += uint64(info.Bytes)
+						} else {
+							stats.BytesOut += uint64(info.Bytes)
+							stats.CapBytesOut[info.MsgCap] += uint64(info.Bytes)
+							stats.TypeBytesOut[info.MsgType] += uint64(info.Bytes)
+						}
+
+						d.peersSyncMap.Store(info.PeerID, stats)
+					} else {
+						log.Debug("Failed to cast value to PeerStatistics struct", value)
+					}
+				} else {
+					d.peersSyncMap.Store(info.PeerID, PeerStatistics{
+						PeerType:     info.PeerType,
+						CapBytesIn:   make(map[string]uint64),
+						CapBytesOut:  make(map[string]uint64),
+						TypeBytesIn:  make(map[string]uint64),
+						TypeBytesOut: make(map[string]uint64),
+					})
+				}
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) Peers() map[string]*PeerStatistics {
+	stats := make(map[string]*PeerStatistics)
+
+	d.peersSyncMap.Range(func(key, value interface{}) bool {
+
+		if loadedKey, ok := key.(string); ok {
+			if loadedValue, ok := value.(PeerStatistics); ok {
+				stats[loadedKey] = &loadedValue
+			} else {
+				log.Debug("Failed to cast value to PeerStatistics struct", value)
+			}
+		} else {
+			log.Debug("Failed to cast key to string", key)
+		}
+
+		return true
+	})
+
+	d.PeerDataResetStatistics()
+
+	return stats
+}
+
+func (d *DiagnosticClient) PeerDataResetStatistics() {
+	d.peersSyncMap.Range(func(key, value interface{}) bool {
+		if stats, ok := value.(PeerStatistics); ok {
+			stats.BytesIn = 0
+			stats.BytesOut = 0
+			stats.CapBytesIn = make(map[string]uint64)
+			stats.CapBytesOut = make(map[string]uint64)
+			stats.TypeBytesIn = make(map[string]uint64)
+			stats.TypeBytesOut = make(map[string]uint64)
+
+			d.peersSyncMap.Store(key, stats)
+		} else {
+			log.Debug("Failed to cast value to PeerStatistics struct", value)
+		}
+
+		return true
+	})
 }

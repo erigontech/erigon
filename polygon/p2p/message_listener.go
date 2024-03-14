@@ -30,6 +30,7 @@ type MessageListener interface {
 	RegisterNewBlockObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc
 	RegisterNewBlockHashesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc
 	RegisterBlockHeadersObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc
+	RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
@@ -45,6 +46,7 @@ func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, pee
 		newBlockObservers:       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{},
 		newBlockHashesObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{},
 		blockHeadersObservers:   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
+		blockBodiesObservers:    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{},
 		peerEventObservers:      map[uint64]MessageObserver[*sentry.PeerEvent]{},
 	}
 }
@@ -59,6 +61,7 @@ type messageListener struct {
 	newBlockObservers       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashesObservers map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
 	blockHeadersObservers   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
+	blockBodiesObservers    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
 	peerEventObservers      map[uint64]MessageObserver[*sentry.PeerEvent]
 	stopWg                  sync.WaitGroup
 }
@@ -84,6 +87,7 @@ func (ml *messageListener) Run(ctx context.Context) {
 	ml.newBlockObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{}
 	ml.newBlockHashesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{}
 	ml.blockHeadersObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{}
+	ml.blockBodiesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{}
 	ml.peerEventObservers = map[uint64]MessageObserver[*sentry.PeerEvent]{}
 }
 
@@ -99,6 +103,10 @@ func (ml *messageListener) RegisterBlockHeadersObserver(observer MessageObserver
 	return registerObserver(ml, ml.blockHeadersObservers, observer)
 }
 
+func (ml *messageListener) RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
+	return registerObserver(ml, ml.blockBodiesObservers, observer)
+}
+
 func (ml *messageListener) RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc {
 	return registerObserver(ml, ml.peerEventObservers, observer)
 }
@@ -110,6 +118,7 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 				sentry.MessageId_NEW_BLOCK_66,
 				sentry.MessageId_NEW_BLOCK_HASHES_66,
 				sentry.MessageId_BLOCK_HEADERS_66,
+				sentry.MessageId_BLOCK_BODIES_66,
 			},
 		}
 
@@ -124,6 +133,8 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 			return notifyInboundMessageObservers(ctx, ml, ml.newBlockHashesObservers, message)
 		case sentry.MessageId_BLOCK_HEADERS_66:
 			return notifyInboundMessageObservers(ctx, ml, ml.blockHeadersObservers, message)
+		case sentry.MessageId_BLOCK_BODIES_66:
+			return notifyInboundMessageObservers(ctx, ml, ml.blockBodiesObservers, message)
 		default:
 			return nil
 		}
@@ -216,10 +227,9 @@ func notifyInboundMessageObservers[TPacket any](
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			ml.logger.Debug("penalizing peer", "peerId", peerId, "err", err)
+			ml.logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
 
-			penalizeErr := ml.peerPenalizer.Penalize(ctx, peerId)
-			if penalizeErr != nil {
+			if penalizeErr := ml.peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
 			}
 		}

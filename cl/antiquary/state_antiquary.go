@@ -95,9 +95,9 @@ func (s *Antiquary) loopStates(ctx context.Context) {
 			beforeFinalized = finalized
 			if err := s.IncrementBeaconState(ctx, finalized); err != nil {
 				if s.currentState != nil {
-					s.logger.Error("Failed to increment beacon state", "err", err, "slot", s.currentState.Slot())
+					s.logger.Warn("Could not to increment beacon state, trying again later", "err", err, "slot", s.currentState.Slot())
 				} else {
-					s.logger.Error("Failed to increment beacon state", "err", err)
+					s.logger.Warn("Failed to increment beacon state", "err", err)
 				}
 				s.currentState = nil
 				time.Sleep(5 * time.Second)
