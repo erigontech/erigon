@@ -16,10 +16,11 @@ package fork
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/stretchr/testify/require"
 )
 
 // Testing Fork digest

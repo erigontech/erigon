@@ -145,16 +145,10 @@ func (s *GossipManager) unsubscribe(topic string) {
 		return
 	}
 	sub := s.subscriptions[topic]
-	go func() {
-		timer := time.NewTimer(time.Hour)
-		ctx := sub.ctx
-		select {
-		case <-ctx.Done():
-			sub.Close()
-		case <-timer.C:
-			sub.Close()
-		}
-	}()
+	if sub == nil {
+		return
+	}
+	sub.Close()
 	delete(s.subscriptions, topic)
 }
 
@@ -181,8 +175,7 @@ func (s *Sentinel) forkWatcher() {
 					s.subManager.unsubscribe(path)
 					newSub, err := s.SubscribeGossip(sub.gossip_topic)
 					if err != nil {
-						log.Error("[Gossip] Failed to resubscribe to topic", "err", err)
-						return
+						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
 					}
 					newSub.Listen()
 				}

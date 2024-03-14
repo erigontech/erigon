@@ -227,10 +227,9 @@ func notifyInboundMessageObservers[TPacket any](
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			ml.logger.Debug("penalizing peer", "peerId", peerId, "err", err)
+			ml.logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
 
-			penalizeErr := ml.peerPenalizer.Penalize(ctx, peerId)
-			if penalizeErr != nil {
+			if penalizeErr := ml.peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
 			}
 		}
