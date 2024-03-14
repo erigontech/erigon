@@ -81,13 +81,13 @@ jobs:
 
     - name: Resume the Erigon instance dedicated to db maintenance
       run: |
-        curl -X POST -H "Accept: application/json" -d '{"status": "running"}' http://localhost:8080/production/default/status || true
+        python3 $ERIGON_QA_PATH/test_system/db-producer/resume_production.py || true
 
     - name: Save test results
       if: always()
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/uploads/upload_test_results.py --commit $(git rev-parse HEAD) --test_name tip-tracking --outcome $TEST_RESULT --result_file $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/result.json
+      run: python3 $ERIGON_QA_PATH/test_system/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name tip-tracking --outcome $TEST_RESULT --result_file $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/result.json
 
     - name: Upload test results
       if: always()
