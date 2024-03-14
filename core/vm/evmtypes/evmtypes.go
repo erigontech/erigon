@@ -104,5 +104,6 @@ type IntraBlockState interface {
 	Snapshot() int
 
 	AddLog(*types.Log)
+	AddLog_zkEvm(*types.Log)
 	GetLogs(hash libcommon.Hash) []*types.Log
 }

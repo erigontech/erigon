@@ -40,7 +40,7 @@ func main() {
 			panic(err)
 		}
 
-		if !debug_tools.CompareBlocks(ctx, blockByNumber, blockByHash, client, client) {
+		if !debug_tools.CompareBlocks(ctx, false, blockByNumber, blockByHash, client, client) {
 			log.Warn("Blocks mismatch", "blockNumber", i)
 		}
 

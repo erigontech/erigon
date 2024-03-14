@@ -902,7 +902,7 @@ func makeLog(size int) executionFunc {
 		}
 
 		d := scope.Memory.GetCopy(int64(mStart.Uint64()), int64(mSize.Uint64()))
-		interpreter.evm.IntraBlockState().AddLog(&types.Log{
+		interpreter.evm.IntraBlockState().AddLog_zkEvm(&types.Log{
 			Address: scope.Contract.Address(),
 			Topics:  topics,
 			Data:    d,

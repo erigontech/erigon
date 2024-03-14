@@ -39,7 +39,7 @@ import (
 )
 
 func (api *BaseAPI) getReceipts(ctx context.Context, tx kv.Tx, chainConfig *chain.Config, block *types.Block, senders []common.Address) (types.Receipts, error) {
-	if cached := rawdb.ReadReceipts(tx, block, senders); cached != nil {
+	if cached := rawdb.ReadReceipts_zkEvm(tx, block, senders); cached != nil {
 		return cached, nil
 	}
 	engine := api.engine()

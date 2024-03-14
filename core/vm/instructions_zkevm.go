@@ -184,7 +184,7 @@ func makeLog_zkevm(size int) executionFunc {
 			d = append(d, make([]byte, 32-lenMod32)...)
 		}
 
-		interpreter.evm.IntraBlockState().AddLog(&types.Log{
+		interpreter.evm.IntraBlockState().AddLog_zkEvm(&types.Log{
 			Address: scope.Contract.Address(),
 			Topics:  topics,
 			Data:    d,

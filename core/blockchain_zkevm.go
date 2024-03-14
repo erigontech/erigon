@@ -239,7 +239,9 @@ func ExecuteBlockEphemerallyZk(
 			}
 		}
 		if !chainConfig.IsForkID7Etrog(block.NumberU64()) {
-			ibs.ScalableSetSmtRootHash(roHermezDb)
+			if err := ibs.ScalableSetSmtRootHash(roHermezDb); err != nil {
+				return nil, err
+			}
 		}
 
 		txSender, _ := tx.GetSender()

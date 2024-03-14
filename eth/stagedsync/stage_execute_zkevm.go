@@ -147,15 +147,12 @@ Loop:
 			return err
 		}
 
-		//TODO: SHOULD RETURN ERR?
 		if block == nil {
-			log.Error(fmt.Sprintf("[%s] Empty block", logPrefix), "blocknum", blockNum)
-			continue
+			return fmt.Errorf("[%s] Empty block blocknum: %d", logPrefix, blockNum)
 		}
 
 		if header == nil {
-			log.Error(fmt.Sprintf("[%s] Empty header", logPrefix), "blocknum", blockNum)
-			continue
+			return fmt.Errorf("[%s] Empty header blocknum: %d", logPrefix, blockNum)
 		}
 
 		lastLogTx += uint64(block.Transactions().Len())
@@ -164,11 +161,11 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err = updateZkEVMBlockCfg(&cfg, hermezDb, logPrefix); err != nil {
+		if err := updateZkEVMBlockCfg(&cfg, hermezDb, logPrefix); err != nil {
 			return err
 		}
 		header.ParentHash = prevBlockHash
-		if err = executeBlockZk(block, &prevBlockRoot, header, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
+		if err := executeBlockZk(block, &prevBlockRoot, header, tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, initialCycle, stateStream, hermezDb); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				log.Warn(fmt.Sprintf("[%s] Execution failed", logPrefix), "block", blockNum, "hash", block.Hash().String(), "err", err)
 				if cfg.hd != nil {
@@ -313,7 +310,9 @@ func postExecuteCommitValues(
 	*/
 	headerHash := header.Hash()
 	blockNum := block.NumberU64()
-	rawdb.WriteHeader(tx, header)
+	if err := rawdb.WriteHeader_zkEvm(tx, header); err != nil {
+		return fmt.Errorf("failed to write header: %v", err)
+	}
 
 	if err := rawdb.WriteCanonicalHash(tx, headerHash, blockNum); err != nil {
 		return fmt.Errorf("failed to write header: %v", err)
@@ -339,7 +338,9 @@ func postExecuteCommitValues(
 	}
 
 	// write the new block lookup entries
-	rawdb.WriteTxLookupEntries(tx, block)
+	if err := rawdb.WriteTxLookupEntries_zkEvm(tx, block); err != nil {
+		return fmt.Errorf("failed to write tx lookup entries: %v", err)
+	}
 
 	return nil
 }
@@ -381,28 +382,23 @@ func executeBlockZk(
 	vmConfig.Debug = true
 	vmConfig.Tracer = callTracer
 
-	var receipts types.Receipts
-	var stateSyncReceipt *types.Receipt
-	var execRs *core.EphemeralExecResult
 	getHashFn := core.GetHashFn(block.Header(), getHeader)
-
-	execRs, err = core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, prevBlockRoot, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, tx, roHermezDb)
-
+	execRs, err := core.ExecuteBlockEphemerallyZk(cfg.chainConfig, &vmConfig, getHashFn, cfg.engine, prevBlockRoot, block, stateReader, stateWriter, ChainReaderImpl{config: cfg.chainConfig, tx: tx, blockReader: cfg.blockReader}, getTracer, tx, roHermezDb)
 	if err != nil {
 		return err
 	}
-	receipts = execRs.Receipts
-	stateSyncReceipt = execRs.StateSyncReceipt
+	receipts := execRs.Receipts
 
 	header.GasUsed = uint64(execRs.GasUsed)
 	header.ReceiptHash = types.DeriveSha(receipts)
 	header.Bloom = execRs.Bloom
 
 	if writeReceipts {
-		if err = rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
+		if err := rawdb.AppendReceipts(tx, blockNum, receipts); err != nil {
 			return err
 		}
 
+		stateSyncReceipt := execRs.StateSyncReceipt
 		if stateSyncReceipt != nil && stateSyncReceipt.Status == types.ReceiptStatusSuccessful {
 			if err := rawdb.WriteBorReceipt(tx, block.Hash(), block.NumberU64(), stateSyncReceipt); err != nil {
 				return err

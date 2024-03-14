@@ -8,6 +8,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/types"
 	dstypes "github.com/ledgerwatch/erigon/zk/datastream/types"
 )
 
@@ -209,4 +210,16 @@ func (sdb *IntraBlockState) ScalableGetTimestamp() uint64 {
 
 	sdb.GetState(ADDRESS_SCALABLE_L2, &TIMESTAMP_STORAGE_POS, timestamp)
 	return timestamp.Uint64()
+}
+
+// log index was derived from the count of ALL logs for all transactions
+// here it is made to be derived for the count of logs for the current transaction only
+func (sdb *IntraBlockState) AddLog_zkEvm(log2 *types.Log) {
+	sdb.journal.append(addLogChange{txhash: sdb.thash})
+	log2.TxHash = sdb.thash
+	log2.BlockHash = sdb.bhash
+	log2.TxIndex = uint(sdb.txIndex)
+	log2.Index = uint(len(sdb.logs[sdb.thash]))
+	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
+	sdb.logSize++
 }

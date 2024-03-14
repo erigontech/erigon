@@ -15,23 +15,31 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-func CompareBlocks(ctx context.Context, blockRemote, blockLocal *types.Block, rpcClientLocal, rpcClientRemote *ethclient.Client) bool {
+func CompareBlocks(ctx context.Context, silent bool, blockRemote, blockLocal *types.Block, rpcClientLocal, rpcClientRemote *ethclient.Client) bool {
 	blocksMatch := true
 	// check all fields
 	if blockRemote.ParentHash() != blockLocal.ParentHash() {
-		log.Warn("ParentHash", "Rpc", blockRemote.ParentHash().Hex(), "Rpc", blockLocal.ParentHash().Hex())
+		if !silent {
+			log.Warn("ParentHash", "Rpc", blockRemote.ParentHash().Hex(), "Rpc", blockLocal.ParentHash().Hex())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.UncleHash() != blockLocal.UncleHash() {
-		log.Warn("UnclesHash", "Rpc", blockRemote.UncleHash().Hex(), "Local", blockLocal.UncleHash().Hex())
+		if !silent {
+			log.Warn("UnclesHash", "Rpc", blockRemote.UncleHash().Hex(), "Local", blockLocal.UncleHash().Hex())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.Root() != blockLocal.Root() {
-		log.Warn("Root", "Rpc", blockRemote.Root().Hex(), "Local", blockLocal.Root().Hex())
+		if !silent {
+			log.Warn("Root", "Rpc", blockRemote.Root().Hex(), "Local", blockLocal.Root().Hex())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.TxHash() != blockLocal.TxHash() {
-		log.Warn("TxHash", "Rpc", blockRemote.TxHash().Hex(), "Local", blockLocal.TxHash().Hex())
+		if !silent {
+			log.Warn("TxHash", "Rpc", blockRemote.TxHash().Hex(), "Local", blockLocal.TxHash().Hex())
+		}
 		blocksMatch = false
 	}
 
@@ -45,59 +53,82 @@ func CompareBlocks(ctx context.Context, blockRemote, blockLocal *types.Block, rp
 	}
 
 	if len(remoteTxHashes) != len(localTxHashes) {
-		log.Warn("Transactions amount mismatch", "Rpc", len(remoteTxHashes), "Local", len(localTxHashes))
+		if !silent {
+			log.Warn("Transactions amount mismatch", "Rpc", len(remoteTxHashes), "Local", len(localTxHashes))
 
-		log.Warn("RPc transactions", "txs", remoteTxHashes)
-		log.Warn("Local transactions", "txs", localTxHashes)
+			log.Warn("RPc transactions", "txs", remoteTxHashes)
+			log.Warn("Local transactions", "txs", localTxHashes)
+		}
 		blocksMatch = false
 	} else {
 		for i, txRemote := range localTxHashes {
 			txLocal := localTxHashes[i]
 			if txRemote != txLocal {
-				log.Warn("TxHash", txRemote.Hex(), txLocal.Hex())
+				if !silent {
+					log.Warn("TxHash", txRemote.Hex(), txLocal.Hex())
+				}
 				blocksMatch = false
 			}
 		}
 	}
 
 	if blockRemote.ReceiptHash() != blockLocal.ReceiptHash() {
-		log.Warn("ReceiptHash mismatch. Checking receipts", "Rpc receipt hash", blockRemote.ReceiptHash().Hex(), "Local receipt hash", blockLocal.ReceiptHash().Hex())
+		if !silent {
+			log.Warn("ReceiptHash mismatch. Checking receipts", "Rpc receipt hash", blockRemote.ReceiptHash().Hex(), "Local receipt hash", blockLocal.ReceiptHash().Hex())
+		}
 		for y, tx := range remoteTxHashes {
 			receiptLocal, receiptRpc, err := getReceipt(ctx, rpcClientLocal, rpcClientRemote, tx)
 			if err != nil {
-				log.Error(fmt.Sprintf("getReceipt: %s", err))
+				if !silent {
+					log.Error(fmt.Sprintf("getReceipt: %s", err))
+				}
 				return false
 			}
-			log.Warn("-------------------------------------------------")
-			log.Warn("Checking Receipts for tx.", "TxHash", tx.Hex())
-
+			if !silent {
+				log.Warn("-------------------------------------------------")
+				log.Warn("Checking Receipts for tx.", "TxHash", tx.Hex())
+			}
 			if receiptLocal.Status != receiptRpc.Status {
-				log.Warn("ReceiptStatus", "Rpc", receiptRpc.Status, "Local", receiptLocal.Status)
+				if !silent {
+					log.Warn("ReceiptStatus", "Rpc", receiptRpc.Status, "Local", receiptLocal.Status)
+				}
 				blocksMatch = false
 			}
 			if receiptLocal.CumulativeGasUsed != receiptRpc.CumulativeGasUsed {
-				log.Warn("CumulativeGasUsed", "Rpc", receiptRpc.CumulativeGasUsed, "Local", receiptLocal.CumulativeGasUsed)
+				if !silent {
+					log.Warn("CumulativeGasUsed", "Rpc", receiptRpc.CumulativeGasUsed, "Local", receiptLocal.CumulativeGasUsed)
+				}
 				blocksMatch = false
 			}
 			if !reflect.DeepEqual(receiptLocal.PostState, receiptRpc.PostState) {
-				log.Warn("PostState", "Rpc", common.BytesToHash(receiptRpc.PostState), "Local", common.BytesToHash(receiptLocal.PostState))
+				if !silent {
+					log.Warn("PostState", "Rpc", common.BytesToHash(receiptRpc.PostState), "Local", common.BytesToHash(receiptLocal.PostState))
+				}
 				blocksMatch = false
 			}
 			if receiptLocal.ContractAddress != receiptRpc.ContractAddress {
-				log.Warn("ContractAddress", "Rpc", receiptRpc.ContractAddress, "Local", receiptLocal.ContractAddress)
+				if !silent {
+					log.Warn("ContractAddress", "Rpc", receiptRpc.ContractAddress, "Local", receiptLocal.ContractAddress)
+				}
 				blocksMatch = false
 			}
 			if receiptLocal.GasUsed != receiptRpc.GasUsed {
-				log.Warn("GasUsed", "Rpc", receiptRpc.GasUsed, "Local", receiptLocal.GasUsed)
+				if !silent {
+					log.Warn("GasUsed", "Rpc", receiptRpc.GasUsed, "Local", receiptLocal.GasUsed)
+				}
 				blocksMatch = false
 			}
 			if receiptLocal.Bloom != receiptRpc.Bloom {
-				log.Warn("LogsBloom", "Rpc", receiptRpc.Bloom, "Local", receiptLocal.Bloom)
+				if !silent {
+					log.Warn("LogsBloom", "Rpc", receiptRpc.Bloom, "Local", receiptLocal.Bloom)
+				}
 				blocksMatch = false
 			}
 
 			if len(receiptRpc.Logs) != len(receiptLocal.Logs) {
-				log.Warn("Receipt log amount mismatch", "receipt index", y, "Rpc log amount", len(receiptRpc.Logs), "Local log amount", len(receiptLocal.Logs))
+				if !silent {
+					log.Warn("Receipt log amount mismatch", "receipt index", y, "Rpc log amount", len(receiptRpc.Logs), "Local log amount", len(receiptLocal.Logs))
+				}
 				blocksMatch = false
 
 				rpcLogIndexes := make([]uint, len(receiptRpc.Logs))
@@ -109,8 +140,12 @@ func CompareBlocks(ctx context.Context, blockRemote, blockLocal *types.Block, rp
 					localLogIndexes[i] = log.Index
 				}
 
-				log.Warn("RPc log indexes", "Remote log indexes", rpcLogIndexes)
-				log.Warn("Local log indexes", "Local log indexes", localLogIndexes)
+				if !silent {
+					log.Warn("RPc log indexes", "Remote log indexes", rpcLogIndexes)
+				}
+				if !silent {
+					log.Warn("Local log indexes", "Local log indexes", localLogIndexes)
+				}
 			}
 
 			// still check the available logs
@@ -121,99 +156,149 @@ func CompareBlocks(ctx context.Context, blockRemote, blockLocal *types.Block, rp
 			}
 			for i := 0; i < smallerLogLength; i++ {
 
-				log.Warn("-------------------------------------------------")
-				log.Warn("	Checking Logs for receipt.", "index", i)
+				if !silent {
+					log.Warn("-------------------------------------------------")
+				}
+				if !silent {
+					log.Warn("	Checking Logs for receipt.", "index", i)
+				}
 				logLocal := receiptLocal.Logs[i]
 				logRemote := receiptRpc.Logs[i]
 
 				if logRemote.Address != logLocal.Address {
-					log.Warn("Log Address", "index", i, "Rpc", logRemote.Address, "Local", logLocal.Address)
+					if !silent {
+						log.Warn("Log Address", "index", i, "Rpc", logRemote.Address, "Local", logLocal.Address)
+					}
 					blocksMatch = false
 				}
 				if !reflect.DeepEqual(logRemote.Data, logLocal.Data) {
-					log.Warn("Log Data", "index", i, "Rpc", logRemote.Data, "Local", logLocal.Data)
+					if !silent {
+						log.Warn("Log Data", "index", i, "Rpc", logRemote.Data, "Local", logLocal.Data)
+					}
 					blocksMatch = false
 				}
 
 				if logRemote.Index != logLocal.Index {
-					log.Warn("Log Index", "index", i, "Rpc", logRemote.Index, "Local", logLocal.Index)
+					if !silent {
+						log.Warn("Log Index", "index", i, "Rpc", logRemote.Index, "Local", logLocal.Index)
+					}
 					blocksMatch = false
 				}
 
 				if logRemote.BlockNumber != logLocal.BlockNumber {
-					log.Warn("Log BlockNumber", "index", i, "Rpc", logRemote.BlockNumber, "Local", logLocal.BlockNumber)
+					if !silent {
+						log.Warn("Log BlockNumber", "index", i, "Rpc", logRemote.BlockNumber, "Local", logLocal.BlockNumber)
+					}
 					blocksMatch = false
 				}
 
 				if logRemote.TxHash != logLocal.TxHash {
-					log.Warn("Log TxHash", "index", i, "Rpc", logRemote.TxHash, "Local", logLocal.TxHash)
+					if !silent {
+						log.Warn("Log TxHash", "index", i, "Rpc", logRemote.TxHash, "Local", logLocal.TxHash)
+					}
 					blocksMatch = false
 				}
 
 				if logRemote.TxIndex != logLocal.TxIndex {
-					log.Warn("Log TxIndex", "index", i, "Rpc", logRemote.TxIndex, "Local", logLocal.TxIndex)
+					if !silent {
+						log.Warn("Log TxIndex", "index", i, "Rpc", logRemote.TxIndex, "Local", logLocal.TxIndex)
+					}
 					blocksMatch = false
 				}
 
 				// don't check blockhash at this point it is most certainly mismatching and this only spams
 				// if logRemote.BlockHash != logLocal.BlockHash {
+				// 	if !silent {
 				// 	log.Warn("Log BlockHash", "index", i, "Rpc", logRemote.BlockHash, "Local", logLocal.BlockHash)
+				// }
 				// }
 
 				if len(logRemote.Topics) != len(logLocal.Topics) {
-					log.Warn("Log Topics amount mismatch", "Log index", i, "Rpc", len(logRemote.Topics), "Local", len(logLocal.Topics))
-					log.Warn("Rpc Topics", "Topics", logRemote.Topics)
-					log.Warn("Local Topics", "Topics", logLocal.Topics)
+					if !silent {
+						log.Warn("Log Topics amount mismatch", "Log index", i, "Rpc", len(logRemote.Topics), "Local", len(logLocal.Topics))
+					}
+					if !silent {
+						log.Warn("Rpc Topics", "Topics", logRemote.Topics)
+					}
+					if !silent {
+						log.Warn("Local Topics", "Topics", logLocal.Topics)
+					}
 					blocksMatch = false
 				} else {
 					for j, topicRemote := range logRemote.Topics {
 						topicLocal := logLocal.Topics[j]
 						if topicRemote != topicLocal {
-							log.Warn("Log Topic", "Log index", i, "Topic index", j, "Rpc", topicRemote, "Local", topicLocal)
+							if !silent {
+								log.Warn("Log Topic", "Log index", i, "Topic index", j, "Rpc", topicRemote, "Local", topicLocal)
+							}
 							blocksMatch = false
 						}
 					}
 				}
+				if !silent {
+					log.Warn("-------------------------------------------------")
+				}
+			}
+			if !silent {
+				log.Warn("Finished tx check")
+			}
+			if !silent {
 				log.Warn("-------------------------------------------------")
 			}
-			log.Warn("Finished tx check")
-			log.Warn("-------------------------------------------------")
 		}
 	}
 	if blockRemote.Bloom() != blockLocal.Bloom() {
-		log.Warn("Bloom", "Rpc", blockRemote.Bloom(), "Local", blockLocal.Bloom())
+		if !silent {
+			log.Warn("Bloom", "Rpc", blockRemote.Bloom(), "Local", blockLocal.Bloom())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.Difficulty().Cmp(blockLocal.Difficulty()) != 0 {
-		log.Warn("Difficulty", "Rpc", blockRemote.Difficulty().Uint64(), "Local", blockLocal.Difficulty().Uint64())
+		if !silent {
+			log.Warn("Difficulty", "Rpc", blockRemote.Difficulty().Uint64(), "Local", blockLocal.Difficulty().Uint64())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.NumberU64() != blockLocal.NumberU64() {
-		log.Warn("NumberU64", "Rpc", blockRemote.NumberU64(), "Local", blockLocal.NumberU64())
+		if !silent {
+			log.Warn("NumberU64", "Rpc", blockRemote.NumberU64(), "Local", blockLocal.NumberU64())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.GasLimit() != blockLocal.GasLimit() {
-		log.Warn("GasLimit", "Rpc", blockRemote.GasLimit(), "Local", blockLocal.GasLimit())
+		if !silent {
+			log.Warn("GasLimit", "Rpc", blockRemote.GasLimit(), "Local", blockLocal.GasLimit())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.GasUsed() != blockLocal.GasUsed() {
-		log.Warn("GasUsed", "Rpc", blockRemote.GasUsed(), "Local", blockLocal.GasUsed())
+		if !silent {
+			log.Warn("GasUsed", "Rpc", blockRemote.GasUsed(), "Local", blockLocal.GasUsed())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.Time() != blockLocal.Time() {
-		log.Warn("Time", "Rpc", blockRemote.Time(), "Local", blockLocal.Time())
+		if !silent {
+			log.Warn("Time", "Rpc", blockRemote.Time(), "Local", blockLocal.Time())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.MixDigest() != blockLocal.MixDigest() {
-		log.Warn("MixDigest", "Rpc", blockRemote.MixDigest().Hex(), "Local", blockLocal.MixDigest().Hex())
+		if !silent {
+			log.Warn("MixDigest", "Rpc", blockRemote.MixDigest().Hex(), "Local", blockLocal.MixDigest().Hex())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.Nonce() != blockLocal.Nonce() {
-		log.Warn("Nonce", "Rpc", blockRemote.Nonce(), "Local", blockLocal.Nonce())
+		if !silent {
+			log.Warn("Nonce", "Rpc", blockRemote.Nonce(), "Local", blockLocal.Nonce())
+		}
 		blocksMatch = false
 	}
 	if blockRemote.BaseFee() != blockLocal.BaseFee() {
-		log.Warn("BaseFee", "Rpc", blockRemote.BaseFee(), "Local", blockLocal.BaseFee())
+		if !silent {
+			log.Warn("BaseFee", "Rpc", blockRemote.BaseFee(), "Local", blockLocal.BaseFee())
+		}
 		blocksMatch = false
 	}
 

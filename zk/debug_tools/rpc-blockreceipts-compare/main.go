@@ -44,45 +44,30 @@ func main() {
 		highestBlockNumber = highestBlockLocal
 	}
 
-	log.Warn("Starting blockhash mismatch check", "highestBlockRemote", highestBlockRemote, "highestBlockLocal", highestBlockLocal, "working highestBlockNumber", highestBlockNumber)
+	log.Warn("Starting block traces mismatch check", "highestBlockRemote", highestBlockRemote, "highestBlockLocal", highestBlockLocal, "working highestBlockNumber", highestBlockNumber)
 
 	lowestBlockNumber := uint64(0)
 	checkBlockNumber := highestBlockNumber
 
 	var blockRemote, blockLocal *types.Block
-
-	for {
-		log.Warn("Checking for block", "blockNumber", checkBlockNumber)
+	for i := lowestBlockNumber; i < checkBlockNumber; i += 100 {
+		if i%10000 == 0 {
+			log.Warn("Checking block", "blockNumber", i)
+		}
 		// get blocks
-		blockRemote, blockLocal, err = getBlocks(ctx, rpcClientLocal, rpcClientRemote, checkBlockNumber)
+		blockRemote, blockLocal, err = getBlocks(ctx, rpcClientLocal, rpcClientRemote, i)
 		if err != nil {
-			log.Error(fmt.Sprintf("blockNum: %d, error getBlocks: %s", checkBlockNumber, err))
+			log.Error(fmt.Sprintf("blockNum: %d, error getBlockTraces: %s", i, err))
 			return
 		}
-		// if they match, go higher
-		if blockRemote.Hash() == blockLocal.Hash() {
-			lowestBlockNumber = checkBlockNumber + 1
-			log.Warn("Blockhash match")
-		} else {
-			highestBlockNumber = checkBlockNumber
-			log.Warn("Blockhash MISMATCH")
+
+		if blockRemote.Hash() != blockLocal.Hash() {
+			log.Warn("Blocks mismatch", "blockNumber", i)
 		}
-
-		checkBlockNumber = (lowestBlockNumber + highestBlockNumber) / 2
-		if lowestBlockNumber >= highestBlockNumber {
-			break
-		}
+		// if match := debug_tools.CompareBlocks(ctx, false, blockRemote, blockLocal, rpcClientLocal, rpcClientRemote); !match {
+		// 	log.Warn("Mismatch found", "blockNum", i)
+		// }
 	}
-
-	// get blocks
-	blockRemote, blockLocal, err = getBlocks(ctx, rpcClientLocal, rpcClientRemote, checkBlockNumber)
-	if err != nil {
-		log.Error(fmt.Sprintf("blockNum: %d, error getBlocks: %s", checkBlockNumber, err))
-		return
-	}
-
-	debug_tools.CompareBlocks(ctx, false, blockRemote, blockLocal, rpcClientLocal, rpcClientRemote)
-
 	log.Warn("Check finished!")
 }
 
