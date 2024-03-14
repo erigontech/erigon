@@ -81,7 +81,7 @@ jobs:
 
     - name: Save test results
       if: always()
-      run: python3 $ERIGON_QA_PATH/test_system/base_library/upload_test_results.py --commit $(git rev-parse --short HEAD) --test_name clean-exit-block-downloading --outcome steps.test_step.outputs.TEST_RESULT --result_file ${{ github.workspace }}/result.json
+      run: python3 $ERIGON_QA_PATH/test_system/qa-tests/uploads/upload_test_results.py --commit $(git rev-parse --short HEAD) --test_name clean-exit-block-downloading --outcome steps.test_step.outputs.TEST_RESULT --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
       if: always()
