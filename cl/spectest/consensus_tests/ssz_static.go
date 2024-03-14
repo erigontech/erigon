@@ -46,26 +46,16 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		_, isBeaconState := object.(*state.CachingBeaconState)
 
 		snappyEncoded, err := fs.ReadFile(fsroot, serializedFile)
-		// fmt.Println("Read snappy encoded:", snappyEncoded, "err:", err)
 		require.NoError(t, err)
 		encoded, err := utils.DecompressSnappy(snappyEncoded)
-		// fmt.Println("Decompressed:", encoded, "err:", err)
 		require.NoError(t, err)
 
 		if err := object.DecodeSSZ(encoded, int(c.Version())); err != nil && !isBeaconState {
 			return err
 		}
 
-		// fmt.Println("Decoded:", object)
 		haveRoot, err := object.HashSSZ()
 		require.NoError(t, err)
-		// fmt.Println("Have root:", haveRoot)
-		// fmt.Println("Expected root:", expectedRoot)
-		// haveRootHex := hex.EncodeToString(haveRoot[:])
-		// fmt.Println("Have root hex:", haveRootHex)
-		// fmt.Println("Object:", object)
-		// hex_string1 := "42cc09f8351adfdf3aec0de8b968da414c88ccfa01f18634404295c2b3df3b770f1daf70d6f4ffa543efbb315e98177a8260f845547a4d66"
-		// fmt.Println("Expected root hex:", len(hex_string1))
 		require.EqualValues(t, expectedRoot, haveRoot)
 		// Cannot test it without a config.
 		if isBeaconState {
@@ -73,10 +63,8 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 		}
 		haveEncoded, err := object.EncodeSSZ(nil)
 		require.NoError(t, err)
-		// fmt.Println("Encoded:", haveEncoded)
 		require.EqualValues(t, haveEncoded, encoded)
 		// Now let it do the encoding in snapshot format
-		// fmt.Println("Encoding in snapshot format")
 		if blk, ok := object.(*cltypes.SignedBeaconBlock); ok {
 			var b bytes.Buffer
 			_, err := snapshot_format.WriteBlockForSnapshot(&b, blk, nil)
