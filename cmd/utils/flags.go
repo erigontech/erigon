@@ -422,6 +422,11 @@ var (
 		Usage: "Rebuild the state tree after this many blocks behind",
 		Value: 10000,
 	}
+	SequencerInitialForkId = cli.Uint64Flag{
+		Name:  "zkevm.sequencer-initial-fork-id",
+		Usage: "The initial fork id to launch the sequencer with",
+		Value: 8,
+	}
 	SequencerAddressFlag = cli.StringFlag{
 		Name:  "zkevm.sequencer-address",
 		Usage: "The sequencer address to use if running as a sequencer",

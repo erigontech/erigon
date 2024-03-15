@@ -63,8 +63,6 @@ const (
 
 	totalVirtualCounterSmtLevel = 80 // todo [zkevm] this should be read from the db
 
-	etrogForkId = 7 // todo [zkevm] we need a better way of handling this
-
 	yieldSize = 100 // arbitrary number defining how many transactions to yield from the pool at once
 )
 
@@ -209,10 +207,20 @@ func SpawnSequencingStage(
 	stateReader := state.NewPlainStateReader(tx)
 	ibs := state.New(stateReader)
 
+	var forkId uint64 = 0
+
 	// here we have a special case and need to inject in the initial batch on the network before
 	// we can continue accepting transactions from the pool
 	if executionAt == 0 {
-		err = processInjectedInitialBatch(hermezDb, ibs, tx, cfg, header, parentBlock, stateReader)
+		// capture the initial sequencer fork id for the first batch
+		forkId = cfg.zk.SequencerInitialForkId
+		if err := hermezDb.WriteForkId(1, forkId); err != nil {
+			return err
+		}
+		if err := hermezDb.WriteForkIdBlockOnce(forkId, 1); err != nil {
+			return err
+		}
+		err = processInjectedInitialBatch(hermezDb, ibs, tx, cfg, header, parentBlock, stateReader, forkId)
 		if err != nil {
 			return err
 		}
@@ -222,9 +230,21 @@ func SpawnSequencingStage(
 			}
 		}
 		return nil
+	} else {
+		forkId, err = hermezDb.GetForkId(lastBatch)
+		if err != nil {
+			return err
+		}
+		if forkId == 0 {
+			return errors.New("the network cannot have a 0 fork id")
+		}
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, etrogForkId)
+	if err := stagedsync.UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
+		return err
+	}
+    
+	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, uint16(forkId))
 
 	// whilst in the 1 batch = 1 block = 1 tx flow we can immediately add in the changeL2BlockTx calculation
 	// as this is the first tx we can skip the overflow check
@@ -307,7 +327,7 @@ LOOP:
 		ger = l1TreeUpdate.GER
 	}
 
-	if err = finaliseBlock(cfg, tx, hermezDb, ibs, stateReader, header, parentBlock, addedTransactions, addedReceipts, thisBatch, ger, l1BlockHash); err != nil {
+	if err = finaliseBlock(cfg, tx, hermezDb, ibs, stateReader, header, parentBlock, addedTransactions, addedReceipts, thisBatch, ger, l1BlockHash, forkId); err != nil {
 		return err
 	}
 
@@ -377,6 +397,7 @@ func processInjectedInitialBatch(
 	header *types.Header,
 	parentBlock *types.Block,
 	stateReader *state.PlainStateReader,
+	forkId uint64,
 ) error {
 	injected, err := hermezDb.GetL1InjectedBatch(0)
 	if err != nil {
@@ -396,13 +417,13 @@ func processInjectedInitialBatch(
 		return err
 	}
 
-	txn, receipt, err := handleInjectedBatch(cfg, tx, ibs, hermezDb, injected, header, parentBlock)
+	txn, receipt, err := handleInjectedBatch(cfg, tx, ibs, hermezDb, injected, header, parentBlock, forkId)
 	if err != nil {
 		return err
 	}
 	txns := types.Transactions{*txn}
 	receipts := types.Receipts{receipt}
-	if err = finaliseBlock(cfg, tx, hermezDb, ibs, stateReader, header, parentBlock, txns, receipts, injectedBatchNumber, injected.LastGlobalExitRoot, injected.L1ParentHash); err != nil {
+	if err = finaliseBlock(cfg, tx, hermezDb, ibs, stateReader, header, parentBlock, txns, receipts, injectedBatchNumber, injected.LastGlobalExitRoot, injected.L1ParentHash, forkId); err != nil {
 		return err
 	}
 
@@ -490,6 +511,7 @@ func handleInjectedBatch(
 	injected *zktypes.L1InjectedBatch,
 	header *types.Header,
 	parentBlock *types.Block,
+	forkId uint64,
 ) (*types.Transaction, *types.Receipt, error) {
 	txs, _, _, err := tx.DecodeTxs(injected.Transaction, 5)
 	if err != nil {
@@ -499,7 +521,7 @@ func handleInjectedBatch(
 		return nil, nil, errors.New("expected 1 transaction in the injected batch")
 	}
 
-	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, etrogForkId)
+	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, uint16(forkId))
 
 	// process the tx and we can ignore the counters as an overflow at this stage means no network anyway
 	receipt, _, err := attemptAddTransaction(dbTx, cfg, batchCounters, header, parentBlock.Header(), txs[0], ibs, hermezDb)
@@ -523,6 +545,7 @@ func finaliseBlock(
 	batch uint64,
 	ger common.Hash,
 	l1BlockHash common.Hash,
+	forkId uint64,
 ) error {
 
 	stateWriter := state.NewPlainStateWriter(tx, tx, newHeader.Number.Uint64())
@@ -584,7 +607,7 @@ func finaliseBlock(
 		return err
 	}
 
-	if err = hermezDb.WriteForkId(batch, etrogForkId); err != nil {
+	if err = hermezDb.WriteForkId(batch, forkId); err != nil {
 		return err
 	}
 

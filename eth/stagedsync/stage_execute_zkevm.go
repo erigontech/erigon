@@ -161,7 +161,7 @@ Loop:
 		writeChangeSets := nextStagesExpectData || blockNum > cfg.prune.History.PruneTo(to)
 		writeReceipts := nextStagesExpectData || blockNum > cfg.prune.Receipts.PruneTo(to)
 		writeCallTraces := nextStagesExpectData || blockNum > cfg.prune.CallTraces.PruneTo(to)
-		if err := updateZkEVMBlockCfg(&cfg, hermezDb, logPrefix); err != nil {
+		if err := UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
 			return err
 		}
 		header.ParentHash = prevBlockHash
@@ -512,7 +512,7 @@ func PruneExecutionStageZk(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx c
 	return nil
 }
 
-func updateZkEVMBlockCfg(cfg *ExecuteBlockCfg, hermezDb *hermez_db.HermezDb, logPrefix string) error {
+func UpdateZkEVMBlockCfg(cfg *chain.Config, hermezDb *hermez_db.HermezDb, logPrefix string) error {
 	update := func(forkId uint64, forkBlock **big.Int) error {
 		if *forkBlock != nil && *forkBlock != big.NewInt(0) {
 			return nil
@@ -530,16 +530,16 @@ func updateZkEVMBlockCfg(cfg *ExecuteBlockCfg, hermezDb *hermez_db.HermezDb, log
 		return nil
 	}
 
-	if err := update(chain.ForkID5Dragonfruit, &cfg.chainConfig.ForkID5DragonfruitBlock); err != nil {
+	if err := update(chain.ForkID5Dragonfruit, &cfg.ForkID5DragonfruitBlock); err != nil {
 		return err
 	}
-	if err := update(chain.ForkID6IncaBerry, &cfg.chainConfig.ForkID6IncaBerryBlock); err != nil {
+	if err := update(chain.ForkID6IncaBerry, &cfg.ForkID6IncaBerryBlock); err != nil {
 		return err
 	}
-	if err := update(chain.ForkID7Etrog, &cfg.chainConfig.ForkID7EtrogBlock); err != nil {
+	if err := update(chain.ForkID7Etrog, &cfg.ForkID7EtrogBlock); err != nil {
 		return err
 	}
-	if err := update(chain.ForkID88Elderberry, &cfg.chainConfig.ForkID88ElderberryBlock); err != nil {
+	if err := update(chain.ForkID88Elderberry, &cfg.ForkID88ElderberryBlock); err != nil {
 		return err
 	}
 	return nil

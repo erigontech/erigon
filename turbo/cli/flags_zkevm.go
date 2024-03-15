@@ -44,6 +44,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		RpcRateLimits:               ctx.Int(utils.RpcRateLimitsFlag.Name),
 		DatastreamVersion:           ctx.Int(utils.DatastreamVersionFlag.Name),
 		RebuildTreeAfter:            ctx.Uint64(utils.RebuildTreeAfterFlag.Name),
+		SequencerInitialForkId:      ctx.Uint64(utils.SequencerInitialForkId.Name),
 		SequencerAddress:            libcommon.HexToAddress(ctx.String(utils.SequencerAddressFlag.Name)),
 		ExecutorUrls:                strings.Split(ctx.String(utils.ExecutorUrls.Name), ","),
 		ExecutorStrictMode:          ctx.Bool(utils.ExecutorStrictMode.Name),
@@ -56,6 +57,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		checkFlag(utils.L2RpcUrlFlag.Name, cfg.Zk.L2RpcUrl)
 		checkFlag(utils.L2DataStreamerUrlFlag.Name, cfg.Zk.L2DataStreamerUrl)
 	} else {
+		checkFlag(utils.SequencerInitialForkId.Name, cfg.Zk.SequencerInitialForkId)
 		checkFlag(utils.SequencerAddressFlag.Name, cfg.Zk.SequencerAddress)
 		checkFlag(utils.ExecutorUrls.Name, cfg.Zk.ExecutorUrls)
 		checkFlag(utils.ExecutorStrictMode.Name, cfg.Zk.ExecutorStrictMode)
