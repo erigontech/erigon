@@ -141,9 +141,9 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 		}
 
 		txCtx := evmtypes.TxContext{
-			TxHash:   txnHash,
-			Origin:   msg.From(),
-			GasPrice: msg.GasPrice(),
+			TxHash:     txnHash,
+			Origin:     msg.From(),
+			GasPrice:   msg.GasPrice(),
 			BlobHashes: msg.BlobHashes(),
 		}
 
