@@ -232,7 +232,7 @@ func BodiesForward(
 					return true, nil
 				}
 
-				metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, *header.Number, logger)
+				metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, header.Number.Uint64(), logger)
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 				ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)

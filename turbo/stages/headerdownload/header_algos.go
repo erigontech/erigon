@@ -550,7 +550,7 @@ func (hd *HeaderDownload) InsertHeader(hf FeedHeaderFunc, terminalTotalDifficult
 		default:
 		}
 
-		metrics.UpdateBlockConsumerHeaderDownloadDelay(link.header.Time, *link.header.Number, hd.logger)
+		metrics.UpdateBlockConsumerHeaderDownloadDelay(link.header.Time, link.header.Number.Uint64(), hd.logger)
 
 		td, err := hf(link.header, link.headerRaw, link.hash, link.blockHeight)
 		if err != nil {
