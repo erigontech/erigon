@@ -48,7 +48,7 @@ type ZkEvmAPI interface {
 	GetBatchByNumber(ctx context.Context, batchNumber rpc.BlockNumber, fullTx *bool) (json.RawMessage, error)
 	GetFullBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (types.Block, error)
 	GetFullBlockByHash(ctx context.Context, hash common.Hash, fullTx bool) (types.Block, error)
-	GetBroadcastURI(ctx context.Context) (string, error)
+	// GetBroadcastURI(ctx context.Context) (string, error)
 	GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error)
 	GetBlockRangeWitness(ctx context.Context, startBlockNrOrHash rpc.BlockNumberOrHash, endBlockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error)
 	GetBatchWitness(ctx context.Context, batchNumber uint64) (hexutility.Bytes, error)
@@ -67,11 +67,11 @@ type ZkEvmAPIImpl struct {
 
 // NewEthAPI returns ZkEvmAPIImpl instance
 func NewZkEvmAPI(
-    base *APIImpl,
-    db kv.RoDB,
-    returnDataLimit int,
-    zkConfig *ethconfig.Zk,
-    l1Syncer *syncer.L1Syncer,
+	base *APIImpl,
+	db kv.RoDB,
+	returnDataLimit int,
+	zkConfig *ethconfig.Zk,
+	l1Syncer *syncer.L1Syncer,
 ) *ZkEvmAPIImpl {
 	return &ZkEvmAPIImpl{
 		ethApi:          base,
@@ -137,9 +137,6 @@ func (api *ZkEvmAPIImpl) IsBlockVirtualized(ctx context.Context, blockNumber rpc
 	batchNum, err := getBatchNoByL2Block(tx, uint64(blockNumber.Int64()))
 	if err != nil {
 		return false, err
-	}
-	if batchNum == 0 {
-		return false, errors.New("batch not found for this block number")
 	}
 
 	latestSequencedBatch, err := getLatestSequencedBatchNo(tx)
@@ -270,10 +267,10 @@ func (api *ZkEvmAPIImpl) GetFullBlockByHash(ctx context.Context, hash libcommon.
 }
 
 func (api *ZkEvmAPIImpl) populateBlockDetail(
-    tx kv.Tx,
-    ctx context.Context,
-    baseBlock *eritypes.Block,
-    fullTx bool,
+	tx kv.Tx,
+	ctx context.Context,
+	baseBlock *eritypes.Block,
+	fullTx bool,
 ) (types.Block, error) {
 	cc, err := api.ethApi.chainConfig(tx)
 	if err != nil {
@@ -312,9 +309,9 @@ func (api *ZkEvmAPIImpl) populateBlockDetail(
 }
 
 // GetBroadcastURI returns the URI of the broadcaster - the trusted sequencer
-func (api *ZkEvmAPIImpl) GetBroadcastURI(ctx context.Context) (string, error) {
-	return api.ethApi.ZkRpcUrl, nil
-}
+// func (api *ZkEvmAPIImpl) GetBroadcastURI(ctx context.Context) (string, error) {
+// 	return api.ethApi.ZkRpcUrl, nil
+// }
 
 func (api *ZkEvmAPIImpl) GetWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, debug *bool) (hexutility.Bytes, error) {
 	dbg := false
@@ -453,12 +450,12 @@ func (api *ZkEvmAPIImpl) GetProverInput(ctx context.Context, batchNumber uint64,
 }
 
 func getStreamBytes(
-    tx kv.Tx,
-    batchNumber uint64,
-    blockNumbers []uint64,
-    lastBlock *eritypes.Block,
-    hDb *hermez_db.HermezDbReader,
-    chainId uint64,
+	tx kv.Tx,
+	batchNumber uint64,
+	blockNumbers []uint64,
+	lastBlock *eritypes.Block,
+	hDb *hermez_db.HermezDbReader,
+	chainId uint64,
 ) ([]byte, error) {
 	streamServer := server.NewDataStreamServer(nil, chainId, server.ExecutorOperationMode)
 	var streamBytes []byte
@@ -607,11 +604,11 @@ func getGlobalExitRoot(tx kv.Tx, l2Block uint64) (common.Hash, error) {
 }
 
 func convertBlockToRpcBlock(
-    orig *eritypes.Block,
-    receipts eritypes.Receipts,
-    senders []common.Address,
-    effectiveGasPricePercentages []uint8,
-    full bool,
+	orig *eritypes.Block,
+	receipts eritypes.Receipts,
+	senders []common.Address,
+	effectiveGasPricePercentages []uint8,
+	full bool,
 ) (types.Block, error) {
 	header := orig.Header()
 
@@ -700,11 +697,11 @@ func convertBlockToRpcBlock(
 }
 
 func convertReceipt(
-    r *eritypes.Receipt,
-    from common.Address,
-    to *common.Address,
-    gasPrice *uint256.Int,
-    effectiveGasPricePercentage uint8,
+	r *eritypes.Receipt,
+	from common.Address,
+	to *common.Address,
+	gasPrice *uint256.Int,
+	effectiveGasPricePercentage uint8,
 ) *types.Receipt {
 	var cAddr *common.Address
 	if r.ContractAddress != (common.Address{}) {

@@ -350,7 +350,7 @@ func NewEthAPI(base *BaseAPI, db kv.RoDB, eth rpchelper.ApiBackend, txPool txpoo
 		gasCache:                   NewGasPriceCache(),
 		GasCap:                     gascap,
 		ReturnDataLimit:            returnDataLimit,
-		ZkRpcUrl:                   "",
+		ZkRpcUrl:                   zkConfig.L2RpcUrl,
 		AllowFreeTransactions:      zkConfig.AllowFreeTransactions,
 		AllowPreEIP155Transactions: zkConfig.AllowPreEIP155Transactions,
 	}

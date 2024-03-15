@@ -32,7 +32,6 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 - `zkevm_batchNumber`
 - `zkevm_batchNumberByBlockNumber`
 - `zkevm_consolidatedBlockNumber`
-- `zkevm_getBatchByNumber`
 - `zkevm_isBlockConsolidated`
 - `zkevm_verifiedBatchNumber`
 - `zkevm_isBlockVirtualized`
@@ -40,9 +39,14 @@ In order to enable the zkevm_ namespace, please add 'zkevm' to the http.api flag
 - `zkevm_getFullBlockByHash`
 - `zkevm_getFullBlockByNumber`
 
+### Supported (remote)
+- `zkevm_getBatchByNumber`
+
 ### Not yet supported
 - `zkevm_getNativeBlockHashesInRange`
 
+### Deprecated
+- `zkevm_getBroadcastURI` - it was removed by zkEvm
 ***
 
 ## Limitations/Warnings
