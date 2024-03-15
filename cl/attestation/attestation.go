@@ -40,12 +40,12 @@ func NewAttestation(
 type subnetSubscription struct {
 	subnetId      uint64
 	gossipSub     *sentinel.GossipSubscription
-	subscriptions []subscription
+	validators    []validator
 	attestations  []*solid.Attestation
 	needAggregate bool
 }
 
-type subscription struct {
+type validator struct {
 	validatorIndex uint64
 	// subscription data structure?
 }
@@ -61,7 +61,7 @@ func (a *Attestation) AddAttestationSubscription(p *cltypes.BeaconCommitteeSubsc
 	if _, exist := a.subnets[subnetId]; !exist {
 		a.subnets[subnetId] = &subnetSubscription{
 			subnetId:      subnetId,
-			subscriptions: make([]subscription, 0),
+			validators:    make([]validator, 0),
 			attestations:  make([]*solid.Attestation, 0),
 			needAggregate: false,
 		}
@@ -78,7 +78,7 @@ func (a *Attestation) AddAttestationSubscription(p *cltypes.BeaconCommitteeSubsc
 		a.subnets[subnetId].gossipSub = gossipSub
 	}
 	theSubnet := a.subnets[subnetId]
-	theSubnet.subscriptions = append(theSubnet.subscriptions, subscription{
+	theSubnet.validators = append(theSubnet.validators, validator{
 		validatorIndex: p.ValidatorIndex,
 	})
 
