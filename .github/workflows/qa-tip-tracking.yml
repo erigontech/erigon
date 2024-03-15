@@ -87,7 +87,7 @@ jobs:
       if: always()
       env:
         TEST_RESULT: ${{ steps.test_step.outputs.TEST_RESULT }}
-      run: python3 $ERIGON_QA_PATH/test_system/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name tip-tracking --outcome $TEST_RESULT --result_file $ERIGON_QA_PATH/test_system/qa-tests/tip-tracking/result.json
+      run: python3 $ERIGON_QA_PATH/test_system/uploads/upload_test_results.py --repo erigon --commit $(git rev-parse HEAD) --test_name tip-tracking --outcome $TEST_RESULT --result_file ${{ github.workspace }}/result.json
 
     - name: Upload test results
       if: always()
