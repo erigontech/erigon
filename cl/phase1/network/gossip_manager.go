@@ -8,6 +8,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
+	"github.com/ledgerwatch/erigon/cl/attestation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence"
@@ -33,10 +34,18 @@ type GossipManager struct {
 
 	emitters     *beaconevents.Emitters
 	gossipSource *persistence.GossipSource
+	attestation  *attestation.Attestation
 }
 
-func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkChoiceStore,
-	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, emitters *beaconevents.Emitters, gossipSource *persistence.GossipSource) *GossipManager {
+func NewGossipReceiver(
+	s sentinel.SentinelClient,
+	forkChoice *forkchoice.ForkChoiceStore,
+	beaconConfig *clparams.BeaconChainConfig,
+	genesisConfig *clparams.GenesisConfig,
+	emitters *beaconevents.Emitters,
+	gossipSource *persistence.GossipSource,
+	attestation *attestation.Attestation,
+) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
 		forkChoice:    forkChoice,
@@ -44,6 +53,7 @@ func NewGossipReceiver(s sentinel.SentinelClient, forkChoice *forkchoice.ForkCho
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		gossipSource:  gossipSource,
+		attestation:   attestation,
 	}
 }
 

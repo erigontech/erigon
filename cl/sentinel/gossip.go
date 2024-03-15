@@ -116,6 +116,13 @@ func GossipSidecarTopics(maxBlobs uint64) (ret []GossipTopic) {
 	return
 }
 
+func GossipBeaconAttestationTopic(subnet uint64) GossipTopic {
+	return GossipTopic{
+		Name:     gossip.TopicNameBeaconAttestationBySubnet(int(subnet)),
+		CodecStr: SSZSnappyCodec,
+	}
+}
+
 func (s *GossipManager) Recv() <-chan *GossipMessage {
 	return s.ch
 }
