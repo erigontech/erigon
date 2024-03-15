@@ -144,6 +144,7 @@ func (api *PrivateDebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rp
 			TxHash:   txnHash,
 			Origin:   msg.From(),
 			GasPrice: msg.GasPrice(),
+			BlobHashes: msg.BlobHashes(),
 		}
 
 		if isBorStateSyncTxn {
