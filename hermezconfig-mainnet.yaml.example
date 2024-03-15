@@ -1,12 +1,12 @@
-datadir : '/Path/to/your/datadirs/hermez-mainnet'
-chain : "hermez-mainnet"
-http : true
-private.api.addr : "localhost:9091"
+datadir: /path/to/datadirs/hermez-mainnet
+chain: hermez-mainnet
+http: true
+private.api.addr: localhost:9091
 zkevm.l2-chain-id: 1101
-zkevm.l2-sequencer-rpc-url: "https://zkevm-rpc.com"
-zkevm.l2-datastreamer-url: "stream.zkevm-rpc.com:6900"
+zkevm.l2-sequencer-rpc-url: https://zkevm-rpc.com
+zkevm.l2-datastreamer-url: stream.zkevm-rpc.com:6900
 zkevm.l1-chain-id: 1
-zkevm.l1-rpc-url: "https://rpc.eth.gateway.fm/"
+zkevm.l1-rpc-url: https://rpc.eth.gateway.fm/
 zkevm.l1-polygon-rollup-manager: "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2"
 zkevm.l1-rollup: "0x519E42c24163192Dca44CD3fBDCEBF6be9130987"
 zkevm.l1-matic-contract-address: "0x7D1AfA7B718fb893dB30A3aBc0Cfc608AaCfeBB0"
@@ -20,4 +20,4 @@ zkevm.rpc-ratelimit: 250
 zkevm.datastream-version: 2
 
 externalcl: true
-http.api : ["eth","debug","net","trace","web3","erigon","zkevm"]
+http.api: [eth, debug, net, trace, web3, erigon, zkevm]

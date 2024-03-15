@@ -1,12 +1,12 @@
-datadir : '/Volumes/External/hermez/dev'
-chain : "hermez-mainnet-shadowfork"
-http : true
-private.api.addr : "localhost:9093"
+datadir: /path/to/datadirs/hermez-mainnet-shadowfork
+chain: hermez-mainnet-shadowfork
+http: true
+private.api.addr: localhost:9093
 zkevm.l2-chain-id: 1101
-zkevm.l2-sequencer-rpc-url: "https://zkevm-rpc.com"
-zkevm.l2-datastreamer-url: "34.175.204.255:6900"
+zkevm.l2-sequencer-rpc-url: https://zkevm-rpc.com
+zkevm.l2-datastreamer-url: 34.175.204.255:6900
 zkevm.l1-chain-id: 11155111
-zkevm.l1-rpc-url: "https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia?apikey=IkrTRMPAlsjfgTyKz1Xfa5ldS8XSc0PN.En5aU2Gwdxvf3zk2"
+zkevm.l1-rpc-url: https://rpc.eu-central-1.gateway.fm/v4/ethereum/non-archival/sepolia?apikey=IkrTRMPAlsjfgTyKz1Xfa5ldS8XSc0PN.En5aU2Gwdxvf3zk2
 zkevm.l1-polygon-rollup-manager: "0x9fB0B4A5d4d60aaCfa8DC20B8DF5528Ab26848d3"
 zkevm.l1-rollup: "0x31A6ae85297DD0EeBD66D7556941c33Bd41d565C"
 zkevm.l1-matic-contract-address: "0x7cD0BAb63E3FE6a61D902d7bD8795C933A511BF8"
@@ -19,11 +19,11 @@ zkevm.l1-first-block: 5192000
 zkevm.rpc-ratelimit: 250
 zkevm.data-stream-port: 6900
 zkevm.datastream-version: 2
-zkevm.data-stream-host: "localhost"
+zkevm.data-stream-host: localhost
 zkevm.executor-strict: false
 zkevm.allow-free-transactions: true
 zkevm.allow-pre-eip155-transactions: true
 
 http.port: 8467
 externalcl: true
-http.api : ["eth","debug","net","trace","web3","erigon","txpool","zkevm"]
+http.api: [eth, debug, net, trace, web3, erigon, txpool, zkevm]
