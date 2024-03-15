@@ -29,7 +29,7 @@ func (r EstimatedRamPerWorker) WorkersQuarter() int {
 // WorkersIgnoringCPUs - return max workers amount based on total Memory and estimated RAM per worker
 func (r EstimatedRamPerWorker) WorkersIgnoringCPUs() int {
 	// 50% of TotalMemory. Better don't count on 100% because OOM Killer may have aggressive defaults and other software may need RAM
-	return int((mmap.TotalMemory() / 2) / uint64(r))
+	return cmp.Max(1, int((mmap.TotalMemory()/2)/uint64(r)))
 }
 
 const (
