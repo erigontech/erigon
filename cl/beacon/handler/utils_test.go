@@ -21,12 +21,13 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 )
 
-func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock) {
+func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logger) (db kv.RwDB, blocks []*cltypes.SignedBeaconBlock, f afero.Fs, preState, postState *state.CachingBeaconState, h *ApiHandler, opPool pool.OperationsPool, syncedData *synced_data.SyncedDataManager, fcu *forkchoice.ForkChoiceStorageMock, vp *validator_params.ValidatorParams) {
 	bcfg := clparams.MainnetBeaconConfig
 	if v == clparams.Phase0Version {
 		blocks, preState, postState = tests.GetPhase0Random()
@@ -77,7 +78,9 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			CommitmentInclusionProof: solid.NewHashVector(17),
 		},
 	})
+	vp = validator_params.NewValidatorParams()
 	h = NewApiHandler(
+		logger,
 		&gC,
 		&bcfg,
 		db,
@@ -96,7 +99,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			Events:     true,
 			Validator:  true,
 			Lighthouse: true,
-		}, nil, blobStorage, nil)
+		}, nil, blobStorage, nil, vp)
 	h.Init()
 	return
 }
