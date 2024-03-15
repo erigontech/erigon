@@ -21,12 +21,32 @@ type PeerStatisticsGetter interface {
 }
 
 type PeerStatistics struct {
+	PeerType     string
 	BytesIn      uint64
 	BytesOut     uint64
 	CapBytesIn   map[string]uint64
 	CapBytesOut  map[string]uint64
 	TypeBytesIn  map[string]uint64
 	TypeBytesOut map[string]uint64
+}
+
+type PeerDataUpdate struct {
+	PeerID string
+	ENR    string
+	Enode  string
+	ID     string
+	Name   string
+	Type   string
+	Caps   []string
+}
+
+type PeerStatisticMsgUpdate struct {
+	PeerType string
+	PeerID   string
+	Inbound  bool
+	MsgType  string
+	MsgCap   string
+	Bytes    int
 }
 
 type SyncStatistics struct {
@@ -135,6 +155,20 @@ type CPUInfo struct {
 	Mhz       float64 `json:"mhz"`
 }
 
+type BlockHeadersUpdate struct {
+	CurrentBlockNumber  uint64  `json:"blockNumber"`
+	PreviousBlockNumber uint64  `json:"previousBlockNumber"`
+	Speed               float64 `json:"speed"`
+	Alloc               uint64  `json:"alloc"`
+	Sys                 uint64  `json:"sys"`
+	InvalidHeaders      int     `json:"invalidHeaders"`
+	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
+}
+
+func (ti BlockHeadersUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (ti SnapshoFilesList) Type() Type {
 	return TypeOf(ti)
 }
@@ -164,5 +198,9 @@ func (ti SyncStagesList) Type() Type {
 }
 
 func (ti CurrentSyncStage) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti PeerStatisticMsgUpdate) Type() Type {
 	return TypeOf(ti)
 }

@@ -3,15 +3,19 @@ package p2p
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	erigonlibtypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 )
@@ -238,7 +242,7 @@ func TestFetcherErrInvalidFetchHeadersRange(t *testing.T) {
 	})
 }
 
-func TestFetcherErrIncompleteHeaders(t *testing.T) {
+func TestFetcherFetchHeadersErrIncompleteResponse(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
@@ -269,6 +273,249 @@ func TestFetcherErrIncompleteHeaders(t *testing.T) {
 	})
 }
 
+func TestFetcherFetchBodies(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	// setup 2 request to test "paging"-style fetch logic
+	requestId1 := uint64(1234)
+	requestId2 := uint64(1235)
+	mockHeaders := []*types.Header{
+		{Number: big.NewInt(1)},
+		{Number: big.NewInt(2)},
+	}
+	mockHashes := []common.Hash{
+		mockHeaders[0].Hash(),
+		mockHeaders[1].Hash(),
+	}
+	mockInboundMessages1 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockBlockBodiesPacketBytes(t, requestId1, &types.Body{
+				Transactions: types.Transactions{
+					types.NewEIP1559Transaction(
+						*uint256.NewInt(1),
+						1,
+						common.BigToAddress(big.NewInt(123)),
+						uint256.NewInt(55),
+						0,
+						uint256.NewInt(666),
+						uint256.NewInt(777),
+						uint256.NewInt(888),
+						nil,
+					),
+				},
+			}),
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           mockHashes,
+	}
+	mockInboundMessages2 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{
+				Transactions: types.Transactions{
+					types.NewEIP1559Transaction(
+						*uint256.NewInt(1),
+						2,
+						common.BigToAddress(big.NewInt(321)),
+						uint256.NewInt(21),
+						0,
+						uint256.NewInt(987),
+						uint256.NewInt(876),
+						uint256.NewInt(765),
+						nil,
+					),
+				},
+			}),
+		},
+	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId,
+		// 2nd time only request the remaining hash since the first one has been received
+		// in first batch
+		wantRequestHashes: mockHashes[1:],
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		require.NoError(t, err)
+		require.Len(t, bodies, 2)
+	})
+}
+
+func TestFetcherFetchBodiesResponseTimeout(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId1 := uint64(1234)
+	requestId2 := uint64(1235)
+	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHashes := []common.Hash{mockHeaders[0].Hash()}
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   nil, // response timeout
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		responseDelay:               600 * time.Millisecond,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           mockHashes,
+	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		responseDelay:               600 * time.Millisecond,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           mockHashes,
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Nil(t, bodies)
+	})
+}
+
+func TestFetcherFetchBodiesResponseTimeoutRetrySuccess(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId1 := uint64(1234)
+	requestId2 := uint64(1235)
+	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHashes := []common.Hash{mockHeaders[0].Hash()}
+	mockInboundMessages1 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   nil, // response timeout
+		},
+	}
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		responseDelay:               600 * time.Millisecond,
+		mockResponseInboundMessages: mockInboundMessages1,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           mockHashes,
+	}
+	mockInboundMessages2 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{
+				Transactions: types.Transactions{
+					types.NewEIP1559Transaction(
+						*uint256.NewInt(1),
+						1,
+						common.BigToAddress(big.NewInt(123)),
+						uint256.NewInt(55),
+						0,
+						uint256.NewInt(666),
+						uint256.NewInt(777),
+						uint256.NewInt(888),
+						nil,
+					),
+				},
+			}),
+		},
+	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           mockHashes,
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		require.NoError(t, err)
+		require.Len(t, bodies, 1)
+	})
+}
+
+func TestFetcherFetchBodiesErrEmptyBody(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHashes := []common.Hash{mockHeaders[0].Hash()}
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId, &types.Body{}),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           mockHashes,
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		require.ErrorIs(t, err, ErrEmptyBody)
+		require.Nil(t, bodies)
+	})
+}
+
+func TestFetcherFetchBodiesErrMissingBodies(t *testing.T) {
+	t.Parallel()
+
+	peerId := PeerIdFromUint64(1)
+	requestId := uint64(1234)
+	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
+	mockHashes := []common.Hash{mockHeaders[0].Hash()}
+	mockInboundMessages := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data:   newMockBlockBodiesPacketBytes(t, requestId),
+		},
+	}
+	mockRequestResponse := requestResponseMock{
+		requestId:                   requestId,
+		mockResponseInboundMessages: mockInboundMessages,
+		wantRequestPeerId:           peerId,
+		wantRequestHashes:           mockHashes,
+	}
+
+	test := newFetcherTest(t, newMockRequestGenerator(requestId))
+	test.mockSentryStreams(mockRequestResponse)
+	test.run(func(ctx context.Context, t *testing.T) {
+		var errMissingBlocks *ErrMissingBodies
+		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
+		require.ErrorAs(t, err, &errMissingBlocks)
+		lowest, exists := errMissingBlocks.LowestMissingBlockNum()
+		require.Equal(t, uint64(1), lowest)
+		require.True(t, exists)
+		require.Nil(t, bodies)
+	})
+}
+
 func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetcherTest {
 	fetcherConfig := FetcherConfig{
 		responseTimeout: 200 * time.Millisecond,
@@ -293,77 +540,64 @@ type fetcherTest struct {
 	peerEvents                  chan *delayedMessage[*sentry.PeerEvent]
 }
 
-func (st *fetcherTest) mockSentryStreams(mocks ...requestResponseMock) {
+func (ft *fetcherTest) mockSentryStreams(mocks ...requestResponseMock) {
 	// default mocks
-	st.sentryClient.
+	ft.sentryClient.
 		EXPECT().
 		HandShake(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, nil).
 		AnyTimes()
-	st.sentryClient.
+	ft.sentryClient.
 		EXPECT().
 		SetStatus(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, nil).
 		AnyTimes()
-	st.sentryClient.
+	ft.sentryClient.
 		EXPECT().
 		MarkDisconnected().
 		AnyTimes()
 
-	st.mockSentryInboundMessagesStream(mocks...)
-	st.mockSentryPeerEventsStream()
+	ft.mockSentryInboundMessagesStream(mocks...)
+	ft.mockSentryPeerEventsStream()
 }
 
-func (st *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseMock) {
+func (ft *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseMock) {
 	var numInboundMessages int
 	for _, mock := range mocks {
 		numInboundMessages += len(mock.mockResponseInboundMessages)
-		st.headersRequestResponseMocks[mock.requestId] = mock
+		ft.headersRequestResponseMocks[mock.requestId] = mock
 	}
 
 	inboundMessageStreamChan := make(chan *delayedMessage[*sentry.InboundMessage], numInboundMessages)
 	mockSentryInboundMessagesStream := &mockSentryMessagesStream[*sentry.InboundMessage]{
-		ctx:    st.ctx,
+		ctx:    ft.ctx,
 		stream: inboundMessageStreamChan,
 	}
 
-	st.sentryClient.
+	ft.sentryClient.
 		EXPECT().
 		Messages(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(mockSentryInboundMessagesStream, nil).
 		AnyTimes()
-	st.sentryClient.
+	ft.sentryClient.
 		EXPECT().
 		SendMessageById(gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, req *sentry.SendMessageByIdRequest, _ ...grpc.CallOption) (*sentry.SentPeers, error) {
-			if sentry.MessageId_GET_BLOCK_HEADERS_66 != req.Data.Id {
-				return nil, fmt.Errorf("MessageId_GET_BLOCK_HEADERS_66 != req.Data.Id - %v", req.Data.Id)
+			var mock requestResponseMock
+			var err error
+			switch req.Data.Id {
+			case sentry.MessageId_GET_BLOCK_HEADERS_66:
+				mock, err = ft.mockSendMessageByIdForHeaders(req)
+			case sentry.MessageId_GET_BLOCK_BODIES_66:
+				mock, err = ft.mockSendMessageByIdForBodies(req)
+			default:
+				return nil, fmt.Errorf("unexpected message id request sent %d", req.Data.Id)
 			}
-
-			var pkt eth.GetBlockHeadersPacket66
-			if err := rlp.DecodeBytes(req.Data.Data, &pkt); err != nil {
+			if err != nil {
 				return nil, err
 			}
 
-			mock, ok := st.headersRequestResponseMocks[pkt.RequestId]
-			if !ok {
-				return &sentry.SentPeers{}, nil
-			}
-
-			delete(st.headersRequestResponseMocks, pkt.RequestId)
-			reqPeerId := PeerIdFromH512(req.PeerId)
-			if !mock.wantRequestPeerId.Equal(reqPeerId) {
-				return nil, fmt.Errorf("wantRequestPeerId != reqPeerId - %v vs %v", mock.wantRequestPeerId, reqPeerId)
-			}
-
-			if mock.wantRequestOriginNumber != pkt.Origin.Number {
-				return nil, fmt.Errorf("wantRequestOriginNumber != pkt.Origin.Number - %v vs %v", mock.wantRequestOriginNumber, pkt.Origin.Number)
-			}
-
-			if mock.wantRequestAmount != pkt.Amount {
-				return nil, fmt.Errorf("wantRequestAmount != pkt.Amount - %v vs %v", mock.wantRequestAmount, pkt.Amount)
-			}
-
+			delete(ft.headersRequestResponseMocks, mock.requestId)
 			for _, inboundMessage := range mock.mockResponseInboundMessages {
 				inboundMessageStreamChan <- &delayedMessage[*sentry.InboundMessage]{
 					message:       inboundMessage,
@@ -378,7 +612,71 @@ func (st *fetcherTest) mockSentryInboundMessagesStream(mocks ...requestResponseM
 		AnyTimes()
 }
 
-func (st *fetcherTest) mockSentryPeerEventsStream() {
+func (ft *fetcherTest) mockSendMessageByIdForHeaders(req *sentry.SendMessageByIdRequest) (requestResponseMock, error) {
+	if sentry.MessageId_GET_BLOCK_HEADERS_66 != req.Data.Id {
+		return requestResponseMock{}, fmt.Errorf("MessageId_GET_BLOCK_HEADERS_66 != req.Data.Id - %v", req.Data.Id)
+	}
+
+	var pkt eth.GetBlockHeadersPacket66
+	if err := rlp.DecodeBytes(req.Data.Data, &pkt); err != nil {
+		return requestResponseMock{}, err
+	}
+
+	mock, ok := ft.headersRequestResponseMocks[pkt.RequestId]
+	if !ok {
+		return requestResponseMock{}, fmt.Errorf("unexpected request id %d", pkt.RequestId)
+	}
+
+	reqPeerId := PeerIdFromH512(req.PeerId)
+	if !mock.wantRequestPeerId.Equal(reqPeerId) {
+		return requestResponseMock{}, fmt.Errorf("wantRequestPeerId != reqPeerId - %v vs %v", mock.wantRequestPeerId, reqPeerId)
+	}
+
+	if mock.wantRequestOriginNumber != pkt.Origin.Number {
+		return requestResponseMock{}, fmt.Errorf("wantRequestOriginNumber != pkt.Origin.Number - %v vs %v", mock.wantRequestOriginNumber, pkt.Origin.Number)
+	}
+
+	if mock.wantRequestAmount != pkt.Amount {
+		return requestResponseMock{}, fmt.Errorf("wantRequestAmount != pkt.Amount - %v vs %v", mock.wantRequestAmount, pkt.Amount)
+	}
+
+	return mock, nil
+}
+
+func (ft *fetcherTest) mockSendMessageByIdForBodies(req *sentry.SendMessageByIdRequest) (requestResponseMock, error) {
+	if sentry.MessageId_GET_BLOCK_BODIES_66 != req.Data.Id {
+		return requestResponseMock{}, fmt.Errorf("MessageId_GET_BLOCK_BODIES_66 != req.Data.Id - %v", req.Data.Id)
+	}
+
+	var pkt eth.GetBlockBodiesPacket66
+	if err := rlp.DecodeBytes(req.Data.Data, &pkt); err != nil {
+		return requestResponseMock{}, err
+	}
+
+	mock, ok := ft.headersRequestResponseMocks[pkt.RequestId]
+	if !ok {
+		return requestResponseMock{}, fmt.Errorf("unexpected request id %d", pkt.RequestId)
+	}
+
+	reqPeerId := PeerIdFromH512(req.PeerId)
+	if !mock.wantRequestPeerId.Equal(reqPeerId) {
+		return requestResponseMock{}, fmt.Errorf("wantRequestPeerId != reqPeerId - %v vs %v", mock.wantRequestPeerId, reqPeerId)
+	}
+
+	if len(mock.wantRequestHashes) != len(pkt.GetBlockBodiesPacket) {
+		return requestResponseMock{}, fmt.Errorf("len(wantRequestHashes) != len(pkt.GetBlockBodiesPacket) - %v vs %v", len(mock.wantRequestHashes), len(pkt.GetBlockBodiesPacket))
+	}
+
+	for i, packet := range pkt.GetBlockBodiesPacket {
+		if mock.wantRequestHashes[i].String() != packet.String() {
+			return requestResponseMock{}, fmt.Errorf("wantRequestHash != packet - %s vs %s", mock.wantRequestHashes[i], packet)
+		}
+	}
+
+	return mock, nil
+}
+
+func (ft *fetcherTest) mockSentryPeerEventsStream() {
 	peerConnectEvents := []*sentry.PeerEvent{
 		{
 			EventId: sentry.PeerEvent_Connect,
@@ -397,19 +695,19 @@ func (st *fetcherTest) mockSentryPeerEventsStream() {
 		}
 	}
 
-	st.peerEvents = streamChan
-	st.sentryClient.
+	ft.peerEvents = streamChan
+	ft.sentryClient.
 		EXPECT().
 		PeerEvents(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(&mockSentryMessagesStream[*sentry.PeerEvent]{
-			ctx:    st.ctx,
+			ctx:    ft.ctx,
 			stream: streamChan,
 		}, nil).
 		AnyTimes()
 }
 
-func (st *fetcherTest) mockDisconnectPeerEvent(peerId *PeerId) {
-	st.peerEvents <- &delayedMessage[*sentry.PeerEvent]{
+func (ft *fetcherTest) mockDisconnectPeerEvent(peerId *PeerId) {
+	ft.peerEvents <- &delayedMessage[*sentry.PeerEvent]{
 		message: &sentry.PeerEvent{
 			EventId: sentry.PeerEvent_Disconnect,
 			PeerId:  peerId.H512(),
@@ -419,11 +717,18 @@ func (st *fetcherTest) mockDisconnectPeerEvent(peerId *PeerId) {
 
 type requestResponseMock struct {
 	requestId                   uint64
-	mockResponseInboundMessages []*sentry.InboundMessage
-	wantRequestPeerId           *PeerId
-	wantRequestOriginNumber     uint64
-	wantRequestAmount           uint64
 	responseDelay               time.Duration
+	mockResponseInboundMessages []*sentry.InboundMessage
+
+	// Common
+	wantRequestPeerId *PeerId
+
+	// FetchHeaders only
+	wantRequestOriginNumber uint64
+	wantRequestAmount       uint64
+
+	// FetchBodies only
+	wantRequestHashes []common.Hash
 }
 
 func newMockRequestGenerator(requestIds ...uint64) RequestIdGenerator {

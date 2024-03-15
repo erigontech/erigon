@@ -693,7 +693,7 @@ func (s *RoSnapshots) PrintDebug() {
 	defer s.unlockSegments()
 
 	s.segments.Scan(func(key snaptype.Enum, value *segments) bool {
-		fmt.Println("    == Snapshots,", key.String())
+		fmt.Println("    == [dbg] Snapshots,", key.String())
 		for _, sn := range value.segments {
 			args := make([]any, 0, len(sn.Type().Indexes())+1)
 			args = append(args, sn.from)
@@ -778,7 +778,7 @@ func buildIdx(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Conf
 		}
 	case snaptype.Enums.Transactions:
 		if err := TransactionsIdx(ctx, chainConfig, sn, tmpDir, p, lvl, logger); err != nil {
-			return err
+			return fmt.Errorf("TransactionsIdx: %s", err)
 		}
 	case snaptype.Enums.BorEvents:
 		if err := BorEventsIdx(ctx, sn, tmpDir, p, lvl, logger); err != nil {
@@ -838,7 +838,10 @@ func buildMissedIndices(logPrefix string, ctx context.Context, dirs datadir.Dirs
 				ps.Add(p)
 				defer notifySegmentIndexingFinished(info.Name())
 				defer ps.Delete(p)
-				return buildIdx(gCtx, info, chainConfig, tmpDir, p, log.LvlInfo, logger)
+				if err := buildIdx(gCtx, info, chainConfig, tmpDir, p, log.LvlInfo, logger); err != nil {
+					return fmt.Errorf("%s: %w", info.Name(), err)
+				}
+				return nil
 			})
 		}
 
@@ -1174,13 +1177,47 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 	return cmp.Min(hardLimit, blocksInSnapshots+1)
 }
 
+func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool, error) {
+	// pre-check if db has enough data
+	var haveGap bool
+	if err := br.db.View(ctx, func(tx kv.Tx) error {
+		firstInDB, ok, err := rawdb.ReadFirstNonGenesisHeaderNumber(tx)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		lastInFiles := br.snapshots().SegmentsMax() + 1
+		haveGap = lastInFiles < firstInDB
+		if haveGap {
+			log.Debug("[snapshots] not enough blocks in db to create snapshots", "lastInFiles", lastInFiles, " firstBlockInDB", firstInDB, "recommendations", "it's ok to ignore this message. can fix by: downloading more files `rm datadir/snapshots/prohibit_new_downloads.lock datdir/snapshots/snapshots-lock.json`, or downloading old blocks to db `integration stage_headers --reset`")
+		}
+		return nil
+	}); err != nil {
+		return false, err
+	}
+	return !haveGap, nil
+}
+
 func (br *BlockRetire) retireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDelete func(l []string) error) (bool, error) {
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	default:
+	}
+
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 	snapshots := br.snapshots()
 
 	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, br.chainConfig)
 
 	if ok {
+		if has, err := br.dbHasEnoughDataForBlocksRetire(ctx); err != nil {
+			return false, err
+		} else if !has {
+			return false, nil
+		}
 		logger.Log(lvl, "[snapshots] Retire Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
 		// in future we will do it in background
 		if err := DumpBlocks(ctx, blockFrom, blockTo, br.chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
@@ -1237,7 +1274,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 	}
 
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
-		br.logger.Info("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
+		br.logger.Debug("[snapshots] Prune Blocks", "to", canDeleteTo, "limit", limit)
 		if err := br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
 			return err
 		}
@@ -1245,7 +1282,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int) error {
 
 	if br.chainConfig.Bor != nil {
 		if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBorBlocks()); canDeleteTo > 0 {
-			br.logger.Info("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
+			br.logger.Debug("[snapshots] Prune Bor Blocks", "to", canDeleteTo, "limit", limit)
 			if err := br.blockWriter.PruneBorBlocks(context.Background(), tx, canDeleteTo, limit,
 				func(block uint64) uint64 { return uint64(heimdall.SpanIdAt(block)) }); err != nil {
 				return err
@@ -1288,44 +1325,25 @@ func (br *BlockRetire) RetireBlocksInBackground(ctx context.Context, minBlockNum
 
 func (br *BlockRetire) RetireBlocks(ctx context.Context, minBlockNum uint64, maxBlockNum uint64, lvl log.Lvl, seedNewSnapshots func(downloadRequest []services.DownloadRequest) error, onDeleteSnapshots func(l []string) error) (err error) {
 	includeBor := br.chainConfig.Bor != nil
-
+	minBlockNum = cmp.Max(br.blockReader.FrozenBlocks(), minBlockNum)
 	if includeBor {
 		// "bor snaps" can be behind "block snaps", it's ok: for example because of `kill -9` in the middle of merge
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
-		for br.blockReader.FrozenBorBlocks() < minBlockNum {
-			haveMore, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-			if err != nil {
-				return err
-			}
-			if !haveMore {
-				break
-			}
-		}
-	}
-
-	var blockHaveMore, borHaveMore bool
-	for {
-		if frozen := br.blockReader.FrozenBlocks(); frozen > minBlockNum {
-			minBlockNum = frozen
-		}
-
-		blockHaveMore, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		_, err := br.retireBorBlocks(ctx, br.blockReader.FrozenBorBlocks(), minBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
 		if err != nil {
 			return err
 		}
+	}
 
-		if includeBor {
-			borHaveMore, err = br.retireBorBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
-			if err != nil {
-				return err
-			}
-		}
-		haveMore := blockHaveMore || borHaveMore
-		if !haveMore {
-			break
+	_, err = br.retireBlocks(ctx, minBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+	if err != nil {
+		return err
+	}
+
+	if includeBor {
+		minBorBlockNum := cmp.Max(br.blockReader.FrozenBorBlocks(), minBlockNum)
+		_, err = br.retireBorBlocks(ctx, minBorBlockNum, maxBlockNum, lvl, seedNewSnapshots, onDeleteSnapshots)
+		if err != nil {
+			return err
 		}
 	}
 
@@ -1350,7 +1368,6 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	if snapshots.IndicesMax() >= snapshots.SegmentsMax() {
 		return nil
 	}
-	snapshots.LogStat("missed-idx")
 	if !snapshots.Cfg().Produce && snapshots.IndicesMax() == 0 {
 		return fmt.Errorf("please remove --snap.stop, erigon can't work without creating basic indices")
 	}
@@ -1360,6 +1377,7 @@ func (br *BlockRetire) buildMissedIndicesIfNeed(ctx context.Context, logPrefix s
 	if !snapshots.SegmentsReady() {
 		return fmt.Errorf("not all snapshot segments are available")
 	}
+	snapshots.LogStat("missed-idx")
 
 	// wait for Downloader service to download all expected snapshots
 	indexWorkers := estimate.IndexSnapshot.Workers()
@@ -1848,6 +1866,10 @@ func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64
 		}
 	}
 
+	if lastBody.BaseTxId < firstBody.BaseTxId {
+		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxId, firstBody.BaseTxId)
+	}
+
 	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxAmount)) - int(firstBody.BaseTxId)
 	return
 }
@@ -1862,7 +1884,7 @@ func TransactionsIdx(ctx context.Context, chainConfig *chain.Config, sn snaptype
 
 	bodiesSegment, err := seg.NewDecompressor(sn.As(snaptype.Bodies).Path)
 	if err != nil {
-		return fmt.Errorf("can't open %s for indexing: %w", sn.Name(), err)
+		return fmt.Errorf("can't open %s for indexing: %w", sn.As(snaptype.Bodies).Name(), err)
 	}
 	defer bodiesSegment.Close()
 

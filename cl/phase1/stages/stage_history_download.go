@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -87,16 +88,14 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Setup slot and block root
 	cfg.downloader.SetSlotToDownload(currentSlot)
 	cfg.downloader.SetExpectedRoot(blockRoot)
-	foundLatestEth1ValidBlock := &atomic.Bool{}
-	foundLatestEth1ValidBlock.Store(false)
-	if cfg.engine == nil || !cfg.engine.SupportInsertion() {
-		foundLatestEth1ValidBlock.Store(true) // skip this if we are not using an engine supporting direct insertion
-	}
 
 	var currEth1Progress atomic.Int64
 
 	bytesReadInTotal := atomic.Uint64{}
-
+	destinationSlotForEL := uint64(math.MaxUint64)
+	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
+		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
+	}
 	// Set up onNewBlock callback
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock) (finished bool, err error) {
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
@@ -108,27 +107,24 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			currEth1Progress.Store(int64(blk.Block.Body.ExecutionPayload.BlockNumber))
 		}
 
-		destinationSlot := cfg.sn.SegmentsMax()
+		destinationSlotForCL := cfg.sn.SegmentsMax()
+
 		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
-		if destinationSlot <= blk.Block.Slot {
+		if destinationSlotForCL <= blk.Block.Slot {
 			if err := beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, blk, true); err != nil {
 				return false, err
 			}
 		}
-		if !foundLatestEth1ValidBlock.Load() && blk.Version() >= clparams.BellatrixVersion {
+		if cfg.engine != nil && cfg.engine.SupportInsertion() && blk.Version() >= clparams.BellatrixVersion {
 			payload := blk.Block.Body.ExecutionPayload
-			bodyChainHeader, err := cfg.engine.GetBodiesByHashes(ctx, []libcommon.Hash{payload.BlockHash})
+			hasELBlock, err := cfg.engine.HasBlock(ctx, payload.BlockHash)
 			if err != nil {
 				return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
 			}
-			foundLatestEth1ValidBlock.Store((len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil) || cfg.engine.FrozenBlocks(ctx) > payload.BlockNumber)
-			if foundLatestEth1ValidBlock.Load() {
-				logger.Info("Found latest eth1 valid block", "blockNumber", payload.BlockNumber, "blockHash", payload.BlockHash)
-			}
 
-			if !foundLatestEth1ValidBlock.Load() {
+			if !hasELBlock {
 				payloadRoot, err := payload.HashSSZ()
 				if err != nil {
 					return false, fmt.Errorf("error hashing execution payload during download: %s", err)
@@ -147,11 +143,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				}
 			}
 		}
-		if blk.Version() <= clparams.AltairVersion {
-			foundLatestEth1ValidBlock.Store(true)
+		isInElSnapshots := true
+		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
+			isInElSnapshots = blk.Block.Body.ExecutionPayload.BlockNumber < cfg.engine.FrozenBlocks(ctx)
 		}
-
-		return foundLatestEth1ValidBlock.Load() && (!cfg.backfilling || slot <= destinationSlot), tx.Commit()
+		return (!cfg.backfilling || slot <= destinationSlotForCL) && (slot <= destinationSlotForEL || isInElSnapshots), tx.Commit()
 	})
 	prevProgress := cfg.downloader.Progress()
 
@@ -202,6 +198,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			case <-finishCh:
 				return
 			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -225,8 +222,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}()
 		}
 	}()
-	// Lets wait for the latestValidHash to be turned on
-	for !foundLatestEth1ValidBlock.Load() || (cfg.waitForAllRoutines && !cfg.downloader.Finished()) {
+	// We block until we are done with the EL side of the backfilling with 2000 blocks of safety margin.
+	for !cfg.downloader.Finished() && (cfg.engine == nil || cfg.downloader.Progress() > destinationSlotForEL) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -330,7 +327,7 @@ func downloadBlobHistoryWorker(cfg StageHistoryReconstructionCfg, ctx context.Co
 			cfg.logger.Debug("Error requesting blobs", "err", err)
 			continue
 		}
-		lastProcessed, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
+		lastProcessed, _, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
 			// The block is preverified so just check that the signature is correct against the block
 			for _, block := range batch {
 				if block.Block.Slot != header.Header.Slot {

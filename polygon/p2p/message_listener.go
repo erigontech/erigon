@@ -30,6 +30,7 @@ type MessageListener interface {
 	RegisterNewBlockObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc
 	RegisterNewBlockHashesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc
 	RegisterBlockHeadersObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc
+	RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
@@ -45,6 +46,7 @@ func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, pee
 		newBlockObservers:       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{},
 		newBlockHashesObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{},
 		blockHeadersObservers:   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
+		blockBodiesObservers:    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{},
 		peerEventObservers:      map[uint64]MessageObserver[*sentry.PeerEvent]{},
 	}
 }
@@ -59,6 +61,7 @@ type messageListener struct {
 	newBlockObservers       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashesObservers map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
 	blockHeadersObservers   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
+	blockBodiesObservers    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
 	peerEventObservers      map[uint64]MessageObserver[*sentry.PeerEvent]
 	stopWg                  sync.WaitGroup
 }
@@ -84,6 +87,7 @@ func (ml *messageListener) Run(ctx context.Context) {
 	ml.newBlockObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{}
 	ml.newBlockHashesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{}
 	ml.blockHeadersObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{}
+	ml.blockBodiesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{}
 	ml.peerEventObservers = map[uint64]MessageObserver[*sentry.PeerEvent]{}
 }
 
@@ -99,6 +103,10 @@ func (ml *messageListener) RegisterBlockHeadersObserver(observer MessageObserver
 	return registerObserver(ml, ml.blockHeadersObservers, observer)
 }
 
+func (ml *messageListener) RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
+	return registerObserver(ml, ml.blockBodiesObservers, observer)
+}
+
 func (ml *messageListener) RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc {
 	return registerObserver(ml, ml.peerEventObservers, observer)
 }
@@ -110,6 +118,7 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 				sentry.MessageId_NEW_BLOCK_66,
 				sentry.MessageId_NEW_BLOCK_HASHES_66,
 				sentry.MessageId_BLOCK_HEADERS_66,
+				sentry.MessageId_BLOCK_BODIES_66,
 			},
 		}
 
@@ -117,13 +126,18 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 	}
 
 	streamMessages(ctx, ml, "InboundMessages", streamFactory, func(message *sentry.InboundMessage) error {
+		ml.observersMu.Lock()
+		defer ml.observersMu.Unlock()
+
 		switch message.Id {
 		case sentry.MessageId_NEW_BLOCK_66:
-			return notifyInboundMessageObservers(ctx, ml, ml.newBlockObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockObservers, message)
 		case sentry.MessageId_NEW_BLOCK_HASHES_66:
-			return notifyInboundMessageObservers(ctx, ml, ml.newBlockHashesObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockHashesObservers, message)
 		case sentry.MessageId_BLOCK_HEADERS_66:
-			return notifyInboundMessageObservers(ctx, ml, ml.blockHeadersObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockHeadersObservers, message)
+		case sentry.MessageId_BLOCK_BODIES_66:
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, message)
 		default:
 			return nil
 		}
@@ -139,7 +153,10 @@ func (ml *messageListener) listenPeerEvents(ctx context.Context) {
 }
 
 func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentry.PeerEvent) error {
-	notifyObservers(&ml.observersMu, ml.peerEventObservers, peerEvent)
+	ml.observersMu.Lock()
+	defer ml.observersMu.Unlock()
+
+	notifyObservers(ml.peerEventObservers, peerEvent)
 	return nil
 }
 
@@ -207,7 +224,8 @@ func streamMessages[TMessage any](
 
 func notifyInboundMessageObservers[TPacket any](
 	ctx context.Context,
-	ml *messageListener,
+	logger log.Logger,
+	peerPenalizer PeerPenalizer,
 	observers map[uint64]MessageObserver[*DecodedInboundMessage[TPacket]],
 	message *sentry.InboundMessage,
 ) error {
@@ -216,10 +234,9 @@ func notifyInboundMessageObservers[TPacket any](
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			ml.logger.Debug("penalizing peer", "peerId", peerId, "err", err)
+			logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
 
-			penalizeErr := ml.peerPenalizer.Penalize(ctx, peerId)
-			if penalizeErr != nil {
+			if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
 			}
 		}
@@ -227,7 +244,7 @@ func notifyInboundMessageObservers[TPacket any](
 		return err
 	}
 
-	notifyObservers(&ml.observersMu, observers, &DecodedInboundMessage[TPacket]{
+	notifyObservers(observers, &DecodedInboundMessage[TPacket]{
 		InboundMessage: message,
 		Decoded:        decodedData,
 		PeerId:         peerId,
@@ -236,10 +253,7 @@ func notifyInboundMessageObservers[TPacket any](
 	return nil
 }
 
-func notifyObservers[TMessage any](mu *sync.Mutex, observers map[uint64]MessageObserver[TMessage], message TMessage) {
-	mu.Lock()
-	defer mu.Unlock()
-
+func notifyObservers[TMessage any](observers map[uint64]MessageObserver[TMessage], message TMessage) {
 	for _, observer := range observers {
 		go observer(message)
 	}

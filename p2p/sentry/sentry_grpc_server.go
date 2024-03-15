@@ -539,10 +539,27 @@ func runPeer(
 
 		msgType := eth.ToProto[protocol][msg.Code]
 		msgCap := cap.String()
-		peerInfo.peer.CountBytesTransfered(msgType.String(), msgCap, uint64(msg.Size), true)
+
+		trackPeerStatistics(peerInfo.peer.Info().ID, true, msgType.String(), msgCap, int(msg.Size))
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
+	}
+}
+
+func trackPeerStatistics(peerID string, inbound bool, msgType string, msgCap string, bytes int) {
+	isDiagEnabled := diagnostics.TypeOf(diagnostics.PeerStatisticMsgUpdate{}).Enabled()
+	if isDiagEnabled {
+		stats := diagnostics.PeerStatisticMsgUpdate{
+			PeerID:   peerID,
+			Inbound:  inbound,
+			MsgType:  msgType,
+			MsgCap:   msgCap,
+			Bytes:    bytes,
+			PeerType: "Sentry",
+		}
+
+		diagnostics.Send(stats)
 	}
 }
 
@@ -743,7 +760,7 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgcode ui
 
 		cap := p2p.Cap{Name: eth.ProtocolName, Version: peerInfo.protocol}
 		msgType := eth.ToProto[cap.Version][msgcode]
-		peerInfo.peer.CountBytesTransfered(msgType.String(), cap.String(), uint64(len(data)), false)
+		trackPeerStatistics(peerInfo.peer.Info().ID, false, msgType.String(), cap.String(), len(data))
 
 		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
@@ -1051,15 +1068,6 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*proto_sentry.
 	}
 
 	return &reply, nil
-}
-
-func (ss *GrpcServer) DiagnosticsPeersData() map[string]*diagnostics.PeerStatistics {
-	if ss.P2pServer == nil {
-		return map[string]*diagnostics.PeerStatistics{}
-	}
-
-	peers := ss.P2pServer.DiagnosticsPeersInfo()
-	return peers
 }
 
 func (ss *GrpcServer) SimplePeerCount() map[uint]int {
