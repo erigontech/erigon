@@ -49,7 +49,7 @@ func NewBlockDownloader(
 		blocksVerifier,
 		storage,
 		notEnoughPeersBackOffDuration,
-		blockDownloaderEstimatedRamPerWorker.Workers(),
+		blockDownloaderEstimatedRamPerWorker.WorkersIgnoringCPUs(),
 	)
 }
 
