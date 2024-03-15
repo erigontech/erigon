@@ -76,6 +76,7 @@ func (a *Attestation) AddAttestationSubscription(p *cltypes.BeaconCommitteeSubsc
 			return err
 		}
 		a.subnets[subnetId].gossipSub = gossipSub
+		// todo: when is a good timeing to unsubscribe?
 	}
 	theSubnet := a.subnets[subnetId]
 	theSubnet.validators = append(theSubnet.validators, validator{
