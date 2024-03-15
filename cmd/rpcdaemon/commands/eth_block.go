@@ -221,9 +221,12 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	if err != nil {
 		return nil, err
 	}
+
+	tdField := hexutil.Big(*big.NewInt(0))
 	if td != nil {
-		additionalFields["totalDifficulty"] = (*hexutil.Big)(td)
+		tdField = hexutil.Big(*td)
 	}
+	additionalFields["totalDifficulty"] = tdField
 
 	_, err = api.chainConfig(tx)
 	if err != nil {
