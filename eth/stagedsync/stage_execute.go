@@ -517,17 +517,31 @@ Loop:
 
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
-			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
-			// Recreate tx because Silkworm has just done commit or abort on passed one
-			var tx_err error
-			txc.Tx, tx_err = cfg.db.BeginRw(context.Background())
-			if tx_err != nil {
-				return tx_err
+			if !useExternalTx {
+				// In case of internal tx we close it (no changes, commit not needed): Silkworm will use its own internal tx
+				txc.Tx.Rollback()
+				txc.Tx = nil
 			}
-			defer txc.Tx.Rollback()
-			// Recreate memory batch because underlying tx has changed
-			batch.Close()
-			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
+			// Possible scenarios:
+			// - external tx i.e. txc.Tx != nil: Silkworm will use but not commit/abort the passed tx
+			// - internal tx i.e. txc.Tx == nil: Silkworm will use its own internal tx calling commit/abort
+			// In both cases Silkworm will use its own state batch and update the Execution stage progess
+			blockNum, err = silkworm.ExecuteBlocks(cfg.silkworm, cfg.db, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			if err != nil {
+				// In case of any error we need to increment to have the failed block number
+				blockNum++
+			}
+			if !useExternalTx {
+				// Recreate internal tx after Silkworm has finished
+				var txErr error
+				if txc.Tx, txErr = cfg.db.BeginRw(context.Background()); txErr != nil {
+					return txErr
+				}
+				defer txc.Tx.Rollback()
+				// Recreate memory batch because underlying tx has changed
+				batch.Close()
+				batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
+			}
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
 		}
