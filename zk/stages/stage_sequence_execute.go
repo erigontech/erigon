@@ -224,9 +224,6 @@ func SpawnSequencingStage(
 		return nil
 	}
 
-	parentRoot := parentBlock.Root()
-	ibs.PreExecuteStateSet(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot)
-
 	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, etrogForkId)
 
 	// whilst in the 1 batch = 1 block = 1 tx flow we can immediately add in the changeL2BlockTx calculation
@@ -239,6 +236,11 @@ func SpawnSequencingStage(
 		return err
 	}
 	if err = hermezDb.WriteBlockL1InfoTreeIndex(nextBlockNum, l1TreeUpdateIndex); err != nil {
+		return err
+	}
+
+	parentRoot := parentBlock.Root()
+	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs); err != nil {
 		return err
 	}
 
