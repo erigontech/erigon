@@ -6,13 +6,14 @@ import (
 
 	"github.com/urfave/cli/v2"
 
+	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/turbo/node"
 )
 
 func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
 	debugMux := http.NewServeMux()
 
-	diagnostic := NewDiagnosticClient(ctx, debugMux, node)
+	diagnostic := diaglib.NewDiagnosticClient(debugMux, node.Backend().DataDir())
 	diagnostic.Setup()
 
 	metricsMux.HandleFunc("/debug/", func(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +30,7 @@ func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
 	SetupBlockBodyDownload(debugMux)
 	SetupHeaderDownloadStats(debugMux)
 	SetupNodeInfoAccess(debugMux, node)
-	SetupPeersAccess(ctx, debugMux, node)
+	SetupPeersAccess(ctx, debugMux, node, diagnostic)
 	SetupBootnodesAccess(debugMux, node)
 	SetupStagesAccess(debugMux, diagnostic)
 	SetupMemAccess(debugMux)

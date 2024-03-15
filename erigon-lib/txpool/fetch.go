@@ -111,6 +111,7 @@ func (f *Fetch) ConnectSentries() {
 		}(i)
 	}
 }
+
 func (f *Fetch) ConnectCore() {
 	go func() {
 		for {

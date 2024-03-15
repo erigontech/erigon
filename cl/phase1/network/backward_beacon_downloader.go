@@ -5,10 +5,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/net/context"
+
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/persistence/base_encoding"
@@ -31,7 +32,6 @@ type BackwardBeaconDownloader struct {
 	reqInterval    *time.Ticker
 	db             kv.RwDB
 	neverSkip      bool
-	elFound        bool
 
 	mu sync.Mutex
 }
@@ -80,6 +80,10 @@ func (b *BackwardBeaconDownloader) SetOnNewBlock(onNewBlock OnNewBlock) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.onNewBlock = onNewBlock
+}
+
+func (b *BackwardBeaconDownloader) RPC() *rpc.BeaconRpcP2P {
+	return b.rpc
 }
 
 // HighestProcessedRoot returns the highest processed block root so far.
@@ -201,13 +205,12 @@ Loop:
 			if err != nil {
 				return err
 			}
-			if blockHash != (libcommon.Hash{}) && !b.elFound {
-				bodyChainHeader, err := b.engine.GetBodiesByHashes([]libcommon.Hash{blockHash})
+			if blockHash != (libcommon.Hash{}) {
+				has, err := b.engine.HasBlock(ctx, blockHash)
 				if err != nil {
 					return err
 				}
-				b.elFound = (len(bodyChainHeader) > 0 && bodyChainHeader[0] != nil)
-				if !b.elFound {
+				if !has {
 					break
 				}
 			}

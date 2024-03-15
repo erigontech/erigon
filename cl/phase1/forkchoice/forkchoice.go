@@ -1,26 +1,31 @@
 package forkchoice
 
 import (
-	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/Giulio2002/bls"
+	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
-	"github.com/ledgerwatch/erigon/cl/freezer"
+	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
-	"golang.org/x/exp/slices"
+	"github.com/ledgerwatch/erigon/cl/utils"
 
 	lru "github.com/hashicorp/golang-lru/v2"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
@@ -75,7 +80,6 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	ctx         context.Context
 	time        atomic.Uint64
 	highestSeen atomic.Uint64
 	// all of *solid.Checkpoint type
@@ -87,20 +91,26 @@ type ForkChoiceStore struct {
 	proposerBoostRoot atomic.Value
 	// attestations that are not yet processed
 	attestationSet sync.Map
+	blocksSet      sync.Map // blocks that are not yet processed
 	// head data
-	headHash    libcommon.Hash
-	headSlot    uint64
-	genesisTime uint64
-	weights     map[libcommon.Hash]uint64
-	headSet     map[libcommon.Hash]struct{}
+	headHash              libcommon.Hash
+	headSlot              uint64
+	genesisTime           uint64
+	genesisValidatorsRoot libcommon.Hash
+	weights               map[libcommon.Hash]uint64
+	headSet               map[libcommon.Hash]struct{}
+	hotSidecars           map[libcommon.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
 	// childrens
 	childrens sync.Map
 
 	// Use go map because this is actually an unordered set
 	equivocatingIndicies []byte
 	forkGraph            fork_graph.ForkGraph
+	blobStorage          blob_storage.BlobStorage
 	// I use the cache due to the convenient auto-cleanup feauture.
-	checkpointStates  sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	checkpointStates   sync.Map // We keep ssz snappy of it as the full beacon state is full of rendundant data.
+	publicKeysPerState sync.Map // Maps root to non-anchor public keys
+
 	latestMessages    []LatestMessage
 	anchorPublicKeys  []byte
 	syncedDataManager *synced_data.SyncedDataManager
@@ -110,6 +120,7 @@ type ForkChoiceStore struct {
 	preverifiedSizes    *lru.Cache[libcommon.Hash, preverifiedAppendListsSizes]
 	finalityCheckpoints *lru.Cache[libcommon.Hash, finalityCheckpoints]
 	totalActiveBalances *lru.Cache[libcommon.Hash, uint64]
+	nextBlockProposers  *lru.Cache[libcommon.Hash, []uint64]
 	// Randao mixes
 	randaoMixesLists *lru.Cache[libcommon.Hash, solid.HashListSSZ] // limited randao mixes full list (only 16 elements)
 	randaoDeltas     *lru.Cache[libcommon.Hash, randaoDelta]       // small entry can be lots of elements.
@@ -119,8 +130,7 @@ type ForkChoiceStore struct {
 	mu sync.RWMutex
 	// EL
 	engine execution_client.ExecutionEngine
-	// freezer
-	recorder freezer.Freezer
+
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
@@ -140,7 +150,7 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -199,6 +209,11 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 		return nil, err
 	}
 
+	nextBlockProposers, err := lru.New[libcommon.Hash, []uint64](checkpointsPerCache * 10)
+	if err != nil {
+		return nil, err
+	}
+
 	participation.Add(state.Epoch(anchorState.BeaconState), anchorState.CurrentEpochParticipation().Copy())
 
 	totalActiveBalances.Add(anchorRoot, anchorState.GetTotalActiveBalance())
@@ -208,33 +223,36 @@ func NewForkChoiceStore(ctx context.Context, anchorState *state2.CachingBeaconSt
 	headSet := make(map[libcommon.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		ctx:                  ctx,
-		forkGraph:            forkGraph,
-		equivocatingIndicies: make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:       make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		eth2Roots:            eth2Roots,
-		engine:               engine,
-		recorder:             recorder,
-		operationsPool:       operationsPool,
-		anchorPublicKeys:     anchorPublicKeys,
-		beaconCfg:            anchorState.BeaconConfig(),
-		preverifiedSizes:     preverifiedSizes,
-		finalityCheckpoints:  finalityCheckpoints,
-		totalActiveBalances:  totalActiveBalances,
-		randaoMixesLists:     randaoMixesLists,
-		randaoDeltas:         randaoDeltas,
-		headSet:              headSet,
-		weights:              make(map[libcommon.Hash]uint64),
-		participation:        participation,
-		emitters:             emitters,
-		genesisTime:          anchorState.GenesisTime(),
-		syncedDataManager:    syncedDataManager,
+		forkGraph:             forkGraph,
+		equivocatingIndicies:  make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:        make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		eth2Roots:             eth2Roots,
+		engine:                engine,
+		operationsPool:        operationsPool,
+		anchorPublicKeys:      anchorPublicKeys,
+		beaconCfg:             anchorState.BeaconConfig(),
+		preverifiedSizes:      preverifiedSizes,
+		finalityCheckpoints:   finalityCheckpoints,
+		totalActiveBalances:   totalActiveBalances,
+		randaoMixesLists:      randaoMixesLists,
+		randaoDeltas:          randaoDeltas,
+		headSet:               headSet,
+		weights:               make(map[libcommon.Hash]uint64),
+		participation:         participation,
+		emitters:              emitters,
+		genesisTime:           anchorState.GenesisTime(),
+		syncedDataManager:     syncedDataManager,
+		nextBlockProposers:    nextBlockProposers,
+		genesisValidatorsRoot: anchorState.GenesisValidatorsRoot(),
+		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
+		blobStorage:           blobStorage,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.unrealizedFinalizedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.unrealizedJustifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.proposerBoostRoot.Store(libcommon.Hash{})
+	f.publicKeysPerState.Store(libcommon.Hash(anchorRoot), []byte{})
 
 	f.highestSeen.Store(anchorState.Slot())
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
@@ -490,4 +508,51 @@ func (f *ForkChoiceStore) GetValidatorSet(blockRoot libcommon.Hash) (*solid.Vali
 
 func (f *ForkChoiceStore) GetCurrentPartecipationIndicies(blockRoot libcommon.Hash) (*solid.BitList, error) {
 	return f.forkGraph.GetCurrentPartecipationIndicies(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error) {
+	anchorPubKeysLen := len(f.anchorPublicKeys) / length.Bytes48
+	if idx < uint64(anchorPubKeysLen) {
+		return libcommon.Bytes48(f.anchorPublicKeys[idx*length.Bytes48 : (idx+1)*length.Bytes48]), nil
+	}
+	pubKeysInterface, ok := f.publicKeysPerState.Load(blockRoot)
+	if !ok {
+		return libcommon.Bytes48{}, fmt.Errorf("public keys not found")
+	}
+	pubKeys := pubKeysInterface.([]byte)
+	offsetedIdx := idx - uint64(anchorPubKeysLen)
+	if offsetedIdx*length.Bytes48 >= uint64(len(pubKeys)) {
+		return libcommon.Bytes48{}, fmt.Errorf("index too large")
+	}
+	return libcommon.Bytes48(pubKeys[offsetedIdx*length.Bytes48 : (offsetedIdx+1)*length.Bytes48]), nil
+}
+
+func VerifyHeaderSignatureAgainstForkChoiceStoreFunction(fcs ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, genesisValidatorsRoot libcommon.Hash) func(header *cltypes.SignedBeaconBlockHeader) error {
+	return func(header *cltypes.SignedBeaconBlockHeader) error {
+		parentHeader, ok := fcs.GetHeader(header.Header.ParentRoot)
+		if !ok {
+			return fmt.Errorf("parent header not found")
+		}
+		currentVersion := beaconCfg.GetCurrentStateVersion(parentHeader.Slot / beaconCfg.SlotsPerEpoch)
+		forkVersion := beaconCfg.GetForkVersionByVersion(currentVersion)
+		domain, err := fork.ComputeDomain(beaconCfg.DomainBeaconProposer[:], utils.Uint32ToBytes4(forkVersion), genesisValidatorsRoot)
+		if err != nil {
+			return err
+		}
+		sigRoot, err := fork.ComputeSigningRoot(header.Header, domain)
+		if err != nil {
+			return err
+		}
+		pk, err := fcs.GetPublicKeyForValidator(header.Header.ParentRoot, header.Header.ProposerIndex)
+		if err != nil {
+			return err
+		}
+		if ok, err = bls.Verify(header.Signature[:], sigRoot[:], pk[:]); err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("blob signature validation: signature not valid")
+		}
+		return nil
+	}
 }

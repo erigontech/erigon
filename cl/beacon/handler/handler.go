@@ -13,10 +13,13 @@ import (
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type ApiHandler struct {
@@ -32,6 +35,8 @@ type ApiHandler struct {
 	syncedData      *synced_data.SyncedDataManager
 	stateReader     *historical_states_reader.HistoricalStatesReader
 	sentinel        sentinel.SentinelClient
+	blobStoage      blob_storage.BlobStorage
+	caplinSnapshots *freezeblocks.CaplinSnapshots
 
 	version string // Node's version
 
@@ -43,12 +48,16 @@ type ApiHandler struct {
 	emitters                 *beaconevents.Emitters
 
 	routerCfg *beacon_router_configuration.RouterConfiguration
+	logger    log.Logger
+
+	// Validator data structures
+	validatorParams *validator_params.ValidatorParams
 }
 
-func NewApiHandler(genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters) *ApiHandler {
-	return &ApiHandler{o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
+func NewApiHandler(logger log.Logger, genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters, blobStoage blob_storage.BlobStorage, caplinSnapshots *freezeblocks.CaplinSnapshots, validatorParams *validator_params.ValidatorParams) *ApiHandler {
+	return &ApiHandler{logger: logger, validatorParams: validatorParams, o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
 		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
-	}}, sentinel: sentinel, version: version, routerCfg: routerCfg, emitters: emitters}
+	}}, sentinel: sentinel, version: version, routerCfg: routerCfg, emitters: emitters, blobStoage: blobStoage, caplinSnapshots: caplinSnapshots}
 }
 
 func (a *ApiHandler) Init() {
@@ -133,6 +142,7 @@ func (a *ApiHandler) init() {
 						r.Get("/finality_update", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconLightClientFinalityUpdate))
 						r.Get("/updates", a.GetEthV1BeaconLightClientUpdates)
 					})
+					r.Get("/blob_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlobSidecars))
 					r.Route("/states", func(r chi.Router) {
 						r.Route("/{state_id}", func(r chi.Router) {
 							r.Get("/randao", beaconhttp.HandleEndpointFunc(a.getRandao))
@@ -163,7 +173,7 @@ func (a *ApiHandler) init() {
 					r.Post("/sync_committee_subscriptions", http.NotFound)
 					r.Get("/sync_committee_contribution", http.NotFound)
 					r.Post("/contribution_and_proofs", http.NotFound)
-					r.Post("/prepare_beacon_proposer", http.NotFound)
+					r.Post("/prepare_beacon_proposer", a.PostEthV1ValidatorPrepareBeaconProposal)
 					r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 				})
 			}
