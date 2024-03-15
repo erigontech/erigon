@@ -14,7 +14,7 @@ replace github.com/ledgerwatch/erigon-lib => ./erigon-lib
 require (
 	gfx.cafe/util/go/generic v0.0.0-20230721185457-c559e86c829c
 	github.com/99designs/gqlgen v0.17.40
-	github.com/Giulio2002/bls v0.0.0-20230906201036-c2330c97dc7d
+	github.com/Giulio2002/bls v0.0.0-20240315151443-652e18a3d188
 	github.com/Masterminds/sprig/v3 v3.2.3
 	github.com/RoaringBitmap/roaring v1.2.3
 	github.com/VictoriaMetrics/fastcache v1.12.2
