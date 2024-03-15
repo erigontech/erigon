@@ -26,15 +26,15 @@ import (
 )
 
 const (
-	blsG1Add      = byte(10)
-	blsG1Mul      = byte(11)
-	blsG1MultiExp = byte(12)
-	blsG2Add      = byte(13)
-	blsG2Mul      = byte(14)
-	blsG2MultiExp = byte(15)
-	blsPairing    = byte(16)
-	blsMapG1      = byte(17)
-	blsMapG2      = byte(18)
+	blsG1Add      = byte(0x0b)
+	blsG1Mul      = byte(0x0c)
+	blsG1MultiExp = byte(0x0d)
+	blsG2Add      = byte(0x0e)
+	blsG2Mul      = byte(0x0f)
+	blsG2MultiExp = byte(0x10)
+	blsPairing    = byte(0x11)
+	blsMapG1      = byte(0x12)
+	blsMapG2      = byte(0x13)
 )
 
 func FuzzG1Add(data []byte) int      { return fuzz(blsG1Add, data) }
