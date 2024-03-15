@@ -4,6 +4,13 @@ cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with t
 
 ***
 
+## Chain/Fork Support
+Current status of cdk-erigon's support for running various chains and fork ids:
+
+- zkEVM Cardona testnet — beta support
+- zkEVM mainnet — alpha support
+- CDK Chains - experimental support (forkid.8 and above)
+
 ## Prereqs
 In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicone it will fall back to the iden3 library and as such these dependencies are not required in that case.
 
