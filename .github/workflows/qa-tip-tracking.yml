@@ -3,13 +3,6 @@ name: QA - Tip tracking
 on:
   schedule:
     - cron: '0 0 * * *'  # Run every day at 00:00 AM UTC
-  pull_request:
-    branches:
-      - devel
-      - 'release/**'
-    types:
-      - synchronize
-      - ready_for_review
 
 jobs:
   long-running-test:
