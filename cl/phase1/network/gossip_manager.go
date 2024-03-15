@@ -3,7 +3,6 @@ package network
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/c2h5oh/datasize"
@@ -33,7 +32,6 @@ type GossipManager struct {
 	genesisConfig *clparams.GenesisConfig
 
 	emitters     *beaconevents.Emitters
-	mu           sync.RWMutex
 	gossipSource *persistence.GossipSource
 }
 
@@ -203,6 +201,8 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			}
 
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
+		case gossip.IsTopicBeaconAttestation(data.Name):
+			// todo
 		default:
 		}
 	}
@@ -218,16 +218,17 @@ func (g *GossipManager) Start(ctx context.Context) {
 	defer close(blocksCh)
 
 	// Start a goroutine that listens for new gossip messages and sends them to the operations processor.
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-operationsCh:
-				l := log.Ctx{}
-				err := g.onRecv(ctx, data, l)
-				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
+	goWorker := func(ch <-chan *sentinel.GossipData, workerCount int) {
+		worker := func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case data := <-ch:
+					l := log.Ctx{}
+					if err := g.onRecv(ctx, data, l); err != nil {
+						log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
+					}
 				}
 				// gives some breathing to the cpu
 				select {
@@ -237,37 +238,13 @@ func (g *GossipManager) Start(ctx context.Context) {
 				}
 			}
 		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-blocksCh:
-				l := log.Ctx{}
-				err := g.onRecv(ctx, data, l)
-				if err != nil {
-					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
-				}
-			}
+		for i := 0; i < workerCount; i++ {
+			go worker()
 		}
-	}()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case data := <-blobsCh:
-				l := log.Ctx{}
-				err := g.onRecv(ctx, data, l)
-				if err != nil {
-					log.Warn("[Beacon Gossip] Recoverable Error", "err", err)
-				}
-			}
-		}
-	}()
+	}
+	goWorker(operationsCh, 1)
+	goWorker(blocksCh, 1)
+	goWorker(blobsCh, 1)
 
 Reconnect:
 	for {

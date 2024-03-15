@@ -29,3 +29,7 @@ func TopicNameBlobSidecar(d int) string {
 func IsTopicBlobSidecar(d string) bool {
 	return strings.Contains(d, "blob_sidecar_")
 }
+
+func IsTopicBeaconAttestation(d string) bool {
+	return strings.HasPrefix(d, "beacon_attestation_")
+}
