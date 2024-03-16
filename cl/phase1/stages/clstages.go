@@ -781,7 +781,7 @@ func ConsensusClStages(ctx context.Context,
 
 					copiedHeadState := cfg.syncedData.HeadState() // it is just copied, so we can use it without worrying about concurrency
 
-					if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(copiedHeadState, 0, 0); err != nil {
+					if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(copiedHeadState, copiedHeadState.Slot(), 0); err != nil {
 						logger.Warn("failed to produce and cache attestation data", "err", err)
 					}
 					// Incement some stuff here

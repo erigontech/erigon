@@ -48,8 +48,8 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 			baseAttestationData.Target(),
 		), nil
 	}
-	if baseState.Slot() < slot {
-		return solid.AttestationData{}, errors.New("head state slot is less than requested slot, the attestation should have been cached, try again later.")
+	if baseState.Slot() > slot {
+		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later.")
 	}
 	baseStateBlockRoot, err := baseState.BlockRoot()
 	if err != nil {
