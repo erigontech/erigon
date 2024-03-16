@@ -126,7 +126,7 @@ func addSszTests() {
 		With("SignedVoluntaryExit", getSSZStaticConsensusTest(&cltypes.SignedVoluntaryExit{})).
 		//	With("SigningData", getSSZStaticConsensusTest(&cltypes.SigningData{})). Not needed.
 		With("SyncAggregate", getSSZStaticConsensusTest(&cltypes.SyncAggregate{})).
-		//	With("SyncAggregatorSelectionData", getSSZStaticConsensusTest(&cltypes.SyncAggregatorSelectionData{})). Unimplemented
+		With("SyncAggregatorSelectionData", getSSZStaticConsensusTest(&cltypes.SyncAggregatorSelectionData{})).
 		With("SyncCommittee", getSSZStaticConsensusTest(&solid.SyncCommittee{})).
 		//	With("SyncCommitteeContribution", getSSZStaticConsensusTest(&cltypes.SyncCommitteeContribution{})).
 		//	With("SyncCommitteeMessage", getSSZStaticConsensusTest(&cltypes.SyncCommitteeMessage{})).
