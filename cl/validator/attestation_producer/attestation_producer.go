@@ -2,7 +2,6 @@ package attestation_producer
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -71,7 +70,6 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	targetEpoch := state.Epoch(baseState)
 	epochStartTargetSlot := (targetEpoch * ap.beaconCfg.SlotsPerEpoch) - (ap.beaconCfg.SlotsPerEpoch - 1)
 	var targetRoot libcommon.Hash
-	fmt.Println(baseStateBlockRoot)
 	if epochStartTargetSlot == baseState.Slot() {
 		targetRoot = baseStateBlockRoot
 	} else {
