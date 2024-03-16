@@ -37,7 +37,8 @@ func RunBlockConsumer(ctx context.Context, dependencies *BlockConsumerDependenci
 		}
 	}
 	if sentry67 == nil {
-		panic("sentry 67 not found")
+		terminateProcess(dependencies.Logger, errors.New("sentry 67 not found"))
+		return
 	}
 
 	sync := sync.NewService(
@@ -54,7 +55,10 @@ func RunBlockConsumer(ctx context.Context, dependencies *BlockConsumerDependenci
 		return
 	}
 
-	logger := dependencies.Logger
+	terminateProcess(dependencies.Logger, err)
+}
+
+func terminateProcess(logger log.Logger, err error) {
 	logger.Error("astrid block consumer crashed - terminating", "err", err)
 	//goland:noinspection GoBoolExpressions
 	if runtime.GOOS == "windows" {
