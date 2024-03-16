@@ -16,7 +16,7 @@ var (
 	ErrHeadStateNotAvailable = errors.New("head state not available")
 )
 
-const attestationsCacheSize = 1024
+const attestationsCacheSize = 21
 
 type attestationProducer struct {
 	beaconCfg *clparams.BeaconChainConfig
@@ -38,23 +38,26 @@ func New(beaconCfg *clparams.BeaconChainConfig) AttestationDataProducer {
 
 func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.CachingBeaconState, slot uint64, committeeIndex uint64) (solid.AttestationData, error) {
 	epoch := slot / ap.beaconCfg.SlotsPerEpoch
-	if baseState.Slot() > slot {
-		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later.")
-	}
 	baseStateBlockRoot, err := baseState.BlockRoot()
 	if err != nil {
 		return solid.AttestationData{}, err
 	}
-	if baseAttestationData, ok := ap.attestationsCache.Get(slot); ok {
+	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
+		beaconBlockRoot, err := baseState.GetBlockRootAtSlot(slot)
+		if err != nil {
+			return solid.AttestationData{}, err
+		}
 		return solid.NewAttestionDataFromParameters(
 			slot,
 			committeeIndex,
-			baseAttestationData.BeaconBlockRoot(),
+			beaconBlockRoot,
 			baseAttestationData.Source(),
 			baseAttestationData.Target(),
 		), nil
 	}
-
+	if baseState.Slot() > slot {
+		return solid.AttestationData{}, errors.New("head state slot is bigger than requested slot, the attestation should have been cached, try again later.")
+	}
 	stateEpoch := state.Epoch(baseState)
 
 	if stateEpoch < epoch {
@@ -85,18 +88,18 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 	baseAttestationData := solid.NewAttestionDataFromParameters(
 		0,
 		0,
-		baseStateBlockRoot,
+		libcommon.Hash{},
 		baseState.CurrentJustifiedCheckpoint(),
 		solid.NewCheckpointFromParameters(
 			targetRoot,
 			targetEpoch,
 		),
 	)
-	ap.attestationsCache.Add(slot, baseAttestationData)
+	ap.attestationsCache.Add(epoch, baseAttestationData)
 	return solid.NewAttestionDataFromParameters(
 		slot,
 		committeeIndex,
-		baseAttestationData.BeaconBlockRoot(),
+		baseStateBlockRoot,
 		baseAttestationData.Source(),
 		baseAttestationData.Target(),
 	), nil
