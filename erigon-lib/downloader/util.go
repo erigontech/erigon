@@ -81,16 +81,25 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
-		fmt.Println(fPath)
+
 		_, name := filepath.Split(fPath)
 		if !snaptype.IsCorrectFileName(name) {
+			if strings.Contains(fPath, "blobsidecars") {
+				fmt.Println("lol")
+			}
 			continue
 		}
 		ff, _, ok := snaptype.ParseFileName(dir, name)
 		if !ok {
+			if strings.Contains(fPath, "blobsidecars") {
+				fmt.Println("lol2")
+			}
 			continue
 		}
 		if !snapcfg.Seedable(chainName, ff) {
+			if strings.Contains(fPath, "blobsidecars") {
+				fmt.Println("lol3")
+			}
 			continue
 		}
 		res = append(res, name)
