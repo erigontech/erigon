@@ -81,6 +81,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
+		fmt.Println(fPath)
 		_, name := filepath.Split(fPath)
 		if !snaptype.IsCorrectFileName(name) {
 			continue
@@ -176,7 +177,6 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	var i atomic.Int32
 
 	for _, file := range files {
-		fmt.Println(file)
 		file := file
 
 		if ignore.Contains(file) {
