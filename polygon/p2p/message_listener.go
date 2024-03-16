@@ -5,11 +5,16 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/direct"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon/core/forkid"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/rlp"
@@ -34,11 +39,39 @@ type MessageListener interface {
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
-func NewMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) MessageListener {
-	return newMessageListener(logger, sentryClient, peerPenalizer)
+func NewMessageListener(
+	logger log.Logger,
+	sentryClient direct.SentryClient,
+	peerPenalizer PeerPenalizer,
+	chainConfig *chain.Config,
+	genesis *types.Block,
+) MessageListener {
+	// TODO add a "status data component" that message listener will use as a dependency to fetch status data
+	//      "status data component" will be responsible for providing a mechanism to provide up-to-date status data
+	td, _ := uint256.FromBig(genesis.Difficulty())
+	heightForks, timeForks := forkid.GatherForks(chainConfig, genesis.Time())
+	statusData := &sentry.StatusData{
+		NetworkId:       chainConfig.ChainID.Uint64(),
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(td),
+		BestHash:        gointerfaces.ConvertHashToH256(genesis.Hash()),
+		MaxBlockHeight:  genesis.NumberU64(),
+		MaxBlockTime:    genesis.Time(),
+		ForkData: &sentry.Forks{
+			Genesis:     gointerfaces.ConvertHashToH256(genesis.Hash()),
+			HeightForks: heightForks,
+			TimeForks:   timeForks,
+		},
+	}
+
+	return newMessageListener(logger, sentryClient, peerPenalizer, statusData)
 }
 
-func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, peerPenalizer PeerPenalizer) *messageListener {
+func newMessageListener(
+	logger log.Logger,
+	sentryClient direct.SentryClient,
+	peerPenalizer PeerPenalizer,
+	statusData *sentry.StatusData,
+) *messageListener {
 	return &messageListener{
 		logger:                  logger,
 		sentryClient:            sentryClient,
@@ -48,6 +81,7 @@ func newMessageListener(logger log.Logger, sentryClient direct.SentryClient, pee
 		blockHeadersObservers:   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
 		blockBodiesObservers:    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{},
 		peerEventObservers:      map[uint64]MessageObserver[*sentry.PeerEvent]{},
+		statusData:              statusData,
 	}
 }
 
@@ -64,6 +98,9 @@ type messageListener struct {
 	blockBodiesObservers    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
 	peerEventObservers      map[uint64]MessageObserver[*sentry.PeerEvent]
 	stopWg                  sync.WaitGroup
+
+	// TODO remove
+	statusData *sentry.StatusData
 }
 
 func (ml *messageListener) Run(ctx context.Context) {
@@ -164,7 +201,7 @@ func (ml *messageListener) statusDataFactory() sentrymulticlient.StatusDataFacto
 	return func() *sentry.StatusData {
 		// TODO add a "status data component" that message listener will use as a dependency to fetch status data
 		//      "status data component" will be responsible for providing a mechanism to provide up-to-date status data
-		return &sentry.StatusData{}
+		return ml.statusData
 	}
 }
 

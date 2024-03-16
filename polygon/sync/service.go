@@ -36,13 +36,14 @@ func NewService(
 	maxPeers int,
 	heimdallUrl string,
 	executionEngine executionclient.ExecutionEngine,
+	genesis *types.Block,
 ) Service {
 	borConfig := chainConfig.Bor.(*borcfg.BorConfig)
 	execution := NewExecutionClient(executionEngine)
 	storage := NewStorage(execution, maxPeers)
 	headersVerifier := VerifyAccumulatedHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
+	p2pService := p2p.NewService(maxPeers, logger, sentryClient, chainConfig, genesis)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
 	blockDownloader := NewBlockDownloader(

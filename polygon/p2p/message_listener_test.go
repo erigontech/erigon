@@ -224,7 +224,7 @@ func newMessageListenerTest(t *testing.T) *messageListenerTest {
 		t:                     t,
 		logger:                logger,
 		sentryClient:          sentryClient,
-		messageListener:       newMessageListener(logger, sentryClient, NewPeerPenalizer(sentryClient)),
+		messageListener:       newMessageListener(logger, sentryClient, NewPeerPenalizer(sentryClient), &sentry.StatusData{}),
 		inboundMessagesStream: inboundMessagesStream,
 		peerEventsStream:      peerEventsStream,
 	}

@@ -1372,6 +1372,7 @@ func (s *Ethereum) Start() error {
 			MaxPeers:        s.maxPeers,
 			HeimdallUrl:     s.config.HeimdallURL,
 			ExecutionEngine: s.executionEngine,
+			Genesis:         s.genesisBlock,
 		})
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)

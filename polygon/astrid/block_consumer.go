@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/polygon/sync"
 )
 
@@ -23,6 +24,7 @@ type BlockConsumerDependencies struct {
 	MaxPeers        int
 	HeimdallUrl     string
 	ExecutionEngine executionclient.ExecutionEngine
+	Genesis         *types.Block
 }
 
 func RunBlockConsumer(ctx context.Context, dependencies *BlockConsumerDependencies) {
@@ -48,6 +50,7 @@ func RunBlockConsumer(ctx context.Context, dependencies *BlockConsumerDependenci
 		dependencies.MaxPeers,
 		dependencies.HeimdallUrl,
 		dependencies.ExecutionEngine,
+		dependencies.Genesis,
 	)
 
 	err := sync.Run(ctx)
