@@ -3,7 +3,6 @@ package snapcfg
 import (
 	_ "embed"
 	"encoding/json"
-	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -281,11 +280,13 @@ type Cfg struct {
 }
 
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
-	mergeLimit := c.MergeLimit(info.From)
-	if info.Type.Enum() == snaptype.Enums.BlobSidecars {
-		fmt.Println(info.To, info.From, mergeLimit, info.To-info.From)
-
+	var mergeLimit uint64
+	if info.Type.Enum() == snaptype.Enums.BlobSidecars || info.Type.Enum() == snaptype.Enums.BeaconBlocks {
+		mergeLimit = snaptype.Erigon2MergeLimit
+	} else {
+		mergeLimit = c.MergeLimit(info.From)
 	}
+
 	return info.To-info.From == mergeLimit
 }
 
