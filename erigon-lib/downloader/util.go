@@ -176,6 +176,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	var i atomic.Int32
 
 	for _, file := range files {
+		fmt.Println(file)
 		file := file
 
 		if ignore.Contains(file) {
