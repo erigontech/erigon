@@ -166,7 +166,7 @@ func (s *Sentinel) forkWatcher() {
 				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
 					sub := value.(*GossipSubscription)
 					s.subManager.unsubscribe(key.(string))
-					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Duration))
+					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
 					if err != nil {
 						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
 					}
@@ -179,7 +179,7 @@ func (s *Sentinel) forkWatcher() {
 	}
 }
 
-func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Duration, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
 	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
@@ -292,7 +292,6 @@ type GossipSubscription struct {
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
 
-	setup     sync.Once
 	stopCh    chan struct{}
 	closeOnce sync.Once
 }
@@ -306,13 +305,14 @@ func (sub *GossipSubscription) Listen() {
 			case <-sub.ctx.Done():
 				return
 			case <-checkingInterval.C:
-				if sub.subscribed.Load() && time.Until(time.Unix(0, sub.expiration.Load().(time.Duration).Nanoseconds())) < 0 {
+				expirationTime := sub.expiration.Load().(time.Time)
+				if sub.subscribed.Load() && time.Until(expirationTime) < 0 {
 					sub.stopCh <- struct{}{}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
 					continue
 				}
-				if !sub.subscribed.Load() && time.Until(time.Unix(0, sub.expiration.Load().(time.Duration).Nanoseconds())) > 0 {
+				if !sub.subscribed.Load() && time.Until(expirationTime) > 0 {
 					sub.stopCh = make(chan struct{}, 3)
 					sub.sub, err = sub.topic.Subscribe()
 					if err != nil {
@@ -328,7 +328,10 @@ func (sub *GossipSubscription) Listen() {
 			}
 		}
 	}()
-	return
+}
+
+func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
+	sub.expiration.Store(expiry)
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub

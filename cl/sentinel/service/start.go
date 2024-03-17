@@ -39,12 +39,12 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 	return topics
 }
 
-func getExpirationForTopic(topic string) time.Duration {
+func getExpirationForTopic(topic string) time.Time {
 	if strings.Contains(topic, "beacon_attestation") || strings.Contains(topic, "sync_committee") {
-		return 0
+		time.Unix(0, 0)
 	}
 
-	return time.Duration(math.MaxInt64)
+	return time.Unix(0, math.MaxInt64)
 }
 
 func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
