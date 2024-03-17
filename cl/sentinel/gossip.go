@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -165,7 +166,7 @@ func (s *Sentinel) forkWatcher() {
 				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
 					sub := value.(*GossipSubscription)
 					s.subManager.unsubscribe(key.(string))
-					newSub, err := s.SubscribeGossip(sub.gossip_topic)
+					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Duration))
 					if err != nil {
 						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
 					}
@@ -178,16 +179,19 @@ func (s *Sentinel) forkWatcher() {
 	}
 }
 
-func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Duration, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
 	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
+	var exp atomic.Value
+	exp.Store(expiration)
 	sub = &GossipSubscription{
 		gossip_topic: topic,
 		ch:           s.subManager.ch,
 		host:         s.host.ID(),
 		ctx:          s.ctx,
+		expiration:   exp,
 	}
 	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
 	sub.topic, err = s.pubsub.Join(path, opts...)
@@ -279,6 +283,8 @@ type GossipSubscription struct {
 	host         peer.ID
 	ch           chan *GossipMessage
 	ctx          context.Context
+	expiration   atomic.Value // Unix nano for how much we should listen to this topic
+	subscribed   atomic.Bool
 
 	topic *pubsub.Topic
 	sub   *pubsub.Subscription
@@ -291,19 +297,38 @@ type GossipSubscription struct {
 	closeOnce sync.Once
 }
 
-func (sub *GossipSubscription) Listen() (err error) {
-	sub.setup.Do(func() {
-		sub.stopCh = make(chan struct{}, 3)
-		sub.sub, err = sub.topic.Subscribe()
-		if err != nil {
-			err = fmt.Errorf("failed to begin topic %s subscription, err=%w", sub.topic.String(), err)
-			return
+func (sub *GossipSubscription) Listen() {
+	go func() {
+		var err error
+		checkingInterval := time.NewTicker(100 * time.Millisecond)
+		for {
+			select {
+			case <-sub.ctx.Done():
+				return
+			case <-checkingInterval.C:
+				if sub.subscribed.Load() && time.Until(time.Unix(0, sub.expiration.Load().(time.Duration).Nanoseconds())) < 0 {
+					sub.stopCh <- struct{}{}
+					sub.topic.Close()
+					sub.subscribed.Store(false)
+					continue
+				}
+				if !sub.subscribed.Load() && time.Until(time.Unix(0, sub.expiration.Load().(time.Duration).Nanoseconds())) > 0 {
+					sub.stopCh = make(chan struct{}, 3)
+					sub.sub, err = sub.topic.Subscribe()
+					if err != nil {
+						log.Warn("[Gossip] failed to begin topic subscription", "err", err)
+						time.Sleep(30 * time.Second)
+						continue
+					}
+					var sctx context.Context
+					sctx, sub.cf = context.WithCancel(sub.ctx)
+					go sub.run(sctx, sub.sub, sub.sub.Topic())
+					sub.subscribed.Store(true)
+				}
+			}
 		}
-		var sctx context.Context
-		sctx, sub.cf = context.WithCancel(sub.ctx)
-		go sub.run(sctx, sub.sub, sub.sub.Topic())
-	})
-	return nil
+	}()
+	return
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
