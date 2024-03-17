@@ -41,10 +41,10 @@ func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
 
 func getExpirationForTopic(topic string) time.Time {
 	if strings.Contains(topic, "beacon_attestation") || strings.Contains(topic, "sync_committee") {
-		time.Unix(0, 0)
+		return time.Unix(0, 0)
 	}
 
-	return time.Unix(0, math.MaxInt64)
+	return time.Unix(math.MaxInt64, math.MaxInt64)
 }
 
 func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
@@ -83,7 +83,6 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 		}
 		// actually start the subscription, aka listening and sending packets to the sentinel recv channel
 		subscriber.Listen()
-
 	}
 	return sent, nil
 }
