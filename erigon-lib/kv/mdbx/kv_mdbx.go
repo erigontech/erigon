@@ -191,6 +191,10 @@ func (opts MdbxOpts) WriteMap() MdbxOpts {
 	opts.flags |= mdbx.WriteMap
 	return opts
 }
+func (opts MdbxOpts) LifoReclaim() MdbxOpts {
+	opts.flags |= mdbx.LifoReclaim
+	return opts
+}
 
 func (opts MdbxOpts) WriteMergeThreshold(v uint64) MdbxOpts {
 	opts.mergeThreshold = v

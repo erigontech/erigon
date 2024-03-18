@@ -155,6 +155,20 @@ type CPUInfo struct {
 	Mhz       float64 `json:"mhz"`
 }
 
+type BlockHeadersUpdate struct {
+	CurrentBlockNumber  uint64  `json:"blockNumber"`
+	PreviousBlockNumber uint64  `json:"previousBlockNumber"`
+	Speed               float64 `json:"speed"`
+	Alloc               uint64  `json:"alloc"`
+	Sys                 uint64  `json:"sys"`
+	InvalidHeaders      int     `json:"invalidHeaders"`
+	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
+}
+
+func (ti BlockHeadersUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (ti SnapshoFilesList) Type() Type {
 	return TypeOf(ti)
 }

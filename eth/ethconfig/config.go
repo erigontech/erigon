@@ -268,7 +268,7 @@ type Sync struct {
 
 	BodyCacheLimit             datasize.ByteSize
 	BodyDownloadTimeoutSeconds int // TODO: change to duration
-	PruneLimit                 int //the maxumum records to delete from the DB during pruning
+	PruneLimit                 int //the maximum records to delete from the DB during pruning
 	BreakAfterStage            string
 	LoopBlockLimit             uint
 

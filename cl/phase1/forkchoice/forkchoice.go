@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/fork"
-	"github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	state2 "github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -131,8 +130,7 @@ type ForkChoiceStore struct {
 	mu sync.RWMutex
 	// EL
 	engine execution_client.ExecutionEngine
-	// freezer
-	recorder freezer.Freezer
+
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
@@ -152,7 +150,7 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, recorder freezer.Freezer, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -230,7 +228,6 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		latestMessages:        make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
 		eth2Roots:             eth2Roots,
 		engine:                engine,
-		recorder:              recorder,
 		operationsPool:        operationsPool,
 		anchorPublicKeys:      anchorPublicKeys,
 		beaconCfg:             anchorState.BeaconConfig(),

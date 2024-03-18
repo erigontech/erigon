@@ -104,3 +104,7 @@ func (cc *ExecutionClientDirect) GetBodiesByHashes(ctx context.Context, hashes [
 func (cc *ExecutionClientDirect) FrozenBlocks(ctx context.Context) uint64 {
 	return cc.chainRW.FrozenBlocks(ctx)
 }
+
+func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	return cc.chainRW.HasBlock(ctx, hash)
+}
