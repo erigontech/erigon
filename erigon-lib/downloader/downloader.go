@@ -1386,7 +1386,8 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 					idleCount = 0
 				}
 
-				if idleCount > 6 {
+				//fallback to webDownloadClient, but only if it's enabled
+				if d.webDownloadClient != nil && idleCount > 6 {
 					t.DisallowDataDownload()
 					return
 				}
