@@ -549,7 +549,7 @@ func (I *impl) processAttestationPostAltair(s abstract.BeaconState, attestation 
 // processAttestationsPhase0 implements the rules for phase0 processing.
 func (I *impl) processAttestationPhase0(s abstract.BeaconState, attestation *solid.Attestation) ([]uint64, error) {
 	data := attestation.AttestantionData()
-	committee, err := s.GetBeaconCommitee(data.Slot(), data.ValidatorIndex())
+	committee, err := s.GetBeaconCommitee(data.Slot(), data.CommitteeIndex())
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +674,7 @@ func (I *impl) processAttestation(s abstract.BeaconState, attestation *solid.Att
 	if s.Version() >= clparams.DenebVersion && data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return nil, errors.New("ProcessAttestation: attestation slot not in range")
 	}
-	if data.ValidatorIndex() >= s.CommitteeCount(data.Target().Epoch()) {
+	if data.CommitteeIndex() >= s.CommitteeCount(data.Target().Epoch()) {
 		return nil, errors.New("ProcessAttestation: attester index out of range")
 	}
 	// check if we need to use rules for phase0 or post-altair.

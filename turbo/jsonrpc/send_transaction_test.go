@@ -12,13 +12,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/eth/ethconfig"
-
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
+	"github.com/ledgerwatch/erigon-lib/wrap"
 	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -81,9 +79,6 @@ func oneBlockStep(mockSentry *mock.MockSentry, require *require.Assertions, t *t
 }
 
 func TestSendRawTransaction(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("TODO: [e4] implement me")
-	}
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 
@@ -132,9 +127,6 @@ func TestSendRawTransaction(t *testing.T) {
 }
 
 func TestSendRawTransactionUnprotected(t *testing.T) {
-	if ethconfig.EnableHistoryV4InTest {
-		t.Skip("TODO: [e4] implement me")
-	}
 	mockSentry, require := mock.MockWithTxPool(t), require.New(t)
 	logger := log.New()
 

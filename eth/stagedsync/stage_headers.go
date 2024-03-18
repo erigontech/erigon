@@ -15,6 +15,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -561,6 +562,16 @@ func logProgressHeaders(
 		"invalidHeaders", stats.InvalidHeaders,
 		"rejectedBadHeaders", stats.RejectedBadHeaders,
 	)
+
+	diagnostics.Send(diagnostics.BlockHeadersUpdate{
+		CurrentBlockNumber:  now,
+		PreviousBlockNumber: prev,
+		Speed:               speed,
+		Alloc:               m.Alloc,
+		Sys:                 m.Sys,
+		InvalidHeaders:      stats.InvalidHeaders,
+		RejectedBadHeaders:  stats.RejectedBadHeaders,
+	})
 
 	return now
 }

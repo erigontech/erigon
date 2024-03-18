@@ -126,15 +126,18 @@ func (ml *messageListener) listenInboundMessages(ctx context.Context) {
 	}
 
 	streamMessages(ctx, ml, "InboundMessages", streamFactory, func(message *sentry.InboundMessage) error {
+		ml.observersMu.Lock()
+		defer ml.observersMu.Unlock()
+
 		switch message.Id {
 		case sentry.MessageId_NEW_BLOCK_66:
-			return notifyInboundMessageObservers(ctx, ml, ml.newBlockObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockObservers, message)
 		case sentry.MessageId_NEW_BLOCK_HASHES_66:
-			return notifyInboundMessageObservers(ctx, ml, ml.newBlockHashesObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.newBlockHashesObservers, message)
 		case sentry.MessageId_BLOCK_HEADERS_66:
-			return notifyInboundMessageObservers(ctx, ml, ml.blockHeadersObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockHeadersObservers, message)
 		case sentry.MessageId_BLOCK_BODIES_66:
-			return notifyInboundMessageObservers(ctx, ml, ml.blockBodiesObservers, message)
+			return notifyInboundMessageObservers(ctx, ml.logger, ml.peerPenalizer, ml.blockBodiesObservers, message)
 		default:
 			return nil
 		}
@@ -150,7 +153,10 @@ func (ml *messageListener) listenPeerEvents(ctx context.Context) {
 }
 
 func (ml *messageListener) notifyPeerEventObservers(peerEvent *sentry.PeerEvent) error {
-	notifyObservers(&ml.observersMu, ml.peerEventObservers, peerEvent)
+	ml.observersMu.Lock()
+	defer ml.observersMu.Unlock()
+
+	notifyObservers(ml.peerEventObservers, peerEvent)
 	return nil
 }
 
@@ -218,7 +224,8 @@ func streamMessages[TMessage any](
 
 func notifyInboundMessageObservers[TPacket any](
 	ctx context.Context,
-	ml *messageListener,
+	logger log.Logger,
+	peerPenalizer PeerPenalizer,
 	observers map[uint64]MessageObserver[*DecodedInboundMessage[TPacket]],
 	message *sentry.InboundMessage,
 ) error {
@@ -227,9 +234,9 @@ func notifyInboundMessageObservers[TPacket any](
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			ml.logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
+			logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
 
-			if penalizeErr := ml.peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
+			if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)
 			}
 		}
@@ -237,7 +244,7 @@ func notifyInboundMessageObservers[TPacket any](
 		return err
 	}
 
-	notifyObservers(&ml.observersMu, observers, &DecodedInboundMessage[TPacket]{
+	notifyObservers(observers, &DecodedInboundMessage[TPacket]{
 		InboundMessage: message,
 		Decoded:        decodedData,
 		PeerId:         peerId,
@@ -246,10 +253,7 @@ func notifyInboundMessageObservers[TPacket any](
 	return nil
 }
 
-func notifyObservers[TMessage any](mu *sync.Mutex, observers map[uint64]MessageObserver[TMessage], message TMessage) {
-	mu.Lock()
-	defer mu.Unlock()
-
+func notifyObservers[TMessage any](observers map[uint64]MessageObserver[TMessage], message TMessage) {
 	for _, observer := range observers {
 		go observer(message)
 	}

@@ -277,14 +277,22 @@ func TestFetcherFetchBodies(t *testing.T) {
 	t.Parallel()
 
 	peerId := PeerIdFromUint64(1)
-	requestId := uint64(1234)
-	mockHeaders := []*types.Header{{Number: big.NewInt(1)}}
-	mockHashes := []common.Hash{mockHeaders[0].Hash()}
-	mockInboundMessages := []*sentry.InboundMessage{
+	// setup 2 request to test "paging"-style fetch logic
+	requestId1 := uint64(1234)
+	requestId2 := uint64(1235)
+	mockHeaders := []*types.Header{
+		{Number: big.NewInt(1)},
+		{Number: big.NewInt(2)},
+	}
+	mockHashes := []common.Hash{
+		mockHeaders[0].Hash(),
+		mockHeaders[1].Hash(),
+	}
+	mockInboundMessages1 := []*sentry.InboundMessage{
 		{
 			Id:     sentry.MessageId_BLOCK_BODIES_66,
 			PeerId: peerId.H512(),
-			Data: newMockBlockBodiesPacketBytes(t, requestId, &types.Body{
+			Data: newMockBlockBodiesPacketBytes(t, requestId1, &types.Body{
 				Transactions: types.Transactions{
 					types.NewEIP1559Transaction(
 						*uint256.NewInt(1),
@@ -301,19 +309,48 @@ func TestFetcherFetchBodies(t *testing.T) {
 			}),
 		},
 	}
-	mockRequestResponse := requestResponseMock{
-		requestId:                   requestId,
-		mockResponseInboundMessages: mockInboundMessages,
+	mockRequestResponse1 := requestResponseMock{
+		requestId:                   requestId1,
+		mockResponseInboundMessages: mockInboundMessages1,
 		wantRequestPeerId:           peerId,
 		wantRequestHashes:           mockHashes,
 	}
+	mockInboundMessages2 := []*sentry.InboundMessage{
+		{
+			Id:     sentry.MessageId_BLOCK_BODIES_66,
+			PeerId: peerId.H512(),
+			Data: newMockBlockBodiesPacketBytes(t, requestId2, &types.Body{
+				Transactions: types.Transactions{
+					types.NewEIP1559Transaction(
+						*uint256.NewInt(1),
+						2,
+						common.BigToAddress(big.NewInt(321)),
+						uint256.NewInt(21),
+						0,
+						uint256.NewInt(987),
+						uint256.NewInt(876),
+						uint256.NewInt(765),
+						nil,
+					),
+				},
+			}),
+		},
+	}
+	mockRequestResponse2 := requestResponseMock{
+		requestId:                   requestId2,
+		mockResponseInboundMessages: mockInboundMessages2,
+		wantRequestPeerId:           peerId,
+		// 2nd time only request the remaining hash since the first one has been received
+		// in first batch
+		wantRequestHashes: mockHashes[1:],
+	}
 
-	test := newFetcherTest(t, newMockRequestGenerator(requestId))
-	test.mockSentryStreams(mockRequestResponse)
+	test := newFetcherTest(t, newMockRequestGenerator(requestId1, requestId2))
+	test.mockSentryStreams(mockRequestResponse1, mockRequestResponse2)
 	test.run(func(ctx context.Context, t *testing.T) {
 		bodies, err := test.fetcher.FetchBodies(ctx, mockHeaders, peerId)
 		require.NoError(t, err)
-		require.Len(t, bodies, 1)
+		require.Len(t, bodies, 2)
 	})
 }
 
