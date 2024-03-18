@@ -551,6 +551,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
+	statusDataProvider, err := sentry.NewStatusDataProvider(
+		ctx,
+		chainKv,
+		chainConfig,
+		genesis,
+		backend.config.NetworkID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	// limit "new block" broadcasts to at most 10 random peers at time
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
 
@@ -573,18 +584,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	backend.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		chainKv,
-		stack.Config().NodeName(),
 		chainConfig,
-		genesis.Hash(),
-		genesis.Time(),
 		backend.engine,
-		backend.config.NetworkID,
 		sentries,
 		config.Sync,
 		blockReader,
 		blockBufferSize,
+		statusDataProvider,
 		stack.Config().SentryLogPeerInfo,
-		backend.forkValidator,
 		maxBlockBroadcastPeers,
 		logger,
 	)
@@ -776,7 +783,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.syncPruneOrder = stagedsync.DefaultPruneOrder
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger)
 
-	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.UpdateHead)
+	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.SetStatus)
 
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, stack.Config().P2P, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
@@ -1351,7 +1358,7 @@ func (s *Ethereum) Start() error {
 	s.sentriesClient.StartStreamLoops(s.sentryCtx)
 	time.Sleep(10 * time.Millisecond) // just to reduce logs order confusion
 
-	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.UpdateHead)
+	hook := stages2.NewHook(s.sentryCtx, s.chainDB, s.notifications, s.stagedSync, s.blockReader, s.chainConfig, s.logger, s.sentriesClient.SetStatus)
 
 	currentTDProvider := func() *big.Int {
 		currentTD, err := readCurrentTotalDifficulty(s.sentryCtx, s.chainDB, s.blockReader)

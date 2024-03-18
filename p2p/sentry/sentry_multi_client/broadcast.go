@@ -7,9 +7,10 @@ import (
 	"strings"
 	"syscall"
 
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/log/v3"
 	"google.golang.org/grpc"
+
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
@@ -19,9 +20,6 @@ import (
 )
 
 func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []headerdownload.Announce) {
-	cs.lock.RLock()
-	defer cs.lock.RUnlock()
-
 	typedRequest := make(eth.NewBlockHashesPacket, len(announces))
 	for i := range announces {
 		typedRequest[i].Hash = announces[i].Hash
@@ -52,9 +50,6 @@ func (cs *MultiClient) PropagateNewBlockHashes(ctx context.Context, announces []
 }
 
 func (cs *MultiClient) BroadcastNewBlock(ctx context.Context, header *types.Header, body *types.RawBody, td *big.Int) {
-	cs.lock.RLock()
-	defer cs.lock.RUnlock()
-
 	block, err := types.RawBlock{Header: header, Body: body}.AsBlock()
 
 	if err != nil {

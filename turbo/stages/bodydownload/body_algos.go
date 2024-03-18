@@ -65,7 +65,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	headTime = 0
 	headHeader, err := bd.br.Header(context.Background(), db, headHash, headHeight)
 	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading header for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headHeader != nil {
 		headTime = headHeader.Time
