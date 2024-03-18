@@ -51,6 +51,11 @@ var (
 		Usage: "Set the log verbosity for logs stored to disk",
 		Value: log.LvlInfo.String(),
 	}
+
+	LogBlockDelayFlag = cli.BoolFlag{
+		Name:  "log.delays",
+		Usage: "Enable block delay logging",
+	}
 )
 
 var Flags = []cli.Flag{
@@ -63,4 +68,5 @@ var Flags = []cli.Flag{
 	&LogDirPathFlag,
 	&LogDirPrefixFlag,
 	&LogDirVerbosityFlag,
+	&LogBlockDelayFlag,
 }

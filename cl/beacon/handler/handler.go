@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/persistence/state/historical_states_reader"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
+	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
@@ -26,17 +27,18 @@ type ApiHandler struct {
 	o   sync.Once
 	mux *chi.Mux
 
-	blockReader     freezeblocks.BeaconSnapshotReader
-	indiciesDB      kv.RoDB
-	genesisCfg      *clparams.GenesisConfig
-	beaconChainCfg  *clparams.BeaconChainConfig
-	forkchoiceStore forkchoice.ForkChoiceStorage
-	operationsPool  pool.OperationsPool
-	syncedData      *synced_data.SyncedDataManager
-	stateReader     *historical_states_reader.HistoricalStatesReader
-	sentinel        sentinel.SentinelClient
-	blobStoage      blob_storage.BlobStorage
-	caplinSnapshots *freezeblocks.CaplinSnapshots
+	blockReader         freezeblocks.BeaconSnapshotReader
+	indiciesDB          kv.RoDB
+	genesisCfg          *clparams.GenesisConfig
+	beaconChainCfg      *clparams.BeaconChainConfig
+	forkchoiceStore     forkchoice.ForkChoiceStorage
+	operationsPool      pool.OperationsPool
+	syncedData          *synced_data.SyncedDataManager
+	stateReader         *historical_states_reader.HistoricalStatesReader
+	sentinel            sentinel.SentinelClient
+	blobStoage          blob_storage.BlobStorage
+	caplinSnapshots     *freezeblocks.CaplinSnapshots
+	attestationProducer attestation_producer.AttestationDataProducer
 
 	version string // Node's version
 
@@ -54,10 +56,10 @@ type ApiHandler struct {
 	validatorParams *validator_params.ValidatorParams
 }
 
-func NewApiHandler(logger log.Logger, genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters, blobStoage blob_storage.BlobStorage, caplinSnapshots *freezeblocks.CaplinSnapshots, validatorParams *validator_params.ValidatorParams) *ApiHandler {
+func NewApiHandler(logger log.Logger, genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters, blobStoage blob_storage.BlobStorage, caplinSnapshots *freezeblocks.CaplinSnapshots, validatorParams *validator_params.ValidatorParams, attestationProducer attestation_producer.AttestationDataProducer) *ApiHandler {
 	return &ApiHandler{logger: logger, validatorParams: validatorParams, o: sync.Once{}, genesisCfg: genesisConfig, beaconChainCfg: beaconChainConfig, indiciesDB: indiciesDB, forkchoiceStore: forkchoiceStore, operationsPool: operationsPool, blockReader: rcsn, syncedData: syncedData, stateReader: stateReader, randaoMixesPool: sync.Pool{New: func() interface{} {
 		return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
-	}}, sentinel: sentinel, version: version, routerCfg: routerCfg, emitters: emitters, blobStoage: blobStoage, caplinSnapshots: caplinSnapshots}
+	}}, sentinel: sentinel, version: version, routerCfg: routerCfg, emitters: emitters, blobStoage: blobStoage, caplinSnapshots: caplinSnapshots, attestationProducer: attestationProducer}
 }
 
 func (a *ApiHandler) Init() {
@@ -166,7 +168,7 @@ func (a *ApiHandler) init() {
 						r.Post("/sync/{epoch}", beaconhttp.HandleEndpointFunc(a.getSyncDuties))
 					})
 					r.Get("/blinded_blocks/{slot}", http.NotFound)
-					r.Get("/attestation_data", http.NotFound)
+					r.Get("/attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAttestationData))
 					r.Get("/aggregate_attestation", http.NotFound)
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 					r.Post("/beacon_committee_subscriptions", http.NotFound)

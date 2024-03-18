@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
@@ -65,6 +66,9 @@ func (e *EthereumExecutionModule) InsertBlocks(ctx context.Context, req *executi
 				return nil, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
 			}
 		}
+
+		metrics.UpdateBlockConsumerHeaderDownloadDelay(header.Time, height-1, e.logger)
+		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height-1, e.logger)
 
 		// Sum TDs.
 		td := parentTd.Add(parentTd, header.Difficulty)

@@ -179,7 +179,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 				if info.Completed != nil {
 					if hash := hex.EncodeToString(info.Hash); download.Hash != hash {
 						fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), download.Name)
+
 						if !ok {
+							d.logger.Debug("[snapshots] Can't parse download filename", "file", download.Name)
 							continue
 						}
 
@@ -698,8 +700,12 @@ func (d *Downloader) mainLoop(silent bool) error {
 				if isComplete, length, completionTime := d.checkComplete(t.Name()); isComplete && completionTime != nil {
 					if _, ok := checking[t.Name()]; !ok {
 						fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
+
 						if !ok {
-							continue
+							downloadComplete <- downloadStatus{
+								name: fileInfo.Name(),
+								err:  fmt.Errorf("can't parse file name: %s", fileInfo.Name()),
+							}
 						}
 
 						stat, err := os.Stat(fileInfo.Path)
@@ -764,7 +770,10 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 					var completionTime *time.Time
 					fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
+
 					if !ok {
+						d.logger.Debug("[snapshots] Can't parse downloaded filename", "file", t.Name())
+						failed[t.Name()] = struct{}{}
 						continue
 					}
 
@@ -832,7 +841,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 				if status.err == nil {
 					var completionTime *time.Time
 					fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), status.name)
+
 					if !ok {
+						d.logger.Debug("[snapshots] Can't parse downloaded filename", "file", status.name)
 						continue
 					}
 
@@ -913,27 +924,14 @@ func (d *Downloader) mainLoop(silent bool) error {
 						available = append(available, webDownload.torrent)
 					}
 				} else {
-					wi, isStateFile, ok := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name())
-					if !ok {
-						continue
-					}
-					if isStateFile {
-						continue
-					}
-
-					for i, t := range available {
-						ai, isStateFile, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
-						if !ok {
-							continue
-						}
-						if isStateFile {
-							available[i] = webDownload.torrent
-							continue
-						}
-
-						if ai.CompareTo(wi) > 0 {
-							available[i] = webDownload.torrent
-							break
+					if wi, isStateFile, ok := snaptype.ParseFileName(d.SnapDir(), webDownload.torrent.Name()); ok && !isStateFile {
+						for i, t := range available {
+							if ai, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name()); ok {
+								if ai.CompareTo(wi) > 0 {
+									available[i] = webDownload.torrent
+									break
+								}
+							}
 						}
 					}
 				}
@@ -942,20 +940,34 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 			for _, t := range available {
 
-				torrentInfo, _ := d.torrentInfo(t.Name())
+				torrentInfo, err := d.torrentInfo(t.Name())
+
+				if err != nil {
+					if err := d.db.Update(d.ctx, torrentInfoReset(t.Name(), t.InfoHash().Bytes(), 0)); err != nil {
+						d.logger.Debug("[snapshots] Can't update torrent info", "file", t.Name(), "hash", t.InfoHash(), "err", err)
+					}
+				}
+
 				fileInfo, _, ok := snaptype.ParseFileName(d.SnapDir(), t.Name())
+
 				if !ok {
+					d.logger.Debug("[snapshots] Can't parse download filename", "file", t.Name())
+					failed[t.Name()] = struct{}{}
 					continue
 				}
 
 				if torrentInfo != nil {
 					if torrentInfo.Completed != nil {
+						// is the last completed download for this file is the same as the current torrent
+						// check if we can re-use the existing file rather than re-downloading it
 						if bytes.Equal(t.InfoHash().Bytes(), torrentInfo.Hash) {
+							// has the local file changed since we downloaded it - if it has just download it otherwise
+							// do a hash check as if we already have the file - we don't need to download it again
 							if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil && fi.ModTime().Equal(*torrentInfo.Completed) {
 								localHash, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock)
 
 								if complete {
-									d.logger.Debug("[snapshots] Download already complete", "file", t.Name(), "hash", t.InfoHash())
+									d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 									continue
 								}
 
@@ -975,7 +987,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 
 							if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
-								d.logger.Debug("[snapshots] Download already complete", "file", t.Name(), "hash", t.InfoHash())
+								d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 								continue
 							}
 						}
@@ -983,7 +995,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 				} else {
 					if _, ok := waiting[t.Name()]; !ok {
 						if _, complete := localHashCompletionCheck(d.ctx, t, fileInfo, downloadComplete, &d.stats, d.lock); complete {
-							d.logger.Debug("[snapshots] Download already complete", "file", t.Name(), "hash", t.InfoHash())
+							d.logger.Trace("[snapshots] Ignoring download request - already complete", "file", t.Name(), "hash", t.InfoHash())
 							continue
 						}
 
@@ -1019,7 +1031,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 							}
 							continue
 						}
-
 					} else {
 						d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
 						delete(waiting, t.Name())
@@ -1066,6 +1077,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 						continue
 					}
 
+					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
+					delete(waiting, t.Name())
+					d.torrentDownload(t, downloadComplete, sem)
 				}
 			}
 
@@ -1425,7 +1439,11 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 	spec.ChunkSize = downloadercfg.DefaultNetworkChunkSize
 	spec.DisallowDataDownload = true
 
-	info, _, _ := snaptype.ParseFileName(d.SnapDir(), name)
+	info, _, ok := snaptype.ParseFileName(d.SnapDir(), name)
+
+	if !ok {
+		return nil, fmt.Errorf("can't parse filename: %s", name)
+	}
 
 	d.lock.Lock()
 	t.Drop()

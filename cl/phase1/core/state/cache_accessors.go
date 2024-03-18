@@ -300,7 +300,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 	// if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
 	// 	return cached, nil
 	// }
-	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.ValidatorIndex())
+	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.CommitteeIndex())
 	if err != nil {
 		return nil, err
 	}

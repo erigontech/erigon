@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/rpc"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
+	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
@@ -115,6 +116,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	pool := pool.NewOperationsPool(beaconConfig)
+	attestationProducer := attestation_producer.New(beaconConfig)
 
 	caplinFcuPath := path.Join(dirs.Tmp, "caplin-forkchoice")
 	os.RemoveAll(caplinFcuPath)
@@ -250,7 +252,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState)
 	validatorParameters := validator_params.NewValidatorParams()
 	if cfg.Active {
-		apiHandler := handler.NewApiHandler(logger, genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &cfg, emitters, blobStorage, csn, validatorParameters)
+		apiHandler := handler.NewApiHandler(logger, genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &cfg, emitters, blobStorage, csn, validatorParameters, attestationProducer)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
 		}, cfg)
@@ -259,7 +261,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 
 	forkChoice.StartJobsRTT(ctx)
 
-	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, gossipSource, blobStorage)
+	stageCfg := stages.ClStagesCfg(beaconRpc, antiq, genesisConfig, beaconConfig, state, engine, gossipManager, forkChoice, indexDB, csn, rcsn, dirs.Tmp, dbConfig, backfilling, blobBackfilling, syncedDataManager, emitters, gossipSource, blobStorage, attestationProducer)
 	sync := stages.ConsensusClStages(ctx, stageCfg)
 
 	logger.Info("[Caplin] starting clstages loop")
