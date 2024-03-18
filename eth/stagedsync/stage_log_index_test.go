@@ -135,7 +135,7 @@ func TestPruneLogIndex(t *testing.T) {
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger, nil)
+	err = pruneLogIndex("", tx, tmpDir, 0, 50, ctx, logger, nil)
 	require.NoError(err)
 
 	{
@@ -175,7 +175,7 @@ func TestUnwindLogIndex(t *testing.T) {
 	require.NoError(err)
 
 	// Mode test
-	err = pruneLogIndex("", tx, tmpDir, 50, ctx, logger, nil)
+	err = pruneLogIndex("", tx, tmpDir, 0, 50, ctx, logger, nil)
 	require.NoError(err)
 
 	// Unwind test
