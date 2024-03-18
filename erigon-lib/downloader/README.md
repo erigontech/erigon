@@ -49,7 +49,31 @@ As this file ise versioned as part of the Erigon release process the file to has
 
 This is a file which resides in the <data-dir>/snapshots directory for an Erigon node.  It is created when the node performs its initial download.  It contains the list of downloaded files and their respective hashes.
 
-When a `snapshot-lock` file exists it is used reather than the chain.toml file to determine which files should be downloaded.  This means that the directory contents can be maintained event if Erigon is re-versioned and the chain.toml contents change.
+When a `snapshot-lock` file exists it is used instead than the chain.toml file to determine which files should be downloaded.  This means that the directory contents can be maintained event if Erigon is re-versioned and the chain.toml contents change.
+
+### Data Model
+
+#### downloads
+
+With E3 downloaded snapshots come in two forms, `fixed` where the file is immutable and should not be changed by the downloading node, and `baseline` where the downloaded file is used as a baseline which is then altered by the local node. These have the following operating requirements.
+
+##### `fixed`
+
+Fixed downloads are expected to be immutable which means that the file contents and thier associated hash are expected not to change.  On order to prevent disruption on the downloading node the hash of a fixed download is read from the pre-verfied hashes in `chains.toml` when a process is first started and written to the downloads section of `snapshot-lock`.   
+
+After this the process will attempt to download the hashed file from the torrent and once it is downloaded will re-check the file contents for consistency on each process restart.  If the file is inconsistent with the `snapshot-lock` hash it will be re-downloaded.
+
+The in order to preserve read performance via the file's page-cache, and to avoid the delay of hash computaion for large files the start-up check on the file is avoid's re-hashing the file every startup.  
+
+
+##### `baseline`
+
+For baseline downloads the hash recorded in the download section of the `snapshot-lock` is a record of the potential divergence point between the local and pre-verified files.  As both files are will change due to local and remote processing this baseline reference point can't be used for verifying file contents. 
+
+Whenever the 
+
+#### `uploads`
+
 
 ### Deleting snapshot-lock.json
 
