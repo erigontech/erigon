@@ -85,7 +85,7 @@ NB: `--externalcl` flag is removed in upstream erigon so beware of re-using comm
 
 - Block Explorers:
   - Mainnet: [PolygonScan Mainnet](https://zkevm.polygonscan.com/)
-  - Cardona: [PolygonScan Cardona](https://cardona-zkevm.polygonscan.com/)
+  - Cardona: [PolygonScan Cardona](https://cardona-zkevm.polygonscan.com/) 
 
 ***
 

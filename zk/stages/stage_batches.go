@@ -134,7 +134,7 @@ func SpawnStageBatches(
 	errChan := make(chan error)
 
 	// start routine to download blocks and push them in a channel
-	if firstCycle {
+	if !cfg.dsClient.GetStreamingAtomic().Load() {
 		log.Info(fmt.Sprintf("[%s] Starting stream", logPrefix), "startBlock", batchesProgress)
 		go func() {
 			log.Info(fmt.Sprintf("[%s] Started downloading L2Blocks routine", logPrefix))

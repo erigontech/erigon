@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -266,8 +267,12 @@ func (c *StreamClient) afterStartCommand() error {
 func (c *StreamClient) readAllFullL2BlocksToChannel() error {
 	var err error
 	for {
+		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 		fullBlock, gerUpdates, _, _, _, localErr := c.readFullBlock()
 		if localErr != nil {
+			if errors.Is(localErr, net.ErrClosed) || strings.Contains(localErr.Error(), "i/o timeout") {
+				c.tryReConnect()
+			}
 			err = localErr
 			break
 		}
@@ -284,6 +289,18 @@ func (c *StreamClient) readAllFullL2BlocksToChannel() error {
 
 	c.streaming.Store(false)
 	return err
+}
+
+func (c *StreamClient) tryReConnect() {
+	for i := 0; i < 5; i++ {
+		c.conn.Close()
+		c.conn = nil
+		if err := c.Start(); err != nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		break
+	}
 }
 
 // reads a set amount of l2blocks from the server and returns them
