@@ -173,11 +173,19 @@ type HeaderCanonicalMarkerUpdate struct {
 	AncestorHeight uint64 `json:"ancestorHeight"`
 	AncestorHash   string `json:"ancestorHash"`
 }
+type HeadersProcessedUpdate struct {
+	Highest   uint64  `json:"highest"`
+	Age       int     `json:"age"`
+	Headers   uint64  `json:"headers"`
+	In        float64 `json:"in"`
+	BlkPerSec uint64  `json:"blkPerSec"`
+}
 
 type Headers struct {
 	WaitingForHeaders uint64                      `json:"waitingForHeaders"`
 	WriteHeaders      BlockHeadersUpdate          `json:"writeHeaders"`
 	CanonicalMarker   HeaderCanonicalMarkerUpdate `json:"canonicalMarker"`
+	Processed         HeadersProcessedUpdate      `json:"processed"`
 }
 
 func (ti BlockHeadersUpdate) Type() Type {
@@ -225,5 +233,9 @@ func (ti HeadersWaitingUpdate) Type() Type {
 }
 
 func (ti HeaderCanonicalMarkerUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeadersProcessedUpdate) Type() Type {
 	return TypeOf(ti)
 }

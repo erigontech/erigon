@@ -356,6 +356,15 @@ Loop:
 	} else {
 		headers := headerInserter.GetHighest() - startProgress
 		secs := time.Since(startTime).Seconds()
+
+		diagnostics.Send(diagnostics.HeadersProcessedUpdate{
+			Highest:   headerInserter.GetHighest(),
+			Age:       time.Unix(int64(headerInserter.GetHighestTimestamp()), 0).Second(),
+			Headers:   headers,
+			In:        secs,
+			BlkPerSec: uint64(float64(headers) / secs),
+		})
+
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix),
 			"highest", headerInserter.GetHighest(), "age", common.PrettyAge(time.Unix(int64(headerInserter.GetHighestTimestamp()), 0)),
 			"headers", headers, "in", secs, "blk/sec", uint64(float64(headers)/secs))

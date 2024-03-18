@@ -11,6 +11,7 @@ func (d *DiagnosticClient) setupHeadersDiagnostics() {
 	d.runHeadersWaitingListener()
 	d.runWriteHeadersListener()
 	d.runCanonicalMarkerListener()
+	d.runProcessedListener()
 }
 
 func (d *DiagnosticClient) GetHeaders() Headers {
@@ -81,6 +82,30 @@ func (d *DiagnosticClient) runCanonicalMarkerListener() {
 			case info := <-ch:
 				d.mu.Lock()
 				d.headers.CanonicalMarker = info
+				d.mu.Unlock()
+
+				return
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runProcessedListener() {
+	go func() {
+		ctx, ch, cancel := Context[HeadersProcessedUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		StartProviders(ctx, TypeOf(HeadersProcessedUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.headers.Processed = info
 				d.mu.Unlock()
 
 				return
