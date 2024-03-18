@@ -169,9 +169,15 @@ type HeadersWaitingUpdate struct {
 	From uint64 `json:"from"`
 }
 
+type HeaderCanonicalMarkerUpdate struct {
+	AncestorHeight uint64 `json:"ancestorHeight"`
+	AncestorHash   string `json:"ancestorHash"`
+}
+
 type Headers struct {
-	WaitingForHeaders uint64             `json:"waitingForHeaders"`
-	WriteHeaders      BlockHeadersUpdate `json:"writeHeaders"`
+	WaitingForHeaders uint64                      `json:"waitingForHeaders"`
+	WriteHeaders      BlockHeadersUpdate          `json:"writeHeaders"`
+	CanonicalMarker   HeaderCanonicalMarkerUpdate `json:"canonicalMarker"`
 }
 
 func (ti BlockHeadersUpdate) Type() Type {
@@ -215,5 +221,9 @@ func (ti PeerStatisticMsgUpdate) Type() Type {
 }
 
 func (ti HeadersWaitingUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeaderCanonicalMarkerUpdate) Type() Type {
 	return TypeOf(ti)
 }

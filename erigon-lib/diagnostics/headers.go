@@ -10,6 +10,7 @@ import (
 func (d *DiagnosticClient) setupHeadersDiagnostics() {
 	d.runHeadersWaitingListener()
 	d.runWriteHeadersListener()
+	d.runCanonicalMarkerListener()
 }
 
 func (d *DiagnosticClient) GetHeaders() Headers {
@@ -56,6 +57,30 @@ func (d *DiagnosticClient) runWriteHeadersListener() {
 			case info := <-ch:
 				d.mu.Lock()
 				d.headers.WriteHeaders = info
+				d.mu.Unlock()
+
+				return
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runCanonicalMarkerListener() {
+	go func() {
+		ctx, ch, cancel := Context[HeaderCanonicalMarkerUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		StartProviders(ctx, TypeOf(HeaderCanonicalMarkerUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.headers.CanonicalMarker = info
 				d.mu.Unlock()
 
 				return
