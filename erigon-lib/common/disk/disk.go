@@ -1,4 +1,4 @@
-//go:build !linux
+//go:build !linux && !darwin
 
 package disk
 
@@ -12,8 +12,9 @@ import (
 
 var (
 	writeBytes = metrics.NewGauge(`system_disk_writebytes`)
-	writeCount = metrics.NewGauge(`ru_outblock`)
 	readBytes  = metrics.NewGauge(`system_disk_readbytes`)
+
+	writeCount = metrics.NewGauge(`ru_outblock`)
 	readCount  = metrics.NewGauge(`ru_inblock`)
 )
 
