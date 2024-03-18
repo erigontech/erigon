@@ -248,7 +248,7 @@ func (g *G1) Affine(p *PointG1) *PointG1 {
 
 // Add adds two G1 points p1, p2 and assigns the result to point at first argument.
 func (g *G1) Add(r, p1, p2 *PointG1) *PointG1 {
-	// www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
+	// http://www.hyperelliptic.org/EFD/g1p/auto-shortw-jacobian-0.html#addition-add-2007-bl
 	if g.IsZero(p1) {
 		return r.Set(p2)
 	}
