@@ -91,26 +91,12 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 		}
 
 		switch segment.Type.Enum() {
-		case snaptype.Enums.Headers:
+		case snaptype.Enums.Headers, snaptype.Enums.Bodies, snaptype.Enums.Transactions:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, segment, dirs.Tmp, jobProgress, logLevel, logger)
-			})
-		case snaptype.Enums.Bodies:
-			g.Go(func() error {
-				jobProgress := &background.Progress{}
-				ps.Add(jobProgress)
-				defer ps.Delete(jobProgress)
-				return freezeblocks.BodiesIdx(ctx, segment, dirs.Tmp, jobProgress, logLevel, logger)
-			})
-		case snaptype.Enums.Transactions:
-			g.Go(func() error {
-				jobProgress := &background.Progress{}
-				ps.Add(jobProgress)
-				defer ps.Delete(jobProgress)
-				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment, dirs.Tmp, jobProgress, logLevel, logger)
+				return segment.Type.BuildIndexes(ctx, segment, chainConfig, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

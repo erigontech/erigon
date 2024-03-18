@@ -1,9 +1,27 @@
 package snaptype
 
 import (
+	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/holiman/uint256"
+	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/recsplit"
+	"github.com/ledgerwatch/erigon-lib/seg"
+	types2 "github.com/ledgerwatch/erigon-lib/types"
+	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/crypto"
+	"github.com/ledgerwatch/erigon/crypto/cryptopool"
+	"github.com/ledgerwatch/erigon/rlp"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Version uint8
@@ -35,7 +53,84 @@ type Versions struct {
 	MinSupported Version
 }
 
+type IndexBuilder interface {
+	Build(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
+}
+
+type IndexBuilderFunc func(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
+
+func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return f(ctx, info, chainConfig, tmpDir, p, lvl, logger)
+}
+
 type Index int
+
+// Idx - iterate over segment and building .idx file
+func BuildIndex(ctx context.Context, info FileInfo, firstDataId uint64, tmpDir string, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
+		}
+	}()
+
+	d, err := seg.NewDecompressor(info.Path)
+
+	if err != nil {
+		return fmt.Errorf("can't open %s for indexing: %w", info.Name(), err)
+	}
+
+	defer d.Close()
+
+	if p != nil {
+		fname := info.Name()
+		p.Name.Store(&fname)
+		p.Total.Store(uint64(d.Count()))
+	}
+
+	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+		KeyCount:   d.Count(),
+		Enums:      true,
+		BucketSize: 2000,
+		LeafSize:   8,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To)),
+		BaseDataID: firstDataId,
+	}, logger)
+	if err != nil {
+		return err
+	}
+	rs.LogLvl(log.LvlDebug)
+
+	defer d.EnableMadvNormal().DisableReadAhead()
+
+RETRY:
+	g := d.MakeGetter()
+	var i, offset, nextPos uint64
+	word := make([]byte, 0, 4096)
+	for g.HasNext() {
+		word, nextPos = g.Next(word[:0])
+		if err := walker(rs, i, offset, word); err != nil {
+			return err
+		}
+		i++
+		offset = nextPos
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+	}
+	if err = rs.Build(ctx); err != nil {
+		if errors.Is(err, recsplit.ErrCollision) {
+			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+			rs.ResetNextSalt()
+			goto RETRY
+		}
+		return err
+	}
+	return nil
+}
 
 var Indexes = struct {
 	Unknown,
@@ -91,6 +186,29 @@ func (i Index) String() string {
 	}
 }
 
+func (i Index) HasFile(info FileInfo, logger log.Logger) bool {
+	dir := info.Dir()
+	fName := IdxFileName(info.Version, info.From, info.To, i.String())
+
+	segment, err := seg.NewDecompressor(info.Path)
+
+	if err != nil {
+		return false
+	}
+
+	defer segment.Close()
+
+	idx, err := recsplit.OpenIndex(filepath.Join(dir, fName))
+
+	if err != nil {
+		return false
+	}
+
+	defer idx.Close()
+
+	return idx.ModTime().After(segment.ModTime())
+}
+
 type Type interface {
 	Enum() Enum
 	Versions() Versions
@@ -100,12 +218,27 @@ type Type interface {
 	IdxFileName(version Version, from uint64, to uint64, index ...Index) string
 	IdxFileNames(version Version, from uint64, to uint64) []string
 	Indexes() []Index
+	HasIndexFiles(info FileInfo, logger log.Logger) bool
+	BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
 }
 
 type snapType struct {
-	enum     Enum
-	versions Versions
-	indexes  []Index
+	enum         Enum
+	versions     Versions
+	indexes      []Index
+	indexBuilder IndexBuilder
+}
+
+var registeredTypes = map[Enum]Type{}
+
+func RegisterType(enum Enum, versions Versions, indexes []Index, indexBuilder IndexBuilder) Type {
+	t := snapType{
+		enum: enum, versions: versions, indexes: indexes, indexBuilder: indexBuilder,
+	}
+
+	registeredTypes[enum] = t
+
+	return t
 }
 
 func (s snapType) Enum() Enum {
@@ -135,6 +268,20 @@ func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 
 func (s snapType) Indexes() []Index {
 	return s.indexes
+}
+
+func (s snapType) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return s.indexBuilder.Build(ctx, info, chainConfig, tmpDir, p, lvl, logger)
+}
+
+func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
+	for _, index := range s.indexes {
+		if !index.HasFile(info, logger) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string {
@@ -192,7 +339,7 @@ var Enums = struct {
 	Transactions,
 	BorEvents,
 	BorSpans,
-	BeaconBlocks Enum
+	BeaconBlocks,
 	BlobSidecars Enum
 }{
 	Unknown:      -1,
@@ -234,16 +381,12 @@ func (ft Enum) Type() Type {
 		return Bodies
 	case Enums.Transactions:
 		return Transactions
-	case Enums.BorEvents:
-		return BorEvents
-	case Enums.BorSpans:
-		return BorSpans
 	case Enums.BeaconBlocks:
 		return BeaconBlocks
 	case Enums.BlobSidecars:
 		return BlobSidecars
 	default:
-		return nil
+		return registeredTypes[ft]
 	}
 }
 
@@ -254,6 +397,14 @@ func (e Enum) FileName(from uint64, to uint64) string {
 func (e Enum) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	f, _, _ := ParseFileName(dir, e.FileName(from, to))
 	return f
+}
+
+func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
+	return e.Type().HasIndexFiles(info, logger)
+}
+
+func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return e.Type().BuildIndexes(ctx, info, chainConfig, tmpDir, p, lvl, logger)
 }
 
 func ParseEnum(s string) (Enum, bool) {
@@ -285,6 +436,29 @@ var (
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.HeaderHash},
+		indexBuilder: IndexBuilderFunc(
+			func(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+				hasher := crypto.NewKeccakState()
+				defer cryptopool.ReturnToPoolKeccak256(hasher)
+				var h common.Hash
+				if err := BuildIndex(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+					if p != nil {
+						p.Processed.Add(1)
+					}
+
+					headerRlp := word[1:]
+					hasher.Reset()
+					hasher.Write(headerRlp)
+					hasher.Read(h[:])
+					if err := idx.AddKey(h[:], offset); err != nil {
+						return err
+					}
+					return nil
+				}, logger); err != nil {
+					return fmt.Errorf("HeadersIdx: %w", err)
+				}
+				return nil
+			}),
 	}
 
 	Bodies = snapType{
@@ -294,6 +468,24 @@ var (
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.BodyHash},
+		indexBuilder: IndexBuilderFunc(
+			func(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+				num := make([]byte, 8)
+
+				if err := BuildIndex(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+					if p != nil {
+						p.Processed.Add(1)
+					}
+					n := binary.PutUvarint(num, i)
+					if err := idx.AddKey(num[:n], offset); err != nil {
+						return err
+					}
+					return nil
+				}, logger); err != nil {
+					return fmt.Errorf("can't index %s: %w", info.Name(), err)
+				}
+				return nil
+			}),
 	}
 
 	Transactions = snapType{
@@ -303,24 +495,164 @@ var (
 			MinSupported: 1,
 		},
 		indexes: []Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
-	}
+		indexBuilder: IndexBuilderFunc(
+			func(ctx context.Context, sn FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						err = fmt.Errorf("index panic: at=%s, %v, %s", sn.Name(), rec, dbg.Stack())
+					}
+				}()
+				firstBlockNum := sn.From
 
-	BorEvents = snapType{
-		enum: Enums.BorEvents,
-		versions: Versions{
-			Current:      1, //2,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.BorTxnHash},
-	}
+				bodiesSegment, err := seg.NewDecompressor(sn.As(Bodies).Path)
+				if err != nil {
+					return fmt.Errorf("can't open %s for indexing: %w", sn.As(Bodies).Name(), err)
+				}
+				defer bodiesSegment.Close()
 
-	BorSpans = snapType{
-		enum: Enums.BorSpans,
-		versions: Versions{
-			Current:      1, //2,
-			MinSupported: 1,
-		},
-		indexes: []Index{Indexes.BorSpanId},
+				firstTxID, expectedCount, err := txsAmountBasedOnBodiesSnapshots(bodiesSegment, sn.Len()-1)
+				if err != nil {
+					return err
+				}
+
+				d, err := seg.NewDecompressor(sn.Path)
+				if err != nil {
+					return fmt.Errorf("can't open %s for indexing: %w", sn.Path, err)
+				}
+				defer d.Close()
+				if d.Count() != expectedCount {
+					return fmt.Errorf("TransactionsIdx: at=%d-%d, pre index building, expect: %d, got %d", sn.From, sn.To, expectedCount, d.Count())
+				}
+
+				if p != nil {
+					name := sn.Name()
+					p.Name.Store(&name)
+					p.Total.Store(uint64(d.Count() * 2))
+				}
+
+				txnHashIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+					KeyCount: d.Count(),
+
+					Enums:              true,
+					LessFalsePositives: true,
+
+					BucketSize: 2000,
+					LeafSize:   8,
+					TmpDir:     tmpDir,
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
+					BaseDataID: firstTxID,
+				}, logger)
+				if err != nil {
+					return err
+				}
+
+				txnHash2BlockNumIdx, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
+					KeyCount:   d.Count(),
+					Enums:      false,
+					BucketSize: 2000,
+					LeafSize:   8,
+					TmpDir:     tmpDir,
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
+					BaseDataID: firstBlockNum,
+				}, logger)
+				if err != nil {
+					return err
+				}
+				txnHashIdx.LogLvl(log.LvlDebug)
+				txnHash2BlockNumIdx.LogLvl(log.LvlDebug)
+
+				chainId, _ := uint256.FromBig(chainConfig.ChainID)
+
+				parseCtx := types2.NewTxParseContext(*chainId)
+				parseCtx.WithSender(false)
+				slot := types2.TxSlot{}
+				bodyBuf, word := make([]byte, 0, 4096), make([]byte, 0, 4096)
+
+				defer d.EnableMadvNormal().DisableReadAhead()
+				defer bodiesSegment.EnableMadvNormal().DisableReadAhead()
+
+			RETRY:
+				g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
+				var i, offset, nextPos uint64
+				blockNum := firstBlockNum
+				body := &types.BodyForStorage{}
+
+				bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
+				if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+					return err
+				}
+
+				for g.HasNext() {
+					if p != nil {
+						p.Processed.Add(1)
+					}
+
+					word, nextPos = g.Next(word[:0])
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+					}
+
+					for body.BaseTxId+uint64(body.TxAmount) <= firstTxID+i { // skip empty blocks
+						if !bodyGetter.HasNext() {
+							return fmt.Errorf("not enough bodies")
+						}
+
+						bodyBuf, _ = bodyGetter.Next(bodyBuf[:0])
+						if err := rlp.DecodeBytes(bodyBuf, body); err != nil {
+							return err
+						}
+
+						blockNum++
+					}
+
+					firstTxByteAndlengthOfAddress := 21
+					isSystemTx := len(word) == 0
+					if isSystemTx { // system-txs hash:pad32(txnID)
+						binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
+					} else {
+						if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, false /* wrappedWithBlobs */, nil /* validateHash */); err != nil {
+							return fmt.Errorf("ParseTransaction: %w, blockNum: %d, i: %d", err, blockNum, i)
+						}
+					}
+
+					if err := txnHashIdx.AddKey(slot.IDHash[:], offset); err != nil {
+						return err
+					}
+					if err := txnHash2BlockNumIdx.AddKey(slot.IDHash[:], blockNum); err != nil {
+						return err
+					}
+
+					i++
+					offset = nextPos
+				}
+
+				if int(i) != expectedCount {
+					return fmt.Errorf("TransactionsIdx: at=%d-%d, post index building, expect: %d, got %d", sn.From, sn.To, expectedCount, i)
+				}
+
+				if err := txnHashIdx.Build(ctx); err != nil {
+					if errors.Is(err, recsplit.ErrCollision) {
+						logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+						txnHashIdx.ResetNextSalt()
+						txnHash2BlockNumIdx.ResetNextSalt()
+						goto RETRY
+					}
+					return fmt.Errorf("txnHashIdx: %w", err)
+				}
+				if err := txnHash2BlockNumIdx.Build(ctx); err != nil {
+					if errors.Is(err, recsplit.ErrCollision) {
+						logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+						txnHashIdx.ResetNextSalt()
+						txnHash2BlockNumIdx.ResetNextSalt()
+						goto RETRY
+					}
+					return fmt.Errorf("txnHash2BlockNumIdx: %w", err)
+				}
+
+				return nil
+			}),
 	}
 
 	BeaconBlocks = snapType{
@@ -342,16 +674,39 @@ var (
 
 	BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
 
-	BorSnapshotTypes = []Type{BorEvents, BorSpans}
-
 	CaplinSnapshotTypes = []Type{BeaconBlocks}
-
-	AllTypes = []Type{
-		Headers,
-		Bodies,
-		Transactions,
-		BorEvents,
-		BorSpans,
-		BeaconBlocks,
-	}
 )
+
+func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (firstTxID uint64, expectedCount int, err error) {
+	gg := bodiesSegment.MakeGetter()
+	buf, _ := gg.Next(nil)
+	firstBody := &types.BodyForStorage{}
+	if err = rlp.DecodeBytes(buf, firstBody); err != nil {
+		return
+	}
+	firstTxID = firstBody.BaseTxId
+
+	lastBody := new(types.BodyForStorage)
+	i := uint64(0)
+	for gg.HasNext() {
+		i++
+		if i == len {
+			buf, _ = gg.Next(buf[:0])
+			if err = rlp.DecodeBytes(buf, lastBody); err != nil {
+				return
+			}
+			if gg.HasNext() {
+				panic(1)
+			}
+		} else {
+			gg.Skip()
+		}
+	}
+
+	if lastBody.BaseTxId < firstBody.BaseTxId {
+		return 0, 0, fmt.Errorf("negative txs count %s: lastBody.BaseTxId=%d < firstBody.BaseTxId=%d", bodiesSegment.FileName(), lastBody.BaseTxId, firstBody.BaseTxId)
+	}
+
+	expectedCount = int(lastBody.BaseTxId+uint64(lastBody.TxAmount)) - int(firstBody.BaseTxId)
+	return
+}

@@ -1,10 +1,8 @@
 package freezeblocks
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,18 +12,16 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/recsplit"
-	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon/cmd/hack/tool/fromdb"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/polygon/bor/bortype"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
@@ -92,7 +88,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		return nil
 	}
 
-	err := merger.Merge(ctx, &snapshots.RoSnapshots, snaptype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
+	err := merger.Merge(ctx, &snapshots.RoSnapshots, bortype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 
 	if err != nil {
 		return ok, err
@@ -112,12 +108,12 @@ func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *
 
 func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 
-	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err := dumpRange(ctx, bortype.BorEvents.FileInfo(snapDir, blockFrom, blockTo),
 		DumpBorEvents, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
 
-	if _, err := dumpRange(ctx, snaptype.BorSpans.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err := dumpRange(ctx, bortype.BorSpans.FileInfo(snapDir, blockFrom, blockTo),
 		DumpBorSpans, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
@@ -248,151 +244,6 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, bl
 	return spanTo, nil
 }
 
-func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
-		}
-	}()
-	// Calculate how many records there will be in the index
-	d, err := seg.NewDecompressor(sn.Path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	g := d.MakeGetter()
-	var blockNumBuf [length.BlockNum]byte
-	var first bool = true
-	word := make([]byte, 0, 4096)
-	var blockCount int
-	var baseEventId uint64
-	for g.HasNext() {
-		word, _ = g.Next(word[:0])
-		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
-			blockCount++
-			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
-		}
-		if first {
-			baseEventId = binary.BigEndian.Uint64(word[length.Hash+length.BlockNum : length.Hash+length.BlockNum+8])
-			first = false
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   blockCount,
-		Enums:      blockCount > 0,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorEvents.String())),
-		BaseDataID: baseEventId,
-	}, logger)
-	if err != nil {
-		return err
-	}
-	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
-	g.Reset(0)
-	first = true
-	var i, offset, nextPos uint64
-	for g.HasNext() {
-		word, nextPos = g.Next(word[:0])
-		i++
-		if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
-			if err = rs.AddKey(word[:length.Hash], offset); err != nil {
-				return err
-			}
-			copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
-		}
-		if first {
-			first = false
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
-	return nil
-}
-
-func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
-		}
-	}()
-	// Calculate how many records there will be in the index
-	d, err := seg.NewDecompressor(sn.Path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-
-	baseSpanId := heimdall.SpanIdAt(sn.From)
-
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   d.Count(),
-		Enums:      d.Count() > 0,
-		BucketSize: 2000,
-		LeafSize:   8,
-		TmpDir:     tmpDir,
-		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
-		BaseDataID: uint64(baseSpanId),
-	}, logger)
-	if err != nil {
-		return err
-	}
-	rs.LogLvl(log.LvlDebug)
-
-	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
-	g := d.MakeGetter()
-	var i, offset, nextPos uint64
-	var key [8]byte
-	for g.HasNext() {
-		nextPos, _ = g.Skip()
-		binary.BigEndian.PutUint64(key[:], i)
-		i++
-		if err = rs.AddKey(key[:], offset); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-
-	return nil
-}
-
 // Bor Events
 // value: event_rlp
 // bor_transaction_hash  -> bor_event_segment_offset
@@ -411,7 +262,7 @@ type BorRoSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewBorRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin uint64, logger log.Logger) *BorRoSnapshots {
-	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, snaptype.BorSnapshotTypes, segmentsMin, logger)}
+	return &BorRoSnapshots{*newRoSnapshots(cfg, snapDir, bortype.BorSnapshotTypes, segmentsMin, logger)}
 }
 
 func (s *BorRoSnapshots) Ranges() []Range {
@@ -483,7 +334,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), snaptype.BorSnapshotTypes)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), bortype.BorSnapshotTypes)
 	if err != nil {
 		return err
 	}
@@ -509,7 +360,7 @@ type BorView struct {
 
 func (s *BorRoSnapshots) View() *BorView {
 	v := &BorView{base: s.RoSnapshots.View()}
-	v.base.baseSegType = snaptype.BorSpans
+	v.base.baseSegType = bortype.BorSpans
 	return v
 }
 
@@ -517,13 +368,13 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*Segment { return v.base.Segments(snaptype.BorEvents) }
-func (v *BorView) Spans() []*Segment  { return v.base.Segments(snaptype.BorSpans) }
+func (v *BorView) Events() []*Segment { return v.base.Segments(bortype.BorEvents) }
+func (v *BorView) Spans() []*Segment  { return v.base.Segments(bortype.BorSpans) }
 
 func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
-	return v.base.Segment(snaptype.BorEvents, blockNum)
+	return v.base.Segment(bortype.BorEvents, blockNum)
 }
 
 func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
-	return v.base.Segment(snaptype.BorSpans, blockNum)
+	return v.base.Segment(bortype.BorSpans, blockNum)
 }

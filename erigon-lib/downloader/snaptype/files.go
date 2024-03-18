@@ -176,10 +176,8 @@ func IsStateFile(name string) (ok bool) {
 		return false
 	}
 	_, err = strconv.ParseUint(subs[4], 10, 64)
-	if err != nil {
-		return false
-	}
-	return true
+
+	return err == nil
 }
 
 const Erigon3SeedableSteps = 32

@@ -323,18 +323,18 @@ var knownPreverified = map[string]Preverified{
 }
 
 var ethereumTypes = append(snaptype.BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
-var borTypes = append(snaptype.BlockSnapshotTypes, snaptype.BorSnapshotTypes...)
+
+func RegisterKnownTypes(networkName string, types []snaptype.Type) {
+	knownTypes[networkName] = types
+}
 
 var knownTypes = map[string][]snaptype.Type{
 	networkname.MainnetChainName: ethereumTypes,
 	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
-	networkname.SepoliaChainName:    ethereumTypes,
-	networkname.GoerliChainName:     ethereumTypes,
-	networkname.MumbaiChainName:     borTypes,
-	networkname.AmoyChainName:       borTypes,
-	networkname.BorMainnetChainName: borTypes,
-	networkname.GnosisChainName:     ethereumTypes,
-	networkname.ChiadoChainName:     ethereumTypes,
+	networkname.SepoliaChainName: ethereumTypes,
+	networkname.GoerliChainName:  ethereumTypes,
+	networkname.GnosisChainName:  ethereumTypes,
+	networkname.ChiadoChainName:  ethereumTypes,
 }
 
 func Seedable(networkName string, info snaptype.FileInfo) bool {

@@ -449,5 +449,5 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segme
 
 	info, _, _ := snaptype.ParseFileName(s.downloader.LocalFsRoot(), fileName)
 
-	return freezeblocks.HeadersIdx(ctx, info, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	return snaptype.Headers.BuildIndexes(ctx, info, nil, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }
