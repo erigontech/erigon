@@ -1400,7 +1400,7 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 }
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
-	if d.webDownloadClient == nil
+	if d.webDownloadClient == nil {
 		return nil, fmt.Errorf("webdonload client not enabled")
 	}
 
