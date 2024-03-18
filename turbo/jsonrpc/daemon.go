@@ -50,6 +50,7 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 	}
 
 	otsImpl := NewOtterscanAPI(base, db, cfg.OtsMaxPageSize)
+	ots2Impl := NewOtterscan2API(base, db)
 	gqlImpl := NewGraphQLAPI(base, db)
 
 	if cfg.GraphQLEnabled {
@@ -147,6 +148,13 @@ func APIList(db kv.RoDB, eth rpchelper.ApiBackend, txPool txpool.TxpoolClient, m
 				Namespace: "ots",
 				Public:    true,
 				Service:   OtterscanAPI(otsImpl),
+				Version:   "1.0",
+			})
+		case "ots2":
+			list = append(list, rpc.API{
+				Namespace: "ots2",
+				Public:    true,
+				Service:   Otterscan2API(ots2Impl),
 				Version:   "1.0",
 			})
 		case "clique":
