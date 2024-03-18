@@ -306,13 +306,13 @@ func (sub *GossipSubscription) Listen() {
 				return
 			case <-checkingInterval.C:
 				expirationTime := sub.expiration.Load().(time.Time)
-				if sub.subscribed.Load() && time.Until(expirationTime) < 0 {
+				if sub.subscribed.Load() && time.Now().After(expirationTime) {
 					sub.stopCh <- struct{}{}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
 					continue
 				}
-				if !sub.subscribed.Load() && time.Until(expirationTime) > 0 {
+				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
 					sub.stopCh = make(chan struct{}, 3)
 					sub.sub, err = sub.topic.Subscribe()
 					if err != nil {
