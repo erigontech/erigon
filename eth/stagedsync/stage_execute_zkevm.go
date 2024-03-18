@@ -224,6 +224,10 @@ Loop:
 			tx.CollectMetrics()
 			Metrics[stages.Execution].Set(blockNum)
 		}
+		//[hack] if we sync to the tip we get wrong block hashes sometimes
+		if stageProgress%3000000 == 0 {
+			break
+		}
 	}
 
 	if err = s.Update(batch, stageProgress); err != nil {
