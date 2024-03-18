@@ -1988,6 +1988,7 @@ RETRY:
 		firstTxByteAndlengthOfAddress := 21
 		isSystemTx := len(word) == 0
 		if isSystemTx { // system-txs hash:pad32(txnID)
+			slot.IDHash = emptyHash
 			binary.BigEndian.PutUint64(slot.IDHash[:], firstTxID+i)
 		} else {
 			if _, err = parseCtx.ParseTransaction(word[firstTxByteAndlengthOfAddress:], 0, &slot, nil, true /* hasEnvelope */, false /* wrappedWithBlobs */, nil /* validateHash */); err != nil {
