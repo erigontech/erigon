@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.21.7
+go 1.21
 
 require (
 	github.com/erigontech/mdbx-go v0.37.2
@@ -20,9 +20,9 @@ require (
 	github.com/VictoriaMetrics/fastcache v1.12.2
 	github.com/alecthomas/atomic v0.1.0-alpha2
 	github.com/alecthomas/kong v0.8.1
-	github.com/anacrolix/log v0.14.6-0.20231202035202-ed7a02cad0b4
+	github.com/anacrolix/log v0.15.2
 	github.com/anacrolix/sync v0.5.1
-	github.com/anacrolix/torrent v1.55.0
+	github.com/anacrolix/torrent v1.55.1-0.20240318063619-4c8105a446db
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
@@ -126,7 +126,7 @@ require (
 	github.com/anacrolix/chansync v0.3.0 // indirect
 	github.com/anacrolix/dht/v2 v2.21.0 // indirect
 	github.com/anacrolix/envpprof v1.3.0 // indirect
-	github.com/anacrolix/generics v0.0.0-20230911070922-5dd7545c6b13 // indirect
+	github.com/anacrolix/generics v0.0.2-0.20240227122613-f95486179cab // indirect
 	github.com/anacrolix/go-libutp v1.3.1 // indirect
 	github.com/anacrolix/missinggo v1.3.0 // indirect
 	github.com/anacrolix/missinggo/perf v1.0.0 // indirect
