@@ -651,7 +651,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent1.Transactions.Name()))
-					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), info, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					salt := freezeblocks.GetIndicesSalt(info.Dir())
+					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), info, salt, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				b2err := make(chan error, 1)
@@ -728,7 +729,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent2.Transactions.Name()))
-					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), info, c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
+					salt := freezeblocks.GetIndicesSalt(info.Dir())
+					return freezeblocks.TransactionsIdx(ctx, c.chainConfig(), info, salt, c.session2.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				if err := g.Wait(); err != nil {
