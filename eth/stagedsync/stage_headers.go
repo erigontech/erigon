@@ -174,6 +174,8 @@ func HeadersPOW(
 
 	logger.Info(fmt.Sprintf("[%s] Waiting for headers...", logPrefix), "from", startProgress)
 
+	diagnostics.Send(diagnostics.HeadersWaitingUpdate{From: startProgress})
+
 	localTd, err := rawdb.ReadTd(tx, hash, startProgress)
 	if err != nil {
 		return err

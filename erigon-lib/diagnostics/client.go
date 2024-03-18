@@ -14,6 +14,7 @@ type DiagnosticClient struct {
 	mu               sync.Mutex
 	hardwareInfo     HardwareInfo
 	peersSyncMap     sync.Map
+	headers          Headers
 }
 
 func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {
@@ -32,6 +33,7 @@ func (d *DiagnosticClient) Setup() {
 	d.setupSysInfoDiagnostics()
 	d.setupNetworkDiagnostics()
 	d.setupBlockExecutionDiagnostics()
+	d.setupHeadersDiagnostics()
 
 	//d.logDiagMsgs()
 }

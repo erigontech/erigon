@@ -165,6 +165,14 @@ type BlockHeadersUpdate struct {
 	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
 }
 
+type HeadersWaitingUpdate struct {
+	From uint64 `json:"from"`
+}
+
+type Headers struct {
+	WaitingForHeaders uint64 `json:"waitingForHeaders"`
+}
+
 func (ti BlockHeadersUpdate) Type() Type {
 	return TypeOf(ti)
 }
@@ -202,5 +210,9 @@ func (ti CurrentSyncStage) Type() Type {
 }
 
 func (ti PeerStatisticMsgUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti HeadersWaitingUpdate) Type() Type {
 	return TypeOf(ti)
 }
