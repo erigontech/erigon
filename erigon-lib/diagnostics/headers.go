@@ -9,6 +9,7 @@ import (
 
 func (d *DiagnosticClient) setupHeadersDiagnostics() {
 	d.runHeadersWaitingListener()
+	d.runWriteHeadersListener()
 }
 
 func (d *DiagnosticClient) GetHeaders() Headers {
@@ -31,6 +32,30 @@ func (d *DiagnosticClient) runHeadersWaitingListener() {
 			case info := <-ch:
 				d.mu.Lock()
 				d.headers.WaitingForHeaders = info.From
+				d.mu.Unlock()
+
+				return
+			}
+		}
+	}()
+}
+
+func (d *DiagnosticClient) runWriteHeadersListener() {
+	go func() {
+		ctx, ch, cancel := Context[BlockHeadersUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		StartProviders(ctx, TypeOf(BlockHeadersUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.headers.WriteHeaders = info
 				d.mu.Unlock()
 
 				return

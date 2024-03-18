@@ -170,7 +170,8 @@ type HeadersWaitingUpdate struct {
 }
 
 type Headers struct {
-	WaitingForHeaders uint64 `json:"waitingForHeaders"`
+	WaitingForHeaders uint64             `json:"waitingForHeaders"`
+	WriteHeaders      BlockHeadersUpdate `json:"writeHeaders"`
 }
 
 func (ti BlockHeadersUpdate) Type() Type {
