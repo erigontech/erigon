@@ -893,62 +893,16 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	// decode Transactions
-	if _, err = s.List(); err != nil {
+	if err := decodeTxns(&bb.Transactions, s); err != nil {
 		return err
 	}
-	var tx Transaction
-	blobTxnsAreWrappedWithBlobs := false
-	for tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; tx, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
-		bb.Transactions = append(bb.Transactions, tx)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Transactions
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-
 	// decode Uncles
-	if _, err = s.List(); err != nil {
+	if err := decodeUncles(&bb.Uncles, s); err != nil {
 		return err
 	}
-	for err == nil {
-		var uncle Header
-		if err = uncle.DecodeRLP(s); err != nil {
-			break
-		}
-		bb.Uncles = append(bb.Uncles, &uncle)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Uncles
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-
 	// decode Withdrawals
-	if _, err = s.List(); err != nil {
-		if errors.Is(err, rlp.EOL) {
-			bb.Withdrawals = nil
-			return s.ListEnd()
-		}
-		return fmt.Errorf("read Withdrawals: %w", err)
-	}
 	bb.Withdrawals = []*Withdrawal{}
-	for err == nil {
-		var withdrawal Withdrawal
-		if err = withdrawal.DecodeRLP(s); err != nil {
-			break
-		}
-		bb.Withdrawals = append(bb.Withdrawals, &withdrawal)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Withdrawals
-	if err = s.ListEnd(); err != nil {
+	if err := decodeWithdrawals(&bb.Withdrawals, s); err != nil {
 		return err
 	}
 
