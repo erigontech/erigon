@@ -1,6 +1,6 @@
 module github.com/ledgerwatch/erigon
 
-go 1.21
+go 1.21.7
 
 require (
 	github.com/erigontech/mdbx-go v0.37.2
@@ -22,7 +22,7 @@ require (
 	github.com/alecthomas/kong v0.8.1
 	github.com/anacrolix/log v0.15.2
 	github.com/anacrolix/sync v0.5.1
-	github.com/anacrolix/torrent v1.55.1-0.20240318063619-4c8105a446db
+	github.com/anacrolix/torrent v1.54.1
 	github.com/benesch/cgosymbolizer v0.0.0-20190515212042-bec6fe6e597b
 	github.com/btcsuite/btcd/btcec/v2 v2.1.3
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
