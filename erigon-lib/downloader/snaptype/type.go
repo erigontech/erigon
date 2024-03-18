@@ -344,7 +344,7 @@ var (
 
 	BorSnapshotTypes = []Type{BorEvents, BorSpans}
 
-	CaplinSnapshotTypes = []Type{BeaconBlocks}
+	CaplinSnapshotTypes = []Type{BeaconBlocks, BlobSidecars}
 
 	AllTypes = []Type{
 		Headers,
