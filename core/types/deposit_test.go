@@ -28,11 +28,11 @@ func randBytes(rnd *rand.Rand, size int) []byte {
 	return arr
 }
 
-func randHash32(rnd *rand.Rand) libcommon.Hash {
+func randBytes32(rnd *rand.Rand) libcommon.Hash {
 	return libcommon.Hash(randBytes(rnd, 32))
 }
 
-func randHash20(rnd *rand.Rand) libcommon.Address {
+func randBytes20(rnd *rand.Rand) libcommon.Address {
 	return libcommon.Address(randBytes(rnd, 20))
 }
 
@@ -54,23 +54,23 @@ func randWithdrawal(rnd *rand.Rand) *Withdrawal {
 	return &Withdrawal{
 		Index:     rnd.Uint64(),
 		Validator: rnd.Uint64(),
-		Address:   randHash20(rnd),
+		Address:   randBytes20(rnd),
 		Amount:    rnd.Uint64(),
 	}
 }
 
 func randHeader(rnd *rand.Rand) *Header {
-	wHash := randHash32(rnd)
-	pHash := randHash32(rnd)
+	wHash := randBytes32(rnd)
+	pHash := randBytes32(rnd)
 	bgu := rnd.Uint64()
 	ebg := rnd.Uint64()
 	return &Header{
-		ParentHash:            randHash32(rnd),                                         // libcommon.Hash
-		UncleHash:             randHash32(rnd),                                         // libcommon.Hash
-		Coinbase:              randHash20(rnd),                                         // libcommon.Address
-		Root:                  randHash32(rnd),                                         // libcommon.Hash
-		TxHash:                randHash32(rnd),                                         // libcommon.Hash
-		ReceiptHash:           randHash32(rnd),                                         // libcommon.Hash
+		ParentHash:            randBytes32(rnd),                                        // libcommon.Hash
+		UncleHash:             randBytes32(rnd),                                        // libcommon.Hash
+		Coinbase:              randBytes20(rnd),                                        // libcommon.Address
+		Root:                  randBytes32(rnd),                                        // libcommon.Hash
+		TxHash:                randBytes32(rnd),                                        // libcommon.Hash
+		ReceiptHash:           randBytes32(rnd),                                        // libcommon.Hash
 		Bloom:                 randBloom(rnd),                                          // Bloom
 		Difficulty:            big.NewInt(int64(rnd.Int())),                            // *big.Int
 		Number:                big.NewInt(int64(rnd.Int())),                            // *big.Int
@@ -78,7 +78,7 @@ func randHeader(rnd *rand.Rand) *Header {
 		GasUsed:               rnd.Uint64(),                                            // uint64
 		Time:                  rnd.Uint64(),                                            // uint64
 		Extra:                 randBytes(rnd, rnd.Intn(randIntMinMax(rnd, 128, 1024))), // []byte
-		MixDigest:             randHash32(rnd),                                         // libcommon.Hash
+		MixDigest:             randBytes32(rnd),                                        // libcommon.Hash
 		Nonce:                 BlockNonce(randBytes(rnd, 8)),                           // BlockNonce
 		BaseFee:               big.NewInt(int64(rnd.Int())),                            // *big.Int
 		WithdrawalsHash:       &wHash,                                                  // *libcommon.Hash
