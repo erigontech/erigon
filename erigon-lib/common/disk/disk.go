@@ -4,6 +4,7 @@ package disk
 
 import (
 	"os"
+	"runtime"
 
 	"github.com/shirou/gopsutil/v3/process"
 
