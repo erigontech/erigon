@@ -132,7 +132,6 @@ func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscriptio
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	//s.subscriptions[topic] = sub
 	s.subscriptions.Store(topic, sub)
 }
 
