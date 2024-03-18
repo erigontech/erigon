@@ -13,6 +13,15 @@ import (
 var (
 	diskMajorFaults = metrics.NewGauge(`process_major_pagefaults_total`)
 	diskMinorFaults = metrics.NewGauge(`process_minor_pagefaults_total`)
+
+	diskMajorFaults2 = metrics.NewGauge(`ru_majflt`)
+	diskMinorFaults2 = metrics.NewGauge(`ru_minflt`)
+
+	writeCount = metrics.NewGauge(`ru_outblock`)
+	readCount  = metrics.NewGauge(`ru_inblock`)
+
+	writeBytes = metrics.NewGauge(`system_disk_writebytes`)
+	readBytes  = metrics.NewGauge(`system_disk_readbytes`)
 )
 
 func UpdatePrometheusDiskStats() error {
@@ -26,8 +35,19 @@ func UpdatePrometheusDiskStats() error {
 		return err
 	}
 
+	counters, err := p.IOCounters()
+	if err != nil {
+		return err
+	}
+
 	diskMajorFaults.SetUint64(faults.MajorFaults)
+	diskMajorFaults2.SetUint64(faults.MajorFaults)
+
 	diskMinorFaults.SetUint64(faults.MinorFaults)
+	diskMinorFaults2.SetUint64(faults.MinorFaults)
+
+	writeBytes.SetUint64(counters.WriteBytes)
+	readBytes.SetUint64(counters.ReadBytes)
 
 	return nil
 }

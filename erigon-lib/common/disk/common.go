@@ -8,7 +8,7 @@ import (
 )
 
 func UpdateDiskStats(ctx context.Context, logger log.Logger) {
-	logEvery := time.NewTicker(180 * time.Second)
+	logEvery := time.NewTicker(5 * time.Second)
 	defer logEvery.Stop()
 
 	for {
