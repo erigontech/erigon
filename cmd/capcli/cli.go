@@ -444,7 +444,7 @@ func (c *CheckSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -524,7 +524,7 @@ func (c *LoopSnapshots) Run(ctx *Context) error {
 
 	to = (to / snaptype.Erigon2MergeLimit) * snaptype.Erigon2MergeLimit
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -638,7 +638,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 	var bor *freezeblocks.BorRoSnapshots
 	blockReader := freezeblocks.NewBlockReader(allSnapshots, bor)
 	eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconConfig, blockReader, db)
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -969,7 +969,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	defer db.Close()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
@@ -1079,7 +1079,7 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 	}
 	defer tx.Rollback()
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, log.Root())
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, log.Root())
 	if err := csn.ReopenFolder(); err != nil {
 		return err
 	}
