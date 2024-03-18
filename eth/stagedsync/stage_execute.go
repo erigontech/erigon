@@ -384,14 +384,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	}
 
 	quit := ctx.Done()
-	useExternalTx := txc.Tx != nil
+	useInternalTx := txc.Tx == nil
 
-	if (!useExternalTx && cfg.silkworm != nil) {
-		_, err = silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, s.BlockNumber + 1, toBlock, uint64(cfg.batchSize), true, true, true)
-		return err
-	}
-
-	if !useExternalTx {
+	if useInternalTx {
 		txc.Tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
@@ -420,8 +415,37 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 		return nil
 	}
 
+	to = 4_350_000
+
 	if to > s.BlockNumber+16 {
 		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
+	}
+
+	if useInternalTx && cfg.silkworm != nil {
+		log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
+
+		//  update plain state version so the cache can be notified that the state has moved on
+		_, err = rawdb.IncrementStateVersion(txc.Tx)
+		if err != nil {
+			return fmt.Errorf("writing plain state version: %w", err)
+		}
+
+		txc.Tx.Rollback()
+		txc.Tx = nil
+		if lastExecutedBlock, err := silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, s.BlockNumber+1, to, uint64(cfg.batchSize), true, true, true); err != nil {
+			if errors.Is(err, silkworm.ErrInterrupted) {
+				logger.Warn(fmt.Sprintf("[%s] Execution interrupted", logPrefix), "lastExecutedBlock", lastExecutedBlock, "err", err)
+				// Remount the termination signal
+				p, err := os.FindProcess(os.Getpid())
+				if err != nil {
+					return err
+				}
+				p.Signal(os.Interrupt)
+				return nil
+			}
+
+			return err
+		}
 	}
 
 	stateStream := cfg.stateStream && to-s.BlockNumber < stateStreamLimit
@@ -541,15 +565,14 @@ Loop:
 
 		shouldUpdateProgress := batch.BatchSize() >= int(cfg.batchSize)
 		if shouldUpdateProgress {
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum)
-			currentStateGas = 0
+			commitTime := time.Now()
 			if err = batch.Flush(ctx, txc.Tx); err != nil {
 				return err
 			}
 			if err = s.Update(txc.Tx, stageProgress); err != nil {
 				return err
 			}
-			if !useExternalTx {
+			if useInternalTx {
 				if err = txc.Tx.Commit(); err != nil {
 					return err
 				}
@@ -560,6 +583,8 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer txc.Tx.Rollback()
 			}
+			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum, "time", time.Since(commitTime), "commitedToDb", useInternalTx)
+			currentStateGas = 0
 			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 		}
 
@@ -587,7 +612,7 @@ Loop:
 		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
-	if !useExternalTx {
+	if useInternalTx {
 		if err = txc.Tx.Commit(); err != nil {
 			return err
 		}
