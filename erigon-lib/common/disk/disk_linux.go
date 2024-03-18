@@ -46,6 +46,9 @@ func UpdatePrometheusDiskStats() error {
 	diskMinorFaults.SetUint64(faults.MinorFaults)
 	diskMinorFaults2.SetUint64(faults.MinorFaults)
 
+	writeCount.SetUint64(counters.WriteCount)
+	readCount.SetUint64(counters.ReadCount)
+
 	writeBytes.SetUint64(counters.WriteBytes)
 	readBytes.SetUint64(counters.ReadBytes)
 
