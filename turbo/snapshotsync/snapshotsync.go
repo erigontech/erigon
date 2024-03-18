@@ -112,6 +112,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		}
 		fmt.Println(blobs, p.Name)
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {
+			fmt.Println("A")
 			continue
 		}
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
