@@ -2,8 +2,11 @@ name: Build and Push Docker
 
 on:
   push:
-    branches:
-      - zkevm
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
   workflow_dispatch:
 
 env:
@@ -37,7 +40,6 @@ jobs:
           file: Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
-
-      - name: Verify Image
-        run: docker run --rm ${{ env.IMAGE_NAME }}:${{ github.sha }} --version
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
