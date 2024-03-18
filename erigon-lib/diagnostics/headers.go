@@ -32,9 +32,9 @@ func (d *DiagnosticClient) runHeadersWaitingListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				d.headerMutex.Lock()
 				d.headers.WaitingForHeaders = info.From
-				d.mu.Unlock()
+				d.headerMutex.Unlock()
 
 				return
 			}
@@ -56,9 +56,9 @@ func (d *DiagnosticClient) runWriteHeadersListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				d.headerMutex.Lock()
 				d.headers.WriteHeaders = info
-				d.mu.Unlock()
+				d.headerMutex.Unlock()
 
 				return
 			}
@@ -80,9 +80,9 @@ func (d *DiagnosticClient) runCanonicalMarkerListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				d.headerMutex.Lock()
 				d.headers.CanonicalMarker = info
-				d.mu.Unlock()
+				d.headerMutex.Unlock()
 
 				return
 			}
@@ -104,9 +104,9 @@ func (d *DiagnosticClient) runProcessedListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				d.headerMutex.Lock()
 				d.headers.Processed = info
-				d.mu.Unlock()
+				d.headerMutex.Unlock()
 
 				return
 			}

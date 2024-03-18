@@ -12,6 +12,7 @@ type DiagnosticClient struct {
 	syncStats        SyncStatistics
 	snapshotFileList SnapshoFilesList
 	mu               sync.Mutex
+	headerMutex      sync.Mutex
 	hardwareInfo     HardwareInfo
 	peersSyncMap     sync.Map
 	headers          Headers
