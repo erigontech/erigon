@@ -59,7 +59,6 @@ const (
 	stateStreamLimit uint64 = 1_000
 
 	transactionGasLimit = 30000000
-	blockGasLimit       = 18446744073709551615
 
 	totalVirtualCounterSmtLevel = 80 // todo [zkevm] this should be read from the db
 
@@ -190,46 +189,19 @@ func SpawnSequencingStage(
 		return err
 	}
 
-	nextBlockNum := executionAt + 1
-	thisBatch := lastBatch + 1
-	newBlockTimestamp := uint64(time.Now().Unix())
-
-	header := &types.Header{
-		ParentHash: parentBlock.Hash(),
-		Coinbase:   constMiner,
-		Difficulty: blockDifficulty,
-		Number:     new(big.Int).SetUint64(nextBlockNum),
-		GasLimit:   blockGasLimit,
-		Time:       newBlockTimestamp,
-		BaseFee:    big.NewInt(0),
-	}
-
-	stateReader := state.NewPlainStateReader(tx)
-	ibs := state.New(stateReader)
-
 	var forkId uint64 = 0
 
-	// here we have a special case and need to inject in the initial batch on the network before
-	// we can continue accepting transactions from the pool
 	if executionAt == 0 {
 		// capture the initial sequencer fork id for the first batch
 		forkId = cfg.zk.SequencerInitialForkId
 		if err := hermezDb.WriteForkId(1, forkId); err != nil {
 			return err
 		}
-		if err := hermezDb.WriteForkIdBlockOnce(forkId, 1); err != nil {
-			return err
-		}
-		err = processInjectedInitialBatch(hermezDb, ibs, tx, cfg, header, parentBlock, stateReader, forkId)
-		if err != nil {
-			return err
-		}
-		if freshTx {
-			if err := tx.Commit(); err != nil {
+		for fId := uint64(chain.ForkID5Dragonfruit); fId <= forkId; fId++ {
+			if err := hermezDb.WriteForkIdBlockOnce(fId, 1); err != nil {
 				return err
 			}
 		}
-		return nil
 	} else {
 		forkId, err = hermezDb.GetForkId(lastBatch)
 		if err != nil {
@@ -243,7 +215,39 @@ func SpawnSequencingStage(
 	if err := stagedsync.UpdateZkEVMBlockCfg(cfg.chainConfig, hermezDb, logPrefix); err != nil {
 		return err
 	}
-    
+
+	nextBlockNum := executionAt + 1
+	thisBatch := lastBatch + 1
+	newBlockTimestamp := uint64(time.Now().Unix())
+
+	header := &types.Header{
+		ParentHash: parentBlock.Hash(),
+		Coinbase:   constMiner,
+		Difficulty: blockDifficulty,
+		Number:     new(big.Int).SetUint64(nextBlockNum),
+		GasLimit:   getGasLimit(uint16(forkId)),
+		Time:       newBlockTimestamp,
+		BaseFee:    big.NewInt(0),
+	}
+
+	stateReader := state.NewPlainStateReader(tx)
+	ibs := state.New(stateReader)
+
+	// here we have a special case and need to inject in the initial batch on the network before
+	// we can continue accepting transactions from the pool
+	if executionAt == 0 {
+		err = processInjectedInitialBatch(hermezDb, ibs, tx, cfg, header, parentBlock, stateReader, forkId)
+		if err != nil {
+			return err
+		}
+		if freshTx {
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	batchCounters := vm.NewBatchCounterCollector(totalVirtualCounterSmtLevel, uint16(forkId))
 
 	// whilst in the 1 batch = 1 block = 1 tx flow we can immediately add in the changeL2BlockTx calculation
@@ -282,7 +286,7 @@ LOOP:
 			log.Info(fmt.Sprintf("[%s] Waiting some more for txs from the pool...", logPrefix))
 		default:
 			cfg.txPool.LockFlusher()
-			transactions, err := getNextTransactions(cfg, executionAt, yielded)
+			transactions, err := getNextTransactions(cfg, executionAt, forkId, yielded)
 			if err != nil {
 				return err
 			}
@@ -344,7 +348,7 @@ LOOP:
 	return nil
 }
 
-func getNextTransactions(cfg SequenceBlockCfg, executionAt uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
+func getNextTransactions(cfg SequenceBlockCfg, executionAt, forkId uint64, alreadyYielded mapset.Set[[32]byte]) ([]types.Transaction, error) {
 	var transactions []types.Transaction
 	var err error
 	var count int
@@ -359,7 +363,7 @@ LOOP:
 		}
 		if err := cfg.txPoolDb.View(context.Background(), func(poolTx kv.Tx) error {
 			slots := types2.TxsRlp{}
-			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, blockGasLimit, alreadyYielded)
+			_, count, err = cfg.txPool.YieldBest(yieldSize, &slots, poolTx, executionAt, getGasLimit(uint16(forkId)), alreadyYielded)
 			if err != nil {
 				return err
 			}
@@ -584,7 +588,7 @@ func finaliseBlock(
 
 	finalHeader := finalBlock.Header()
 	finalHeader.Coinbase = constMiner
-	finalHeader.GasLimit = blockGasLimit
+	finalHeader.GasLimit = getGasLimit(uint16(forkId))
 	finalHeader.ReceiptHash = types.DeriveSha(receipts)
 	newNum := finalBlock.Number()
 
