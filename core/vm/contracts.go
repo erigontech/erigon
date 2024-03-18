@@ -143,8 +143,8 @@ var PrecompiledContractsPrague = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{0x0f}): &bls12381G2Mul{},
 	libcommon.BytesToAddress([]byte{0x10}): &bls12381G2MultiExp{},
 	libcommon.BytesToAddress([]byte{0x11}): &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{0x12}): &bls12381MapG1{},
-	libcommon.BytesToAddress([]byte{0x13}): &bls12381MapG2{},
+	libcommon.BytesToAddress([]byte{0x12}): &bls12381MapFpToG1{},
+	libcommon.BytesToAddress([]byte{0x13}): &bls12381MapFp2ToG2{},
 }
 
 var (
@@ -1042,15 +1042,15 @@ func decodeBLS12381FieldElement(in []byte) ([]byte, error) {
 	return out, nil
 }
 
-// bls12381MapG1 implements EIP-2537 MapG1 precompile.
-type bls12381MapG1 struct{}
+// bls12381MapFpToG1 implements EIP-2537 MapG1 precompile.
+type bls12381MapFpToG1 struct{}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
-func (c *bls12381MapG1) RequiredGas(input []byte) uint64 {
-	return params.Bls12381MapG1Gas
+func (c *bls12381MapFpToG1) RequiredGas(input []byte) uint64 {
+	return params.Bls12381MapFpToG1Gas
 }
 
-func (c *bls12381MapG1) Run(input []byte) ([]byte, error) {
+func (c *bls12381MapFpToG1) Run(input []byte) ([]byte, error) {
 	// Implements EIP-2537 Map_To_G1 precompile.
 	// > Field-to-curve call expects `64` bytes an an input that is interpreted as a an element of the base field.
 	// > Output of this call is `128` bytes and is G1 point following respective encoding rules.
@@ -1077,15 +1077,15 @@ func (c *bls12381MapG1) Run(input []byte) ([]byte, error) {
 	return g.EncodePoint(r), nil
 }
 
-// bls12381MapG2 implements EIP-2537 MapG2 precompile.
-type bls12381MapG2 struct{}
+// bls12381MapFp2ToG2 implements EIP-2537 MapG2 precompile.
+type bls12381MapFp2ToG2 struct{}
 
 // RequiredGas returns the gas required to execute the pre-compiled contract.
-func (c *bls12381MapG2) RequiredGas(input []byte) uint64 {
-	return params.Bls12381MapG2Gas
+func (c *bls12381MapFp2ToG2) RequiredGas(input []byte) uint64 {
+	return params.Bls12381MapFp2ToG2Gas
 }
 
-func (c *bls12381MapG2) Run(input []byte) ([]byte, error) {
+func (c *bls12381MapFp2ToG2) Run(input []byte) ([]byte, error) {
 	// Implements EIP-2537 Map_FP2_TO_G2 precompile logic.
 	// > Field-to-curve call expects `128` bytes an an input that is interpreted as a an element of the quadratic extension field.
 	// > Output of this call is `256` bytes and is G2 point following respective encoding rules.
