@@ -139,7 +139,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	var stats AggStats
 
 	lock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
-
 	if err != nil {
 		return nil, fmt.Errorf("can't initialize snapshot lock: %w", err)
 	}
@@ -651,19 +650,6 @@ type seedHash struct {
 }
 
 func (d *Downloader) mainLoop(silent bool) error {
-	if d.webseedsDiscover {
-		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
-		// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
-		d.wg.Add(1)
-		go func() {
-			defer d.wg.Done()
-			d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
-			// webseeds.Discover may create new .torrent files on disk
-			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
-				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
-			}
-		}()
-	}
 
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
@@ -697,6 +683,20 @@ func (d *Downloader) mainLoop(silent bool) error {
 			for _, t := range torrents {
 				if _, ok := complete[t.Name()]; ok {
 					continue
+				}
+				if d.webseedsDiscover {
+					// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
+					// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
+					d.wg.Add(1)
+					go func() {
+						defer d.wg.Done()
+						fmt.Println(d.cfg.WebSeedUrls, t.Name(), d.cfg.Dirs.Snap)
+						d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, []string{t.Name()}, d.cfg.Dirs.Snap)
+						// webseeds.Discover may create new .torrent files on disk
+						if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
+							d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
+						}
+					}()
 				}
 
 				if isComplete, length, completionTime := d.checkComplete(t.Name()); isComplete && completionTime != nil {
