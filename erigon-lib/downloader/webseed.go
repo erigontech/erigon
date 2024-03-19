@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"github.com/anacrolix/torrent"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
@@ -55,9 +56,7 @@ func NewWebSeeds(seeds []*url.URL, verbosity log.Lvl, logger log.Logger) *WebSee
 	}
 }
 
-func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) ([]webDownloadInfo, []*seedHash, error) {
-	var seedHashMismatches []*seedHash
-	var infos []webDownloadInfo
+func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (infos []webDownloadInfo, seedHashMismatches []*seedHash, err error) {
 	torrentHash := t.InfoHash().Bytes()
 
 	for _, webseed := range d.seeds {
@@ -107,47 +106,65 @@ func (d *WebSeeds) SetTorrent(t *TorrentFiles, whiteList snapcfg.Preverified, do
 	d.torrentFiles = t
 }
 
-func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, webSeedProviderURL *url.URL) {
+func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, webSeedProviderURL *url.URL, report *webSeedCheckReport) {
 	// check that for each file in the manifest, there is a corresponding .torrent file
-	count := len(manifestResponse)
+
+	torrentNames := make(map[string]struct{})
 	for name := range manifestResponse {
-		if !strings.HasSuffix(name, ".torrent") {
+		if strings.HasSuffix(name, ".torrent") {
+			torrentNames[name] = struct{}{}
 			continue
 		}
-		fn := strings.TrimSuffix(name, ".torrent")
+	}
+
+	report.missingTorrents = make([]string, 0)
+	for name := range manifestResponse {
+		if strings.HasSuffix(name, ".torrent") {
+			continue
+		}
+
+		tname := name + ".torrent"
 		if !nameWhitelisted(name, d.torrentsWhitelist) {
-			delete(manifestResponse, fn)
-			delete(manifestResponse, name)
+			delete(torrentNames, tname)
 			continue
 		}
-		if _, ok := manifestResponse[fn]; !ok {
-			d.logger.Warn("[snapshots.webseed] .torrent file not found for file in manifest",
-				"file", name, "seed", webSeedProviderURL.String())
+		if _, ok := torrentNames[tname]; !ok {
+			report.missingTorrents = append(report.missingTorrents, name)
 			continue
 		}
-		delete(manifestResponse, fn)
-		delete(manifestResponse, name)
+		delete(torrentNames, tname)
 	}
 
-	if len(manifestResponse) > 0 {
-		d.logger.Warn("[snapshots.webseed] manifested .torrent files was not found",
-			"missing", len(manifestResponse), "totalFiles", count, "seed", webSeedProviderURL.String())
+	//if len(missingNames) > 0 {
+	//	//fmt.Printf("## Seed %s is missing torrents for %d files\n", webSeedProviderURL.String(), len(missingNames))
+	//	//
+	//	//sort.Strings(missingNames)
+	//	//for _, file := range missingNames {
+	//	//	fmt.Printf("%s\n", file)
+	//	//}
+	//	report.missingTorrents = missingNames
+	//}
 
-		files := make([]string, 0, len(manifestResponse))
-		for file := range manifestResponse {
-			files = append(files, file)
+	if len(torrentNames) > 0 {
+		//fmt.Printf("## Seed %s has %d dangling torrents (data file not found)\n", webSeedProviderURL.String(), len(torrentNames))
+
+		report.danglingTorrents = make([]string, 0, len(torrentNames))
+		for file := range torrentNames {
+			report.danglingTorrents = append(report.danglingTorrents, file)
 		}
-		sort.Strings(files)
-		for _, file := range files {
-			fmt.Printf("%s\n", file)
-		}
-		//return fmt.Errorf("missing %d .torrent files", len(files))
+		//sort.Strings(danglingTorrents)
+		//for _, file := range danglingTorrents {
+		//	fmt.Printf("%s\n", file)
+		//}
 	}
-	//return nil
+	report.torrentsOK = len(report.missingTorrents) == 0 && len(report.danglingTorrents) == 0
 }
 
-func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype.WebSeedsFromProvider) (map[string]string, error) {
-	tags := make(map[string]string)
+func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype.WebSeedsFromProvider, webSeedURL *url.URL) (tags map[string]string, invalidTags, noEtags []string, err error) {
+	noEtags = make([]string, 0)
+	tags = make(map[string]string)
+	invalidTagsMap := make(map[string]string)
+
 	for name, wurl := range manifestResponse {
 		if strings.HasSuffix(name, ".torrent") {
 			continue
@@ -158,16 +175,43 @@ func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype
 
 		u, err := url.Parse(wurl)
 		if err != nil {
-			return nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
+			return nil, nil, nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
 		}
 		md5Tag, err := d.retrieveFileEtag(ctx, u)
 		if err != nil {
+			if errors.Is(err, ErrInvalidEtag) {
+				invalidTagsMap[name] = md5Tag
+				continue
+			}
+			if errors.Is(err, ErrEtagNotFound) {
+				noEtags = append(noEtags, name)
+				continue
+			}
 			d.logger.Debug("[snapshots.webseed] get file ETag", "err", err, "url", u.String())
-			return nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
+			return nil, nil, nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
 		}
 		tags[name] = md5Tag
 	}
-	return tags, nil
+
+	invalidTags = make([]string, 0)
+	if len(invalidTagsMap) > 0 {
+		//fmt.Printf("## Seed %s has invalid etags for %d files\n", webSeedURL.String(), len(invalidTagsMap))
+		for name, tag := range invalidTagsMap {
+			invalidTags = append(invalidTags, fmt.Sprintf("%s %s", name, tag))
+		}
+		sort.Strings(invalidTags)
+		//for _, name := range invalidTags {
+		//	fmt.Printf("%s\n", name)
+		//}
+	}
+	if len(noEtags) > 0 {
+		//fmt.Printf("## Seed %s has no etags for %d files\n", webSeedURL.String(), len(noEtags))
+		sort.Strings(noEtags)
+		//for _, name := range noEtags {
+		//	fmt.Printf("%s\n", name)
+		//}
+	}
+	return tags, invalidTags, noEtags, nil
 }
 
 func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, dirs datadir.Dirs, failFast bool) error {
@@ -191,25 +235,25 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, dirs datadir.Dir
 	return supErr
 }
 
-func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, dirs datadir.Dirs, manifestResponse snaptype.WebSeedsFromProvider) error {
-	etags, err := d.fetchFileEtags(ctx, manifestResponse)
+func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, dirs datadir.Dirs, manifestResponse snaptype.WebSeedsFromProvider, webSeedURL *url.URL, report *webSeedCheckReport) error {
+	etags, invalidTags, noTags, err := d.fetchFileEtags(ctx, manifestResponse, webSeedURL)
 	if err != nil {
 		return err
 	}
 
-	notFounds := make([]string, 0, len(etags))
+	report.invalidEtags = invalidTags
+	report.etagFetchFailed = noTags
 
+	report.notFoundOnRemote = make([]string, 0, len(etags))
 	hasher := md5.New()
 
-	walker := func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			return nil
+	walker := func(path string, de fs.DirEntry, err error) error {
+		if err != nil || de.IsDir() {
+			d.logger.Warn("[snapshots.webseed] walk", "err", err, "path", path)
+			return nil //nolint
 		}
 
-		if strings.HasSuffix(d.Name(), ".torrent") || strings.HasPrefix(d.Name(), ".") {
+		if strings.HasSuffix(de.Name(), ".torrent") || strings.HasPrefix(de.Name(), ".") {
 			return nil
 		}
 		hasher.Reset()
@@ -219,19 +263,17 @@ func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, dirs datadir.Di
 		}
 		defer f.Close()
 
-		webHash, found := etags[d.Name()]
+		webHash, found := etags[de.Name()]
 		if !found {
-			fmt.Printf("file %s not found in webseed\n", d.Name())
-			notFounds = append(notFounds, path)
+			report.notFoundOnRemote = append(report.notFoundOnRemote, path)
 			return nil
-			//return fmt.Errorf("file %s not found in webseed", d.Name())
 		}
 
 		n, err := io.Copy(hasher, f)
 		if err != nil {
 			return err
 		}
-		finf, err := d.Info()
+		finf, err := de.Info()
 		if err != nil {
 			return err
 		}
@@ -241,9 +283,9 @@ func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, dirs datadir.Di
 
 		hashOnDisk := hex.EncodeToString(hasher.Sum(nil))
 		if hashOnDisk != webHash {
-			return fmt.Errorf("file %s has invalid md5 %s != %s (webseed)", d.Name(), hashOnDisk, webHash)
+			return fmt.Errorf("file %s has invalid md5 %s != %s (webseed)", de.Name(), hashOnDisk, webHash)
 		}
-		delete(etags, d.Name())
+		delete(etags, de.Name())
 		return nil
 	}
 
@@ -254,34 +296,121 @@ func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, dirs datadir.Di
 		}
 	}
 
+	//fmt.Printf("## Seed %s has invalid etags for %d files\n", webSeedURL.String(), len(invalidTags))
+	//for _, name := range invalidTags {
+	//	fmt.Printf("%s\n", name)
+	//}
+	//
+	//fmt.Printf("## Seed %s has no etags for %d files\n", webSeedURL.String(), len(noTags))
+	//for _, name := range noTags {
+	//	fmt.Printf("%s\n", name)
+	//}
+
+	//if len(notFoundOnRemote) > 0 {
+	//	fmt.Printf("## Seed %s does not have %d local files\n", webSeedURL.String(), len(notFoundOnRemote))
+	//	sort.Strings(notFoundOnRemote)
+	//	for _, n := range notFoundOnRemote {
+	//		fmt.Printf("%s\n", n)
+	//	}
+	//}
+
 	if len(etags) > 0 {
-		fmt.Printf("Files not found on disk:\n")
-		for n, e := range etags {
-			fmt.Printf("%s %s\n", e, n)
+		report.notFoundOnLocal = make([]string, 0)
+		for n := range etags {
+			report.notFoundOnLocal = append(report.notFoundOnLocal, n)
 		}
+		//fmt.Printf("## Seed %s have %d files which not presented on localhost\n", webSeedURL.String(), len(report.notFoundOnLocal))
+		//sort.Strings(missingFilesOnDisk)
+		//for _, name := range missingFilesOnDisk {
+		//	fmt.Printf("%s %s\n", name, etags[name])
+		//}
+	}
+	return nil
+}
+
+type webSeedCheckReport struct {
+	seed             *url.URL
+	manifestExist    bool
+	torrentsOK       bool
+	missingTorrents  []string
+	danglingTorrents []string
+	invalidEtags     []string
+	etagFetchFailed  []string
+	notFoundOnRemote []string
+	notFoundOnLocal  []string
+}
+
+func (w *webSeedCheckReport) sort() {
+	sort.Strings(w.missingTorrents)
+	sort.Strings(w.invalidEtags)
+	sort.Strings(w.etagFetchFailed)
+	sort.Strings(w.notFoundOnRemote)
+	sort.Strings(w.notFoundOnLocal)
+	sort.Strings(w.danglingTorrents)
+}
+
+func (w *webSeedCheckReport) String() string {
+	w.sort()
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("## REPORT on %s\n", w.seed))
+	b.WriteString(fmt.Sprintf(" - manifest exist: %t\n", w.manifestExist))
+	b.WriteString(fmt.Sprintf(" - missing torrents: %d\n", len(w.missingTorrents)))
+	b.WriteString(fmt.Sprintf(" - dangling torrents: %d\n", len(w.danglingTorrents)))
+	b.WriteString(fmt.Sprintf(" - invalid etags format: %d\n", len(w.invalidEtags)))
+	b.WriteString(fmt.Sprintf(" - etag fetch failed: %d\n", len(w.etagFetchFailed)))
+	b.WriteString(fmt.Sprintf(" - files not found on remote: %d\n", len(w.notFoundOnRemote)))
+	b.WriteString(fmt.Sprintf(" - files not found on local: %d\n", len(w.notFoundOnLocal)))
+	b.WriteString(fmt.Sprintf("======== Details ========\n"))
+
+	titles := []string{
+		"Missing torrents",
+		"Dangling torrents",
+		"Invalid ETags format",
+		"ETag fetch failed",
+		"Files not found on remote",
+		"Files not found on local",
 	}
 
-	if len(notFounds) > 0 {
-		sort.Strings(notFounds)
-		fmt.Printf("Files not found on webseed:\n")
-		for _, n := range notFounds {
-			fmt.Printf("%s\n", n)
-		}
+	fnamess := [][]string{
+		w.missingTorrents,
+		w.danglingTorrents,
+		w.invalidEtags,
+		w.etagFetchFailed,
+		w.notFoundOnRemote,
+		w.notFoundOnLocal,
 	}
 
-	return err
+	for ti, names := range fnamess {
+		if len(names) == 0 {
+			continue
+		}
+		b.WriteString(fmt.Sprintf("# %s\n", titles[ti]))
+		for _, name := range names {
+			b.WriteString(fmt.Sprintf("%s\n", name))
+		}
+		if ti != len(fnamess)-1 {
+			b.WriteByte(10)
+		}
+	}
+	b.WriteString(fmt.Sprintf("======== End of %s ========\n", w.seed.String()))
+	return b.String()
 }
 
 func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, dir datadir.Dirs, webSeedProviderURL *url.URL) error {
 	manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
+	report := &webSeedCheckReport{
+		seed:          webSeedProviderURL,
+		manifestExist: len(manifestResponse) != 0,
+	}
+	defer func() { fmt.Printf("%s\n", report.String()) }()
+
 	if err != nil {
-		d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.String())
 		return err
 	}
 
-	d.checkHasTorrents(manifestResponse, webSeedProviderURL)
+	d.checkHasTorrents(manifestResponse, webSeedProviderURL, report)
 
-	err = d.findLocalFileAndCheckMD5(ctx, dir, manifestResponse)
+	err = d.findLocalFileAndCheckMD5(ctx, dir, manifestResponse, webSeedProviderURL, report)
 	if err != nil {
 		return err
 	}
@@ -403,6 +532,9 @@ func (d *WebSeeds) ByFileName(name string) (metainfo.UrlList, bool) {
 	return v, ok
 }
 
+var ErrInvalidEtag = fmt.Errorf("invalid etag")
+var ErrEtagNotFound = fmt.Errorf("not found")
+
 func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string, error) {
 	request, err := http.NewRequest(http.MethodHead, file.String(), nil)
 	if err != nil {
@@ -416,6 +548,9 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return "", ErrEtagNotFound
+		}
 		return "", fmt.Errorf("webseed.http: status code %d, url=%s", resp.StatusCode, file.String())
 	}
 
@@ -425,17 +560,9 @@ func (d *WebSeeds) retrieveFileEtag(ctx context.Context, file *url.URL) (string,
 	}
 	etag = strings.Trim(etag, "\"")
 	if strings.Contains(etag, "-") {
-		fmt.Printf("invalid etag (md5): %s %s\n", etag, file.Path)
-		etag = strings.Split(etag, "-")[0]
+		return etag, ErrInvalidEtag
 	}
-
 	return etag, nil
-	//buuuuf, err := httputil.DumpResponse(resp, true)
-	//if err != nil {
-	//	panic(err)
-	//}
-	//fmt.Println(string(buuuuf))
-	//return "", nil
 }
 
 func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url.URL) (snaptype.WebSeedsFromProvider, error) {
@@ -457,6 +584,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		fmt.Printf("## Seed %s manifest.txt fetch failed: %s\n", webSeedProviderUrl.String(), resp.Status)
 		return nil, fmt.Errorf("webseed.http: status=%d, url=%s", resp.StatusCode, u.String())
 	}
 
@@ -469,7 +597,9 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	fileNames := strings.Split(string(b), "\n")
 	for fi, f := range fileNames {
 		if strings.TrimSpace(f) == "" {
-			fmt.Printf("empty line in manifest %q at line %d\n", f, fi)
+			if fi != len(fileNames)-1 {
+				fmt.Printf("## Seed %s empty line in manifest.txt at line %d\n", webSeedProviderUrl.String(), fi)
+			}
 			continue
 		}
 
