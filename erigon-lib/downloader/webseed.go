@@ -45,7 +45,6 @@ func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string
 	}
 	listsOfFiles := d.constructListsOfFiles(ctx, urls, files)
 	torrentMap := d.makeTorrentUrls(listsOfFiles)
-	fmt.Println(torrentMap)
 	webSeedMap := d.downloadTorrentFilesFromProviders(ctx, rootDir, torrentMap)
 	d.makeWebSeedUrls(listsOfFiles, webSeedMap)
 }

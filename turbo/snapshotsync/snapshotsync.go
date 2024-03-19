@@ -110,9 +110,7 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		if caplin == OnlyCaplin && !strings.Contains(p.Name, "beaconblocks") && !strings.Contains(p.Name, "blobsidecars") {
 			continue
 		}
-		fmt.Println(blobs, p.Name)
 		if !blobs && strings.Contains(p.Name, "blobsidecars") {
-			fmt.Println("A")
 			continue
 		}
 		downloadRequest = append(downloadRequest, services.NewDownloadRequest(p.Name, p.Hash))
