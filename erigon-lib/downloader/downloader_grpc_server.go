@@ -45,8 +45,8 @@ type GrpcServer struct {
 	d *Downloader
 }
 
-func (s *GrpcServer) ProhibitNewDownloads(context.Context, *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	if err := s.d.torrentFiles.prohibitNewDownloads(); err != nil {
+func (s *GrpcServer) ProhibitNewDownloads(_ context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
+	if err := s.d.torrentFiles.prohibitNewDownloads(req.Type); err != nil {
 		return nil, err
 	}
 	return nil, nil

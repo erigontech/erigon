@@ -40,9 +40,6 @@ type WebSeeds struct {
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
-	// if d.torrentFiles.newDownloadsAreProhibited() {
-	// 	return
-	// }
 	listsOfFiles := d.constructListsOfFiles(ctx, urls, files)
 	torrentMap := d.makeTorrentUrls(listsOfFiles)
 	webSeedMap := d.downloadTorrentFilesFromProviders(ctx, rootDir, torrentMap)
@@ -64,6 +61,13 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			d.logger.Debug("[snapshots.webseed] get from HTTP provider", "err", err, "url", webSeedProviderURL.EscapedPath())
 			continue
 		}
+		// check if we need to prohibit new downloads for some files
+		for name, _ := range manifestResponse {
+			if d.torrentFiles.newDownloadsAreProhibited(name) {
+				delete(manifestResponse, name)
+			}
+		}
+
 		listsOfFiles = append(listsOfFiles, manifestResponse)
 	}
 
@@ -73,6 +77,12 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		if err != nil { // don't fail on error
 			d.logger.Debug("[snapshots.webseed] get from File provider", "err", err)
 			continue
+		}
+		// check if we need to prohibit new downloads for some files
+		for name, _ := range response {
+			if d.torrentFiles.newDownloadsAreProhibited(name) {
+				delete(response, name)
+			}
 		}
 		listsOfFiles = append(listsOfFiles, response)
 	}

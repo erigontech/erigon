@@ -2140,9 +2140,9 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		return nil
 	}
 
-	// if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
-	// 	return nil
-	// }
+	if d.torrentFiles.newDownloadsAreProhibited(name) && !d.torrentFiles.Exists(name) {
+		return nil
+	}
 
 	mi := &metainfo.MetaInfo{AnnounceList: Trackers}
 	magnet := mi.Magnet(&infoHash, &metainfo.Info{Name: name})

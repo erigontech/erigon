@@ -14,8 +14,9 @@ import (
 
 // TorrentFiles - does provide thread-safe CRUD operations on .torrent files
 type TorrentFiles struct {
-	lock sync.Mutex
-	dir  string
+	lock       sync.Mutex
+	dir        string
+	prohibited []string
 }
 
 func NewAtomicTorrentFiles(dir string) *TorrentFiles {
@@ -125,29 +126,20 @@ const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
 // After "download once" - Erigon will produce and seed new files
 // Downloader will able: seed new files (already existing on FS), download uncomplete parts of existing files (if Verify found some bad parts)
-func (tf *TorrentFiles) prohibitNewDownloads() error {
+func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	return CreateProhibitNewDownloadsFile(tf.dir)
-}
-func (tf *TorrentFiles) newDownloadsAreProhibited() bool {
-	tf.lock.Lock()
-	defer tf.lock.Unlock()
-	return dir.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName))
-
-	//return dir.FileExist(filepath.Join(tf.dir, ProhibitNewDownloadsFileName)) ||
-	//	dir.FileExist(filepath.Join(tf.dir, SnapshotsLockFileName))
-}
-
-func CreateProhibitNewDownloadsFile(dir string) error {
-	fPath := filepath.Join(dir, ProhibitNewDownloadsFileName)
-	f, err := os.Create(fPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := f.Sync(); err != nil {
-		return err
-	}
+	tf.prohibited = append(tf.prohibited, t)
 	return nil
+}
+
+func (tf *TorrentFiles) newDownloadsAreProhibited(name string) bool {
+	tf.lock.Lock()
+	defer tf.lock.Unlock()
+	for _, t := range tf.prohibited {
+		if strings.Contains(name, t) {
+			return true
+		}
+	}
+	return false
 }
