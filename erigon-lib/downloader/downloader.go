@@ -658,7 +658,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		go func() {
 			defer d.wg.Done()
 			d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
-			// webseeds.Discover may create new .torrent files on disk
+			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 			}
@@ -2168,6 +2168,27 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-ctx.Done():
 			return
 		case <-t.GotInfo():
+		case <-time.After(30 * time.Second): //fallback to r2
+			// TOOD: handle errors
+			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
+			if ok && err == nil {
+				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
+				if err != nil {
+					return
+				}
+				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
+				if err != nil {
+					return
+				}
+				return
+			}
+
+			// wait for p2p
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.GotInfo():
+			}
 		}
 
 		if !d.snapshotLock.Downloads.Contains(name) {
