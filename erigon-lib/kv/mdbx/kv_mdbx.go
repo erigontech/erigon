@@ -1860,6 +1860,7 @@ func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 func (s *cursor2iter) Close() {
 	if s.c != nil {
 		s.c.Close()
+		s.c = nil
 	}
 }
 func (s *cursor2iter) HasNext() bool {
@@ -1958,6 +1959,7 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 func (s *cursorDup2iter) Close() {
 	if s.c != nil {
 		s.c.Close()
+		s.c = nil
 	}
 }
 func (s *cursorDup2iter) HasNext() bool {
