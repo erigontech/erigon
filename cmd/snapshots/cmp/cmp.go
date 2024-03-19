@@ -612,8 +612,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent1.Body.Name()))
-
-					return freezeblocks.BodiesIdx(ctx, info, 0, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					salt := freezeblocks.GetIndicesSalt(info.Dir())
+					return freezeblocks.BodiesIdx(ctx, info, salt, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
@@ -688,7 +688,8 @@ func (c comparitor) compareBodies(ctx context.Context, f1ents []*BodyEntry, f2en
 					}()
 
 					logger.Info(fmt.Sprintf("Indexing %s", ent2.Body.Name()))
-					return freezeblocks.BodiesIdx(ctx, info, 0, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
+					salt := freezeblocks.GetIndicesSalt(info.Dir())
+					return freezeblocks.BodiesIdx(ctx, info, salt, c.session1.LocalFsRoot(), nil, log.LvlDebug, logger)
 				})
 
 				g.Go(func() error {
