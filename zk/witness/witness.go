@@ -33,7 +33,7 @@ import (
 )
 
 var (
-	maxGetProofRewindBlockCount uint64 = 1_000
+	maxGetProofRewindBlockCount uint64 = 10_000
 
 	ErrEndBeforeStart = errors.New("end block must be higher than start block")
 )
