@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,6 +113,11 @@ func init() {
 	withDataDir(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
 
+	withChainFlag(manifestVerifyCmd)
+	manifestVerifyCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
+	rootCmd.AddCommand(manifestVerifyCmd)
+
 	withDataDir(printTorrentHashes)
 	withChainFlag(printTorrentHashes)
 	printTorrentHashes.PersistentFlags().BoolVar(&forceRebuild, "rebuild", false, "Force re-create .torrent files")
@@ -216,7 +222,7 @@ func Downloader(ctx context.Context, logger log.Logger) error {
 
 	cfg.AddTorrentsFromDisk = true // always true unless using uploader - which wants control of torrent files
 
-	d, err := downloader.New(ctx, cfg, dirs, logger, log.LvlInfo, seedbox)
+	d, err := downloader.New(ctx, cfg, logger, log.LvlInfo, seedbox)
 	if err != nil {
 		return err
 	}
@@ -276,10 +282,22 @@ var printTorrentHashes = &cobra.Command{
 
 var manifestCmd = &cobra.Command{
 	Use:     "manifest",
-	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
+	Example: "go run ./cmd/downloader manifest --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifest(cmd.Context(), logger); err != nil {
+			log.Error(err.Error())
+		}
+		return nil
+	},
+}
+
+var manifestVerifyCmd = &cobra.Command{
+	Use:     "manifest-verify",
+	Example: "go run ./cmd/downloader manifest-verify --datadir <your_datadir>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		logger := debug.SetupCobra(cmd, "downloader")
+		if err := manifestVerify(cmd.Context(), logger); err != nil {
 			log.Error(err.Error())
 		}
 		return nil
@@ -323,6 +341,59 @@ var torrentMagnet = &cobra.Command{
 		fmt.Printf("%s\n", mi.Magnet(nil, nil).String())
 		return nil
 	},
+}
+
+func manifestVerify(ctx context.Context, logger log.Logger) error {
+	webseedsList := common.CliString2Array(webseeds)
+	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
+		webseedsList = append(webseedsList, known...)
+	}
+
+	webseedUrlsOrFiles := webseedsList
+	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
+	webseedFileProviders := make([]string, 0, len(webseedUrlsOrFiles))
+	for _, webseed := range webseedUrlsOrFiles {
+		if !strings.HasPrefix(webseed, "v") { // has marker v1/v2/...
+			uri, err := url.ParseRequestURI(webseed)
+			if err != nil {
+				if strings.HasSuffix(webseed, ".toml") && dir.FileExist(webseed) {
+					webseedFileProviders = append(webseedFileProviders, webseed)
+				}
+				continue
+			}
+			webseedHttpProviders = append(webseedHttpProviders, uri)
+			continue
+		}
+
+		if strings.HasPrefix(webseed, "v1:") {
+			withoutVerisonPrefix := webseed[3:]
+			if !strings.HasPrefix(withoutVerisonPrefix, "https:") {
+				continue
+			}
+			uri, err := url.ParseRequestURI(withoutVerisonPrefix)
+			if err != nil {
+				log.Warn("[webseed] can't parse url", "err", err, "url", withoutVerisonPrefix)
+				continue
+			}
+			webseedHttpProviders = append(webseedHttpProviders, uri)
+		} else {
+			continue
+		}
+	}
+
+	wseed := downloader.NewWebSeeds(webseedHttpProviders, log.LvlDebug, logger)
+	err := wseed.VerifyManifestedBuckets(ctx, datadir.New(datadirCli), verifyFailfast)
+	if err != nil {
+		return err
+	}
+
+	//wseed.Discover(ctx, []string{}, "./")
+	//localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
+	//if dir.FileExist(localCfgFile) {
+	//	webseedFileProviders = append(webseedFileProviders, localCfgFile)
+	//}
+
+	return nil
 }
 
 func manifest(ctx context.Context, logger log.Logger) error {
