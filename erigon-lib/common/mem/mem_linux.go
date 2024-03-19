@@ -39,16 +39,16 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 	m := (*memoryMaps)[0]
 
 	// convert from kilobytes to bytes
-	val := reflect.ValueOf(m)
+	val := reflect.ValueOf(&m).Elem()
 	for i := 0; i < val.NumField(); i++ {
 		field := val.Field(i)
 
 		if field.Kind() == reflect.Uint64 {
-			field.Set(reflect.ValueOf(field.Interface().(uint64) * 1000))
+			field.SetUint(field.Interface().(uint64) * 1000)
 		}
 	}
 
-	return (*memoryMaps)[0], nil
+	return m, nil
 }
 
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {
