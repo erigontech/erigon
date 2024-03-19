@@ -333,8 +333,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
 				break
 			}
-
 		}
+		if casted, ok := it.(kv.Closer); ok {
+			casted.Close()
+		}
+
 		blockCount++
 		if len(blockLogs) == 0 {
 			continue

@@ -818,6 +818,9 @@ func ReadRawReceipts(db kv.Tx, blockNum uint64) types.Receipts {
 			receipts[txIndex].Logs = logs
 		}
 	}
+	if casted, ok := it.(kv.Closer); ok {
+		casted.Close()
+	}
 
 	return receipts
 }
