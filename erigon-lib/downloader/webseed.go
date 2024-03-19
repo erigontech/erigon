@@ -113,7 +113,9 @@ func (d *WebSeeds) makeWebSeedUrls(listsOfFiles []snaptype.WebSeedsFromProvider,
 			if strings.HasSuffix(name, ".torrent") {
 				continue
 			}
-			webSeedUrls[name] = append(webSeedUrls[name], wUrl)
+			if _, ok := webSeedMap[name]; ok {
+				webSeedUrls[name] = append(webSeedUrls[name], wUrl)
+			}
 		}
 	}
 
