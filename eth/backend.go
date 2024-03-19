@@ -53,6 +53,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
@@ -313,11 +314,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		return nil
 	}); err != nil {
 		return nil, err
-	}
-	if !config.Sync.UseSnapshots {
-		if err := downloader.CreateProhibitNewDownloadsFile(dirs.Snap); err != nil {
-			return nil, err
-		}
 	}
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
@@ -777,6 +773,14 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	backend.stagedSync = stagedsync.New(config.Sync, backend.syncStages, backend.syncUnwindOrder, backend.syncPruneOrder, logger)
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.UpdateHead)
+
+	if !config.Sync.UseSnapshots {
+		for _, p := range snaptype.AllTypes {
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+				Type: p.String(),
+			})
+		}
+	}
 
 	checkStateRoot := true
 	pipelineStages := stages2.NewPipelineStages(ctx, chainKv, config, stack.Config().P2P, backend.sentriesClient, backend.notifications, backend.downloaderClient, blockReader, blockRetire, backend.agg, backend.silkworm, backend.forkValidator, logger, checkStateRoot)
