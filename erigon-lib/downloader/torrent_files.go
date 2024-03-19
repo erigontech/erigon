@@ -19,7 +19,7 @@ type TorrentFiles struct {
 	prohibited []string
 }
 
-func NewAtomicTorrentFiles(dir string) *TorrentFiles {
+func NewAtomicTorrentFiles(dir string, prohibited []string) *TorrentFiles {
 	return &TorrentFiles{dir: dir}
 }
 
