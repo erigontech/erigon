@@ -140,7 +140,13 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 	}
 }
 
-func Send[I Info](info I) error {
+func Send[I Info](info I) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic recovered: %v", r)
+		}
+	}()
+
 	ctx := info.Type().Context()
 
 	if ctx.Err() != nil {
