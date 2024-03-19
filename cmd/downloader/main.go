@@ -114,7 +114,8 @@ func init() {
 	rootCmd.AddCommand(manifestCmd)
 
 	withChainFlag(manifestVerifyCmd)
-	manifestVerifyCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	withDataDir(manifestVerifyCmd)
+	manifestVerifyCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
 	rootCmd.AddCommand(manifestVerifyCmd)
 
@@ -386,13 +387,6 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	if err != nil {
 		return err
 	}
-
-	//wseed.Discover(ctx, []string{}, "./")
-	//localCfgFile := filepath.Join(dirs.DataDir, "webseed.toml") // datadir/webseed.toml allowed
-	//if dir.FileExist(localCfgFile) {
-	//	webseedFileProviders = append(webseedFileProviders, localCfgFile)
-	//}
-
 	return nil
 }
 
