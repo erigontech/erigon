@@ -106,7 +106,7 @@ func (d *WebSeeds) SetTorrent(t *TorrentFiles, whiteList snapcfg.Preverified, do
 	d.torrentFiles = t
 }
 
-func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, webSeedProviderURL *url.URL, report *webSeedCheckReport) {
+func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvider, report *webSeedCheckReport) {
 	// check that for each file in the manifest, there is a corresponding .torrent file
 
 	torrentNames := make(map[string]struct{})
@@ -141,7 +141,7 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 	report.torrentsOK = len(report.missingTorrents) == 0 && len(report.danglingTorrents) == 0 && hasTorrents
 }
 
-func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype.WebSeedsFromProvider, webSeedURL *url.URL) (tags map[string]string, invalidTags, etagFetchFailed []string, err error) {
+func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype.WebSeedsFromProvider) (tags map[string]string, invalidTags, etagFetchFailed []string, err error) {
 	etagFetchFailed = make([]string, 0)
 	tags = make(map[string]string)
 	invalidTagsMap := make(map[string]string)
@@ -253,8 +253,8 @@ func (d *WebSeeds) sumLocalTags(dirs datadir.Dirs) (map[string]string, error) {
 	return localTags, nil
 }
 
-func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, localTags map[string]string, manifestResponse snaptype.WebSeedsFromProvider, webSeedURL *url.URL, report *webSeedCheckReport) error {
-	etags, invalidTags, noTags, err := d.fetchFileEtags(ctx, manifestResponse, webSeedURL)
+func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, localTags map[string]string, manifestResponse snaptype.WebSeedsFromProvider, report *webSeedCheckReport) error {
+	etags, invalidTags, noTags, err := d.fetchFileEtags(ctx, manifestResponse)
 	if err != nil {
 		return err
 	}
@@ -368,8 +368,8 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, localTags map[str
 		return err
 	}
 
-	d.checkHasTorrents(manifestResponse, webSeedProviderURL, report)
-	return d.findLocalFileAndCheckMD5(ctx, localTags, manifestResponse, webSeedProviderURL, report)
+	d.checkHasTorrents(manifestResponse, report)
+	return d.findLocalFileAndCheckMD5(ctx, localTags, manifestResponse, report)
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
