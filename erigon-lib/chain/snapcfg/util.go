@@ -294,15 +294,7 @@ type Cfg struct {
 }
 
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
-	// Caplin uses slots not block numbers, so the merge limit function does not work on some chains like sepolia.
-	var mergeLimit uint64
-	if info.Type.Enum() == snaptype.Enums.BlobSidecars || info.Type.Enum() == snaptype.Enums.BeaconBlocks {
-		mergeLimit = snaptype.Erigon2MergeLimit
-	} else {
-		mergeLimit = c.MergeLimit(info.From)
-	}
-
-	return info.To-info.From == mergeLimit
+	return info.To-info.From == snaptype.Erigon2MergeLimit || info.To-info.From == snaptype.Erigon2OldMergeLimit
 }
 
 func (c Cfg) MergeLimit(fromBlock uint64) uint64 {

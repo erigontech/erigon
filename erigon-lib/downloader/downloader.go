@@ -1397,6 +1397,10 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 }
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
+	if d.webDownloadClient == nil {
+		return nil, fmt.Errorf("webdownload client not enabled")
+	}
+
 	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
 
 	if err != nil {
@@ -1905,7 +1909,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if len(downloading) > 0 {
-		webTransfers += int32(len(downloading))
+		if d.webDownloadClient != nil {
+			webTransfers += int32(len(downloading))
+		}
+
 		stats.Completed = false
 	}
 
