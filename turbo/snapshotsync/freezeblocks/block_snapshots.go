@@ -291,6 +291,8 @@ func NewRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, segmentsMin ui
 func GetIndicesSalt(baseDir string) (salt uint32) {
 	fpath := filepath.Join(baseDir, "salt-blocks.txt")
 	if !dir2.FileExist(fpath) {
+		dir2.MustExist(baseDir)
+
 		saltBytes := make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
 		if err := dir2.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
