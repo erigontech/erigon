@@ -283,32 +283,6 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 	return info.To-info.From == snaptype.Erigon2MergeLimit || info.To-info.From == snaptype.Erigon2OldMergeLimit
 }
 
-func (c Cfg) MergeLimit(fromBlock uint64) uint64 {
-	for _, p := range c.Preverified {
-		info, _, ok := snaptype.ParseFileName("", p.Name)
-		if !ok {
-			continue
-		}
-		if info.Ext != ".seg" {
-			continue
-		}
-		if fromBlock < info.From {
-			continue
-		}
-		if fromBlock >= info.To {
-			continue
-		}
-		if info.Len() == snaptype.Erigon2MergeLimit ||
-			info.Len() == snaptype.Erigon2OldMergeLimit {
-			return info.Len()
-		}
-
-		break
-	}
-
-	return snaptype.Erigon2MergeLimit
-}
-
 var knownPreverified = map[string]Preverified{
 	networkname.MainnetChainName: Mainnet,
 	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
@@ -343,10 +317,6 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func MergeLimit(networkName string, fromBlock uint64) uint64 {
-	return KnownCfg(networkName).MergeLimit(fromBlock)
-}
-
 func MaxSeedableSegment(chain string, dir string) uint64 {
 	var max uint64
 
@@ -361,15 +331,7 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 	return max
 }
 
-var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
-
 func MergeSteps(networkName string, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimit(networkName, fromBlock)
-
-	if mergeLimit == snaptype.Erigon2OldMergeLimit {
-		return oldMergeSteps
-	}
-
 	return snaptype.MergeSteps
 }
 

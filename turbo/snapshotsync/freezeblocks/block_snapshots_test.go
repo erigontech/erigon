@@ -65,12 +65,12 @@ func TestFindMergeRange(t *testing.T) {
 	merger.DisableFsync()
 	t.Run("big", func(t *testing.T) {
 		var rangesOld []Range
-		for i := 0; i < 24; i++ {
-			rangesOld = append(rangesOld, Range{from: uint64(i * 100_000), to: uint64((i + 1) * 100_000)})
+		for i := 0; i < 8; i++ {
+			rangesOld = append(rangesOld, Range{from: uint64(i * 50_000), to: uint64((i + 1) * 50_000)})
 		}
 		found := merger.FindMergeRanges(rangesOld, uint64(24*100_000))
 
-		expect := Ranges{{0, 500000}, {500000, 1000000}, {1000000, 1500000}, {1500000, 2000000}}
+		expect := Ranges{{0, 100000}, {100000, 200000}, {200000, 300000}, {300000, 400000}}
 		require.Equal(t, expect.String(), Ranges(found).String())
 
 		var rangesNew []Range
@@ -91,11 +91,8 @@ func TestFindMergeRange(t *testing.T) {
 		}
 		found := merger.FindMergeRanges(rangesOld, uint64(240*10_000))
 		var expect Ranges
-		for i := uint64(0); i < 4; i++ {
-			expect = append(expect, Range{from: i * snaptype.Erigon2OldMergeLimit, to: (i + 1) * snaptype.Erigon2OldMergeLimit})
-		}
-		for i := uint64(0); i < 4; i++ {
-			expect = append(expect, Range{from: 2_000_000 + i*snaptype.Erigon2MergeLimit, to: 2_000_000 + (i+1)*snaptype.Erigon2MergeLimit})
+		for i := uint64(0); i < 24; i++ {
+			expect = append(expect, Range{from: i * snaptype.Erigon2MergeLimit, to: (i + 1) * snaptype.Erigon2MergeLimit})
 		}
 
 		require.Equal(t, expect.String(), Ranges(found).String())
@@ -142,12 +139,12 @@ func TestMergeSnapshots(t *testing.T) {
 		require.NoError(err)
 	}
 
-	expectedFileName := snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 0, 500_000, snaptype.Transactions.Enum())
+	expectedFileName := snaptype.SegmentFileName(snaptype.Transactions.Versions().Current, 0, 100_000, snaptype.Transactions.Enum())
 	d, err := seg.NewDecompressor(filepath.Join(dir, expectedFileName))
 	require.NoError(err)
 	defer d.Close()
 	a := d.Count()
-	require.Equal(50, a)
+	require.Equal(10, a)
 
 	{
 		merger := NewMerger(dir, 1, log.LvlInfo, nil, params.MainnetChainConfig, logger)

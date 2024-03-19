@@ -1058,12 +1058,7 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 }
 
 func chooseSegmentEnd(from, to uint64, chainConfig *chain.Config) uint64 {
-	var chainName string
-
-	if chainConfig != nil {
-		chainName = chainConfig.ChainName
-	}
-	blocksPerFile := snapcfg.MergeLimit(chainName, from)
+	blocksPerFile := uint64(snaptype.Erigon2MergeLimit)
 
 	next := (from/blocksPerFile + 1) * blocksPerFile
 	to = cmp.Min(next, to)
@@ -1132,13 +1127,7 @@ func canRetire(from, to uint64, chainConfig *chain.Config) (blockFrom, blockTo u
 	roundedTo1K := (to / 1_000) * 1_000
 	var maxJump uint64 = 1_000
 
-	var chainName string
-
-	if chainConfig != nil {
-		chainName = chainConfig.ChainName
-	}
-
-	mergeLimit := snapcfg.MergeLimit(chainName, blockFrom)
+	mergeLimit := uint64(snaptype.Erigon2MergeLimit)
 
 	if blockFrom%mergeLimit == 0 {
 		maxJump = mergeLimit
@@ -2190,7 +2179,7 @@ func (m *Merger) DisableFsync() { m.noFsync = true }
 func (m *Merger) FindMergeRanges(currentRanges []Range, maxBlockNum uint64) (toMerge []Range) {
 	for i := len(currentRanges) - 1; i > 0; i-- {
 		r := currentRanges[i]
-		mergeLimit := snapcfg.MergeLimit(m.chainConfig.ChainName, r.from)
+		mergeLimit := uint64(snaptype.Erigon2MergeLimit)
 		if r.to-r.from >= mergeLimit {
 			continue
 		}

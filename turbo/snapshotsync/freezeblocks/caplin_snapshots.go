@@ -14,7 +14,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/ledgerwatch/log/v3"
 
-	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -461,7 +460,7 @@ func dumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
-		blocksPerFile := snapcfg.MergeLimit("", i)
+		blocksPerFile := uint64(snaptype.Erigon2MergeLimit)
 
 		if toSlot-i < blocksPerFile {
 			break
@@ -477,7 +476,7 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
 	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
-		blocksPerFile := snapcfg.MergeLimit("", i)
+		blocksPerFile := uint64(snaptype.Erigon2MergeLimit)
 
 		if toSlot-i < blocksPerFile {
 			break
