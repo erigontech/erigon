@@ -122,7 +122,7 @@ func Test_ReadBuffer(t *testing.T) {
 			name:           "test error",
 			input:          6,
 			expectedResult: []byte{},
-			expectedError:  fmt.Errorf("error reading from server: %v", io.ErrUnexpectedEOF),
+			expectedError:  fmt.Errorf("reading from server: %v", io.ErrUnexpectedEOF),
 		},
 	}
 
@@ -158,7 +158,7 @@ func Test_ParseIoReadError(t *testing.T) {
 		{
 			name:          "test error",
 			input:         errors.New("test error"),
-			expectedError: errors.New("error reading from server: test error"),
+			expectedError: errors.New("reading from server: test error"),
 		},
 	}
 

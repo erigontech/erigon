@@ -13,6 +13,7 @@ type TestDatastreamClient struct {
 	streamingAtomic       atomic.Bool
 	l2BlockChan           chan types.FullL2Block
 	gerUpdatesChan        chan types.GerUpdate
+	errChan               chan error
 }
 
 func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []types.GerUpdate) *TestDatastreamClient {
@@ -21,6 +22,7 @@ func NewTestDatastreamClient(fullL2Blocks []types.FullL2Block, gerUpdates []type
 		gerUpdates:     gerUpdates,
 		l2BlockChan:    make(chan types.FullL2Block, 100),
 		gerUpdatesChan: make(chan types.GerUpdate, 100),
+		errChan:        make(chan error, 100),
 	}
 
 	return client
@@ -46,6 +48,11 @@ func (c *TestDatastreamClient) GetL2BlockChan() chan types.FullL2Block {
 func (c *TestDatastreamClient) GetGerUpdatesChan() chan types.GerUpdate {
 	return c.gerUpdatesChan
 }
+
+func (c *TestDatastreamClient) GetErrChan() chan error {
+	return c.errChan
+}
+
 func (c *TestDatastreamClient) GetLastWrittenTimeAtomic() *atomic.Int64 {
 	return &c.lastWrittenTimeAtomic
 }

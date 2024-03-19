@@ -37,7 +37,7 @@ func Test_readHeaderEntry(t *testing.T) {
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20},
 			expectedResult: types.HeaderEntry{},
-			expectedError:  fmt.Errorf("failed to read header bytes error reading from server: unexpected EOF"),
+			expectedError:  fmt.Errorf("failed to read header bytes reading from server: unexpected EOF"),
 		},
 	}
 
@@ -95,13 +95,13 @@ func Test_readResultEntry(t *testing.T) {
 			name:           "Invalid byte array length",
 			input:          []byte{20, 21, 22, 23, 24, 20},
 			expectedResult: types.ResultEntry{},
-			expectedError:  fmt.Errorf("failed to read main result bytes error reading from server: unexpected EOF"),
+			expectedError:  fmt.Errorf("failed to read main result bytes reading from server: unexpected EOF"),
 		},
 		{
 			name:           "Invalid error length",
 			input:          []byte{0, 0, 0, 12, 0, 0, 0, 0, 20, 21},
 			expectedResult: types.ResultEntry{},
-			expectedError:  fmt.Errorf("failed to read result errStr bytes error reading from server: unexpected EOF"),
+			expectedError:  fmt.Errorf("failed to read result errStr bytes reading from server: unexpected EOF"),
 		},
 	}
 
@@ -166,12 +166,12 @@ func Test_readFileEntry(t *testing.T) {
 			name:           "Invalid byte array length",
 			input:          []byte{2, 21, 22, 23, 24, 20},
 			expectedResult: types.FileEntry{},
-			expectedError:  fmt.Errorf("error reading file bytes: error reading from server: unexpected EOF"),
+			expectedError:  fmt.Errorf("error reading file bytes: reading from server: unexpected EOF"),
 		}, {
 			name:           "Invalid data length",
 			input:          []byte{2, 0, 0, 0, 31, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 45, 0, 0, 0, 24, 0, 0, 0, 0, 0, 0, 0, 64},
 			expectedResult: types.FileEntry{},
-			expectedError:  fmt.Errorf("error reading file data bytes: error reading from server: unexpected EOF"),
+			expectedError:  fmt.Errorf("error reading file data bytes: reading from server: unexpected EOF"),
 		},
 	}
 	for _, testCase := range testCases {

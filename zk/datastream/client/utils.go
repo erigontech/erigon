@@ -8,10 +8,6 @@ import (
 	"net"
 )
 
-var (
-	ErrBadBookmark = errors.New("bad bookmark")
-)
-
 // writeFullUint64ToConn writes a uint64 to a connection
 func writeFullUint64ToConn(conn net.Conn, value uint64) error {
 	buffer := make([]byte, 8)
@@ -80,6 +76,6 @@ func parseIoReadError(err error) error {
 	if err == io.EOF {
 		return errors.New("server close connection")
 	} else {
-		return fmt.Errorf("error reading from server: %v", err)
+		return fmt.Errorf("reading from server: %v", err)
 	}
 }

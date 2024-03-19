@@ -15,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk"
-	dsclient "github.com/ledgerwatch/erigon/zk/datastream/client"
 	"github.com/ledgerwatch/erigon/zk/datastream/types"
 	"github.com/ledgerwatch/erigon/zk/erigon_db"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
@@ -69,6 +68,7 @@ type HermezDb interface {
 type DatastreamClient interface {
 	ReadAllEntriesToChannel(bookmark *types.Bookmark) error
 	GetL2BlockChan() chan types.FullL2Block
+	GetErrChan() chan error
 	GetGerUpdatesChan() chan types.GerUpdate
 	GetLastWrittenTimeAtomic() *atomic.Int64
 	GetStreamingAtomic() *atomic.Bool
@@ -131,28 +131,18 @@ func SpawnStageBatches(
 	}
 
 	startSyncTime := time.Now()
-	errChan := make(chan error)
-
 	// start routine to download blocks and push them in a channel
 	if !cfg.dsClient.GetStreamingAtomic().Load() {
 		log.Info(fmt.Sprintf("[%s] Starting stream", logPrefix), "startBlock", batchesProgress)
 		go func() {
 			log.Info(fmt.Sprintf("[%s] Started downloading L2Blocks routine", logPrefix))
 			defer log.Info(fmt.Sprintf("[%s] Finished downloading L2Blocks routine", logPrefix))
-			var err error
 
 			// this will download all blocks from datastream and push them in a channel
 			// if no error, break, else continue trying to get them
 			// Create bookmark
 			bookmark := types.NewL2BlockBookmark(batchesProgress)
-			err = cfg.dsClient.ReadAllEntriesToChannel(bookmark)
-
-			//[zkevm] - this is expected to be returned only when given block number is higher than the highest block number in datastream
-			if err == dsclient.ErrBadBookmark {
-				log.Debug(fmt.Sprintf("[%s] Invalid bookmark. Probably ahead of stream.", logPrefix))
-			}
-
-			errChan <- err
+			cfg.dsClient.ReadAllEntriesToChannel(bookmark)
 		}()
 	}
 
@@ -167,7 +157,6 @@ func SpawnStageBatches(
 	highestSeenBatchNo := uint64(0)
 	highestHashableL2BlockNo := uint64(0)
 
-	writeThreadFinished := false
 	lastForkId64, err := stages.GetStageProgress(tx, stages.ForkId)
 	lastForkId := uint16(lastForkId64)
 	if err != nil {
@@ -183,6 +172,7 @@ func SpawnStageBatches(
 	gerUpdateChan := cfg.dsClient.GetGerUpdatesChan()
 	lastWrittenTimeAtomic := cfg.dsClient.GetLastWrittenTimeAtomic()
 	streamingAtomic := cfg.dsClient.GetStreamingAtomic()
+	errChan := cfg.dsClient.GetErrChan()
 
 	for {
 		// get block
@@ -255,7 +245,6 @@ func SpawnStageBatches(
 			if err != nil {
 				return fmt.Errorf("l2blocks download routine error: %v", err)
 			}
-			writeThreadFinished = true
 		default:
 			//wait at least one block to be written, before continuing
 			if atLeastOneBlockWritten {
@@ -266,15 +255,18 @@ func SpawnStageBatches(
 				timePassedAfterlastBlock := time.Since(time.Unix(0, lastWrittenTs))
 				if streamingAtomic.Load() && timePassedAfterlastBlock.Milliseconds() > 500 {
 					log.Info(fmt.Sprintf("[%s] No new blocks in %d miliseconds. Ending the stage.", logPrefix, timePassedAfterlastBlock.Milliseconds()), "lastBlockHeight", lastBlockHeight)
-					writeThreadFinished = true
-				}
-
-				if writeThreadFinished {
 					endLoop = true
 				}
 			} else {
 				timePassedAfterlastBlock := time.Since(startTime)
 				if timePassedAfterlastBlock.Seconds() > 10 {
+					// if the connection ropped, continue with next stages while it tries to reconnect
+					// otherwise it will get stuck in "waiting for at least one block to be written" loop
+					// if !streamingAtomic.Load() {
+					// 	endLoop = true
+					// 	break
+					// }
+
 					log.Info(fmt.Sprintf("[%s] Waiting for at least one new block.", logPrefix))
 					startTime = time.Now()
 				}
