@@ -18,7 +18,6 @@ import (
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
@@ -207,10 +206,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 
 	for fileName, tUrls := range urlsByName {
 		name := fileName
-		tPath := filepath.Join(rootDir, name)
-		if dir.FileExist(tPath) {
-			continue
-		}
 		addedNew++
 		if !strings.HasSuffix(name, ".seg.torrent") {
 			_, fName := filepath.Split(name)
@@ -226,9 +221,11 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				if err := d.torrentFiles.Create(tPath, res); err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
-					continue
+				if !d.torrentFiles.Exists(name) {
+					if err := d.torrentFiles.Create(name, res); err != nil {
+						d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
+						continue
+					}
 				}
 				webSeeMapLock.Lock()
 				webSeedMap[torrentMap[*url]] = struct{}{}
