@@ -655,14 +655,17 @@ func (db *MdbxKV) beginRw(ctx context.Context, flags uint) (txn kv.RwTx, err err
 
 type MdbxTx struct {
 	tx               *mdbx.Txn
+	id               uint64 // set only if TRACE_TX=true
 	db               *MdbxKV
-	cursors          map[uint64]*mdbx.Cursor
-	streams          []kv.Closer
 	statelessCursors map[string]kv.RwCursor
 	readOnly         bool
-	cursorID         uint64
 	ctx              context.Context
-	id               uint64 // set only if TRACE_TX=true
+
+	cursors  map[uint64]*mdbx.Cursor
+	cursorID uint64
+
+	streams  map[int]kv.Closer
+	streamID int
 }
 
 type MdbxCursor struct {
@@ -995,6 +998,7 @@ func (tx *MdbxTx) closeCursors() {
 			c.Close()
 		}
 	}
+	tx.streams = nil
 	tx.statelessCursors = nil
 }
 
@@ -1802,7 +1806,10 @@ func (tx *MdbxTx) RangeDescend(table string, fromPrefix, toPrefix []byte, limit 
 }
 
 type cursor2iter struct {
-	c                                  kv.Cursor
+	c  kv.Cursor
+	id int
+	tx *MdbxTx
+
 	fromPrefix, toPrefix, nextK, nextV []byte
 	err                                error
 	orderAscend                        order.By
@@ -1811,8 +1818,12 @@ type cursor2iter struct {
 }
 
 func (tx *MdbxTx) rangeOrderLimit(table string, fromPrefix, toPrefix []byte, orderAscend order.By, limit int) (*cursor2iter, error) {
-	s := &cursor2iter{ctx: tx.ctx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: int64(limit)}
-	tx.streams = append(tx.streams, s)
+	s := &cursor2iter{ctx: tx.ctx, tx: tx, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: orderAscend, limit: int64(limit), id: tx.streamID}
+	tx.streamID++
+	if tx.streams == nil {
+		tx.streams = map[int]kv.Closer{}
+	}
+	tx.streams[s.id] = s
 	return s.init(table, tx)
 }
 func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
@@ -1860,6 +1871,8 @@ func (s *cursor2iter) init(table string, tx kv.Tx) (*cursor2iter, error) {
 func (s *cursor2iter) Close() {
 	if s.c != nil {
 		s.c.Close()
+		delete(s.tx.streams, s.id)
+		s.c = nil
 	}
 }
 func (s *cursor2iter) HasNext() bool {
@@ -1898,13 +1911,20 @@ func (s *cursor2iter) Next() (k, v []byte, err error) {
 }
 
 func (tx *MdbxTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (iter.KV, error) {
-	s := &cursorDup2iter{ctx: tx.ctx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit)}
-	tx.streams = append(tx.streams, s)
+	s := &cursorDup2iter{ctx: tx.ctx, tx: tx, key: key, fromPrefix: fromPrefix, toPrefix: toPrefix, orderAscend: bool(asc), limit: int64(limit), id: tx.streamID}
+	tx.streamID++
+	if tx.streams == nil {
+		tx.streams = map[int]kv.Closer{}
+	}
+	tx.streams[s.id] = s
 	return s.init(table, tx)
 }
 
 type cursorDup2iter struct {
-	c                           kv.CursorDupSort
+	c  kv.CursorDupSort
+	id int
+	tx *MdbxTx
+
 	key                         []byte
 	fromPrefix, toPrefix, nextV []byte
 	err                         error
@@ -1958,6 +1978,8 @@ func (s *cursorDup2iter) init(table string, tx kv.Tx) (*cursorDup2iter, error) {
 func (s *cursorDup2iter) Close() {
 	if s.c != nil {
 		s.c.Close()
+		delete(s.tx.streams, s.id)
+		s.c = nil
 	}
 }
 func (s *cursorDup2iter) HasNext() bool {
