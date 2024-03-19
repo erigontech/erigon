@@ -650,6 +650,19 @@ type seedHash struct {
 }
 
 func (d *Downloader) mainLoop(silent bool) error {
+	if d.webseedsDiscover {
+		// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
+		// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+			// apply webseeds to existing torrents
+			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
+				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
+			}
+		}()
+	}
 
 	var sem = semaphore.NewWeighted(int64(d.cfg.DownloadSlots))
 
@@ -683,20 +696,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 			for _, t := range torrents {
 				if _, ok := complete[t.Name()]; ok {
 					continue
-				}
-				if d.webseedsDiscover {
-					// CornerCase: no peers -> no anoncments to trackers -> no magnetlink resolution (but magnetlink has filename)
-					// means we can start adding weebseeds without waiting for `<-t.GotInfo()`
-					d.wg.Add(1)
-					go func() {
-						defer d.wg.Done()
-						fmt.Println(d.cfg.WebSeedFiles, t.Name(), d.cfg.Dirs.Snap)
-						d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, []string{t.Name()}, d.cfg.Dirs.Snap)
-						// webseeds.Discover may create new .torrent files on disk
-						if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
-							d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
-						}
-					}()
 				}
 
 				if isComplete, length, completionTime := d.checkComplete(t.Name()); isComplete && completionTime != nil {
@@ -1400,6 +1399,10 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 }
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
+	if d.webDownloadClient == nil {
+		return nil, fmt.Errorf("webdownload client not enabled")
+	}
+
 	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
 
 	if err != nil {
@@ -1880,7 +1883,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if len(downloading) > 0 {
-		webTransfers += int32(len(downloading))
+		if d.webDownloadClient != nil {
+			webTransfers += int32(len(downloading))
+		}
+
 		stats.Completed = false
 	}
 
@@ -2161,8 +2167,33 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-ctx.Done():
 			return
 		case <-t.GotInfo():
+		case <-time.After(30 * time.Second): //fallback to r2
+			// TOOD: handle errors
+			// TOOD: add `d.webseeds.Complete` chan - to prevent race - Discover is also async
+			// TOOD: maybe run it in goroutine and return channel - to select with p2p
+
+			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
+			if ok && err == nil {
+				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
+				if err != nil {
+					return
+				}
+				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
+				if err != nil {
+					return
+				}
+				return
+			}
+
+			// wait for p2p
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.GotInfo():
+			}
 		}
 
+		//TODO: remove whitelist check - Erigon may send us new seedable files
 		if !d.snapshotLock.Downloads.Contains(name) {
 			mi := t.Metainfo()
 			if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {

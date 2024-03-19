@@ -18,7 +18,6 @@ import (
 
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
-	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/pelletier/go-toml/v2"
@@ -41,6 +40,9 @@ type WebSeeds struct {
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, urls []*url.URL, files []string, rootDir string) {
+	if d.torrentFiles.newDownloadsAreProhibited() {
+		return
+	}
 	listsOfFiles := d.constructListsOfFiles(ctx, urls, files)
 	torrentMap := d.makeTorrentUrls(listsOfFiles)
 	fmt.Println(torrentMap)
@@ -208,10 +210,6 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 
 	for fileName, tUrls := range urlsByName {
 		name := fileName
-		tPath := filepath.Join(rootDir, name)
-		if dir.FileExist(tPath) {
-			continue
-		}
 		addedNew++
 		if !strings.HasSuffix(name, ".seg.torrent") {
 			_, fName := filepath.Split(name)
@@ -222,15 +220,13 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		tUrls := tUrls
 		e.Go(func() error {
 			for _, url := range tUrls {
-				res, err := d.callTorrentHttpProvider(ctx, url, name)
+				//validation happens inside
+				_, err := d.callTorrentHttpProvider(ctx, url, name)
 				if err != nil {
 					d.logger.Log(d.verbosity, "[snapshots] got from webseed", "name", name, "err", err, "url", url)
 					continue
 				}
-				if err := d.torrentFiles.Create(tPath, res); err != nil {
-					d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err, "url", url)
-					continue
-				}
+				//don't save .torrent here - do it inside downloader.Add
 				webSeeMapLock.Lock()
 				webSeedMap[torrentMap[*url]] = struct{}{}
 				webSeeMapLock.Unlock()
@@ -243,6 +239,33 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 		d.logger.Debug("[snapshots] webseed discover", "err", err)
 	}
 	return webSeedMap
+}
+
+func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (bool, error) {
+	urls, ok := d.ByFileName(name)
+	if !ok {
+		return false, nil
+	}
+	for _, urlStr := range urls {
+		parsedUrl, err := url.Parse(urlStr)
+		if err != nil {
+			continue
+		}
+		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
+		if err != nil {
+			return false, err
+		}
+		if d.torrentFiles.Exists(name) {
+			continue
+		}
+		if err := d.torrentFiles.Create(name, res); err != nil {
+			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
+			continue
+		}
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {
