@@ -806,13 +806,17 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			*/
 
 			datastreamClient := initDataStreamClient(cfg)
-
-			l1Topics := [][]libcommon.Hash{{contracts.SequencedBatchTopic, contracts.VerificationTopic}}
+			l1Topics := [][]libcommon.Hash{{
+				contracts.SequencedBatchTopicPreEtrog,
+				contracts.SequencedBatchTopicEtrog,
+				contracts.VerificationTopicPreEtrog,
+				contracts.VerificationTopicEtrog,
+			}}
 
 			etherMan := newEtherMan(cfg)
 			zkL1Syncer := syncer.NewL1Syncer(
 				etherMan.EthClient,
-				[]libcommon.Address{cfg.L1PolygonRollupManager},
+				[]libcommon.Address{cfg.L1PolygonRollupManager, cfg.L1Rollup},
 				l1Topics,
 				cfg.L1BlockRange,
 				cfg.L1QueryDelay,

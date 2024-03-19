@@ -9,6 +9,7 @@ zkevm.l1-chain-id: 11155111
 zkevm.l1-rpc-url: https://rpc.sepolia.org
 zkevm.l1-polygon-rollup-manager: "0x32d33D5137a7cFFb54c5Bf8371172bcEc5f310ff"
 zkevm.l1-rollup: "0xA13Ddb14437A8F34897131367ad3ca78416d6bCa"
+zkevm.l1-rollup-id: 1
 zkevm.l1-matic-contract-address: "0x1850Dd35dE878238fb1dBa7aF7f929303AB6e8E4"
 zkevm.l1-ger-manager-contract-address: "0xAd1490c248c5d3CbAE399Fd529b79B42984277DF"
 zkevm.l1-topic-verification: "0x9c72852172521097ba7e1482e6b44b351323df0155f97f4ea18fcec28e1f5966"

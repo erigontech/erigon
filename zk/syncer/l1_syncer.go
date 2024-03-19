@@ -274,8 +274,8 @@ func (s *L1Syncer) getSequencedLogs(jobs <-chan fetchJob, results chan jobResult
 				return
 			}
 			query := ethereum.FilterQuery{
-				FromBlock: big.NewInt(int64(j.From)),
-				ToBlock:   big.NewInt(int64(j.To)),
+				FromBlock: new(big.Int).SetUint64(j.From),
+				ToBlock:   new(big.Int).SetUint64(j.To),
 				Addresses: s.l1ContractAddresses,
 				Topics:    s.topics,
 			}

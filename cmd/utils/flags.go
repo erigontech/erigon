@@ -381,6 +381,11 @@ var (
 		Usage: "Ethereum L1 Rollup Address",
 		Value: "",
 	}
+	L1RollupIdFlag = cli.Uint64Flag{
+		Name:  "zkevm.l1-rollup-id",
+		Usage: "Ethereum L1 Rollup ID",
+		Value: 1,
+	}
 	L1TopicVerificationFlag = cli.StringFlag{
 		Name:  "zkevm.l1-topic-verification",
 		Usage: "Ethereum L1 topic for verification",

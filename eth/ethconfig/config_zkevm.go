@@ -10,6 +10,7 @@ type Zk struct {
 	L1RpcUrl                    string
 	L1PolygonRollupManager      common.Address
 	L1Rollup                    common.Address
+	L1RollupId                  uint64
 	L1TopicVerification         common.Hash
 	L1TopicSequence             common.Hash
 	L1BlockRange                uint64

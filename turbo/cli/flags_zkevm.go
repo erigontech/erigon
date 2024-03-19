@@ -34,6 +34,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		L1RpcUrl:                    ctx.String(utils.L1RpcUrlFlag.Name),
 		L1PolygonRollupManager:      libcommon.HexToAddress(ctx.String(utils.L1PolygonRollupManagerFlag.Name)),
 		L1Rollup:                    libcommon.HexToAddress(ctx.String(utils.L1RollupFlag.Name)),
+		L1RollupId:                  ctx.Uint64(utils.L1RollupIdFlag.Name),
 		L1TopicVerification:         libcommon.HexToHash(ctx.String(utils.L1TopicVerificationFlag.Name)),
 		L1TopicSequence:             libcommon.HexToHash(ctx.String(utils.L1TopicSequenceFlag.Name)),
 		L1BlockRange:                ctx.Uint64(utils.L1BlockRangeFlag.Name),
@@ -66,7 +67,6 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		if cfg.Zk.ExecutorStrictMode && (len(cfg.Zk.ExecutorUrls) == 0 || cfg.Zk.ExecutorUrls[0] == "") {
 			panic("You must set executor urls when running in executor strict mode (zkevm.executor-strict)")
 		}
-
 	}
 	checkFlag(utils.L1ChainIdFlag.Name, cfg.Zk.L1ChainId)
 	checkFlag(utils.L1RpcUrlFlag.Name, cfg.Zk.L1RpcUrl)

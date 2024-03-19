@@ -171,6 +171,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.L1RpcUrlFlag,
 	&utils.L1PolygonRollupManagerFlag,
 	&utils.L1RollupFlag,
+	&utils.L1RollupIdFlag,
 	&utils.L1TopicVerificationFlag,
 	&utils.L1TopicSequenceFlag,
 	&utils.L1BlockRangeFlag,
