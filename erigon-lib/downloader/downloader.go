@@ -2170,6 +2170,9 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-t.GotInfo():
 		case <-time.After(30 * time.Second): //fallback to r2
 			// TOOD: handle errors
+			// TOOD: add `d.webseeds.Complete` chan - to prevent race - Discover is also async
+			// TOOD: maybe run it in goroutine and return channel - to select with p2p
+
 			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
 			if ok && err == nil {
 				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
