@@ -690,7 +690,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 					d.wg.Add(1)
 					go func() {
 						defer d.wg.Done()
-						fmt.Println(d.cfg.WebSeedUrls, t.Name(), d.cfg.Dirs.Snap)
+						fmt.Println(d.cfg.WebSeedFiles, t.Name(), d.cfg.Dirs.Snap)
 						d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, []string{t.Name()}, d.cfg.Dirs.Snap)
 						// webseeds.Discover may create new .torrent files on disk
 						if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
