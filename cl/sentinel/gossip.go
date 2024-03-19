@@ -89,8 +89,7 @@ var LightClientOptimisticUpdateSsz = GossipTopic{
 
 type GossipManager struct {
 	ch            chan *GossipMessage
-	subscriptions map[string]*GossipSubscription
-	mu            sync.RWMutex
+	subscriptions sync.Map // map from topic string to *GossipSubscription
 }
 
 const maxIncomingGossipMessages = 1 << 16
@@ -101,7 +100,7 @@ func NewGossipManager(
 ) *GossipManager {
 	g := &GossipManager{
 		ch:            make(chan *GossipMessage, maxIncomingGossipMessages),
-		subscriptions: map[string]*GossipSubscription{},
+		subscriptions: sync.Map{},
 	}
 	return g
 }
@@ -121,32 +120,27 @@ func (s *GossipManager) Recv() <-chan *GossipMessage {
 }
 
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var sub *GossipSubscription
-	for topic, currSub := range s.subscriptions {
-		if strings.Contains(topic, match) {
-			sub = currSub
+	s.subscriptions.Range(func(topic, value interface{}) bool {
+		if strings.Contains(topic.(string), match) {
+			sub = value.(*GossipSubscription)
+			return false
 		}
-	}
+		return true
+	})
 	return sub
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.subscriptions[topic] = sub
+	s.subscriptions.Store(topic, sub)
 }
 
 func (s *GossipManager) unsubscribe(topic string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sub, ok := s.subscriptions[topic]
+	sub, ok := s.subscriptions.LoadAndDelete(topic)
 	if !ok || sub == nil {
 		return
 	}
-	sub.Close()
-	delete(s.subscriptions, topic)
+	sub.(*GossipSubscription).Close()
 }
 
 func (s *Sentinel) forkWatcher() {
@@ -167,25 +161,17 @@ func (s *Sentinel) forkWatcher() {
 				return
 			}
 			if prevDigest != digest {
-				copy := func() map[string]*GossipSubscription {
-					s.subManager.mu.Lock()
-					defer s.subManager.mu.Unlock()
-					// copy the map
-					copy := make(map[string]*GossipSubscription)
-					for k, v := range s.subManager.subscriptions {
-						copy[k] = v
-					}
-					return copy
-				}()
 				// unsubscribe and resubscribe to all topics
-				for path, sub := range copy {
-					s.subManager.unsubscribe(path)
+				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
+					sub := value.(*GossipSubscription)
+					s.subManager.unsubscribe(key.(string))
 					newSub, err := s.SubscribeGossip(sub.gossip_topic)
 					if err != nil {
 						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
 					}
 					newSub.Listen()
-				}
+					return true
+				})
 				prevDigest = digest
 			}
 		}
@@ -279,11 +265,12 @@ func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 }
 
 func (g *GossipManager) Close() {
-	for _, topic := range g.subscriptions {
-		if topic != nil {
-			topic.Close()
+	g.subscriptions.Range(func(key, value interface{}) bool {
+		if value != nil {
+			value.(*GossipSubscription).Close()
 		}
-	}
+		return true
+	})
 }
 
 // GossipSubscription abstracts a gossip subscription to write decoded structs.
