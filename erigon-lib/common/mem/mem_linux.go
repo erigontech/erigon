@@ -4,6 +4,7 @@ package mem
 
 import (
 	"os"
+	"reflect"
 
 	"github.com/shirou/gopsutil/v3/process"
 
@@ -33,6 +34,18 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 	memoryMaps, err := proc.MemoryMaps(true)
 	if err != nil {
 		return process.MemoryMapsStat{}, err
+	}
+
+	m := (*memoryMaps)[0]
+
+	// convert from kilobytes to bytes
+	val := reflect.ValueOf(m)
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+
+		if field.Kind() == reflect.Uint64 {
+			field.Set(reflect.ValueOf(field.Interface().(uint64) * 1000))
+		}
 	}
 
 	return (*memoryMaps)[0], nil
