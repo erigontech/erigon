@@ -836,7 +836,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		stat, err := ac.Prune(context.Background(), tx, math.MaxUint64, logEvery)
+		stat, err := ac.Prune(context.Background(), tx, math.MaxUint64, true, logEvery)
 		if err != nil {
 			return err
 		}
