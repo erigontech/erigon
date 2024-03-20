@@ -72,7 +72,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := histCfg{
-		iiCfg:             iiCfg{salt: &salt, dirs: dirs},
+		iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
 		withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
@@ -549,7 +549,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 		if doPrune {
 			hc := h.MakeContext()
-			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			hc.Close()
 			require.NoError(err)
 		}

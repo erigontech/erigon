@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
@@ -92,6 +93,7 @@ type InvertedIndex struct {
 type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
+	db   kv.RoDB // global db pointer. mostly for background warmup.
 }
 
 func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, withExistenceIndex bool, integrityCheck func(fromStep uint64, toStep uint64) bool, logger log.Logger) (*InvertedIndex, error) {
@@ -884,9 +886,26 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
+func (ic *InvertedIndexContext) Warmup(ctx context.Context) (cleanup func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := &errgroup.Group{}
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexTable, log.LvlDebug, 16)
+		return nil
+	})
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexKeysTable, log.LvlDebug, 16)
+		return nil
+	})
+	return func() {
+		cancel()
+		_ = wg.Wait()
+	}
+}
+
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	if !forced && !ic.CanPrune(rwTx) {
 		return stat, nil
@@ -895,6 +914,11 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
+
+	if withWarmup {
+		cleanup := ic.Warmup(ctx)
+		defer cleanup()
+	}
 
 	ii := ic.ii
 	//defer func() {
