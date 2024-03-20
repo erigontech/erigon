@@ -1,7 +1,9 @@
 package downloader
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,13 +12,13 @@ import (
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
+	"golang.org/x/exp/slices"
 )
 
 // TorrentFiles - does provide thread-safe CRUD operations on .torrent files
 type TorrentFiles struct {
-	lock       sync.Mutex
-	dir        string
-	prohibited []string
+	lock sync.Mutex
+	dir  string
 }
 
 func NewAtomicTorrentFiles(dir string, prohibited []string) *TorrentFiles {
@@ -129,17 +131,67 @@ const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	tf.prohibited = append(tf.prohibited, t)
+	// open or create file ProhibitNewDownloadsFileName
+	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var prohibitedList []string
+	torrentListJsonBytes, err := io.ReadAll(f)
+	if err != nil {
+		return err
+	}
+	if len(torrentListJsonBytes) > 0 {
+		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
+			return err
+		}
+	}
+	if slices.Contains(prohibitedList, t) {
+		return nil
+	}
+	prohibitedList = append(prohibitedList, t)
+	f.Close()
+
+	// write new prohibited list by opening the file in truncate mode
+	f, err = os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	prohibitedListJsonBytes, err := json.Marshal(prohibitedList)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(prohibitedListJsonBytes); err != nil {
+		return err
+	}
+
 	return nil
 }
 
-func (tf *TorrentFiles) newDownloadsAreProhibited(name string) bool {
+func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	for _, t := range tf.prohibited {
-		if strings.Contains(name, t) {
-			return true
+	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return false, err
+	}
+	defer f.Close()
+	var prohibitedList []string
+	torrentListJsonBytes, err := io.ReadAll(f)
+	if err != nil {
+		return false, err
+	}
+	if len(torrentListJsonBytes) > 0 {
+		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
+			return false, err
 		}
 	}
-	return false
+	for _, p := range prohibitedList {
+		if strings.Contains(name, p) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

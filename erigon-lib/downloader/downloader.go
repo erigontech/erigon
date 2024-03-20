@@ -162,20 +162,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		webseedsDiscover:    discover,
 	}
 
-	if err := db.View(context.Background(), func(tx kv.Tx) error {
-		prohibitedBytes, err := tx.GetOne(kv.BittorentProhibited, []byte(kv.BittorentProhibitedKey))
-		if err != nil {
-			return err
-		}
-		if len(prohibitedBytes) == 0 {
-			return nil
-		}
-		return json.Unmarshal(prohibitedBytes, &d.torrentFiles.prohibited)
-	}); err != nil {
-		return nil, fmt.Errorf("can't get prohibited types: %w", err)
-	}
-	fmt.Println(d.torrentFiles.prohibited)
-
 	if cfg.ClientConfig.DownloadRateLimiter != nil {
 		downloadLimit := cfg.ClientConfig.DownloadRateLimiter.Limit()
 		d.downloadLimit = &downloadLimit
@@ -2153,8 +2139,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
+	isProhibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+	if err != nil {
+		return err
+	}
 
-	if d.torrentFiles.newDownloadsAreProhibited(name) && !d.torrentFiles.Exists(name) {
+	if isProhibited && !d.torrentFiles.Exists(name) {
 		return nil
 	}
 

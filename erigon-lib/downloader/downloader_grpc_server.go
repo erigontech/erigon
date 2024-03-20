@@ -18,7 +18,6 @@ package downloader
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -31,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 var (
@@ -48,30 +46,6 @@ type GrpcServer struct {
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
-	if s.d.torrentFiles.newDownloadsAreProhibited(req.Type) {
-		return &emptypb.Empty{}, nil
-	}
-	if err := s.d.db.Update(ctx, func(tx kv.RwTx) error {
-		// basically keep in DB a list of prohibited types and update it with the new type, also add it to the in-memory list.
-		var prohibitList []string
-		prohibitListBytes, err := tx.GetOne(kv.BittorentProhibited, []byte(kv.BittorentProhibitedKey))
-		if err != nil {
-			return err
-		}
-		if len(prohibitListBytes) != 0 {
-			if err := json.Unmarshal(prohibitListBytes, &prohibitList); err != nil {
-				return err
-			}
-		}
-		prohibitList = append(prohibitList, req.Type)
-		prohibitListBytes, err = json.Marshal(prohibitList)
-		if err != nil {
-			return err
-		}
-		return tx.Put(kv.BittorentProhibited, []byte(kv.BittorentProhibitedKey), prohibitListBytes)
-	}); err != nil {
-		return nil, err
-	}
 	return &emptypb.Empty{}, s.d.torrentFiles.prohibitNewDownloads(req.Type)
 }
 
