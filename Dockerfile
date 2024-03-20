@@ -25,6 +25,11 @@ ADD tools.go tools.go
 ADD go.mod go.mod
 ADD go.sum go.sum
 
+## add pre-defined run configs
+ADD hermezconfig-mainnet.yaml.example mainnet.yaml
+ADD hermezconfig-cardona.yaml.example cardona.yaml
+ADD hermezconfig-cardona-internal.yaml.example cardona-internal.yaml
+
 RUN mkdir -p /app/build/bin
 
 RUN --mount=type=cache,target=/root/.cache \

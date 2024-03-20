@@ -1,4 +1,4 @@
-datadir: /path/to/datadirs/hermez-cardona-internal
+datadir: ~/.cdk-erigon/hermez-cardona-internal
 chain: hermez-cardona-internal
 http: true
 private.api.addr: localhost:9092
@@ -22,3 +22,4 @@ zkevm.datastream-version: 2
 
 externalcl: true
 http.api: [eth, debug, net, trace, web3, erigon, zkevm]
+http.addr: 0.0.0.0

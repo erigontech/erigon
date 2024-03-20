@@ -63,14 +63,45 @@ Depending on the RPC provider you are using, you may wish to alter `zkevm.rpc-ra
 
 ***
 
-## Running zKEVM Erigon
+## Running CDK-Erigon
 - Build using  `make cdk-erigon`
-- Set up your config file (copy an example and edit as required)
+- Set up your config file (copy one of the examples found in the repository root directory, and edit as required)
 - run `./build/bin/cdk-erigon --config="./hermezconfig-{network}.yaml"` (complete the name of your config file as required)
 
 NB: `--externalcl` flag is removed in upstream erigon so beware of re-using commands/config
 
+### Docker ([DockerHub](https://hub.docker.com/r/hermeznetwork/cdk-erigon))
+The image comes with 3 preinstalled default configs which you may wish to edit according to the config section below, otherwise you can mount your own config to the container as necessary.
+
+A datadir must be mounted to the container to persist the chain data between runs.
+
+Example commands:
+- Mainnet `docker run -p 8545:8545 -v  /datadirs:/datadirs hermeznetwork/cdk-erigon  --config="./mainnet.yaml" --datadir='/datadirs/mainnet'`
+- Cardona `docker run -p 8545:8545 -v  /datadirs:/datadirs hermeznetwork/cdk-erigon  --config="./cardona.yaml" --datadir='/datadirs/cardona'`
+- Cardona Internal `docker run -p 8545:8545 -v  /datadirs:/datadirs hermeznetwork/cdk-erigon  --config="./cardona-internal.yaml" --datadir='/datadirs/cardona-internal'`
+
+### Config
+The examples are comprehensive but there are some key fields which will need setting e.g. `datadir`, and others you may wish to change
+to increase performance, e.g. `zkevm.l1-rpc-url` as the provided RPCs may have restrictive rate limits.
+
+For a full explanation of the config options, see below:
+- `datadir`: Path to your node's data directory.
+- `chain`: Specifies the L2 network to connect with, e.g., hermez-mainnet.
+- `http`: Enables HTTP RPC server (set to true).
+- `private.api.addr`: Address for the private API, typically localhost:9091, change this to run multiple instances on the same machine
+- `zkevm.l2-chain-id`: Chain ID for the L2 network, e.g., 1101.
+- `zkevm.l2-sequencer-rpc-url`: URL for the L2 sequencer RPC.
+- `zkevm.l2-datastreamer-url`: URL for the L2 data streamer.
+- `zkevm.l1-chain-id`: Chain ID for the L1 network.
+- `zkevm.l1-rpc-url`: L1 Ethereum RPC URL.
+- `zkevm.l1-polygon-rollup-manager`, `zkevm.l1-rollup`, `zkevm.l1-matic-contract-address`: Addresses and topics for smart contracts and event listening.
+- `zkevm.rpc-ratelimit`: Rate limit for RPC calls.
+- `zkevm.datastream-version:` Version of the data stream protocol.
+- `externalcl`: External consensus layer flag.
+- `http.api`: List of enabled HTTP API modules.
+
 ***
+
 
 ## Networks
 
