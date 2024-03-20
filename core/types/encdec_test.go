@@ -117,7 +117,7 @@ func (tr *TRand) RandAccessList(size int) types2.AccessList {
 }
 
 func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(1, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
+	txType := tr.RandIntInRange(0, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
 	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
@@ -239,8 +239,8 @@ func (tr *TRand) RandRawBlock(setNil bool) *RawBlock {
 func (tr *TRand) RandBody() *Body {
 	return &Body{
 		Transactions: tr.RandTransactions(tr.RandIntInRange(1, 6)),
-		// Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
-		// Withdrawals: tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
+		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
+		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -309,10 +309,6 @@ func compareTransactions(t *testing.T, a, b Transaction) {
 	check(t, "Tx.V", v1, v2)
 	check(t, "Tx.R", r1, r2)
 	check(t, "Tx.S", s1, s2)
-	// check(t, "Tx.WithdrawalsHash", a.WithdrawalsHash, b.WithdrawalsHash)
-	// check(t, "Tx.BlobGasUsed", a.BlobGasUsed, b.BlobGasUsed)
-	// check(t, "Tx.ExcessBlobGas", a.ExcessBlobGas, b.ExcessBlobGas)
-	// check(t, "Tx.ParentBeaconBlockRoot", a.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot)
 }
 
 // func compareDeposits(t *testing.T, a, b *Deposit) {
