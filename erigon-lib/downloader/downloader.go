@@ -427,7 +427,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 				if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 					downloadMap.Set(fileInfo.Name(), preverified)
 				} else {
-					logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+					logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 					// TODO: check if it has an index - if not use the known hash and delete the file
 					downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 				}
@@ -459,7 +459,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 					if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 						downloadMap.Set(preverified.Name, preverified)
 					} else {
-						logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+						logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 						// TODO: check if it has an index - if not use the known hash and delete the file
 						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 					}
@@ -488,7 +488,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 						if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 							downloadMap.Set(preverified.Name, preverified)
 						} else {
-							logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+							logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 							// TODO: check if it has an index - if not use the known hash and delete the file
 							downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 						}
