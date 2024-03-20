@@ -353,5 +353,6 @@ var (
 		BorEvents,
 		BorSpans,
 		BeaconBlocks,
+		BlobSidecars,
 	}
 )

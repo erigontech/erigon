@@ -369,6 +369,9 @@ const (
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
+	BittorentProhibited  = "BittorentProhibited"
+
+	BittorentProhibitedKey = "BittorentProhibitedKey"
 
 	// Domains/Histry/InvertedIndices
 	// Contants have "Tbl" prefix, to avoid collision with actual Domain names
@@ -706,6 +709,7 @@ var SentryTables = []string{}
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
+	BittorentProhibited,
 }
 var ReconTables = []string{
 	PlainStateR,
