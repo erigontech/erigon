@@ -914,7 +914,7 @@ Loop:
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
 							if err := tx.(state2.HasAggCtx).
 								AggCtx().(*state2.AggregatorV3Context).
-								PruneSmallBatches(ctx, time.Minute*10, tx); err != nil {
+								PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil {
 
 								return err
 							}
