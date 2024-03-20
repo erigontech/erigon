@@ -440,16 +440,18 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 		baseFee.SetFromBig(parent.BaseFee)
 	}
 
+	var excessBlobGas uint64 = 0
 	blockCtx = evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		GetHash:     getHash,
-		Coinbase:    parent.Coinbase,
-		BlockNumber: parent.Number.Uint64(),
-		Time:        parent.Time,
-		Difficulty:  new(big.Int).Set(parent.Difficulty),
-		GasLimit:    parent.GasLimit,
-		BaseFee:     &baseFee,
+		CanTransfer:   core.CanTransfer,
+		Transfer:      core.Transfer,
+		GetHash:       getHash,
+		Coinbase:      parent.Coinbase,
+		BlockNumber:   parent.Number.Uint64(),
+		Time:          parent.Time,
+		Difficulty:    new(big.Int).Set(parent.Difficulty),
+		GasLimit:      parent.GasLimit,
+		BaseFee:       &baseFee,
+		ExcessBlobGas: &excessBlobGas,
 	}
 
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
