@@ -65,6 +65,7 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 		if err != nil {
 			return err
 		}
+		fmt.Println(prohibitList)
 		return tx.Put(kv.BittorentProhibited, []byte(kv.BittorentProhibitedKey), prohibitListBytes)
 	}); err != nil {
 		return nil, err
