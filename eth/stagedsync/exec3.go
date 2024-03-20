@@ -912,9 +912,12 @@ Loop:
 
 						tt = time.Now()
 						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+							//very aggressive prune, because:
+							// if prune is slow - means DB > RAM and skip pruning will only make things worse
+							// db will grow -> prune will get slower -> db will grow -> ...
 							if err := tx.(state2.HasAggCtx).
 								AggCtx().(*state2.AggregatorV3Context).
-								PruneSmallBatches(ctx, 10*time.Hour, tx); err != nil {
+								PruneSmallBatches(ctx, 12*time.Hour, tx); err != nil {
 
 								return err
 							}
