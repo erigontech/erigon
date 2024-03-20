@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/url"
 	"os"
@@ -110,6 +111,9 @@ func init() {
 
 	rootCmd.AddCommand(torrentCat)
 	rootCmd.AddCommand(torrentMagnet)
+
+	withDataDir(torrentClean)
+	rootCmd.AddCommand(torrentClean)
 
 	withDataDir(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
@@ -329,6 +333,43 @@ var torrentCat = &cobra.Command{
 		return nil
 	},
 }
+var torrentClean = &cobra.Command{
+	Use:     "torrent_clean",
+	Example: "go run ./cmd/downloader torrent_clean --datadir=<datadir>",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		dirs := datadir.New(datadirCli)
+
+		logger.Info("[snapshots.webseed] processing local file etags")
+		removedTorrents := 0
+		walker := func(path string, de fs.DirEntry, err error) error {
+			if err != nil || de.IsDir() {
+				if err != nil {
+					logger.Warn("[snapshots.torrent] walk and cleanup", "err", err, "path", path)
+				}
+				return nil //nolint
+			}
+
+			if !strings.HasSuffix(de.Name(), ".torrent") || strings.HasPrefix(de.Name(), ".") {
+				return nil
+			}
+			err = os.Remove(filepath.Join(dirs.Snap, path))
+			if err != nil {
+				logger.Warn("[snapshots.torrent] remove", "err", err, "path", path)
+				return err
+			}
+			removedTorrents++
+			return nil
+		}
+
+		sfs := os.DirFS(dirs.Snap)
+		if err := fs.WalkDir(sfs, ".", walker); err != nil {
+			return err
+		}
+		logger.Info("[snapshots.torrent] cleanup finished", "count", removedTorrents)
+		return nil
+	},
+}
+
 var torrentMagnet = &cobra.Command{
 	Use:     "torrent_magnet",
 	Example: "go run ./cmd/downloader torrent_magnet <path_to_torrent_file>",
@@ -348,9 +389,11 @@ var torrentMagnet = &cobra.Command{
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
+	//if len(webseedsList) == 0 {
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
+	//}
 
 	webseedUrlsOrFiles := webseedsList
 	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
@@ -385,6 +428,8 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	}
 
 	_ = webseedFileProviders // todo add support of file providers
+	logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
+
 	wseed := downloader.NewWebSeeds(webseedHttpProviders, log.LvlDebug, logger)
 	return wseed.VerifyManifestedBuckets(ctx, datadir.New(datadirCli), verifyFailfast, checksumCheck)
 }

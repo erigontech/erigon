@@ -197,6 +197,7 @@ func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, dirs datadir.Dir
 			return ctx.Err()
 		default:
 		}
+		d.logger.Debug("[snapshots.webseed] verify manifest", "url", webSeedProviderURL.String())
 
 		if err := d.VerifyManifestedBucket(ctx, localTags, webSeedProviderURL); err != nil {
 			d.logger.Warn("[snapshots.webseed] verify manifest", "err", err)
