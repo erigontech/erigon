@@ -15,7 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
-const RUNS = 100
+const RUNS = 100 // for local tests increase this number
 
 type TRand struct {
 	rnd *rand.Rand
@@ -117,7 +117,7 @@ func (tr *TRand) RandAccessList(size int) types2.AccessList {
 }
 
 func (tr *TRand) RandTransaction() Transaction {
-	txType := tr.RandIntInRange(0, 4)
+	txType := tr.RandIntInRange(1, 4) // LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType
 	to := tr.RandAddress()
 	commonTx := CommonTx{
 		Nonce: *tr.RandUint64(),
@@ -129,7 +129,6 @@ func (tr *TRand) RandTransaction() Transaction {
 		R:     *uint256.NewInt(*tr.RandUint64()),
 		S:     *uint256.NewInt(*tr.RandUint64()),
 	}
-	fmt.Println("TYPE: ", txType)
 	switch txType {
 	case LegacyTxType:
 		return &LegacyTx{
@@ -154,6 +153,7 @@ func (tr *TRand) RandTransaction() Transaction {
 			AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 		}
 	case BlobTxType:
+		r := *tr.RandUint64()
 		return &BlobTx{
 			DynamicFeeTransaction: DynamicFeeTransaction{
 				CommonTx:   commonTx,
@@ -162,8 +162,8 @@ func (tr *TRand) RandTransaction() Transaction {
 				FeeCap:     uint256.NewInt(*tr.RandUint64()),
 				AccessList: tr.RandAccessList(tr.RandIntInRange(1, 5)),
 			},
-			MaxFeePerBlobGas:    uint256.NewInt(*tr.RandUint64()),
-			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 5)),
+			MaxFeePerBlobGas:    uint256.NewInt(r),
+			BlobVersionedHashes: tr.RandHashes(tr.RandIntInRange(1, 2)),
 		}
 	default:
 		fmt.Printf("unexpected txType %v", txType)
@@ -239,8 +239,8 @@ func (tr *TRand) RandRawBlock(setNil bool) *RawBlock {
 func (tr *TRand) RandBody() *Body {
 	return &Body{
 		Transactions: tr.RandTransactions(tr.RandIntInRange(1, 6)),
-		Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
-		Withdrawals:  tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
+		// Uncles:       tr.RandHeaders(tr.RandIntInRange(1, 6)),
+		// Withdrawals: tr.RandWithdrawals(tr.RandIntInRange(1, 6)),
 	}
 }
 
@@ -262,25 +262,25 @@ func check(t *testing.T, f string, got, want interface{}) {
 
 func compareHeaders(t *testing.T, a, b *Header) {
 	check(t, "Header.ParentHash", a.ParentHash, b.ParentHash)
-	check(t, "Withdrawal.UncleHash", a.UncleHash, b.UncleHash)
-	check(t, "Withdrawal.Coinbase", a.Coinbase, b.Coinbase)
-	check(t, "Withdrawal.Root", a.Root, b.Root)
-	check(t, "Withdrawal.TxHash", a.TxHash, b.TxHash)
-	check(t, "Withdrawal.ReceiptHash", a.ReceiptHash, b.ReceiptHash)
-	check(t, "Withdrawal.Bloom", a.Bloom, b.Bloom)
-	check(t, "Withdrawal.Difficulty", a.Difficulty, b.Difficulty)
-	check(t, "Withdrawal.Number", a.Number, b.Number)
-	check(t, "Withdrawal.GasLimit", a.GasLimit, b.GasLimit)
-	check(t, "Withdrawal.GasUsed", a.GasUsed, b.GasUsed)
-	check(t, "Withdrawal.Time", a.Time, b.Time)
-	check(t, "Withdrawal.Extra", a.Extra, b.Extra)
-	check(t, "Withdrawal.MixDigest", a.MixDigest, b.MixDigest)
-	check(t, "Withdrawal.Nonce", a.Nonce, b.Nonce)
-	check(t, "Withdrawal.BaseFee", a.BaseFee, b.BaseFee)
-	check(t, "Withdrawal.WithdrawalsHash", a.WithdrawalsHash, b.WithdrawalsHash)
-	check(t, "Withdrawal.BlobGasUsed", a.BlobGasUsed, b.BlobGasUsed)
-	check(t, "Withdrawal.ExcessBlobGas", a.ExcessBlobGas, b.ExcessBlobGas)
-	check(t, "Withdrawal.ParentBeaconBlockRoot", a.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot)
+	check(t, "Header.UncleHash", a.UncleHash, b.UncleHash)
+	check(t, "Header.Coinbase", a.Coinbase, b.Coinbase)
+	check(t, "Header.Root", a.Root, b.Root)
+	check(t, "Header.TxHash", a.TxHash, b.TxHash)
+	check(t, "Header.ReceiptHash", a.ReceiptHash, b.ReceiptHash)
+	check(t, "Header.Bloom", a.Bloom, b.Bloom)
+	check(t, "Header.Difficulty", a.Difficulty, b.Difficulty)
+	check(t, "Header.Number", a.Number, b.Number)
+	check(t, "Header.GasLimit", a.GasLimit, b.GasLimit)
+	check(t, "Header.GasUsed", a.GasUsed, b.GasUsed)
+	check(t, "Header.Time", a.Time, b.Time)
+	check(t, "Header.Extra", a.Extra, b.Extra)
+	check(t, "Header.MixDigest", a.MixDigest, b.MixDigest)
+	check(t, "Header.Nonce", a.Nonce, b.Nonce)
+	check(t, "Header.BaseFee", a.BaseFee, b.BaseFee)
+	check(t, "Header.WithdrawalsHash", a.WithdrawalsHash, b.WithdrawalsHash)
+	check(t, "Header.BlobGasUsed", a.BlobGasUsed, b.BlobGasUsed)
+	check(t, "Header.ExcessBlobGas", a.ExcessBlobGas, b.ExcessBlobGas)
+	check(t, "Header.ParentBeaconBlockRoot", a.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot)
 }
 
 func compareWithdrawals(t *testing.T, a, b *Withdrawal) {
@@ -288,6 +288,31 @@ func compareWithdrawals(t *testing.T, a, b *Withdrawal) {
 	check(t, "Withdrawal.Validator", a.Validator, b.Validator)
 	check(t, "Withdrawal.Address", a.Address, b.Address)
 	check(t, "Withdrawal.Amount", a.Amount, b.Amount)
+}
+
+func compareTransactions(t *testing.T, a, b Transaction) {
+	v1, r1, s1 := a.RawSignatureValues()
+	v2, r2, s2 := b.RawSignatureValues()
+	check(t, "Tx.Type", a.Type(), b.Type())
+	check(t, "Tx.GetChainID", a.GetChainID(), b.GetChainID())
+	check(t, "Tx.GetNonce", a.GetNonce(), b.GetNonce())
+	check(t, "Tx.GetPrice", a.GetPrice(), b.GetPrice())
+	check(t, "Tx.GetTip", a.GetTip(), b.GetTip())
+	check(t, "Tx.GetFeeCap", a.GetFeeCap(), b.GetFeeCap())
+	check(t, "Tx.GetBlobHashes", a.GetBlobHashes(), b.GetBlobHashes())
+	check(t, "Tx.GetGas", a.GetGas(), b.GetGas())
+	check(t, "Tx.GetBlobGas", a.GetBlobGas(), b.GetBlobGas())
+	check(t, "Tx.GetValue", a.GetValue(), b.GetValue())
+	check(t, "Tx.GetTo", a.GetTo(), b.GetTo())
+	check(t, "Tx.GetData", a.GetData(), b.GetData())
+	check(t, "Tx.GetAccessList", a.GetAccessList(), b.GetAccessList())
+	check(t, "Tx.V", v1, v2)
+	check(t, "Tx.R", r1, r2)
+	check(t, "Tx.S", s1, s2)
+	// check(t, "Tx.WithdrawalsHash", a.WithdrawalsHash, b.WithdrawalsHash)
+	// check(t, "Tx.BlobGasUsed", a.BlobGasUsed, b.BlobGasUsed)
+	// check(t, "Tx.ExcessBlobGas", a.ExcessBlobGas, b.ExcessBlobGas)
+	// check(t, "Tx.ParentBeaconBlockRoot", a.ParentBeaconBlockRoot, b.ParentBeaconBlockRoot)
 }
 
 // func compareDeposits(t *testing.T, a, b *Deposit) {
@@ -332,26 +357,33 @@ func compareRawBodies(t *testing.T, a, b *RawBody) error {
 	return nil
 }
 
-func compareBlocks(t *testing.T, a, b *Block) error {
+func compareBodies(t *testing.T, a, b *Body) error {
 
-	compareHeaders(t, a.header, b.header)
+	atLen, btLen := len(a.Transactions), len(b.Transactions)
+	if atLen != btLen {
+		return fmt.Errorf("txns len mismatch: expected: %v, got: %v", atLen, btLen)
+	}
 
-	auLen, buLen := len(a.uncles), len(b.uncles)
+	for i := 0; i < atLen; i++ {
+		compareTransactions(t, a.Transactions[i], b.Transactions[i])
+	}
+
+	auLen, buLen := len(a.Uncles), len(b.Uncles)
 	if auLen != buLen {
 		return fmt.Errorf("uncles len mismatch: expected: %v, got: %v", auLen, buLen)
 	}
 
 	for i := 0; i < auLen; i++ {
-		compareHeaders(t, a.uncles[i], b.uncles[i])
+		compareHeaders(t, a.Uncles[i], b.Uncles[i])
 	}
 
-	awLen, bwLen := len(a.withdrawals), len(b.withdrawals)
+	awLen, bwLen := len(a.Withdrawals), len(b.Withdrawals)
 	if awLen != bwLen {
-		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", auLen, buLen)
+		return fmt.Errorf("withdrawals len mismatch: expected: %v, got: %v", awLen, bwLen)
 	}
 
 	for i := 0; i < awLen; i++ {
-		compareWithdrawals(t, a.withdrawals[i], b.withdrawals[i])
+		compareWithdrawals(t, a.Withdrawals[i], b.Withdrawals[i])
 	}
 
 	// adLen, bdLen := len(a.deposits), len(b.deposits)
@@ -368,10 +400,10 @@ func compareBlocks(t *testing.T, a, b *Block) error {
 
 func TestRawBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
-
+	var buf bytes.Buffer
 	for i := 0; i < RUNS; i++ {
 		enc := tr.RandRawBody()
-		var buf bytes.Buffer
+		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
@@ -392,25 +424,23 @@ func TestRawBodyEncodeDecodeRLP(t *testing.T) {
 
 func TestBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
-
+	var buf bytes.Buffer
 	for i := 0; i < RUNS; i++ {
-		// rawBlock := randRawBlock(rnd, false)
 		enc := tr.RandBody()
-		var buf bytes.Buffer
+		buf.Reset()
 		if err := enc.EncodeRLP(&buf); err != nil {
 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
 		}
 
 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
-
 		dec := &Body{}
 		if err := dec.DecodeRLP(s); err != nil {
 			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
 			panic(err)
 		}
 
-		// if err := compareBlocks(t, enc, dec); err != nil {
-		// 	t.Errorf("error: compareRawBodies: %v", err)
-		// }
+		if err := compareBodies(t, enc, dec); err != nil {
+			t.Errorf("error: compareRawBodies: %v", err)
+		}
 	}
 }

@@ -819,17 +819,14 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	if err = s.Decode(&bfs.BaseTxId); err != nil {
 		return err
 	}
-
 	// decode TxAmount
 	if err = s.Decode(&bfs.TxAmount); err != nil {
 		return err
 	}
-
 	// decode Uncles
 	if err := decodeUncles(&bfs.Uncles, s); err != nil {
 		return err
 	}
-
 	// decode Withdrawals
 	bfs.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
@@ -889,9 +886,9 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
+		fmt.Println("THIS ERR")
 		return err
 	}
-
 	// decode Transactions
 	if err := decodeTxns(&bb.Transactions, s); err != nil {
 		return err
