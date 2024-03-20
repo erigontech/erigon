@@ -151,6 +151,19 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
+	// check if snapshots lock exists. (for backward compatibility) - TODO: remove eventually.
+	lockPath := filepath.Join(cfg.dirs.Snap, downloader.SnapshotsLockFileName)
+	if dir.FileExist(lockPath) {
+		for _, snapType := range snaptype.AllTypes {
+			if snapType.Enum() == snaptype.Enums.BlobSidecars {
+				continue
+			}
+			if _, err := cfg.snapshotDownloader.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{Type: snapType.String()}); err != nil {
+				return err
+			}
+		}
+	}
+
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle, logger); err != nil {
 		return err
 	}
