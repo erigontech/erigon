@@ -55,8 +55,10 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 		if err != nil {
 			return err
 		}
-		if err := json.Unmarshal(prohibitListBytes, &prohibitList); err != nil {
-			return err
+		if len(prohibitListBytes) != 0 {
+			if err := json.Unmarshal(prohibitListBytes, &prohibitList); err != nil {
+				return err
+			}
 		}
 		prohibitList = append(prohibitList, req.Type)
 		prohibitListBytes, err = json.Marshal(prohibitList)
