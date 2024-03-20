@@ -15,7 +15,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/bitmapdb"
@@ -34,7 +33,7 @@ import (
 
 type OverlayAPI interface {
 	GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides) ([]*types.Log, error)
-	CallConstructor(ctx context.Context, address libcommon.Address, code *hexutility.Bytes) (*CreationCode, error)
+	CallConstructor(ctx context.Context, address common.Address, code *hexutility.Bytes) (*CreationCode, error)
 }
 
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
@@ -74,7 +73,7 @@ func NewOverlayAPI(base *BaseAPI, db kv.RoDB, gascap uint64, overlayGetLogsTimeo
 	}
 }
 
-func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address libcommon.Address, code *hexutility.Bytes) (*CreationCode, error) {
+func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.Address, code *hexutility.Bytes) (*CreationCode, error) {
 	var (
 		replayTransactions types.Transactions
 		evm                *vm.EVM
@@ -107,7 +106,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address libcommo
 	}
 
 	if !ok {
-		return nil, fmt.Errorf("Contract construction tx not found")
+		return nil, fmt.Errorf("contract construction tx not found")
 	}
 
 	err = api.BaseAPI.checkPruneHistory(tx, blockNum)
