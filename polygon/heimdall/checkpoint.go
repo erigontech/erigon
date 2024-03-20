@@ -74,3 +74,7 @@ type CheckpointCountResponse struct {
 	Height string          `json:"height"`
 	Result CheckpointCount `json:"result"`
 }
+
+func CheckpointIdAt(block uint64) CheckpointId {
+	return 0
+}

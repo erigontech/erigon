@@ -460,13 +460,13 @@ func dumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 }
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
-		blocksPerFile := snapcfg.MergeLimit("", i)
+	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.Enums.BeaconBlocks, nil) {
+		blocksPerFile := snapcfg.MergeLimit("", snaptype.Enums.BeaconBlocks, i)
 
 		if toSlot-i < blocksPerFile {
 			break
 		}
-		to := chooseSegmentEnd(i, toSlot, nil)
+		to := chooseSegmentEnd(i, toSlot, snaptype.Enums.BeaconBlocks, nil)
 		logger.Log(lvl, "Dumping beacon blocks", "from", i, "to", to)
 		if err := dumpBeaconBlocksRange(ctx, db, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err
@@ -476,13 +476,13 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 }
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, tmpDir, snapDir string, workers int, lvl log.Lvl, logger log.Logger) error {
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
-		blocksPerFile := snapcfg.MergeLimit("", i)
+	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.Enums.BlobSidecars, nil) {
+		blocksPerFile := snapcfg.MergeLimit("", snaptype.Enums.BlobSidecars, i)
 
 		if toSlot-i < blocksPerFile {
 			break
 		}
-		to := chooseSegmentEnd(i, toSlot, nil)
+		to := chooseSegmentEnd(i, toSlot, snaptype.Enums.BlobSidecars, nil)
 		logger.Log(lvl, "Dumping blobs sidecars", "from", i, "to", to)
 		if err := dumpBlobSidecarsRange(ctx, db, blobStorage, i, to, tmpDir, snapDir, workers, lvl, logger); err != nil {
 			return err

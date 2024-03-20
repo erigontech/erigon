@@ -7,6 +7,7 @@ import (
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv/dbutils"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 )
 
@@ -27,13 +28,13 @@ func ComputeBorTxHash(blockNumber uint64, blockHash libcommon.Hash) libcommon.Ha
 }
 
 // NewBorTransaction create new bor transaction for bor receipt
-func NewBorTransaction() *LegacyTx {
-	return NewTransaction(0, libcommon.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
+func NewBorTransaction() *types.LegacyTx {
+	return types.NewTransaction(0, libcommon.Address{}, uint256.NewInt(0), 0, uint256.NewInt(0), make([]byte, 0))
 }
 
 // DeriveFieldsForBorReceipt fills the receipts with their computed fields based on consensus
 // data and contextual infos like containing block and transactions.
-func DeriveFieldsForBorReceipt(receipt *Receipt, blockHash libcommon.Hash, blockNumber uint64, receipts Receipts) {
+func DeriveFieldsForBorReceipt(receipt *types.Receipt, blockHash libcommon.Hash, blockNumber uint64, receipts types.Receipts) {
 	txHash := ComputeBorTxHash(blockNumber, blockHash)
 	txIndex := uint(len(receipts))
 

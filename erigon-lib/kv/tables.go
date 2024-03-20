@@ -356,15 +356,17 @@ const (
 	StateCommitment = "StateCommitment"
 
 	// BOR
-	BorReceipts    = "BorReceipt"
-	BorFinality    = "BorFinality"
-	BorTxLookup    = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
-	BorSeparate    = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
-	BorEvents      = "BorEvents"                 // event_id -> event_payload
-	BorEventNums   = "BorEventNums"              // block_num -> event_id (first event_id in that block)
-	BorSpans       = "BorSpans"                  // span_id -> span (in JSON encoding)
-	BorMilestones  = "BorMilestones"             // milestone_id -> checkpoint (in JSON encoding)
-	BorCheckpoints = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
+	BorReceipts         = "BorReceipt"
+	BorFinality         = "BorFinality"
+	BorTxLookup         = "BlockBorTransactionLookup" // transaction_hash -> block_num_u64
+	BorSeparate         = "BorSeparate"               // persisted snapshots of the Validator Sets, with their proposer priorities
+	BorEvents           = "BorEvents"                 // event_id -> event_payload
+	BorEventNums        = "BorEventNums"              // block_num -> event_id (first event_id in that block)
+	BorSpans            = "BorSpans"                  // span_id -> span (in JSON encoding)
+	BorMilestones       = "BorMilestones"             // milestone_id -> milestone (in JSON encoding)
+	BorMilestoneStarts  = "BorCheckpointStarts"       // start block_num -> milestone_id (first block of milestone)
+	BorCheckpoints      = "BorCheckpoints"            // checkpoint_id -> checkpoint (in JSON encoding)
+	BorCheckpointStarts = "BorCheckpointStarts"       // start block_num -> checkpoint_id (first block of checkpoint)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"

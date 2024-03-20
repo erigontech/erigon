@@ -14,7 +14,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/polygon/bor"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -56,11 +55,11 @@ func fetchRequiredHeimdallSpansIfNeeded(
 	logPrefix string,
 	logger log.Logger,
 ) (uint64, error) {
-	requiredSpanID := bor.SpanIDAt(toBlockNum)
+	requiredSpanID := heimdall.SpanIdAt(toBlockNum)
 	if requiredSpanID == 0 && toBlockNum >= cfg.borConfig.CalculateSprintLength(toBlockNum) {
 		// when in span 0 we fetch the next span (span 1) at the beginning of sprint 2 (block 16 or later)
 		requiredSpanID++
-	} else if bor.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
+	} else if heimdall.IsBlockInLastSprintOfSpan(toBlockNum, cfg.borConfig) {
 		// for subsequent spans, we always fetch the next span at the beginning of the last sprint of a span
 		requiredSpanID++
 	}
@@ -86,7 +85,7 @@ func fetchRequiredHeimdallSpansIfNeeded(
 		}
 	}
 
-	return requiredSpanID, err
+	return uint64(requiredSpanID), err
 }
 
 func fetchAndWriteHeimdallSpan(
@@ -115,6 +114,88 @@ func fetchAndWriteHeimdallSpan(
 
 	logger.Trace(fmt.Sprintf("[%s] Wrote span", logPrefix), "id", spanID)
 	return spanID, nil
+}
+
+func fetchRequiredHeimdallCheckpointsIfNeeded(
+	ctx context.Context,
+	toBlockNum uint64,
+	tx kv.RwTx,
+	cfg BorHeimdallCfg,
+	logPrefix string,
+	logger log.Logger,
+) (uint64, error) {
+
+	lastId, exists, err := cfg.blockReader.LastCheckpointId(ctx, tx)
+
+	if err != nil {
+		return 0, err
+	}
+
+	var lastCheckpoint *heimdall.Checkpoint
+
+	if exists {
+		data, err := cfg.blockReader.Checkpoint(ctx, tx, lastId)
+
+		if err != nil {
+			return 0, err
+		}
+
+		var checkpoint heimdall.Checkpoint
+
+		if err := json.Unmarshal(data, &checkpoint); err != nil {
+			return 0, err
+		}
+
+		lastCheckpoint = &checkpoint
+	}
+
+	if lastId > 0 {
+		lastId++
+	}
+
+	logger.Info(fmt.Sprintf("[%s] Processing checkpoints...", logPrefix), "from", lastId)
+
+	for checkpointId := lastId; lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() >= toBlockNum; checkpointId++ {
+		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, lastId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+			return 0, err
+		}
+	}
+
+	return lastId, err
+}
+
+func fetchAndWriteHeimdallCheckpoint(
+	ctx context.Context,
+	checkpointId uint64,
+	tx kv.RwTx,
+	heimdallClient heimdall.HeimdallClient,
+	logPrefix string,
+	logger log.Logger,
+) (uint64, *heimdall.Checkpoint, error) {
+	response, err := heimdallClient.FetchCheckpoint(ctx, int64(checkpointId))
+	if err != nil {
+		return 0, nil, err
+	}
+
+	bytes, err := json.Marshal(response)
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var idBytes [8]byte
+	binary.BigEndian.PutUint64(idBytes[:], checkpointId)
+	if err = tx.Put(kv.BorCheckpoints, idBytes[:], bytes); err != nil {
+		return 0, nil, err
+	}
+
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], response.StartBlock().Uint64())
+	if err = tx.Put(kv.BorCheckpointStarts, blockNumBuf[:], idBytes[:]); err != nil {
+		return 0, nil, err
+	}
+
+	logger.Trace(fmt.Sprintf("[%s] Wrote checkpoint", logPrefix), "id", checkpointId)
+	return checkpointId, response, nil
 }
 
 func fetchRequiredHeimdallStateSyncEventsIfNeeded(

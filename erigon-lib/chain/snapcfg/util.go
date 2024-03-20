@@ -280,25 +280,25 @@ type Cfg struct {
 }
 
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
-	mergeLimit := c.MergeLimit(info.From)
+	mergeLimit := c.MergeLimit(info.Type.Enum(), info.From)
 	return info.To-info.From == mergeLimit
 }
 
-func (c Cfg) MergeLimit(fromBlock uint64) uint64 {
+func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	for _, p := range c.Preverified {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
 			continue
 		}
-		if info.Ext != ".seg" {
+
+		if info.Ext != ".seg" || (t != snaptype.Enums.Unknown && t != info.Type.Enum()) {
 			continue
 		}
-		if fromBlock < info.From {
+
+		if fromBlock < info.From || fromBlock >= info.To {
 			continue
 		}
-		if fromBlock >= info.To {
-			continue
-		}
+
 		if info.Len() == snaptype.Erigon2MergeLimit ||
 			info.Len() == snaptype.Erigon2OldMergeLimit {
 			return info.Len()
@@ -344,8 +344,8 @@ func Seedable(networkName string, info snaptype.FileInfo) bool {
 	return KnownCfg(networkName).Seedable(info)
 }
 
-func MergeLimit(networkName string, fromBlock uint64) uint64 {
-	return KnownCfg(networkName).MergeLimit(fromBlock)
+func MergeLimit(networkName string, snapType snaptype.Enum, fromBlock uint64) uint64 {
+	return KnownCfg(networkName).MergeLimit(snapType, fromBlock)
 }
 
 func MaxSeedableSegment(chain string, dir string) uint64 {
@@ -364,8 +364,8 @@ func MaxSeedableSegment(chain string, dir string) uint64 {
 
 var oldMergeSteps = append([]uint64{snaptype.Erigon2OldMergeLimit}, snaptype.MergeSteps...)
 
-func MergeSteps(networkName string, fromBlock uint64) []uint64 {
-	mergeLimit := MergeLimit(networkName, fromBlock)
+func MergeSteps(networkName string, snapType snaptype.Enum, fromBlock uint64) []uint64 {
+	mergeLimit := MergeLimit(networkName, snapType, fromBlock)
 
 	if mergeLimit == snaptype.Erigon2OldMergeLimit {
 		return oldMergeSteps

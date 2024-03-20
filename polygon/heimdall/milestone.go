@@ -127,3 +127,7 @@ type MilestoneIDResponse struct {
 	Height string      `json:"height"`
 	Result MilestoneID `json:"result"`
 }
+
+func MilestoneIdAt(block uint64) MilestoneId {
+	return 0
+}
