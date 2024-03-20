@@ -29,11 +29,6 @@ jobs:
       with:
         go-version: '1.21'
 
-    - name: Restore Erigon Testbed Data Directory
-      run: |
-        rm -rf $ERIGON_TESTBED_DATA_DIR/chaindata
-        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
-
     - name: Clean Erigon Build Directory
       run: |
         make clean
@@ -46,6 +41,11 @@ jobs:
     - name: Pause the Erigon instance dedicated to db maintenance
       run: |
         python3 $ERIGON_QA_PATH/test_system/db-producer/pause_production.py || true
+
+    - name: Restore Erigon Testbed Data Directory
+      run: |
+        rm -rf $ERIGON_TESTBED_DATA_DIR/chaindata
+        rsync -a --delete $ERIGON_REFERENCE_DATA_DIR/ $ERIGON_TESTBED_DATA_DIR/
 
     - name: Run Erigon, send ctrl-c and check for clean exiting
       id: test_step
