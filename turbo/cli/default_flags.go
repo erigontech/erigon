@@ -89,6 +89,8 @@ var DefaultFlags = []cli.Flag{
 	&AuthRpcWriteTimeoutFlag,
 	&AuthRpcIdleTimeoutFlag,
 	&EvmCallTimeoutFlag,
+	&OverlayGetLogsFlag,
+	&OverlayReplayBlockFlag,
 
 	&utils.SnapKeepBlocksFlag,
 	&utils.SnapStopFlag,
