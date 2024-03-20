@@ -9,8 +9,9 @@ import (
 	"math"
 	"sort"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -1372,7 +1373,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 	var buf [8]byte
 	binary.BigEndian.PutUint64(buf[:], spanId)
 	maxBlockNumInFiles := r.FrozenBorBlocks()
-	if maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles {
+	if tx != nil && (maxBlockNumInFiles == 0 || endBlock > maxBlockNumInFiles) {
 		v, err := tx.GetOne(kv.BorSpans, buf[:])
 		if err != nil {
 			return nil, err
@@ -1415,20 +1416,23 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 }
 
 func (r *BlockReader) LastSpanId(_ context.Context, tx kv.Tx) (uint64, bool, error) {
-	sCursor, err := tx.Cursor(kv.BorSpans)
-	if err != nil {
-		return 0, false, err
-	}
-
-	defer sCursor.Close()
-	k, _, err := sCursor.Last()
-	if err != nil {
-		return 0, false, err
-	}
-
 	var lastSpanId uint64
-	if k != nil {
-		lastSpanId = binary.BigEndian.Uint64(k)
+	var k []byte
+	if tx != nil {
+		sCursor, err := tx.Cursor(kv.BorSpans)
+		if err != nil {
+			return 0, false, err
+		}
+
+		defer sCursor.Close()
+		k, _, err = sCursor.Last()
+		if err != nil {
+			return 0, false, err
+		}
+
+		if k != nil {
+			lastSpanId = binary.BigEndian.Uint64(k)
+		}
 	}
 
 	snapshotLastSpanId := r.LastFrozenSpanId()
