@@ -1,4 +1,4 @@
-datadir: ~/.cdk-erigon/hermez-mainnet
+datadir: ~/.cdk-erigon/data
 chain: hermez-mainnet
 http: true
 private.api.addr: localhost:9091

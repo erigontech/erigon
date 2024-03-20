@@ -1,4 +1,4 @@
-datadir: ~/.cdk-erigon/hermez-cardona-internal
+datadir: ~/.cdk-erigon/data
 chain: hermez-cardona-internal
 http: true
 private.api.addr: localhost:9092

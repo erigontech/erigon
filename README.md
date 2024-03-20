@@ -3,6 +3,12 @@
 cdk-erigon is a fork of Erigon, currently in Alpha, optimized for syncing with the Polygon Hermez zkEVM network.
 
 ***
+## Release Roadmap
+- **v0.9.x**: Support for Cardona testnet
+- **v1.x.x**: Support for Mainnet
+- **v3.x.x**: Erigon 3 based (snapshot support)
+
+***
 
 ## Chain/Fork Support
 Current status of cdk-erigon's support for running various chains and fork ids:
@@ -76,9 +82,8 @@ The image comes with 3 preinstalled default configs which you may wish to edit a
 A datadir must be mounted to the container to persist the chain data between runs.
 
 Example commands:
-- Mainnet `docker run -p 8545:8545 -v  /datadirs:/datadirs hermeznetwork/cdk-erigon  --config="./mainnet.yaml" --datadir='/datadirs/mainnet'`
-- Cardona `docker run -p 8545:8545 -v  /datadirs:/datadirs hermeznetwork/cdk-erigon  --config="./cardona.yaml" --datadir='/datadirs/cardona'`
-- Cardona Internal `docker run -p 8545:8545 -v  /datadirs:/datadirs hermeznetwork/cdk-erigon  --config="./cardona-internal.yaml" --datadir='/datadirs/cardona-internal'`
+- Mainnet `docker run -p 8545:8545 -v ./cdk-erigon-data/:~/.cdk-erigon/data hermeznetwork/cdk-erigon  --config="./mainnet.yaml"`
+- Cardona `docker run -p 8545:8545 -v ./cdk-erigon-data/:~/.cdk-erigon/data hermeznetwork/cdk-erigon  --config="./cardona.yaml"`
 
 ### Config
 The examples are comprehensive but there are some key fields which will need setting e.g. `datadir`, and others you may wish to change

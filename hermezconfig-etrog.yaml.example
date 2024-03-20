@@ -1,4 +1,4 @@
-datadir: ~/.cdk-erigon/hermez-etrog
+datadir: ~/.cdk-erigon/data
 chain: hermez-etrog
 http: true
 private.api.addr: localhost:9093
