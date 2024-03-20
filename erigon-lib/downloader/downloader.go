@@ -167,6 +167,9 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		if err != nil {
 			return err
 		}
+		if len(prohibitedBytes) == 0 {
+			return nil
+		}
 		return json.Unmarshal(prohibitedBytes, &d.torrentFiles.prohibited)
 	}); err != nil {
 		return nil, fmt.Errorf("can't get prohibited types: %w", err)
