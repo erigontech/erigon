@@ -25,11 +25,6 @@ ADD tools.go tools.go
 ADD go.mod go.mod
 ADD go.sum go.sum
 
-## add pre-defined run configs
-ADD hermezconfig-mainnet.yaml.example mainnet.yaml
-ADD hermezconfig-cardona.yaml.example cardona.yaml
-ADD hermezconfig-cardona-internal.yaml.example cardona-internal.yaml
-
 RUN mkdir -p /app/build/bin
 
 RUN --mount=type=cache,target=/root/.cache \
@@ -53,6 +48,12 @@ ARG GID=1000
 RUN adduser -D -u $UID -g $GID erigon
 USER erigon
 RUN mkdir -p ~/.local/share/erigon
+WORKDIR /home/erigon
+
+## add pre-defined run configs
+ADD hermezconfig-mainnet.yaml.example mainnet.yaml
+ADD hermezconfig-cardona.yaml.example cardona.yaml
+ADD hermezconfig-cardona-internal.yaml.example cardona-internal.yaml
 
 # copy compiled artifacts from builder
 ## first do the mdbx ones - since these wont change as often

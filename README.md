@@ -82,8 +82,24 @@ The image comes with 3 preinstalled default configs which you may wish to edit a
 A datadir must be mounted to the container to persist the chain data between runs.
 
 Example commands:
-- Mainnet `docker run -p 8545:8545 -v ./cdk-erigon-data/:~/.cdk-erigon/data hermeznetwork/cdk-erigon  --config="./mainnet.yaml"`
-- Cardona `docker run -p 8545:8545 -v ./cdk-erigon-data/:~/.cdk-erigon/data hermeznetwork/cdk-erigon  --config="./cardona.yaml"`
+- Mainnet 
+```
+docker run -d -p 8545:8545 -v ./cdk-erigon-data/:/home/erigon/.local/share/erigon hermeznetwork/cdk-erigon  --config="./mainnet.yaml" --zkevm.l1-rpc-url=https://rpc.eth.gateway.fm
+```
+- Cardona
+```
+docker run -d -p 8545:8545 -v ./cdk-erigon-data/:/home/erigon/.local/share/erigon hermeznetwork/cdk-erigon  --config="./cardona.yaml" --zkevm.l1-rpc-url=https://rpc.sepolia.org
+```
+docker-compose example:
+
+- Mainnet:
+```
+NETWORK=mainnet L1_RPC_URL=https://rpc.eth.gateway.fm docker-compose -f docker-compose-example.yml up -d
+```
+- Cardona:
+```
+NETWORK=cardona-internal L1_RPC_URL=https://rpc.sepolia.org docker-compose -f docker-compose-example.yml up -d
+```
 
 ### Config
 The examples are comprehensive but there are some key fields which will need setting e.g. `datadir`, and others you may wish to change

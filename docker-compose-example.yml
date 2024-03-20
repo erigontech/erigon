@@ -1,0 +1,32 @@
+# Erigon by default is "all in one binary" solution, but it's possible start TxPool as separated processes.
+# Same true about: JSON RPC layer (RPCDaemon), p2p layer (Sentry), history download layer (Downloader), consensus.
+# Don't start services as separated processes unless you have clear reason for it: resource limiting, scale, replace by your own implementation, security.
+# This file is an example: how to start Erigon's services as separated processes.
+
+# Default: --datadir=/home/erigon/.local/share/erigon
+# Default UID: 1000
+# Default GID: 1000
+# Ports: `9090` execution engine (private api), `9091` sentry, `9092` consensus engine, `9093` snapshot downloader, `9094` TxPool
+# Ports: `8545` json rpc, `8551` consensus json rpc, `30303` eth p2p protocol, `42069` bittorrent protocol,
+
+# Connections: erigon -> (sentries, downloader), rpcdaemon -> (erigon, txpool), txpool -> erigon
+
+version: '2.2'
+
+services:
+  erigon:
+    image: hermeznetwork/cdk-erigon:${TAG:-latest}
+    build:
+      args:
+        UID: ${DOCKER_UID:-1000}
+        GID: ${DOCKER_GID:-1000}
+      context: .
+    command: ${ERIGON_FLAGS-} --config ${NETWORK:-cardona}.yaml --zkevm.l1-rpc-url=${L1_RPC_URL:-https://rpc.sepolia.org}
+    environment:
+      - name=value
+    ports: 
+      - "8545:8545"
+    volumes:
+      - ./cdk-erigon-data:/home/erigon/.local/share/erigon
+    restart: unless-stopped
+    mem_swappiness: 0
