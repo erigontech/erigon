@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon/cl/attestation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
@@ -212,7 +213,19 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		case gossip.IsTopicBeaconAttestation(data.Name):
-			// todo
+			att := &solid.Attestation{}
+			if err := att.DecodeSSZ(common.CopyBytes(data.Data), int(version)); err != nil {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				l["at"] = "decoding attestation"
+				return err
+			}
+			if err := g.attestation.OnReceiveAttestation(att); err != nil {
+				return err
+			}
+			// publish
+			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+				log.Debug("failed publish gossip", "err", err)
+			}
 		default:
 		}
 	}

@@ -4,19 +4,21 @@ import (
 	"context"
 	"sync"
 
+	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
-	"github.com/ledgerwatch/erigon/cl/sentinel"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type Attestation struct {
 	indiciesDB   kv.RoDB
 	beaconConfig *clparams.BeaconChainConfig
 	netConfig    *clparams.NetworkConfig
-	sentinel     *sentinel.Sentinel
+	sentinel     sentinel.SentinelClient
 	// subscriptions
 	subnetAttMutex sync.Mutex
 	subnets        map[uint64]*subnetSubscription // map from subnet id to subscription list
@@ -27,7 +29,7 @@ func NewAttestation(
 	indiciesDB kv.RoDB,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
-	sentinel *sentinel.Sentinel,
+	sentinel sentinel.SentinelClient,
 ) *Attestation {
 	return &Attestation{
 		indiciesDB:   indiciesDB,
@@ -38,11 +40,11 @@ func NewAttestation(
 }
 
 type subnetSubscription struct {
-	subnetId      uint64
-	gossipSub     *sentinel.GossipSubscription
-	validators    []validator
-	attestations  []*solid.Attestation
-	needAggregate bool
+	subnetId             uint64
+	subscribers          []validator
+	needAggregate        bool
+	aggregationSignature []byte
+	aggregationBits      []byte
 }
 
 type validator struct {
@@ -58,41 +60,70 @@ func (a *Attestation) AddAttestationSubscription(p *cltypes.BeaconCommitteeSubsc
 	if err != nil {
 		return err
 	}
-	if _, exist := a.subnets[subnetId]; !exist {
+	curSubnet, exist := a.subnets[subnetId]
+	if !exist {
 		a.subnets[subnetId] = &subnetSubscription{
-			subnetId:      subnetId,
-			validators:    make([]validator, 0),
-			attestations:  make([]*solid.Attestation, 0),
-			needAggregate: false,
+			subnetId:             subnetId,
+			subscribers:          make([]validator, 0),
+			needAggregate:        false,
+			aggregationSignature: nil,
+			aggregationBits:      make([]byte, a.beaconConfig.MaxValidatorsPerCommittee/8),
 		}
-		// todo: subscribe to attestation subnet topic
-		topic := sentinel.GossipBeaconAttestationTopic(subnetId)
-		gossipSub, err := a.sentinel.SubscribeGossip(topic)
-		if err != nil {
-			return err
-		}
-		if err := gossipSub.Listen(); err != nil {
-			gossipSub.Close()
-			return err
-		}
-		a.subnets[subnetId].gossipSub = gossipSub
-		// todo: when is a good timeing to unsubscribe?
 	}
-	theSubnet := a.subnets[subnetId]
-	theSubnet.validators = append(theSubnet.validators, validator{
+	curSubnet.subscribers = append(curSubnet.subscribers, validator{
 		validatorIndex: p.ValidatorIndex,
 	})
-
+	// todo: a.sentinel.SetGossipExpiration()
 	if p.IsAggregator {
-		theSubnet.needAggregate = true
+		curSubnet.needAggregate = true
 	}
 	return nil
 }
 
-func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) {
-	// todo:
-	// add attestation to attestationSubscriptions
-	// try aggregate?
+func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) error {
+	// compute subnet id
+	slot := att.AttestantionData().Slot()
+	committeeIndex := att.AttestantionData().CommitteeIndex()
+	subnetId, err := a.computeSubnetId(slot, committeeIndex)
+	if err != nil {
+		log.Error("computeSubnetId failed", "err", err)
+		return err
+	}
+	// acquire lock
+	a.subnetAttMutex.Lock()
+	defer a.subnetAttMutex.Unlock()
+	curSubnet, exist := a.subnets[subnetId]
+	if !exist {
+		// no one is interested in this subnet
+		return nil
+	}
+
+	// add attestation to the list
+	if curSubnet.needAggregate {
+		// aggregate
+		sig := att.Signature()
+		bits := att.AggregationBits()
+		sigBytes := make([]byte, 96)
+		copy(sigBytes, sig[:])
+		signatures := [][]byte{sigBytes}
+		if curSubnet.aggregationSignature != nil {
+			signatures = append(signatures, curSubnet.aggregationSignature)
+			aggrSig, err := bls.AggregateSignatures(signatures)
+			if err != nil {
+				log.Error("aggregate signature failed", "err", err)
+				return err
+			}
+			curSubnet.aggregationSignature = aggrSig
+		} else {
+			curSubnet.aggregationSignature = sigBytes
+		}
+
+		// collect aggregation bits
+		for i := 0; i < len(curSubnet.aggregationBits); i++ {
+			curSubnet.aggregationBits[i] |= bits[i]
+		}
+	}
+	return nil
 }
 
 func (a *Attestation) computeSubnetId(slot uint64, committeeIndex uint64) (uint64, error) {
