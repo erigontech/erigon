@@ -116,6 +116,7 @@ func init() {
 	rootCmd.AddCommand(torrentClean)
 
 	withDataDir(manifestCmd)
+	withChainFlag(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
 
 	manifestVerifyCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
@@ -335,6 +336,7 @@ var torrentCat = &cobra.Command{
 }
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
+	Short:   "Remove all .torrent files from datadir directory",
 	Example: "go run ./cmd/downloader torrent_clean --datadir=<datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dirs := datadir.New(datadirCli)
@@ -436,13 +438,22 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 
 func manifest(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+
+	files, err := downloader.SeedableFiles(dirs, chain)
+	if err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		fmt.Printf("%s\n", f)
+	}
 	extList := []string{
 		".torrent",
-		".seg", ".idx", // e2
-		".kv", ".kvi", ".bt", ".kvei", // e3 domain
-		".v", ".vi", //e3 hist
-		".ef", ".efi", //e3 idx
-		".txt", //salt.txt
+		//".seg", ".idx", // e2
+		//".kv", ".kvi", ".bt", ".kvei", // e3 domain
+		//".v", ".vi", //e3 hist
+		//".ef", ".efi", //e3 idx
+		".txt", //salt.txt, manifest.txt
 	}
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {
@@ -470,14 +481,49 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		}
 		fmt.Printf("idx/%s\n", fName)
 	}
-	l, _ = dir.ListFiles(dirs.SnapAccessors, extList...)
-	for _, fPath := range l {
-		_, fName := filepath.Split(fPath)
-		if strings.Contains(fName, "commitment") {
-			continue
-		}
-		fmt.Printf("accessors/%s\n", fName)
-	}
+
+	//extList := []string{
+	//	".torrent",
+	//	".seg", ".idx", // e2
+	//	".kv", ".kvi", ".bt", ".kvei", // e3 domain
+	//	".v", ".vi", //e3 hist
+	//	".ef", ".efi", //e3 idx
+	//	".txt", //salt.txt, manifest.txt
+	//}
+	//l, _ := dir.ListFiles(dirs.Snap, extList...)
+	//for _, fPath := range l {
+	//	_, fName := filepath.Split(fPath)
+	//	fmt.Printf("%s\n", fName)
+	//}
+	//l, _ = dir.ListFiles(dirs.SnapDomain, extList...)
+	//for _, fPath := range l {
+	//	_, fName := filepath.Split(fPath)
+	//	fmt.Printf("domain/%s\n", fName)
+	//}
+	//l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
+	//for _, fPath := range l {
+	//	_, fName := filepath.Split(fPath)
+	//	if strings.Contains(fName, "commitment") {
+	//		continue
+	//	}
+	//	fmt.Printf("history/%s\n", fName)
+	//}
+	//l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
+	//for _, fPath := range l {
+	//	_, fName := filepath.Split(fPath)
+	//	if strings.Contains(fName, "commitment") {
+	//		continue
+	//	}
+	//	fmt.Printf("idx/%s\n", fName)
+	//}
+	//l, _ = dir.ListFiles(dirs.SnapAccessors, extList...)
+	//for _, fPath := range l {
+	//	_, fName := filepath.Split(fPath)
+	//	if strings.Contains(fName, "commitment") {
+	//		continue
+	//	}
+	//	fmt.Printf("accessors/%s\n", fName)
+	//}
 	return nil
 }
 

@@ -344,7 +344,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		Chain: cfg.ChainName,
 	}
 
-	files, err := seedableFiles(cfg.Dirs, cfg.ChainName)
+	files, err := SeedableFiles(cfg.Dirs, cfg.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -2156,7 +2156,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	return nil
 }
 
-func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
+func SeedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
 	files, err := seedableSegmentFiles(dirs.Snap, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
