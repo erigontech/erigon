@@ -375,10 +375,8 @@ blockLoop:
 		if res == nil {
 			continue
 		}
-		log.Debug("logs for", "blockNumber", res.BlockNumber, "len(Logs)", len(res.Logs), "Error", res.Error)
 		logs = append(logs, res.Logs...)
 	}
-	log.Debug("FINAL LOGS", "len(logs)", len(logs))
 	return logs, nil
 }
 
