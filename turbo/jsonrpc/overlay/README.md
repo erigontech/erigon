@@ -73,7 +73,8 @@ Example response as in `eth_getLogs`:
     {
       "address": "<CONTRACT_ADDRESS>",
       "topics": [
-        "0x8b615fdc5486fad0275d26c56169e31fd7a71d8f916bb2e9ba80b626903a8b64","0x0000000000000000000000006f3a86a0fd7aafa0b679d4dac8ea7dfccce383ab",
+        "0x8b615fdc5486fad0275d26c56169e31fd7a71d8f916bb2e9ba80b626903a8b64",
+        "0x0000000000000000000000006f3a86a0fd7aafa0b679d4dac8ea7dfccce383ab",
         "0x0000000000000000000000006f3a86a0fd7aafa0b679d4dac8ea7dfccce383ab",
         "0x0000000000000000000000008e27d64063d74c7c2f7c8609e5b6d78d03378d23"
       ],
