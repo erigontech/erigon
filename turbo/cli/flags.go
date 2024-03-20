@@ -234,6 +234,18 @@ var (
 		Value: rpccfg.DefaultEvmCallTimeout,
 	}
 
+	OverlayGetLogsFlag = cli.DurationFlag{
+		Name:  "rpc.overlay.getlogstimeout",
+		Usage: "Maximum amount of time to wait for the answer from the overlay_getLogs call.",
+		Value: rpccfg.DefaultOverlayGetLogsTimeout,
+	}
+
+	OverlayReplayBlockFlag = cli.DurationFlag{
+		Name:  "rpc.overlay.replayblocktimeout",
+		Usage: "Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call.",
+		Value: rpccfg.DefaultOverlayReplayBlockTimeout,
+	}
+
 	TxPoolCommitEvery = cli.DurationFlag{
 		Name:  "txpool.commit.every",
 		Usage: "How often transactions should be committed to the storage",
@@ -465,6 +477,8 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 			IdleTimeout:  ctx.Duration(HTTPIdleTimeoutFlag.Name),
 		},
 		EvmCallTimeout:              ctx.Duration(EvmCallTimeoutFlag.Name),
+		OverlayGetLogsTimeout:       ctx.Duration(OverlayGetLogsFlag.Name),
+		OverlayReplayBlockTimeout:   ctx.Duration(OverlayReplayBlockFlag.Name),
 		WebsocketPort:               ctx.Int(utils.WSPortFlag.Name),
 		WebsocketEnabled:            ctx.IsSet(utils.WSEnabledFlag.Name),
 		RpcBatchConcurrency:         ctx.Uint(utils.RpcBatchConcurrencyFlag.Name),

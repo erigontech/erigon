@@ -40,9 +40,11 @@ type OverlayAPI interface {
 // OverlayAPIImpl is implementation of the OverlayAPIImpl interface based on remote Db access
 type OverlayAPIImpl struct {
 	*BaseAPI
-	db     kv.RoDB
-	GasCap uint64
-	OtsAPI OtterscanAPI
+	db                        kv.RoDB
+	GasCap                    uint64
+	OverlayGetLogsTimeout     time.Duration
+	OverlayReplayBlockTimeout time.Duration
+	OtsAPI                    OtterscanAPI
 }
 
 type CreationCode struct {
@@ -61,12 +63,14 @@ type blockReplayResult struct {
 }
 
 // NewOverlayAPI returns OverlayAPIImpl instance
-func NewOverlayAPI(base *BaseAPI, db kv.RoDB, gascap uint64, otsApi OtterscanAPI) *OverlayAPIImpl {
+func NewOverlayAPI(base *BaseAPI, db kv.RoDB, gascap uint64, overlayGetLogsTimeout time.Duration, overlayReplayBlockTimeout time.Duration, otsApi OtterscanAPI) *OverlayAPIImpl {
 	return &OverlayAPIImpl{
-		BaseAPI: base,
-		db:      db,
-		GasCap:  gascap,
-		OtsAPI:  otsApi,
+		BaseAPI:                   base,
+		db:                        db,
+		GasCap:                    gascap,
+		OverlayGetLogsTimeout:     overlayGetLogsTimeout,
+		OverlayReplayBlockTimeout: overlayReplayBlockTimeout,
+		OtsAPI:                    otsApi,
 	}
 }
 
@@ -247,6 +251,19 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address libcommo
 }
 
 func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria, stateOverride *ethapi.StateOverrides) ([]*types.Log, error) {
+	timeout := api.OverlayGetLogsTimeout
+	// Setup context so it may be cancelled the call has completed
+	// or, in case of unmetered gas, setup a context with a timeout.
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
+	// Make sure the context is cancelled when the call has completed
+	// this makes sure resources are cleaned up.
+	defer cancel()
+
 	tx, err := api.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
@@ -257,7 +274,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
-	defer func(start time.Time) { log.Trace("Executing EVM overlayCall finished", "runtime", time.Since(start)) }(time.Now())
+	defer func(start time.Time) { log.Trace("Executing overlay_getLogs finished", "runtime", time.Since(start)) }(time.Now())
 
 	begin, end, err := getBeginEnd(ctx, tx, api, crit)
 	if err != nil {
@@ -455,9 +472,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 	signer := types.MakeSigner(chainConfig, blockNum, blockCtx.Time)
 	rules := chainConfig.Rules(blockNum, blockCtx.Time)
 
-	timeoutMilliSeconds := int64(500000)
-
-	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
+	timeout := api.OverlayReplayBlockTimeout
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
 	var cancel context.CancelFunc
