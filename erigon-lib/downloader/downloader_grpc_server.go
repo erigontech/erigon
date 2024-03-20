@@ -48,6 +48,9 @@ type GrpcServer struct {
 }
 
 func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downloader.ProhibitNewDownloadsRequest) (*emptypb.Empty, error) {
+	if s.d.torrentFiles.newDownloadsAreProhibited(req.Type) {
+		return &emptypb.Empty{}, nil
+	}
 	if err := s.d.db.Update(ctx, func(tx kv.RwTx) error {
 		// basically keep in DB a list of prohibited types and update it with the new type, also add it to the in-memory list.
 		var prohibitList []string
@@ -65,12 +68,11 @@ func (s *GrpcServer) ProhibitNewDownloads(ctx context.Context, req *proto_downlo
 		if err != nil {
 			return err
 		}
-		fmt.Println(prohibitList)
 		return tx.Put(kv.BittorentProhibited, []byte(kv.BittorentProhibitedKey), prohibitListBytes)
 	}); err != nil {
 		return nil, err
 	}
-	return nil, s.d.torrentFiles.prohibitNewDownloads(req.Type)
+	return &emptypb.Empty{}, s.d.torrentFiles.prohibitNewDownloads(req.Type)
 }
 
 // Erigon "download once" - means restart/upgrade/downgrade will not download files (and will be fast)
