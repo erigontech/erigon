@@ -76,6 +76,7 @@ var (
 	disableIPV6                    bool
 	disableIPV4                    bool
 	seedbox                        bool
+	checksumCheck                  bool
 )
 
 func init() {
@@ -113,10 +114,11 @@ func init() {
 	withDataDir(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
 
-	withChainFlag(manifestVerifyCmd)
-	withDataDir(manifestVerifyCmd)
+	manifestVerifyCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	manifestVerifyCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
+	manifestVerifyCmd.Flags().BoolVar(&checksumCheck, "checksums", false, "Calculate MD5 checksums for datadir and compare it against file etags in all buckets. rclone sync does the same")
+	withChainFlag(manifestVerifyCmd)
 	rootCmd.AddCommand(manifestVerifyCmd)
 
 	withDataDir(printTorrentHashes)
@@ -295,7 +297,7 @@ var manifestCmd = &cobra.Command{
 
 var manifestVerifyCmd = &cobra.Command{
 	Use:     "manifest-verify",
-	Example: "go run ./cmd/downloader manifest-verify --datadir <your_datadir>",
+	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--datadir <your_datadir>]",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifestVerify(cmd.Context(), logger); err != nil {
@@ -382,12 +384,9 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 		}
 	}
 
+	_ = webseedFileProviders // todo add support of file providers
 	wseed := downloader.NewWebSeeds(webseedHttpProviders, log.LvlDebug, logger)
-	err := wseed.VerifyManifestedBuckets(ctx, datadir.New(datadirCli), verifyFailfast)
-	if err != nil {
-		return err
-	}
-	return nil
+	return wseed.VerifyManifestedBuckets(ctx, datadir.New(datadirCli), verifyFailfast, checksumCheck)
 }
 
 func manifest(ctx context.Context, logger log.Logger) error {

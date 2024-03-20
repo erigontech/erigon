@@ -180,10 +180,14 @@ func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype
 	return tags, invalidTags, etagFetchFailed, nil
 }
 
-func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, dirs datadir.Dirs, failFast bool) error {
-	localTags, err := d.sumLocalTags(dirs)
-	if err != nil {
-		return err
+func (d *WebSeeds) VerifyManifestedBuckets(ctx context.Context, dirs datadir.Dirs, failFast, checksumCheck bool) error {
+	var err error
+	var localTags map[string]string
+	if checksumCheck {
+		localTags, err = d.sumLocalTags(dirs)
+		if err != nil {
+			return err
+		}
 	}
 
 	var supErr error
@@ -253,19 +257,10 @@ func (d *WebSeeds) sumLocalTags(dirs datadir.Dirs) (map[string]string, error) {
 	return localTags, nil
 }
 
-func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, localTags map[string]string, manifestResponse snaptype.WebSeedsFromProvider, report *webSeedCheckReport) error {
-	etags, invalidTags, noTags, err := d.fetchFileEtags(ctx, manifestResponse)
-	if err != nil {
-		return err
-	}
-
-	report.invalidEtags = invalidTags
-	report.etagFetchFailed = noTags
-
-	report.notFoundOnRemote = make([]string, 0, len(etags))
-
+func (d *WebSeeds) checkEtagsMatching(remoteTags, localTags map[string]string, report *webSeedCheckReport) error {
+	report.notFoundOnRemote = make([]string, 0, len(remoteTags))
 	for name, lHash := range localTags {
-		webHash, found := etags[name]
+		webHash, found := remoteTags[name]
 		if !found {
 			report.notFoundOnRemote = append(report.notFoundOnRemote, name)
 			continue
@@ -273,12 +268,12 @@ func (d *WebSeeds) findLocalFileAndCheckMD5(ctx context.Context, localTags map[s
 		if lHash != webHash {
 			report.invalidEtags = append(report.invalidEtags, fmt.Sprintf("%-50s (local) %s != %s (remote)", name, lHash, webHash))
 		}
-		delete(etags, name)
+		delete(remoteTags, name)
 	}
 
-	if len(etags) > 0 {
+	if len(remoteTags) > 0 {
 		report.notFoundOnLocal = make([]string, 0)
-		for n := range etags {
+		for n := range remoteTags {
 			report.notFoundOnLocal = append(report.notFoundOnLocal, n)
 		}
 	}
@@ -357,19 +352,28 @@ func (w *webSeedCheckReport) String() string {
 }
 
 func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, localTags map[string]string, webSeedProviderURL *url.URL) error {
+	report := &webSeedCheckReport{seed: webSeedProviderURL}
 	manifestResponse, err := d.retrieveManifest(ctx, webSeedProviderURL)
-	report := &webSeedCheckReport{
-		seed:          webSeedProviderURL,
-		manifestExist: len(manifestResponse) != 0,
-	}
+	report.manifestExist = len(manifestResponse) != 0
 	defer func() { fmt.Printf("%s\n", report.String()) }()
-
 	if err != nil {
 		return err
 	}
 
 	d.checkHasTorrents(manifestResponse, report)
-	return d.findLocalFileAndCheckMD5(ctx, localTags, manifestResponse, report)
+
+	remoteTags, invalidTags, noTags, err := d.fetchFileEtags(ctx, manifestResponse)
+	if err != nil {
+		return err
+	}
+
+	report.invalidEtags = invalidTags
+	report.etagFetchFailed = noTags
+
+	if localTags == nil {
+		return nil // skip local tags verification
+	}
+	return d.checkEtagsMatching(remoteTags, localTags, report)
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
