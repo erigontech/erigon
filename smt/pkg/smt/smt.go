@@ -624,6 +624,33 @@ func (s *SMT) CheckOrphanedNodes(ctx context.Context) int {
 	return len(orphanedNodes)
 }
 
+func (s *SMT) GetDepth() int {
+	rootNodeKey, _ := s.getLastRoot()
+	return s.getDepth(rootNodeKey, 1)
+}
+
+func (s *SMT) getDepth(nodeKey utils.NodeKey, level int) int {
+	if nodeKey.IsZero() {
+		return level - 1
+	}
+
+	nodeValue, _ := s.Db.Get(nodeKey)
+	if nodeValue.IsFinalNode() {
+		return level
+	}
+
+	nodeKeyLeft := utils.NodeKeyFromBigIntArray(nodeValue[0:4])
+	leftDepth := s.getDepth(nodeKeyLeft, level+1)
+
+	nodeKeyRight := utils.NodeKeyFromBigIntArray(nodeValue[4:8])
+	rightDepth := s.getDepth(nodeKeyRight, level+1)
+
+	if leftDepth > rightDepth {
+		return leftDepth
+	}
+	return rightDepth
+}
+
 type TraverseAction func(prefix []byte, k utils.NodeKey, v utils.NodeValue12) (bool, error)
 
 func (s *SMT) Traverse(ctx context.Context, node *big.Int, action TraverseAction) error {
