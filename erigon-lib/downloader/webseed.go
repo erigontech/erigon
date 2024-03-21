@@ -62,7 +62,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			continue
 		}
 		// check if we need to prohibit new downloads for some files
-		for name, _ := range manifestResponse {
+		for name := range manifestResponse {
 			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(manifestResponse, name)
@@ -80,7 +80,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 			continue
 		}
 		// check if we need to prohibit new downloads for some files
-		for name, _ := range response {
+		for name := range response {
 			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(response, name)
