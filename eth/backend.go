@@ -34,6 +34,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 
 	"github.com/erigontech/mdbx-go/mdbx"
@@ -495,6 +496,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// setup periodic logging and prometheus updates
 	go mem.LogMemStats(ctx, logger)
+	go disk.UpdateDiskStats(ctx, logger)
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
