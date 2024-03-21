@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -52,7 +51,6 @@ type HeadersCfg struct {
 
 	blockReader   services.FullBlockReader
 	blockWriter   *blockio.BlockWriter
-	forkValidator *engine_helpers.ForkValidator
 	notifications *shards.Notifications
 
 	syncConfig     ethconfig.Sync
@@ -75,7 +73,6 @@ func StageHeadersCfg(
 	tmpdir string,
 	historyV3 bool,
 	notifications *shards.Notifications,
-	forkValidator *engine_helpers.ForkValidator,
 	loopBreakCheck func(int) bool) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -92,7 +89,6 @@ func StageHeadersCfg(
 		noP2PDiscovery:    noP2PDiscovery,
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
-		forkValidator:     forkValidator,
 		notifications:     notifications,
 		loopBreakCheck:    loopBreakCheck,
 	}

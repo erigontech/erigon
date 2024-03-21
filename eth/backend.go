@@ -541,7 +541,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			dirs, notifications, blockReader, blockWriter, backend.agg, backend.silkworm, terseLogger)
 		chainReader := consensuschain.NewReader(chainConfig, txc.Tx, blockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, backend.blockWriter, stateSync, backend.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, config.HistoryV3); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, backend.engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, config.HistoryV3); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -594,7 +594,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		blockReader,
 		blockBufferSize,
 		stack.Config().SentryLogPeerInfo,
-		backend.forkValidator,
 		maxBlockBroadcastPeers,
 		logger,
 	)
