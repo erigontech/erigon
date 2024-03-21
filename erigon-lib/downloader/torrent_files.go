@@ -134,17 +134,17 @@ func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 	// open or create file ProhibitNewDownloadsFileName
 	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file: %w", err)
 	}
 	defer f.Close()
 	var prohibitedList []string
 	torrentListJsonBytes, err := io.ReadAll(f)
 	if err != nil {
-		return err
+		return fmt.Errorf("read file: %w", err)
 	}
 	if len(torrentListJsonBytes) > 0 {
 		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return err
+			return fmt.Errorf("unmarshal: %w", err)
 		}
 	}
 	if slices.Contains(prohibitedList, t) {
@@ -156,15 +156,15 @@ func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 	// write new prohibited list by opening the file in truncate mode
 	f, err = os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
-		return err
+		return fmt.Errorf("open file for writing: %w", err)
 	}
 	defer f.Close()
 	prohibitedListJsonBytes, err := json.Marshal(prohibitedList)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal: %w", err)
 	}
 	if _, err := f.Write(prohibitedListJsonBytes); err != nil {
-		return err
+		return fmt.Errorf("write: %w", err)
 	}
 
 	return nil
