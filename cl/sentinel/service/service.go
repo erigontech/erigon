@@ -350,11 +350,11 @@ func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sent
 		topic      = expiryReq.GetTopic()
 		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
 	)
-	if subs := s.sentinel.GossipManager().GetMatchingSubscription(topic); subs == nil {
+	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
+	if subs == nil {
 		return nil, fmt.Errorf("no such subscription")
-	} else {
-		subs.OverwriteSubscriptionExpiry(expiryTime)
 	}
+	subs.OverwriteSubscriptionExpiry(expiryTime)
 	return &sentinelrpc.EmptyMessage{}, nil
 }
 
