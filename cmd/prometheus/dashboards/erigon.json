@@ -1,4 +1,40 @@
 {
+  "__inputs": [
+    {
+      "name": "DS_PROMETHEUS",
+      "label": "erigon-prometheus",
+      "description": "Prometheus data source",
+      "type": "datasource",
+      "pluginId": "prometheus",
+      "pluginName": "Prometheus"
+    }
+  ],
+  "__requires": [
+    {
+      "type": "grafana",
+      "id": "grafana",
+      "name": "Grafana",
+      "version": "7.3.4"
+    },
+    {
+      "type": "panel",
+      "id": "graph",
+      "name": "Graph",
+      "version": ""
+    },
+    {
+      "type": "datasource",
+      "id": "prometheus",
+      "name": "Prometheus",
+      "version": "1.0.0"
+    },
+    {
+      "type": "panel",
+      "id": "stat",
+      "name": "Stat",
+      "version": ""
+    }
+  ],
   "annotations": {
     "list": [
       {
@@ -31,7 +67,7 @@
     {
       "collapsed": false,
       "datasource": {
-        "type": "prometheus"
+        "datasource": "${DS_PROMETHEUS}"
       },
       "gridPos": {
         "h": 1,
@@ -44,7 +80,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "prometheus"
+            "datasource": "${DS_PROMETHEUS}"
           },
           "refId": "A"
         }
@@ -54,7 +90,7 @@
     },
     {
       "datasource": {
-        "type": "prometheus"
+        "datasource": "${DS_PROMETHEUS}"
       },
       "fieldConfig": {
         "defaults": {
@@ -135,9 +171,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "expr": "sync{instance=~\"$instance\",stage=\"headers\"}",
           "format": "time_series",
@@ -148,9 +182,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "expr": "chain_head_block{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
@@ -163,9 +195,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -245,9 +275,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "expr": "txpool_pending{instance=~\"$instance\"}",
           "format": "time_series",
@@ -258,9 +286,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "expr": "txpool_basefee{instance=~\"$instance\"}",
           "format": "time_series",
@@ -272,9 +298,7 @@
           "refId": "D"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "expr": "txpool_queued{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
@@ -287,9 +311,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -370,9 +392,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "increase(process_cpu_seconds_total{instance=~\"$instance\"}[1m])",
@@ -388,9 +408,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "description": "",
       "fieldConfig": {
         "defaults": {
@@ -472,9 +490,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "go_memstats_stack_sys_bytes{instance=~\"$instance\"}",
@@ -487,9 +503,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "go_memstats_sys_bytes{instance=~\"$instance\"}",
@@ -502,9 +516,7 @@
           "refId": "B"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "go_memstats_stack_inuse_bytes{instance=~\"$instance\"}",
@@ -517,9 +529,7 @@
           "refId": "C"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "go_memstats_mspan_sys_bytes{instance=~\"$instance\"}",
@@ -532,9 +542,7 @@
           "refId": "D"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "go_memstats_mcache_sys_bytes{instance=~\"$instance\"}",
@@ -547,9 +555,7 @@
           "refId": "E"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "go_memstats_heap_alloc_bytes{instance=~\"$instance\"}",
@@ -566,9 +572,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -650,9 +654,7 @@
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "expr": "sync{instance=~\"$instance\"}",
           "instant": false,
@@ -665,9 +667,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -750,9 +750,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "expr": "p2p_peers{instance=~\"$instance\"}",
           "format": "time_series",
           "interval": "",
@@ -761,9 +759,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "expr": "rate(p2p_dials{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
@@ -772,9 +768,7 @@
           "refId": "B"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "expr": "rate(p2p_serves{instance=~\"$instance\"}[1m])",
           "format": "time_series",
           "interval": "",
@@ -787,9 +781,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -870,9 +862,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "rate(p2p_ingress{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
@@ -882,9 +872,7 @@
           "refId": "B"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "rate(p2p_egress{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
@@ -899,9 +887,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -982,9 +968,7 @@
       "pluginVersion": "8.0.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "rate(process_io_storage_read_bytes_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
@@ -994,9 +978,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "rate(process_io_storage_written_bytes_total{instance=~\"$instance\"}[$rate_interval])",
           "format": "time_series",
@@ -1010,9 +992,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1091,18 +1071,14 @@
       "pluginVersion": "8.4.7",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "expr": "db_size{instance=~\"$instance\"}",
           "interval": "",
           "legendFormat": "size: {{instance}}",
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "expr": "db_mi_last_pgno{instance=~\"$instance\"}",
           "hide": false,
@@ -1117,9 +1093,7 @@
     },
     {
       "collapsed": false,
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1130,9 +1104,7 @@
       "panels": [],
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "refId": "A"
         }
       ],
@@ -1140,9 +1112,7 @@
       "type": "row"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1219,9 +1189,7 @@
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "rate(rpc_duration_seconds_count{instance=~\"$instance\",success=\"success\"}[1m])",
           "interval": "",
@@ -1229,9 +1197,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "rate(rpc_duration_seconds_count{instance=~\"$instance\",success=\"failure\"}[1m])",
           "hide": false,
@@ -1245,9 +1211,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1324,9 +1288,7 @@
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "rpc_duration_seconds{quantile=\"$quantile\",instance=~\"$instance\"}",
           "interval": "",
@@ -1339,9 +1301,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1418,9 +1378,7 @@
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "cache_keys_total{name=\"rpc\",instance=~\"$instance\"}",
           "hide": false,
@@ -1429,9 +1387,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "cache_list_total{name=\"rpc\",instance=~\"$instance\"}",
           "hide": false,
@@ -1440,9 +1396,7 @@
           "refId": "B"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "cache_code_keys_total{name=\"rpc\",instance=~\"$instance\"}",
           "hide": false,
@@ -1451,9 +1405,7 @@
           "refId": "C"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "cache_code_list_total{name=\"rpc\",instance=~\"$instance\"}",
           "hide": false,
@@ -1466,9 +1418,7 @@
       "type": "timeseries"
     },
     {
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1544,9 +1494,7 @@
       },
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "editorMode": "code",
           "exemplar": true,
           "expr": "sum(delta(cache_total{result=\"hit\",name=\"rpc\",instance=~\"$instance\"}[1m]))/sum(delta(cache_total{name=\"rpc\",instance=~\"$instance\"}[1m])) ",
@@ -1557,9 +1505,7 @@
           "refId": "A"
         },
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "exemplar": true,
           "expr": "sum(delta(cache_code_total{result=\"hit\",name=\"rpc\",instance=~\"$instance\"}[1m]))/sum(delta(cache_code_total{name=\"rpc\",instance=~\"$instance\"}[1m])) ",
           "hide": false,
@@ -1573,9 +1519,7 @@
     },
     {
       "collapsed": true,
-      "datasource": {
-        "type": "prometheus"
-      },
+        "datasource": "${DS_PROMETHEUS}",
       "gridPos": {
         "h": 1,
         "w": 24,
@@ -1589,9 +1533,7 @@
           "bars": false,
           "dashLength": 10,
           "dashes": false,
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "fill": 1,
           "fillGradient": 0,
           "gridPos": {
@@ -1628,18 +1570,14 @@
           "steppedLine": false,
           "targets": [
             {
-              "datasource": {
-                "type": "prometheus"
-              },
+                "datasource": "${DS_PROMETHEUS}",
               "expr": "sum by (grpc_service, grpc_method, instance) (rate(grpc_server_started_total{instance=~\"$instance\"}[1m]))",
               "interval": "",
               "legendFormat": "Calls: {{grpc_service}}.{{grpc_method}}, {{instance}}",
               "refId": "A"
             },
             {
-              "datasource": {
-                "type": "prometheus"
-              },
+                "datasource": "${DS_PROMETHEUS}",
               "expr": "sum by (grpc_service, grpc_method, instance) (rate(grpc_server_handled_total{instance=~\"$instance\",grpc_code!=\"OK\"}[1m])) ",
               "interval": "",
               "legendFormat": "Errors: {{grpc_service}}.{{grpc_method}}, {{instance}}",
@@ -1679,9 +1617,7 @@
       ],
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus"
-          },
+            "datasource": "${DS_PROMETHEUS}",
           "refId": "A"
         }
       ],
@@ -1758,9 +1694,7 @@
             "mumbai3-2:6061"
           ]
         },
-        "datasource": {
-          "type": "prometheus"
-        },
+          "datasource": "${DS_PROMETHEUS}",
         "definition": "go_goroutines",
         "hide": 0,
         "includeAll": true,
