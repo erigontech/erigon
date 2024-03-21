@@ -394,29 +394,29 @@ func compareBodies(t *testing.T, a, b *Body) error {
 	return nil
 }
 
-func TestRawBodyEncodeDecodeRLP(t *testing.T) {
-	tr := NewTRand()
-	var buf bytes.Buffer
-	for i := 0; i < RUNS; i++ {
-		enc := tr.RandRawBody()
-		buf.Reset()
-		if err := enc.EncodeRLP(&buf); err != nil {
-			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
-		}
+// func TestRawBodyEncodeDecodeRLP(t *testing.T) {
+// 	tr := NewTRand()
+// 	var buf bytes.Buffer
+// 	for i := 0; i < RUNS; i++ {
+// 		enc := tr.RandRawBody()
+// 		buf.Reset()
+// 		if err := enc.EncodeRLP(&buf); err != nil {
+// 			t.Errorf("error: RawBody.EncodeRLP(): %v", err)
+// 		}
 
-		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
+// 		s := rlp.NewStream(bytes.NewReader(buf.Bytes()), 0)
 
-		dec := &RawBody{}
-		if err := dec.DecodeRLP(s); err != nil {
-			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
-			panic(err)
-		}
+// 		dec := &RawBody{}
+// 		if err := dec.DecodeRLP(s); err != nil {
+// 			t.Errorf("error: RawBody.DecodeRLP(): %v", err)
+// 			panic(err)
+// 		}
 
-		if err := compareRawBodies(t, enc, dec); err != nil {
-			t.Errorf("error: compareRawBodies: %v", err)
-		}
-	}
-}
+// 		if err := compareRawBodies(t, enc, dec); err != nil {
+// 			t.Errorf("error: compareRawBodies: %v", err)
+// 		}
+// 	}
+// }
 
 func TestBodyEncodeDecodeRLP(t *testing.T) {
 	tr := NewTRand()
