@@ -88,15 +88,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	// TODO: this is still wrong... we should build a subscription here to match exactly, meaning that downstream consumers should be
 	// in charge of keeping track of fork id.
 	switch msg.Name {
-	case gossip.TopicNameBeaconBlock:
-		subscription = manager.GetMatchingSubscription(msg.Name)
-	case gossip.TopicNameBeaconAggregateAndProof:
-		subscription = manager.GetMatchingSubscription(msg.Name)
-	case gossip.TopicNameVoluntaryExit:
-		subscription = manager.GetMatchingSubscription(msg.Name)
-	case gossip.TopicNameProposerSlashing:
-		subscription = manager.GetMatchingSubscription(msg.Name)
-	case gossip.TopicNameAttesterSlashing:
+	case gossip.TopicNameBeaconBlock,
+		gossip.TopicNameBeaconAggregateAndProof,
+		gossip.TopicNameVoluntaryExit,
+		gossip.TopicNameProposerSlashing,
+		gossip.TopicNameAttesterSlashing:
 		subscription = manager.GetMatchingSubscription(msg.Name)
 	default:
 		// check subnets
@@ -106,6 +102,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
 			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+		case strings.Contains(msg.Name, gossip.TopicNamePrefixBeaconAttestation):
+			if msg.SubnetId == nil {
+				return nil, fmt.Errorf("subnetId is required for beacon attestation")
+			}
+			subscription = manager.GetMatchingSubscription(fmt.Sprintf("%s/%d", gossip.TopicNamePrefixBeaconAttestation, *msg.SubnetId))
 		default:
 			return &sentinelrpc.EmptyMessage{}, nil
 		}
