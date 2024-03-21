@@ -167,7 +167,7 @@ func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	return nil
+	return f.Sync()
 }
 
 func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
