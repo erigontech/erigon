@@ -300,7 +300,7 @@ var manifestCmd = &cobra.Command{
 
 var manifestVerifyCmd = &cobra.Command{
 	Use:     "manifest-verify",
-	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--datadir <your_datadir>]",
+	Example: "go run ./cmd/downloader manifest-verify --chain <chain> [--webseeds 'a','b','c']",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
 		if err := manifestVerify(cmd.Context(), logger); err != nil {
