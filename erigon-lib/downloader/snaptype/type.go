@@ -147,7 +147,6 @@ func (s snapType) IdxFileNames(version Version, from uint64, to uint64) []string
 }
 
 func (s snapType) IdxFileName(version Version, from uint64, to uint64, index ...Index) string {
-
 	if len(index) == 0 {
 		if len(s.indexes) == 0 {
 			return ""
