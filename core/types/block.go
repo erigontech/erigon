@@ -673,7 +673,7 @@ func (rb RawBody) EncodingSize() int {
 func (rb RawBody) payloadSize() (payloadSize, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
 	for _, tx := range rb.Transactions {
-		txsLen += rlp2.StringLen(tx)
+		txsLen += len(tx)
 	}
 	payloadSize += rlp2.ListPrefixLen(txsLen) + txsLen
 
@@ -702,8 +702,8 @@ func (rb RawBody) EncodeRLP(w io.Writer) error {
 		return err
 	}
 	for _, tx := range rb.Transactions {
-		if err := rlp.EncodeString(tx, w, b[:]); err != nil {
-			return err
+		if _, err := w.Write(tx); err != nil {
+			return nil
 		}
 	}
 	// encode Uncles
@@ -724,15 +724,14 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-
 	// decode Transactions
 	if _, err = s.List(); err != nil {
 		return err
 	}
-	for err == nil {
-		var tx []byte
-		if err = s.Decode(&tx); err != nil {
-			break
+	var tx []byte
+	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
+		if tx == nil {
+			return errors.New("RawBody.DecodeRLP tx nil\n")
 		}
 		rb.Transactions = append(rb.Transactions, tx)
 	}
