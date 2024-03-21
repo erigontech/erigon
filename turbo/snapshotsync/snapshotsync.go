@@ -213,10 +213,9 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 		if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
 			continue
 		}
-		fmt.Println("A")
 		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
 			Type: p.String(),
-		}); err == nil {
+		}); err != nil {
 			return err
 		}
 	}
