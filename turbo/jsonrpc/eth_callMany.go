@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 
 	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/core"
@@ -77,7 +78,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		blockCtx           evmtypes.BlockContext
 		txCtx              evmtypes.TxContext
 		overrideBlockHash  map[uint64]common.Hash
-		baseFee            uint256.Int
 	)
 
 	overrideBlockHash = make(map[uint64]common.Hash)
@@ -138,9 +138,9 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	st := state.New(stateReader)
 
-	parent := block.Header()
+	header := block.Header()
 
-	if parent == nil {
+	if header == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", blockNum, hash)
 	}
 
@@ -155,21 +155,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return hash
 	}
 
-	if parent.BaseFee != nil {
-		baseFee.SetFromBig(parent.BaseFee)
-	}
-
-	blockCtx = evmtypes.BlockContext{
-		CanTransfer: core.CanTransfer,
-		Transfer:    core.Transfer,
-		GetHash:     getHash,
-		Coinbase:    parent.Coinbase,
-		BlockNumber: parent.Number.Uint64(),
-		Time:        parent.Time,
-		Difficulty:  new(big.Int).Set(parent.Difficulty),
-		GasLimit:    parent.GasLimit,
-		BaseFee:     &baseFee,
-	}
+	blockCtx = core.NewEVMBlockContext(header, getHash, api.engine(), nil /* author */)
 
 	// Get a new instance of the EVM
 	evm = vm.NewEVM(blockCtx, txCtx, st, chainConfig, vm.Config{Debug: false})

@@ -26,7 +26,7 @@ func TestPoolAttesterSlashings(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -76,7 +76,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -117,7 +117,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -164,7 +164,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -213,7 +213,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 		},
 	}
 	// find server
-	_, _, _, _, _, handler, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root())
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()

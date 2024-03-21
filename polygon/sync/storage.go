@@ -7,9 +7,10 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
+//go:generate mockgen -destination=./storage_mock.go -package=sync . Storage
 type Storage interface {
-	// PutHeaders queues blocks for writing into the local canonical chain.
-	PutHeaders(ctx context.Context, headers []*types.Header) error
+	// InsertBlocks queues blocks for writing into the local canonical chain.
+	InsertBlocks(ctx context.Context, blocks []*types.Block) error
 	// Flush makes sure that all queued blocks have been written.
 	Flush(ctx context.Context) error
 	// Run performs the block writing.
@@ -18,21 +19,21 @@ type Storage interface {
 
 type executionClientStorage struct {
 	execution ExecutionClient
-	queue     chan []*types.Header
+	queue     chan []*types.Block
 	waitGroup sync.WaitGroup
 }
 
 func NewStorage(execution ExecutionClient, queueCapacity int) Storage {
 	return &executionClientStorage{
 		execution: execution,
-		queue:     make(chan []*types.Header, queueCapacity),
+		queue:     make(chan []*types.Block, queueCapacity),
 	}
 }
 
-func (s *executionClientStorage) PutHeaders(ctx context.Context, headers []*types.Header) error {
+func (s *executionClientStorage) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	s.waitGroup.Add(1)
 	select {
-	case s.queue <- headers:
+	case s.queue <- blocks:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -55,8 +56,8 @@ func (s *executionClientStorage) Flush(ctx context.Context) error {
 func (s *executionClientStorage) Run(ctx context.Context) error {
 	for {
 		select {
-		case headers := <-s.queue:
-			err := s.execution.InsertBlocks(ctx, headers)
+		case blocks := <-s.queue:
+			err := s.execution.InsertBlocks(ctx, blocks)
 			s.waitGroup.Done()
 			if err != nil {
 				return err

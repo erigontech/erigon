@@ -97,6 +97,31 @@ func (e ErrNonSequentialHeaderNumbers) Is(err error) bool {
 	}
 }
 
+type ErrTooManyBodies struct {
+	requested int
+	received  int
+}
+
+func (e ErrTooManyBodies) Error() string {
+	return fmt.Sprintf("too many bodies in fetch bodies response: requested=%d, received=%d", e.requested, e.received)
+}
+
+func (e ErrTooManyBodies) Is(err error) bool {
+	var errTooManyBodies *ErrTooManyBodies
+	switch {
+	case errors.As(err, &errTooManyBodies):
+		return true
+	default:
+		return false
+	}
+}
+
+func NewErrMissingBodies(headers []*types.Header) *ErrMissingBodies {
+	return &ErrMissingBodies{
+		headers: headers,
+	}
+}
+
 type ErrMissingBodies struct {
 	headers []*types.Header
 }

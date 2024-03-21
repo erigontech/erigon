@@ -858,7 +858,7 @@ var (
 		Usage: "Enable Silkworm block execution",
 	}
 	SilkwormRpcDaemonFlag = cli.BoolFlag{
-		Name:  "silkworm.rpcd",
+		Name:  "silkworm.rpc",
 		Usage: "Enable embedded Silkworm RPC daemon",
 	}
 	SilkwormSentryFlag = cli.BoolFlag{
@@ -922,7 +922,7 @@ var (
 	}
 	CaplinArchiveFlag = cli.BoolFlag{
 		Name:  "caplin.archive",
-		Usage: "enables archival node in caplin (Experimental, does not work)",
+		Usage: "enables archival node in caplin",
 		Value: false,
 	}
 	BeaconApiAllowCredentialsFlag = cli.BoolFlag{
