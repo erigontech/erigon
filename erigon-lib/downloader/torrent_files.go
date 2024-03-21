@@ -181,11 +181,11 @@ func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
 	var prohibitedList []string
 	torrentListJsonBytes, err := io.ReadAll(f)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("newDownloadsAreProhibited: read file: %w", err)
 	}
 	if len(torrentListJsonBytes) > 0 {
 		if err := json.Unmarshal(torrentListJsonBytes, &prohibitedList); err != nil {
-			return false, err
+			return false, fmt.Errorf("newDownloadsAreProhibited: unmarshal: %w", err)
 		}
 	}
 	for _, p := range prohibitedList {
