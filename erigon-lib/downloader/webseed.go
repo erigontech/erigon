@@ -120,10 +120,6 @@ func (d *WebSeeds) checkHasTorrents(manifestResponse snaptype.WebSeedsFromProvid
 	for name := range manifestResponse {
 		if !strings.HasSuffix(name, ".torrent") {
 			tname := name + ".torrent"
-			if !nameWhitelisted(name, d.torrentsWhitelist) {
-				delete(torrentNames, tname)
-				continue
-			}
 			if _, ok := torrentNames[tname]; !ok || !hasTorrents {
 				report.missingTorrents = append(report.missingTorrents, name)
 				continue
@@ -147,10 +143,6 @@ func (d *WebSeeds) fetchFileEtags(ctx context.Context, manifestResponse snaptype
 	invalidTagsMap := make(map[string]string)
 
 	for name, wurl := range manifestResponse {
-		//if !nameWhitelisted(name, d.torrentsWhitelist) {
-		//	continue
-		//}
-
 		u, err := url.Parse(wurl)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("webseed.fetchFileEtags: %w", err)
@@ -287,6 +279,7 @@ type webSeedCheckReport struct {
 	torrentsOK       bool
 	missingTorrents  []string
 	danglingTorrents []string
+	totalEtags       int
 	invalidEtags     []string
 	etagFetchFailed  []string
 	notFoundOnRemote []string
@@ -312,7 +305,7 @@ func (w *webSeedCheckReport) String() string {
 	b.WriteString(fmt.Sprintf(" - manifest exist: %t\n", w.manifestExist))
 	b.WriteString(fmt.Sprintf(" - missing torrents: %d\n", len(w.missingTorrents)))
 	b.WriteString(fmt.Sprintf(" - dangling (data file not found) torrents: %d\n", len(w.danglingTorrents)))
-	b.WriteString(fmt.Sprintf(" - invalid etags format: %d\n", len(w.invalidEtags)))
+	b.WriteString(fmt.Sprintf(" - invalid etags format: %d/%d\n", len(w.invalidEtags), w.totalEtags))
 	b.WriteString(fmt.Sprintf(" - etag fetch failed: %d\n", len(w.etagFetchFailed)))
 	b.WriteString(fmt.Sprintf(" - files not found on remote: %d\n", len(w.notFoundOnRemote)))
 	b.WriteString(fmt.Sprintf(" - files not found on local: %d\n", len(w.notFoundOnLocal)))
@@ -370,6 +363,7 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, localTags map[str
 
 	report.invalidEtags = invalidTags
 	report.etagFetchFailed = noTags
+	report.totalEtags = len(remoteTags) + len(noTags)
 
 	if localTags == nil {
 		return nil // skip local tags verification

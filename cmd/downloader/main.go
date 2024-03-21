@@ -481,49 +481,6 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		}
 		fmt.Printf("idx/%s\n", fName)
 	}
-
-	//extList := []string{
-	//	".torrent",
-	//	".seg", ".idx", // e2
-	//	".kv", ".kvi", ".bt", ".kvei", // e3 domain
-	//	".v", ".vi", //e3 hist
-	//	".ef", ".efi", //e3 idx
-	//	".txt", //salt.txt, manifest.txt
-	//}
-	//l, _ := dir.ListFiles(dirs.Snap, extList...)
-	//for _, fPath := range l {
-	//	_, fName := filepath.Split(fPath)
-	//	fmt.Printf("%s\n", fName)
-	//}
-	//l, _ = dir.ListFiles(dirs.SnapDomain, extList...)
-	//for _, fPath := range l {
-	//	_, fName := filepath.Split(fPath)
-	//	fmt.Printf("domain/%s\n", fName)
-	//}
-	//l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
-	//for _, fPath := range l {
-	//	_, fName := filepath.Split(fPath)
-	//	if strings.Contains(fName, "commitment") {
-	//		continue
-	//	}
-	//	fmt.Printf("history/%s\n", fName)
-	//}
-	//l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
-	//for _, fPath := range l {
-	//	_, fName := filepath.Split(fPath)
-	//	if strings.Contains(fName, "commitment") {
-	//		continue
-	//	}
-	//	fmt.Printf("idx/%s\n", fName)
-	//}
-	//l, _ = dir.ListFiles(dirs.SnapAccessors, extList...)
-	//for _, fPath := range l {
-	//	_, fName := filepath.Split(fPath)
-	//	if strings.Contains(fName, "commitment") {
-	//		continue
-	//	}
-	//	fmt.Printf("accessors/%s\n", fName)
-	//}
 	return nil
 }
 
