@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -77,7 +78,6 @@ var (
 	disableIPV6                    bool
 	disableIPV4                    bool
 	seedbox                        bool
-	checksumCheck                  bool
 )
 
 func init() {
@@ -119,10 +119,8 @@ func init() {
 	withChainFlag(manifestCmd)
 	rootCmd.AddCommand(manifestCmd)
 
-	manifestVerifyCmd.Flags().StringVar(&datadirCli, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	manifestVerifyCmd.Flags().StringVar(&webseeds, utils.WebSeedsFlag.Name, utils.WebSeedsFlag.Value, utils.WebSeedsFlag.Usage)
 	manifestVerifyCmd.PersistentFlags().BoolVar(&verifyFailfast, "verify.failfast", false, "Stop on first found error. Report it and exit")
-	manifestVerifyCmd.Flags().BoolVar(&checksumCheck, "checksums", false, "Calculate MD5 checksums for datadir and compare it against file etags in all buckets. rclone sync does the same")
 	withChainFlag(manifestVerifyCmd)
 	rootCmd.AddCommand(manifestVerifyCmd)
 
@@ -391,11 +389,9 @@ var torrentMagnet = &cobra.Command{
 
 func manifestVerify(ctx context.Context, logger log.Logger) error {
 	webseedsList := common.CliString2Array(webseeds)
-	//if len(webseedsList) == 0 {
 	if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 		webseedsList = append(webseedsList, known...)
 	}
-	//}
 
 	webseedUrlsOrFiles := webseedsList
 	webseedHttpProviders := make([]*url.URL, 0, len(webseedUrlsOrFiles))
@@ -433,7 +429,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	logger.Warn("file providers are not supported yet", "fileProviders", webseedFileProviders)
 
 	wseed := downloader.NewWebSeeds(webseedHttpProviders, log.LvlDebug, logger)
-	return wseed.VerifyManifestedBuckets(ctx, datadir.New(datadirCli), verifyFailfast, checksumCheck)
+	return wseed.VerifyManifestedBuckets(ctx, verifyFailfast)
 }
 
 func manifest(ctx context.Context, logger log.Logger) error {
@@ -444,9 +440,6 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	for _, f := range files {
-		fmt.Printf("%s\n", f)
-	}
 	extList := []string{
 		".torrent",
 		//".seg", ".idx", // e2
@@ -458,12 +451,12 @@ func manifest(ctx context.Context, logger log.Logger) error {
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		fmt.Printf("%s\n", fName)
+		files = append(files, fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapDomain, extList...)
 	for _, fPath := range l {
 		_, fName := filepath.Split(fPath)
-		fmt.Printf("domain/%s\n", fName)
+		files = append(files, "domain/"+fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapHistory, extList...)
 	for _, fPath := range l {
@@ -471,7 +464,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		if strings.Contains(fName, "commitment") {
 			continue
 		}
-		fmt.Printf("history/%s\n", fName)
+		files = append(files, "history/"+fName)
 	}
 	l, _ = dir.ListFiles(dirs.SnapIdx, extList...)
 	for _, fPath := range l {
@@ -479,7 +472,12 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		if strings.Contains(fName, "commitment") {
 			continue
 		}
-		fmt.Printf("idx/%s\n", fName)
+		files = append(files, "idx/"+fName)
+	}
+
+	sort.Strings(files)
+	for _, f := range files {
+		fmt.Printf("%s\n", f)
 	}
 	return nil
 }
