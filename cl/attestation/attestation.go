@@ -3,6 +3,7 @@ package attestation
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -49,19 +50,20 @@ type subnetSubscription struct {
 
 type validator struct {
 	validatorIndex uint64
-	// subscription data structure?
+	expiry         time.Time // todo: might need to add expiration
 }
 
 func (a *Attestation) AddAttestationSubscription(p *cltypes.BeaconCommitteeSubscription) error {
-	a.subnetAttMutex.Lock()
-	defer a.subnetAttMutex.Unlock()
-	// add subscription to attestationSubscriptions
 	subnetId, err := a.computeSubnetId(p.Slot, p.CommitteeIndex)
 	if err != nil {
 		return err
 	}
+	a.subnetAttMutex.Lock()
+	defer a.subnetAttMutex.Unlock()
+	// add subscription to attestationSubscriptions
 	curSubnet, exist := a.subnets[subnetId]
 	if !exist {
+		// a new subnet
 		a.subnets[subnetId] = &subnetSubscription{
 			subnetId:             subnetId,
 			subscribers:          make([]validator, 0),
@@ -89,7 +91,7 @@ func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) error {
 		log.Error("computeSubnetId failed", "err", err)
 		return err
 	}
-	// acquire lock
+
 	a.subnetAttMutex.Lock()
 	defer a.subnetAttMutex.Unlock()
 	curSubnet, exist := a.subnets[subnetId]
@@ -98,11 +100,30 @@ func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) error {
 		return nil
 	}
 
-	// add attestation to the list
 	if curSubnet.needAggregate {
-		// aggregate
 		sig := att.Signature()
 		bits := att.AggregationBits()
+		bitGroupIdx := -1
+		// check if already have aggregation signature associated with the bit. if not, add it
+		for i := 0; i < len(bits); i++ {
+			if bits[i] == 0 {
+				continue
+			} else if bits[i]|curSubnet.aggregationBits[i] == curSubnet.aggregationBits[i] {
+				// already have this bit, skip current attestation
+				return nil
+			} else {
+				// get a new bit
+				bitGroupIdx = i
+				break
+			}
+		}
+		if bitGroupIdx == -1 {
+			// weird case. all bits are 0
+			log.Warn("all bits are 0")
+			return nil
+		}
+
+		// aggregate
 		sigBytes := make([]byte, 96)
 		copy(sigBytes, sig[:])
 		signatures := [][]byte{sigBytes}
@@ -117,11 +138,8 @@ func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) error {
 		} else {
 			curSubnet.aggregationSignature = sigBytes
 		}
-
-		// collect aggregation bits
-		for i := 0; i < len(curSubnet.aggregationBits); i++ {
-			curSubnet.aggregationBits[i] |= bits[i]
-		}
+		// update aggregation bits
+		curSubnet.aggregationBits[bitGroupIdx] |= bits[bitGroupIdx]
 	}
 	return nil
 }
