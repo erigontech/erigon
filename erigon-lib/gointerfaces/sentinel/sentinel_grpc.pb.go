@@ -19,23 +19,25 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Sentinel_SubscribeGossip_FullMethodName = "/sentinel.Sentinel/SubscribeGossip"
-	Sentinel_SendRequest_FullMethodName     = "/sentinel.Sentinel/SendRequest"
-	Sentinel_SetStatus_FullMethodName       = "/sentinel.Sentinel/SetStatus"
-	Sentinel_GetPeers_FullMethodName        = "/sentinel.Sentinel/GetPeers"
-	Sentinel_BanPeer_FullMethodName         = "/sentinel.Sentinel/BanPeer"
-	Sentinel_UnbanPeer_FullMethodName       = "/sentinel.Sentinel/UnbanPeer"
-	Sentinel_PenalizePeer_FullMethodName    = "/sentinel.Sentinel/PenalizePeer"
-	Sentinel_RewardPeer_FullMethodName      = "/sentinel.Sentinel/RewardPeer"
-	Sentinel_PublishGossip_FullMethodName   = "/sentinel.Sentinel/PublishGossip"
-	Sentinel_Identity_FullMethodName        = "/sentinel.Sentinel/Identity"
-	Sentinel_PeersInfo_FullMethodName       = "/sentinel.Sentinel/PeersInfo"
+	Sentinel_SetSubscribeExpiry_FullMethodName = "/sentinel.Sentinel/SetSubscribeExpiry"
+	Sentinel_SubscribeGossip_FullMethodName    = "/sentinel.Sentinel/SubscribeGossip"
+	Sentinel_SendRequest_FullMethodName        = "/sentinel.Sentinel/SendRequest"
+	Sentinel_SetStatus_FullMethodName          = "/sentinel.Sentinel/SetStatus"
+	Sentinel_GetPeers_FullMethodName           = "/sentinel.Sentinel/GetPeers"
+	Sentinel_BanPeer_FullMethodName            = "/sentinel.Sentinel/BanPeer"
+	Sentinel_UnbanPeer_FullMethodName          = "/sentinel.Sentinel/UnbanPeer"
+	Sentinel_PenalizePeer_FullMethodName       = "/sentinel.Sentinel/PenalizePeer"
+	Sentinel_RewardPeer_FullMethodName         = "/sentinel.Sentinel/RewardPeer"
+	Sentinel_PublishGossip_FullMethodName      = "/sentinel.Sentinel/PublishGossip"
+	Sentinel_Identity_FullMethodName           = "/sentinel.Sentinel/Identity"
+	Sentinel_PeersInfo_FullMethodName          = "/sentinel.Sentinel/PeersInfo"
 )
 
 // SentinelClient is the client API for Sentinel service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SentinelClient interface {
+	SetSubscribeExpiry(ctx context.Context, in *RequestSubscribeExpiry, opts ...grpc.CallOption) (*EmptyMessage, error)
 	SubscribeGossip(ctx context.Context, in *SubscriptionData, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error)
 	SendRequest(ctx context.Context, in *RequestData, opts ...grpc.CallOption) (*ResponseData, error)
 	SetStatus(ctx context.Context, in *Status, opts ...grpc.CallOption) (*EmptyMessage, error)
@@ -55,6 +57,15 @@ type sentinelClient struct {
 
 func NewSentinelClient(cc grpc.ClientConnInterface) SentinelClient {
 	return &sentinelClient{cc}
+}
+
+func (c *sentinelClient) SetSubscribeExpiry(ctx context.Context, in *RequestSubscribeExpiry, opts ...grpc.CallOption) (*EmptyMessage, error) {
+	out := new(EmptyMessage)
+	err := c.cc.Invoke(ctx, Sentinel_SetSubscribeExpiry_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *sentinelClient) SubscribeGossip(ctx context.Context, in *SubscriptionData, opts ...grpc.CallOption) (Sentinel_SubscribeGossipClient, error) {
@@ -183,6 +194,7 @@ func (c *sentinelClient) PeersInfo(ctx context.Context, in *PeersInfoRequest, op
 // All implementations must embed UnimplementedSentinelServer
 // for forward compatibility
 type SentinelServer interface {
+	SetSubscribeExpiry(context.Context, *RequestSubscribeExpiry) (*EmptyMessage, error)
 	SubscribeGossip(*SubscriptionData, Sentinel_SubscribeGossipServer) error
 	SendRequest(context.Context, *RequestData) (*ResponseData, error)
 	SetStatus(context.Context, *Status) (*EmptyMessage, error)
@@ -201,6 +213,9 @@ type SentinelServer interface {
 type UnimplementedSentinelServer struct {
 }
 
+func (UnimplementedSentinelServer) SetSubscribeExpiry(context.Context, *RequestSubscribeExpiry) (*EmptyMessage, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetSubscribeExpiry not implemented")
+}
 func (UnimplementedSentinelServer) SubscribeGossip(*SubscriptionData, Sentinel_SubscribeGossipServer) error {
 	return status.Errorf(codes.Unimplemented, "method SubscribeGossip not implemented")
 }
@@ -245,6 +260,24 @@ type UnsafeSentinelServer interface {
 
 func RegisterSentinelServer(s grpc.ServiceRegistrar, srv SentinelServer) {
 	s.RegisterService(&Sentinel_ServiceDesc, srv)
+}
+
+func _Sentinel_SetSubscribeExpiry_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RequestSubscribeExpiry)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SentinelServer).SetSubscribeExpiry(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Sentinel_SetSubscribeExpiry_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SentinelServer).SetSubscribeExpiry(ctx, req.(*RequestSubscribeExpiry))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _Sentinel_SubscribeGossip_Handler(srv interface{}, stream grpc.ServerStream) error {
@@ -455,6 +488,10 @@ var Sentinel_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "sentinel.Sentinel",
 	HandlerType: (*SentinelServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SetSubscribeExpiry",
+			Handler:    _Sentinel_SetSubscribeExpiry_Handler,
+		},
 		{
 			MethodName: "SendRequest",
 			Handler:    _Sentinel_SendRequest_Handler,

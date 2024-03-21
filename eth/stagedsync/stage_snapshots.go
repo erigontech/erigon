@@ -104,7 +104,7 @@ func StageSnapshotsCfg(db kv.RwDB,
 		cfg.snapshotUploader = &snapshotUploader{
 			cfg:          &cfg,
 			uploadFs:     uploadFs,
-			torrentFiles: downloader.NewAtomicTorrentFiles(cfg.dirs.Snap, []string{}),
+			torrentFiles: downloader.NewAtomicTorrentFiles(cfg.dirs.Snap),
 		}
 
 		cfg.blockRetire.SetWorkers(estimate.CompressSnapshot.Workers())
