@@ -147,7 +147,6 @@ func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 			return fmt.Errorf("unmarshal: %w", err)
 		}
 	}
-	fmt.Println("prohibitedList", prohibitedList)
 	if slices.Contains(prohibitedList, t) {
 		return nil
 	}
