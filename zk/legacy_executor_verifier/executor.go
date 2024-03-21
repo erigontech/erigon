@@ -86,7 +86,7 @@ func (e *Executor) Close() {
 	}
 }
 
-func (e *Executor) Verify(p *Payload, erigonStateRoot *common.Hash) (bool, error) {
+func (e *Executor) Verify(p *Payload, request *VerifierRequest) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
@@ -101,6 +101,13 @@ func (e *Executor) Verify(p *Payload, erigonStateRoot *common.Hash) (bool, error
 		TimestampLimit:    p.TimestampLimit,
 		ForcedBlockhashL1: p.ForcedBlockhashL1,
 		ContextId:         p.ContextId,
+		//TraceConfig: &executor.TraceConfigV2{
+		//	DisableStorage:            0,
+		//	DisableStack:              0,
+		//	EnableMemory:              0,
+		//	EnableReturnData:          0,
+		//	TxHashToGenerateFullTrace: nil,
+		//},
 	})
 	if err != nil {
 		return false, fmt.Errorf("failed to process stateless batch: %w", err)
@@ -114,18 +121,18 @@ func (e *Executor) Verify(p *Payload, erigonStateRoot *common.Hash) (bool, error
 	counters += fmt.Sprintf("[P: %v]", resp.CntPoseidonHashes)
 	counters += fmt.Sprintf("[S: %v]", resp.CntSteps)
 	counters += fmt.Sprintf("[D: %v]", resp.CntPoseidonPaddings)
-	log.Info("executor result", "counters", counters)
-	log.Info("Received response from grpc server", "grpcUrl", e.grpcUrl, "response", resp)
+	log.Info("executor result", "batch", request.BatchNumber, "counters", counters, "root", common.BytesToHash(resp.NewStateRoot), "our-root", request.StateRoot)
+	log.Debug("Received response from executor", "grpcUrl", e.grpcUrl, "response", resp)
 
-	return responseCheck(resp, erigonStateRoot)
+	return responseCheck(resp, request.StateRoot)
 }
 
-func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot *common.Hash) (bool, error) {
+func responseCheck(resp *executor.ProcessBatchResponseV2, erigonStateRoot common.Hash) (bool, error) {
 	if resp == nil {
 		return false, fmt.Errorf("nil response")
 	}
 	if resp.Error != executor.ExecutorError_EXECUTOR_ERROR_UNSPECIFIED &&
-	    resp.Error != executor.ExecutorError_EXECUTOR_ERROR_NO_ERROR {
+		resp.Error != executor.ExecutorError_EXECUTOR_ERROR_NO_ERROR {
 		return false, fmt.Errorf("error in response: %s", resp.Error)
 	}
 

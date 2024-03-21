@@ -1,11 +1,15 @@
 package ethconfig
 
-import "github.com/ledgerwatch/erigon-lib/common"
+import (
+	"github.com/ledgerwatch/erigon-lib/common"
+	"time"
+)
 
 type Zk struct {
 	L2ChainId                   uint64
 	L2RpcUrl                    string
 	L2DataStreamerUrl           string
+	L2DataStreamerTimeout       time.Duration
 	L1ChainId                   uint64
 	L1RpcUrl                    string
 	L1PolygonRollupManager      common.Address

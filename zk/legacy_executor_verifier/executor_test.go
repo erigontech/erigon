@@ -70,7 +70,7 @@ func TestExecutor_Verify(t *testing.T) {
 				ContextId:         "cdk-erigon-test",
 			}
 
-			_, err := executor.Verify(payload, tt.expectedStateRoot)
+			_, err := executor.Verify(payload, &VerifierRequest{StateRoot: *tt.expectedStateRoot})
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Executor.Verify() error = %v, wantErr %v", err, tt.wantErr)
 			}

@@ -310,6 +310,7 @@ message ProcessStatelessBatchRequestV2 {
 
   // Debug
   string context_id = 8; // batch ID to be shown in the executor traces, for your convenience: "Erigon_candidate_batch_N"
+  TraceConfigV2 trace_config = 9;
 }
 
 message L1DataV2 {
@@ -352,6 +353,15 @@ message ProcessBatchResponseV2 {
   uint64 fork_id = 22;
   uint32 invalid_batch = 23;
   RomError error_rom = 24;
+  uint32 cnt_reserve_keccak_hashes = 25;
+  uint32 cnt_reserve_poseidon_hashes = 26;
+  uint32 cnt_reserve_poseidon_paddings = 27;
+  uint32 cnt_reserve_mem_aligns = 28;
+  uint32 cnt_reserve_arithmetics = 29;
+  uint32 cnt_reserve_binaries = 30;
+  uint32 cnt_reserve_steps = 31;
+  uint32 cnt_reserve_sha256_hashes = 32;
+  bytes old_state_root = 33;
 }
 
 // Trace configuration request params
@@ -392,6 +402,12 @@ message InfoReadWriteV2 {
   string nonce = 1;
   // If balance="" then it has not been set; if set, string is in decimal (base 10)
   string balance = 2;
+  // If sc_code="" then it has not been set; if set, string is in hexa (base 16)
+  string sc_code = 3;
+  // Both sc_storage first and second map elements are set in hexa (base 16)
+  map<string, string> sc_storage = 4;
+  // If sc_length="" then it has not been set; if set, string is in hexa (base 16)
+  string sc_length = 5;
 }
 
 message FullTraceV2 {
@@ -545,6 +561,8 @@ message ProcessTransactionResponseV2 {
   uint32 has_gasprice_opcode = 19;
   // Flag to indicate if opcode 'BALANCE' has been called
   uint32 has_balance_opcode = 20;
+  // Receipt status of the transaction, 1 = success, 0 = failure
+  uint32 status = 21;
 }
 
 message LogV2 {
@@ -880,6 +898,6 @@ enum ExecutorError {
   EXECUTOR_ERROR_INVALID_DATA_STREAM = 115;
   // EXECUTOR_ERROR_INVALID_UPDATE_MERKLE_TREE indicates that the provided update merkle tree is invalid, e.g. because the executor is configured not to write to database
   EXECUTOR_ERROR_INVALID_UPDATE_MERKLE_TREE = 116;
-  // EXECUTOR_ERROR_UNSUPPORTED_PRECOMPILED indicates that an unsupported precompiled has been used
-  EXECUTOR_ERROR_UNSUPPORTED_PRECOMPILED = 117;
+  // EXECUTOR_ERROR_SM_MAIN_INVALID_TX_STATUS_ERROR indicates that a TX has an invalid status-error combination
+  EXECUTOR_ERROR_SM_MAIN_INVALID_TX_STATUS_ERROR = 117;
 }

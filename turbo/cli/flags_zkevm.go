@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/urfave/cli/v2"
+	"time"
 )
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -26,10 +27,17 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		}
 	}
 
+	l2DataStreamTimeoutVal := ctx.String(utils.L2DataStreamerTimeout.Name)
+	l2DataStreamTimeout, err := time.ParseDuration(l2DataStreamTimeoutVal)
+	if err != nil {
+		panic(fmt.Sprintf("could not parse l2 datastreamer timeout value %s", l2DataStreamTimeoutVal))
+	}
+
 	cfg.Zk = &ethconfig.Zk{
 		L2ChainId:                   ctx.Uint64(utils.L2ChainIdFlag.Name),
 		L2RpcUrl:                    ctx.String(utils.L2RpcUrlFlag.Name),
 		L2DataStreamerUrl:           ctx.String(utils.L2DataStreamerUrlFlag.Name),
+		L2DataStreamerTimeout:       l2DataStreamTimeout,
 		L1ChainId:                   ctx.Uint64(utils.L1ChainIdFlag.Name),
 		L1RpcUrl:                    ctx.String(utils.L1RpcUrlFlag.Name),
 		L1PolygonRollupManager:      libcommon.HexToAddress(ctx.String(utils.L1PolygonRollupManagerFlag.Name)),
@@ -57,6 +65,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	if !sequencer.IsSequencer() {
 		checkFlag(utils.L2RpcUrlFlag.Name, cfg.Zk.L2RpcUrl)
 		checkFlag(utils.L2DataStreamerUrlFlag.Name, cfg.Zk.L2DataStreamerUrl)
+		checkFlag(utils.L2DataStreamerTimeout.Name, cfg.Zk.L2DataStreamerTimeout)
 	} else {
 		checkFlag(utils.SequencerInitialForkId.Name, cfg.Zk.SequencerInitialForkId)
 		checkFlag(utils.SequencerAddressFlag.Name, cfg.Zk.SequencerAddress)

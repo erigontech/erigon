@@ -22,12 +22,13 @@ type EntityDefinition struct {
 }
 
 type StreamClient struct {
-	server     string // Server address to connect IP:port
-	version    int
-	streamType StreamType
-	conn       net.Conn
-	id         string            // Client id
-	Header     types.HeaderEntry // Header info received (from Header command)
+	server       string // Server address to connect IP:port
+	version      int
+	streamType   StreamType
+	conn         net.Conn
+	id           string            // Client id
+	Header       types.HeaderEntry // Header info received (from Header command)
+	checkTimeout time.Duration     // time to wait for data before reporting an error
 
 	entriesDefinition map[types.EntryType]EntityDefinition
 
@@ -58,13 +59,14 @@ const (
 
 // Creates a new client fo datastream
 // server must be in format "url:port"
-func NewClient(server string, version int) *StreamClient {
+func NewClient(server string, version int, checkTimeout time.Duration) *StreamClient {
 	// Create the client data stream
 	c := &StreamClient{
-		server:     server,
-		version:    version,
-		streamType: StSequencer,
-		id:         "",
+		checkTimeout: checkTimeout,
+		server:       server,
+		version:      version,
+		streamType:   StSequencer,
+		id:           "",
 		entriesDefinition: map[types.EntryType]EntityDefinition{
 			types.EntryTypeStartL2Block: {
 				Name:       "StartL2Block",
@@ -283,7 +285,9 @@ func (c *StreamClient) afterStartCommand() error {
 func (c *StreamClient) readAllFullL2BlocksToChannel() error {
 	var err error
 	for {
-		c.conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		if c.checkTimeout > 0 {
+			c.conn.SetReadDeadline(time.Now().Add(c.checkTimeout))
+		}
 		fullBlock, gerUpdates, _, _, _, localErr := c.readFullBlock()
 		if localErr != nil {
 			err = localErr

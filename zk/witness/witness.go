@@ -217,7 +217,6 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 		}
 	}
 
-	// todo [zkevm] we need to use this retain list rather than using the always true retain decider
 	rl, err := tds.ResolveSMTRetainList()
 	if err != nil {
 		return nil, err

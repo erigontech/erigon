@@ -242,6 +242,9 @@ func (api *ZkEvmAPIImpl) GetFullBlockByNumber(ctx context.Context, number rpc.Bl
 	if err != nil {
 		return types.Block{}, err
 	}
+	if baseBlock == nil {
+		return types.Block{}, errors.New("could not find block")
+	}
 
 	return api.populateBlockDetail(tx, ctx, baseBlock, fullTx)
 }

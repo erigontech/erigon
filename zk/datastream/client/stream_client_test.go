@@ -42,7 +42,7 @@ func Test_readHeaderEntry(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient("", 0)
+		c := NewClient("", 0, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -106,7 +106,7 @@ func Test_readResultEntry(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		c := NewClient("", 0)
+		c := NewClient("", 0, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -175,7 +175,7 @@ func Test_readFileEntry(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("", 0)
+		c := NewClient("", 0, 0)
 		server, conn := net.Pipe()
 		defer server.Close()
 		defer c.Stop()
@@ -369,7 +369,7 @@ func Test_readFullL2Blocks(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("", BigEndianVersion)
+		c := NewClient("", BigEndianVersion, 0)
 		c.Header.TotalEntries = 3
 		server, conn := net.Pipe()
 		defer server.Close()
@@ -525,7 +525,7 @@ func Test_readFullBlock(t *testing.T) {
 		},
 	}
 	for _, testCase := range testCases {
-		c := NewClient("", BigEndianVersion)
+		c := NewClient("", BigEndianVersion, 0)
 		c.Header.TotalEntries = 3
 		server, conn := net.Pipe()
 		defer server.Close()

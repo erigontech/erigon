@@ -36,7 +36,7 @@ type VerifierResponse struct {
 }
 
 type ILegacyExecutor interface {
-	Verify(*Payload, *common.Hash) (bool, error)
+	Verify(*Payload, *VerifierRequest) (bool, error)
 }
 
 type WitnessGenerator interface {
@@ -205,12 +205,14 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		ContextId:         strconv.Itoa(int(request.BatchNumber)),
 	}
 
-	// todo [zkevm] do something with the result but for now just move on in a happy state, we also need to handle errors
-	_, _ = execer.Verify(payload, &request.StateRoot)
+	ok, err := execer.Verify(payload, request)
+	if err != nil {
+		return err
+	}
 
 	response := &VerifierResponse{
 		BatchNumber: request.BatchNumber,
-		Valid:       true,
+		Valid:       ok,
 	}
 	v.responseChan <- response
 

@@ -227,7 +227,6 @@ func SpawnSequencingStage(
 		Number:     new(big.Int).SetUint64(nextBlockNum),
 		GasLimit:   getGasLimit(uint16(forkId)),
 		Time:       newBlockTimestamp,
-		BaseFee:    big.NewInt(0),
 	}
 
 	stateReader := state.NewPlainStateReader(tx)
@@ -260,11 +259,6 @@ func SpawnSequencingStage(
 		return err
 	}
 	if err = hermezDb.WriteBlockL1InfoTreeIndex(nextBlockNum, l1TreeUpdateIndex); err != nil {
-		return err
-	}
-
-	parentRoot := parentBlock.Root()
-	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs); err != nil {
 		return err
 	}
 
@@ -329,6 +323,11 @@ LOOP:
 	if l1TreeUpdate != nil {
 		l1BlockHash = l1TreeUpdate.ParentHash
 		ger = l1TreeUpdate.GER
+	}
+
+	parentRoot := parentBlock.Root()
+	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs); err != nil {
+		return err
 	}
 
 	if err = finaliseBlock(cfg, tx, hermezDb, ibs, stateReader, header, parentBlock, addedTransactions, addedReceipts, thisBatch, ger, l1BlockHash, forkId); err != nil {
@@ -577,7 +576,7 @@ func finaliseBlock(
 		cfg.chainConfig,
 		ibs,
 		receipts,
-		[]*types.Withdrawal{}, // no withdrawals
+		nil, // no withdrawals
 		chainReader,
 		true,
 		excessDataGas,

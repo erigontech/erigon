@@ -294,8 +294,27 @@ func (tds *TrieDbState) buildStorageReads() eriCommon.StorageKeys {
 	for storageKey := range tds.aggregateBuffer.storageReads {
 		storageTouches = append(storageTouches, storageKey)
 	}
+	storageTouches = append(storageTouches, tds.scalableStorageKeys()...)
 	sort.Sort(storageTouches)
 	return storageTouches
+}
+
+func (tds *TrieDbState) scalableStorageKeys() eriCommon.StorageKeys {
+	keys := eriCommon.StorageKeys{}
+	keys = append(keys, buildStorageKey(ADDRESS_SCALABLE_L2, 1, LAST_BLOCK_STORAGE_POS))
+	keys = append(keys, buildStorageKey(ADDRESS_SCALABLE_L2, 1, STATE_ROOT_STORAGE_POS))
+	keys = append(keys, buildStorageKey(ADDRESS_SCALABLE_L2, 1, TIMESTAMP_STORAGE_POS))
+	keys = append(keys, buildStorageKey(ADDRESS_SCALABLE_L2, 1, BLOCK_INFO_ROOT_STORAGE_POS))
+	keys = append(keys, buildStorageKey(GER_MANAGER_ADDRESS, 1, GLOBAL_EXIT_ROOT_STORAGE_POS))
+	return keys
+}
+
+func buildStorageKey(address common.Address, incarnation uint64, slot common.Hash) eriCommon.StorageKey {
+	var storageKey eriCommon.StorageKey
+	copy(storageKey[:], address.Bytes())
+	binary.BigEndian.PutUint64(storageKey[length.Hash:], incarnation)
+	copy(storageKey[length.Hash+length.Incarnation:], slot.Bytes())
+	return storageKey
 }
 
 // buildStorageWrites builds a sorted list of all storage key hashes that were modified within the

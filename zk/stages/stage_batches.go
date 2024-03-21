@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon/chain"
 )
 
 const (
@@ -195,8 +196,17 @@ func SpawnStageBatches(
 				if err != nil {
 					return fmt.Errorf("write fork id error: %v", err)
 				}
-				if err := hermezDb.WriteForkIdBlockOnce(uint64(l2Block.ForkId), l2Block.L2BlockNumber); err != nil {
-					return fmt.Errorf("write fork id block once error: %v", err)
+				// if this is the first block then enable all forks prior to this new one as well
+				if l2Block.L2BlockNumber == 1 {
+					for fId := uint16(chain.ForkID5Dragonfruit); fId <= l2Block.ForkId; fId++ {
+						if err := hermezDb.WriteForkIdBlockOnce(uint64(fId), 1); err != nil {
+							return err
+						}
+					}
+				} else {
+					if err := hermezDb.WriteForkIdBlockOnce(uint64(l2Block.ForkId), l2Block.L2BlockNumber); err != nil {
+						return fmt.Errorf("write fork id block once error: %v", err)
+					}
 				}
 			}
 

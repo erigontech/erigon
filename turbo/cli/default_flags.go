@@ -167,6 +167,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.L2ChainIdFlag,
 	&utils.L2RpcUrlFlag,
 	&utils.L2DataStreamerUrlFlag,
+	&utils.L2DataStreamerTimeout,
 	&utils.L1ChainIdFlag,
 	&utils.L1RpcUrlFlag,
 	&utils.L1PolygonRollupManagerFlag,
