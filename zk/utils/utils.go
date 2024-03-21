@@ -6,6 +6,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
+	"github.com/ledgerwatch/log/v3"
 )
 
 func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
@@ -88,6 +89,10 @@ func ShouldShortCircuitExecution(tx kv.RwTx) (bool, uint64, error) {
 
 	// check to skip execution: 1. there is inters progress, 2. the inters progress is less than the highest hashable, 3. we're in the tip batch range
 	if intersProgress != 0 && intersProgress < highestHashableL2BlockNo && highestHashableBatchNo-intersProgressBatchNo <= 1 {
+		log.Info("[shortCircuit]",
+			"inters", intersProgress,
+			"highestHashableBlock", highestHashableL2BlockNo,
+			"highestHashableBatch", highestHashableBatchNo)
 		return true, highestHashableL2BlockNo, nil
 	}
 
