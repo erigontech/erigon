@@ -173,7 +173,7 @@ func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
 func (tf *TorrentFiles) newDownloadsAreProhibited(name string) (bool, error) {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile(filepath.Join(tf.dir, ProhibitNewDownloadsFileName), os.O_CREATE|os.O_APPEND|os.O_RDONLY, 0644)
 	if err != nil {
 		return false, err
 	}
