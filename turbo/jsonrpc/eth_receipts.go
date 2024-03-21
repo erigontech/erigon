@@ -205,6 +205,9 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 			}
 			blockLogs = append(blockLogs, filtered...)
 		}
+		if casted, ok := it.(kv.Closer); ok {
+			casted.Close()
+		}
 		if len(blockLogs) == 0 {
 			continue
 		}
