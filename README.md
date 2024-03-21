@@ -18,13 +18,15 @@ Current status of cdk-erigon's support for running various chains and fork ids:
 - CDK Chains - experimental support (forkid.8 and above)
 
 ## Prereqs
-In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicone it will fall back to the iden3 library and as such these dependencies are not required in that case.
+In order to use the optimal vectorized poseidon hashing for the Sparse Merkle Tree, on x86 the following packages are required (for Apple silicon it will fall back to the iden3 library and as such these dependencies are not required in that case.
 
 Please install: 
 - Linux: `libgtest-dev` `libomp-dev` `libgmp-dev`
 - MacOS: `brew install libomp` `brew install gmp`
 
 Using the Makefile command: `make build-libs` will install these for the relevant architecture.
+
+Due to dependency requirements Go 1.19 is required to build.
 
 ## sequencer (WIP)
 
