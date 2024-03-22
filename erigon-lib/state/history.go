@@ -1025,8 +1025,7 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx := hc.ic.CanPruneFrom(tx)
-	maxIdxTx := hc.ic.highestTxNum(tx)
+	minIdxTx, maxIdxTx := hc.ic.smallestTxNum(tx), hc.ic.highestTxNum(tx)
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
 	//		hc.h.filenameBase, untilTx, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
@@ -1038,11 +1037,22 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 		}
 		txTo = min(maxIdxTx-hc.h.keepTxInDB, untilTx) // bound pruning
 	} else {
-		canPruneIdx := hc.ic.CanPruneUntil(tx, untilTx)
+		canPruneIdx := hc.ic.CanPrune(tx)
 		if !canPruneIdx {
 			return false, 0
 		}
 		txTo = min(hc.maxTxNumInFiles(false), untilTx)
+	}
+
+	switch hc.h.filenameBase {
+	case "accounts":
+		mxPrunableHAcc.Set(float64(txTo - minIdxTx))
+	case "storage":
+		mxPrunableHSto.Set(float64(txTo - minIdxTx))
+	case "code":
+		mxPrunableHCode.Set(float64(txTo - minIdxTx))
+	case "commitment":
+		mxPrunableHComm.Set(float64(txTo - minIdxTx))
 	}
 	return minIdxTx < txTo, txTo
 }

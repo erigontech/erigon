@@ -651,7 +651,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	}
 }
 
-func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
+func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune bool) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -665,11 +665,13 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
 	require.NoError(t, err)
 	d.integrateFiles(sf, txFrom, txTo)
 
-	dc := d.MakeContext()
-	stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, false, logEvery)
-	dc.Close()
-	require.NoError(t, err)
-	t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
+	if prune {
+		dc := d.MakeContext()
+		stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, false, logEvery)
+		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
+		require.NoError(t, err)
+		dc.Close()
+	}
 
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
@@ -896,7 +898,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			err = writer.Flush(ctx, tx)
 			require.NoError(t, err)
 
-			collateAndMergeOnce(t, d, tx, step)
+			collateAndMergeOnce(t, d, tx, step, true)
 		}
 	}
 	err = writer.Flush(ctx, tx)
@@ -1514,6 +1516,101 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 		require.EqualValuesf(t, updates[len(updates)-1].value, v, "key %x latest", []byte(key))
 		require.True(t, ok)
 	}
+}
+
+func TestDomain_CanPruneAfterAggregation(t *testing.T) {
+	aggStep := uint64(25)
+	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
+	d.History.compression = CompressKeys | CompressVals
+	d.compression = CompressKeys | CompressVals
+	d.withExistenceIndex = true
+
+	dc := d.MakeContext()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	dc.Close()
+
+	stepToPrune := uint64(2)
+	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+
+	dc = d.MakeContext()
+	can, untilStep := dc.canPruneDomainTables(tx, aggStep)
+	defer dc.Close()
+	require.Falsef(t, can, "those step is already pruned")
+	require.EqualValues(t, stepToPrune, untilStep)
+
+	stepToPrune = 3
+	collateAndMergeOnce(t, d, tx, stepToPrune, false)
+
+	// refresh file list
+	dc = d.MakeContext()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune)
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	dc.Close()
+
+	stepToPrune = 30
+	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+
+	dc = d.MakeContext()
+	can, untilStep = dc.canPruneDomainTables(tx, aggStep*stepToPrune)
+	require.False(t, can, "lattter step is not yet pruned")
+	require.EqualValues(t, stepToPrune, untilStep)
+	dc.Close()
+
+	stepToPrune = 35
+	collateAndMergeOnce(t, d, tx, stepToPrune, false)
+
+	dc = d.MakeContext()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune)
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	dc.Close()
 }
 
 func TestDomain_PruneAfterAggregation(t *testing.T) {

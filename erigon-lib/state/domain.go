@@ -60,6 +60,14 @@ var (
 	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
 	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
 	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
+	mxPrunableDAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
+	mxPrunableDSto  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
+	mxPrunableDCode = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
+	mxPrunableDComm = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
+	mxPrunableHAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
+	mxPrunableHSto  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
+	mxPrunableHCode = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
+	mxPrunableHComm = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
 
 	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
 	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
@@ -2012,8 +2020,20 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can boo
 		untilStep = (untilTx - 1) / dc.d.aggregationStep
 	}
 	sm := dc.smallestStepForPruning(tx)
-	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxStepToPrune)
-	return sm <= maxStepToPrune && sm <= untilStep && untilStep <= maxStepToPrune, maxStepToPrune
+
+	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
+	switch dc.d.filenameBase {
+	case "account":
+		mxPrunableDAcc.Set(delta)
+	case "storage":
+		mxPrunableDSto.Set(delta)
+	case "code":
+		mxPrunableDCode.Set(delta)
+	case "commitment":
+		mxPrunableDComm.Set(delta)
+	}
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dc.d.filenameBase, sm, maxStepToPrune, untilStep)
+	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
 }
 
 func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {

@@ -714,10 +714,10 @@ func (ac *AggregatorV3Context) CanPrune(tx kv.Tx, untilTx uint64) bool {
 			return true
 		}
 	}
-	return ac.logAddrs.CanPruneUntil(tx, untilTx) ||
-		ac.logTopics.CanPruneUntil(tx, untilTx) ||
-		ac.tracesFrom.CanPruneUntil(tx, untilTx) ||
-		ac.tracesTo.CanPruneUntil(tx, untilTx)
+	return ac.logAddrs.CanPrune(tx) ||
+		ac.logTopics.CanPrune(tx) ||
+		ac.tracesFrom.CanPrune(tx) ||
+		ac.tracesTo.CanPrune(tx)
 }
 
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
