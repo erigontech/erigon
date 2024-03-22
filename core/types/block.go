@@ -731,7 +731,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 	var tx []byte
 	for tx, err = s.Raw(); err == nil; tx, err = s.Raw() {
 		if tx == nil {
-			return errors.New("RawBody.DecodeRLP tx nil\n")
+			return errors.New("RawBody.DecodeRLP tx nil")
 		}
 		rb.Transactions = append(rb.Transactions, tx)
 	}
@@ -885,7 +885,6 @@ func (bb Body) EncodeRLP(w io.Writer) error {
 func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
-		fmt.Println("THIS ERR")
 		return err
 	}
 	// decode Transactions
