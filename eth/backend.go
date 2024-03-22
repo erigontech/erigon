@@ -775,7 +775,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	hook := stages2.NewHook(backend.sentryCtx, backend.chainDB, backend.notifications, backend.stagedSync, backend.blockReader, backend.chainConfig, backend.logger, backend.sentriesClient.UpdateHead)
 
-	if !config.Sync.UseSnapshots {
+	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
 		for _, p := range snaptype.AllTypes {
 			backend.downloaderClient.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
 				Type: p.String(),
