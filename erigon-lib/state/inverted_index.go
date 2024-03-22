@@ -890,17 +890,11 @@ func (ic *InvertedIndexContext) Warmup(ctx context.Context) (cleanup func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
-		defer func(t time.Time) {
-			log.Warn(fmt.Sprintf("[dbg] warmup1 ii.go:2108: %s,  %s\n", time.Since(t), ic.ii.filenameBase))
-		}(time.Now())
-		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexTable, log.LvlDebug, 16)
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexTable, log.LvlDebug, 4)
 		return nil
 	})
 	wg.Go(func() error {
-		defer func(t time.Time) {
-			log.Warn(fmt.Sprintf("[dbg] warmup2 ii.go:2108: %s,  %s\n", time.Since(t), ic.ii.filenameBase))
-		}(time.Now())
-		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexKeysTable, log.LvlDebug, 16)
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexKeysTable, log.LvlDebug, 4)
 		return nil
 	})
 	return func() {
