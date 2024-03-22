@@ -760,13 +760,18 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)
 	defer localTimeout.Stop()
-	withWarmup := timeout >= 10*time.Minute
+
+	var pruneLimit uint64 = 1_000
+	var withWarmup bool = false
+	if timeout >= 10*time.Minute {
+		pruneLimit = 100_000
+		withWarmup = true
+	}
+
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
 	defer aggLogEvery.Stop()
-
-	const pruneLimit uint64 = 10000
 
 	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
