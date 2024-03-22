@@ -441,7 +441,7 @@ func ExecV3(ctx context.Context,
 							return err
 						}
 						ac := agg.MakeContext()
-						if err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
+						if _, err = ac.PruneSmallBatches(ctx, 10*time.Second, tx); err != nil { // prune part of retired data, before commit
 							return err
 						}
 						ac.Close()
@@ -911,20 +911,23 @@ Loop:
 						}
 
 						tt = time.Now()
-						if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
-							//very aggressive prune, because:
-							// if prune is slow - means DB > RAM and skip pruning will only make things worse
-							// db will grow -> prune will get slower -> db will grow -> ...
-							if err := tx.(state2.HasAggCtx).
-								AggCtx().(*state2.AggregatorV3Context).
-								PruneSmallBatches(ctx, 12*time.Hour, tx); err != nil {
+						for haveMoreToPrune := true; haveMoreToPrune; {
+							if err := chainDb.Update(ctx, func(tx kv.RwTx) error {
+								//very aggressive prune, because:
+								// if prune is slow - means DB > RAM and skip pruning will only make things worse
+								// db will grow -> prune will get slower -> db will grow -> ...
+								if haveMoreToPrune, err = tx.(state2.HasAggCtx).
+									AggCtx().(*state2.AggregatorV3Context).
+									PruneSmallBatches(ctx, 10*time.Minute, tx); err != nil {
 
+									return err
+								}
+								return nil
+							}); err != nil {
 								return err
 							}
-							return nil
-						}); err != nil {
-							return err
 						}
+
 						t3 = time.Since(tt)
 
 						applyTx, err = cfg.db.BeginRw(context.Background()) //nolint

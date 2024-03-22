@@ -834,7 +834,7 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 	return it, nil
 }
 
-func (ic *InvertedIndexContext) CanPruneFrom(tx kv.Tx) uint64 {
+func (ic *InvertedIndexContext) smallestTxNum(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ic.ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
@@ -852,14 +852,8 @@ func (ic *InvertedIndexContext) highestTxNum(tx kv.Tx) uint64 {
 	return 0
 }
 
-func (ic *InvertedIndexContext) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
-	minTx := ic.CanPruneFrom(tx)
-	maxInFiles := ic.maxTxNumInFiles(false)
-	return minTx < maxInFiles && untilTx <= maxInFiles && minTx < untilTx
-}
-
 func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
-	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
+	return ic.smallestTxNum(tx) < ic.maxTxNumInFiles(false)
 }
 
 type InvertedIndexPruneStat struct {
@@ -890,11 +884,11 @@ func (ic *InvertedIndexContext) Warmup(ctx context.Context) (cleanup func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
-		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexTable, log.LvlDebug, 16)
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexTable, log.LvlDebug, 4)
 		return nil
 	})
 	wg.Go(func() error {
-		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexKeysTable, log.LvlDebug, 16)
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexKeysTable, log.LvlDebug, 4)
 		return nil
 	})
 	return func() {
