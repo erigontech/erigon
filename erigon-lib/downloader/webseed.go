@@ -285,9 +285,6 @@ func (d *WebSeeds) VerifyManifestedBucket(ctx context.Context, webSeedProviderUR
 }
 
 func (d *WebSeeds) Discover(ctx context.Context, files []string, rootDir string) {
-	if d.torrentFiles.newDownloadsAreProhibited() {
-		return
-	}
 	listsOfFiles := d.constructListsOfFiles(ctx, d.seeds, files)
 	torrentMap := d.makeTorrentUrls(listsOfFiles)
 	webSeedMap := d.downloadTorrentFilesFromProviders(ctx, rootDir, torrentMap)
