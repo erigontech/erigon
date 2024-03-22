@@ -209,6 +209,8 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					kNum++
 					if kNum%1024 == 0 { // a bit reduce runtime cost
 						select {
+						case <-ctx.Done():
+							return ctx.Err()
 						case <-logEvery.C:
 							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 						default:
@@ -245,6 +247,8 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					kNum++
 					if kNum%1024 == 0 {
 						select {
+						case <-ctx.Done():
+							return ctx.Err()
 						case <-logEvery.C:
 							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 						default:
