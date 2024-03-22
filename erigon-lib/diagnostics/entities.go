@@ -165,6 +165,10 @@ type BlockHeadersUpdate struct {
 	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
 }
 
+type BodiesInfo struct {
+	BlockDownload BodiesDownloadBlockUpdate `json:"blockDownload"`
+}
+
 type BodiesDownloadBlockUpdate struct {
 	BlockNumber    uint64 `json:"blockNumber"`
 	DeliveryPerSec uint64 `json:"deliveryPerSec"`
