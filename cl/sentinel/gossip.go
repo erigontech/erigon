@@ -308,6 +308,9 @@ func (sub *GossipSubscription) Listen() {
 				expirationTime := sub.expiration.Load().(time.Time)
 				if sub.subscribed.Load() && time.Now().After(expirationTime) {
 					sub.stopCh <- struct{}{}
+					if cancelFunc := sub.cf; cancelFunc != nil {
+						cancelFunc() // stop pubsub.Subscription.Next
+					}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
 					continue
