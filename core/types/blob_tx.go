@@ -132,6 +132,12 @@ func (stx BlobTx) SigningHash(chainID *big.Int) libcommon.Hash {
 		})
 }
 
+func (stx BlobTx) EncodingSize() int {
+	payloadSize, _, _, _, _ := stx.payloadSize()
+	// Add envelope size and type size
+	return 1 + rlp2.ListPrefixLen(payloadSize) + payloadSize
+}
+
 func (stx BlobTx) payloadSize() (payloadSize, nonceLen, gasLen, accessListLen, blobHashesLen int) {
 	payloadSize, nonceLen, gasLen, accessListLen = stx.DynamicFeeTransaction.payloadSize()
 	// size of MaxFeePerBlobGas
@@ -217,7 +223,7 @@ func (stx BlobTx) encodePayload(w io.Writer, b []byte, payloadSize, nonceLen, ga
 	if err := encodeBlobVersionedHashes(stx.BlobVersionedHashes, w, b); err != nil {
 		return err
 	}
-	// encode y_parity
+	// encode V
 	if err := stx.V.EncodeRLP(w); err != nil {
 		return err
 	}
@@ -317,20 +323,18 @@ func (stx *BlobTx) DecodeRLP(s *rlp.Stream) error {
 	if err = decodeAccessList(&stx.AccessList, s); err != nil {
 		return err
 	}
-
 	// decode MaxFeePerBlobGas
 	if b, err = s.Uint256Bytes(); err != nil {
 		return err
 	}
 	stx.MaxFeePerBlobGas = new(uint256.Int).SetBytes(b)
-
 	// decode BlobVersionedHashes
 	stx.BlobVersionedHashes = []libcommon.Hash{}
 	if err = decodeBlobVersionedHashes(&stx.BlobVersionedHashes, s); err != nil {
 		return err
 	}
 	if len(stx.BlobVersionedHashes) == 0 {
-		return fmt.Errorf("a blob tx must contain at least one blob")
+		return fmt.Errorf("a blob stx must contain at least one blob")
 	}
 	// decode V
 	if b, err = s.Uint256Bytes(); err != nil {
