@@ -102,6 +102,7 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 }
 func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FrozenBorBlocks() uint64               { panic("not supported") }
 func (r *RemoteBlockReader) FrozenFiles() (list []string)          { panic("not supported") }
@@ -318,6 +319,15 @@ func (r *BlockReader) BorSnapshots() services.BlockSnapshots {
 	}
 
 	return nil
+}
+
+func (r *BlockReader) AllTypes() []snaptype.Type {
+	var types []snaptype.Type
+	types = append(types, r.sn.Types()...)
+	if r.borSn != nil {
+		types = append(types, r.borSn.Types()...)
+	}
+	return types
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }

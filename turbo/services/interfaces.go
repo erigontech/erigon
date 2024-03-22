@@ -109,6 +109,8 @@ type FullBlockReader interface {
 
 	Snapshots() BlockSnapshots
 	BorSnapshots() BlockSnapshots
+
+	AllTypes() []snaptype.Type
 }
 
 type BlockSnapshots interface {
