@@ -168,6 +168,7 @@ type BlockHeadersUpdate struct {
 type BodiesInfo struct {
 	BlockDownload BodiesDownloadBlockUpdate `json:"blockDownload"`
 	BlockWrite    BodiesWriteBlockUpdate    `json:"blockWrite"`
+	Processing    BodiesProcessingUpdate    `json:"processing"`
 }
 
 type BodiesDownloadBlockUpdate struct {
@@ -187,6 +188,17 @@ type BodiesWriteBlockUpdate struct {
 	Remaining   uint64 `json:"remaining"`
 	Alloc       uint64 `json:"alloc"`
 	Sys         uint64 `json:"sys"`
+}
+
+type BodiesProcessingUpdate struct {
+	HighestBlock uint64  `json:"highestBlock"`
+	Blocks       uint64  `json:"blocks"`
+	TimeElapsed  float64 `json:"timeElapsed"`
+	BlkPerSec    float64 `json:"blkPerSec"`
+}
+
+func (ti BodiesProcessingUpdate) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti BodiesWriteBlockUpdate) Type() Type {
