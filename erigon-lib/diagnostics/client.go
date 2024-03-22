@@ -15,6 +15,7 @@ type DiagnosticClient struct {
 	hardwareInfo     HardwareInfo
 	peersSyncMap     sync.Map
 	bodies           BodiesInfo
+	bodiesMutex      sync.Mutex
 }
 
 func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {

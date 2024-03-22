@@ -11,6 +11,7 @@ func (d *DiagnosticClient) setupBodiesDiagnostics() {
 	d.runBodiesBlockDownloadListener()
 	d.runBodiesBlockWriteListener()
 	d.runBodiesProcessingListener()
+	d.runBodiesProcessedListener()
 }
 
 func (d *DiagnosticClient) runBodiesBlockDownloadListener() {
@@ -27,9 +28,9 @@ func (d *DiagnosticClient) runBodiesBlockDownloadListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				d.bodiesMutex.Lock()
 				d.bodies.BlockDownload = info
-				d.mu.Unlock()
+				d.bodiesMutex.Unlock()
 			}
 		}
 
@@ -50,9 +51,32 @@ func (d *DiagnosticClient) runBodiesBlockWriteListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				d.bodiesMutex.Lock()
 				d.bodies.BlockWrite = info
-				d.mu.Unlock()
+				d.bodiesMutex.Unlock()
+			}
+		}
+
+	}()
+}
+
+func (d *DiagnosticClient) runBodiesProcessedListener() {
+	go func() {
+		ctx, ch, cancel := Context[BodiesProcessedUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		StartProviders(ctx, TypeOf(BodiesProcessedUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.bodiesMutex.Lock()
+				d.bodies.Processed = info
+				d.bodiesMutex.Unlock()
 			}
 		}
 
@@ -73,9 +97,9 @@ func (d *DiagnosticClient) runBodiesProcessingListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.mu.Lock()
+				d.bodiesMutex.Lock()
 				d.bodies.Processing = info
-				d.mu.Unlock()
+				d.bodiesMutex.Unlock()
 			}
 		}
 
@@ -83,5 +107,7 @@ func (d *DiagnosticClient) runBodiesProcessingListener() {
 }
 
 func (d *DiagnosticClient) GetBodiesInfo() BodiesInfo {
+	d.bodiesMutex.Lock()
+	defer d.bodiesMutex.Unlock()
 	return d.bodies
 }

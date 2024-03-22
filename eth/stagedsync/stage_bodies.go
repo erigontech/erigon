@@ -125,6 +125,11 @@ func BodiesForward(
 		timeout = 1
 	} else {
 		// Do not print logs for short periods
+		diagnostics.Send(diagnostics.BodiesProcessingUpdate{
+			From: bodyProgress,
+			To:   headerProgress,
+		})
+
 		logger.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	}
 	logEvery := time.NewTicker(logInterval)
@@ -325,7 +330,7 @@ func BodiesForward(
 		blocks := bodyProgress - s.BlockNumber
 		secs := time.Since(startTime).Seconds()
 
-		diagnostics.Send(diagnostics.BodiesProcessingUpdate{
+		diagnostics.Send(diagnostics.BodiesProcessedUpdate{
 			HighestBlock: bodyProgress,
 			Blocks:       blocks,
 			TimeElapsed:  secs,
