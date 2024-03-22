@@ -2,8 +2,8 @@ package attestation
 
 import (
 	"context"
+	"fmt"
 	"sync"
-	"time"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -21,8 +21,12 @@ type Attestation struct {
 	netConfig    *clparams.NetworkConfig
 	sentinel     sentinel.SentinelClient
 	// subscriptions
-	subnetAttMutex sync.Mutex
-	subnets        map[uint64]*subnetSubscription // map from subnet id to subscription list
+	//subnetAttMutex sync.Mutex
+	//subnets        map[uint64]*subnetSubscription // map from subnet id to subscription list
+	aggregationMutex   sync.RWMutex
+	aggregations       map[string]*aggregateData // map from slot:committeeIndex to aggregate data
+	validatorSubsMutex sync.RWMutex
+	validatorSubs      map[uint64][]*validatorSub // map from validator index to subscription details
 }
 
 func NewAttestation(
@@ -35,22 +39,41 @@ func NewAttestation(
 	return &Attestation{
 		indiciesDB:   indiciesDB,
 		beaconConfig: beaconConfig,
-		subnets:      make(map[uint64]*subnetSubscription),
 		netConfig:    netConfig,
+		sentinel:     sentinel,
+		//subnets:      make(map[uint64]*subnetSubscription),
+		aggregations:  make(map[string]*aggregateData),
+		validatorSubs: make(map[uint64][]*validatorSub),
 	}
 }
 
-type subnetSubscription struct {
-	subnetId             uint64
-	subscribers          []validator
-	needAggregate        bool
-	aggregationSignature []byte
-	aggregationBits      []byte
+type aggregateData struct {
+	subnetId       uint64
+	slot           uint64
+	committeeIndex uint64
+	internalLock   sync.RWMutex
+	signature      []byte
+	bits           []byte
 }
 
-type validator struct {
-	validatorIndex uint64
-	expiry         time.Time // todo: might need to add expiration
+/*
+	type subnetSubscription struct {
+		subnetId             uint64
+		slot                 uint64
+		subscribers          map[uint64]validator // map from validator index to subscription details
+		needAggregate        bool
+		aggregationSignature []byte
+		aggregationBits      []byte
+	}
+*/
+type validatorSub struct {
+	subnetId       uint64
+	slot           uint64
+	committeeIndex uint64
+}
+
+func toAggregationId(slot, committeeIndex uint64) string {
+	return fmt.Sprintf("%d:%d", slot, committeeIndex)
 }
 
 func (a *Attestation) AddAttestationSubscription(p *cltypes.BeaconCommitteeSubscription) error {
@@ -58,28 +81,62 @@ func (a *Attestation) AddAttestationSubscription(p *cltypes.BeaconCommitteeSubsc
 	if err != nil {
 		return err
 	}
-	a.subnetAttMutex.Lock()
-	defer a.subnetAttMutex.Unlock()
-	// add subscription to attestationSubscriptions
-	curSubnet, exist := a.subnets[subnetId]
-	if !exist {
-		// a new subnet
-		a.subnets[subnetId] = &subnetSubscription{
-			subnetId:             subnetId,
-			subscribers:          make([]validator, 0),
-			needAggregate:        false,
-			aggregationSignature: nil,
-			aggregationBits:      make([]byte, a.beaconConfig.MaxValidatorsPerCommittee/8),
-		}
+	// 1. add validator to subscription
+	a.validatorSubsMutex.Lock()
+	if _, exist := a.validatorSubs[p.ValidatorIndex]; !exist {
+		a.validatorSubs[p.ValidatorIndex] = make([]*validatorSub, 0)
 	}
-	curSubnet.subscribers = append(curSubnet.subscribers, validator{
-		validatorIndex: p.ValidatorIndex,
+	a.validatorSubs[p.ValidatorIndex] = append(a.validatorSubs[p.ValidatorIndex], &validatorSub{
+		subnetId:       subnetId,
+		slot:           p.Slot,
+		committeeIndex: p.CommitteeIndex,
 	})
-	// todo: a.sentinel.SetGossipExpiration()
+	a.validatorSubsMutex.Unlock()
+
+	// 2. if aggregator, add to aggregation collection
 	if p.IsAggregator {
-		curSubnet.needAggregate = true
+		a.aggregationMutex.Lock()
+		aggrId := toAggregationId(p.Slot, p.CommitteeIndex)
+		if _, exist := a.aggregations[aggrId]; !exist {
+			a.aggregations[aggrId] = &aggregateData{
+				subnetId:       subnetId,
+				slot:           p.Slot,
+				committeeIndex: p.CommitteeIndex,
+				signature:      nil,
+				bits:           make([]byte, a.beaconConfig.MaxValidatorsPerCommittee/8),
+			}
+		}
+		a.aggregationMutex.Unlock()
 	}
-	return nil
+
+	// 3. set sentinel gossip expiration by subnet id
+
+	/*
+		a.subnetAttMutex.Lock()
+		defer a.subnetAttMutex.Unlock()
+		// add subscription to attestationSubscriptions
+		curSubnet, exist := a.subnets[subnetId]
+		if !exist {
+			// a new subnet
+			a.subnets[subnetId] = &subnetSubscription{
+				subnetId:             subnetId,
+				subscribers:          make(map[uint64]validator),
+				needAggregate:        false,
+				aggregationSignature: nil,
+				aggregationBits:      make([]byte, a.beaconConfig.MaxValidatorsPerCommittee/8),
+			}
+		}
+		curSubnet.subscribers[p.ValidatorIndex] = validator{
+			// todo: might need to consider expiration
+			expiry: time.Now().Add(7 * 24 * time.Hour),
+		}
+
+		// todo: a.sentinel.SetGossipExpiration()
+		if p.IsAggregator {
+			curSubnet.needAggregate = true
+		}
+		return nil
+	*/
 }
 
 func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) error {
