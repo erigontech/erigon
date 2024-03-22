@@ -371,6 +371,14 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed
+
+	diagnostics.Send(diagnostics.BodiesWriteBlockUpdate{
+		BlockNumber: committed,
+		Remaining:   remaining,
+		Alloc:       m.Alloc,
+		Sys:         m.Sys,
+	})
+
 	logger.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
 		"block_num", committed,
 		"remaining", remaining,

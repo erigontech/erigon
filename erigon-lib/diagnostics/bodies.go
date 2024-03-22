@@ -9,6 +9,7 @@ import (
 
 func (d *DiagnosticClient) setupBodiesDiagnostics() {
 	d.runBodiesBlockDownloadListener()
+	d.runBodiesBlockWriteListener()
 }
 
 func (d *DiagnosticClient) runBodiesBlockDownloadListener() {
@@ -27,6 +28,29 @@ func (d *DiagnosticClient) runBodiesBlockDownloadListener() {
 			case info := <-ch:
 				d.mu.Lock()
 				d.bodies.BlockDownload = info
+				d.mu.Unlock()
+			}
+		}
+
+	}()
+}
+
+func (d *DiagnosticClient) runBodiesBlockWriteListener() {
+	go func() {
+		ctx, ch, cancel := Context[BodiesWriteBlockUpdate](context.Background(), 1)
+		defer cancel()
+
+		rootCtx, _ := common.RootContext()
+
+		StartProviders(ctx, TypeOf(BodiesWriteBlockUpdate{}), log.Root())
+		for {
+			select {
+			case <-rootCtx.Done():
+				cancel()
+				return
+			case info := <-ch:
+				d.mu.Lock()
+				d.bodies.BlockWrite = info
 				d.mu.Unlock()
 			}
 		}
