@@ -756,14 +756,14 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
-func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
+func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)
 	defer localTimeout.Stop()
 
 	var pruneLimit uint64 = 1_000
 	var withWarmup bool = false
-	if timeout >= 10*time.Minute {
+	if timeout >= 1*time.Minute {
 		log.Warn("[dbg] set withWarmup=true")
 		pruneLimit = 100_000
 		withWarmup = true
@@ -780,13 +780,13 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		stat, err := ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
 		if err != nil {
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
-			return err
+			return false, err
 		}
 		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
 				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
-			return nil
+			return false, nil
 		}
 		fullStat.Accumulate(stat)
 
@@ -799,9 +799,9 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 				"pruned", fullStat.String(),
 			)
 		case <-localTimeout.C:
-			return nil
+			return true, nil
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		default:
 		}
 	}
