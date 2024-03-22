@@ -1,8 +1,9 @@
 package ethconfig
 
 import (
-	"github.com/ledgerwatch/erigon-lib/common"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 type Zk struct {
@@ -32,6 +33,7 @@ type Zk struct {
 	AllowPreEIP155Transactions  bool
 
 	RebuildTreeAfter uint64
+	WitnessFull      bool
 }
 
 var DefaultZkConfig = &Zk{}

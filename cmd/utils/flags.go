@@ -482,6 +482,11 @@ var (
 		Usage: "Allow the sequencer to proceed pre-EIP155 transactions",
 		Value: false,
 	}
+	WitnessFullFlag = cli.BoolFlag{
+		Name:  "zkevm.witness-full",
+		Usage: "Enable/Diable witness full",
+		Value: true,
+	}
 	RpcBatchConcurrencyFlag = cli.UintFlag{
 		Name:  "rpc.batch.concurrency",
 		Usage: "Does limit amount of goroutines to process 1 batch request. Means 1 bach request can't overload server. 1 batch still can have unlimited amount of request",

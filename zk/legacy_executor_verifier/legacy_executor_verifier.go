@@ -33,6 +33,7 @@ type VerifierRequest struct {
 type VerifierResponse struct {
 	BatchNumber uint64
 	Valid       bool
+	Witness     []byte
 }
 
 type ILegacyExecutor interface {
@@ -40,7 +41,7 @@ type ILegacyExecutor interface {
 }
 
 type WitnessGenerator interface {
-	GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, endBlock uint64, debug bool) ([]byte, error)
+	GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, endBlock uint64, debug, witnessFull bool) ([]byte, error)
 }
 
 type LegacyExecutorVerifier struct {
@@ -172,7 +173,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		return err
 	}
 
-	witness, err := v.witnessGenerator.GenerateWitness(tx, innerCtx, blocks[0], blocks[len(blocks)-1], false)
+	witness, err := v.witnessGenerator.GenerateWitness(tx, innerCtx, blocks[0], blocks[len(blocks)-1], false, v.cfg.WitnessFull)
 	if err != nil {
 		return err
 	}
@@ -213,6 +214,7 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 	response := &VerifierResponse{
 		BatchNumber: request.BatchNumber,
 		Valid:       ok,
+		Witness:     witness,
 	}
 	v.responseChan <- response
 

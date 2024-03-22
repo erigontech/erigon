@@ -29,6 +29,7 @@ const L1_BLOCK_HASHES = "l1_block_hashes"                              // l1 blo
 const BLOCK_L1_BLOCK_HASHES = "block_l1_block_hashes"                  // block number -> l1 block hash
 const L1_BLOCK_HASH_GER = "l1_block_hash_ger"                          // l1 block hash -> GER
 const INTERMEDIATE_TX_STATEROOTS = "hermez_intermediate_tx_stateRoots" // l2blockno -> stateRoot
+const BATCH_WITNESSES = "hermez_batch_witnesses"                       // batch number -> witness
 
 type HermezDb struct {
 	tx kv.RwTx
@@ -72,6 +73,7 @@ func CreateHermezBuckets(tx kv.RwTx) error {
 		BLOCK_L1_BLOCK_HASHES,
 		L1_BLOCK_HASH_GER,
 		INTERMEDIATE_TX_STATEROOTS,
+		BATCH_WITNESSES,
 	}
 	for _, t := range tables {
 		if err := tx.CreateBucket(t); err != nil {
@@ -848,4 +850,16 @@ func (db *HermezDbReader) GetBlockInfoRoot(blockNumber uint64) (common.Hash, err
 	}
 	res := common.BytesToHash(data)
 	return res, nil
+}
+
+func (db *HermezDb) WriteWitness(batchNumber uint64, witness []byte) error {
+	return db.tx.Put(BATCH_WITNESSES, Uint64ToBytes(batchNumber), witness)
+}
+
+func (db *HermezDbReader) GetWitness(batchNumber uint64) ([]byte, error) {
+	v, err := db.tx.GetOne(BATCH_WITNESSES, Uint64ToBytes(batchNumber))
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }

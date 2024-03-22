@@ -191,4 +191,5 @@ var DefaultFlags = []cli.Flag{
 	&utils.AllowPreEIP155Transactions,
 	&utils.DataStreamHost,
 	&utils.DataStreamPort,
+	&utils.WitnessFullFlag,
 }

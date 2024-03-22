@@ -5,12 +5,13 @@ import (
 
 	"strings"
 
+	"time"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	"github.com/urfave/cli/v2"
-	"time"
 )
 
 func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
@@ -59,6 +60,7 @@ func ApplyFlagsForZkConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 		ExecutorStrictMode:          ctx.Bool(utils.ExecutorStrictMode.Name),
 		AllowFreeTransactions:       ctx.Bool(utils.AllowFreeTransactions.Name),
 		AllowPreEIP155Transactions:  ctx.Bool(utils.AllowPreEIP155Transactions.Name),
+		WitnessFull:                 ctx.Bool(utils.WitnessFullFlag.Name),
 	}
 
 	checkFlag(utils.L2ChainIdFlag.Name, cfg.Zk.L2ChainId)

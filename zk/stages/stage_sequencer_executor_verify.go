@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/zk/legacy_executor_verifier"
 	"github.com/ledgerwatch/erigon/zk/txpool"
 	"sort"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type SequencerExecutorVerifyCfg struct {
@@ -75,11 +76,19 @@ func SpawnSequencerExecutorVerifyStage(
 		if !response.Valid {
 			// now we need to rollback and handle the error
 			// todo [zkevm]!
+
+			// todo: remove any witnesses for batches higher than the one failing (including the failing one)
 		}
 
 		// all good so just update the stage progress for now
 		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, response.BatchNumber); err != nil {
 			return err
+		}
+
+		// store the witness
+		errWitness := hermezDb.WriteWitness(response.BatchNumber, response.Witness)
+		if errWitness != nil {
+			log.Warn("Failed to write witness", "batch", response.BatchNumber, "err", errWitness)
 		}
 
 		// now let the verifier know we have got this message, so it can release it
