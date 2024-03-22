@@ -253,7 +253,7 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	return webSeedMap
 }
 
-func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (*torrent.TorrentSpec, bool, error) {
+func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (ts *torrent.TorrentSpec, ok bool, err error) {
 	urls, ok := d.ByFileName(name)
 	if !ok {
 		return nil, false, nil
@@ -269,7 +269,7 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
 			continue // it's ok if some HTTP provider failed - try next one
 		}
-		ts, _, _, err := d.torrentFiles.CreateIfNotProhibited(name, res)
+		ts, _, _, err = d.torrentFiles.CreateIfNotProhibited(name, res)
 		return ts, ts != nil, err
 	}
 
