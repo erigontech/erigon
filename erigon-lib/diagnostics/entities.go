@@ -165,6 +165,22 @@ type BlockHeadersUpdate struct {
 	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
 }
 
+type BodiesDownloadBlockUpdate struct {
+	BlockNumber    uint64 `json:"blockNumber"`
+	DeliveryPerSec uint64 `json:"deliveryPerSec"`
+	WastedPerSec   uint64 `json:"wastedPerSec"`
+	Remaining      uint64 `json:"remaining"`
+	Delivered      uint64 `json:"delivered"`
+	BlockPerSec    uint64 `json:"blockPerSec"`
+	Cache          uint64 `json:"cache"`
+	Alloc          uint64 `json:"alloc"`
+	Sys            uint64 `json:"sys"`
+}
+
+func (ti BodiesDownloadBlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (ti BlockHeadersUpdate) Type() Type {
 	return TypeOf(ti)
 }
