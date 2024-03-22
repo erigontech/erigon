@@ -104,13 +104,13 @@ type callFrameMarshaling struct {
 
 type callTracer struct {
 	noopTracer
-	callstack []callFrame
-	config    callTracerConfig
-	gasLimit  uint64
-	interrupt uint32 // Atomic flag to signal execution interruption
-	reason    error  // Textual reason for the interruption
-	logIndex  uint64
-	logGaps   map[uint64]int
+	callstack        []callFrame
+	config           callTracerConfig
+	gasLimit         uint64
+	interrupt        uint32 // Atomic flag to signal execution interruption
+	reason           error  // Textual reason for the interruption
+	logIndex         uint64
+	failedLogIndexes []uint64
 }
 
 type callTracerConfig struct {
@@ -241,18 +241,18 @@ func (t *callTracer) CaptureExit(output []byte, gasUsed uint64, err error) {
 func (t *callTracer) CaptureTxStart(gasLimit uint64) {
 	t.gasLimit = gasLimit
 	t.logIndex = 0
-	t.logGaps = make(map[uint64]int)
+	t.failedLogIndexes = make([]uint64, 0)
 }
 
 func (t *callTracer) CaptureTxEnd(restGas uint64) {
 	t.callstack[0].GasUsed = t.gasLimit - restGas
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
-		clearFailedLogs(&t.callstack[0], false, 0, t.logGaps)
-		fixLogIndexGap(&t.callstack[0], t.logGaps)
+		clearFailedLogs(&t.callstack[0], false, &t.failedLogIndexes)
+		fixLogIndexGap(&t.callstack[0], &t.failedLogIndexes)
 	}
 	t.logIndex = 0
-	t.logGaps = nil
+	t.failedLogIndexes = nil
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any
@@ -274,37 +274,38 @@ func (t *callTracer) Stop(err error) {
 	atomic.StoreUint32(&t.interrupt, 1)
 }
 
+// TODO: Consider developing a test case inspired by the transaction with txnHash = '0x71744160091c78cc98ee723972ce3665b285410cc8f99f9ce61e1a86236844d3'
 // clearFailedLogs clears the logs of a callframe and all its children
 // in case of execution failure.
-func clearFailedLogs(cf *callFrame, parentFailed bool, gap int, logGaps map[uint64]int) {
+func clearFailedLogs(cf *callFrame, parentFailed bool, failedLogIndexes *[]uint64) {
 	failed := cf.failed() || parentFailed
 	// Clear own logs
 	if failed {
-		gap += len(cf.Logs)
-		if gap > 0 {
-			lastIdx := len(cf.Logs) - 1
-			if lastIdx > 0 && logGaps != nil {
-				idx := cf.Logs[lastIdx].Index
-				logGaps[idx] = gap
+		if len(cf.Logs) > 0 {
+			for _, log := range cf.Logs {
+				*failedLogIndexes = append(*failedLogIndexes, log.Index)
 			}
 		}
 		cf.Logs = nil
 	}
 	for i := range cf.Calls {
-		clearFailedLogs(&cf.Calls[i], failed, gap, logGaps)
+		clearFailedLogs(&cf.Calls[i], failed, failedLogIndexes)
 	}
 }
 
-func fixLogIndexGap(cf *callFrame, logGaps map[uint64]int) {
+// re-index logs in callFrame
+func fixLogIndexGap(cf *callFrame, failedLogIndexes *[]uint64) {
 	if len(cf.Logs) > 0 {
-		gap := logGaps[cf.Logs[0].Index-1]
-		if gap > 0 {
-			for _, log := range cf.Logs {
-				log.Index -= uint64(gap)
+		for i := range cf.Logs {
+			currentLogOriginalIndex := cf.Logs[i].Index
+			for _, deletedIndex := range *failedLogIndexes {
+				if currentLogOriginalIndex > deletedIndex {
+					cf.Logs[i].Index--
+				}
 			}
 		}
 	}
 	for i := range cf.Calls {
-		fixLogIndexGap(&cf.Calls[i], logGaps)
+		fixLogIndexGap(&cf.Calls[i], failedLogIndexes)
 	}
 }
