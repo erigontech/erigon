@@ -153,6 +153,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BorBlockPeriodFlag,
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
+	&utils.WithHeimdallWaypoints,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideCancunFlag,
 

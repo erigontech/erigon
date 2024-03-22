@@ -53,6 +53,7 @@ type BorHeimdallCfg struct {
 	loopBreakCheck   func(int) bool
 	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
+	recordWaypoints  bool
 }
 
 func StageBorHeimdallCfg(
@@ -67,6 +68,7 @@ func StageBorHeimdallCfg(
 	loopBreakCheck func(int) bool,
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
+	recordWaypoints bool,
 ) BorHeimdallCfg {
 	var borConfig *borcfg.BorConfig
 	if chainConfig.Bor != nil {
@@ -87,6 +89,7 @@ func StageBorHeimdallCfg(
 		loopBreakCheck:   loopBreakCheck,
 		recents:          recents,
 		signatures:       signatures,
+		recordWaypoints:  recordWaypoints,
 	}
 }
 
@@ -172,6 +175,20 @@ func BorHeimdallForward(
 		return err
 	}
 
+	var lastCheckpointId, lastMilestoneId uint64
+
+	if cfg.recordWaypoints {
+		lastCheckpointId, err = fetchRequiredHeimdallCheckpointsIfNeeded(ctx, headNumber, tx, cfg, s.LogPrefix(), logger)
+		if err != nil {
+			return err
+		}
+
+		lastMilestoneId, err = fetchRequiredHeimdallMilestonesIfNeeded(ctx, headNumber, tx, cfg, s.LogPrefix(), logger)
+		if err != nil {
+			return err
+		}
+	}
+
 	lastStateSyncEventID, _, err := cfg.blockReader.LastEventId(ctx, tx)
 	if err != nil {
 		return err
@@ -190,6 +207,8 @@ func BorHeimdallForward(
 				fmt.Sprintf("[%s] StateSync Progress", s.LogPrefix()),
 				"progress", blockNum,
 				"lastSpanID", lastSpanID,
+				"lastCheckpointId", lastCheckpointId,
+				"lastMilestoneId", lastMilestoneId,
 				"lastStateSyncEventID", lastStateSyncEventID,
 				"total records", eventRecords,
 				"fetch time", fetchTime,

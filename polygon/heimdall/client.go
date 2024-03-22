@@ -245,6 +245,8 @@ func (c *Client) FetchMilestone(ctx context.Context, number int64) (*Milestone, 
 		return nil, err
 	}
 
+	response.Result.Id = MilestoneId(number)
+
 	return &response.Result, nil
 }
 

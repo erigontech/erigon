@@ -149,16 +149,14 @@ func fetchRequiredHeimdallCheckpointsIfNeeded(
 		lastCheckpoint = &checkpoint
 	}
 
-	if lastId > 0 {
-		lastId++
-	}
+	logger.Info(fmt.Sprintf("[%s] Processing checkpoints...", logPrefix), "from", lastId+1, "to", toBlockNum)
 
-	logger.Info(fmt.Sprintf("[%s] Processing checkpoints...", logPrefix), "from", lastId)
-
-	for checkpointId := lastId; lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() >= toBlockNum; checkpointId++ {
-		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, lastId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+	for checkpointId := lastId + 1; lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() < toBlockNum; checkpointId++ {
+		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, checkpointId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
 			return 0, err
 		}
+
+		lastId = checkpointId
 	}
 
 	return lastId, err
@@ -189,13 +187,134 @@ func fetchAndWriteHeimdallCheckpoint(
 	}
 
 	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], response.StartBlock().Uint64())
-	if err = tx.Put(kv.BorCheckpointStarts, blockNumBuf[:], idBytes[:]); err != nil {
+	binary.BigEndian.PutUint64(blockNumBuf[:], response.EndBlock().Uint64())
+	if err = tx.Put(kv.BorCheckpointEnds, blockNumBuf[:], idBytes[:]); err != nil {
 		return 0, nil, err
 	}
 
-	logger.Trace(fmt.Sprintf("[%s] Wrote checkpoint", logPrefix), "id", checkpointId)
+	logger.Trace(fmt.Sprintf("[%s] Wrote checkpoint", logPrefix), "id", checkpointId, "start", response.StartBlock(), "end", response.EndBlock())
 	return checkpointId, response, nil
+}
+
+func fetchRequiredHeimdallMilestonesIfNeeded(
+	ctx context.Context,
+	toBlockNum uint64,
+	tx kv.RwTx,
+	cfg BorHeimdallCfg,
+	logPrefix string,
+	logger log.Logger,
+) (uint64, error) {
+
+	lastId, exists, err := cfg.blockReader.LastMilestoneId(ctx, tx)
+
+	if err != nil {
+		return 0, err
+	}
+
+	var lastMilestone *heimdall.Milestone
+
+	if exists {
+		data, err := cfg.blockReader.Milestone(ctx, tx, lastId)
+
+		if err != nil {
+			return 0, err
+		}
+
+		if len(data) > 0 {
+			var milestone heimdall.Milestone
+
+			if err := json.Unmarshal(data, &milestone); err != nil {
+				return 0, err
+			}
+
+			lastMilestone = &milestone
+		}
+	}
+
+	logger.Info(fmt.Sprintf("[%s] Processing milestones...", logPrefix), "from", lastId+1, "to", toBlockNum)
+
+	count, err := cfg.heimdallClient.FetchMilestoneCount(ctx)
+
+	if err != nil {
+		return 0, err
+	}
+
+	// it seems heimdall does not keep may live milestones - if
+	// you try to get one before this you get an error on the api
+
+	lastActive := uint64(count) - activeMilestones
+
+	if lastId < lastActive {
+		for lastActive <= uint64(count) {
+			lastMilestone, err = cfg.heimdallClient.FetchMilestone(ctx, int64(lastActive))
+
+			if errors.Is(err, heimdall.ErrNotInMilestoneList) {
+				lastActive++
+				continue
+			}
+
+			return lastId, err
+		}
+
+		if lastMilestone == nil || toBlockNum < lastMilestone.StartBlock().Uint64() {
+			return lastId, nil
+		}
+
+		lastId = lastActive - 1
+	}
+
+	for milestoneId := lastId + 1; lastMilestone == nil || lastMilestone.EndBlock().Uint64() < toBlockNum; milestoneId++ {
+		if _, lastMilestone, err = fetchAndWriteHeimdallMilestone(ctx, milestoneId, uint64(count), tx, cfg.heimdallClient, logPrefix, logger); err != nil {
+			return 0, err
+		}
+
+		if lastMilestone == nil && toBlockNum/12 < milestoneId {
+			break
+		}
+
+		lastId = milestoneId
+	}
+
+	return lastId, err
+}
+
+var activeMilestones uint64 = 100
+
+func fetchAndWriteHeimdallMilestone(
+	ctx context.Context,
+	milestoneId uint64,
+	count uint64,
+	tx kv.RwTx,
+	heimdallClient heimdall.HeimdallClient,
+	logPrefix string,
+	logger log.Logger,
+) (uint64, *heimdall.Milestone, error) {
+	response, err := heimdallClient.FetchMilestone(ctx, int64(milestoneId))
+
+	if err != nil {
+		return 0, nil, err
+	}
+
+	bytes, err := json.Marshal(response)
+
+	if err != nil {
+		return 0, nil, err
+	}
+
+	var idBytes [8]byte
+	binary.BigEndian.PutUint64(idBytes[:], milestoneId)
+	if err = tx.Put(kv.BorMilestones, idBytes[:], bytes); err != nil {
+		return 0, nil, err
+	}
+
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], response.EndBlock().Uint64())
+	if err = tx.Put(kv.BorMilestoneEnds, blockNumBuf[:], idBytes[:]); err != nil {
+		return 0, nil, err
+	}
+
+	logger.Trace(fmt.Sprintf("[%s] Wrote checkpoint", logPrefix), "id", milestoneId, "start", response.StartBlock(), "end", response.EndBlock())
+	return milestoneId, response, nil
 }
 
 func fetchRequiredHeimdallStateSyncEventsIfNeeded(

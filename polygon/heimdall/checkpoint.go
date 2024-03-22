@@ -1,11 +1,14 @@
 package heimdall
 
 import (
+	"context"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/kv"
 )
 
 var _ Waypoint = Checkpoint{}
@@ -14,6 +17,7 @@ type CheckpointId uint64
 
 // Checkpoint defines a response object type of bor checkpoint
 type Checkpoint struct {
+	Id     CheckpointId
 	Fields WaypointFields
 }
 
@@ -53,12 +57,42 @@ func (m Checkpoint) String() string {
 	)
 }
 
-func (c Checkpoint) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.Fields)
+func (c *Checkpoint) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Id         CheckpointId      `json:"id"`
+		Proposer   libcommon.Address `json:"proposer"`
+		StartBlock *big.Int          `json:"start_block"`
+		EndBlock   *big.Int          `json:"end_block"`
+		RootHash   libcommon.Hash    `json:"hash"`
+		ChainID    string            `json:"bor_chain_id"`
+		Timestamp  uint64            `json:"timestamp"`
+	}{
+		c.Id,
+		c.Fields.Proposer,
+		c.Fields.StartBlock,
+		c.Fields.EndBlock,
+		c.Fields.RootHash,
+		c.Fields.ChainID,
+		c.Fields.Timestamp,
+	})
 }
 
 func (c *Checkpoint) UnmarshalJSON(b []byte) error {
-	return json.Unmarshal(b, &c.Fields)
+	dto := struct {
+		WaypointFields
+		RootHash libcommon.Hash `json:"hash"`
+		Id       CheckpointId   `json:"id"`
+	}{}
+
+	if err := json.Unmarshal(b, &dto); err != nil {
+		return err
+	}
+
+	c.Id = dto.Id
+	c.Fields = dto.WaypointFields
+	c.Fields.RootHash = dto.RootHash
+
+	return nil
 }
 
 type CheckpointResponse struct {
@@ -75,6 +109,35 @@ type CheckpointCountResponse struct {
 	Result CheckpointCount `json:"result"`
 }
 
-func CheckpointIdAt(block uint64) CheckpointId {
-	return 0
+var ErrCheckpointNotFound = fmt.Errorf("checkpoint not found")
+
+func CheckpointIdAt(ctx context.Context, db kv.RoDB, block uint64) (CheckpointId, error) {
+	var id uint64
+
+	err := db.View(ctx, func(tx kv.Tx) error {
+		c, err := tx.Cursor(kv.BorCheckpointEnds)
+
+		if err != nil {
+			return err
+		}
+
+		var blockNumBuf [8]byte
+		binary.BigEndian.PutUint64(blockNumBuf[:], block)
+
+		k, v, err := c.Seek(blockNumBuf[:])
+
+		if err != nil {
+			return err
+		}
+
+		if k == nil {
+			return fmt.Errorf("%d: %w", block)
+		}
+
+		id = binary.BigEndian.Uint64(v)
+
+		return nil
+	})
+
+	return CheckpointId(id), err
 }

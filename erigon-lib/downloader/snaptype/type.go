@@ -49,13 +49,13 @@ type Versions struct {
 type FirstKeyGetter func(ctx context.Context) uint64
 
 type RangeExtractor interface {
-	Extract(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+	Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 }
 
-type RangeExtractorFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+type RangeExtractorFunc func(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 
-func (f RangeExtractorFunc) Extract(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	return f(ctx, db, chainConfig, blockFrom, blockTo, firstKey, collect, workers, lvl, logger)
+func (f RangeExtractorFunc) Extract(ctx context.Context, blockFrom, blockTo uint64, firstKey FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	return f(ctx, blockFrom, blockTo, firstKey, db, chainConfig, collect, workers, lvl, logger)
 }
 
 type IndexBuilder interface {
@@ -78,6 +78,8 @@ var Indexes = struct {
 	TxnHash2BlockNum,
 	BorTxnHash,
 	BorSpanId,
+	BorCheckpointId,
+	BorMilestoneId,
 	BeaconBlockSlot,
 	BlobSidecarSlot Index
 }{
@@ -88,8 +90,10 @@ var Indexes = struct {
 	TxnHash2BlockNum: 3,
 	BorTxnHash:       4,
 	BorSpanId:        5,
-	BeaconBlockSlot:  6,
-	BlobSidecarSlot:  7,
+	BorCheckpointId:  6,
+	BorMilestoneId:   7,
+	BeaconBlockSlot:  8,
+	BlobSidecarSlot:  9,
 }
 
 func (i Index) Offset() int {
@@ -115,6 +119,10 @@ func (i Index) String() string {
 		return Enums.BorEvents.String()
 	case Indexes.BorSpanId:
 		return Enums.BorSpans.String()
+	case Indexes.BorCheckpointId:
+		return Enums.BorCheckpoints.String()
+	case Indexes.BorMilestoneId:
+		return Enums.BorMilestones.String()
 	case Indexes.BeaconBlockSlot:
 		return Enums.BeaconBlocks.String()
 	case Indexes.BlobSidecarSlot:
@@ -158,7 +166,7 @@ type Type interface {
 	Indexes() []Index
 	HasIndexFiles(info FileInfo, logger log.Logger) bool
 	BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
-	ExtractRange(ctx context.Context, info FileInfo, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+	ExtractRange(ctx context.Context, info FileInfo, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
 }
 
 type snapType struct {
@@ -167,7 +175,6 @@ type snapType struct {
 	indexes        []Index
 	indexBuilder   IndexBuilder
 	rangeExtractor RangeExtractor
-	firstKeyGetter FirstKeyGetter
 }
 
 var registeredTypes = map[Enum]Type{}
@@ -207,8 +214,8 @@ func (s snapType) FileInfo(dir string, from uint64, to uint64) FileInfo {
 	return f
 }
 
-func (s snapType) ExtractRange(ctx context.Context, info FileInfo, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	return ExtractRange(ctx, info, s.rangeExtractor, s.firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger)
+func (s snapType) ExtractRange(ctx context.Context, info FileInfo, firstKeyGetter FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+	return ExtractRange(ctx, info, s.rangeExtractor, firstKeyGetter, db, chainConfig, tmpDir, workers, lvl, logger)
 }
 
 func (s snapType) Indexes() []Index {
@@ -462,7 +469,7 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, fir
 	}
 	defer sn.Close()
 
-	lastKeyValue, err = extractor.Extract(ctx, chainDB, chainConfig, f.From, f.To, firstKey, func(v []byte) error {
+	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
 		return sn.AddWord(v)
 	}, workers, lvl, logger)
 

@@ -237,6 +237,9 @@ type Config struct {
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
+	// Heimdall waypoint recording active
+	WithHeimdallWaypointRecording bool
+
 	// Ethstats service
 	Ethstats string
 	// Consensus layer

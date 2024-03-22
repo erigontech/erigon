@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -44,7 +45,7 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, _ snaptype.FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, _ snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				logEvery := time.NewTicker(20 * time.Second)
 				defer logEvery.Stop()
 
@@ -200,16 +201,24 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 				spanFrom := uint64(heimdall.SpanIdAt(blockFrom))
 				spanTo := uint64(heimdall.SpanIdAt(blockTo))
-				return extractValueRange(ctx, db, chainConfig, spanFrom, spanTo, firstKeyGetter, collect, workers, lvl, logger)
+				return extractValueRange(ctx, kv.BorSpans, spanFrom, spanTo, db, chainConfig, collect, workers, lvl, logger)
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorSpanId},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+				d, err := seg.NewDecompressor(sn.Path)
+
+				if err != nil {
+					return err
+				}
+				defer d.Close()
+
 				baseSpanId := uint64(heimdall.SpanIdAt(sn.From))
-				return buildValueIndex(ctx, sn, baseSpanId, chainConfig, tmpDir, p, lvl, logger)
+
+				return buildValueIndex(ctx, sn, d, baseSpanId, chainConfig, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -220,16 +229,45 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				checkpointFrom := uint64(heimdall.CheckpointIdAt(blockFrom))
-				checkpointTo := uint64(heimdall.CheckpointIdAt(blockTo))
-				return extractValueRange(ctx, db, chainConfig, checkpointFrom, checkpointTo, firstKeyGetter, collect, workers, lvl, logger)
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+				checkpointFrom, err := heimdall.CheckpointIdAt(ctx, db, blockFrom)
+
+				if err != nil {
+					return 0, err
+				}
+
+				if blockFrom > 0 {
+					if prevTo, err := heimdall.CheckpointIdAt(ctx, db, blockFrom-1); err == nil && prevTo == checkpointFrom {
+						checkpointFrom++
+					}
+				}
+
+				checkpointTo, err := heimdall.CheckpointIdAt(ctx, db, blockTo)
+
+				if err != nil {
+					return 0, err
+				}
+
+				return extractValueRange(ctx, kv.BorCheckpoints, uint64(checkpointFrom), uint64(checkpointTo), db, chainConfig, collect, workers, lvl, logger)
 			}),
-		[]snaptype.Index{snaptype.Indexes.BorSpanId},
+		[]snaptype.Index{snaptype.Indexes.BorCheckpointId},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-				baseCheckpointId := uint64(heimdall.CheckpointIdAt(sn.From))
-				return buildValueIndex(ctx, sn, baseCheckpointId, chainConfig, tmpDir, p, lvl, logger)
+				d, err := seg.NewDecompressor(sn.Path)
+
+				if err != nil {
+					return err
+				}
+				defer d.Close()
+
+				buf, _ := d.MakeGetter().Next(nil)
+				var firstCheckpoint heimdall.Checkpoint
+
+				if err = json.Unmarshal(buf, &firstCheckpoint); err != nil {
+					return err
+				}
+
+				return buildValueIndex(ctx, sn, d, uint64(firstCheckpoint.Id), chainConfig, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -240,27 +278,68 @@ var (
 			MinSupported: 1,
 		},
 		snaptype.RangeExtractorFunc(
-			func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				milestoneFrom := uint64(heimdall.MilestoneIdAt(blockFrom))
-				milestoneTo := uint64(heimdall.MilestoneIdAt(blockTo))
-				return extractValueRange(ctx, db, chainConfig, milestoneFrom, milestoneTo, firstKeyGetter, collect, workers, lvl, logger)
+			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+				milestoneFrom, err := heimdall.MilestoneIdAt(ctx, db, blockFrom)
+
+				if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+					return 0, err
+				}
+
+				if milestoneFrom > 0 && blockFrom > 0 {
+					if prevTo, err := heimdall.MilestoneIdAt(ctx, db, blockFrom-1); err == nil && prevTo == milestoneFrom {
+						milestoneFrom++
+					}
+				}
+
+				milestoneTo, err := heimdall.MilestoneIdAt(ctx, db, blockTo)
+
+				if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+					return 0, err
+				}
+
+				if milestoneTo < milestoneFrom {
+					return 0, fmt.Errorf("end milestone: %d before start milestone: %d", milestoneTo, milestoneFrom)
+				}
+
+				return extractValueRange(ctx, kv.BorMilestones, uint64(milestoneFrom), uint64(milestoneTo), db, chainConfig, collect, workers, lvl, logger)
 			}),
-		[]snaptype.Index{snaptype.Indexes.BorSpanId},
+		[]snaptype.Index{snaptype.Indexes.BorMilestoneId},
 		snaptype.IndexBuilderFunc(
 			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
-				baseMilestoneId := uint64(heimdall.MilestoneIdAt(sn.From))
-				return buildValueIndex(ctx, sn, baseMilestoneId, chainConfig, tmpDir, p, lvl, logger)
+				d, err := seg.NewDecompressor(sn.Path)
+
+				if err != nil {
+					return err
+				}
+				defer d.Close()
+
+				gg := d.MakeGetter()
+
+				var firstMilestoneId uint64
+
+				if gg.HasNext() {
+					buf, _ := gg.Next(nil)
+					if len(buf) > 0 {
+						var firstMilestone heimdall.Milestone
+						if err = json.Unmarshal(buf, &firstMilestone); err != nil {
+							return err
+						}
+						firstMilestoneId = uint64(firstMilestone.Id)
+					}
+				}
+
+				return buildValueIndex(ctx, sn, d, firstMilestoneId, chainConfig, tmpDir, p, lvl, logger)
 			}),
 	)
 
-	BorSnapshotTypes = []snaptype.Type{BorEvents, BorSpans}
+	BorSnapshotTypes = []snaptype.Type{BorEvents, BorSpans, BorCheckpoints, BorMilestones}
 )
 
-func extractValueRange(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, valueFrom, valueTo uint64, _ snaptype.FirstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
+func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uint64, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	if err := kv.BigChunks(db, kv.BorSpans, hexutility.EncodeTs(valueFrom), func(tx kv.Tx, idBytes, valueBytes []byte) (bool, error) {
+	if err := kv.BigChunks(db, table, hexutility.EncodeTs(valueFrom), func(tx kv.Tx, idBytes, valueBytes []byte) (bool, error) {
 		id := binary.BigEndian.Uint64(idBytes)
 		if id >= valueTo {
 			return false, nil
@@ -288,18 +367,12 @@ func extractValueRange(ctx context.Context, db kv.RoDB, chainConfig *chain.Confi
 	return valueTo, nil
 }
 
-func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, baseId uint64, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, d *seg.Decompressor, baseId uint64, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
 		}
 	}()
-	// Calculate how many records there will be in the index
-	d, err := seg.NewDecompressor(sn.Path)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
 
 	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
 		KeyCount:   d.Count(),
@@ -317,6 +390,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, baseId uint64, c
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 RETRY:
+
 	g := d.MakeGetter()
 	var i, offset, nextPos uint64
 	var key [8]byte

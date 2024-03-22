@@ -285,6 +285,8 @@ func (c Cfg) Seedable(info snaptype.FileInfo) bool {
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
+	hasType := false
+
 	for _, p := range c.Preverified {
 		info, _, ok := snaptype.ParseFileName("", p.Name)
 		if !ok {
@@ -294,6 +296,8 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		if info.Ext != ".seg" || (t != snaptype.Enums.Unknown && t != info.Type.Enum()) {
 			continue
 		}
+
+		hasType = true
 
 		if fromBlock < info.From || fromBlock >= info.To {
 			continue
@@ -307,7 +311,18 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 		break
 	}
 
-	return snaptype.Erigon2MergeLimit
+	// This should only get called the first time a new type is added and created - as it will
+	// not have previous history to check against
+
+	// BeaconBlocks && BlobSidecars follow their own slot based sharding scheme which is
+	// not the same as other snapshots which follow a block based sharding scheme
+	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
+	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
+	if hasType || snaptype.IsCaplinType(t) {
+		return snaptype.Erigon2MergeLimit
+	}
+
+	return c.MergeLimit(snaptype.Enums.Headers, fromBlock)
 }
 
 var knownPreverified = map[string]Preverified{
