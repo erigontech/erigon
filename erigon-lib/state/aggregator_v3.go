@@ -806,6 +806,8 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		}
 
 		select {
+		case <-localTimeout.C: //must be first to improve responsivness
+			return true, nil
 		case <-logEvery.C:
 			ac.a.logger.Info("[snapshots] pruning state",
 				"until commit", time.Until(started.Add(timeout)).String(),
@@ -814,8 +816,6 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
-		case <-localTimeout.C:
-			return true, nil
 		case <-ctx.Done():
 			return false, ctx.Err()
 		default:
