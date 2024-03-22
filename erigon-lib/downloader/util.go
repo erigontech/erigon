@@ -81,6 +81,7 @@ func seedableSegmentFiles(dir string, chainName string) ([]string, error) {
 	}
 	res := make([]string, 0, len(files))
 	for _, fPath := range files {
+
 		_, name := filepath.Split(fPath)
 		if !snaptype.IsCorrectFileName(name) {
 			continue
@@ -339,6 +340,7 @@ func _addTorrentFile(ctx context.Context, ts *torrent.TorrentSpec, torrentClient
 				return nil, false, fmt.Errorf("addTorrentFile %s: update failed: %w", ts.DisplayName, err)
 			}
 		} else {
+			t.AddWebSeeds(ts.Webseeds)
 			if err := db.Update(ctx, torrentInfoReset(ts.DisplayName, ts.InfoHash.Bytes(), 0)); err != nil {
 				return nil, false, fmt.Errorf("addTorrentFile %s: reset failed: %w", ts.DisplayName, err)
 			}

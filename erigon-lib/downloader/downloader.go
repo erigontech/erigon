@@ -139,7 +139,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	var stats AggStats
 
 	lock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
-
 	if err != nil {
 		return nil, fmt.Errorf("can't initialize snapshot lock: %w", err)
 	}
@@ -429,7 +428,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 				if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 					downloadMap.Set(fileInfo.Name(), preverified)
 				} else {
-					logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+					logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 					// TODO: check if it has an index - if not use the known hash and delete the file
 					downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 				}
@@ -461,7 +460,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 					if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 						downloadMap.Set(preverified.Name, preverified)
 					} else {
-						logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+						logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 						// TODO: check if it has an index - if not use the known hash and delete the file
 						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 					}
@@ -490,7 +489,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 						if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 							downloadMap.Set(preverified.Name, preverified)
 						} else {
-							logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+							logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 							// TODO: check if it has an index - if not use the known hash and delete the file
 							downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 						}
@@ -658,7 +657,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 		go func() {
 			defer d.wg.Done()
 			d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
-			// webseeds.Discover may create new .torrent files on disk
+			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 			}
@@ -1033,7 +1032,6 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 							continue
 						}
-
 					} else {
 						d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()), "webpeers", len(t.WebseedPeerConns()))
 						delete(waiting, t.Name())
@@ -1080,6 +1078,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 						continue
 					}
 
+					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
+					delete(waiting, t.Name())
+					d.torrentDownload(t, downloadComplete, sem)
 				}
 			}
 
@@ -1387,7 +1388,8 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 					idleCount = 0
 				}
 
-				if idleCount > 6 {
+				//fallback to webDownloadClient, but only if it's enabled
+				if d.webDownloadClient != nil && idleCount > 6 {
 					t.DisallowDataDownload()
 					return
 				}
@@ -1397,6 +1399,10 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 }
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
+	if d.webDownloadClient == nil {
+		return nil, fmt.Errorf("webdownload client not enabled")
+	}
+
 	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
 
 	if err != nil {
@@ -1877,7 +1883,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if len(downloading) > 0 {
-		webTransfers += int32(len(downloading))
+		if d.webDownloadClient != nil {
+			webTransfers += int32(len(downloading))
+		}
+
 		stats.Completed = false
 	}
 
@@ -2130,8 +2139,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
+	isProhibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+	if err != nil {
+		return err
+	}
 
-	if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
+	if isProhibited && !d.torrentFiles.Exists(name) {
 		return nil
 	}
 
@@ -2158,8 +2171,33 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-ctx.Done():
 			return
 		case <-t.GotInfo():
+		case <-time.After(30 * time.Second): //fallback to r2
+			// TOOD: handle errors
+			// TOOD: add `d.webseeds.Complete` chan - to prevent race - Discover is also async
+			// TOOD: maybe run it in goroutine and return channel - to select with p2p
+
+			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
+			if ok && err == nil {
+				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
+				if err != nil {
+					return
+				}
+				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
+				if err != nil {
+					return
+				}
+				return
+			}
+
+			// wait for p2p
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.GotInfo():
+			}
 		}
 
+		//TODO: remove whitelist check - Erigon may send us new seedable files
 		if !d.snapshotLock.Downloads.Contains(name) {
 			mi := t.Metainfo()
 			if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {

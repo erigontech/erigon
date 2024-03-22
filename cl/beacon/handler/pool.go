@@ -44,7 +44,7 @@ func (a *ApiHandler) GetEthV1BeaconPoolAttestations(w http.ResponseWriter, r *ht
 		if slot != nil && atts[i].AttestantionData().Slot() != *slot {
 			continue
 		}
-		if committeeIndex != nil && atts[i].AttestantionData().ValidatorIndex() != *committeeIndex {
+		if committeeIndex != nil && atts[i].AttestantionData().CommitteeIndex() != *committeeIndex {
 			continue
 		}
 		ret = append(ret, atts[i])

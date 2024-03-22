@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
+	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 
@@ -44,24 +45,25 @@ import (
 )
 
 type Cfg struct {
-	rpc             *rpc.BeaconRpcP2P
-	genesisCfg      *clparams.GenesisConfig
-	beaconCfg       *clparams.BeaconChainConfig
-	executionClient execution_client.ExecutionEngine
-	state           *state.CachingBeaconState
-	gossipManager   *network2.GossipManager
-	forkChoice      *forkchoice.ForkChoiceStore
-	indiciesDB      kv.RwDB
-	tmpdir          string
-	dbConfig        db_config.DatabaseConfiguration
-	blockReader     freezeblocks.BeaconSnapshotReader
-	antiquary       *antiquary.Antiquary
-	syncedData      *synced_data.SyncedDataManager
-	emitter         *beaconevents.Emitters
-	prebuffer       *etl.Collector
-	gossipSource    persistence.BlockSource
-	sn              *freezeblocks.CaplinSnapshots
-	blobStore       blob_storage.BlobStorage
+	rpc                     *rpc.BeaconRpcP2P
+	genesisCfg              *clparams.GenesisConfig
+	beaconCfg               *clparams.BeaconChainConfig
+	executionClient         execution_client.ExecutionEngine
+	state                   *state.CachingBeaconState
+	gossipManager           *network2.GossipManager
+	forkChoice              *forkchoice.ForkChoiceStore
+	indiciesDB              kv.RwDB
+	tmpdir                  string
+	dbConfig                db_config.DatabaseConfiguration
+	blockReader             freezeblocks.BeaconSnapshotReader
+	antiquary               *antiquary.Antiquary
+	syncedData              *synced_data.SyncedDataManager
+	emitter                 *beaconevents.Emitters
+	prebuffer               *etl.Collector
+	gossipSource            persistence.BlockSource
+	sn                      *freezeblocks.CaplinSnapshots
+	blobStore               blob_storage.BlobStorage
+	attestationDataProducer attestation_producer.AttestationDataProducer
 
 	hasDownloaded, backfilling, blobBackfilling bool
 }
@@ -116,28 +118,30 @@ func ClStagesCfg(
 	emitters *beaconevents.Emitters,
 	gossipSource persistence.BlockSource,
 	blobStore blob_storage.BlobStorage,
+	attestationDataProducer attestation_producer.AttestationDataProducer,
 ) *Cfg {
 	return &Cfg{
-		rpc:             rpc,
-		antiquary:       antiquary,
-		genesisCfg:      genesisCfg,
-		beaconCfg:       beaconCfg,
-		state:           state,
-		executionClient: executionClient,
-		gossipManager:   gossipManager,
-		forkChoice:      forkChoice,
-		tmpdir:          tmpdir,
-		indiciesDB:      indiciesDB,
-		dbConfig:        dbConfig,
-		sn:              sn,
-		blockReader:     blockReader,
-		backfilling:     backfilling,
-		syncedData:      syncedData,
-		emitter:         emitters,
-		blobStore:       blobStore,
-		prebuffer:       etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
-		gossipSource:    gossipSource,
-		blobBackfilling: blobBackfilling,
+		rpc:                     rpc,
+		antiquary:               antiquary,
+		genesisCfg:              genesisCfg,
+		beaconCfg:               beaconCfg,
+		state:                   state,
+		executionClient:         executionClient,
+		gossipManager:           gossipManager,
+		forkChoice:              forkChoice,
+		tmpdir:                  tmpdir,
+		indiciesDB:              indiciesDB,
+		dbConfig:                dbConfig,
+		sn:                      sn,
+		blockReader:             blockReader,
+		backfilling:             backfilling,
+		syncedData:              syncedData,
+		emitter:                 emitters,
+		blobStore:               blobStore,
+		prebuffer:               etl.NewCollector("Caplin-blocks", tmpdir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
+		gossipSource:            gossipSource,
+		blobBackfilling:         blobBackfilling,
+		attestationDataProducer: attestationDataProducer,
 	}
 }
 
@@ -560,14 +564,23 @@ func ConsensusClStages(ctx context.Context,
 										errCh <- err
 										return
 									}
-									blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-									if err != nil {
-										errCh <- err
-										return
-									}
-									if _, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
-										errCh <- err
-										return
+									var inserted uint64
+
+									for inserted != uint64(ids.Len()) {
+										select {
+										case <-ctx.Done():
+											return
+										default:
+										}
+										blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+										if err != nil {
+											errCh <- err
+											return
+										}
+										if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+											errCh <- err
+											return
+										}
 									}
 
 									select {
@@ -774,6 +787,12 @@ func ConsensusClStages(ctx context.Context,
 						return fmt.Errorf("failed to set head state: %w", err)
 					}
 					start := time.Now()
+
+					copiedHeadState := cfg.syncedData.HeadState() // it is just copied, so we can use it without worrying about concurrency
+
+					if _, err = cfg.attestationDataProducer.ProduceAndCacheAttestationData(copiedHeadState, copiedHeadState.Slot(), 0); err != nil {
+						logger.Warn("failed to produce and cache attestation data", "err", err)
+					}
 					// Incement some stuff here
 					preverifiedValidators := cfg.forkChoice.PreverifiedValidator(headState.FinalizedCheckpoint().BlockRoot())
 					preverifiedHistoricalSummary := cfg.forkChoice.PreverifiedHistoricalSummaries(headState.FinalizedCheckpoint().BlockRoot())
