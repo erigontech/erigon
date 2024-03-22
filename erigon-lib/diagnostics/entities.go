@@ -167,6 +167,7 @@ type BlockHeadersUpdate struct {
 
 type BodiesInfo struct {
 	BlockDownload BodiesDownloadBlockUpdate `json:"blockDownload"`
+	BlockWrite    BodiesWriteBlockUpdate    `json:"blockWrite"`
 }
 
 type BodiesDownloadBlockUpdate struct {
@@ -179,6 +180,17 @@ type BodiesDownloadBlockUpdate struct {
 	Cache          uint64 `json:"cache"`
 	Alloc          uint64 `json:"alloc"`
 	Sys            uint64 `json:"sys"`
+}
+
+type BodiesWriteBlockUpdate struct {
+	BlockNumber uint64 `json:"blockNumber"`
+	Remaining   uint64 `json:"remaining"`
+	Alloc       uint64 `json:"alloc"`
+	Sys         uint64 `json:"sys"`
+}
+
+func (ti BodiesWriteBlockUpdate) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti BodiesDownloadBlockUpdate) Type() Type {
