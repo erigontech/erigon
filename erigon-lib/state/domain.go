@@ -2102,7 +2102,6 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
 func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
-	log.Warn(fmt.Sprintf("[dbg] warmup start domain.go:2108: %s\n", dc.d.filenameBase))
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
@@ -2113,6 +2112,9 @@ func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
 		return nil
 	})
 	wg.Go(func() error {
+		defer func(t time.Time) {
+			log.Warn(fmt.Sprintf("[dbg] warmup2 domain.go:2108: %s,  %s\n", time.Since(t), dc.d.filenameBase))
+		}(time.Now())
 		backup.WarmupTable(ctx, dc.d.db, dc.d.valsTable, log.LvlDebug, 16)
 		return nil
 	})

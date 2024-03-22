@@ -1051,6 +1051,9 @@ func (hc *HistoryContext) Warmup(ctx context.Context) (cleanup func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
+		defer func(t time.Time) {
+			log.Warn(fmt.Sprintf("[dbg] warmup2 history.go:2108: %s,  %s\n", time.Since(t), hc.h.filenameBase))
+		}(time.Now())
 		backup.WarmupTable(ctx, hc.h.db, hc.h.historyValsTable, log.LvlDebug, 16)
 		return nil
 	})
