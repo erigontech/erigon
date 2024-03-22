@@ -781,6 +781,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
 		}
+		withWarmup = false // warmup once is enough
 		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
 				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
