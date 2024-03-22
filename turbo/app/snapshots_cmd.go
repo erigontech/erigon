@@ -789,12 +789,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Prune state history")
-	for i := 0; i < 10_000; i++ {
+	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			return ac.PruneSmallBatches(context.Background(), 10*time.Minute, tx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 5*time.Minute, tx)
+			return err
 		}); err != nil {
 			return err
 		}
@@ -845,12 +846,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-	for i := 0; i < 10000; i++ {
+	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			return ac.PruneSmallBatches(context.Background(), time.Minute, tx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 5*time.Minute, tx)
+			return err
 		}); err != nil {
 			return err
 		}
