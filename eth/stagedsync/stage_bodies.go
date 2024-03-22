@@ -361,7 +361,7 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 		WastedPerSec:   uint64(wastedSpeed),
 		Remaining:      remaining,
 		Delivered:      totalDelivered,
-		BlockPerSec:    uint64(totalDelivered / uint64(logInterval/time.Second)),
+		BlockPerSec:    totalDelivered / uint64(logInterval/time.Second),
 		Cache:          uint64(bodyCacheSize),
 		Alloc:          m.Alloc,
 		Sys:            m.Sys,
