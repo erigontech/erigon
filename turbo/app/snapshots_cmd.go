@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
@@ -64,8 +66,10 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 var snapshotCommand = cli.Command{
 	Name:  "snapshots",
 	Usage: `Managing snapshots (historical data partitions)`,
-	Before: func(context *cli.Context) error {
-		_, _, err := debug.Setup(context, true /* rootLogger */)
+	Before: func(cliCtx *cli.Context) error {
+		go mem.LogMemStats(cliCtx.Context, log.New())
+		go disk.UpdateDiskStats(cliCtx.Context, log.New())
+		_, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
