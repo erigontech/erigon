@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -1046,12 +1047,25 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 	return minIdxTx < txTo, txTo
 }
 
+func (hc *HistoryContext) Warmup(ctx context.Context) (cleanup func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := &errgroup.Group{}
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, hc.h.db, hc.h.historyValsTable, log.LvlDebug, 16)
+		return nil
+	})
+	return func() {
+		cancel()
+		_ = wg.Wait()
+	}
+}
+
 // Prune [txFrom; txTo)
 // `force` flag to prune even if canPruneUntil returns false (when Unwind is needed, canPruneUntil always returns false)
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced, withWarmup bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPruneUntil(rwTx), txFrom, txTo)
 	if !forced {
 		var can bool
@@ -1108,7 +1122,12 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	if withWarmup {
+		cleanup := hc.Warmup(ctx)
+		defer cleanup()
+	}
+
+	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, withWarmup, pruneValue)
 }
 
 func (hc *HistoryContext) Close() {
