@@ -2105,6 +2105,9 @@ func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
+		defer func(t time.Time) {
+			log.Warn(fmt.Sprintf("[dbg] warmup domain.go:2108: %s,  %s\n", time.Since(t), dc.d.filenameBase))
+		}(time.Now())
 		backup.WarmupTable(ctx, dc.d.db, dc.d.keysTable, log.LvlDebug, 16)
 		return nil
 	})
