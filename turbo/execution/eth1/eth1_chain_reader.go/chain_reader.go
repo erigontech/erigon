@@ -15,6 +15,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
@@ -394,4 +395,68 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash libcommon.Hash
 		return false, err
 	}
 	return resp.HasBlock, nil
+}
+
+func (c ChainReaderWriterEth1) AssembleBlock(attributes *engine_types.PayloadAttributes) (id uint64, err error) {
+	request := &execution.AssembleBlockRequest{
+		Timestamp:             uint64(attributes.Timestamp),
+		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
+		Withdrawals:           eth1_utils.ConvertWithdrawalsToRpc(attributes.Withdrawals),
+	}
+	if attributes.ParentBeaconBlockRoot != nil {
+		request.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*attributes.ParentBeaconBlockRoot)
+	}
+	resp, err := c.executionModule.AssembleBlock(context.Background(), request)
+	if err != nil {
+		return 0, err
+	}
+	if resp.Busy {
+		return 0, fmt.Errorf("execution data is still syncing")
+	}
+	return resp.Id, nil
+}
+
+func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*types.Block, *engine_types.BlobsBundleV1, *big.Int, error) {
+	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &execution.GetAssembledBlockRequest{
+		Id: id,
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if resp.Busy {
+		return nil, nil, nil, fmt.Errorf("execution data is still syncing")
+	}
+
+	bundle := engine_types.ConvertBlobsFromRpc(resp.Data.BlobsBundle)
+	blockValue := gointerfaces.ConvertH256ToUint256Int(resp.Data.BlockValue).ToBig()
+	payloadRpc := resp.Data.ExecutionPayload
+	header := &types.Header{
+		ParentHash:  gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
+		Coinbase:    gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
+		Root:        gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot),
+		ReceiptHash: gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot),
+		Bloom:       gointerfaces.ConvertH2048ToBloom(payloadRpc.LogsBloom),
+		Number:      big.NewInt(int64(payloadRpc.BlockNumber)),
+		GasLimit:    payloadRpc.GasLimit,
+		GasUsed:     payloadRpc.GasUsed,
+		Time:        payloadRpc.Timestamp,
+		Extra:       payloadRpc.ExtraData,
+		MixDigest:   gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
+	}
+	if payloadRpc.BaseFeePerGas != nil {
+		header.BaseFee = gointerfaces.ConvertH256ToUint256Int(payloadRpc.BaseFeePerGas).ToBig()
+	}
+	if payloadRpc.ExcessBlobGas != nil {
+		header.ExcessBlobGas = payloadRpc.ExcessBlobGas
+	}
+	if payloadRpc.BlobGasUsed != nil {
+		header.BlobGasUsed = payloadRpc.BlobGasUsed
+	}
+	txs, err := types.DecodeTransactions(payloadRpc.Transactions)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return types.NewBlock(header, txs, nil, nil, eth1_utils.ConvertWithdrawalsFromRpc(payloadRpc.Withdrawals)), bundle, blockValue, nil
 }

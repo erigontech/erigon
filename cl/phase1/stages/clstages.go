@@ -713,10 +713,10 @@ func ConsensusClStages(ctx context.Context,
 						finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 						logger.Debug("Caplin is sending forkchoice")
 						// Run forkchoice
-						if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
+						if _, err := cfg.forkChoice.Engine().ForkChoiceUpdate(
 							ctx,
 							cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
-							cfg.forkChoice.GetEth1Hash(headRoot),
+							cfg.forkChoice.GetEth1Hash(headRoot), nil,
 						); err != nil {
 							logger.Warn("Could not set forkchoice", "err", err)
 							return err

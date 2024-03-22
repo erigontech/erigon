@@ -30,3 +30,7 @@ func (a *ApiHandler) GetEthV1ValidatorAttestationData(w http.ResponseWriter, r *
 	}
 	return newBeaconResponse(attestationData), nil
 }
+
+func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	return nil, nil
+}
