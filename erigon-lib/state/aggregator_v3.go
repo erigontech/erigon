@@ -760,7 +760,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)
 	defer localTimeout.Stop()
-	withWarmup := timeout >= 10*time.Minute
+	withWarmup := timeout >= 10*time.Minute && false /*disable for now*/
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
