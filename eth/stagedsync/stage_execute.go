@@ -977,11 +977,11 @@ func PruneExecutionStage(s *PruneState, tx kv.RwTx, cfg ExecuteBlockCfg, ctx con
 	defer logEvery.Stop()
 
 	if cfg.historyV3 {
-		//var pruneLimit uint64
-		//if !initialCycle {
-		//	pruneLimit = 10 * time.Minute
-		//}
-		if err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorV3Context).PruneSmallBatches(ctx, 3*time.Second, tx); err != nil { // prune part of retired data, before commit
+		pruneTimeout := 3 * time.Second
+		if !initialCycle {
+			pruneTimeout = 1 * time.Hour
+		}
+		if err = tx.(*temporal.Tx).AggCtx().(*libstate.AggregatorV3Context).PruneSmallBatches(ctx, pruneTimeout, tx); err != nil { // prune part of retired data, before commit
 			return err
 		}
 	} else {
