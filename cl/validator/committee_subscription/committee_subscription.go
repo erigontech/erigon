@@ -1,4 +1,4 @@
-package attestation
+package committee_subscription
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
-type Attestation struct {
+type CommitteeSubscribeMgmt struct {
 	indiciesDB    kv.RoDB
 	genesisConfig *clparams.GenesisConfig
 	beaconConfig  *clparams.BeaconChainConfig
@@ -31,15 +31,15 @@ type Attestation struct {
 	validatorSubs      map[uint64][]*validatorSub // map from validator index to subscription details
 }
 
-func NewAttestation(
+func NewCommitteeSubscribeManagement(
 	ctx context.Context,
 	indiciesDB kv.RoDB,
 	beaconConfig *clparams.BeaconChainConfig,
 	netConfig *clparams.NetworkConfig,
 	genesisConfig *clparams.GenesisConfig,
 	sentinel sentinel.SentinelClient,
-) *Attestation {
-	a := &Attestation{
+) *CommitteeSubscribeMgmt {
+	a := &CommitteeSubscribeMgmt{
 		indiciesDB:    indiciesDB,
 		beaconConfig:  beaconConfig,
 		netConfig:     netConfig,
@@ -71,7 +71,7 @@ func toAggregationId(slot, committeeIndex uint64) string {
 	return fmt.Sprintf("%d:%d", slot, committeeIndex)
 }
 
-func (a *Attestation) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
+func (a *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
 	subnetId, err := a.computeSubnetId(p.Slot, p.CommitteeIndex)
 	if err != nil {
 		return err
@@ -116,7 +116,7 @@ func (a *Attestation) AddAttestationSubscription(ctx context.Context, p *cltypes
 	return nil
 }
 
-func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) error {
+func (a *CommitteeSubscribeMgmt) OnReceiveAttestation(att *solid.Attestation) error {
 	var (
 		slot           = att.AttestantionData().Slot()
 		committeeIndex = att.AttestantionData().CommitteeIndex()
@@ -171,7 +171,7 @@ func (a *Attestation) OnReceiveAttestation(att *solid.Attestation) error {
 	return nil
 }
 
-func (a *Attestation) sweepByStaleSlots(ctx context.Context) {
+func (a *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 	// sweep subscriptions if slot is older than current slot
 	sweepValidatorSubscriptions := func(curSlot uint64) {
 		a.validatorSubsMutex.Lock()
@@ -216,7 +216,7 @@ func (a *Attestation) sweepByStaleSlots(ctx context.Context) {
 	}
 }
 
-func (a *Attestation) computeSubnetId(slot uint64, committeeIndex uint64) (uint64, error) {
+func (a *CommitteeSubscribeMgmt) computeSubnetId(slot uint64, committeeIndex uint64) (uint64, error) {
 	tx, err := a.indiciesDB.BeginRo(context.Background())
 	if err != nil {
 		return 0, err
@@ -236,7 +236,7 @@ func (a *Attestation) computeSubnetId(slot uint64, committeeIndex uint64) (uint6
 	return (committeesSinceEpochStart + committeeIndex) % a.netConfig.AttestationSubnetCount, nil
 }
 
-func (a *Attestation) computeCommitteePerSlot(activeIndiciesLength uint64) uint64 {
+func (a *CommitteeSubscribeMgmt) computeCommitteePerSlot(activeIndiciesLength uint64) uint64 {
 	cfg := a.beaconConfig
 	committeePerSlot := activeIndiciesLength / cfg.SlotsPerEpoch / cfg.TargetCommitteeSize
 	if cfg.MaxCommitteesPerSlot < committeePerSlot {

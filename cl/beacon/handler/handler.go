@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon/cl/attestation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
@@ -23,6 +22,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
+	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 	"github.com/ledgerwatch/log/v3"
@@ -69,7 +69,7 @@ type ApiHandler struct {
 	validatorParams *validator_params.ValidatorParams
 	blobBundles     *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine          execution_client.ExecutionEngine
-	attestation     *attestation.Attestation
+	committeeSub    *committee_subscription.CommitteeSubscribeMgmt
 }
 
 func NewApiHandler(
@@ -91,7 +91,7 @@ func NewApiHandler(
 	validatorParams *validator_params.ValidatorParams,
 	attestationProducer attestation_producer.AttestationDataProducer,
 	engine execution_client.ExecutionEngine,
-	attestation *attestation.Attestation,
+	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
 ) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
@@ -121,7 +121,7 @@ func NewApiHandler(
 		attestationProducer: attestationProducer,
 		blobBundles:         blobBundles,
 		engine:              engine,
-		attestation:         attestation,
+		committeeSub:        committeeSub,
 	}
 }
 

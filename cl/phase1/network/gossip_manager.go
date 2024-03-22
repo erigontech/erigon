@@ -8,13 +8,13 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
-	"github.com/ledgerwatch/erigon/cl/attestation"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel/peers"
+	"github.com/ledgerwatch/erigon/cl/validator/committee_subscription"
 	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
@@ -35,7 +35,7 @@ type GossipManager struct {
 
 	emitters     *beaconevents.Emitters
 	gossipSource *persistence.GossipSource
-	attestation  *attestation.Attestation
+	committeeSub *committee_subscription.CommitteeSubscribeMgmt
 }
 
 func NewGossipReceiver(
@@ -45,7 +45,7 @@ func NewGossipReceiver(
 	genesisConfig *clparams.GenesisConfig,
 	emitters *beaconevents.Emitters,
 	gossipSource *persistence.GossipSource,
-	attestation *attestation.Attestation,
+	comitteeSub *committee_subscription.CommitteeSubscribeMgmt,
 ) *GossipManager {
 	return &GossipManager{
 		sentinel:      s,
@@ -54,7 +54,7 @@ func NewGossipReceiver(
 		beaconConfig:  beaconConfig,
 		genesisConfig: genesisConfig,
 		gossipSource:  gossipSource,
-		attestation:   attestation,
+		committeeSub:  comitteeSub,
 	}
 }
 
@@ -219,7 +219,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding attestation"
 				return err
 			}
-			if err := g.attestation.OnReceiveAttestation(att); err != nil {
+			if err := g.committeeSub.OnReceiveAttestation(att); err != nil {
 				return err
 			}
 			// publish
