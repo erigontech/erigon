@@ -159,7 +159,7 @@ const ProhibitNewDownloadsFileName = "prohibit_new_downloads.lock"
 func (tf *TorrentFiles) ProhibitNewDownloads(t string) error {
 	tf.lock.Lock()
 	defer tf.lock.Unlock()
-	return tf.ProhibitNewDownloads(t)
+	return tf.prohibitNewDownloads(t)
 }
 
 func (tf *TorrentFiles) prohibitNewDownloads(t string) error {
