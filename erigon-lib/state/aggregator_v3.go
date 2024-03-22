@@ -764,7 +764,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	var pruneLimit uint64 = 1_000
 	var withWarmup bool = false
 	if timeout >= 1*time.Minute {
-		pruneLimit = 100_000
+		pruneLimit = 1_000_000
 		withWarmup = true
 	}
 
