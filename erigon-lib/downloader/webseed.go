@@ -64,7 +64,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		// check if we need to prohibit new downloads for some files
 		for name := range manifestResponse {
-			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(manifestResponse, name)
 			}
@@ -82,7 +82,7 @@ func (d *WebSeeds) constructListsOfFiles(ctx context.Context, httpProviders []*u
 		}
 		// check if we need to prohibit new downloads for some files
 		for name := range response {
-			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+			prohibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 			if prohibited || err != nil {
 				delete(response, name)
 			}
@@ -269,18 +269,21 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
 			continue // it's ok if some HTTP provider failed - try next one
 		}
-		if !d.torrentFiles.Exists(name) {
-			//HTTP call is slow and to reduce chance of race - check `newDownloadsAreProhibited` here and before all HTTP calls
-			prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+		//TODO: Replace `Create` by `CreateIfNotExists` to avoid races
+		prohibited, _, err := d.torrentFiles.CreateIfNotProhibited(name, res)
+		if err != nil {
+			return nil, false, err
+		}
+		if prohibited {
+			ts, err := d.torrentFiles.Exists(name)
+
+			ts, err := d.torrentFiles.LoadByName(name)
 			if err != nil {
 				return nil, false, err
 			}
-			if prohibited {
-				return nil, false, nil
-			}
-			if err := d.torrentFiles.Create(name, res); err != nil {
-				return nil, false, err
-			}
+			return ts, ts != nil, nil
+
+			return
 		}
 
 		ts, err := d.torrentFiles.LoadByName(name)

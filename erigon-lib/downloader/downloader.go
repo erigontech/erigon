@@ -2139,7 +2139,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
-	isProhibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+	isProhibited, err := d.torrentFiles.NewDownloadsAreProhibited(name)
 	if err != nil {
 		return err
 	}
