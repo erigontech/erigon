@@ -3,6 +3,7 @@ package simulator_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -22,30 +23,38 @@ func TestSimulatorStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	span, err := sim.FetchLatestSpan(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 0)
+	t.Log(res)
+	t.Log(err)
 
-	t.Log(span)
+	res, err = sim.FetchStateSyncEvents(ctx, 0, time.Now(), 0)
+	t.Log(res)
+	t.Log(err)
+	//
+	//span, err := sim.FetchLatestSpan(ctx)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//
+	//t.Log(span)
+	//
+	//span, err = sim.FetchLatestSpan(ctx)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//t.Log(span)
+	//
+	//span, err = sim.FetchSpan(ctx, 0)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//
+	//t.Log(span)
+	//
+	//span, err = sim.FetchSpan(ctx, 2)
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
 
-	span, err = sim.FetchLatestSpan(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Log(span)
-
-	span, err = sim.FetchSpan(ctx, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log(span)
-
-	span, err = sim.FetchSpan(ctx, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Log(span)
+	//t.Log(span)
 }

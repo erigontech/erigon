@@ -2,14 +2,14 @@ package simulator
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
-	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -78,66 +78,6 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 	return s, nil
 }
 
-func (h *HeimdallSimulator) downloadSpans(ctx context.Context, spans *freezeblocks.Segment) error {
-	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), snaptype.Enums.BorSpans)
-
-	h.logger.Warn(fmt.Sprintf("Downloading %s", fileName))
-
-	err := h.downloader.Download(ctx, fileName)
-	if err != nil {
-		return fmt.Errorf("can't download %s: %w", fileName, err)
-	}
-
-	h.logger.Warn(fmt.Sprintf("Indexing %s", fileName))
-
-	info, _, _ := snaptype.ParseFileName(h.downloader.LocalFsRoot(), fileName)
-
-	h.logger.Warn(fmt.Sprintf("snapshot from: %d, to: %d", heimdall.SpanIdAt(info.From), heimdall.SpanIdAt(info.To)))
-
-	return freezeblocks.BorSpansIdx(ctx, info, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
-}
-
-func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdall.Span, error) {
-	span, err := h.blockReader.Span(ctx, nil, spanId)
-	if span != nil && err == nil {
-		var s heimdall.Span
-		if err = json.Unmarshal(span, &s); err != nil {
-			return heimdall.Span{}, err
-		}
-		return s, err
-	}
-
-	//var span []byte
-	//var err error
-
-	if span == nil {
-		view := h.knownBorSnapshots.View()
-		defer view.Close()
-
-		if seg, ok := view.SpansSegment(spanId); ok {
-			if err := h.downloadSpans(ctx, seg); err != nil {
-				return heimdall.Span{}, err
-			}
-		}
-
-		h.activeBorSnapshots.ReopenSegments([]snaptype.Type{snaptype.BorSpans}, true)
-
-		h.logger.Warn(fmt.Sprintf("%s", h.activeBorSnapshots.Files()))
-
-		span, err = h.blockReader.Span(ctx, nil, spanId)
-		if err != nil {
-			return heimdall.Span{}, err
-		}
-	}
-
-	var s heimdall.Span
-	if err := json.Unmarshal(span, &s); err != nil {
-		return heimdall.Span{}, err
-	}
-
-	return s, nil
-}
-
 // FetchLatestSpan gets the next span from the snapshot
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
 	span, err := h.getSpan(h.ctx, h.nextSpan)
@@ -160,6 +100,39 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 	}
 
 	return &span, err
+}
+
+func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	events, err := h.getEvents(h.ctx, 0, time.Now(), 0)
+	return events, err
+}
+
+func (h *HeimdallSimulator) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FetchCheckpoint not implemented")
+}
+
+func (h *HeimdallSimulator) FetchCheckpointCount(ctx context.Context) (int64, error) {
+	return 0, status.Errorf(codes.Unimplemented, "method FetchCheckpointCount not implemented")
+}
+
+func (h *HeimdallSimulator) FetchMilestone(ctx context.Context, number int64) (*heimdall.Milestone, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FetchMilestone not implemented")
+}
+
+func (h *HeimdallSimulator) FetchMilestoneCount(ctx context.Context) (int64, error) {
+	return 0, status.Errorf(codes.Unimplemented, "method FetchMilestoneCount not implemented")
+}
+
+func (h *HeimdallSimulator) FetchNoAckMilestone(ctx context.Context, milestoneID string) error {
+	return status.Errorf(codes.Unimplemented, "method FetchNoAckMilestone not implemented")
+}
+
+func (h *HeimdallSimulator) FetchLastNoAckMilestone(ctx context.Context) (string, error) {
+	return "", status.Errorf(codes.Unimplemented, "method FetchLastNoAckMilestone not implemented")
+}
+
+func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID string) error {
+	return status.Errorf(codes.Unimplemented, "method FetchMilestoneID not implemented")
 }
 
 func (h *HeimdallSimulator) Close() {
