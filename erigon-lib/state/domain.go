@@ -60,6 +60,14 @@ var (
 	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
 	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
 	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
+	mxPrunableDAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
+	mxPrunableDSto  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
+	mxPrunableDCode = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
+	mxPrunableDComm = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
+	mxPrunableHAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
+	mxPrunableHSto  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
+	mxPrunableHCode = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
+	mxPrunableHComm = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
 
 	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
 	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
@@ -2012,6 +2020,17 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can boo
 		untilStep = (untilTx - 1) / dc.d.aggregationStep
 	}
 	sm := dc.smallestStepForPruning(tx)
+
+	switch dc.d.filenameBase {
+	case "account":
+		mxPrunableDAcc.Set(float64(maxStepToPrune - sm))
+	case "storage":
+		mxPrunableDSto.Set(float64(maxStepToPrune - sm))
+	case "code":
+		mxPrunableDCode.Set(float64(maxStepToPrune - sm))
+	case "commitment":
+		mxPrunableDComm.Set(float64(maxStepToPrune - sm))
+	}
 	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxStepToPrune)
 	return sm <= maxStepToPrune && sm <= untilStep && untilStep <= maxStepToPrune, maxStepToPrune
 }
