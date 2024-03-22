@@ -778,6 +778,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
 	for {
+		iterationStarted := time.Now()
 		// `context.Background()` is important here!
 		//     it allows keep DB consistent - prune all keys-related data or noting
 		//     can't interrupt by ctrl+c and leave dirt in DB
@@ -786,10 +787,9 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
 		}
-		took := time.Since(started)
 		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
-				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", took.String(), "stat", fstat)
+				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
 			return false, nil
 		}
@@ -797,6 +797,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 
 		withWarmup = false // warmup once is enough
 
+		took := time.Since(iterationStarted)
 		if took < time.Second {
 			pruneLimit *= 10
 		}
