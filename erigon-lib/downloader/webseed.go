@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/anacrolix/torrent"
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"golang.org/x/sync/errgroup"
@@ -252,10 +253,10 @@ func (d *WebSeeds) downloadTorrentFilesFromProviders(ctx context.Context, rootDi
 	return webSeedMap
 }
 
-func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (bool, error) {
+func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) (*torrent.TorrentSpec, bool, error) {
 	urls, ok := d.ByFileName(name)
 	if !ok {
-		return false, nil
+		return nil, false, nil
 	}
 	for _, urlStr := range urls {
 		parsedUrl, err := url.Parse(urlStr)
@@ -264,19 +265,31 @@ func (d *WebSeeds) DownloadAndSaveTorrentFile(ctx context.Context, name string) 
 		}
 		res, err := d.callTorrentHttpProvider(ctx, parsedUrl, name)
 		if err != nil {
-			return false, err
+			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
+			continue
 		}
 		if d.torrentFiles.Exists(name) {
 			continue
 		}
-		if err := d.torrentFiles.Create(name, res); err != nil {
-			d.logger.Log(d.verbosity, "[snapshots] .torrent from webseed rejected", "name", name, "err", err)
-			continue
+		//HTTP call is slow and to reduce chance of race - check `newDownloadsAreProhibited` here and before all HTTP calls
+		prohibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+		if err != nil {
+			return nil, false, err
 		}
-		return true, nil
+		if prohibited {
+			return nil, false, nil
+		}
+		if err := d.torrentFiles.Create(name, res); err != nil {
+			return nil, false, err
+		}
+		ts, err := d.torrentFiles.LoadByName(name)
+		if err != nil {
+			return nil, false, err
+		}
+		return ts, ts != nil, nil
 	}
 
-	return false, nil
+	return nil, false, nil
 }
 
 func (d *WebSeeds) callTorrentHttpProvider(ctx context.Context, url *url.URL, fileName string) ([]byte, error) {

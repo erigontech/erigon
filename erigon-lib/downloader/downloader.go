@@ -2176,12 +2176,8 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 			// TOOD: add `d.webseeds.Complete` chan - to prevent race - Discover is also async
 			// TOOD: maybe run it in goroutine and return channel - to select with p2p
 
-			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
+			ts, ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
 			if ok && err == nil {
-				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
-				if err != nil {
-					return
-				}
 				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
 				if err != nil {
 					return
