@@ -324,6 +324,14 @@ func BodiesForward(
 	if bodyProgress > s.BlockNumber+16 {
 		blocks := bodyProgress - s.BlockNumber
 		secs := time.Since(startTime).Seconds()
+
+		diagnostics.Send(diagnostics.BodiesProcessingUpdate{
+			HighestBlock: bodyProgress,
+			Blocks:       blocks,
+			TimeElapsed:  secs,
+			BlkPerSec:    float64(blocks) / secs,
+		})
+
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress,
 			"blocks", blocks, "in", secs, "blk/sec", uint64(float64(blocks)/secs))
 	}
