@@ -1051,7 +1051,7 @@ func (hc *HistoryContext) Warmup(ctx context.Context) (cleanup func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
-		backup.WarmupTable(ctx, hc.h.db, hc.h.historyValsTable, log.LvlDebug, 16)
+		backup.WarmupTable(ctx, hc.h.db, hc.h.historyValsTable, log.LvlDebug, 4)
 		return nil
 	})
 	return func() {

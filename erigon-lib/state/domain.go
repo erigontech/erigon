@@ -2105,11 +2105,11 @@ func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
 	ctx, cancel := context.WithCancel(ctx)
 	wg := &errgroup.Group{}
 	wg.Go(func() error {
-		backup.WarmupTable(ctx, dc.d.db, dc.d.keysTable, log.LvlDebug, 16)
+		backup.WarmupTable(ctx, dc.d.db, dc.d.keysTable, log.LvlDebug, 4)
 		return nil
 	})
 	wg.Go(func() error {
-		backup.WarmupTable(ctx, dc.d.db, dc.d.valsTable, log.LvlDebug, 16)
+		backup.WarmupTable(ctx, dc.d.db, dc.d.valsTable, log.LvlDebug, 4)
 		return nil
 	})
 	return func() {

@@ -353,7 +353,8 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	ac = agg.MakeContext()
 
 	err = db.Update(ctx, func(tx kv.RwTx) error {
-		return ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
+		_, err = ac.PruneSmallBatches(ctx, 1*time.Minute, tx)
+		return err
 	})
 	require.NoError(t, err)
 

@@ -756,46 +756,75 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
-func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
+func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
+	// On tip-of-chain timeout is about `3sec`
+	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
+	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
+	aggressivePrune := timeout >= 1*time.Minute
+
+	var pruneLimit uint64 = 1_000
+	var withWarmup bool = false
+	if timeout >= 1*time.Minute {
+		// start from a bit high limit to give time for warmup
+		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
+		pruneLimit = 100_000
+		withWarmup = true
+	}
+
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)
 	defer localTimeout.Stop()
-	withWarmup := timeout >= 10*time.Minute && false /*disable for now*/
-	logEvery := time.NewTicker(20 * time.Second)
+	logPeriod := 30 * time.Second
+	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
 	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
 	defer aggLogEvery.Stop()
 
-	const pruneLimit uint64 = 10000
-
 	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
 	for {
+		iterationStarted := time.Now()
+		// `context.Background()` is important here!
+		//     it allows keep DB consistent - prune all keys-related data or noting
+		//     can't interrupt by ctrl+c and leave dirt in DB
 		stat, err := ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
 		if err != nil {
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
-			return err
+			return false, err
 		}
 		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
 				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
-			return nil
+			return false, nil
 		}
 		fullStat.Accumulate(stat)
 
+		withWarmup = false // warmup once is enough
+
+		if aggressivePrune {
+			took := time.Since(iterationStarted)
+			if took < 2*time.Second {
+				pruneLimit *= 10
+			}
+			if took > logPeriod {
+				pruneLimit /= 10
+			}
+		}
+
 		select {
+		case <-localTimeout.C: //must be first to improve responsivness
+			return true, nil
 		case <-logEvery.C:
 			ac.a.logger.Info("[snapshots] pruning state",
-				"until timeout", time.Until(started.Add(timeout)).String(),
+				"until commit", time.Until(started.Add(timeout)).String(),
+				"pruneLimit", pruneLimit,
 				"aggregatedStep", (ac.maxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
-		case <-localTimeout.C:
-			return nil
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		default:
 		}
 	}
@@ -871,6 +900,7 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 }
 
 func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, withWarmup bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
+	defer func(t time.Time) { fmt.Printf(" Prune took aggregator_v3.go:879: %s, %d\n", time.Since(t), limit) }(time.Now())
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {

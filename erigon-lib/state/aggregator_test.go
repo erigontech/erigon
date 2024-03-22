@@ -359,7 +359,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 
 	ac = agg.MakeContext()
 	for i := 0; i < 10; i++ {
-		err = ac.PruneSmallBatches(context.Background(), time.Second*3, buildTx)
+		_, err = ac.PruneSmallBatches(context.Background(), time.Second*3, buildTx)
 		require.NoError(t, err)
 	}
 	err = buildTx.Commit()
