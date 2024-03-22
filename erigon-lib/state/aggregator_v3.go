@@ -801,7 +801,7 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		if took < time.Second {
 			pruneLimit *= 10
 		}
-		if took > 10*time.Second {
+		if took > 30*time.Second {
 			log.Warn("[dbg] m?", "took", took, "diff", took > 10*time.Second)
 			pruneLimit /= 10
 		}
