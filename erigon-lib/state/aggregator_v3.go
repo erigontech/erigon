@@ -784,14 +784,22 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
 			return false, err
 		}
-		withWarmup = false // warmup once is enough
+		took := time.Since(started)
 		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
-				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
+				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", took.String(), "stat", fstat)
 			}
 			return false, nil
 		}
 		fullStat.Accumulate(stat)
+
+		withWarmup = false // warmup once is enough
+
+		if took < time.Second {
+			pruneLimit *= 10
+		} else if took > 10*time.Second {
+			pruneLimit /= 10
+		}
 
 		select {
 		case <-logEvery.C:
