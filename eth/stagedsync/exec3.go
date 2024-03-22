@@ -918,7 +918,7 @@ Loop:
 								// db will grow -> prune will get slower -> db will grow -> ...
 								if haveMoreToPrune, err = tx.(state2.HasAggCtx).
 									AggCtx().(*state2.AggregatorV3Context).
-									PruneSmallBatches(ctx, 5*time.Minute, tx); err != nil {
+									PruneSmallBatches(ctx, 2*time.Minute, tx); err != nil {
 
 									return err
 								}

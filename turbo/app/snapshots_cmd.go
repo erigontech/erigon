@@ -794,7 +794,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 5*time.Minute, tx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 2*time.Minute, tx)
 			return err
 		}); err != nil {
 			return err
@@ -851,7 +851,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 5*time.Minute, tx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 2*time.Minute, tx)
 			return err
 		}); err != nil {
 			return err
