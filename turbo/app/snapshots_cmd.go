@@ -798,7 +798,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 2*time.Minute, tx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
 			return err
 		}); err != nil {
 			return err
@@ -841,7 +841,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		stat, err := ac.Prune(context.Background(), tx, math.MaxUint64, true, logEvery)
+		stat, err := ac.Prune(ctx, tx, math.MaxUint64, true, logEvery)
 		if err != nil {
 			return err
 		}
