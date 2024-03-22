@@ -91,7 +91,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	var currEth1Progress atomic.Int64
 
-	bytesReadInTotal := atomic.Uint64{}
 	destinationSlotForEL := uint64(math.MaxUint64)
 	if cfg.engine != nil && cfg.engine.SupportInsertion() && cfg.beaconCfg.DenebForkEpoch != math.MaxUint64 {
 		destinationSlotForEL = cfg.beaconCfg.BellatrixForkEpoch * cfg.beaconCfg.SlotsPerEpoch
@@ -108,8 +107,6 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		}
 
 		destinationSlotForCL := cfg.sn.SegmentsMax()
-
-		bytesReadInTotal.Add(uint64(blk.EncodingSizeSSZ()))
 
 		slot := blk.Block.Slot
 		if destinationSlotForCL <= blk.Block.Slot {
@@ -154,6 +151,8 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	finishCh := make(chan struct{})
 	// Start logging thread
 
+	isBackfilling := atomic.Bool{}
+
 	go func() {
 		logInterval := time.NewTicker(logIntervalTime)
 		defer logInterval.Stop()
@@ -177,11 +176,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				ratio := float64(logTime / time.Second)
 				speed := blockProgress / ratio
 				prevProgress = currProgress
-				peerCount, err := cfg.downloader.Peers()
-				if err != nil {
-					log.Debug("could not get peer count", "err", err)
-					continue
-				}
+
 				if speed == 0 {
 					continue
 				}
@@ -189,12 +184,13 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					"slot", currProgress,
 					"blockNumber", currEth1Progress.Load(),
 					"blk/sec", fmt.Sprintf("%.1f", speed),
-					"mbps/sec", fmt.Sprintf("%.1f", float64(bytesReadInTotal.Load())/(1000*1000*ratio)),
-					"peers", peerCount,
 					"snapshots", cfg.sn.SegmentsMax(),
 				)
-				bytesReadInTotal.Store(0)
-				logger.Info("Backfilling History", logArgs...)
+				logMsg := "Node is still syncing... downloading past blocks"
+				if isBackfilling.Load() {
+					logMsg = "Node has finished syncing... full history is being downloaded for archiving purposes"
+				}
+				logger.Info(logMsg, logArgs...)
 			case <-finishCh:
 				return
 			case <-ctx.Done():
@@ -211,7 +207,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 		cfg.antiquary.NotifyBackfilled()
-		log.Info("Backfilling finished")
+		if cfg.backfilling {
+			cfg.logger.Info("full backfilling finished")
+		} else {
+			cfg.logger.Info("Missing blocks download finished (note: this does not mean that the history is complete, only that the missing blocks need for sync have been downloaded)")
+		}
 
 		close(finishCh)
 		if cfg.blobsBackfilling {
@@ -240,6 +240,7 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 		return err
 	}
 	defer tx2.Rollback()
+	isBackfilling.Store(true)
 
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
