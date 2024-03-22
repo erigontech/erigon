@@ -776,6 +776,9 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
 	for {
+		// `context.Background()` is important here!
+		//     it allows keep DB consistent - prune all keys-related data or noting
+		//     can't interrupt by ctrl+c and leave dirt in DB
 		stat, err := ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
 		if err != nil {
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
