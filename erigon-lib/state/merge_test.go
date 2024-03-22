@@ -16,7 +16,7 @@ import (
 func emptyTestInvertedIndex(aggStep uint64) *InvertedIndex {
 	salt := uint32(1)
 	logger := log.New()
-	return &InvertedIndex{iiCfg: iiCfg{salt: &salt},
+	return &InvertedIndex{iiCfg: iiCfg{salt: &salt, db: nil},
 		logger:       logger,
 		filenameBase: "test", aggregationStep: aggStep, files: btree2.NewBTreeG[*filesItem](filesItemLess)}
 }

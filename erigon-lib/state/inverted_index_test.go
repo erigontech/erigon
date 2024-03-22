@@ -52,7 +52,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	}).MustOpen()
 	tb.Cleanup(db.Close)
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: dirs}
+	cfg := iiCfg{salt: &salt, dirs: dirs, db: db}
 	ii, err := NewInvertedIndex(cfg, aggStep, "inv", keysTable, indexTable, true, nil, logger)
 	require.NoError(tb, err)
 	ii.DisableFsync()
@@ -198,7 +198,7 @@ func TestInvIndexAfterPrune(t *testing.T) {
 		ic = ii.MakeContext()
 		defer ic.Close()
 
-		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, nil)
+		_, err = ic.Prune(ctx, tx, 0, 16, math.MaxUint64, logEvery, false, false, nil)
 		require.NoError(t, err)
 		return nil
 	})
@@ -375,7 +375,7 @@ func mergeInverted(tb testing.TB, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			ic := ii.MakeContext()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
 			require.NoError(tb, err)
 			var found bool
 			var startTxNum, endTxNum uint64
@@ -426,7 +426,7 @@ func TestInvIndexRanges(t *testing.T) {
 			ii.integrateFiles(sf, step*ii.aggregationStep, (step+1)*ii.aggregationStep)
 			ic := ii.MakeContext()
 			defer ic.Close()
-			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, nil)
+			_, err = ic.Prune(ctx, tx, step*ii.aggregationStep, (step+1)*ii.aggregationStep, math.MaxUint64, logEvery, false, false, nil)
 			require.NoError(t, err)
 		}()
 	}
@@ -451,7 +451,7 @@ func TestInvIndexScanFiles(t *testing.T) {
 	// Recreate InvertedIndex to scan the files
 	var err error
 	salt := uint32(1)
-	cfg := iiCfg{salt: &salt, dirs: ii.dirs}
+	cfg := iiCfg{salt: &salt, dirs: ii.dirs, db: db}
 	ii, err = NewInvertedIndex(cfg, ii.aggregationStep, ii.filenameBase, ii.indexKeysTable, ii.indexTable, true, nil, logger)
 	require.NoError(t, err)
 	defer ii.Close()
