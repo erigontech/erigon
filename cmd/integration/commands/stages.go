@@ -1627,7 +1627,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		blockReader,
 		blockBufferSize,
 		false,
-		nil,
 		maxBlockBroadcastPeers,
 		logger,
 	)

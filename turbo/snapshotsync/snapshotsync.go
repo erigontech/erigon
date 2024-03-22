@@ -205,8 +205,19 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	// after the initial call the downloader or snapshot-lock.file will prevent this download from running
 	//
 
-	if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{}); err == nil {
-		return err
+	// prohibits further downloads, except some exceptions
+	for _, p := range snaptype.AllTypes {
+		if (p.Enum() == snaptype.BeaconBlocks.Enum() || p.Enum() == snaptype.BlobSidecars.Enum()) && caplin == NoCaplin {
+			continue
+		}
+		if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
+			continue
+		}
+		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			Type: p.String(),
+		}); err != nil {
+			return err
+		}
 	}
 
 	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {

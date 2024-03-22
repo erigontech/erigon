@@ -345,6 +345,19 @@ func (s *SentinelServer) ListenToGossip() {
 	}
 }
 
+func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelrpc.RequestSubscribeExpiry) (*sentinelrpc.EmptyMessage, error) {
+	var (
+		topic      = expiryReq.GetTopic()
+		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
+	)
+	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
+	if subs == nil {
+		return nil, fmt.Errorf("no such subscription")
+	}
+	subs.OverwriteSubscriptionExpiry(expiryTime)
+	return &sentinelrpc.EmptyMessage{}, nil
+}
+
 func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	var err error
 	s.logger.Trace("[Sentinel Gossip] Received Packet", "topic", pkt.TopicName)

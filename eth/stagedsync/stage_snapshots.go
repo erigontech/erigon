@@ -151,6 +151,7 @@ func SpawnStageSnapshots(
 		}
 		defer tx.Rollback()
 	}
+
 	if err := DownloadAndIndexSnapshotsIfNeed(s, ctx, tx, cfg, initialCycle, logger); err != nil {
 		return err
 	}

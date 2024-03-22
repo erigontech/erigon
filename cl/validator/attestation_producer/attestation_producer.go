@@ -43,9 +43,12 @@ func (ap *attestationProducer) ProduceAndCacheAttestationData(baseState *state.C
 		return solid.AttestationData{}, err
 	}
 	if baseAttestationData, ok := ap.attestationsCache.Get(epoch); ok {
-		beaconBlockRoot, err := baseState.GetBlockRootAtSlot(slot)
-		if err != nil {
-			return solid.AttestationData{}, err
+		beaconBlockRoot := baseStateBlockRoot
+		if baseState.Slot() > slot {
+			beaconBlockRoot, err = baseState.GetBlockRootAtSlot(slot)
+			if err != nil {
+				return solid.AttestationData{}, err
+			}
 		}
 		return solid.NewAttestionDataFromParameters(
 			slot,

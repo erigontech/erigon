@@ -140,7 +140,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosi
 	var stats AggStats
 
 	lock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
-
 	if err != nil {
 		return nil, fmt.Errorf("can't initialize snapshot lock: %w", err)
 	}
@@ -658,8 +657,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
-			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 			// webseeds.Discover may create new .torrent files on disk
+			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 			}
@@ -2109,8 +2109,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
+	isProhibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+	if err != nil {
+		return err
+	}
 
-	if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
+	if isProhibited && !d.torrentFiles.Exists(name) {
 		return nil
 	}
 
@@ -2137,8 +2141,33 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-ctx.Done():
 			return
 		case <-t.GotInfo():
+		case <-time.After(30 * time.Second): //fallback to r2
+			// TOOD: handle errors
+			// TOOD: add `d.webseeds.Complete` chan - to prevent race - Discover is also async
+			// TOOD: maybe run it in goroutine and return channel - to select with p2p
+
+			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
+			if ok && err == nil {
+				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
+				if err != nil {
+					return
+				}
+				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
+				if err != nil {
+					return
+				}
+				return
+			}
+
+			// wait for p2p
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.GotInfo():
+			}
 		}
 
+		//TODO: remove whitelist check - Erigon may send us new seedable files
 		if !d.snapshotLock.Downloads.Contains(name) {
 			mi := t.Metainfo()
 			if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
