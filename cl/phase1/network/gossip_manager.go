@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -219,7 +220,12 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding attestation"
 				return err
 			}
-			if err := g.committeeSub.OnReceiveAttestation(att); err != nil {
+			if err := g.committeeSub.OnReceiveAttestation(data.Name, att); err != nil {
+				log.Debug("failed to process attestation", "err", err)
+				if errors.Is(err, committee_subscription.ErrIgnore) {
+					return nil
+				}
+				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
 			// publish

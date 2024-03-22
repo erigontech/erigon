@@ -37,3 +37,12 @@ func IsTopicBeaconAttestation(d string) bool {
 func TopicNameBeaconAttestation(d uint64) string {
 	return fmt.Sprintf(TopicNamePrefixBeaconAttestation, d)
 }
+
+func SubnetIdFromTopicBeaconAttestation(d string) (uint64, error) {
+	if !IsTopicBeaconAttestation(d) {
+		return 0, fmt.Errorf("not a beacon attestation topic")
+	}
+	var id uint64
+	_, err := fmt.Sscanf(d, TopicNamePrefixBeaconAttestation, &id)
+	return id, err
+}
