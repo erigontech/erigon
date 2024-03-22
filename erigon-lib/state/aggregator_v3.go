@@ -808,7 +808,8 @@ func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout ti
 		select {
 		case <-logEvery.C:
 			ac.a.logger.Info("[snapshots] pruning state",
-				"until timeout", time.Until(started.Add(timeout)).String(),
+				"until commit", time.Until(started.Add(timeout)).String(),
+				"pruneLimit", pruneLimit,
 				"aggregatedStep", (ac.maxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
