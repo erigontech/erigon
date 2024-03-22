@@ -209,7 +209,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					case <-ctx.Done():
 						return ctx.Err()
 					case <-logEvery.C:
-						log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+						log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 					default:
 					}
 					return nil
@@ -243,7 +243,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 				case <-ctx.Done():
 					return ctx.Err()
 				case <-logEvery.C:
-					log.Log(lvl, fmt.Sprintf("Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+					log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
 				default:
 				}
 				return nil
