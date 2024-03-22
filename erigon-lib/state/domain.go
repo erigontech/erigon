@@ -2021,15 +2021,16 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can boo
 	}
 	sm := dc.smallestStepForPruning(tx)
 
+	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
 	switch dc.d.filenameBase {
 	case "account":
-		mxPrunableDAcc.Set(float64(maxStepToPrune - sm))
+		mxPrunableDAcc.Set(delta)
 	case "storage":
-		mxPrunableDSto.Set(float64(maxStepToPrune - sm))
+		mxPrunableDSto.Set(delta)
 	case "code":
-		mxPrunableDCode.Set(float64(maxStepToPrune - sm))
+		mxPrunableDCode.Set(delta)
 	case "commitment":
-		mxPrunableDComm.Set(float64(maxStepToPrune - sm))
+		mxPrunableDComm.Set(delta)
 	}
 	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxStepToPrune)
 	return sm <= maxStepToPrune && sm <= untilStep && untilStep <= maxStepToPrune, maxStepToPrune

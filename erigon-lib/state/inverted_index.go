@@ -852,12 +852,6 @@ func (ic *InvertedIndexContext) highestTxNum(tx kv.Tx) uint64 {
 	return 0
 }
 
-func (ic *InvertedIndexContext) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
-	minTx := ic.smallestTxNum(tx)
-	maxInFiles := ic.maxTxNumInFiles(false)
-	return minTx < maxInFiles && untilTx <= maxInFiles && minTx < untilTx
-}
-
 func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
 	return ic.smallestTxNum(tx) < ic.maxTxNumInFiles(false)
 }
