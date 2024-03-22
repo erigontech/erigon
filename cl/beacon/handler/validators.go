@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -668,17 +669,12 @@ func (a *ApiHandler) postBeaconCommitteeSubscriptions(w http.ResponseWriter, r *
 		return
 	}
 	for _, sub := range req {
-		if err := a.attestation.AddAttestationSubscription(sub); err != nil {
+		if err := a.attestation.AddAttestationSubscription(context.Background(), sub); err != nil {
 			log.Error("failed to add attestation subscription", "err", err)
 			// todo: more specific error
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
-
-	/*if err := a.forkchoiceStore.OnValidatorCommitteeSubscriptions(req); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}*/
 	w.WriteHeader(http.StatusOK)
 }

@@ -33,3 +33,7 @@ func IsTopicBlobSidecar(d string) bool {
 func IsTopicBeaconAttestation(d string) bool {
 	return strings.HasPrefix(d, "beacon_attestation_")
 }
+
+func TopicNameBeaconAttestation(d uint64) string {
+	return fmt.Sprintf(TopicNamePrefixBeaconAttestation, d)
+}
