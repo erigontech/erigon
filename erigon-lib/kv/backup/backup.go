@@ -191,6 +191,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					if err != nil {
 						return err
 					}
+					kNum := 0
 					for it.HasNext() {
 						k, v, err := it.Next()
 						if err != nil {
@@ -205,12 +206,13 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 						progress.Add(1)
 					}
 
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case <-logEvery.C:
-						log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-					default:
+					kNum++
+					if kNum%1024 == 0 { // a bit reduce runtime cost
+						select {
+						case <-logEvery.C:
+							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+						default:
+						}
 					}
 					return nil
 				})
@@ -227,6 +229,7 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 				if err != nil {
 					return err
 				}
+				kNum := 0
 				for it.HasNext() {
 					k, v, err := it.Next()
 					if err != nil {
@@ -238,14 +241,17 @@ func WarmupTable(ctx context.Context, db kv.RoDB, bucket string, lvl log.Lvl, re
 					if len(v) > 0 {
 						_, _ = v[0], v[len(v)-1]
 					}
+
+					kNum++
+					if kNum%1024 == 0 {
+						select {
+						case <-logEvery.C:
+							log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
+						default:
+						}
+					}
 				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					log.Log(lvl, fmt.Sprintf("[warmup] Progress: %s %.2f%%", bucket, 100*float64(progress.Load())/float64(total)))
-				default:
-				}
+
 				return nil
 			})
 		})
