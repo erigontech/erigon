@@ -149,6 +149,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	}
 	consensusValue := rewardsCollector.Attestations + rewardsCollector.ProposerSlashings + rewardsCollector.AttesterSlashings + rewardsCollector.SyncAggregate
 	isSSZBlinded := false
+	a.setupHeaderReponseForBlockProduction(w, block.Version(), isSSZBlinded, executionValue, consensusValue)
+
 	return newBeaconResponse(beaconBody).
 		With("execution_payload_blinded", isSSZBlinded).
 		With("execution_payload_value", strconv.FormatUint(executionValue, 10)).
@@ -283,6 +285,13 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	}
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
+}
+
+func (a *ApiHandler) setupHeaderReponseForBlockProduction(w http.ResponseWriter, consensusVersion clparams.StateVersion, blinded bool, executionBlockValue, consensusBlockValue uint64) {
+	w.Header().Set("Eth-Execution-Payload-Value", strconv.FormatUint(executionBlockValue, 10))
+	w.Header().Set("Eth-Consensus-Block-Value", strconv.FormatUint(consensusBlockValue, 10))
+	w.Header().Set("Eth-Consensus-Version", clparams.ClVersionToString(consensusVersion))
+	w.Header().Set("Eth-Execution-Payload-Blinded", strconv.FormatBool(blinded))
 }
 
 func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) {
