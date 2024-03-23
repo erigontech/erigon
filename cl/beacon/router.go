@@ -35,6 +35,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 
 	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
 		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
+		log.Debug("[Beacon API] Incoming Request", "method", r.Method, "path", r.URL.Path)
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {
 			start := time.Now()
