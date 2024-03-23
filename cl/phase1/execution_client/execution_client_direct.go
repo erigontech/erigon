@@ -68,7 +68,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, nil
 	}
 	idBytes := make([]byte, 8)
-	id, err := cc.chainRW.AssembleBlock(attr)
+	id, err := cc.chainRW.AssembleBlock(head, attr)
 	if err != nil {
 		return nil, err
 	}
