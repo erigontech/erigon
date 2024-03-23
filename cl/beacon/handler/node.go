@@ -176,6 +176,8 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 	// resp["is_syncing"] = a.syncedData.Syncing()
 	// resp["is_optimistic"] = false // needs to change
 	// resp["el_offline"] = false
+	fmt.Println("currentSlot", currentSlot, "headSlot", a.syncedData.HeadSlot())
+
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"data": map[string]interface{}{
 			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
