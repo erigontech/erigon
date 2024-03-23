@@ -33,7 +33,7 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 			MaxAge:           4,
 		}))
 
-	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("*", func(w http.ResponseWriter, r *http.Request) {
 		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
 		log.Debug("[Beacon API] Incoming Request", "method", r.Method, "path", r.URL.Path)
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
@@ -47,9 +47,6 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 
 	})
 
-	mux.HandleFunc("/archive/*", func(w http.ResponseWriter, r *http.Request) {
-		http.StripPrefix("/archive", beaconHandler.ArchiveApi).ServeHTTP(w, r)
-	})
 	server := &http.Server{
 		Handler:      mux,
 		ReadTimeout:  routerCfg.ReadTimeTimeout,
