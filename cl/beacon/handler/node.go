@@ -177,4 +177,7 @@ func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request)
 	resp["is_syncing"] = a.syncedData.Syncing()
 	resp["is_optimistic"] = false // needs to change
 	resp["el_offline"] = false
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
