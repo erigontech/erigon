@@ -113,6 +113,7 @@ func (a *ApiHandler) init() {
 					r.Get("/peers", a.GetEthV1NodePeersInfos)
 					r.Get("/peers/{peer_id}", a.GetEthV1NodePeerInfos)
 					r.Get("/identity", a.GetEthV1NodeIdentity)
+					r.Get("/syncing", a.GetEthV1NodeSyncing)
 				})
 			}
 
