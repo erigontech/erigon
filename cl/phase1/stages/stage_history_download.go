@@ -139,6 +139,9 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 					return false, tx.Commit()
 				}
 			}
+			if hasELBlock && !cfg.backfilling {
+				return true, tx.Commit()
+			}
 		}
 		isInElSnapshots := true
 		if blk.Version() >= clparams.BellatrixVersion && cfg.engine != nil && cfg.engine.SupportInsertion() {
