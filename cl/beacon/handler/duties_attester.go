@@ -31,7 +31,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if s == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
 	}
-	dependentRootSlot := (epoch * a.beaconChainCfg.SlotsPerEpoch) - 1
+	dependentRootSlot := ((epoch - 1) * a.beaconChainCfg.SlotsPerEpoch) - 1
 	dependentRoot, err := s.GetBlockRootAtSlot(dependentRootSlot)
 	if err != nil {
 		return nil, err
