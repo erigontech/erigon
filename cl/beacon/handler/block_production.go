@@ -121,6 +121,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return nil, err
 	}
+	log.Info("BlockProduction: Computing HashSSZ block", "slot", targetSlot, "execution_value", executionValue)
 
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot + 1)
 	if err != nil {
