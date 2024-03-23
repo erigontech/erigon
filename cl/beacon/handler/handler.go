@@ -89,6 +89,8 @@ func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
 
+	r.Get("/", a.GetEthV1NodeHealth)
+
 	if a.routerCfg.Lighthouse {
 		r.Route("/lighthouse", func(r chi.Router) {
 			r.Get("/validator_inclusion/{epoch}/global", beaconhttp.HandleEndpointFunc(a.GetLighthouseValidatorInclusionGlobal))
