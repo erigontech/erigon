@@ -169,7 +169,7 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 }
 
 func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request) {
-	currentSlot := utils.GetCurrentSlot(a.genesisCfg.GenesisTime, a.beaconChainCfg.SlotsPerEpoch)
+	currentSlot := utils.GetCurrentSlot(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot)
 	// resp := make(map[string]interface{})
 	// resp["head_slot"] = strconv.FormatUint(a.syncedData.HeadSlot(), 10)
 	// resp["sync_distance"] = strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10)
