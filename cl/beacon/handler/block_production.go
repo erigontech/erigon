@@ -121,9 +121,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return nil, err
 	}
-	log.Info("BlockProduction: Computing HashSSZ block", "slot", targetSlot, "execution_value", executionValue)
 
-	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot + 1)
+	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +133,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 		ParentRoot:    baseBlockRoot,
 		Body:          beaconBody,
 	}
+	log.Info("BlockProduction: Computing HashSSZ block", "slot", targetSlot, "execution_value", executionValue, "proposerIndex", proposerIndex)
+
 	// compute the state root now
 	if err := transition.TransitionState(baseState, &cltypes.SignedBeaconBlock{
 		Block: block,
