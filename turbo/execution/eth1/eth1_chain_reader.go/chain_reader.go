@@ -397,12 +397,13 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash libcommon.Hash
 	return resp.HasBlock, nil
 }
 
-func (c ChainReaderWriterEth1) AssembleBlock(attributes *engine_types.PayloadAttributes) (id uint64, err error) {
+func (c ChainReaderWriterEth1) AssembleBlock(baseHash libcommon.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	request := &execution.AssembleBlockRequest{
 		Timestamp:             uint64(attributes.Timestamp),
 		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),
 		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
 		Withdrawals:           eth1_utils.ConvertWithdrawalsToRpc(attributes.Withdrawals),
+		ParentHash:            gointerfaces.ConvertHashToH256(baseHash),
 	}
 	if attributes.ParentBeaconBlockRoot != nil {
 		request.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*attributes.ParentBeaconBlockRoot)
