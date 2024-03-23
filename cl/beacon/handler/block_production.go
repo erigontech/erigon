@@ -122,7 +122,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 		return nil, err
 	}
 
-	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
+	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot + 1)
 	if err != nil {
 		return nil, err
 	}
