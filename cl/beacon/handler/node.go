@@ -170,14 +170,21 @@ func (a *ApiHandler) GetEthV1NodeIdentity(w http.ResponseWriter, r *http.Request
 
 func (a *ApiHandler) GetEthV1NodeSyncing(w http.ResponseWriter, r *http.Request) {
 	currentSlot := utils.GetCurrentSlot(a.genesisCfg.GenesisTime, a.beaconChainCfg.SlotsPerEpoch)
-	resp := make(map[string]interface{})
-	resp["data"] = make(map[string]interface{})
-	resp["head_slot"] = strconv.FormatUint(a.syncedData.HeadSlot(), 10)
-	resp["sync_distance"] = strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10)
-	resp["is_syncing"] = a.syncedData.Syncing()
-	resp["is_optimistic"] = false // needs to change
-	resp["el_offline"] = false
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
+	// resp := make(map[string]interface{})
+	// resp["head_slot"] = strconv.FormatUint(a.syncedData.HeadSlot(), 10)
+	// resp["sync_distance"] = strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10)
+	// resp["is_syncing"] = a.syncedData.Syncing()
+	// resp["is_optimistic"] = false // needs to change
+	// resp["el_offline"] = false
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+		"data": map[string]interface{}{
+			"head_slot":     strconv.FormatUint(a.syncedData.HeadSlot(), 10),
+			"sync_distance": strconv.FormatUint(currentSlot-a.syncedData.HeadSlot(), 10),
+			"is_syncing":    a.syncedData.Syncing(),
+			"is_optimistic": false, // needs to change
+			"el_offline":    false,
+		},
+	}); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
