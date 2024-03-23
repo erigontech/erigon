@@ -587,10 +587,6 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 
 		begin = latest
 		if crit.FromBlock != nil {
-			if !getLogsIsValidBlockNumber(crit.FromBlock) {
-				return 0, 0, fmt.Errorf("invalid value for FromBlock: %v", crit.FromBlock)
-			}
-
 			fromBlock := crit.FromBlock.Int64()
 			if fromBlock > 0 {
 				begin = uint64(fromBlock)
@@ -605,10 +601,6 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		}
 		end = latest
 		if crit.ToBlock != nil {
-			if !getLogsIsValidBlockNumber(crit.ToBlock) {
-				return 0, 0, fmt.Errorf("invalid value for ToBlock: %v", crit.ToBlock)
-			}
-
 			toBlock := crit.ToBlock.Int64()
 			if toBlock > 0 {
 				end = uint64(toBlock)
