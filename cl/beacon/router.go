@@ -52,7 +52,11 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 			start := time.Now()
 			beaconHandler.ArchiveApi.ServeHTTP(w, r)
 			log.Debug("[Beacon API] Request", "method", r.Method, "path", r.URL.Path, "time", time.Since(start))
+		} else {
+			log.Warn("[Beacon API] Request to unavaiable endpoint, check --beacon.api flag", "method", r.Method, "path", r.URL.Path)
+
 		}
+
 	})
 
 	mux.HandleFunc("/archive/*", func(w http.ResponseWriter, r *http.Request) {
