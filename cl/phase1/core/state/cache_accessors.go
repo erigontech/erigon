@@ -86,7 +86,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndex() (uint64, error) {
 
 // GetBeaconProposerIndexForSlot compute the proposer index for a specific slot
 func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
-	epoch := Epoch(b)
+	epoch := slot / b.BeaconConfig().SlotsPerEpoch
 
 	hash := sha256.New()
 	beaconConfig := b.BeaconConfig()
@@ -96,7 +96,7 @@ func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64,
 	mix := b.GetRandaoMix(int(mixPosition))
 	input := shuffling2.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
 	slotByteArray := make([]byte, 8)
-	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
+	binary.LittleEndian.PutUint64(slotByteArray, slot)
 
 	// Add slot to the end of the input.
 	inputWithSlot := append(input[:], slotByteArray...)
