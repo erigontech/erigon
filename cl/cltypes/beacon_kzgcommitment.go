@@ -54,6 +54,11 @@ func (b *Blob) MarshalJSON() ([]byte, error) {
 	return json.Marshal(hexutility.Bytes(b[:]))
 }
 
+func (b *Blob) UnmarshalJSON(in []byte) error {
+	copy(b[:], hexutility.FromHex(string(in)))
+	return nil
+}
+
 func (b *Blob) Clone() clonable.Clonable {
 	return &Blob{}
 }
