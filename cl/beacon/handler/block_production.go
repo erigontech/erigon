@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Giulio2002/bls"
 	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -165,6 +166,9 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	beaconBody.RandaoReveal = randaoReveal
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
+	beaconBody.SyncAggregate = &cltypes.SyncAggregate{
+		SyncCommiteeSignature: bls.InfiniteSignature,
+	}
 
 	// Build execution payload
 	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()

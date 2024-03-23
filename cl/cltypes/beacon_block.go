@@ -130,7 +130,6 @@ func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BeaconBody {
 		ExecutionPayload:   NewEth1Block(clparams.Phase0Version, beaconCfg),
 		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
 		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
-		SyncAggregate:      &SyncAggregate{},
 	}
 }
 
