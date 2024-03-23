@@ -252,7 +252,7 @@ func (I *impl) ProcessWithdrawals(s abstract.BeaconState, withdrawals *solid.Lis
 
 	// Check if full validation is required and verify expected withdrawals.
 	if I.FullValidation {
-		expectedWithdrawals := state.ExpectedWithdrawals(s)
+		expectedWithdrawals := state.ExpectedWithdrawals(s, state.Epoch(s))
 		if len(expectedWithdrawals) != withdrawals.Len() {
 			return fmt.Errorf("ProcessWithdrawals: expected %d withdrawals, but got %d", len(expectedWithdrawals), withdrawals.Len())
 		}
