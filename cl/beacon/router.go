@@ -33,9 +33,8 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 			MaxAge:           4,
 		}))
 
-	mux.HandleFunc("*", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/*", func(w http.ResponseWriter, r *http.Request) {
 		nfw := &notFoundNoWriter{ResponseWriter: w, r: r}
-		log.Debug("[Beacon API] Incoming Request", "method", r.Method, "path", r.URL.Path)
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, chi.NewRouteContext()))
 		if isNotFound(nfw.code) || nfw.code == 0 {
 			start := time.Now()
@@ -44,7 +43,10 @@ func ListenAndServe(beaconHandler *LayeredBeaconHandler, routerCfg beacon_router
 		} else {
 			log.Warn("[Beacon API] Request to unavaiable endpoint, check --beacon.api flag", "method", r.Method, "path", r.URL.Path)
 		}
-
+	})
+	mux.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		log.Warn("[Beacon API] Not found", "method", r.Method, "path", r.URL.Path)
+		http.Error(w, "Not found", http.StatusNotFound)
 	})
 
 	server := &http.Server{
