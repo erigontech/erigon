@@ -24,6 +24,9 @@ func NewBeaconResponse(data any) *BeaconResponse {
 }
 
 func (r *BeaconResponse) With(key string, value any) (out *BeaconResponse) {
+	if out.Extra == nil {
+		out.Extra = make(map[string]any)
+	}
 	out = new(BeaconResponse)
 	*out = *r
 	out.Extra[key] = value
