@@ -126,11 +126,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		return nil, err
 	}
-	fmt.Println(baseState.GetBeaconProposerIndexForSlot(targetSlot - 1))
-	fmt.Println(baseState.GetBeaconProposerIndexForSlot(targetSlot + 1))
-	fmt.Println(baseState.GetBeaconProposerIndexForSlot(targetSlot + 2))
-	fmt.Println(baseState.GetBeaconProposerIndexForSlot(targetSlot + 3))
-	fmt.Println(baseState.GetBeaconProposerIndexForSlot(targetSlot + 4))
 
 	rewardsCollector := &eth2.BlockRewardsCollector{}
 	block := &cltypes.BeaconBlock{
