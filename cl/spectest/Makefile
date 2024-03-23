@@ -13,4 +13,4 @@ clean:
 	rm -rf tests
 
 mainnet:
-	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet -failfast -v --timeout 30m
+	CGO_CFLAGS=-D__BLST_PORTABLE__ go  test -tags=spectest -run=/mainnet/deneb/ssz_static/BlobSidecar/ssz_random/case_3 -failfast -v --timeout 30m

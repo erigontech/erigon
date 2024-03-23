@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"encoding/json"
 	"fmt"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -57,7 +58,7 @@ type BeaconBody struct {
 	// Data related to crosslink records and executing operations on the Ethereum 2.0 chain
 	ExecutionPayload *Eth1Block `json:"execution_payload,omitempty"`
 	// Withdrawals Diffs for Execution Layer
-	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"execution_changes,omitempty"`
+	ExecutionChanges *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"bls_to_execution_changes,omitempty"`
 	// The commitments for beacon chain blobs
 	// With a max of 4 per block
 	BlobKzgCommitments *solid.ListSSZ[*KZGCommitment] `json:"blob_kzg_commitments,omitempty"`
@@ -317,4 +318,46 @@ func (b *BeaconBody) KzgCommitmentMerkleProof(index int) ([][32]byte, error) {
 	}
 	branch := b.BlobKzgCommitments.ElementProof(index)
 	return append(branch, kzgCommitmentsProof...), nil
+}
+
+func (b *BeaconBody) UnmarshalJSON(buf []byte) error {
+	var tmp struct {
+		RandaoReveal       libcommon.Bytes96                           `json:"randao_reveal"`
+		Eth1Data           *Eth1Data                                   `json:"eth1_data"`
+		Graffiti           libcommon.Hash                              `json:"graffiti"`
+		ProposerSlashings  *solid.ListSSZ[*ProposerSlashing]           `json:"proposer_slashings"`
+		AttesterSlashings  *solid.ListSSZ[*AttesterSlashing]           `json:"attester_slashings"`
+		Attestations       *solid.ListSSZ[*solid.Attestation]          `json:"attestations"`
+		Deposits           *solid.ListSSZ[*Deposit]                    `json:"deposits"`
+		VoluntaryExits     *solid.ListSSZ[*SignedVoluntaryExit]        `json:"voluntary_exits"`
+		SyncAggregate      *SyncAggregate                              `json:"sync_aggregate,omitempty"`
+		ExecutionPayload   *Eth1Block                                  `json:"execution_payload,omitempty"`
+		ExecutionChanges   *solid.ListSSZ[*SignedBLSToExecutionChange] `json:"bls_to_execution_changes,omitempty"`
+		BlobKzgCommitments *solid.ListSSZ[*KZGCommitment]              `json:"blob_kzg_commitments,omitempty"`
+	}
+	tmp.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
+	tmp.AttesterSlashings = solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings)
+	tmp.Attestations = solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations)
+	tmp.Deposits = solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240)
+	tmp.VoluntaryExits = solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112)
+	tmp.ExecutionChanges = solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172)
+	tmp.BlobKzgCommitments = solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48)
+	tmp.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
+
+	if err := json.Unmarshal(buf, &tmp); err != nil {
+		return err
+	}
+	b.RandaoReveal = tmp.RandaoReveal
+	b.Eth1Data = tmp.Eth1Data
+	b.Graffiti = tmp.Graffiti
+	b.ProposerSlashings = tmp.ProposerSlashings
+	b.AttesterSlashings = tmp.AttesterSlashings
+	b.Attestations = tmp.Attestations
+	b.Deposits = tmp.Deposits
+	b.VoluntaryExits = tmp.VoluntaryExits
+	b.SyncAggregate = tmp.SyncAggregate
+	b.ExecutionPayload = tmp.ExecutionPayload
+	b.ExecutionChanges = tmp.ExecutionChanges
+	b.BlobKzgCommitments = tmp.BlobKzgCommitments
+	return nil
 }

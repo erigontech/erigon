@@ -2,6 +2,7 @@ package cltypes
 
 import (
 	"encoding/json"
+	"reflect"
 
 	gokzg4844 "github.com/crate-crypto/go-kzg-4844"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -9,6 +10,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+)
+
+var (
+	blobT = reflect.TypeOf(Blob{})
 )
 
 type Blob gokzg4844.Blob
@@ -55,8 +60,7 @@ func (b *Blob) MarshalJSON() ([]byte, error) {
 }
 
 func (b *Blob) UnmarshalJSON(in []byte) error {
-	copy(b[:], hexutility.FromHex(string(in)))
-	return nil
+	return hexutility.UnmarshalFixedJSON(blobT, in, b[:])
 }
 
 func (b *Blob) Clone() clonable.Clonable {

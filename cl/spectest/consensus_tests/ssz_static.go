@@ -93,12 +93,13 @@ func getSSZStaticConsensusTest[T unmarshalerMarshalerHashable](ref T) spectest.H
 			return nil
 		}
 
+		obj2 := object.Clone()
 		// test json
 		jsonBlock, err := json.Marshal(object)
 		require.NoError(t, err)
-		require.NoError(t, json.Unmarshal(jsonBlock, object))
+		require.NoError(t, json.Unmarshal(jsonBlock, obj2))
 
-		haveRoot, err = object.HashSSZ()
+		haveRoot, err = obj2.(unmarshalerMarshalerHashable).HashSSZ()
 		require.NoError(t, err)
 		require.Equal(t, expectedRoot, libcommon.Hash(haveRoot))
 
