@@ -223,7 +223,7 @@ func (a *ApiHandler) init() {
 			}
 		})
 		if a.routerCfg.Validator {
-			r.Get("/v3/validator/blocks/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
+			r.Get("/v3/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 		}
 	})
 }

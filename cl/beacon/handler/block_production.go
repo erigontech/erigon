@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
@@ -67,10 +68,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	ctx := r.Context()
 	// parse request data
 
-	targetSlotOptional, err := beaconhttp.Uint64FromQueryParams(r, "slot")
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-	}
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
 	var randaoReveal common.Bytes96
 	if err := randaoReveal.UnmarshalText([]byte(randaoRevealString)); err != nil {
@@ -83,17 +80,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	if !r.URL.Query().Has("graffiti") {
 		graffiti = libcommon.HexToHash(defaultGraffitiString)
 	}
-	// TODO: implement mev boost.
-	// _, err = beaconhttp.Uint64FromQueryParams(r, "builder_boost_factor")
-	// if err != nil {
-	// 	return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-	// }
-	if targetSlotOptional == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("slot is required"))
-	}
-	targetSlot := *targetSlotOptional
-	_ = targetSlot
-	_ = graffiti
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
 	if err != nil {
@@ -101,11 +87,18 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	}
 	defer tx.Rollback()
 
-	blockId, err := beaconhttp.BlockIdFromRequest(r)
+	targetSlotStr := chi.URLParam(r, "slot")
+	targetSlot, err := strconv.ParseUint(targetSlotStr, 10, 64)
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid slot: %v", err))
 	}
-	baseBlockRoot, err := a.rootFromBlockId(ctx, tx, blockId)
+
+	s := a.syncedData.HeadState()
+	if s == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
+	}
+
+	baseBlockRoot, err := s.BlockRoot()
 	if err != nil {
 		return nil, err
 	}
