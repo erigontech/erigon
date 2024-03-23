@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"sync"
@@ -12,9 +14,12 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
@@ -22,6 +27,14 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/log/v3"
+)
+
+type BlockPublishingValidation string
+
+const (
+	BlockPublishingValidationGossip                   BlockPublishingValidation = "gossip"
+	BlockPublishingValidationConsensus                BlockPublishingValidation = "consensus"
+	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
 var defaultGraffitiString = "Caplin"
@@ -269,4 +282,137 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	}
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
+}
+
+func (a *ApiHandler) PostEthV1BeaconBlocks(w http.ResponseWriter, r *http.Request) {
+	a.postBeaconBlocks(w, r, 1)
+}
+
+func (a *ApiHandler) PostEthV2BeaconBlocks(w http.ResponseWriter, r *http.Request) {
+	a.postBeaconBlocks(w, r, 2)
+}
+
+func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, apiVersion int) {
+	ctx := r.Context()
+	version, err := a.parseEthConsensusVersion(r.Header.Get("Eth-Consensus-Version"), apiVersion)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	validation := a.parseBlockPublishingValidation(w, r, apiVersion)
+	// Decode the block
+	block, err := a.parseRequestBeaconBlock(version, r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_ = validation
+
+	// TODO: do gossip checks first, so check of MaximumClockDisparity
+	// if validation == BlockPublishingValidationConsensus {
+	// 	// TODO: check for consensus sigs.
+	// }
+	if err := a.broadcastBlock(ctx, block); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+
+}
+
+func (a *ApiHandler) parseEthConsensusVersion(str string, apiVersion int) (clparams.StateVersion, error) {
+	if str == "" && apiVersion == 2 {
+		return 0, fmt.Errorf("Eth-Consensus-Version header is required")
+	}
+	if str == "" && apiVersion == 1 {
+		currentEpoch := utils.GetCurrentEpoch(a.genesisCfg.GenesisTime, a.beaconChainCfg.SecondsPerSlot, a.beaconChainCfg.SlotsPerEpoch)
+		return a.beaconChainCfg.GetCurrentStateVersion(currentEpoch), nil
+	}
+	return clparams.StringToClVersion(str)
+}
+
+func (a *ApiHandler) parseBlockPublishingValidation(w http.ResponseWriter, r *http.Request, apiVersion int) BlockPublishingValidation {
+	str := r.URL.Query().Get("broadcast_validation")
+	if apiVersion == 1 || str == string(BlockPublishingValidationGossip) {
+		return BlockPublishingValidationGossip
+	}
+	// fall to consensus anyway. equivocation is not supported yet.
+	return BlockPublishingValidationConsensus
+}
+
+func (a *ApiHandler) parseRequestBeaconBlock(version clparams.StateVersion, r *http.Request) (*cltypes.SignedBeaconBlock, error) {
+	block := cltypes.NewSignedBeaconBlock(a.beaconChainCfg)
+	// check content type
+	if r.Header.Get("Content-Type") == "application/json" {
+		return block, json.NewDecoder(r.Body).Decode(block)
+	}
+	octect, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	if err := block.DecodeSSZ(octect, int(version)); err != nil {
+		return nil, err
+	}
+	return block, nil
+}
+
+func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {
+	// TODO(Giulio2002): Add sync pool.
+	blkSSZ, err := blk.EncodeSSZ(nil)
+	if err != nil {
+		return err
+	}
+	blobsSidecarsBytes := make([][]byte, 0, blk.Block.Body.BlobKzgCommitments.Len())
+	blobSidecar := &cltypes.BlobSidecar{}
+	header := blk.SignedBeaconBlockHeader()
+
+	if blk.Version() >= clparams.DenebVersion {
+		for i := 0; i < blk.Block.Body.BlobKzgCommitments.Len(); i++ {
+			commitment := blk.Block.Body.BlobKzgCommitments.Get(i)
+			if commitment == nil {
+				return fmt.Errorf("missing commitment %d", i)
+			}
+			bundle, has := a.blobBundles.Get(libcommon.Bytes48(*commitment))
+			if !has {
+				return fmt.Errorf("missing blob bundle for commitment %x", commitment)
+			}
+			// Assemble inclusion proof
+			inclusionProofRaw, err := blk.Block.Body.KzgCommitmentMerkleProof(i)
+			if err != nil {
+				return err
+			}
+			blobSidecar.CommitmentInclusionProof = solid.NewHashVector(cltypes.CommitmentBranchSize)
+			for _, h := range inclusionProofRaw {
+				blobSidecar.CommitmentInclusionProof.Append(h)
+			}
+			blobSidecar.Index = uint64(i)
+			blobSidecar.Blob = *bundle.Blob
+			blobSidecar.KzgCommitment = bundle.Commitment
+			blobSidecar.KzgProof = bundle.KzgProof
+			blobSidecar.SignedBlockHeader = header
+			blobSidecarSSZ, err := blobSidecar.EncodeSSZ(nil)
+			if err != nil {
+				return err
+			}
+			blobsSidecarsBytes = append(blobsSidecarsBytes, blobSidecarSSZ)
+		}
+	}
+	// Broadcast the block and its blobs
+	if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+		Name: gossip.TopicNameBeaconBlock,
+		Data: blkSSZ,
+	}); err != nil {
+		return err
+	}
+	for idx, blob := range blobsSidecarsBytes {
+		idx64 := uint64(idx)
+		if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
+			Name:     gossip.TopicNamePrefixBlobSidecar,
+			Data:     blob,
+			SubnetId: &idx64,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
