@@ -166,6 +166,7 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	beaconBody.RandaoReveal = randaoReveal
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
+	// Sync aggregate is empty for now.
 	beaconBody.SyncAggregate = &cltypes.SyncAggregate{
 		SyncCommiteeSignature: bls.InfiniteSignature,
 	}
@@ -201,7 +202,7 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 			withdrawals = append(withdrawals, &types.Withdrawal{
 				Index:     w.Index,
 				Amount:    w.Amount,
-				Validator: w.Amount,
+				Validator: w.Validator,
 				Address:   w.Address,
 			})
 		}
