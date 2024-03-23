@@ -32,7 +32,7 @@ const maxBlobBundleCacheSize = 48 // 8 blocks worth of blobs
 type BlobBundle struct {
 	Commitment common.Bytes48
 	Blob       *cltypes.Blob
-	KzgProof   cltypes.KZGProof
+	KzgProof   common.Bytes48
 }
 
 type ApiHandler struct {

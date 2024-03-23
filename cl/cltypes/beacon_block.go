@@ -120,7 +120,16 @@ func (b *BeaconBlock) Blinded() (*BlindedBeaconBlock, error) {
 
 func NewBeaconBody(beaconCfg *clparams.BeaconChainConfig) *BeaconBody {
 	return &BeaconBody{
-		beaconCfg: beaconCfg,
+		beaconCfg:          beaconCfg,
+		Eth1Data:           &Eth1Data{},
+		ProposerSlashings:  solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416),
+		AttesterSlashings:  solid.NewDynamicListSSZ[*AttesterSlashing](MaxAttesterSlashings),
+		Attestations:       solid.NewDynamicListSSZ[*solid.Attestation](MaxAttestations),
+		Deposits:           solid.NewStaticListSSZ[*Deposit](MaxDeposits, 1240),
+		VoluntaryExits:     solid.NewStaticListSSZ[*SignedVoluntaryExit](MaxVoluntaryExits, 112),
+		ExecutionPayload:   NewEth1Block(clparams.Phase0Version, beaconCfg),
+		ExecutionChanges:   solid.NewStaticListSSZ[*SignedBLSToExecutionChange](MaxExecutionChanges, 172),
+		BlobKzgCommitments: solid.NewStaticListSSZ[*KZGCommitment](MaxBlobsCommittmentsPerBlock, 48),
 	}
 }
 

@@ -427,6 +427,9 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*types.Block, *engi
 	if resp.Busy {
 		return nil, nil, nil, fmt.Errorf("execution data is still syncing")
 	}
+	if resp.Data == nil {
+		return nil, nil, nil, nil
+	}
 
 	bundle := engine_types.ConvertBlobsFromRpc(resp.Data.BlobsBundle)
 	blockValue := gointerfaces.ConvertH256ToUint256Int(resp.Data.BlockValue).ToBig()
