@@ -27,13 +27,22 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
+	s := a.syncedData.HeadState()
+	if s == nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
+	}
+	dependentRootSlot := (epoch * a.beaconChainCfg.SlotsPerEpoch) - 1
+	dependentRoot, err := s.GetBlockRootAtSlot(dependentRootSlot)
+	if err != nil {
+		return nil, err
+	}
 
 	var idxsStr []string
 	if err := json.NewDecoder(r.Body).Decode(&idxsStr); err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("could not decode request body: %w. request body is required", err))
 	}
 	if len(idxsStr) == 0 {
-		return newBeaconResponse([]string{}).WithOptimistic(false), nil
+		return newBeaconResponse([]string{}).WithOptimistic(false).With("dependent_root", dependentRoot), nil
 	}
 	idxSet := map[int]struct{}{}
 	// convert the request to uint64
@@ -60,7 +69,6 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	// get the duties
 	if a.forkchoiceStore.LowestAvaiableSlot() <= epoch*a.beaconChainCfg.SlotsPerEpoch {
 		// non-finality case
-		s := a.syncedData.HeadState()
 
 		if s == nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("node is syncing"))
@@ -100,7 +108,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 				}
 			}
 		}
-		return newBeaconResponse(resp).WithOptimistic(false), nil
+		return newBeaconResponse(resp).WithOptimistic(false).With("dependent_root", dependentRoot), nil
 	}
 
 	stageStateProgress, err := state_accessors.GetStateProcessingProgress(tx)
@@ -159,5 +167,5 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			}
 		}
 	}
-	return newBeaconResponse(resp).WithOptimistic(false), nil
+	return newBeaconResponse(resp).WithOptimistic(false).With("dependent_root", dependentRoot), nil
 }
