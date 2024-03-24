@@ -263,8 +263,6 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 }
 
 func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestation, indicies []uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
 	target := attestation.AttestantionData().Target()
 
