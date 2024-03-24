@@ -425,8 +425,8 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				return err
 			}
 			blobSidecar.CommitmentInclusionProof = solid.NewHashVector(cltypes.CommitmentBranchSize)
-			for _, h := range inclusionProofRaw {
-				blobSidecar.CommitmentInclusionProof.Append(h)
+			for i, h := range inclusionProofRaw {
+				blobSidecar.CommitmentInclusionProof.Set(i, h)
 			}
 			blobSidecar.Index = uint64(i)
 			blobSidecar.Blob = *bundle.Blob
