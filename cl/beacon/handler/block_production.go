@@ -446,6 +446,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	if err := a.storeBlockAndBlobs(ctx, blk, blobsSidecars); err != nil {
 		return err
 	}
+	log.Info("BlockPublishing: publishing block and blobs", "slot", blk.Block.Slot, "blobs", len(blobsSidecars))
 	// Broadcast the block and its blobs
 	if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
 		Name: gossip.TopicNameBeaconBlock,
