@@ -311,15 +311,15 @@ func (f *forkGraphDisk) getBlock(blockRoot libcommon.Hash) (*cltypes.SignedBeaco
 }
 
 func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
-	// if f.currentState != nil && !alwaysCopy {
-	// 	currentStateBlockRoot, err := f.currentState.BlockRoot()
-	// 	if err != nil {
-	// 		return nil, err
-	// 	}
-	// 	if currentStateBlockRoot == blockRoot {
-	// 		return f.currentState, nil
-	// 	}
-	// }
+	if f.currentState != nil && !alwaysCopy {
+		currentStateBlockRoot, err := f.currentState.BlockRoot()
+		if err != nil {
+			return nil, err
+		}
+		if currentStateBlockRoot == blockRoot {
+			return f.currentState, nil
+		}
+	}
 
 	// collect all blocks beetwen greatest extending node path and block.
 	blocksInTheWay := []*cltypes.SignedBeaconBlock{}
