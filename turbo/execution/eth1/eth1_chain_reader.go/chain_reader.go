@@ -14,7 +14,9 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
-	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
@@ -419,7 +421,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash libcommon.Hash, attributes
 	return resp.Id, nil
 }
 
-func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*types.Block, *engine_types.BlobsBundleV1, *big.Int, error) {
+func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
 	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &execution.GetAssembledBlockRequest{
 		Id: id,
 	})
@@ -436,35 +438,43 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*types.Block, *engi
 	bundle := engine_types.ConvertBlobsFromRpc(resp.Data.BlobsBundle)
 	blockValue := gointerfaces.ConvertH256ToUint256Int(resp.Data.BlockValue).ToBig()
 	payloadRpc := resp.Data.ExecutionPayload
-	header := &types.Header{
-		ParentHash:  gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
-		UncleHash:   types.EmptyUncleHash,
-		Coinbase:    gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
-		Root:        gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot),
-		ReceiptHash: gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot),
-		Bloom:       gointerfaces.ConvertH2048ToBloom(payloadRpc.LogsBloom),
-		Number:      big.NewInt(int64(payloadRpc.BlockNumber)),
-		GasLimit:    payloadRpc.GasLimit,
-		GasUsed:     payloadRpc.GasUsed,
-		Time:        payloadRpc.Timestamp,
-		Extra:       payloadRpc.ExtraData,
-		Nonce:       merge.ProofOfStakeNonce,
-		Difficulty:  merge.ProofOfStakeDifficulty,
-		MixDigest:   gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
-	}
-	if payloadRpc.BaseFeePerGas != nil {
-		header.BaseFee = gointerfaces.ConvertH256ToUint256Int(payloadRpc.BaseFeePerGas).ToBig()
+
+	extraData := solid.NewExtraData()
+	extraData.SetBytes(payloadRpc.ExtraData)
+	blockHash := gointerfaces.ConvertH256ToHash(payloadRpc.BlockHash)
+	block := &cltypes.Eth1Block{
+		ParentHash:    gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
+		FeeRecipient:  gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
+		StateRoot:     gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot),
+		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot),
+		LogsBloom:     gointerfaces.ConvertH2048ToBloom(payloadRpc.LogsBloom),
+		BlockNumber:   payloadRpc.BlockNumber,
+		GasLimit:      payloadRpc.GasLimit,
+		GasUsed:       payloadRpc.GasUsed,
+		Time:          payloadRpc.Timestamp,
+		Extra:         extraData,
+		PrevRandao:    gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
+		Transactions:  solid.NewTransactionsSSZFromTransactions(payloadRpc.Transactions),
+		BlockHash:     blockHash,
+		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
 	}
 	if payloadRpc.ExcessBlobGas != nil {
-		header.ExcessBlobGas = payloadRpc.ExcessBlobGas
+		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}
-	if payloadRpc.BlobGasUsed != nil {
-		header.BlobGasUsed = payloadRpc.BlobGasUsed
+	if payloadRpc.ExcessBlobGas != nil {
+		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}
-	txs, err := types.DecodeTransactions(payloadRpc.Transactions)
-	if err != nil {
-		return nil, nil, nil, err
+
+	// change the limit later
+	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+	for _, w := range payloadRpc.Withdrawals {
+		withdrawals.Append(&cltypes.Withdrawal{
+			Amount:    w.Amount,
+			Address:   gointerfaces.ConvertH160toAddress(w.Address),
+			Index:     w.Index,
+			Validator: w.ValidatorIndex,
+		})
 	}
-	blockHash := gointerfaces.ConvertH256ToHash(payloadRpc.BlockHash)
-	return types.NewBlockFromStorage(blockHash, header, txs, nil, eth1_utils.ConvertWithdrawalsFromRpc(payloadRpc.Withdrawals)), bundle, blockValue, nil
+	block.Withdrawals = withdrawals
+	return block, bundle, blockValue, nil
 }
