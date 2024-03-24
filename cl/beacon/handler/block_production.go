@@ -302,10 +302,7 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 					return true
 				})
 				executionPayload.Transactions = payload.Transactions
-				_, err = executionPayload.RlpHeader((*libcommon.Hash)(&baseBlock.ParentRoot))
-				if err != nil {
-					log.Error("BlockProduction: Failed to RlpHeader", "err", err)
-				}
+
 				return
 			}
 		}

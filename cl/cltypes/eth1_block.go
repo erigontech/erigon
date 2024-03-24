@@ -334,16 +334,7 @@ func (b *Eth1Block) RlpHeader(parentRoot *libcommon.Hash) (*types.Header, error)
 		header.BlobGasUsed = &blobGasUsed
 		excessBlobGas := b.ExcessBlobGas
 		header.ExcessBlobGas = &excessBlobGas
-		fmt.Println("header.BlobGasUsed", *header.BlobGasUsed)
-		fmt.Println("header.ExcessBlobGas", *header.ExcessBlobGas)
 	}
-	if parentRoot != nil {
-		fmt.Println("parentRoot", *parentRoot)
-	}
-	fmt.Println("header.TxHash", header.TxHash)
-
-	j, _ := json.Marshal(header)
-	fmt.Println(string(j))
 
 	// If the header hash does not match the block hash, return an error.
 	if header.Hash() != b.BlockHash {
