@@ -96,6 +96,7 @@ type Downloader struct {
 type webDownloadInfo struct {
 	url     *url.URL
 	length  int64
+	md5     string
 	torrent *torrent.Torrent
 }
 
@@ -118,7 +119,7 @@ type AggStats struct {
 	LocalFileHashTime          time.Duration
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger log.Logger, verbosity log.Lvl, discover bool) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl, discover bool) (*Downloader, error) {
 	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -151,7 +152,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		torrentClient:       torrentClient,
 		lock:                mutex,
 		stats:               stats,
-		webseeds:            &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: lock.Downloads},
+		webseeds:            NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
 		logger:              logger,
 		verbosity:           verbosity,
 		torrentFiles:        &TorrentFiles{dir: cfg.Dirs.Snap},
@@ -161,13 +162,13 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
+	d.webseeds.SetTorrent(d.torrentFiles, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	if cfg.ClientConfig.DownloadRateLimiter != nil {
 		downloadLimit := cfg.ClientConfig.DownloadRateLimiter.Limit()
 		d.downloadLimit = &downloadLimit
 	}
 
-	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if cfg.AddTorrentsFromDisk {
@@ -342,7 +343,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		Chain: cfg.ChainName,
 	}
 
-	files, err := seedableFiles(cfg.Dirs, cfg.ChainName)
+	files, err := SeedableFiles(cfg.Dirs, cfg.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -656,7 +657,8 @@ func (d *Downloader) mainLoop(silent bool) error {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
-			d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+			// webseeds.Discover may create new .torrent files on disk
+			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
@@ -1272,8 +1274,6 @@ func (d *Downloader) checkComplete(name string) (bool, int64, *time.Time) {
 }
 
 func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []*seedHash, error) {
-	torrentHash := t.InfoHash()
-
 	d.lock.RLock()
 	info, ok := d.webDownloadInfo[t.Name()]
 	d.lock.RUnlock()
@@ -1282,46 +1282,16 @@ func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []
 		return info, nil, nil
 	}
 
-	seedHashMismatches := make([]*seedHash, 0, len(d.cfg.WebSeedUrls))
-
-	for _, webseed := range d.cfg.WebSeedUrls {
-		downloadUrl := webseed.JoinPath(t.Name())
-
-		if headRequest, err := http.NewRequestWithContext(d.ctx, "HEAD", downloadUrl.String(), nil); err == nil {
-			headResponse, err := http.DefaultClient.Do(headRequest)
-
-			if err != nil {
-				continue
-			}
-
-			headResponse.Body.Close()
-
-			if headResponse.StatusCode == http.StatusOK {
-				if meta, err := getWebpeerTorrentInfo(d.ctx, downloadUrl); err == nil {
-					if bytes.Equal(torrentHash.Bytes(), meta.HashInfoBytes().Bytes()) {
-						// TODO check the torrent's hash matches this hash
-						return webDownloadInfo{
-							url:     downloadUrl,
-							length:  headResponse.ContentLength,
-							torrent: t,
-						}, seedHashMismatches, nil
-					} else {
-						hash := meta.HashInfoBytes()
-						seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed, hash: &hash})
-						continue
-					}
-				}
-			}
-		}
-
-		seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed})
+	// todo this function does not exit on first matched webseed hash, could make unexpected results
+	infos, seedHashMismatches, err := d.webseeds.getWebDownloadInfo(d.ctx, t)
+	if err != nil || len(infos) == 0 {
+		return webDownloadInfo{}, seedHashMismatches, fmt.Errorf("can't find download info: %w", err)
 	}
-
-	return webDownloadInfo{}, seedHashMismatches, fmt.Errorf("can't find download info")
+	return infos[0], seedHashMismatches, nil
 }
 
 func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo.MetaInfo, error) {
-	torrentRequest, err := http.NewRequestWithContext(ctx, "GET", downloadUrl.String()+".torrent", nil)
+	torrentRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadUrl.String()+".torrent", nil)
 
 	if err != nil {
 		return nil, err
@@ -2215,7 +2185,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	return nil
 }
 
-func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
+func SeedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
 	files, err := seedableSegmentFiles(dirs.Snap, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)
