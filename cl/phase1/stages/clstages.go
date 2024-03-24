@@ -614,7 +614,7 @@ func ConsensusClStages(ctx context.Context,
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
 					// blocks may be scheduled for later execution outside of the catch-up flow
-					presenceTicker := time.NewTicker(1 * time.Second)
+					presenceTicker := time.NewTicker(20 * time.Millisecond)
 					defer presenceTicker.Stop()
 					seenBlockRoots := make(map[common.Hash]struct{})
 				MainLoop:
