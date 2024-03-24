@@ -378,6 +378,7 @@ func (a *ApiHandler) parseBlockPublishingValidation(w http.ResponseWriter, r *ht
 
 func (a *ApiHandler) parseRequestBeaconBlock(version clparams.StateVersion, r *http.Request) (*cltypes.SignedBeaconBlock, error) {
 	block := cltypes.NewSignedBeaconBlock(a.beaconChainCfg)
+	block.Block.Body.Version = version
 	// check content type
 	if r.Header.Get("Content-Type") == "application/json" {
 		return block, json.NewDecoder(r.Body).Decode(block)
