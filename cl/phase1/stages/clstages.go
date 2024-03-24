@@ -439,7 +439,6 @@ func ConsensusClStages(ctx context.Context,
 							case <-ctx.Done():
 								return ctx.Err()
 							case <-readyTimeout.C:
-								time.Sleep(10 * time.Second)
 								return nil
 							case <-readyInterval.C:
 								ready, err := cfg.executionClient.Ready(ctx)

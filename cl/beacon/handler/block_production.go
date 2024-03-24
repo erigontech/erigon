@@ -437,7 +437,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 	go func() {
-		if err := a.storeBlockAndBlobs(ctx, blk, blobsSidecars); err != nil {
+		if err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars); err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}
 	}()
