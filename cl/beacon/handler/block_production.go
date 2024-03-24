@@ -273,8 +273,25 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 					copy(c[:], bundles.Commitments[i])
 					beaconBody.BlobKzgCommitments.Append((*cltypes.KZGCommitment)(&c))
 				}
-
-				executionPayload = cltypes.NewEth1BlockFromHeaderAndBody(payload.Header(), payload.RawBody(), a.beaconChainCfg)
+				executionPayload = cltypes.NewEth1Block(beaconBody.Version, a.beaconChainCfg)
+				executionPayload.BlockHash = payload.BlockHash
+				executionPayload.ParentHash = payload.ParentHash
+				executionPayload.StateRoot = payload.StateRoot
+				executionPayload.ReceiptsRoot = payload.ReceiptsRoot
+				executionPayload.LogsBloom = payload.LogsBloom
+				executionPayload.BlockNumber = payload.BlockNumber
+				executionPayload.GasLimit = payload.GasLimit
+				executionPayload.GasUsed = payload.GasUsed
+				executionPayload.Time = payload.Time
+				executionPayload.Extra = payload.Extra
+				executionPayload.BlobGasUsed = payload.BlobGasUsed
+				executionPayload.ExcessBlobGas = payload.ExcessBlobGas
+				executionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(a.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+				payload.Withdrawals.Range(func(index int, value *cltypes.Withdrawal, length int) bool {
+					executionPayload.Withdrawals.Append(value)
+					return true
+				})
+				executionPayload.Transactions = payload.Transactions
 				return
 			}
 		}

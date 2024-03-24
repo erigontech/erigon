@@ -31,5 +31,5 @@ type ExecutionEngine interface {
 	// Snapshots
 	FrozenBlocks(ctx context.Context) uint64
 	// Block production
-	GetAssembledBlock(ctx context.Context, id []byte) (*types.Block, *engine_types.BlobsBundleV1, *big.Int, error)
+	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error)
 }
