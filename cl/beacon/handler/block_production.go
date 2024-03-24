@@ -376,6 +376,10 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	blobSidecar := &cltypes.BlobSidecar{}
 	header := blk.SignedBeaconBlockHeader()
 
+	if err := a.forkchoiceStore.OnBlock(ctx, blk, true, true, false); err != nil {
+		return err
+	}
+
 	if blk.Version() >= clparams.DenebVersion {
 		for i := 0; i < blk.Block.Body.BlobKzgCommitments.Len(); i++ {
 			commitment := blk.Block.Body.BlobKzgCommitments.Get(i)
@@ -412,6 +416,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		Name: gossip.TopicNameBeaconBlock,
 		Data: blkSSZ,
 	}); err != nil {
+		log.Error("Failed to publish block", "err", err)
 		return err
 	}
 	for idx, blob := range blobsSidecarsBytes {
@@ -421,6 +426,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			Data:     blob,
 			SubnetId: &idx64,
 		}); err != nil {
+			log.Error("Failed to publish blob sidecar", "err", err)
 			return err
 		}
 	}
