@@ -350,10 +350,6 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	}
 	_ = validation
 
-	// TODO: do gossip checks first, so check of MaximumClockDisparity
-	// if validation == BlockPublishingValidationConsensus {
-	// 	// TODO: check for consensus sigs.
-	// }
 	if err := a.broadcastBlock(ctx, block); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -400,7 +396,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(version clparams.StateVersion, r *h
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {
-	// TODO(Giulio2002): Add sync pool.
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
 		return err

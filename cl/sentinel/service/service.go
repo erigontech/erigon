@@ -101,7 +101,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	default:
 		// check subnets
 		switch {
-		case strings.Contains(msg.Name, gossip.TopicNamePrefixBlobSidecar):
+		case strings.Contains(msg.Name, "blob_sidecar"):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
