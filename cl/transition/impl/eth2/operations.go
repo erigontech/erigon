@@ -301,7 +301,7 @@ func (I *impl) ProcessExecutionPayload(s abstract.BeaconState, payload *cltypes.
 		}
 	}
 	if payload.PrevRandao != s.GetRandaoMixes(state.Epoch(s)) {
-		return fmt.Errorf("ProcessExecutionPayload: randao mix mismatches with mix digest")
+		return fmt.Errorf("ProcessExecutionPayload: randao mix mismatches with mix digest, expected %x, got %x", s.GetRandaoMixes(state.Epoch(s)), payload.PrevRandao)
 	}
 	if payload.Time != state.ComputeTimestampAtSlot(s, s.Slot()) {
 		return fmt.Errorf("ProcessExecutionPayload: invalid Eth1 timestamp")
