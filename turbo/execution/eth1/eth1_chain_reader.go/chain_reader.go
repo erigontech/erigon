@@ -461,8 +461,8 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	if payloadRpc.ExcessBlobGas != nil {
 		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}
-	if payloadRpc.ExcessBlobGas != nil {
-		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
+	if payloadRpc.BlobGasUsed != nil {
+		block.BlobGasUsed = *payloadRpc.BlobGasUsed
 	}
 
 	// change the limit later
