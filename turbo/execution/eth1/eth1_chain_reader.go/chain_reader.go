@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
@@ -458,6 +459,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 		BlockHash:     blockHash,
 		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
 	}
+	copy(block.BaseFeePerGas[:], utils.ReverseOfByteSlice(block.BaseFeePerGas[:])) // reverse the byte slice
 	if payloadRpc.ExcessBlobGas != nil {
 		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
 	}
