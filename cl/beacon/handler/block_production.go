@@ -278,7 +278,7 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 					// Assemble the KZG commitments list
 					var c cltypes.KZGCommitment
 					copy(c[:], bundles.Commitments[i])
-					beaconBody.BlobKzgCommitments.Append((*cltypes.KZGCommitment)(&c))
+					beaconBody.BlobKzgCommitments.Append(&c)
 				}
 				executionPayload = cltypes.NewEth1Block(beaconBody.Version, a.beaconChainCfg)
 				executionPayload.BlockHash = payload.BlockHash
