@@ -40,7 +40,7 @@ type ApiHandler struct {
 	mux *chi.Mux
 
 	blockReader         freezeblocks.BeaconSnapshotReader
-	indiciesDB          kv.RoDB
+	indiciesDB          kv.RwDB
 	genesisCfg          *clparams.GenesisConfig
 	beaconChainCfg      *clparams.BeaconChainConfig
 	forkchoiceStore     forkchoice.ForkChoiceStorage
@@ -70,7 +70,7 @@ type ApiHandler struct {
 	engine          execution_client.ExecutionEngine
 }
 
-func NewApiHandler(logger log.Logger, genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RoDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters, blobStoage blob_storage.BlobStorage, caplinSnapshots *freezeblocks.CaplinSnapshots, validatorParams *validator_params.ValidatorParams, attestationProducer attestation_producer.AttestationDataProducer, engine execution_client.ExecutionEngine) *ApiHandler {
+func NewApiHandler(logger log.Logger, genesisConfig *clparams.GenesisConfig, beaconChainConfig *clparams.BeaconChainConfig, indiciesDB kv.RwDB, forkchoiceStore forkchoice.ForkChoiceStorage, operationsPool pool.OperationsPool, rcsn freezeblocks.BeaconSnapshotReader, syncedData *synced_data.SyncedDataManager, stateReader *historical_states_reader.HistoricalStatesReader, sentinel sentinel.SentinelClient, version string, routerCfg *beacon_router_configuration.RouterConfiguration, emitters *beaconevents.Emitters, blobStoage blob_storage.BlobStorage, caplinSnapshots *freezeblocks.CaplinSnapshots, validatorParams *validator_params.ValidatorParams, attestationProducer attestation_producer.AttestationDataProducer, engine execution_client.ExecutionEngine) *ApiHandler {
 	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("blobs", maxBlobBundleCacheSize)
 	if err != nil {
 		panic(err)

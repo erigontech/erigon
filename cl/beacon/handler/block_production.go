@@ -18,12 +18,16 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
+	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
+	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -402,15 +406,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		return err
 	}
 	blobsSidecarsBytes := make([][]byte, 0, blk.Block.Body.BlobKzgCommitments.Len())
-	blobSidecar := &cltypes.BlobSidecar{}
-	header := blk.SignedBeaconBlockHeader()
+	blobsSidecars := make([]*cltypes.BlobSidecar, 0, blk.Block.Body.BlobKzgCommitments.Len())
 
-	if err := a.forkchoiceStore.OnBlock(ctx, blk, true, true, false); err != nil {
-		return err
-	}
+	header := blk.SignedBeaconBlockHeader()
 
 	if blk.Version() >= clparams.DenebVersion {
 		for i := 0; i < blk.Block.Body.BlobKzgCommitments.Len(); i++ {
+			blobSidecar := &cltypes.BlobSidecar{}
 			commitment := blk.Block.Body.BlobKzgCommitments.Get(i)
 			if commitment == nil {
 				return fmt.Errorf("missing commitment %d", i)
@@ -438,7 +440,11 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				return err
 			}
 			blobsSidecarsBytes = append(blobsSidecarsBytes, blobSidecarSSZ)
+			blobsSidecars = append(blobsSidecars, blobSidecar)
 		}
+	}
+	if err := a.storeBlockAndBlobs(ctx, blk, blobsSidecars); err != nil {
+		return err
 	}
 	// Broadcast the block and its blobs
 	if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{
@@ -460,4 +466,33 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 	return nil
+}
+
+func (a *ApiHandler) storeBlockAndBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, sidecars []*cltypes.BlobSidecar) error {
+	ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block})
+	if err != nil {
+		return err
+	}
+	if ids.Len() > 0 {
+		_, inserted, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, a.blobStoage, ids, sidecars, func(header *cltypes.SignedBeaconBlockHeader) error {
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if inserted == 0 {
+			return fmt.Errorf("no blobs could be inserted")
+		}
+	}
+
+	if err := a.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
+		if err := beacon_indicies.WriteHighestFinalized(tx, a.forkchoiceStore.FinalizedSlot()); err != nil {
+			return err
+		}
+		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+	}); err != nil {
+		return err
+	}
+
+	return a.forkchoiceStore.OnBlock(ctx, block, true, true, true)
 }

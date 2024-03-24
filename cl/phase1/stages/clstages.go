@@ -238,7 +238,6 @@ func ConsensusClStages(ctx context.Context,
 		}
 
 		return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
-
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
