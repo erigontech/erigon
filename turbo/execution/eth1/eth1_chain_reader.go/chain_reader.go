@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
@@ -437,6 +438,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*types.Block, *engi
 	payloadRpc := resp.Data.ExecutionPayload
 	header := &types.Header{
 		ParentHash:  gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
+		UncleHash:   types.EmptyUncleHash,
 		Coinbase:    gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
 		Root:        gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot),
 		ReceiptHash: gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot),
@@ -446,6 +448,8 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*types.Block, *engi
 		GasUsed:     payloadRpc.GasUsed,
 		Time:        payloadRpc.Timestamp,
 		Extra:       payloadRpc.ExtraData,
+		Nonce:       merge.ProofOfStakeNonce,
+		Difficulty:  merge.ProofOfStakeDifficulty,
 		MixDigest:   gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
 	}
 	if payloadRpc.BaseFeePerGas != nil {
@@ -461,6 +465,6 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*types.Block, *engi
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
-	return types.NewBlock(header, txs, nil, nil, eth1_utils.ConvertWithdrawalsFromRpc(payloadRpc.Withdrawals)), bundle, blockValue, nil
+	blockHash := gointerfaces.ConvertH256ToHash(payloadRpc.BlockHash)
+	return types.NewBlockFromStorage(blockHash, header, txs, nil, eth1_utils.ConvertWithdrawalsFromRpc(payloadRpc.Withdrawals)), bundle, blockValue, nil
 }
