@@ -665,10 +665,12 @@ func ConsensusClStages(ctx context.Context,
 								go func() {
 									block.Block.Body.Attestations.Range(func(idx int, a *solid.Attestation, total int) bool {
 										// emit attestation
+										start := time.Now()
 										cfg.emitter.Publish("attestation", a)
 										if err = cfg.forkChoice.OnAttestation(a, true, false); err != nil {
 											log.Debug("bad attestation received", "err", err)
 										}
+										fmt.Println("Attestation processing took", time.Since(start))
 										return true
 									})
 								}()
