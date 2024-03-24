@@ -25,9 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
-	"github.com/ledgerwatch/erigon/cl/persistence/blob_storage"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
-	"github.com/ledgerwatch/erigon/cl/phase1/network"
 	"github.com/ledgerwatch/erigon/cl/transition"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -465,22 +463,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 }
 
 func (a *ApiHandler) storeBlockAndBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, sidecars []*cltypes.BlobSidecar) error {
-	ids, err := network.BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block})
+	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
 	}
-	if ids.Len() > 0 {
-		_, inserted, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, a.blobStoage, ids, sidecars, func(header *cltypes.SignedBeaconBlockHeader) error {
-			return nil
-		})
-		if err != nil {
-			return err
-		}
-		if inserted == 0 {
-			return fmt.Errorf("no blobs could be inserted")
-		}
+	if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
+		return err
 	}
-
 	if err := a.indiciesDB.Update(ctx, func(tx kv.RwTx) error {
 		if err := beacon_indicies.WriteHighestFinalized(tx, a.forkchoiceStore.FinalizedSlot()); err != nil {
 			return err
@@ -490,5 +479,5 @@ func (a *ApiHandler) storeBlockAndBlobs(ctx context.Context, block *cltypes.Sign
 		return err
 	}
 
-	return a.forkchoiceStore.OnBlock(ctx, block, true, true, true)
+	return a.forkchoiceStore.OnBlock(ctx, block, true, false, false)
 }
