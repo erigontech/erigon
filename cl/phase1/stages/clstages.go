@@ -621,7 +621,6 @@ func ConsensusClStages(ctx context.Context,
 					for {
 						select {
 						case <-presenceTicker.C:
-							fmt.Println(cfg.forkChoice.HighestSeen(), args.targetSlot)
 							if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 								break MainLoop
 							}
