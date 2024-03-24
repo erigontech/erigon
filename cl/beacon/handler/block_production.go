@@ -436,9 +436,12 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			blobsSidecars = append(blobsSidecars, blobSidecar)
 		}
 	}
-	if err := a.storeBlockAndBlobs(ctx, blk, blobsSidecars); err != nil {
-		return err
-	}
+	go func() {
+		if err := a.storeBlockAndBlobs(ctx, blk, blobsSidecars); err != nil {
+			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
+		}
+	}()
+
 	log.Info("BlockPublishing: publishing block and blobs", "slot", blk.Block.Slot, "blobs", len(blobsSidecars))
 	// Broadcast the block and its blobs
 	if _, err := a.sentinel.PublishGossip(ctx, &sentinel.GossipData{

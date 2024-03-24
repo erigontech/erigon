@@ -615,13 +615,14 @@ func ConsensusClStages(ctx context.Context,
 					logTimer := time.NewTicker(30 * time.Second)
 					defer logTimer.Stop()
 					// blocks may be scheduled for later execution outside of the catch-up flow
-					presenceTicker := time.NewTicker(20 * time.Millisecond)
+					presenceTicker := time.NewTicker(1 * time.Second)
 					defer presenceTicker.Stop()
 					seenBlockRoots := make(map[common.Hash]struct{})
 				MainLoop:
 					for {
 						select {
 						case <-presenceTicker.C:
+							fmt.Println(cfg.forkChoice.HighestSeen(), args.targetSlot)
 							if cfg.forkChoice.HighestSeen() >= args.targetSlot {
 								break MainLoop
 							}
