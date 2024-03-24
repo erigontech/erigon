@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,7 +80,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	}
 	graffiti := libcommon.HexToHash(r.URL.Query().Get("graffiti"))
 	if !r.URL.Query().Has("graffiti") {
-		graffiti = libcommon.HexToHash(defaultGraffitiString)
+		graffiti = libcommon.HexToHash(hex.EncodeToString([]byte(defaultGraffitiString)))
 	}
 
 	tx, err := a.indiciesDB.BeginRo(ctx)
