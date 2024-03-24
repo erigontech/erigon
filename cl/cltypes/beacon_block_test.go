@@ -19,6 +19,9 @@ import (
 //go:embed testdata/block_test_gnosis_deneb.json
 var beaconBodyJSON []byte
 
+//go:embed testdata/block_test_gnosis_deneb.ssz
+var beaconBodySSZ []byte
+
 func TestBeaconBody(t *testing.T) {
 	// Create sample data
 	randaoReveal := [96]byte{1, 2, 3}
@@ -109,6 +112,11 @@ func TestBeaconBlockJson(t *testing.T) {
 	require.NoError(t, err)
 
 	r, _ := block.Block.HashSSZ()
+
+	block2 := NewSignedBeaconBlock(bc)
+	if err := block2.DecodeSSZ(beaconBodySSZ, int(clparams.DenebVersion)); err != nil {
+		t.Fatal(err)
+	}
 
 	assert.Equal(t, map1, map2)
 	assert.Equal(t, libcommon.Hash(r), libcommon.HexToHash("0x1a9b89eb12282543a5fa0b0f251d8ec0c5c432121d7cb2a8d78461ea9d10c294"))

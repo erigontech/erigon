@@ -103,3 +103,11 @@ func GetBitlistLength(b []byte) int {
 	// bit. Subtract this value by 1 to determine the length of the bitlist.
 	return 8*(len(b)-1) + msb - 1
 }
+
+func ReverseOfByteSlice(b []byte) (out []byte) {
+	out = make([]byte, len(b))
+	for i := range b {
+		out[i] = b[len(b)-1-i]
+	}
+	return
+}

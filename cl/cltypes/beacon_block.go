@@ -156,9 +156,7 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 	if b.SyncAggregate == nil {
 		b.SyncAggregate = &SyncAggregate{}
 	}
-	if b.ExecutionPayload == nil {
-		b.ExecutionPayload = NewEth1Block(b.Version, b.beaconCfg)
-	}
+
 	if b.ProposerSlashings == nil {
 		b.ProposerSlashings = solid.NewStaticListSSZ[*ProposerSlashing](MaxProposerSlashings, 416)
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/consensus/merge"
 	"github.com/ledgerwatch/erigon/core/types"
 )
@@ -123,7 +124,7 @@ func (b *Eth1Block) MarshalJSON() ([]byte, error) {
 		GasUsed:       b.GasUsed,
 		Time:          b.Time,
 		Extra:         b.Extra,
-		BaseFeePerGas: uint256.NewInt(0).SetBytes32(b.BaseFeePerGas[:]).Dec(),
+		BaseFeePerGas: uint256.NewInt(0).SetBytes32(utils.ReverseOfByteSlice(b.BaseFeePerGas[:])).Dec(),
 		BlockHash:     b.BlockHash,
 		Transactions:  b.Transactions,
 		Withdrawals:   b.Withdrawals,
@@ -171,7 +172,9 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	b.BaseFeePerGas = tmp.Bytes32()
+	tmpBaseFee := tmp.Bytes32()
+	b.BaseFeePerGas = libcommon.Hash{}
+	copy(b.BaseFeePerGas[:], utils.ReverseOfByteSlice(tmpBaseFee[:]))
 	b.BlockHash = aux.BlockHash
 	b.Transactions = aux.Transactions
 	b.Withdrawals = aux.Withdrawals
