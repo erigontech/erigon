@@ -151,7 +151,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(w http.ResponseWriter, r *http.Reque
 	isSSZBlinded := false
 	a.setupHeaderReponseForBlockProduction(w, block.Version(), isSSZBlinded, executionValue, consensusValue)
 
-	return newBeaconResponse(beaconBody).
+	return newBeaconResponse(block).
 		With("execution_payload_blinded", isSSZBlinded).
 		With("execution_payload_value", strconv.FormatUint(executionValue, 10)).
 		With("consensus_block_value", strconv.FormatUint(consensusValue, 10)), nil
