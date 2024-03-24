@@ -25,8 +25,8 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 		return nil
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
-	f.mu.Unlock()
 	data := attestation.AttestantionData()
 	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
 		return err
