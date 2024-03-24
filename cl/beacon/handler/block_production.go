@@ -286,6 +286,8 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 				executionPayload.Extra = payload.Extra
 				executionPayload.BlobGasUsed = payload.BlobGasUsed
 				executionPayload.ExcessBlobGas = payload.ExcessBlobGas
+				payload.BaseFeePerGas = payload.BaseFeePerGas
+				// Reset the limit of withdrawals
 				executionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(a.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
 				payload.Withdrawals.Range(func(index int, value *cltypes.Withdrawal, length int) bool {
 					executionPayload.Withdrawals.Append(value)
