@@ -190,6 +190,10 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
 
+	blockRoot, err := baseBlock.HashSSZ()
+	if err != nil {
+		return nil, 0, err
+	}
 	// Process the execution data in a thread.
 	wg.Add(1)
 	go func() {
@@ -214,7 +218,7 @@ func (a *ApiHandler) produceBeaconBody(ctx context.Context, apiVersion int, base
 			PrevRandao:            random,
 			SuggestedFeeRecipient: feeRecipient,
 			Withdrawals:           withdrawals,
-			ParentBeaconBlockRoot: &baseBlock.ParentRoot,
+			ParentBeaconBlockRoot: (*libcommon.Hash)(&blockRoot),
 		})
 		if err != nil {
 			log.Error("BlockProduction: Failed to get payload id", "err", err)
