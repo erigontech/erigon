@@ -256,6 +256,10 @@ func (c *CommitteeSubscribeMgmt) OnReceiveAttestation(topic string, att *solid.A
 }
 
 func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
+	slotIsStale := func(curSlot, targetSlot uint64) bool {
+		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
+	}
+
 	// sweep subscriptions if slot is older than current slot
 	sweepValidatorSubscriptions := func(curSlot uint64) {
 		c.validatorSubsMutex.Lock()
@@ -263,12 +267,13 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		for idx, subs := range c.validatorSubs {
 			liveSubs := make([]*validatorSub, 0)
 			for i := 0; i < len(subs); i++ {
-				if curSlot <= subs[i].slot {
+				if !slotIsStale(curSlot, subs[i].slot) {
 					// keep this subscription
 					liveSubs = append(liveSubs, subs[i])
 				}
 			}
 			if len(liveSubs) == 0 {
+				// no live subscription, delete this validator index
 				delete(c.validatorSubs, idx)
 			} else {
 				c.validatorSubs[idx] = liveSubs
@@ -280,7 +285,7 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		c.aggregationMutex.Lock()
 		defer c.aggregationMutex.Unlock()
 		for id, aggrData := range c.aggregations {
-			if curSlot > aggrData.slot {
+			if slotIsStale(curSlot, aggrData.slot) {
 				delete(c.aggregations, id)
 			}
 		}
