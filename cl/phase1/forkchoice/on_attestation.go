@@ -226,6 +226,8 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 		return fmt.Errorf("invalid target block")
 	}
 
+	// Add to some sort of aggregation layer TODO(Giulio2002)
+
 	return nil
 }
 
