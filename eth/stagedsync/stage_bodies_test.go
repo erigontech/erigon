@@ -2,6 +2,8 @@ package stagedsync_test
 
 import (
 	"bytes"
+	"errors"
+	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"math/big"
 	"testing"
 	"time"
@@ -16,6 +18,57 @@ import (
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
+
+func TestBodiesCanonical(t *testing.T) {
+	require := require.New(t)
+	m := mock.Mock(t)
+	db := m.DB
+	tx, err := db.BeginRw(m.Ctx)
+	require.NoError(err)
+	defer tx.Rollback()
+	m.HistoryV3 = true
+	_, bw := m.BlocksIO()
+
+	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
+	buf := bytes.NewBuffer(nil)
+	err = txn.MarshalBinary(buf)
+	require.NoError(err)
+	rlpTxn := buf.Bytes()
+
+	logEvery := time.NewTicker(time.Second)
+	defer logEvery.Stop()
+
+	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
+	h := &types.Header{}
+	for i := uint64(1); i <= 10; i++ {
+		if i == 3 {
+			// if latest block is <=1, append delta check is disabled, so no sense to test it here.
+			// INSTEAD we make first block canonical, write some blocks and then test append with gap
+			err = bw.MakeBodiesCanonical(tx, 1)
+			require.NoError(err)
+		}
+		h.Number = big.NewInt(int64(i))
+		hash := h.Hash()
+		err = rawdb.WriteHeader(tx, h)
+		require.NoError(err)
+		err = rawdb.WriteCanonicalHash(tx, hash, i)
+		require.NoError(err)
+		_, err = rawdb.WriteRawBodyIfNotExists(tx, hash, i, b)
+		require.NoError(err)
+	}
+
+	// test append with gap
+	err = rawdb.AppendCanonicalTxNums(tx, 5)
+	require.Error(err)
+	var e1 rawdbv3.ErrTxNumsAppendWithGap
+	require.True(errors.As(err, &e1))
+
+	if ethconfig.EnableHistoryV4InTest {
+		// this should see same error inside then retry from last block available, therefore return no error
+		err = bw.MakeBodiesCanonical(tx, 5)
+		require.NoError(err)
+	}
+}
 
 func TestBodiesUnwind(t *testing.T) {
 	require := require.New(t)
