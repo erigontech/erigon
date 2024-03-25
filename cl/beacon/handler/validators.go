@@ -671,7 +671,6 @@ func (a *ApiHandler) postBeaconCommitteeSubscriptions(w http.ResponseWriter, r *
 	for _, sub := range req {
 		if err := a.committeeSub.AddAttestationSubscription(context.Background(), sub); err != nil {
 			log.Error("failed to add attestation subscription", "err", err)
-			// todo: more specific error
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
