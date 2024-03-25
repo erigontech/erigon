@@ -929,6 +929,7 @@ type DomainContext struct {
 	idxReaders []*recsplit.IndexReader
 
 	keyBuf [60]byte // 52b key and 8b for inverted step
+	valBuf [128]byte
 
 	keysC kv.CursorDupSort
 	valsC kv.Cursor
@@ -1778,7 +1779,7 @@ func (dc *DomainContext) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, uint64
 			if err != nil {
 				return nil, foundStep, false, err
 			}
-			_, v, err = valsC.SeekExact(append(append(dc.keyBuf[:0], key...), foundInvStep...))
+			_, v, err = valsC.SeekExact(append(append(dc.valBuf[:0], key...), foundInvStep...))
 			if err != nil {
 				return nil, foundStep, false, fmt.Errorf("GetLatest value: %w", err)
 			}
