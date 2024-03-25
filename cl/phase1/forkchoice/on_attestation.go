@@ -297,21 +297,10 @@ func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
 					select {
 					case <-ctx.Done():
 						return false
-					case <-time.After(1 * time.Millisecond):
+					case <-time.After(20 * time.Millisecond):
 					}
 					return true
 				})
-			}
-		}
-	}()
-
-	go func() {
-		interval := time.NewTicker(50 * time.Millisecond)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-interval.C:
 				f.blocksSet.Range(func(key, value interface{}) bool {
 					job := value.(*blockJob)
 					if time.Since(job.when) > maxBlockJobLifetime {
@@ -336,6 +325,7 @@ func (f *ForkChoiceStore) StartJobsRTT(ctx context.Context) {
 			}
 		}
 	}()
+
 }
 
 func (f *ForkChoiceStore) setLatestMessage(index uint64, message LatestMessage) {
