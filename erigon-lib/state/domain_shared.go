@@ -1163,7 +1163,6 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		}
 		if len(state) >= 16 {
 			txNum, blockNum = _decodeTxBlockNums(state)
-			log.Warn("[dbg] zero2?", "bn", blockNum)
 			return blockNum, txNum, state, nil
 		}
 	}
@@ -1180,10 +1179,9 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		txn, _ := _decodeTxBlockNums(value)
 		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
-			log.Warn("[dbg] zero4?", "bn", blockNum)
+			log.Warn("[dbg] zero1?", "bn", blockNum, "ViewID", tx.ViewID(), "stack", dbg.Stack())
 			state = value
 		}
-		log.Warn("[dbg] zero5?", "bn", blockNum)
 
 		return nil
 	}); err != nil {
@@ -1191,12 +1189,11 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	}
 
 	if len(state) < 16 {
-		log.Warn("[dbg] zero3?", "bn", blockNum)
+		log.Warn("[dbg] zero2?", "bn", blockNum, "ViewID", tx.ViewID(), "stack", dbg.Stack())
 		return 0, 0, nil, nil
 	}
 
 	txNum, blockNum = _decodeTxBlockNums(state)
-	log.Warn("[dbg] zero1?", "bn", blockNum)
 	return blockNum, txNum, state, nil
 }
 
