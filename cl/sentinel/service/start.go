@@ -44,7 +44,7 @@ func getExpirationForTopic(topic string) time.Time {
 		return time.Unix(0, 0)
 	}
 
-	return time.Unix(math.MaxInt64, math.MaxInt64)
+	return time.Unix(0, math.MaxInt64)
 }
 
 func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (*sentinel.Sentinel, error) {
