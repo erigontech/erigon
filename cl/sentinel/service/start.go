@@ -24,8 +24,11 @@ import (
 )
 
 type ServerConfig struct {
-	Network string
-	Addr    string
+	Network       string
+	Addr          string
+	Creds         credentials.TransportCredentials
+	Validator     bool
+	InitialStatus *cltypes.Status
 }
 
 func generateSubnetsTopics(template string, maxIds int) []sentinel.GossipTopic {
@@ -88,19 +91,19 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 	return sent, nil
 }
 
-func StartSentinelService(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, srvCfg *ServerConfig, creds credentials.TransportCredentials, initialStatus *cltypes.Status, forkChoiceReader forkchoice.ForkChoiceStorageReader, validatorTopics bool, logger log.Logger) (sentinelrpc.SentinelClient, error) {
+func StartSentinelService(cfg *sentinel.SentinelConfig, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, indiciesDB kv.RwDB, srvCfg *ServerConfig, forkChoiceReader forkchoice.ForkChoiceStorageReader, logger log.Logger) (sentinelrpc.SentinelClient, error) {
 	ctx := context.Background()
-	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, validatorTopics, logger)
+	sent, err := createSentinel(cfg, blockReader, blobStorage, indiciesDB, forkChoiceReader, srvCfg.Validator, logger)
 	if err != nil {
 		return nil, err
 	}
 	// rcmgrObs.MustRegisterWith(prometheus.DefaultRegisterer)
 	logger.Info("[Sentinel] Sentinel started", "enr", sent.String())
-	if initialStatus != nil {
-		sent.SetStatus(initialStatus)
+	if srvCfg.InitialStatus != nil {
+		sent.SetStatus(srvCfg.InitialStatus)
 	}
 	server := NewSentinelServer(ctx, sent, logger)
-	go StartServe(server, srvCfg, creds)
+	go StartServe(server, srvCfg, srvCfg.Creds)
 
 	return direct.NewSentinelClientDirect(server), nil
 }
