@@ -451,7 +451,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		d.logger.Crit("[snapshots.webseed] /manifest.txt retrieval failed, no downloads from this webseed",
+		d.logger.Debug("[snapshots.webseed] /manifest.txt retrieval failed, no downloads from this webseed",
 			"webseed", webSeedProviderUrl.String(), "status", resp.Status)
 		return nil, fmt.Errorf("webseed.http: status=%d, url=%s", resp.StatusCode, u.String())
 	}
