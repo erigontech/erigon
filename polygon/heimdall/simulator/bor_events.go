@@ -13,7 +13,7 @@ func continueLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit in
 	if len(events) == 0 {
 		return true
 	}
-	if len(events) >= limit {
+	if len(events) == limit {
 		return false
 	}
 
