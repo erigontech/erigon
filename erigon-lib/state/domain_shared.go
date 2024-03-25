@@ -1182,6 +1182,8 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		if txn >= sinceTx && txn <= untilTx {
 			state = value
 		}
+		log.Warn("[dbg] zero4?", "bn", blockNum)
+
 		return nil
 	}); err != nil {
 		return 0, 0, nil, fmt.Errorf("failed to seek commitment, IteratePrefix: %w", err)
