@@ -1132,6 +1132,10 @@ func (sd *SharedDomains) LatestCommitmentState(tx kv.Tx, sinceTx, untilTx uint64
 	return sd.sdCtx.LatestCommitmentState(tx, sd.aggCtx.d[kv.CommitmentDomain], sinceTx, untilTx)
 }
 
+func _decodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
+	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
+}
+
 // LatestCommitmentState [sinceTx, untilTx] searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *DomainContext, sinceTx, untilTx uint64) (blockNum, txNum uint64, state []byte, err error) {
@@ -1140,10 +1144,6 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	}
 	if sdc.patriciaTrie.Variant() != commitment.VariantHexPatriciaTrie {
 		return 0, 0, nil, fmt.Errorf("state storing is only supported hex patricia trie")
-	}
-
-	decodeTxBlockNums := func(v []byte) (txNum, blockNum uint64) {
-		return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])
 	}
 
 	// Domain storing only 1 latest commitment (for each step). Erigon can unwind behind this - it means we must look into History (instead of Domain)
@@ -1162,7 +1162,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 			return 0, 0, nil, err
 		}
 		if len(state) >= 16 {
-			txNum, blockNum = decodeTxBlockNums(state)
+			txNum, blockNum = _decodeTxBlockNums(state)
 			return blockNum, txNum, state, nil
 		}
 	}
@@ -1176,7 +1176,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 			return fmt.Errorf("invalid state value size %d [%x]", len(value), value)
 		}
 
-		txn, _ := decodeTxBlockNums(value)
+		txn, _ := _decodeTxBlockNums(value)
 		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
 			state = value
@@ -1190,7 +1190,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		return 0, 0, nil, nil
 	}
 
-	txNum, blockNum = decodeTxBlockNums(state)
+	txNum, blockNum = _decodeTxBlockNums(state)
 	return blockNum, txNum, state, nil
 }
 
