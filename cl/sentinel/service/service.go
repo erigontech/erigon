@@ -101,12 +101,12 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
-			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+			subscription = manager.GetMatchingSubscription(gossip.TopicNameBlobSidecar(*msg.SubnetId))
 		case strings.Contains(msg.Name, gossip.TopicNamePrefixBeaconAttestation):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for beacon attestation")
 			}
-			subscription = manager.GetMatchingSubscription(fmt.Sprintf("%s/%d", gossip.TopicNamePrefixBeaconAttestation, *msg.SubnetId))
+			subscription = manager.GetMatchingSubscription(gossip.TopicNameBeaconAttestation(*msg.SubnetId))
 		default:
 			return &sentinelrpc.EmptyMessage{}, nil
 		}

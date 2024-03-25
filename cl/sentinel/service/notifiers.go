@@ -52,7 +52,7 @@ func (g *gossipNotifier) notifyBlob(data []byte, pid string, blobIndex int) {
 		*sbI = uint64(blobIndex)
 		ch <- gossipObject{
 			data:     data,
-			t:        gossip.TopicNameBlobSidecar(blobIndex),
+			t:        gossip.TopicNameBlobSidecar(uint64(blobIndex)),
 			pid:      pid,
 			subnetId: sbI,
 		}

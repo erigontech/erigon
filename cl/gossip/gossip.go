@@ -22,7 +22,7 @@ const (
 	TopicNamePrefixSyncCommittee     = "sync_committee_%d"
 )
 
-func TopicNameBlobSidecar(d int) string {
+func TopicNameBlobSidecar(d uint64) string {
 	return fmt.Sprintf(TopicNamePrefixBlobSidecar, d)
 }
 
