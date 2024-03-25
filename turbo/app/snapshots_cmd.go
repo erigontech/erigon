@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/semaphore"
@@ -64,8 +66,10 @@ func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
 var snapshotCommand = cli.Command{
 	Name:  "snapshots",
 	Usage: `Managing snapshots (historical data partitions)`,
-	Before: func(context *cli.Context) error {
-		_, _, err := debug.Setup(context, true /* rootLogger */)
+	Before: func(cliCtx *cli.Context) error {
+		go mem.LogMemStats(cliCtx.Context, log.New())
+		go disk.UpdateDiskStats(cliCtx.Context, log.New())
+		_, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 		if err != nil {
 			return err
 		}
@@ -152,7 +156,7 @@ var snapshotCommand = cli.Command{
 			Name: "rm-all-state-snapshots",
 			Action: func(cliCtx *cli.Context) error {
 				dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
-				os.Remove(filepath.Join(dirs.Snap, "salt.txt"))
+				os.Remove(filepath.Join(dirs.Snap, "salt-state.txt"))
 				return dir.DeleteFiles(dirs.SnapIdx, dirs.SnapHistory, dirs.SnapDomain, dirs.SnapAccessors)
 			},
 			Flags: joinFlags([]cli.Flag{&utils.DataDirFlag}),
@@ -534,7 +538,7 @@ func doIndicesCommand(cliCtx *cli.Context) error {
 		panic("not implemented")
 	}
 
-	if err := freezeblocks.RemoveIncompatibleIndices(dirs.Snap); err != nil {
+	if err := freezeblocks.RemoveIncompatibleIndices(dirs); err != nil {
 		return err
 	}
 
@@ -789,12 +793,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}
 
 	logger.Info("Prune state history")
-	for i := 0; i < 10000; i++ {
+	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			return ac.PruneSmallBatches(context.Background(), time.Minute, tx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(ctx, 2*time.Minute, tx)
+			return err
 		}); err != nil {
 			return err
 		}
@@ -836,7 +841,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 		logEvery := time.NewTicker(30 * time.Second)
 		defer logEvery.Stop()
 
-		stat, err := ac.Prune(context.Background(), tx, math.MaxUint64, logEvery)
+		stat, err := ac.Prune(ctx, tx, math.MaxUint64, true, logEvery)
 		if err != nil {
 			return err
 		}
@@ -845,12 +850,13 @@ func doRetireCommand(cliCtx *cli.Context) error {
 	}); err != nil {
 		return err
 	}
-	for i := 0; i < 10000; i++ {
+	for hasMoreToPrune := true; hasMoreToPrune; {
 		if err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 			ac := agg.MakeContext()
 			defer ac.Close()
 
-			return ac.PruneSmallBatches(context.Background(), time.Minute, tx)
+			hasMoreToPrune, err = ac.PruneSmallBatches(context.Background(), 2*time.Minute, tx)
+			return err
 		}); err != nil {
 			return err
 		}

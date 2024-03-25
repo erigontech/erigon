@@ -205,7 +205,10 @@ func (t *StateTest) RunNoVerify(tx kv.RwTx, subtest StateSubtest, vmconfig vm.Co
 	var txc wrap.TxContainer
 	txc.Tx = tx
 	if ethconfig.EnableHistoryV4InTest {
-		domains = state2.NewSharedDomains(tx, log.New())
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, libcommon.Hash{}, UnsupportedForkError{subtest.Fork}
+		}
 		defer domains.Close()
 		txc.Doms = domains
 	}
@@ -356,7 +359,11 @@ func MakePreState(rules *chain.Rules, tx kv.RwTx, accounts types.GenesisAlloc, b
 	var txc wrap.TxContainer
 	txc.Tx = tx
 	if ethconfig.EnableHistoryV4InTest {
-		domains = state2.NewSharedDomains(tx, log.New())
+		var err error
+		domains, err = state2.NewSharedDomains(tx, log.New())
+		if err != nil {
+			return nil, err
+		}
 		defer domains.Close()
 		defer domains.Flush(context2.Background(), tx)
 		txc.Doms = domains

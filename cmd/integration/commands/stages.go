@@ -730,7 +730,10 @@ func stageSnapshots(db kv.RwDB, ctx context.Context, logger log.Logger) error {
 		ac := agg.MakeContext()
 		defer ac.Close()
 
-		domains := libstate.NewSharedDomains(tx, logger)
+		domains, err := libstate.NewSharedDomains(tx, logger)
+		if err != nil {
+			return err
+		}
 		defer domains.Close()
 		//txnUm := domains.TxNum()
 		blockNum := domains.BlockNum()
@@ -1737,8 +1740,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*freezebl
 				panic(err)
 			}
 
-			_allSnapshotsSingleton.LogStat("all")
-			_allBorSnapshotsSingleton.LogStat("all")
+			_allSnapshotsSingleton.LogStat("blocks")
+			_allBorSnapshotsSingleton.LogStat("bor")
 			_ = db.View(context.Background(), func(tx kv.Tx) error {
 				ac := _aggSingleton.MakeContext()
 				defer ac.Close()
@@ -1817,7 +1820,6 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 		blockReader,
 		blockBufferSize,
 		false,
-		nil,
 		maxBlockBroadcastPeers,
 		logger,
 	)

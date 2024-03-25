@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -89,8 +90,7 @@ var LightClientOptimisticUpdateSsz = GossipTopic{
 
 type GossipManager struct {
 	ch            chan *GossipMessage
-	subscriptions map[string]*GossipSubscription
-	mu            sync.RWMutex
+	subscriptions sync.Map // map from topic string to *GossipSubscription
 }
 
 const maxIncomingGossipMessages = 1 << 16
@@ -101,7 +101,7 @@ func NewGossipManager(
 ) *GossipManager {
 	g := &GossipManager{
 		ch:            make(chan *GossipMessage, maxIncomingGossipMessages),
-		subscriptions: map[string]*GossipSubscription{},
+		subscriptions: sync.Map{},
 	}
 	return g
 }
@@ -121,41 +121,27 @@ func (s *GossipManager) Recv() <-chan *GossipMessage {
 }
 
 func (s *GossipManager) GetMatchingSubscription(match string) *GossipSubscription {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var sub *GossipSubscription
-	for topic, currSub := range s.subscriptions {
-		if strings.Contains(topic, match) {
-			sub = currSub
+	s.subscriptions.Range(func(topic, value interface{}) bool {
+		if strings.Contains(topic.(string), match) {
+			sub = value.(*GossipSubscription)
+			return false
 		}
-	}
+		return true
+	})
 	return sub
 }
 
 func (s *GossipManager) AddSubscription(topic string, sub *GossipSubscription) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.subscriptions[topic] = sub
+	s.subscriptions.Store(topic, sub)
 }
 
 func (s *GossipManager) unsubscribe(topic string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.subscriptions[topic]; !ok {
+	sub, ok := s.subscriptions.LoadAndDelete(topic)
+	if !ok || sub == nil {
 		return
 	}
-	sub := s.subscriptions[topic]
-	go func() {
-		timer := time.NewTimer(time.Hour)
-		ctx := sub.ctx
-		select {
-		case <-ctx.Done():
-			sub.Close()
-		case <-timer.C:
-			sub.Close()
-		}
-	}()
-	delete(s.subscriptions, topic)
+	sub.(*GossipSubscription).Close()
 }
 
 func (s *Sentinel) forkWatcher() {
@@ -176,32 +162,36 @@ func (s *Sentinel) forkWatcher() {
 				return
 			}
 			if prevDigest != digest {
-				subs := s.subManager.subscriptions
-				for path, sub := range subs {
-					s.subManager.unsubscribe(path)
-					newSub, err := s.SubscribeGossip(sub.gossip_topic)
+				// unsubscribe and resubscribe to all topics
+				s.subManager.subscriptions.Range(func(key, value interface{}) bool {
+					sub := value.(*GossipSubscription)
+					s.subManager.unsubscribe(key.(string))
+					newSub, err := s.SubscribeGossip(sub.gossip_topic, sub.expiration.Load().(time.Time))
 					if err != nil {
-						log.Error("[Gossip] Failed to resubscribe to topic", "err", err)
-						return
+						log.Warn("[Gossip] Failed to resubscribe to topic", "err", err)
 					}
 					newSub.Listen()
-				}
+					return true
+				})
 				prevDigest = digest
 			}
 		}
 	}
 }
 
-func (s *Sentinel) SubscribeGossip(topic GossipTopic, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
+func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
 	digest, err := fork.ComputeForkDigest(s.cfg.BeaconConfig, s.cfg.GenesisConfig)
 	if err != nil {
 		log.Error("[Gossip] Failed to calculate fork choice", "err", err)
 	}
+	var exp atomic.Value
+	exp.Store(expiration)
 	sub = &GossipSubscription{
 		gossip_topic: topic,
 		ch:           s.subManager.ch,
 		host:         s.host.ID(),
 		ctx:          s.ctx,
+		expiration:   exp,
 	}
 	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
 	sub.topic, err = s.pubsub.Join(path, opts...)
@@ -279,11 +269,12 @@ func (s *Sentinel) defaultBlockTopicParams() *pubsub.TopicScoreParams {
 }
 
 func (g *GossipManager) Close() {
-	for _, topic := range g.subscriptions {
-		if topic != nil {
-			topic.Close()
+	g.subscriptions.Range(func(key, value interface{}) bool {
+		if value != nil {
+			value.(*GossipSubscription).Close()
 		}
-	}
+		return true
+	})
 }
 
 // GossipSubscription abstracts a gossip subscription to write decoded structs.
@@ -292,6 +283,8 @@ type GossipSubscription struct {
 	host         peer.ID
 	ch           chan *GossipMessage
 	ctx          context.Context
+	expiration   atomic.Value // Unix nano for how much we should listen to this topic
+	subscribed   atomic.Bool
 
 	topic *pubsub.Topic
 	sub   *pubsub.Subscription
@@ -299,42 +292,70 @@ type GossipSubscription struct {
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
 
-	setup  sync.Once
-	stopCh chan struct{}
+	stopCh    chan struct{}
+	closeOnce sync.Once
 }
 
-func (sub *GossipSubscription) Listen() (err error) {
-	sub.setup.Do(func() {
-		sub.stopCh = make(chan struct{}, 3)
-		sub.sub, err = sub.topic.Subscribe()
-		if err != nil {
-			err = fmt.Errorf("failed to begin topic %s subscription, err=%w", sub.topic.String(), err)
-			return
+func (sub *GossipSubscription) Listen() {
+	go func() {
+		var err error
+		checkingInterval := time.NewTicker(100 * time.Millisecond)
+		for {
+			select {
+			case <-sub.ctx.Done():
+				return
+			case <-checkingInterval.C:
+				expirationTime := sub.expiration.Load().(time.Time)
+				if sub.subscribed.Load() && time.Now().After(expirationTime) {
+					sub.stopCh <- struct{}{}
+					if cancelFunc := sub.cf; cancelFunc != nil {
+						cancelFunc() // stop pubsub.Subscription.Next
+					}
+					sub.topic.Close()
+					sub.subscribed.Store(false)
+					continue
+				}
+				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
+					sub.stopCh = make(chan struct{}, 3)
+					sub.sub, err = sub.topic.Subscribe()
+					if err != nil {
+						log.Warn("[Gossip] failed to begin topic subscription", "err", err)
+						time.Sleep(30 * time.Second)
+						continue
+					}
+					var sctx context.Context
+					sctx, sub.cf = context.WithCancel(sub.ctx)
+					go sub.run(sctx, sub.sub, sub.sub.Topic())
+					sub.subscribed.Store(true)
+				}
+			}
 		}
-		var sctx context.Context
-		sctx, sub.cf = context.WithCancel(sub.ctx)
-		go sub.run(sctx, sub.sub, sub.sub.Topic())
-	})
-	return nil
+	}()
+}
+
+func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
+	sub.expiration.Store(expiry)
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
 func (s *GossipSubscription) Close() {
-	s.stopCh <- struct{}{}
-	if s.cf != nil {
-		s.cf()
-	}
-	if s.rf != nil {
-		s.rf()
-	}
-	if s.sub != nil {
-		s.sub.Cancel()
-		s.sub = nil
-	}
-	if s.topic != nil {
-		s.topic.Close()
-		s.topic = nil
-	}
+	s.closeOnce.Do(func() {
+		close(s.stopCh)
+		if s.cf != nil {
+			s.cf()
+		}
+		if s.rf != nil {
+			s.rf()
+		}
+		if s.sub != nil {
+			s.sub.Cancel()
+			s.sub = nil
+		}
+		if s.topic != nil {
+			s.topic.Close()
+			s.topic = nil
+		}
+	})
 }
 
 type GossipMessage struct {
@@ -366,11 +387,14 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
 			}
-			if msg.GetFrom() == s.host {
+			if msg.Topic != nil {
+				fmt.Println(*msg.Topic)
+			}
+			if msg.ReceivedFrom == s.host {
 				continue
 			}
 			s.ch <- &GossipMessage{
-				From:      msg.GetFrom(),
+				From:      msg.ReceivedFrom,
 				TopicName: topicName,
 				Data:      common.Copy(msg.Data),
 			}

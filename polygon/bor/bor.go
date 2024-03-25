@@ -1452,9 +1452,9 @@ func (c *Bor) CommitStates(
 ) error {
 	events := chain.Chain.BorEventsByBlock(header.Hash(), header.Number.Uint64())
 
+	//if len(events) == 50 || len(events) == 0 {
 	if len(events) == 50 {
 		blockNum := header.Number.Uint64()
-		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum)
 
 		var to time.Time
 		if c.config.IsIndore(blockNum) {
@@ -1465,7 +1465,8 @@ func (c *Bor) CommitStates(
 			to = time.Unix(int64(pHeader.Time), 0)
 		}
 
-		startEventID := chain.Chain.BorStartEventID(blockNum)
+		startEventID := chain.Chain.BorStartEventID(header.Hash(), blockNum)
+		log.Warn("[dbg] fallback to remote bor events", "blockNum", blockNum, "startEventID", startEventID, "events_from_db_or_snaps", len(events))
 		remote, err := c.HeimdallClient.FetchStateSyncEvents(context.Background(), startEventID, to, 0)
 		if err != nil {
 			return err

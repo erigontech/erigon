@@ -68,7 +68,8 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	ac := agg.MakeContext()
 	defer ac.Close()
 
-	domains := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	domains, err := NewSharedDomains(WrapTxWithCtx(tx, ac), log.New())
+	require.NoError(b, err)
 	defer domains.Close()
 
 	b.ReportAllocs()
@@ -250,7 +251,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		p := rnd.Intn(len(keys))
 
-		offset := idxr.Lookup(keys[p])
+		offset, _ := idxr.Lookup(keys[p])
 		getter.Reset(offset)
 
 		require.True(b, getter.HasNext())

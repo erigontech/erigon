@@ -19,6 +19,7 @@ package seg
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -119,6 +120,10 @@ type Decompressor struct {
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 }
 
+// Maximal Huffman tree depth
+// Note: mainnet has patternMaxDepth 31
+const maxAllowedDepth = 50
+
 // Tables with bitlen greater than threshold will be condensed.
 // Condensing reduces size of decompression table but leads to slower reads.
 // To disable condesning at all set to 9 (we dont use tables larger than 2^9)
@@ -193,7 +198,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 
 	for i < dictSize {
 		d, ns := binary.Uvarint(data[i:])
-		if d > 64 { // mainnet has maxDepth 31
+		if d > maxAllowedDepth {
 			return nil, fmt.Errorf("dictionary is invalid: patternMaxDepth=%d", d)
 		}
 		depths = append(depths, d)
@@ -217,7 +222,9 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 		}
 		// fmt.Printf("pattern maxDepth=%d\n", tree.maxDepth)
 		d.dict = newPatternTable(bitLen)
-		buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth)
+		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth); err != nil {
+			return nil, err
+		}
 	}
 
 	// read positions
@@ -232,7 +239,7 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 	i = 0
 	for i < dictSize {
 		d, ns := binary.Uvarint(data[i:])
-		if d > 2048 {
+		if d > maxAllowedDepth {
 			return nil, fmt.Errorf("dictionary is invalid: posMaxDepth=%d", d)
 		}
 		posDepths = append(posDepths, d)
@@ -260,22 +267,28 @@ func NewDecompressor(compressedFilePath string) (d *Decompressor, err error) {
 			lens:   make([]byte, tableSize),
 			ptrs:   make([]*posTable, tableSize),
 		}
-		buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth)
+		if _, err = buildPosTable(posDepths, poss, d.posDict, 0, 0, 0, posMaxDepth); err != nil {
+			return nil, err
+		}
 	}
 	d.wordsStart = pos + 8 + dictSize
 	return d, nil
 }
 
-func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64) int {
+func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
+	if maxDepth > maxAllowedDepth {
+		return 0, fmt.Errorf("buildCondensedPatternTable: maxDepth=%d is too deep", maxDepth)
+	}
+
 	if len(depths) == 0 {
-		return 0
+		return 0, nil
 	}
 	if depth == depths[0] {
 		pattern := word(patterns[0])
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
 		cw := &codeword{code: code, pattern: &pattern, len: byte(bits), ptr: nil}
 		table.insertWord(cw)
-		return 1
+		return 1, nil
 	}
 	if bits == 9 {
 		var bitLen int
@@ -288,13 +301,23 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 		table.insertWord(cw)
 		return buildCondensedPatternTable(cw.ptr, depths, patterns, 0, 0, depth, maxDepth)
 	}
-	b0 := buildCondensedPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1)
-	return b0 + buildCondensedPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	if maxDepth == 0 {
+		return 0, errors.New("buildCondensedPatternTable: maxDepth reached zero")
+	}
+	b0, err := buildCondensedPatternTable(table, depths, patterns, code, bits+1, depth+1, maxDepth-1)
+	if err != nil {
+		return 0, err
+	}
+	b1, err := buildCondensedPatternTable(table, depths[b0:], patterns[b0:], (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	return b0 + b1, err
 }
 
-func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) int {
+func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16, bits int, depth uint64, maxDepth uint64) (int, error) {
+	if maxDepth > maxAllowedDepth {
+		return 0, fmt.Errorf("buildPosTable: maxDepth=%d is too deep", maxDepth)
+	}
 	if len(depths) == 0 {
-		return 0
+		return 0, nil
 	}
 	if depth == depths[0] {
 		p := poss[0]
@@ -313,7 +336,7 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 				table.ptrs[c] = nil
 			}
 		}
-		return 1
+		return 1, nil
 	}
 	if bits == 9 {
 		var bitLen int
@@ -334,8 +357,15 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 		table.ptrs[code] = newTable
 		return buildPosTable(depths, poss, newTable, 0, 0, depth, maxDepth)
 	}
-	b0 := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
-	return b0 + buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	if maxDepth == 0 {
+		return 0, errors.New("buildPosTable: maxDepth reached zero")
+	}
+	b0, err := buildPosTable(depths, poss, table, code, bits+1, depth+1, maxDepth-1)
+	if err != nil {
+		return 0, err
+	}
+	b1, err := buildPosTable(depths[b0:], poss[b0:], table, (uint16(1)<<bits)|code, bits+1, depth+1, maxDepth-1)
+	return b0 + b1, err
 }
 
 func (d *Decompressor) DataHandle() unsafe.Pointer {
@@ -561,8 +591,8 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		}
 		return buf, g.dataP
 	}
-	bufPos := len(buf) // Tracking position in buf where to insert part of the word
-	lastUncovered := len(buf)
+
+	bufOffset := len(buf)
 	if len(buf)+int(wordLen) > cap(buf) {
 		newBuf := make([]byte, len(buf)+int(wordLen))
 		copy(newBuf, buf)
@@ -571,7 +601,10 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		// Expand buffer
 		buf = buf[:len(buf)+int(wordLen)]
 	}
+
 	// Loop below fills in the patterns
+	// Tracking position in buf where to insert part of the word
+	bufPos := bufOffset
 	for pos := g.nextPos(false /* clean */); pos != 0; pos = g.nextPos(false) {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		pt := g.nextPattern()
@@ -585,7 +618,11 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	g.dataP = savePos
 	g.dataBit = 0
 	g.nextPos(true /* clean */) // Reset the state of huffman reader
-	bufPos = lastUncovered      // Restore to the beginning of buf
+
+	// Restore to the beginning of buf
+	bufPos = bufOffset
+	lastUncovered := bufOffset
+
 	// Loop below fills the data which is not in the patterns
 	for pos := g.nextPos(false); pos != 0; pos = g.nextPos(false) {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
@@ -596,9 +633,9 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		}
 		lastUncovered = bufPos + len(g.nextPattern())
 	}
-	if int(wordLen) > lastUncovered {
-		dif := wordLen - uint64(lastUncovered)
-		copy(buf[lastUncovered:wordLen], g.data[postLoopPos:postLoopPos+dif])
+	if bufOffset+int(wordLen) > lastUncovered {
+		dif := uint64(bufOffset + int(wordLen) - lastUncovered)
+		copy(buf[lastUncovered:lastUncovered+int(dif)], g.data[postLoopPos:postLoopPos+dif])
 		postLoopPos += dif
 	}
 	g.dataP = postLoopPos

@@ -3,9 +3,11 @@ package diagnostics
 import (
 	"encoding/json"
 	"net/http"
+
+	diaglib "github.com/ledgerwatch/erigon-lib/diagnostics"
 )
 
-func SetupStagesAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) {
+func SetupStagesAccess(metricsMux *http.ServeMux, diag *diaglib.DiagnosticClient) {
 	metricsMux.HandleFunc("/snapshot-sync", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Content-Type", "application/json")
@@ -25,14 +27,14 @@ func SetupStagesAccess(metricsMux *http.ServeMux, diag *DiagnosticClient) {
 	})
 }
 
-func writeStages(w http.ResponseWriter, diag *DiagnosticClient) {
+func writeStages(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.SyncStatistics())
 }
 
-func writeFilesList(w http.ResponseWriter, diag *DiagnosticClient) {
+func writeFilesList(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.SnapshotFilesList())
 }
 
-func writeHardwareInfo(w http.ResponseWriter, diag *DiagnosticClient) {
+func writeHardwareInfo(w http.ResponseWriter, diag *diaglib.DiagnosticClient) {
 	json.NewEncoder(w).Encode(diag.HardwareInfo())
 }

@@ -21,9 +21,8 @@ import (
 	"github.com/spaolacci/murmur3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/dbg"
-
 	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/etl"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/erigon-lib/seg"
@@ -579,7 +578,7 @@ type BtIndexWriterArgs struct {
 // are likely to use different hash function, to collision attacks are unlikely to slow down any meaningful number of nodes at the same time
 func NewBtIndexWriter(args BtIndexWriterArgs, logger log.Logger) (*BtIndexWriter, error) {
 	if args.EtlBufLimit == 0 {
-		args.EtlBufLimit = etl.BufferOptimalSize
+		args.EtlBufLimit = etl.BufferOptimalSize / 2
 	}
 	if args.Lvl == 0 {
 		args.Lvl = log.LvlTrace

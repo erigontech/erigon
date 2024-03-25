@@ -43,6 +43,7 @@ output=$(find "$projectDir" -maxdepth 1 -type 'd' \
     | grep -v "github.com/consensys/gnark-crypto"   `# Apache-2.0` \
     | grep -v "github.com/erigontech/mdbx-go"       `# Apache-2.0` \
     | grep -v "github.com/ledgerwatch/secp256k1"    `# BSD-3-Clause` \
+    | grep -v "golang.org/toolchain"                `# BSD-3-Clause` \
     | grep -v "github.com/RoaringBitmap/roaring"    `# Apache-2.0` \
     | grep -v "github.com/!roaring!bitmap/roaring"  `# Apache-2.0` \
     | grep -v "github.com/holiman/bloomfilter/v2"   `# MIT` \

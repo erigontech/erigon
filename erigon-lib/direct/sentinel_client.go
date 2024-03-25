@@ -20,7 +20,6 @@ import (
 	"context"
 	"io"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"google.golang.org/grpc"
 )
@@ -82,6 +81,10 @@ func (s *SentinelClientDirect) SubscribeGossip(ctx context.Context, in *sentinel
 	return &SentinelSubscribeGossipC{ch: ch, ctx: ctx}, nil
 }
 
+func (s *SentinelClientDirect) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinel.RequestSubscribeExpiry, opts ...grpc.CallOption) (*sentinel.EmptyMessage, error) {
+	return s.server.SetSubscribeExpiry(ctx, expiryReq)
+}
+
 type SentinelSubscribeGossipC struct {
 	ch  chan *gossipReply
 	ctx context.Context
@@ -118,13 +121,4 @@ func (s *SentinelSubscribeGossipS) Err(err error) {
 		return
 	}
 	s.ch <- &gossipReply{err: err}
-}
-
-func (s *SentinelClientDirect) GetPeersStatistics() map[string]*diagnostics.PeerStatistics {
-
-	if diag, ok := s.server.(diagnostics.PeerStatisticsGetter); ok {
-		return diag.GetPeersStatistics()
-	}
-
-	return map[string]*diagnostics.PeerStatistics{}
 }

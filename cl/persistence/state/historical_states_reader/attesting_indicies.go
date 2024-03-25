@@ -16,7 +16,7 @@ import (
 func (r *HistoricalStatesReader) attestingIndicies(attestation solid.AttestationData, aggregationBits []byte, checkBitsLength bool, mix libcommon.Hash, idxs []uint64) ([]uint64, error) {
 	slot := attestation.Slot()
 	committeesPerSlot := committeeCount(r.cfg, slot/r.cfg.SlotsPerEpoch, idxs)
-	committeeIndex := attestation.ValidatorIndex()
+	committeeIndex := attestation.CommitteeIndex()
 	index := (slot%r.cfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 	count := committeesPerSlot * r.cfg.SlotsPerEpoch
 

@@ -15,7 +15,7 @@ import (
 	"github.com/go-echarts/go-echarts/v2/opts"
 	"github.com/go-echarts/go-echarts/v2/types"
 	"github.com/ledgerwatch/erigon-lib/commitment"
-	"github.com/ledgerwatch/erigon-lib/compress"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/erigon-lib/state"
 )
 
@@ -148,7 +148,7 @@ func (s *overallStat) Collect(other *overallStat) {
 
 func extractKVPairFromCompressed(filename string, keysSink chan commitment.BranchStat) error {
 	defer close(keysSink)
-	dec, err := compress.NewDecompressor(filename)
+	dec, err := seg.NewDecompressor(filename)
 	if err != nil {
 		return fmt.Errorf("failed to create decompressor: %w", err)
 	}

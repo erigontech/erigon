@@ -294,22 +294,30 @@ type Cfg struct {
 }
 
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
-	mergeLimit := c.MergeLimit(info.From)
-	return info.To-info.From == mergeLimit
+	return info.To-info.From == snaptype.Erigon2MergeLimit || info.To-info.From == snaptype.Erigon2OldMergeLimit
 }
 
 func (c Cfg) MergeLimit(fromBlock uint64) uint64 {
 	for _, p := range c.Preverified {
-		if info, _, ok := snaptype.ParseFileName("", p.Name); ok && info.Ext == ".seg" {
-			if fromBlock >= info.From && fromBlock < info.To {
-				if info.Len() == snaptype.Erigon2MergeLimit ||
-					info.Len() == snaptype.Erigon2OldMergeLimit {
-					return info.Len()
-				}
-
-				break
-			}
+		info, _, ok := snaptype.ParseFileName("", p.Name)
+		if !ok {
+			continue
 		}
+		if info.Ext != ".seg" {
+			continue
+		}
+		if fromBlock < info.From {
+			continue
+		}
+		if fromBlock >= info.To {
+			continue
+		}
+		if info.Len() == snaptype.Erigon2MergeLimit ||
+			info.Len() == snaptype.Erigon2OldMergeLimit {
+			return info.Len()
+		}
+
+		break
 	}
 
 	return snaptype.Erigon2MergeLimit
@@ -343,6 +351,9 @@ var knownTypes = map[string][]snaptype.Type{
 }
 
 func Seedable(networkName string, info snaptype.FileInfo) bool {
+	if networkName == "" {
+		panic("empty network name")
+	}
 	return KnownCfg(networkName).Seedable(info)
 }
 

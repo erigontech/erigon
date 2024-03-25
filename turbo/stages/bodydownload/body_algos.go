@@ -7,6 +7,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/exp/maps"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -17,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"golang.org/x/exp/maps"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download

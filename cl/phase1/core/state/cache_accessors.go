@@ -1,12 +1,14 @@
 package state
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
 	"math"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
+	shuffling2 "github.com/ledgerwatch/erigon/cl/phase1/core/state/shuffling"
 
 	"github.com/Giulio2002/bls"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
@@ -80,6 +82,35 @@ func (b *CachingBeaconState) GetBeaconProposerIndex() (uint64, error) {
 		}
 	}
 	return *b.proposerIndex, nil
+}
+
+// GetBeaconProposerIndexForSlot compute the proposer index for a specific slot
+func (b *CachingBeaconState) GetBeaconProposerIndexForSlot(slot uint64) (uint64, error) {
+	epoch := Epoch(b)
+
+	hash := sha256.New()
+	beaconConfig := b.BeaconConfig()
+	mixPosition := (epoch + beaconConfig.EpochsPerHistoricalVector - beaconConfig.MinSeedLookahead - 1) %
+		beaconConfig.EpochsPerHistoricalVector
+	// Input for the seed hash.
+	mix := b.GetRandaoMix(int(mixPosition))
+	input := shuffling2.GetSeed(b.BeaconConfig(), mix, epoch, b.BeaconConfig().DomainBeaconProposer)
+	slotByteArray := make([]byte, 8)
+	binary.LittleEndian.PutUint64(slotByteArray, b.Slot())
+
+	// Add slot to the end of the input.
+	inputWithSlot := append(input[:], slotByteArray...)
+
+	// Calculate the hash.
+	hash.Write(inputWithSlot)
+	seed := hash.Sum(nil)
+
+	indices := b.GetActiveValidatorsIndices(epoch)
+	// Write the seed to an array.
+	seedArray := [32]byte{}
+	copy(seedArray[:], seed)
+	b.proposerIndex = new(uint64)
+	return shuffling2.ComputeProposerIndex(b.BeaconState, indices, seedArray)
 }
 
 // BaseRewardPerIncrement return base rewards for processing sync committee and duties.
@@ -269,7 +300,7 @@ func (b *CachingBeaconState) GetAttestingIndicies(attestation solid.AttestationD
 	// if cached, ok := cache.LoadAttestatingIndicies(&attestation, aggregationBits); ok {
 	// 	return cached, nil
 	// }
-	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.ValidatorIndex())
+	committee, err := b.GetBeaconCommitee(attestation.Slot(), attestation.CommitteeIndex())
 	if err != nil {
 		return nil, err
 	}

@@ -1,3 +1,28 @@
+## Snapshots (synonym of segments/shards) overview
+
+- What is "snaphots"? - It's way to store "cold" data outside of main database. It's not 'temporary' files -
+  it's `frozen db` where stored old blocks/history/etc... Most important: it's "building block" for future "sync Archive
+  node without execution all blocks from genesis" (will release this feature in Erigon3).
+
+- When snapshots are created? - Blocks older than 90K (`FullImmutabilityThreshold`) are moved from DB to files
+  in-background
+
+- Where snapshots are stored? - `datadir/snapshots` - you can symlink/mount it to cheaper disk.
+
+- When snapshots are pulled? - Erigon download snapshots **only-once** when creating node - all other files are
+  self-generated
+
+- How does it benefit the new nodes? - P2P and Becaon networks may have not enough good peers for old data (no
+  incentives). StageSenders results are included into blocks snaps - means new node can skip it.
+
+- How network benefit? - Serve immutable snapshots can use cheaper infrastructure: Bittorrent/S3/R2/etc... - because
+  there is no incentive. Polygon mainnet is 12Tb now. Also Beacon network is very bad in serving old data.
+
+- How does it benefit current nodes? - Erigon's db is 1-file (doesens of Tb of nvme) - which is not friendly for
+  maintainance. Can't mount `hot` data to 1 type of disk and `cold` to another. Erigon2 moving only Blocks to snaps
+  but Erigon3 also moving there `cold latest state` and `state history` - means new node doesn't need re-exec all blocks
+  from genesis.
+
 # Downloader
 
 Service to seed/download historical data (snapshots, immutable .seg files) by
@@ -196,7 +221,6 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url>
 # See also: `downloader --help` of `--webseed` flag. There is an option to pass it by `datadir/webseed.toml` file.   
 ```
 
-
 ---------------
 
 ## E3
@@ -209,6 +233,8 @@ Golang 1.21
 
 Almost all RPC methods are implemented - if something doesn't work - just drop it on our head.
 
+Supported networks: all (which supported by E2).
+
 ### E3 changes from E2:
 
 - Sync from scratch doesn't require re-exec all history. Latest state and it's history are in snapshots - can download.
@@ -219,9 +245,7 @@ Almost all RPC methods are implemented - if something doesn't work - just drop i
 - Doesn't store Receipts/Logs - it always re-executing historical transactions - but re-execution is cheaper (see point
   above). We would like to see how it will impact users - welcome feedback. Likely we will try add some small LRU-cache
   here. Likely later we will add optional flag "to persist receipts".
-- More cold-start-friendly and os-pre-fetch-friendly. E2 DB had MADVISE_RANDOM (because b+tree gravitating towards
-  random-pages-distribution and confusing OS's pre-fetch logic), now snapshots storing data sequentially and have
-  MADVISE_NORMAL - and it showing better performance on our benchmarks.
+- More cold-start-friendly and os-pre-fetch-friendly.
 - datadir/chaindata is small now - to prevent it's grow: we recommend set --batchSize <= 1G. Probably 512mb is
   enough.
 

@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core"
@@ -15,7 +16,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/state/temporal"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
-	"github.com/ledgerwatch/erigon/turbo/backup"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -160,7 +160,10 @@ func ResetExec(ctx context.Context, db kv.RwDB, chain string, tmpDir string, log
 			agg := v3db.Agg()
 			ct := agg.MakeContext()
 			defer ct.Close()
-			doms := state.NewSharedDomains(tx, logger)
+			doms, err := state.NewSharedDomains(tx, logger)
+			if err != nil {
+				return err
+			}
 			defer doms.Close()
 
 			_ = stages.SaveStageProgress(tx, stages.Execution, doms.BlockNum())

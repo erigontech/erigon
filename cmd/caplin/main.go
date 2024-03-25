@@ -18,7 +18,6 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
-	freezer2 "github.com/ledgerwatch/erigon/cl/freezer"
 	"github.com/ledgerwatch/erigon/cl/persistence/db_config"
 	"github.com/ledgerwatch/erigon/cl/phase1/core"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
@@ -73,8 +72,9 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Phase1]", "chain", cliCtx.String(utils.ChainFlag.Name))
 	log.Info("[Phase1] Running Caplin")
+
 	// Either start from genesis or a checkpoint
-	ctx, cn := context.WithCancel(context.Background())
+	ctx, cn := context.WithCancel(cliCtx.Context)
 	defer cn()
 	var state *state.CachingBeaconState
 	if cfg.InitialSync {
@@ -114,7 +114,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 	}
 	var executionEngine execution_client2.ExecutionEngine
 	if cfg.RunEngineAPI {
-		cc, err := execution_client2.NewExecutionClientRPC(ctx, cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
+		cc, err := execution_client2.NewExecutionClientRPC(cfg.JwtSecret, cfg.EngineAPIAddr, cfg.EngineAPIPort)
 		if err != nil {
 			log.Error("could not start engine api", "err", err)
 		}
@@ -122,13 +122,7 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		executionEngine = cc
 	}
 
-	var caplinFreezer freezer2.Freezer
-	if cfg.RecordMode {
-		caplinFreezer = &freezer2.RootPathOsFs{
-			Root: cfg.RecordDir,
-		}
-	}
-	indiciesDB, _, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.Dirs.CaplinIndexing, executionEngine, false)
+	indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, cfg.BeaconCfg, cfg.GenesisCfg, cfg.Dirs.CaplinIndexing, cfg.Dirs.CaplinBlobs, executionEngine, false, 100_000)
 	if err != nil {
 		return err
 	}
@@ -138,5 +132,5 @@ func runCaplinNode(cliCtx *cli.Context) error {
 		LightClientDiscoveryAddr:    cfg.Addr,
 		LightClientDiscoveryPort:    uint64(cfg.Port),
 		LightClientDiscoveryTCPPort: uint64(cfg.ServerTcpPort),
-	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, caplinFreezer, cfg.Dirs, rcfg, nil, nil, false, false, indiciesDB, nil, blockSnapBuildSema)
+	}, cfg.NetworkCfg, cfg.BeaconCfg, cfg.GenesisCfg, state, cfg.Dirs, rcfg, nil, nil, false, false, false, indiciesDB, blobStorage, nil, blockSnapBuildSema)
 }

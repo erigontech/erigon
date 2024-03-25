@@ -106,7 +106,7 @@ type OnFreezeFunc func(frozenFileNames []string)
 
 func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
 	tmpdir := dirs.Tmp
-	salt, err := getIndicesSalt(dirs.Snap)
+	salt, err := getStateIndicesSalt(dirs.Snap)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +129,8 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg := domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
+			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
+			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
 		},
 	}
 	if a.d[kv.AccountsDomain], err = NewDomain(cfg, aggregationStep, "accounts", kv.TblAccountKeys, kv.TblAccountVals, kv.TblAccountHistoryKeys, kv.TblAccountHistoryVals, kv.TblAccountIdx, logger); err != nil {
@@ -138,8 +138,8 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
+			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
+			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
 		},
 	}
 	if a.d[kv.StorageDomain], err = NewDomain(cfg, aggregationStep, "storage", kv.TblStorageKeys, kv.TblStorageVals, kv.TblStorageHistoryKeys, kv.TblStorageHistoryVals, kv.TblStorageIdx, logger); err != nil {
@@ -147,8 +147,8 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressKeys | CompressVals, historyLargeValues: true,
+			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
+			withLocalityIndex: false, withExistenceIndex: false, compression: CompressKeys | CompressVals, historyLargeValues: true,
 		},
 	}
 	if a.d[kv.CodeDomain], err = NewDomain(cfg, aggregationStep, "code", kv.TblCodeKeys, kv.TblCodeVals, kv.TblCodeHistoryKeys, kv.TblCodeHistoryVals, kv.TblCodeIdx, logger); err != nil {
@@ -156,8 +156,8 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	}
 	cfg = domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: salt, dirs: dirs},
-			withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: false,
+			iiCfg:             iiCfg{salt: salt, dirs: dirs, db: db},
+			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: false,
 			dontProduceFiles: true,
 		},
 		compress: CompressNone,
@@ -174,20 +174,20 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	//if a.d[kv.GasUsedDomain], err = NewDomain(cfg, aggregationStep, "gasused", kv.TblGasUsedKeys, kv.TblGasUsedVals, kv.TblGasUsedHistoryKeys, kv.TblGasUsedVals, kv.TblGasUsedIdx, logger); err != nil {
 	//	return nil, err
 	//}
-	idxCfg := iiCfg{salt: salt, dirs: dirs}
-	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, true, nil, logger); err != nil {
+	idxCfg := iiCfg{salt: salt, dirs: dirs, db: db}
+	if a.logAddrs, err = NewInvertedIndex(idxCfg, aggregationStep, "logaddrs", kv.TblLogAddressKeys, kv.TblLogAddressIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dirs: dirs}
-	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, true, nil, logger); err != nil {
+	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
+	if a.logTopics, err = NewInvertedIndex(idxCfg, aggregationStep, "logtopics", kv.TblLogTopicsKeys, kv.TblLogTopicsIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dirs: dirs}
-	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, true, nil, logger); err != nil {
+	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
+	if a.tracesFrom, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesfrom", kv.TblTracesFromKeys, kv.TblTracesFromIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
-	idxCfg = iiCfg{salt: salt, dirs: dirs}
-	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, true, nil, logger); err != nil {
+	idxCfg = iiCfg{salt: salt, dirs: dirs, db: db}
+	if a.tracesTo, err = NewInvertedIndex(idxCfg, aggregationStep, "tracesto", kv.TblTracesToKeys, kv.TblTracesToIdx, false, nil, logger); err != nil {
 		return nil, err
 	}
 	a.KeepStepsInDB(1)
@@ -200,10 +200,13 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 	return a, nil
 }
 
-// getIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// getStateIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
 // if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices - and existing indices have salt in metadata.
-func getIndicesSalt(baseDir string) (salt *uint32, err error) {
-	fpath := filepath.Join(baseDir, "salt.txt")
+func getStateIndicesSalt(baseDir string) (salt *uint32, err error) {
+	if dir.FileExist(filepath.Join(baseDir, "salt.txt")) && !dir.FileExist(filepath.Join(baseDir, "salt-state.txt")) {
+		_ = os.Rename(filepath.Join(baseDir, "salt.txt"), filepath.Join(baseDir, "salt-state.txt"))
+	}
+	fpath := filepath.Join(baseDir, "salt-state.txt")
 	if !dir.FileExist(fpath) {
 		if salt == nil {
 			saltV := rand2.Uint32()
@@ -711,10 +714,10 @@ func (ac *AggregatorV3Context) CanPrune(tx kv.Tx, untilTx uint64) bool {
 			return true
 		}
 	}
-	return ac.logAddrs.CanPruneUntil(tx, untilTx) ||
-		ac.logTopics.CanPruneUntil(tx, untilTx) ||
-		ac.tracesFrom.CanPruneUntil(tx, untilTx) ||
-		ac.tracesTo.CanPruneUntil(tx, untilTx)
+	return ac.logAddrs.CanPrune(tx) ||
+		ac.logTopics.CanPrune(tx) ||
+		ac.tracesFrom.CanPrune(tx) ||
+		ac.tracesTo.CanPrune(tx)
 }
 
 func (ac *AggregatorV3Context) CanUnwindDomainsToBlockNum(tx kv.Tx) (uint64, error) {
@@ -737,7 +740,10 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 	// not all blocks have commitment
 	//fmt.Printf("CanUnwindBeforeBlockNum: blockNum=%d unwindTo=%d\n", blockNum, unwindToTxNum)
-	domains := NewSharedDomains(tx, ac.a.logger)
+	domains, err := NewSharedDomains(tx, ac.a.logger)
+	if err != nil {
+		return 0, false, err
+	}
 	defer domains.Close()
 
 	blockNumWithCommitment, _, _, err := domains.LatestCommitmentState(tx, ac.CanUnwindDomainsToTxNum(), unwindToTxNum)
@@ -750,45 +756,75 @@ func (ac *AggregatorV3Context) CanUnwindBeforeBlockNum(blockNum uint64, tx kv.Tx
 
 // PruneSmallBatches is not cancellable, it's over when it's over or failed.
 // It fills whole timeout with pruning by small batches (of 100 keys) and making some progress
-func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) error {
+func (ac *AggregatorV3Context) PruneSmallBatches(ctx context.Context, timeout time.Duration, tx kv.RwTx) (haveMore bool, err error) {
+	// On tip-of-chain timeout is about `3sec`
+	//  On tip of chain:     must be real-time - prune by small batches and prioritize exact-`timeout`
+	//  Not on tip of chain: must be aggressive (prune as much as possible) by bigger batches
+	aggressivePrune := timeout >= 1*time.Minute
+
+	var pruneLimit uint64 = 1_000
+	var withWarmup bool = false
+	if timeout >= 1*time.Minute {
+		// start from a bit high limit to give time for warmup
+		// will disable warmup after first iteration and will adjust pruneLimit based on `time`
+		pruneLimit = 100_000
+		withWarmup = true
+	}
+
 	started := time.Now()
 	localTimeout := time.NewTicker(timeout)
 	defer localTimeout.Stop()
-	logEvery := time.NewTicker(20 * time.Second)
+	logPeriod := 30 * time.Second
+	logEvery := time.NewTicker(logPeriod)
 	defer logEvery.Stop()
 	aggLogEvery := time.NewTicker(600 * time.Second) // to hide specific domain/idx logging
 	defer aggLogEvery.Stop()
 
-	const pruneLimit uint64 = 10000
-
 	fullStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 
 	for {
-		stat, err := ac.Prune(context.Background(), tx, pruneLimit, aggLogEvery)
+		iterationStarted := time.Now()
+		// `context.Background()` is important here!
+		//     it allows keep DB consistent - prune all keys-related data or noting
+		//     can't interrupt by ctrl+c and leave dirt in DB
+		stat, err := ac.Prune(context.Background(), tx, pruneLimit, withWarmup, aggLogEvery)
 		if err != nil {
 			ac.a.logger.Warn("[snapshots] PruneSmallBatches failed", "err", err)
-			return err
+			return false, err
 		}
 		if stat == nil {
 			if fstat := fullStat.String(); fstat != "" {
 				ac.a.logger.Info("[snapshots] PruneSmallBatches finished", "took", time.Since(started).String(), "stat", fstat)
 			}
-			return nil
+			return false, nil
 		}
 		fullStat.Accumulate(stat)
 
+		withWarmup = false // warmup once is enough
+
+		if aggressivePrune {
+			took := time.Since(iterationStarted)
+			if took < 2*time.Second {
+				pruneLimit *= 10
+			}
+			if took > logPeriod {
+				pruneLimit /= 10
+			}
+		}
+
 		select {
+		case <-localTimeout.C: //must be first to improve responsivness
+			return true, nil
 		case <-logEvery.C:
 			ac.a.logger.Info("[snapshots] pruning state",
-				"until timeout", time.Until(started.Add(timeout)).String(),
+				"until commit", time.Until(started.Add(timeout)).String(),
+				"pruneLimit", pruneLimit,
 				"aggregatedStep", (ac.maxTxNumInDomainFiles(false)-1)/ac.a.StepSize(),
 				"stepsRangeInDB", ac.a.StepsRangeInDBAsStr(tx),
 				"pruned", fullStat.String(),
 			)
-		case <-localTimeout.C:
-			return nil
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		default:
 		}
 	}
@@ -863,7 +899,8 @@ func (as *AggregatorPruneStat) Accumulate(other *AggregatorPruneStat) {
 	}
 }
 
-func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
+func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint64, withWarmup bool, logEvery *time.Ticker) (*AggregatorPruneStat, error) {
+	defer func(t time.Time) { fmt.Printf(" Prune took aggregator_v3.go:879: %s, %d\n", time.Since(t), limit) }(time.Now())
 	defer mxPruneTookAgg.ObserveDuration(time.Now())
 
 	if limit == 0 {
@@ -891,24 +928,24 @@ func (ac *AggregatorV3Context) Prune(ctx context.Context, tx kv.RwTx, limit uint
 	aggStat := &AggregatorPruneStat{Domains: make(map[string]*DomainPruneStat), Indices: make(map[string]*InvertedIndexPruneStat)}
 	for id, d := range ac.d {
 		var err error
-		aggStat.Domains[ac.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, logEvery)
+		aggStat.Domains[ac.d[id].d.filenameBase], err = d.Prune(ctx, tx, step, txFrom, txTo, limit, withWarmup, logEvery)
 		if err != nil {
 			return aggStat, err
 		}
 	}
-	lap, err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	lap, err := ac.logAddrs.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
 	if err != nil {
 		return nil, err
 	}
-	ltp, err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	ltp, err := ac.logTopics.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
 	if err != nil {
 		return nil, err
 	}
-	tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	tfp, err := ac.tracesFrom.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
 	if err != nil {
 		return nil, err
 	}
-	ttp, err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, nil)
+	ttp, err := ac.tracesTo.Prune(ctx, tx, txFrom, txTo, limit, logEvery, false, withWarmup, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1493,7 +1530,6 @@ type AggregatorV3Context struct {
 }
 
 func (a *AggregatorV3) MakeContext() *AggregatorV3Context {
-
 	ac := &AggregatorV3Context{
 		a:          a,
 		logAddrs:   a.logAddrs.MakeContext(),

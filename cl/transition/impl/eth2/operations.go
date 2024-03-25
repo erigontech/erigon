@@ -162,7 +162,7 @@ func (I *impl) ProcessDeposit(s abstract.BeaconState, deposit *cltypes.Deposit) 
 	validatorIndex, has := s.ValidatorIndexByPubkey(publicKey)
 	if !has {
 		// Agnostic domain.
-		domain, err := fork.ComputeDomain(s.BeaconConfig().DomainDeposit[:], utils.Uint32ToBytes4(s.BeaconConfig().GenesisForkVersion), [32]byte{})
+		domain, err := fork.ComputeDomain(s.BeaconConfig().DomainDeposit[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().GenesisForkVersion)), [32]byte{})
 		if err != nil {
 			return err
 		}
@@ -220,7 +220,7 @@ func (I *impl) ProcessVoluntaryExit(s abstract.BeaconState, signedVoluntaryExit 
 		if s.Version() < clparams.DenebVersion {
 			domain, err = s.GetDomain(s.BeaconConfig().DomainVoluntaryExit, voluntaryExit.Epoch)
 		} else if s.Version() >= clparams.DenebVersion {
-			domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(s.BeaconConfig().CapellaForkVersion), s.GenesisValidatorsRoot())
+			domain, err = fork.ComputeDomain(s.BeaconConfig().DomainVoluntaryExit[:], utils.Uint32ToBytes4(uint32(s.BeaconConfig().CapellaForkVersion)), s.GenesisValidatorsRoot())
 		}
 		if err != nil {
 			return err
@@ -412,7 +412,7 @@ func (I *impl) ProcessBlsToExecutionChange(s abstract.BeaconState, signedChange 
 	wc := validator.WithdrawalCredentials()
 	if I.FullValidation {
 		// Check the validator's withdrawal credentials prefix.
-		if wc[0] != beaconConfig.BLSWithdrawalPrefixByte {
+		if wc[0] != byte(beaconConfig.BLSWithdrawalPrefixByte) {
 			return fmt.Errorf("invalid withdrawal credentials prefix")
 		}
 
@@ -423,7 +423,7 @@ func (I *impl) ProcessBlsToExecutionChange(s abstract.BeaconState, signedChange 
 		}
 
 		// Compute the signing domain and verify the message signature.
-		domain, err := fork.ComputeDomain(beaconConfig.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(beaconConfig.GenesisForkVersion), s.GenesisValidatorsRoot())
+		domain, err := fork.ComputeDomain(beaconConfig.DomainBLSToExecutionChange[:], utils.Uint32ToBytes4(uint32(beaconConfig.GenesisForkVersion)), s.GenesisValidatorsRoot())
 		if err != nil {
 			return err
 		}
@@ -441,7 +441,7 @@ func (I *impl) ProcessBlsToExecutionChange(s abstract.BeaconState, signedChange 
 	}
 	credentials := wc
 	// Reset the validator's withdrawal credentials.
-	credentials[0] = beaconConfig.ETH1AddressWithdrawalPrefixByte
+	credentials[0] = byte(beaconConfig.ETH1AddressWithdrawalPrefixByte)
 	copy(credentials[1:], make([]byte, 11))
 	copy(credentials[12:], change.To[:])
 
@@ -549,7 +549,7 @@ func (I *impl) processAttestationPostAltair(s abstract.BeaconState, attestation 
 // processAttestationsPhase0 implements the rules for phase0 processing.
 func (I *impl) processAttestationPhase0(s abstract.BeaconState, attestation *solid.Attestation) ([]uint64, error) {
 	data := attestation.AttestantionData()
-	committee, err := s.GetBeaconCommitee(data.Slot(), data.ValidatorIndex())
+	committee, err := s.GetBeaconCommitee(data.Slot(), data.CommitteeIndex())
 	if err != nil {
 		return nil, err
 	}
@@ -674,7 +674,7 @@ func (I *impl) processAttestation(s abstract.BeaconState, attestation *solid.Att
 	if s.Version() >= clparams.DenebVersion && data.Slot()+beaconConfig.MinAttestationInclusionDelay > stateSlot {
 		return nil, errors.New("ProcessAttestation: attestation slot not in range")
 	}
-	if data.ValidatorIndex() >= s.CommitteeCount(data.Target().Epoch()) {
+	if data.CommitteeIndex() >= s.CommitteeCount(data.Target().Epoch()) {
 		return nil, errors.New("ProcessAttestation: attester index out of range")
 	}
 	// check if we need to use rules for phase0 or post-altair.

@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/services"
 )
 
-var SpanNotFoundErr = errors.New("span not found")
+var ErrSpanNotFound = errors.New("span not found")
 
 type RemoteBlockReader struct {
 	client remote.ETHBACKENDClient
@@ -99,7 +99,6 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-
 func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
@@ -260,7 +259,7 @@ func (r *RemoteBlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash co
 	}
 	return result, nil
 }
-func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
+func (r *RemoteBlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
 	panic("not implemented")
 }
 
@@ -610,9 +609,6 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if err != nil {
 		return nil, nil, err
 	}
-	if !ok {
-		return
-	}
 	block = types.NewBlockFromStorage(hash, h, txs, b.Uncles, b.Withdrawals)
 	if len(senders) != block.Transactions().Len() {
 		return block, senders, nil // no senders is fine - will recover them on the fly
@@ -662,7 +658,10 @@ func (r *BlockReader) headerFromSnapshotByHash(hash common.Hash, sn *Segment, bu
 	}
 
 	reader := recsplit.NewIndexReader(index)
-	localID := reader.Lookup(hash[:])
+	localID, ok := reader.Lookup(hash[:])
+	if !ok {
+		return nil, nil
+	}
 	headerOffset := index.OrdinalLookup(localID)
 	gg := sn.MakeGetter()
 	gg.Reset(headerOffset)
@@ -801,6 +800,7 @@ func (r *BlockReader) txnByID(txnID uint64, sn *Segment, buf []byte) (txn types.
 }
 
 func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []byte) (types.Transaction, uint64, bool, error) {
+	fmt.Printf("[dbg] txnByHash1\n")
 	for i := len(segments) - 1; i >= 0; i-- {
 		sn := segments[i]
 
@@ -812,7 +812,10 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		}
 
 		reader := recsplit.NewIndexReader(idxTxnHash)
-		txnId := reader.Lookup(txnHash[:])
+		txnId, ok := reader.Lookup(txnHash[:])
+		if !ok {
+			continue
+		}
 		offset := idxTxnHash.OrdinalLookup(txnId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -832,7 +835,10 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*Segment, buf []
 		txn.SetSender(sender) // see: https://tip.golang.org/ref/spec#Conversions_from_slice_to_array_pointer
 
 		reader2 := recsplit.NewIndexReader(idxTxnHash2BlockNum)
-		blockNum := reader2.Lookup(txnHash[:])
+		blockNum, ok := reader2.Lookup(txnHash[:])
+		if !ok {
+			continue
+		}
 
 		// final txnHash check  - completely avoid false-positives
 		if txn.Hash() == txnHash {
@@ -890,6 +896,8 @@ func (r *BlockReader) TxnLookup(_ context.Context, tx kv.Getter, txnHash common.
 	if err != nil {
 		return 0, false, err
 	}
+
+	fmt.Printf("[dbg] txnByHash0: %t\n", n != nil)
 	if n != nil {
 		return *n, true, nil
 	}
@@ -1096,7 +1104,10 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(txnHash[:])
+		blockEventId, exists := reader.Lookup(txnHash[:])
+		if !exists {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -1111,13 +1122,50 @@ func (r *BlockReader) borBlockByEventHash(txnHash common.Hash, segments []*Segme
 	return
 }
 
-func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, blockHeight uint64) (uint64, error) {
-	v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
-	if err != nil {
-		return 0, err
+func (r *BlockReader) BorStartEventID(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) (uint64, error) {
+	maxBlockNumInFiles := r.FrozenBorBlocks()
+	if maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		v, err := tx.GetOne(kv.BorEventNums, hexutility.EncodeTs(blockHeight))
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			return 0, fmt.Errorf("BorStartEventID(%d) not found", blockHeight)
+		}
+		startEventId := binary.BigEndian.Uint64(v)
+		return startEventId, nil
 	}
-	startEventId := binary.BigEndian.Uint64(v)
-	return startEventId, nil
+
+	borTxHash := types.ComputeBorTxHash(blockHeight, hash)
+	view := r.borSn.View()
+	defer view.Close()
+
+	segments := view.Events()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		if sn.from > blockHeight {
+			continue
+		}
+		if sn.to <= blockHeight {
+			break
+		}
+
+		idxBorTxnHash := sn.Index()
+
+		if idxBorTxnHash == nil {
+			continue
+		}
+		if idxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
+		reader := recsplit.NewIndexReader(idxBorTxnHash)
+		blockEventId, found := reader.Lookup(borTxHash[:])
+		if !found {
+			return 0, fmt.Errorf("borTxHash %x not found in snapshot %s", borTxHash, sn.FilePath())
+		}
+		return idxBorTxnHash.BaseDataID() + blockEventId, nil
+	}
+	return 0, nil
 }
 
 func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.Hash, blockHeight uint64) ([]rlp.RawValue, error) {
@@ -1190,7 +1238,10 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 			continue
 		}
 		reader := recsplit.NewIndexReader(idxBorTxnHash)
-		blockEventId := reader.Lookup(borTxHash[:])
+		blockEventId, ok := reader.Lookup(borTxHash[:])
+		if !ok {
+			continue
+		}
 		offset := idxBorTxnHash.OrdinalLookup(blockEventId)
 		gg := sn.MakeGetter()
 		gg.Reset(offset)
@@ -1331,7 +1382,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		}
 		if v == nil {
 			err := fmt.Errorf("span %d not found (db), frozenBlocks=%d", spanId, maxBlockNumInFiles)
-			return nil, fmt.Errorf("%w: %w", SpanNotFoundErr, err)
+			return nil, fmt.Errorf("%w: %w", ErrSpanNotFound, err)
 		}
 		return common.Copy(v), nil
 	}
@@ -1363,7 +1414,7 @@ func (r *BlockReader) Span(ctx context.Context, tx kv.Getter, spanId uint64) ([]
 		return common.Copy(result), nil
 	}
 	err := fmt.Errorf("span %d not found (snapshots)", spanId)
-	return nil, fmt.Errorf("%w: %w", SpanNotFoundErr, err)
+	return nil, fmt.Errorf("%w: %w", ErrSpanNotFound, err)
 }
 
 func (r *BlockReader) LastSpanId(_ context.Context, tx kv.Tx) (uint64, bool, error) {

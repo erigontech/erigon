@@ -33,6 +33,7 @@ import (
 	"time"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
@@ -53,12 +54,20 @@ import (
 )
 
 var (
-	LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
-	LatestStateReadWarmNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="no"}`)   //nolint
-	LatestStateReadGrind         = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="yes"}`) //nolint
-	LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
-	LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
-	LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
+	//LatestStateReadWarm          = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="yes"}`)  //nolint
+	//LatestStateReadWarmNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="warm",found="no"}`)   //nolint
+	//LatestStateReadGrind         = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="yes"}`) //nolint
+	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
+	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
+	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
+	mxPrunableDAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
+	mxPrunableDSto  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
+	mxPrunableDCode = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
+	mxPrunableDComm = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
+	mxPrunableHAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
+	mxPrunableHSto  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
+	mxPrunableHCode = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
+	mxPrunableHComm = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
 
 	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
 	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
@@ -361,8 +370,9 @@ type Domain struct {
 	valsTable string // key + invertedStep -> values
 	stats     DomainStats
 
-	compression FileCompression
-	indexList   idxList
+	compression        FileCompression
+	indexList          idxList
+	withExistenceIndex bool
 }
 
 type domainCfg struct {
@@ -381,16 +391,14 @@ func NewDomain(cfg domainCfg, aggregationStep uint64, filenameBase, keysTable, v
 		files:       btree2.NewBTreeGOptions[*filesItem](filesItemLess, btree2.Options{Degree: 128, NoLocks: false}),
 		stats:       DomainStats{FilesQueries: &atomic.Uint64{}, TotalQueries: &atomic.Uint64{}},
 
-		indexList: withBTree,
+		indexList:          withBTree | withExistence,
+		withExistenceIndex: true,
 	}
 	d.roFiles.Store(&[]ctxItem{})
 
 	var err error
 	if d.History, err = NewHistory(cfg.hist, aggregationStep, filenameBase, indexKeysTable, indexTable, historyValsTable, nil, logger); err != nil {
 		return nil, err
-	}
-	if d.withExistenceIndex {
-		d.indexList |= withExistence
 	}
 
 	return d, nil
@@ -901,12 +909,6 @@ type ctxItem struct {
 func (i *ctxItem) isSubSetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 func (i *ctxItem) isSubsetOf(j *ctxItem) bool { return i.src.isSubsetOf(j.src) } //nolint
 
-type ctxLocalityIdx struct {
-	reader          *recsplit.IndexReader
-	file            *ctxItem
-	aggregationStep uint64
-}
-
 // DomainContext allows accesing the same domain from multiple go-routines
 type DomainContext struct {
 	hc         *HistoryContext
@@ -923,40 +925,6 @@ type DomainContext struct {
 	valsC kv.Cursor
 }
 
-// getFromFile returns exact match for the given key from the given file
-func (dc *DomainContext) getFromFileOld(i int, filekey []byte) ([]byte, bool, error) {
-	g := dc.statelessGetter(i)
-	if UseBtree || UseBpsTree {
-		if dc.d.withExistenceIndex && dc.files[i].src.existence != nil {
-			hi, _ := dc.hc.ic.hashKey(filekey)
-			if !dc.files[i].src.existence.ContainsHash(hi) {
-				return nil, false, nil
-			}
-		}
-
-		_, v, ok, err := dc.statelessBtree(i).Get(filekey, g)
-		if err != nil || !ok {
-			return nil, false, err
-		}
-		//fmt.Printf("getLatestFromBtreeColdFiles key %x shard %d %x\n", filekey, exactColdShard, v)
-		return v, true, nil
-	}
-
-	reader := dc.statelessIdxReader(i)
-	if reader.Empty() {
-		return nil, false, nil
-	}
-	offset := reader.Lookup(filekey)
-	g.Reset(offset)
-
-	k, _ := g.Next(nil)
-	if !bytes.Equal(filekey, k) {
-		return nil, false, nil
-	}
-	v, _ := g.Next(nil)
-	return v, true, nil
-}
-
 func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error) {
 	g := dc.statelessGetter(i)
 	if !(UseBtree || UseBpsTree) {
@@ -964,7 +932,10 @@ func (dc *DomainContext) getFromFile(i int, filekey []byte) ([]byte, bool, error
 		if reader.Empty() {
 			return nil, false, nil
 		}
-		offset := reader.Lookup(filekey)
+		offset, ok := reader.Lookup(filekey)
+		if !ok {
+			return nil, false, nil
+		}
 		g.Reset(offset)
 
 		k, _ := g.Next(nil)
@@ -1017,7 +988,10 @@ func (dc *DomainContext) DebugEFKey(k []byte) error {
 				}
 			}
 
-			offset := idx.GetReaderFromPool().Lookup(k)
+			offset, ok := idx.GetReaderFromPool().Lookup(k)
+			if !ok {
+				continue
+			}
 			g := item.decompressor.MakeGetter()
 			g.Reset(offset)
 			key, _ := g.NextUncompressed()
@@ -1312,8 +1286,8 @@ func (d *Domain) buildFiles(ctx context.Context, step uint64, collation Collatio
 func (d *Domain) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := d.kvAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums: false,
-		//LessFalsePositives: false,
+		Enums:              false,
+		LessFalsePositives: false,
 
 		BucketSize: 2000,
 		LeafSize:   8,
@@ -1593,7 +1567,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if _, err := dc.hc.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+	if _, err := dc.hc.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return restored.Flush(ctx, rwTx)
@@ -1620,10 +1594,6 @@ var (
 )
 
 func (dc *DomainContext) getLatestFromFiles(filekey []byte) (v []byte, found bool, err error) {
-	if !dc.d.withExistenceIndex {
-		return dc.getLatestFromFilesWithoutExistenceIndex(filekey)
-	}
-
 	hi, _ := dc.hc.ic.hashKey(filekey)
 
 	for i := len(dc.files) - 1; i >= 0; i-- {
@@ -1905,8 +1875,10 @@ func (dc *DomainContext) IteratePrefix(roTx kv.Tx, prefix []byte, it func(k []by
 				heap.Push(&cp, &CursorItem{t: FILE_CURSOR, dg: dc.statelessGetter(i), key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
 			}
 		} else {
-			ir := dc.statelessIdxReader(i)
-			offset := ir.Lookup(prefix)
+			offset, ok := dc.statelessIdxReader(i).Lookup(prefix)
+			if !ok {
+				continue
+			}
 			g := dc.statelessGetter(i)
 			g.Reset(offset)
 			if !g.HasNext() {
@@ -2048,8 +2020,20 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can boo
 		untilStep = (untilTx - 1) / dc.d.aggregationStep
 	}
 	sm := dc.smallestStepForPruning(tx)
-	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxStepToPrune)
-	return sm <= maxStepToPrune && sm <= untilStep && untilStep <= maxStepToPrune, maxStepToPrune
+
+	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
+	switch dc.d.filenameBase {
+	case "account":
+		mxPrunableDAcc.Set(delta)
+	case "storage":
+		mxPrunableDSto.Set(delta)
+	case "code":
+		mxPrunableDCode.Set(delta)
+	case "commitment":
+		mxPrunableDComm.Set(delta)
+	}
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dc.d.filenameBase, sm, maxStepToPrune, untilStep)
+	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
 }
 
 func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
@@ -2137,13 +2121,30 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
-func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := &errgroup.Group{}
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, dc.d.db, dc.d.keysTable, log.LvlDebug, 4)
+		return nil
+	})
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, dc.d.db, dc.d.valsTable, log.LvlDebug, 4)
+		return nil
+	})
+	return func() {
+		cancel()
+		_ = wg.Wait()
+	}
+}
+
+func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, withWarmup bool, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx, txTo)
@@ -2157,6 +2158,11 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	st := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
+
+	if withWarmup {
+		cleanup := dc.Warmup(ctx)
+		defer cleanup()
+	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dc.d.keysTable)
 	if err != nil {
@@ -2503,142 +2509,4 @@ func (mf MergedFiles) Close() {
 			}
 		}
 	}
-}
-
-// ---- deprecated area START ---
-
-func (dc *DomainContext) getLatestFromFilesWithoutExistenceIndex(filekey []byte) (v []byte, found bool, err error) {
-	if v, found, err = dc.getLatestFromWarmFiles(filekey); err != nil {
-		return nil, false, err
-	} else if found {
-		return v, true, nil
-	}
-
-	if v, found, err = dc.getLatestFromColdFilesGrind(filekey); err != nil {
-		return nil, false, err
-	} else if found {
-		return v, true, nil
-	}
-
-	// still not found, search in indexed cold shards
-	return dc.getLatestFromColdFiles(filekey)
-}
-
-func (dc *DomainContext) getLatestFromWarmFiles(filekey []byte) ([]byte, bool, error) {
-	exactWarmStep, ok, err := dc.hc.ic.warmLocality.lookupLatest(filekey)
-	if err != nil {
-		return nil, false, err
-	}
-	// _ = ok
-	if !ok {
-		return nil, false, nil
-	}
-
-	t := time.Now()
-	exactTxNum := exactWarmStep * dc.d.aggregationStep
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
-		if !isUseful {
-			continue
-		}
-
-		v, found, err := dc.getFromFileOld(i, filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if !found {
-			LatestStateReadWarmNotFound.ObserveDuration(t)
-			t = time.Now()
-			continue
-		}
-		// fmt.Printf("warm [%d] want %x keys i idx %v %v\n", i, filekey, bt.ef.Count(), bt.decompressor.FileName())
-
-		LatestStateReadWarm.ObserveDuration(t)
-		return v, found, nil
-	}
-	return nil, false, nil
-}
-
-func (dc *DomainContext) getLatestFromColdFilesGrind(filekey []byte) (v []byte, found bool, err error) {
-	// sometimes there is a gap between indexed cold files and indexed warm files. just grind them.
-	// possible reasons:
-	// - no locality indices at all
-	// - cold locality index is "lazy"-built
-	// corner cases:
-	// - cold and warm segments can overlap
-	lastColdIndexedTxNum := dc.hc.ic.coldLocality.indexedTo()
-	firstWarmIndexedTxNum, haveWarmIdx := dc.hc.ic.warmLocality.indexedFrom()
-	if !haveWarmIdx && len(dc.files) > 0 {
-		firstWarmIndexedTxNum = dc.files[len(dc.files)-1].endTxNum
-	}
-
-	if firstWarmIndexedTxNum <= lastColdIndexedTxNum {
-		return nil, false, nil
-	}
-
-	t := time.Now()
-	//if firstWarmIndexedTxNum/dc.d.aggregationStep-lastColdIndexedTxNum/dc.d.aggregationStep > 0 && dc.d.withLocalityIndex {
-	//	if dc.d.filenameBase != "commitment" {
-	//		log.Warn("[dbg] gap between warm and cold locality", "cold", lastColdIndexedTxNum/dc.d.aggregationStep, "warm", firstWarmIndexedTxNum/dc.d.aggregationStep, "nil", dc.hc.ic.coldLocality == nil, "name", dc.d.filenameBase)
-	//		if dc.hc.ic.coldLocality != nil && dc.hc.ic.coldLocality.file != nil {
-	//			log.Warn("[dbg] gap", "cold_f", dc.hc.ic.coldLocality.file.src.bm.FileName())
-	//		}
-	//		if dc.hc.ic.warmLocality != nil && dc.hc.ic.warmLocality.file != nil {
-	//			log.Warn("[dbg] gap", "warm_f", dc.hc.ic.warmLocality.file.src.bm.FileName())
-	//		}
-	//	}
-	//}
-
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		isUseful := dc.files[i].startTxNum >= lastColdIndexedTxNum && dc.files[i].endTxNum <= firstWarmIndexedTxNum
-		if !isUseful {
-			continue
-		}
-		v, ok, err := dc.getFromFileOld(i, filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if !ok {
-			LatestStateReadGrindNotFound.ObserveDuration(t)
-			t = time.Now()
-			continue
-		}
-		LatestStateReadGrind.ObserveDuration(t)
-		return v, true, nil
-	}
-	return nil, false, nil
-}
-
-func (dc *DomainContext) getLatestFromColdFiles(filekey []byte) (v []byte, found bool, err error) {
-	// exactColdShard, ok, err := dc.hc.ic.coldLocality.lookupLatest(filekey)
-	// if err != nil {
-	// 	return nil, false, err
-	// }
-	// _ = ok
-	// if !ok {
-	// 	return nil, false, nil
-	// }
-	//dc.d.stats.FilesQuerie.Add(1)
-	t := time.Now()
-	// exactTxNum := exactColdShard * StepsInColdFile * dc.d.aggregationStep
-	// fmt.Printf("exactColdShard: %d, exactTxNum=%d\n", exactColdShard, exactTxNum)
-	for i := len(dc.files) - 1; i >= 0; i-- {
-		// isUseful := dc.files[i].startTxNum <= exactTxNum && dc.files[i].endTxNum > exactTxNum
-		//fmt.Printf("read3: %s, %t, %d-%d\n", dc.files[i].src.decompressor.FileName(), isUseful, dc.files[i].startTxNum, dc.files[i].endTxNum)
-		// if !isUseful {
-		// 	continue
-		// }
-		v, found, err = dc.getFromFileOld(i, filekey)
-		if err != nil {
-			return nil, false, err
-		}
-		if !found {
-			LatestStateReadColdNotFound.ObserveDuration(t)
-			t = time.Now()
-			continue
-		}
-		LatestStateReadCold.ObserveDuration(t)
-		return v, true, nil
-	}
-	return nil, false, nil
 }

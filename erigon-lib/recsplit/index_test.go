@@ -74,7 +74,7 @@ func TestReWriteIndex(t *testing.T) {
 	defer reidx.Close()
 	for i := 0; i < 100; i++ {
 		reader := NewIndexReader(reidx)
-		offset := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
+		offset, _ := reader.Lookup([]byte(fmt.Sprintf("key %d", i)))
 		if offset != uint64(i*3965) {
 			t.Errorf("expected offset: %d, looked up: %d", i*3965, offset)
 		}

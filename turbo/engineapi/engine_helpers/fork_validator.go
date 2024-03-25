@@ -169,7 +169,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 		defer m.Close()
 		txc.Tx = m
 		if histV3 {
-			txc.Doms = state.NewSharedDomains(tx, logger)
+			txc.Doms, err = state.NewSharedDomains(tx, logger)
+			if err != nil {
+				return "", [32]byte{}, nil, err
+			}
 			defer txc.Doms.Close()
 		}
 		fv.extendingForkNotifications = &shards.Notifications{
@@ -270,7 +273,10 @@ func (fv *ForkValidator) ValidatePayload(tx kv.Tx, header *types.Header, body *t
 	defer batch.Rollback()
 	txc.Tx = batch
 	if histV3 {
-		sd := state.NewSharedDomains(tx, logger)
+		sd, err := state.NewSharedDomains(tx, logger)
+		if err != nil {
+			return "", [32]byte{}, nil, err
+		}
 		defer sd.Close()
 		txc.Doms = sd
 	}

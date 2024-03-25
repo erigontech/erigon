@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	sentry2 "github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -208,7 +207,7 @@ func pumpStreamLoop[TMessage interface{}](
 		}
 	}() // avoid crash because Erigon's core does many things
 
-	streamCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	defer sentry.MarkDisconnected()
 
@@ -216,20 +215,23 @@ func pumpStreamLoop[TMessage interface{}](
 	// - can group them or process in batch
 	// - can have slow processing
 	reqs := make(chan TMessage, 256)
-	defer close(reqs)
-
 	go func() {
-		for req := range reqs {
-			if err := handleInboundMessage(ctx, req, sentry); err != nil {
-				logger.Debug("Handling incoming message", "stream", streamName, "err", err)
-			}
-			if wg != nil {
-				wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case req := <-reqs:
+				if err := handleInboundMessage(ctx, req, sentry); err != nil {
+					logger.Debug("Handling incoming message", "stream", streamName, "err", err)
+				}
+				if wg != nil {
+					wg.Done()
+				}
 			}
 		}
 	}()
 
-	stream, err := streamFactory(streamCtx, sentry)
+	stream, err := streamFactory(ctx, sentry)
 	if err != nil {
 		return err
 	}
@@ -292,7 +294,6 @@ func NewMultiClient(
 	blockReader services.FullBlockReader,
 	blockBufferSize int,
 	logPeerInfo bool,
-	forkValidator *engine_helpers.ForkValidator,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	logger log.Logger,
 ) (*MultiClient, error) {

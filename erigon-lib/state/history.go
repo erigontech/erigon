@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -119,9 +120,7 @@ func NewHistory(cfg histCfg, aggregationStep uint64, filenameBase, indexKeysTabl
 	}
 	h.roFiles.Store(&[]ctxItem{})
 	var err error
-	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withLocalityIndex, cfg.withExistenceIndex,
-		func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) },
-		logger)
+	h.InvertedIndex, err = NewInvertedIndex(cfg.iiCfg, aggregationStep, filenameBase, indexKeysTable, indexTable, cfg.withExistenceIndex, func(fromStep, toStep uint64) bool { return dir.FileExist(h.vFilePath(fromStep, toStep)) }, logger)
 	if err != nil {
 		return nil, fmt.Errorf("NewHistory: %s, %w", filenameBase, err)
 	}
@@ -698,9 +697,6 @@ type HistoryFiles struct {
 	efHistoryDecomp *seg.Decompressor
 	efHistoryIdx    *recsplit.Index
 	efExistence     *ExistenceFilter
-
-	warmLocality *LocalityIndexFiles
-	coldLocality *LocalityIndexFiles
 }
 
 func (sf HistoryFiles) CleanupOnError() {
@@ -718,12 +714,6 @@ func (sf HistoryFiles) CleanupOnError() {
 	}
 	if sf.efExistence != nil {
 		sf.efExistence.Close()
-	}
-	if sf.warmLocality != nil {
-		sf.warmLocality.Close()
-	}
-	if sf.coldLocality != nil {
-		sf.coldLocality.Close()
 	}
 }
 func (h *History) reCalcRoFiles() {
@@ -747,7 +737,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		historyIdx, efHistoryIdx       *recsplit.Index
 		efExistence                    *ExistenceFilter
 		efHistoryComp                  *seg.Compressor
-		warmLocality                   *LocalityIndexFiles
 		rs                             *recsplit.RecSplit
 	)
 	closeComp := true
@@ -773,9 +762,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 			}
 			if efExistence != nil {
 				efExistence.Close()
-			}
-			if warmLocality != nil {
-				warmLocality.Close()
 			}
 			if rs != nil {
 				rs.Close()
@@ -915,11 +901,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 	rs.Close()
 	rs = nil
 
-	warmLocality, err = h.buildWarmLocality(ctx, efHistoryDecomp, step, ps)
-	if err != nil {
-		return HistoryFiles{}, err
-	}
-
 	if historyIdx, err = recsplit.OpenIndex(historyIdxPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("open idx: %w", err)
 	}
@@ -930,7 +911,6 @@ func (h *History) buildFiles(ctx context.Context, step uint64, collation History
 		efHistoryDecomp: efHistoryDecomp,
 		efHistoryIdx:    efHistoryIdx,
 		efExistence:     efExistence,
-		warmLocality:    warmLocality,
 	}, nil
 }
 
@@ -941,11 +921,9 @@ func (h *History) integrateFiles(sf HistoryFiles, txNumFrom, txNumTo uint64) {
 	}
 
 	h.InvertedIndex.integrateFiles(InvertedFiles{
-		decomp:       sf.efHistoryDecomp,
-		index:        sf.efHistoryIdx,
-		existence:    sf.efExistence,
-		warmLocality: sf.warmLocality,
-		coldLocality: sf.coldLocality,
+		decomp:    sf.efHistoryDecomp,
+		index:     sf.efHistoryIdx,
+		existence: sf.efExistence,
 	}, txNumFrom, txNumTo)
 
 	fi := newFilesItem(txNumFrom, txNumTo, h.aggregationStep)
@@ -1047,8 +1025,7 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx := hc.ic.CanPruneFrom(tx)
-	maxIdxTx := hc.ic.highestTxNum(tx)
+	minIdxTx, maxIdxTx := hc.ic.smallestTxNum(tx), hc.ic.highestTxNum(tx)
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
 	//		hc.h.filenameBase, untilTx, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
@@ -1060,13 +1037,37 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 		}
 		txTo = min(maxIdxTx-hc.h.keepTxInDB, untilTx) // bound pruning
 	} else {
-		canPruneIdx := hc.ic.CanPruneUntil(tx, untilTx)
+		canPruneIdx := hc.ic.CanPrune(tx)
 		if !canPruneIdx {
 			return false, 0
 		}
 		txTo = min(hc.maxTxNumInFiles(false), untilTx)
 	}
+
+	switch hc.h.filenameBase {
+	case "accounts":
+		mxPrunableHAcc.Set(float64(txTo - minIdxTx))
+	case "storage":
+		mxPrunableHSto.Set(float64(txTo - minIdxTx))
+	case "code":
+		mxPrunableHCode.Set(float64(txTo - minIdxTx))
+	case "commitment":
+		mxPrunableHComm.Set(float64(txTo - minIdxTx))
+	}
 	return minIdxTx < txTo, txTo
+}
+
+func (hc *HistoryContext) Warmup(ctx context.Context) (cleanup func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := &errgroup.Group{}
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, hc.h.db, hc.h.historyValsTable, log.LvlDebug, 4)
+		return nil
+	})
+	return func() {
+		cancel()
+		_ = wg.Wait()
+	}
 }
 
 // Prune [txFrom; txTo)
@@ -1074,7 +1075,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced, withWarmup bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPruneUntil(rwTx), txFrom, txTo)
 	if !forced {
 		var can bool
@@ -1131,7 +1132,12 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	if withWarmup {
+		cleanup := hc.Warmup(ctx)
+		defer cleanup()
+	}
+
+	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, withWarmup, pruneValue)
 }
 
 func (hc *HistoryContext) Close() {
@@ -1178,9 +1184,6 @@ func (hc *HistoryContext) getFile(txNum uint64) (it ctxItem, ok bool) {
 }
 
 func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, error) {
-	if !hc.h.withExistenceIndex {
-		return hc.getNoStateByLocalityIndex(key, txNum)
-	}
 	// Files list of II and History is different
 	// it means II can't return index of file, but can return TxNum which History will use to find own file
 	ok, histTxNum := hc.ic.Seek(key, txNum)
@@ -1195,7 +1198,10 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	if reader.Empty() {
 		return nil, false, nil
 	}
-	offset := reader.Lookup2(hc.encodeTs(histTxNum), key)
+	offset, ok := reader.Lookup2(hc.encodeTs(histTxNum), key)
+	if !ok {
+		return nil, false, nil
+	}
 	g := hc.statelessGetter(historyItem.i)
 	g.Reset(offset)
 
@@ -1205,114 +1211,16 @@ func (hc *HistoryContext) GetNoState(key []byte, txNum uint64) ([]byte, bool, er
 	}
 	return v, true, nil
 }
-func (hc *HistoryContext) getNoStateByLocalityIndex(key []byte, txNum uint64) ([]byte, bool, error) {
-	exactStep1, exactStep2, lastIndexedTxNum, foundExactShard1, foundExactShard2 := hc.ic.coldLocality.lookupIdxFiles(key, txNum)
-
-	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
-	var foundTxNum uint64
-	var foundEndTxNum uint64
-	var foundStartTxNum uint64
-	var found bool
-	var findInFile = func(item ctxItem) bool {
-		reader := hc.ic.statelessIdxReader(item.i)
-		if reader.Empty() {
-			return true
-		}
-		offset := reader.Lookup(key)
-
-		g := hc.ic.statelessGetter(item.i)
-		g.Reset(offset)
-		k, _ := g.Next(nil)
-
-		if !bytes.Equal(k, key) {
-			//if bytes.Equal(key, hex.MustDecodeString("009ba32869045058a3f05d6f3dd2abb967e338f6")) {
-			//	fmt.Printf("not in this shard: %x, %d, %d-%d\n", k, txNum, item.startTxNum/hc.h.aggregationStep, item.endTxNum/hc.h.aggregationStep)
-			//}
-			return true
-		}
-		eliasVal, _ := g.Next(nil)
-		n, ok := eliasfano32.Seek(eliasVal, txNum)
-		if ok {
-			foundTxNum = n
-			foundEndTxNum = item.endTxNum
-			foundStartTxNum = item.startTxNum
-			found = true
-			return false
-		}
-		return true
-	}
-
-	// -- LocaliyIndex opimization --
-	// check up to 2 exact files
-	if foundExactShard1 {
-		from, to := exactStep1*hc.h.aggregationStep, (exactStep1+StepsInColdFile)*hc.h.aggregationStep
-		item, ok := hc.ic.getFile(from, to)
-		if ok {
-			findInFile(item)
-		}
-		//for _, item := range hc.invIndexFiles {
-		//	if item.startTxNum == from && item.endTxNum == to {
-		//		findInFile(item)
-		//	}
-		//}
-		//exactShard1, ok := hc.invIndexFiles.Get(ctxItem{startTxNum: exactStep1 * hc.h.aggregationStep, endTxNum: (exactStep1 + StepsInColdFile) * hc.h.aggregationStep})
-		//if ok {
-		//	findInFile(exactShard1)
-		//}
-	}
-	if !found && foundExactShard2 {
-		from, to := exactStep2*hc.h.aggregationStep, (exactStep2+StepsInColdFile)*hc.h.aggregationStep
-		item, ok := hc.ic.getFile(from, to)
-		if ok {
-			findInFile(item)
-		}
-		//exactShard2, ok := hc.invIndexFiles.Get(ctxItem{startTxNum: exactStep2 * hc.h.aggregationStep, endTxNum: (exactStep2 + StepsInColdFile) * hc.h.aggregationStep})
-		//if ok {
-		//	findInFile(exactShard2)
-		//}
-	}
-	// otherwise search in recent non-fully-merged files (they are out of LocalityIndex scope)
-	// searchFrom - variable already set for this
-	// if there is no LocaliyIndex available
-	// -- LocaliyIndex opimization End --
-
-	if !found {
-		for _, item := range hc.ic.files {
-			if item.endTxNum <= lastIndexedTxNum {
-				continue
-			}
-			if !findInFile(item) {
-				break
-			}
-		}
-		//hc.invIndexFiles.AscendGreaterOrEqual(ctxItem{startTxNum: lastIndexedTxNum, endTxNum: lastIndexedTxNum}, findInFile)
-	}
-
-	if found {
-		historyItem, ok := hc.getFileDeprecated(foundStartTxNum, foundEndTxNum)
-		if !ok {
-			return nil, false, fmt.Errorf("hist file not found: key=%x, %s.%d-%d", key, hc.h.filenameBase, foundStartTxNum/hc.h.aggregationStep, foundEndTxNum/hc.h.aggregationStep)
-		}
-		var txKey [8]byte
-		binary.BigEndian.PutUint64(txKey[:], foundTxNum)
-		reader := hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(txKey[:], key)
-		//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
-		g := hc.statelessGetter(historyItem.i)
-		g.Reset(offset)
-
-		v, _ := g.Next(nil)
-		return v, true, nil
-	}
-	return nil, false, nil
-}
 
 func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint64) {
 	//fmt.Printf("GetNoState [%x] %d\n", key, txNum)
 	if hs.indexFile.reader.Empty() {
 		return nil, false, txNum
 	}
-	offset := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.TwoLayerLookup(key)
+	if !ok {
+		return nil, false, txNum
+	}
 	g := hs.indexFile.getter
 	g.Reset(offset)
 	k, _ := g.NextUncompressed()
@@ -1328,7 +1236,10 @@ func (hs *HistoryStep) GetNoState(key []byte, txNum uint64) ([]byte, bool, uint6
 	}
 	var txKey [8]byte
 	binary.BigEndian.PutUint64(txKey[:], n)
-	offset = hs.historyFile.reader.Lookup2(txKey[:], key)
+	offset, ok = hs.historyFile.reader.Lookup2(txKey[:], key)
+	if !ok {
+		return nil, false, txNum
+	}
 	//fmt.Printf("offset = %d, txKey=[%x], key=[%x]\n", offset, txKey[:], key)
 	g = hs.historyFile.getter
 	g.Reset(offset)
@@ -1344,7 +1255,10 @@ func (hs *HistoryStep) MaxTxNum(key []byte) (bool, uint64) {
 	if hs.indexFile.reader.Empty() {
 		return false, 0
 	}
-	offset := hs.indexFile.reader.Lookup(key)
+	offset, ok := hs.indexFile.reader.TwoLayerLookup(key)
+	if !ok {
+		return false, 0
+	}
 	g := hs.indexFile.getter
 	g.Reset(offset)
 	k, _ := g.NextUncompressed()
@@ -1532,8 +1446,10 @@ func (hi *StateAsOfIterF) advanceInFiles() error {
 			return fmt.Errorf("no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
-
+		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		if !ok {
+			continue
+		}
 		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)
@@ -1835,7 +1751,10 @@ func (hi *HistoryChangesIterFiles) advance() error {
 			return fmt.Errorf("HistoryChangesIterFiles: no %s file found for [%x]", hi.hc.h.filenameBase, hi.nextKey)
 		}
 		reader := hi.hc.statelessIdxReader(historyItem.i)
-		offset := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		offset, ok := reader.Lookup2(hi.txnKey[:], hi.nextKey)
+		if !ok {
+			continue
+		}
 		g := hi.hc.statelessGetter(historyItem.i)
 		g.Reset(offset)
 		hi.nextVal, _ = g.Next(nil)

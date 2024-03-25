@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spaolacci/murmur3"
@@ -77,14 +78,7 @@ type InvertedIndex struct {
 	//TODO: re-visit this check - maybe we don't need it. It's abot kill in the middle of merge
 	integrityCheck func(fromStep, toStep uint64) bool
 
-	withLocalityIndex  bool
 	withExistenceIndex bool
-
-	// localityIdx of warm files - storing `steps` where `key` was updated
-	//  - need re-calc when new file created
-	//  - don't need re-calc after files merge - because merge doesn't change `steps` where `key` was updated
-	warmLocalityIdx *LocalityIndex
-	coldLocalityIdx *LocalityIndex
 
 	// fields for history write
 	logger log.Logger
@@ -99,18 +93,10 @@ type InvertedIndex struct {
 type iiCfg struct {
 	salt *uint32
 	dirs datadir.Dirs
+	db   kv.RoDB // global db pointer. mostly for background warmup.
 }
 
-func NewInvertedIndex(
-	cfg iiCfg,
-	aggregationStep uint64,
-	filenameBase string,
-	indexKeysTable string,
-	indexTable string,
-	withLocalityIndex, withExistenceIndex bool,
-	integrityCheck func(fromStep, toStep uint64) bool,
-	logger log.Logger,
-) (*InvertedIndex, error) {
+func NewInvertedIndex(cfg iiCfg, aggregationStep uint64, filenameBase, indexKeysTable, indexTable string, withExistenceIndex bool, integrityCheck func(fromStep uint64, toStep uint64) bool, logger log.Logger) (*InvertedIndex, error) {
 	if cfg.dirs.SnapDomain == "" {
 		panic("empty `dirs` varialbe")
 	}
@@ -123,7 +109,6 @@ func NewInvertedIndex(
 		indexTable:         indexTable,
 		compressWorkers:    1,
 		integrityCheck:     integrityCheck,
-		withLocalityIndex:  withLocalityIndex,
 		withExistenceIndex: withExistenceIndex,
 		logger:             logger,
 		compression:        CompressNone,
@@ -135,11 +120,6 @@ func NewInvertedIndex(
 
 	ii.roFiles.Store(&[]ctxItem{})
 
-	if ii.withLocalityIndex {
-		if err := ii.enableLocalityIndex(); err != nil {
-			return nil, err
-		}
-	}
 	return &ii, nil
 }
 
@@ -153,11 +133,6 @@ func (ii *InvertedIndex) efFilePath(fromStep, toStep uint64) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("v1-%s.%d-%d.ef", ii.filenameBase, fromStep, toStep))
 }
 
-func (ii *InvertedIndex) enableLocalityIndex() error {
-	ii.warmLocalityIdx = NewLocalityIndex(true, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
-	ii.coldLocalityIdx = NewLocalityIndex(false, ii.dirs.SnapIdx, ii.filenameBase, ii.aggregationStep, ii.dirs.Tmp, ii.salt, ii.logger)
-	return nil
-}
 func filesFromDir(dir string) ([]string, error) {
 	allFiles, err := os.ReadDir(dir)
 	if err != nil {
@@ -189,21 +164,6 @@ func (ii *InvertedIndex) fileNamesOnDisk() (idx, hist, domain []string, err erro
 }
 
 func (ii *InvertedIndex) OpenList(fNames []string, readonly bool) error {
-	{
-		if ii.withLocalityIndex {
-			accFiles, err := filesFromDir(ii.dirs.SnapAccessors)
-			if err != nil {
-				return err
-			}
-			if err := ii.warmLocalityIdx.OpenList(accFiles); err != nil {
-				return err
-			}
-			if err := ii.coldLocalityIdx.OpenList(accFiles); err != nil {
-				return err
-			}
-		}
-	}
-
 	ii.closeWhatNotInList(fNames)
 	ii.scanStateFiles(fNames)
 	if err := ii.openFiles(); err != nil {
@@ -440,21 +400,6 @@ func (ii *InvertedIndex) BuildMissedIndices(ctx context.Context, g *errgroup.Gro
 			return ii.buildExistenceFilter(ctx, item, ps)
 		})
 	}
-
-	if ii.withLocalityIndex && ii.warmLocalityIdx != nil {
-		g.Go(func() error {
-			ic := ii.MakeContext()
-			defer ic.Close()
-			from, to := ic.minWarmStep(), ic.maxWarmStep()
-			if from == to || ic.ii.warmLocalityIdx.exists(from, to) {
-				return nil
-			}
-			if err := ic.ii.warmLocalityIdx.BuildMissedIndices(ctx, from, to, false, ps, func() *LocalityIterator { return ic.iterateKeysLocality(ctx, from, to, nil) }); err != nil {
-				return err
-			}
-			return nil
-		})
-	}
 }
 
 func (ii *InvertedIndex) openFiles() error {
@@ -551,8 +496,6 @@ func (ii *InvertedIndex) closeWhatNotInList(fNames []string) {
 }
 
 func (ii *InvertedIndex) Close() {
-	ii.warmLocalityIdx.Close()
-	ii.coldLocalityIdx.Close()
 	ii.closeWhatNotInList([]string{})
 	ii.reCalcRoFiles()
 }
@@ -670,10 +613,8 @@ func (ii *InvertedIndex) MakeContext() *InvertedIndexContext {
 		}
 	}
 	return &InvertedIndexContext{
-		ii:           ii,
-		files:        files,
-		warmLocality: ii.warmLocalityIdx.MakeContext(),
-		coldLocality: ii.coldLocalityIdx.MakeContext(),
+		ii:    ii,
+		files: files,
 	}
 }
 func (ic *InvertedIndexContext) Close() {
@@ -699,9 +640,6 @@ func (ic *InvertedIndexContext) Close() {
 	for _, r := range ic.readers {
 		r.Close()
 	}
-
-	ic.warmLocality.Close()
-	ic.coldLocality.Close()
 }
 
 type InvertedIndexContext struct {
@@ -709,9 +647,6 @@ type InvertedIndexContext struct {
 	files   []ctxItem // have no garbage (overlaps, etc...)
 	getters []ArchiveGetter
 	readers []*recsplit.IndexReader
-
-	warmLocality *ctxLocalityIdx
-	coldLocality *ctxLocalityIdx
 
 	_hasher murmur3.Hash128
 }
@@ -753,15 +688,6 @@ func (ic *InvertedIndexContext) statelessIdxReader(i int) *recsplit.IndexReader 
 	return r
 }
 
-func (ic *InvertedIndexContext) getFile(from, to uint64) (it ctxItem, ok bool) {
-	for _, item := range ic.files {
-		if item.startTxNum == from && item.endTxNum == to {
-			return item, true
-		}
-	}
-	return it, false
-}
-
 func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equalOrHigherTxNum uint64) {
 	hi, lo := ic.hashKey(key)
 
@@ -774,11 +700,10 @@ func (ic *InvertedIndexContext) Seek(key []byte, txNum uint64) (found bool, equa
 				continue
 			}
 		}
-		reader := ic.statelessIdxReader(i)
-		if reader.Empty() {
+		offset, ok := ic.statelessIdxReader(i).TwoLayerLookupByHash(hi, lo)
+		if !ok {
 			continue
 		}
-		offset := reader.LookupHash(hi, lo)
 
 		g := ic.statelessGetter(i)
 		g.Reset(offset)
@@ -909,7 +834,7 @@ func (ic *InvertedIndexContext) iterateRangeFrozen(key []byte, startTxNum, endTx
 	return it, nil
 }
 
-func (ic *InvertedIndexContext) CanPruneFrom(tx kv.Tx) uint64 {
+func (ic *InvertedIndexContext) smallestTxNum(tx kv.Tx) uint64 {
 	fst, _ := kv.FirstKey(tx, ic.ii.indexKeysTable)
 	if len(fst) > 0 {
 		fstInDb := binary.BigEndian.Uint64(fst)
@@ -927,14 +852,8 @@ func (ic *InvertedIndexContext) highestTxNum(tx kv.Tx) uint64 {
 	return 0
 }
 
-func (ic *InvertedIndexContext) CanPruneUntil(tx kv.Tx, untilTx uint64) bool {
-	minTx := ic.CanPruneFrom(tx)
-	maxInFiles := ic.maxTxNumInFiles(false)
-	return minTx < maxInFiles && untilTx <= maxInFiles && minTx < untilTx
-}
-
 func (ic *InvertedIndexContext) CanPrune(tx kv.Tx) bool {
-	return ic.CanPruneFrom(tx) < ic.maxTxNumInFiles(false)
+	return ic.smallestTxNum(tx) < ic.maxTxNumInFiles(false)
 }
 
 type InvertedIndexPruneStat struct {
@@ -961,9 +880,26 @@ func (is *InvertedIndexPruneStat) Accumulate(other *InvertedIndexPruneStat) {
 	is.PruneCountValues += other.PruneCountValues
 }
 
+func (ic *InvertedIndexContext) Warmup(ctx context.Context) (cleanup func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := &errgroup.Group{}
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexTable, log.LvlDebug, 4)
+		return nil
+	})
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, ic.ii.db, ic.ii.indexKeysTable, log.LvlDebug, 4)
+		return nil
+	})
+	return func() {
+		cancel()
+		_ = wg.Wait()
+	}
+}
+
 // [txFrom; txTo)
 // forced - prune even if CanPrune returns false, so its true only when we do Unwind.
-func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
+func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, logEvery *time.Ticker, forced, withWarmup bool, fn func(key []byte, txnum []byte) error) (stat *InvertedIndexPruneStat, err error) {
 	stat = &InvertedIndexPruneStat{MinTxNum: math.MaxUint64}
 	if !forced && !ic.CanPrune(rwTx) {
 		return stat, nil
@@ -972,6 +908,11 @@ func (ic *InvertedIndexContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom,
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
 	defer func(t time.Time) { mxPruneTookIndex.ObserveDuration(t) }(time.Now())
+
+	if withWarmup {
+		cleanup := ic.Warmup(ctx)
+		defer cleanup()
+	}
 
 	ii := ic.ii
 	//defer func() {
@@ -1236,14 +1177,17 @@ func (it *FrozenInvertedIdxIter) next() uint64 {
 
 func (it *FrozenInvertedIdxIter) advanceInFiles() {
 	for {
-		for it.efIt == nil { //TODO: this loop may be optimized by LocalityIndex
+		for it.efIt == nil {
 			if len(it.stack) == 0 {
 				it.hasNext = false
 				return
 			}
 			item := it.stack[len(it.stack)-1]
 			it.stack = it.stack[:len(it.stack)-1]
-			offset := item.reader.Lookup(it.key)
+			offset, ok := item.reader.TwoLayerLookup(it.key)
+			if !ok {
+				continue
+			}
 			g := item.getter
 			g.Reset(offset)
 			k, _ := g.NextUncompressed()
@@ -1652,11 +1596,9 @@ func (ii *InvertedIndex) collate(ctx context.Context, step uint64, roTx kv.Tx) (
 }
 
 type InvertedFiles struct {
-	decomp       *seg.Decompressor
-	index        *recsplit.Index
-	existence    *ExistenceFilter
-	warmLocality *LocalityIndexFiles
-	coldLocality *LocalityIndexFiles
+	decomp    *seg.Decompressor
+	index     *recsplit.Index
+	existence *ExistenceFilter
 }
 
 func (sf InvertedFiles) CleanupOnError() {
@@ -1671,12 +1613,11 @@ func (sf InvertedFiles) CleanupOnError() {
 // buildFiles - `step=N` means build file `[N:N+1)` which is equal to [N:N+1)
 func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps map[string]*roaring64.Bitmap, ps *background.ProgressSet) (InvertedFiles, error) {
 	var (
-		decomp       *seg.Decompressor
-		index        *recsplit.Index
-		existence    *ExistenceFilter
-		comp         *seg.Compressor
-		warmLocality *LocalityIndexFiles
-		err          error
+		decomp    *seg.Decompressor
+		index     *recsplit.Index
+		existence *ExistenceFilter
+		comp      *seg.Compressor
+		err       error
 	)
 	mxRunningFilesBuilding.Inc()
 	defer mxRunningFilesBuilding.Dec()
@@ -1694,9 +1635,6 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 			}
 			if existence != nil {
 				existence.Close()
-			}
-			if warmLocality != nil {
-				warmLocality.Close()
 			}
 		}
 	}()
@@ -1757,20 +1695,15 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step uint64, bitmaps ma
 		}
 	}
 
-	warmLocality, err = ii.buildWarmLocality(ctx, decomp, step+1, ps)
-	if err != nil {
-		return InvertedFiles{}, fmt.Errorf("buildWarmLocality: %w", err)
-	}
-
 	closeComp = false
-	return InvertedFiles{decomp: decomp, index: index, existence: existence, warmLocality: warmLocality}, nil
+	return InvertedFiles{decomp: decomp, index: index, existence: existence}, nil
 }
 
 func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint64, data *seg.Decompressor, ps *background.ProgressSet) error {
 	idxPath := ii.efAccessorFilePath(fromStep, toStep)
 	cfg := recsplit.RecSplitArgs{
-		Enums: false,
-		//LessFalsePositives: true,
+		Enums:              true,
+		LessFalsePositives: true,
 
 		BucketSize: 2000,
 		LeafSize:   8,
@@ -1781,34 +1714,12 @@ func (ii *InvertedIndex) buildMapIdx(ctx context.Context, fromStep, toStep uint6
 	return buildIndex(ctx, data, ii.compression, idxPath, false, cfg, ps, ii.logger, ii.noFsync)
 }
 
-func (ii *InvertedIndex) buildWarmLocality(ctx context.Context, decomp *seg.Decompressor, step uint64, ps *background.ProgressSet) (*LocalityIndexFiles, error) {
-	if !ii.withLocalityIndex {
-		return nil, nil
-	}
-
-	ic := ii.MakeContext() // TODO: use existing context
-	defer ic.Close()
-	// Here we can make a choise: to index "cold non-indexed file" by warm locality index, or not?
-	// Let's don't index. Because: speed of new files build is very important - to speed-up pruning
-	fromStep, toStep := ic.minWarmStep(), step+1
-	defer func() {
-		if ic.ii.filenameBase == traceFileLife {
-			ii.logger.Warn(fmt.Sprintf("[agg] BuildWarmLocality done: %s.%d-%d", ii.filenameBase, fromStep, toStep))
-		}
-	}()
-	return ii.warmLocalityIdx.buildFiles(ctx, fromStep, toStep, false, ps, func() *LocalityIterator {
-		return ic.iterateKeysLocality(ctx, fromStep, toStep, decomp)
-	})
-}
-
 func (ii *InvertedIndex) integrateFiles(sf InvertedFiles, txNumFrom, txNumTo uint64) {
 	defer ii.reCalcRoFiles()
 
 	if asserts && ii.withExistenceIndex && sf.existence == nil {
 		panic(fmt.Errorf("assert: no existence index: %s", sf.decomp.FileName()))
 	}
-
-	ii.warmLocalityIdx.integrateFiles(sf.warmLocality)
 
 	fi := newFilesItem(txNumFrom, txNumTo, ii.aggregationStep)
 	fi.decompressor = sf.decomp

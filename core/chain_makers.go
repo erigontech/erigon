@@ -326,7 +326,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine consensus.E
 	var stateWriter state.StateWriter
 	var domains *state2.SharedDomains
 	if histV3 {
-		domains = state2.NewSharedDomains(tx, logger)
+		var err error
+		domains, err = state2.NewSharedDomains(tx, logger)
+		if err != nil {
+			return nil, err
+		}
 		defer domains.Close()
 		stateReader = state.NewReaderV4(domains)
 		stateWriter = state.NewWriterV4(domains)
@@ -699,7 +703,7 @@ func (cr *FakeChainReader) FrozenBlocks() uint64                                
 func (cr *FakeChainReader) BorEventsByBlock(hash libcommon.Hash, number uint64) []rlp.RawValue {
 	return nil
 }
-func (cr *FakeChainReader) BorStartEventID(number uint64) uint64 {
+func (cr *FakeChainReader) BorStartEventID(hash libcommon.Hash, number uint64) uint64 {
 	return 0
 }
 func (cr *FakeChainReader) BorSpan(spanId uint64) []byte { return nil }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -92,7 +93,11 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 		stateWriter state.StateWriter
 	)
 	if histV3 {
-		domains = state2.NewSharedDomains(tx, logger)
+		var err error
+		domains, err = state2.NewSharedDomains(tx, logger)
+		if err != nil {
+			return err
+		}
 		defer domains.Close()
 		stateWriter = state.NewWriterV4(domains)
 		stateReader = state.NewReaderV4(domains)
@@ -130,7 +135,11 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 			var simStateReader state.StateReader
 			var simStateWriter state.StateWriter
 			if histV3 {
-				domains = state2.NewSharedDomains(tx, logger)
+				var err error
+				domains, err = state2.NewSharedDomains(tx, logger)
+				if err != nil {
+					return err
+				}
 				defer domains.Close()
 				simStateReader = state.NewReaderV4(domains)
 			} else {
@@ -168,6 +177,8 @@ func SpawnMiningExecStage(s *StageState, tx kv.RwTx, cfg MiningExecCfg, ctx cont
 					break
 				}
 			}
+
+			metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
 		}
 	}
 

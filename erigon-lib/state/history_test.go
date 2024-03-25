@@ -72,8 +72,8 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := histCfg{
-		iiCfg:             iiCfg{salt: &salt, dirs: dirs},
-		withLocalityIndex: false, withExistenceIndex: true, compression: CompressNone, historyLargeValues: largeValues,
+		iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
+		withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
 	require.NoError(tb, err)
@@ -167,7 +167,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 		require.Equal([][]uint64{{2, 6}, {3, 6, 7}, {7}}, intArrs)
 		r := recsplit.NewIndexReader(sf.efHistoryIdx)
 		for i := 0; i < len(keyWords); i++ {
-			offset := r.Lookup([]byte(keyWords[i]))
+			offset, ok := r.TwoLayerLookup([]byte(keyWords[i]))
+			if !ok {
+				continue
+			}
 			g.Reset(offset)
 			w, _ := g.Next(nil)
 			require.Equal(keyWords[i], string(w))
@@ -180,7 +183,10 @@ func TestHistoryCollationBuild(t *testing.T) {
 			for j := 0; j < len(ints); j++ {
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], ints[j])
-				offset := r.Lookup2(txKey[:], []byte(keyWords[i]))
+				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
+				if !ok {
+					continue
+				}
 				g.Reset(offset)
 				w, _ := g.Next(nil)
 				require.Equal(valWords[vi], string(w))
@@ -247,7 +253,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		hc.Close()
 
 		hc = h.MakeContext()
-		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, logEvery)
+		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, false, logEvery)
 		hc.Close()
 
 		require.NoError(err)
@@ -349,7 +355,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			} else {
 				require.Truef(t, cp, "step %d should be prunable", i)
 			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			require.NoError(t, err)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -385,7 +391,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			} else {
 				require.Truef(t, cp, "step %d should be prunable", i)
 			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			require.NoError(t, err)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -504,7 +510,7 @@ func TestHistoryHistory(t *testing.T) {
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 				hc := h.MakeContext()
-				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 				hc.Close()
 				require.NoError(err)
 			}()
@@ -543,7 +549,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 		if doPrune {
 			hc := h.MakeContext()
-			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			hc.Close()
 			require.NoError(err)
 		}
