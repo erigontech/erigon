@@ -1528,7 +1528,7 @@ func decodeDeposits(appendList *[]*Deposit, s *rlp.Stream) error {
 			*appendList = nil
 			return nil // EOL, check for ListEnd is in calling function
 		}
-		return fmt.Errorf("read Withdrawals: %w", err)
+		return fmt.Errorf("read Deposits: %w", err)
 	}
 	for err == nil {
 		var deposit Deposit

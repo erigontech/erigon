@@ -1,10 +1,13 @@
 package types
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -13,6 +16,8 @@ const (
 	wLen = 32 // withdrawalCredentials size
 	sLen = 96 // signature size
 )
+
+//go:generate go run github.com/fjl/gencodec -type Deposit -field-override depositMarshaling -out gen_deposit_json.go
 
 type Deposit struct {
 	Pubkey                [pLen]byte
@@ -116,4 +121,29 @@ func (d *Deposit) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	return s.ListEnd()
+}
+
+// func (*Deposit) Clone() clonable.Clonable { // TODO(racytech): make sure this one is correct
+// 	return &Deposit{}
+// }
+
+// field type overrides for gencodec
+type depositMarshaling struct {
+	Pubkey                hexutility.Bytes
+	WithdrawalCredentials hexutility.Bytes
+	Amount                hexutil.Uint64
+	Signature             hexutility.Bytes
+	Index                 hexutil.Uint64
+}
+
+// Deposits implements DerivableList for deposits.
+type Deposits []*Deposit
+
+func (s Deposits) Len() int { return len(s) }
+
+// EncodeIndex encodes the i'th deposit to w. Note that this does not check for errors
+// because we assume that *Deposit will only ever contain valid deposits that were either
+// constructed by decoding or via public API in this package.
+func (s Deposits) EncodeIndex(i int, w *bytes.Buffer) {
+	rlp.Encode(w, s[i])
 }
