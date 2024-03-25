@@ -61,12 +61,12 @@ func (a *SignedAggregateAndProof) HashSSZ() ([32]byte, error) {
 }
 
 /*
- * SyncAggregate, Determines successfull committee, bits shows active participants,
+ * SyncAggregate, Determines successful committee, bits shows active participants,
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncAggregate struct {
 	SyncCommiteeBits      libcommon.Bytes64 `json:"sync_committee_bits"`
-	SyncCommiteeSignature libcommon.Bytes96 `json:"signature"`
+	SyncCommiteeSignature libcommon.Bytes96 `json:"sync_committee_signature"`
 }
 
 // return sum of the committee bits

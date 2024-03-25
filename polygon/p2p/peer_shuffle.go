@@ -1,13 +1,11 @@
 package p2p
 
-import "math/rand"
+import "github.com/ledgerwatch/erigon-lib/common"
 
 type PeerShuffle func(peerIds []*PeerId)
 
 func RandPeerShuffle(peerIds []*PeerId) {
-	rand.Shuffle(len(peerIds), func(i, j int) {
-		peerIds[i], peerIds[j] = peerIds[j], peerIds[i]
-	})
+	common.SliceShuffle(peerIds)
 }
 
 func PreservingPeerShuffle(_ []*PeerId) {

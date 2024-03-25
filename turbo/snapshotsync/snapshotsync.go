@@ -205,8 +205,19 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 	// after the initial call the downloader or snapshot-lock.file will prevent this download from running
 	//
 
-	if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{}); err == nil {
-		return err
+	// prohibits further downloads, except some exceptions
+	for _, p := range snaptype.AllTypes {
+		if (p.Enum() == snaptype.BeaconBlocks.Enum() || p.Enum() == snaptype.BlobSidecars.Enum()) && caplin == NoCaplin {
+			continue
+		}
+		if p.Enum() == snaptype.BlobSidecars.Enum() && !blobs {
+			continue
+		}
+		if _, err := snapshotDownloader.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			Type: p.String(),
+		}); err != nil {
+			return err
+		}
 	}
 
 	if err := rawdb.WriteSnapshots(tx, blockReader.FrozenFiles(), agg.Files()); err != nil {
@@ -229,38 +240,25 @@ func WaitForDownloader(ctx context.Context, logPrefix string, histV3, blobs bool
 func logStats(ctx context.Context, stats *proto_downloader.StatsReply, startTime time.Time, stagesIdsList []string, logPrefix string, logReason string) {
 	var m runtime.MemStats
 
-	if stats.Completed {
-		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-			Downloaded:       stats.BytesCompleted,
-			Total:            stats.BytesTotal,
-			TotalTime:        time.Since(startTime).Round(time.Second).Seconds(),
-			DownloadRate:     stats.DownloadRate,
-			UploadRate:       stats.UploadRate,
-			Peers:            stats.PeersUnique,
-			Files:            stats.FilesTotal,
-			Connections:      stats.ConnectionsTotal,
-			Alloc:            m.Alloc,
-			Sys:              m.Sys,
-			DownloadFinished: stats.Completed,
-		})
+	diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
+	diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
+		Downloaded:           stats.BytesCompleted,
+		Total:                stats.BytesTotal,
+		TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
+		DownloadRate:         stats.DownloadRate,
+		UploadRate:           stats.UploadRate,
+		Peers:                stats.PeersUnique,
+		Files:                stats.FilesTotal,
+		Connections:          stats.ConnectionsTotal,
+		Alloc:                m.Alloc,
+		Sys:                  m.Sys,
+		DownloadFinished:     stats.Completed,
+		TorrentMetadataReady: stats.MetadataReady,
+	})
 
+	if stats.Completed {
 		log.Info(fmt.Sprintf("[%s] download finished", logPrefix), "time", time.Since(startTime).String())
 	} else {
-		diagnostics.Send(diagnostics.SyncStagesList{Stages: stagesIdsList})
-		diagnostics.Send(diagnostics.SnapshotDownloadStatistics{
-			Downloaded:           stats.BytesCompleted,
-			Total:                stats.BytesTotal,
-			TotalTime:            time.Since(startTime).Round(time.Second).Seconds(),
-			DownloadRate:         stats.DownloadRate,
-			UploadRate:           stats.UploadRate,
-			Peers:                stats.PeersUnique,
-			Files:                stats.FilesTotal,
-			Connections:          stats.ConnectionsTotal,
-			Alloc:                m.Alloc,
-			Sys:                  m.Sys,
-			DownloadFinished:     stats.Completed,
-			TorrentMetadataReady: stats.MetadataReady,
-		})
 
 		if stats.MetadataReady < stats.FilesTotal && stats.BytesTotal == 0 {
 			log.Info(fmt.Sprintf("[%s] Waiting for torrents metadata: %d/%d", logPrefix, stats.MetadataReady, stats.FilesTotal))

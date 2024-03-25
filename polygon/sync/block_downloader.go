@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -49,7 +50,7 @@ func NewBlockDownloader(
 		blocksVerifier,
 		storage,
 		notEnoughPeersBackOffDuration,
-		blockDownloaderEstimatedRamPerWorker.WorkersIgnoringCPUs(),
+		blockDownloaderEstimatedRamPerWorker.WorkersByRAMOnly(),
 	)
 }
 
@@ -132,7 +133,8 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 			continue
 		}
 
-		waypointsBatch := d.nextWaypointsBatch(waypoints, peers)
+		numWorkers := cmp.Min(cmp.Min(d.maxWorkers, len(peers)), len(waypoints))
+		waypointsBatch := waypoints[:numWorkers]
 
 		d.logger.Info(
 			fmt.Sprintf("[%s] downloading blocks", blockDownloaderLogPrefix),
@@ -283,18 +285,4 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 	}
 
 	return blocks, nil
-}
-
-func (d *blockDownloader) nextWaypointsBatch(waypoints heimdall.Waypoints, peers []*p2p.PeerId) heimdall.Waypoints {
-	workers := len(peers)
-	if workers > d.maxWorkers {
-		workers = d.maxWorkers
-	}
-
-	batch := waypoints
-	if len(batch) > workers {
-		batch = batch[:workers]
-	}
-
-	return batch
 }

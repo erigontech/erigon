@@ -65,8 +65,8 @@ var allPrecompiles = map[libcommon.Address]PrecompiledContract{
 	libcommon.BytesToAddress([]byte{14}):         &bls12381G2Mul{},
 	libcommon.BytesToAddress([]byte{15}):         &bls12381G2MultiExp{},
 	libcommon.BytesToAddress([]byte{16}):         &bls12381Pairing{},
-	libcommon.BytesToAddress([]byte{17}):         &bls12381MapG1{},
-	libcommon.BytesToAddress([]byte{18}):         &bls12381MapG2{},
+	libcommon.BytesToAddress([]byte{17}):         &bls12381MapFpToG1{},
+	libcommon.BytesToAddress([]byte{18}):         &bls12381MapFp2ToG2{},
 	libcommon.BytesToAddress([]byte{20}):         &pointEvaluation{},
 	libcommon.BytesToAddress([]byte{0x01, 0x00}): &p256Verify{},
 }
