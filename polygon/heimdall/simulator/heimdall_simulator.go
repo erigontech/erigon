@@ -146,8 +146,8 @@ func (h *HeimdallSimulator) Close() {
 	h.knownSnapshots.Close()
 }
 
-func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblocks.Segment, sType snaptype.Enum, indexFn IndexFnType, reopenType snaptype.Type) error {
-	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), sType)
+func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblocks.Segment, sType snaptype.Type, indexFn IndexFnType) error {
+	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), sType.Enum())
 
 	h.logger.Warn(fmt.Sprintf("Downloading %s", fileName))
 
@@ -165,5 +165,5 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 		return fmt.Errorf("can't download %s: %w", fileName, err)
 	}
 
-	return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{reopenType}, true)
+	return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{sType}, true)
 }

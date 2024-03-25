@@ -24,7 +24,7 @@ func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdal
 		defer view.Close()
 
 		if seg, ok := view.SpansSegment(spanId); ok {
-			if err := h.downloadData(ctx, seg, snaptype.Enums.BorSpans, freezeblocks.BorSpansIdx, snaptype.BorSpans); err != nil {
+			if err := h.downloadData(ctx, seg, snaptype.BorSpans, freezeblocks.BorSpansIdx); err != nil {
 				return heimdall.Span{}, err
 			}
 		}

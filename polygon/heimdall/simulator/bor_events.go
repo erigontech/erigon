@@ -30,7 +30,7 @@ func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to tim
 
 	for continueLoop(span, to, limit) && err == nil {
 		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
-			if err := h.downloadData(ctx, seg, snaptype.Enums.BorEvents, freezeblocks.BorEventsIdx, snaptype.BorEvents); err != nil {
+			if err := h.downloadData(ctx, seg, snaptype.BorEvents, freezeblocks.BorEventsIdx); err != nil {
 				return nil, err
 			}
 		}
