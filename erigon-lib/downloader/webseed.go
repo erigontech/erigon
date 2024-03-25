@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/anacrolix/torrent"
 	"io"
 	"net/http"
 	"net/url"
