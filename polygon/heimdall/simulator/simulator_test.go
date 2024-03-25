@@ -23,13 +23,13 @@ func TestSimulatorStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 0)
+	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 1000)
 	t.Log(res)
 	t.Log(err)
 
-	res, err = sim.FetchStateSyncEvents(ctx, 0, time.Now(), 0)
-	t.Log(res)
-	t.Log(err)
+	//res, err = sim.FetchStateSyncEvents(ctx, 0, time.Now(), 2)
+	//t.Log(res)
+	//t.Log(err)
 	//
 	//span, err := sim.FetchLatestSpan(ctx)
 	//if err != nil {

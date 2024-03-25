@@ -31,39 +31,59 @@ func (h *HeimdallSimulator) downloadEvents(ctx context.Context, spans *freezeblo
 
 	h.logger.Warn(fmt.Sprintf("snapshot from: %d, to: %d", heimdall.SpanIdAt(info.From), heimdall.SpanIdAt(info.To)))
 
-	return freezeblocks.BorSpansIdx(ctx, info, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
+	return freezeblocks.BorEventsIdx(ctx, info, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
 }
 
-func bytestoEvents(events []rlp.RawValue) ([]*heimdall.EventRecordWithTime, error) {
-	stateContract := bor.GenesisContractStateReceiverABI()
-	records := make([]*heimdall.EventRecordWithTime, len(events))
+func (h *HeimdallSimulator) downloadHeader(ctx context.Context, spans *freezeblocks.Segment) error {
+	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), snaptype.Enums.Headers)
 
-	for i, e := range events {
+	h.logger.Warn(fmt.Sprintf("Downloading %s", fileName))
+
+	err := h.downloader.Download(ctx, fileName)
+	if err != nil {
+		return fmt.Errorf("can't download %s: %w", fileName, err)
+	}
+
+	h.logger.Warn(fmt.Sprintf("Indexing %s", fileName))
+
+	info, _, _ := snaptype.ParseFileName(h.downloader.LocalFsRoot(), fileName)
+
+	return freezeblocks.HeadersIdx(ctx, info, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
+}
+
+func bytestoEvents(events []rlp.RawValue, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	stateContract := bor.GenesisContractStateReceiverABI()
+	records := make([]*heimdall.EventRecordWithTime, 0, len(events))
+
+	for _, e := range events {
+		if limit == 0 {
+			break
+		}
 		r := heimdall.UnpackEventRecordWithTime(stateContract, e)
 		if r == nil {
 			return nil, errors.New("unable to unmarshal EventRecordWithTime")
 		}
 
-		records[i] = r
+		records = append(records, r)
+		limit--
 	}
 
 	return records, nil
 }
 
 func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	block0, _ := h.blockReader.HeaderByNumber(ctx, nil, 0)
-	blockHash := block0.Hash()
-	h.logger.Warn(fmt.Sprintf("block hash: %s", blockHash))
-
-	span, err := h.blockReader.EventsByBlock(ctx, nil, blockHash, 0)
-	if len(span) != 0 && err == nil {
-		return bytestoEvents(span)
-	}
+	var span []*heimdall.EventRecordWithTime
+	var err error
 
 	if len(span) == 0 && err == nil {
 		view := h.knownBorSnapshots.View()
 		defer view.Close()
 
+		if seg, ok := view.EventsSegment(600000); ok {
+			if err := h.downloadEvents(ctx, seg); err != nil {
+				return nil, err
+			}
+		}
 		if seg, ok := view.EventsSegment(0); ok {
 			if err := h.downloadEvents(ctx, seg); err != nil {
 				return nil, err
@@ -72,13 +92,7 @@ func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to tim
 
 		h.activeBorSnapshots.ReopenSegments([]snaptype.Type{snaptype.BorEvents}, true)
 
-		span, err = h.blockReader.EventsByBlock(ctx, nil, blockHash, 0)
-
-		if err != nil {
-			return nil, err
-		}
-
-		return bytestoEvents(span)
+		return h.blockReader.EventsById(fromId, to, limit)
 	}
 
 	return nil, err

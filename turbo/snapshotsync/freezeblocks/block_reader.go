@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/polygon/bor"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
@@ -360,7 +362,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	defer view.Close()
 	seg, ok := view.HeadersSegment(blockHeight)
 	if !ok {
-		return
+		return nil, errors.New("segment not found")
 	}
 
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
@@ -1246,6 +1248,49 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 		for gg.HasNext() && gg.MatchPrefix(borTxHash[:]) {
 			buf, _ = gg.Next(buf[:0])
 			result = append(result, rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:])))
+		}
+	}
+	return result, nil
+}
+
+func (r *BlockReader) EventsById(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	view := r.borSn.View()
+	defer view.Close()
+
+	segments := view.Events()
+	var buf []byte
+	var result []*heimdall.EventRecordWithTime
+	stateContract := bor.GenesisContractStateReceiverABI()
+
+	for _, sn := range segments {
+		idxBorTxnHash := sn.Index()
+
+		if idxBorTxnHash == nil {
+			continue
+		}
+		if idxBorTxnHash.KeyCount() == 0 {
+			continue
+		}
+
+		offset := idxBorTxnHash.OrdinalLookup(0)
+		gg := sn.MakeGetter()
+		gg.Reset(offset)
+		for gg.HasNext() {
+			buf, _ = gg.Next(buf[:0])
+
+			raw := rlp.RawValue(common.Copy(buf[length.Hash+length.BlockNum+8:]))
+			event := heimdall.UnpackEventRecordWithTime(stateContract, raw)
+			if event.ID < from {
+				continue
+			}
+			if event.Time.After(to) {
+				break
+			}
+
+			result = append(result, event)
+			if len(result) == limit {
+				break
+			}
 		}
 	}
 	return result, nil
