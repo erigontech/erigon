@@ -14,6 +14,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -132,8 +133,8 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 			continue
 		}
 
-		numWorkers := math.Min(math.Min(float64(d.maxWorkers), float64(len(peers))), float64(len(waypoints)))
-		waypointsBatch := waypoints[:int(numWorkers)]
+		numWorkers := cmp.Min(cmp.Min(d.maxWorkers, len(peers)), len(waypoints))
+		waypointsBatch := waypoints[:numWorkers]
 
 		d.logger.Info(
 			fmt.Sprintf("[%s] downloading blocks", blockDownloaderLogPrefix),
