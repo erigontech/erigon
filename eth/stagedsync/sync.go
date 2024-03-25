@@ -135,6 +135,7 @@ func (s *Sync) HasUnwindPoint() bool { return s.unwindPoint != nil }
 func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error {
 	if tx != nil {
 		if casted, ok := tx.(state.HasAggCtx); ok {
+			log.Warn("[dbg] inside UnwindTo")
 			// protect from too far unwind
 			unwindPointWithCommitment, ok, err := casted.AggCtx().(*state.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindPoint, tx)
 			if err != nil {
@@ -144,6 +145,7 @@ func (s *Sync) UnwindTo(unwindPoint uint64, reason UnwindReason, tx kv.Tx) error
 				return fmt.Errorf("too far unwind. requested=%d, minAllowed=%d", unwindPoint, unwindPointWithCommitment)
 			}
 			unwindPoint = unwindPointWithCommitment
+			log.Warn("[dbg] inside UnwindTo done", "unwindPoint", unwindPoint)
 		}
 	}
 
