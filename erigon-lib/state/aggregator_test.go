@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 	"math"
 	"math/rand"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/erigon-lib/kv/rawdbv3"
 
 	"github.com/ledgerwatch/erigon-lib/kv/iter"
 	"github.com/ledgerwatch/erigon-lib/kv/order"
@@ -117,7 +118,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	stat, err := ac.Prune(context.Background(), rwTx, 0, false, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
@@ -226,7 +227,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
-	stat, err := ac.Prune(context.Background(), rwTx, 0, logEvery)
+	stat, err := ac.Prune(context.Background(), rwTx, 0, false, logEvery)
 	require.NoError(t, err)
 	t.Logf("Prune: %s", stat)
 
