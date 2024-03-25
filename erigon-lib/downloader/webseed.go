@@ -452,7 +452,8 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("## Seed %s manifest.txt fetch failed: %s\n", webSeedProviderUrl.String(), resp.Status)
+		d.logger.Warn("[snapshots.webseed] manifest retrieval failed, this webseed is not available",
+			"status", resp.Status, "url", u.String())
 		return nil, fmt.Errorf("webseed.http: status=%d, url=%s", resp.StatusCode, u.String())
 	}
 
