@@ -85,7 +85,7 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 	return nil
 }
 
-func (f *ForkChoiceStore) verifyAggregateAndProofSignature(aggregate *cltypes.AggregateAndProof, state *state.CachingBeaconState) error {
+func (f *ForkChoiceStore) verifyAggregateAndProofSignature(state *state.CachingBeaconState, aggregate *cltypes.AggregateAndProof) error {
 	slot := aggregate.Aggregate.AttestantionData().Slot()
 	publicKey, err := state.ValidatorPublicKey(int(aggregate.AggregatorIndex))
 	if err != nil {
@@ -106,7 +106,7 @@ func (f *ForkChoiceStore) verifyAggregateAndProofSignature(aggregate *cltypes.Ag
 	return nil
 }
 
-func (f *ForkChoiceStore) verifyAggregatorSignature(aggregate *cltypes.SignedAggregateAndProof, state *state.CachingBeaconState) error {
+func (f *ForkChoiceStore) verifyAggregatorSignature(state *state.CachingBeaconState, aggregate *cltypes.SignedAggregateAndProof) error {
 	publicKey, err := state.ValidatorPublicKey(int(aggregate.Message.AggregatorIndex))
 	if err != nil {
 		return err
@@ -142,16 +142,42 @@ func (f *ForkChoiceStore) verifyAggregateMessageSignature(s *state.CachingBeacon
 	return nil
 }
 
+func (f *ForkChoiceStore) canProcessAggregate() bool {
+	return f.synced.Load() && f.syncedDataManager.HeadState() != nil
+}
+
+func (f *ForkChoiceStore) verifySignaturesOnAggregate(s *state.CachingBeaconState, aggregateAndProof *cltypes.SignedAggregateAndProof) error {
+	aggregationBits := aggregateAndProof.Message.Aggregate.AggregationBits()
+	// [REJECT] The aggregate attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1.
+	attestingIndicies, err := s.GetAttestingIndicies(aggregateAndProof.Message.Aggregate.AttestantionData(), aggregationBits, true)
+	if err != nil {
+		return err
+	}
+	if len(attestingIndicies) == 0 {
+		return fmt.Errorf("no attesting indicies")
+	}
+	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
+	if err := f.verifyAggregateAndProofSignature(s, aggregateAndProof.Message); err != nil {
+		return err
+	}
+
+	// [REJECT] The aggregator signature, signed_aggregate_and_proof.signature, is valid.
+	if err := f.verifyAggregatorSignature(s, aggregateAndProof); err != nil {
+		return err
+	}
+
+	return f.verifyAggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
+}
+
 func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
-	headState := f.syncedDataManager.HeadState()
-	if !f.synced.Load() || headState == nil {
+	if f.canProcessAggregate() {
 		return nil
 	}
+	headState := f.syncedDataManager.HeadState()
 	selectionProof := aggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.Message.Aggregate.AttestantionData()
 	target := aggregateAndProof.Message.Aggregate.AttestantionData().Target()
 	slot := aggregateAndProof.Message.Aggregate.AttestantionData().Slot()
-	aggregationBits := aggregateAndProof.Message.Aggregate.AggregationBits()
 	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().CommitteeIndex()
 
 	// [IGNORE] aggregate.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. current_slot >= aggregate.data.slot (a client MAY queue future aggregates for processing at the appropriate slot).
@@ -188,15 +214,6 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 		return err
 	}
 
-	// [REJECT] The aggregate attestation has participants -- that is, len(get_attesting_indices(state, aggregate)) >= 1.
-	attestingIndicies, err := headState.GetAttestingIndicies(aggregateData, aggregationBits, true)
-	if err != nil {
-		return err
-	}
-	if len(attestingIndicies) == 0 {
-		return fmt.Errorf("no attesting indicies")
-	}
-
 	// [REJECT] aggregate_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_aggregator(state, aggregate.data.slot, index, aggregate_and_proof.selection_proof) returns True.
 	if !state.IsAggregator(f.beaconCfg, uint64(len(committee)), committeeIndex, selectionProof) {
 		log.Warn("receveived aggregate and proof from invalid aggregator")
@@ -207,20 +224,10 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 		return fmt.Errorf("committee index not in committee")
 	}
 
-	// [REJECT] The aggregate_and_proof.selection_proof is a valid signature of the aggregate.data.slot by the validator with index aggregate_and_proof.aggregator_index.
-	if err := f.verifyAggregateAndProofSignature(aggregateAndProof.Message, headState); err != nil {
+	if err := f.verifySignaturesOnAggregate(headState, aggregateAndProof); err != nil {
 		return err
 	}
 
-	// [REJECT] The aggregator signature, signed_aggregate_and_proof.signature, is valid.
-	if err := f.verifyAggregatorSignature(aggregateAndProof, headState); err != nil {
-		return err
-	}
-
-	// [REJECT] The signature of aggregate is valid.
-	if err := f.verifyAggregateMessageSignature(headState, aggregateAndProof, attestingIndicies); err != nil {
-		return err
-	}
 	// [REJECT] The aggregate attestation's target block is an ancestor of the block named in the LMD vote -- i.e. get_checkpoint_block(store, aggregate.data.beacon_block_root, aggregate.data.target.epoch) == aggregate.data.target.root
 	if f.Ancestor(aggregateData.BeaconBlockRoot(), f.computeStartSlotAtEpoch(target.Epoch())) != target.BlockRoot() {
 		return fmt.Errorf("invalid target block")
