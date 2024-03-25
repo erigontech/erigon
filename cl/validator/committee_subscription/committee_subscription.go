@@ -268,7 +268,7 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
 	}
 
-	// sweep subscriptions if slot is older than current slot
+	// sweep subscriptions
 	sweepValidatorSubscriptions := func(curSlot uint64) {
 		c.validatorSubsMutex.Lock()
 		defer c.validatorSubsMutex.Unlock()
@@ -288,7 +288,7 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			}
 		}
 	}
-	// sweep aggregations if slot is older than current slot
+	// sweep aggregations
 	sweepAggregations := func(curSlot uint64) {
 		c.aggregationMutex.Lock()
 		defer c.aggregationMutex.Unlock()
