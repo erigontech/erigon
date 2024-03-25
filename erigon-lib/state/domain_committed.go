@@ -358,12 +358,15 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 		}
 	}
 	if item == nil {
-		for _, f := range dc.d.files.Items() {
-			if f.startTxNum == txFrom && f.endTxNum == txTo {
-				item = f
-				break
+		dc.d.files.Walk(func(files []*filesItem) bool {
+			for _, f := range files {
+				if f.startTxNum == txFrom && f.endTxNum == txTo {
+					item = f
+					return false
+				}
 			}
-		}
+			return true
+		})
 	}
 
 	if item == nil {
