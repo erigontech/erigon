@@ -98,7 +98,7 @@ func (a *Contribution) HashSSZ() ([32]byte, error) {
 }
 
 /*
- * SyncContribution, Determines successfull committee, bits shows active participants,
+ * SyncContribution, Determines successful committee, bits shows active participants,
  * and signature is the aggregate BLS signature of the committee.
  */
 type SyncContribution struct {

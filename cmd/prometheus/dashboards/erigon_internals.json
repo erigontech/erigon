@@ -2577,59 +2577,59 @@
           "datasource": {
             "type": "prometheus"
           },
-          "expr": "ru_inblock{instance=~\"$instance\"}",
+          "expr": "process_io_read_syscalls_total{instance=~\"$instance\"}",
           "interval": "",
-          "legendFormat": "inblock: {{instance}}",
+          "legendFormat": "process_io_read_syscalls_total: {{instance}}",
           "refId": "A"
         },
         {
           "datasource": {
             "type": "prometheus"
           },
-          "expr": "ru_outblock{instance=~\"$instance\"}",
+          "expr": "process_io_write_syscalls_total{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "outblock: {{instance}}",
+          "legendFormat": "process_io_write_syscalls_total: {{instance}}",
           "refId": "B"
         },
         {
           "datasource": {
             "type": "prometheus"
           },
-          "expr": "ru_minflt{instance=~\"$instance\"}",
+          "expr": "process_minor_pagefaults_total{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "minflt: {{instance}}",
+          "legendFormat": "process_minor_pagefaults_total: {{instance}}",
           "refId": "C"
         },
         {
           "datasource": {
             "type": "prometheus"
           },
-          "expr": "ru_majflt{instance=~\"$instance\"}",
+          "expr": "process_major_pagefaults_total{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "majflt: {{instance}}",
+          "legendFormat": "process_major_pagefaults_total: {{instance}}",
           "refId": "D"
         },
         {
           "datasource": {
             "type": "prometheus"
           },
-          "expr": "system_disk_readbytes{instance=~\"$instance\"}",
+          "expr": "process_io_storage_read_bytes_total{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "system_disk_readbytes: {{instance}}",
+          "legendFormat": "process_io_storage_read_bytes_total: {{instance}}",
           "refId": "E"
         },
         {
           "datasource": {
             "type": "prometheus"
           },
-          "expr": "system_disk_writebytes{instance=~\"$instance\"}",
+          "expr": "process_io_storage_written_bytes_total{instance=~\"$instance\"}",
           "hide": false,
           "interval": "",
-          "legendFormat": "system_disk_writebytes: {{instance}}",
+          "legendFormat": "process_io_storage_written_bytes_total: {{instance}}",
           "refId": "F"
         },
         {

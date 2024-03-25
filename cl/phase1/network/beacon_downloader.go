@@ -67,10 +67,15 @@ func (f *ForwardBeaconDownloader) HighestProcessedRoot() libcommon.Hash {
 	return f.highestBlockRootProcessed
 }
 
+type peerAndBlocks struct {
+	peerId string
+	blocks []*cltypes.SignedBeaconBlock
+}
+
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	count := uint64(16)
 	var atomicResp atomic.Value
-	atomicResp.Store([]*cltypes.SignedBeaconBlock{})
+	atomicResp.Store(peerAndBlocks{})
 	reqInterval := time.NewTicker(300 * time.Millisecond)
 	defer reqInterval.Stop()
 Loop:
@@ -78,7 +83,7 @@ Loop:
 		select {
 		case <-reqInterval.C:
 			go func() {
-				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					return
 				}
 				// this is so we do not get stuck on a side-fork
@@ -94,15 +99,15 @@ Loop:
 					f.rpc.BanPeer(peerId)
 					return
 				}
-				if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 					return
 				}
-				atomicResp.Store(responses)
+				atomicResp.Store(peerAndBlocks{peerId, responses})
 			}()
 		case <-ctx.Done():
 			return
 		default:
-			if len(atomicResp.Load().([]*cltypes.SignedBeaconBlock)) > 0 {
+			if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 				break Loop
 			}
 			time.Sleep(10 * time.Millisecond)
@@ -115,7 +120,10 @@ Loop:
 	var highestBlockRootProcessed libcommon.Hash
 	var highestSlotProcessed uint64
 	var err error
-	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, atomicResp.Load().([]*cltypes.SignedBeaconBlock)); err != nil {
+	blocks := atomicResp.Load().(peerAndBlocks).blocks
+	pid := atomicResp.Load().(peerAndBlocks).peerId
+	if highestSlotProcessed, highestBlockRootProcessed, err = f.process(f.highestSlotProcessed, f.highestBlockRootProcessed, blocks); err != nil {
+		f.rpc.BanPeer(pid)
 		return
 	}
 	f.highestSlotProcessed = highestSlotProcessed

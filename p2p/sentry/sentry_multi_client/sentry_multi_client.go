@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	sentry2 "github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
 	"github.com/ledgerwatch/erigon/turbo/stages/headerdownload"
@@ -295,7 +294,6 @@ func NewMultiClient(
 	blockReader services.FullBlockReader,
 	blockBufferSize int,
 	logPeerInfo bool,
-	forkValidator *engine_helpers.ForkValidator,
 	maxBlockBroadcastPeers func(*types.Header) uint,
 	logger log.Logger,
 ) (*MultiClient, error) {
