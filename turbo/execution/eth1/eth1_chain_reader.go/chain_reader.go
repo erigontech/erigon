@@ -14,7 +14,12 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	types2 "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	"github.com/ledgerwatch/erigon/cl/clparams"
+	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/utils"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_utils"
 )
 
@@ -384,4 +389,94 @@ func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, fin
 	}
 	return gointerfaces.ConvertH256ToHash(resp.HeadBlockHash), gointerfaces.ConvertH256ToHash(resp.FinalizedBlockHash),
 		gointerfaces.ConvertH256ToHash(resp.SafeBlockHash), nil
+}
+
+func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error) {
+	resp, err := c.executionModule.HasBlock(ctx, &execution.GetSegmentRequest{
+		BlockHash: gointerfaces.ConvertHashToH256(hash),
+	})
+	if err != nil {
+		return false, err
+	}
+	return resp.HasBlock, nil
+}
+
+func (c ChainReaderWriterEth1) AssembleBlock(baseHash libcommon.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
+	request := &execution.AssembleBlockRequest{
+		Timestamp:             uint64(attributes.Timestamp),
+		PrevRandao:            gointerfaces.ConvertHashToH256(attributes.PrevRandao),
+		SuggestedFeeRecipient: gointerfaces.ConvertAddressToH160(attributes.SuggestedFeeRecipient),
+		Withdrawals:           eth1_utils.ConvertWithdrawalsToRpc(attributes.Withdrawals),
+		ParentHash:            gointerfaces.ConvertHashToH256(baseHash),
+	}
+	if attributes.ParentBeaconBlockRoot != nil {
+		request.ParentBeaconBlockRoot = gointerfaces.ConvertHashToH256(*attributes.ParentBeaconBlockRoot)
+	}
+	resp, err := c.executionModule.AssembleBlock(context.Background(), request)
+	if err != nil {
+		return 0, err
+	}
+	if resp.Busy {
+		return 0, fmt.Errorf("execution data is still syncing")
+	}
+	return resp.Id, nil
+}
+
+func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error) {
+	resp, err := c.executionModule.GetAssembledBlock(context.Background(), &execution.GetAssembledBlockRequest{
+		Id: id,
+	})
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if resp.Busy {
+		return nil, nil, nil, fmt.Errorf("execution data is still syncing")
+	}
+	if resp.Data == nil {
+		return nil, nil, nil, nil
+	}
+
+	bundle := engine_types.ConvertBlobsFromRpc(resp.Data.BlobsBundle)
+	blockValue := gointerfaces.ConvertH256ToUint256Int(resp.Data.BlockValue).ToBig()
+	payloadRpc := resp.Data.ExecutionPayload
+
+	extraData := solid.NewExtraData()
+	extraData.SetBytes(payloadRpc.ExtraData)
+	blockHash := gointerfaces.ConvertH256ToHash(payloadRpc.BlockHash)
+	block := &cltypes.Eth1Block{
+		ParentHash:    gointerfaces.ConvertH256ToHash(payloadRpc.ParentHash),
+		FeeRecipient:  gointerfaces.ConvertH160toAddress(payloadRpc.Coinbase),
+		StateRoot:     gointerfaces.ConvertH256ToHash(payloadRpc.StateRoot),
+		ReceiptsRoot:  gointerfaces.ConvertH256ToHash(payloadRpc.ReceiptRoot),
+		LogsBloom:     gointerfaces.ConvertH2048ToBloom(payloadRpc.LogsBloom),
+		BlockNumber:   payloadRpc.BlockNumber,
+		GasLimit:      payloadRpc.GasLimit,
+		GasUsed:       payloadRpc.GasUsed,
+		Time:          payloadRpc.Timestamp,
+		Extra:         extraData,
+		PrevRandao:    gointerfaces.ConvertH256ToHash(payloadRpc.PrevRandao),
+		Transactions:  solid.NewTransactionsSSZFromTransactions(payloadRpc.Transactions),
+		BlockHash:     blockHash,
+		BaseFeePerGas: gointerfaces.ConvertH256ToHash(payloadRpc.BaseFeePerGas),
+	}
+	copy(block.BaseFeePerGas[:], utils.ReverseOfByteSlice(block.BaseFeePerGas[:])) // reverse the byte slice
+	if payloadRpc.ExcessBlobGas != nil {
+		block.ExcessBlobGas = *payloadRpc.ExcessBlobGas
+	}
+	if payloadRpc.BlobGasUsed != nil {
+		block.BlobGasUsed = *payloadRpc.BlobGasUsed
+	}
+
+	// change the limit later
+	withdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+	for _, w := range payloadRpc.Withdrawals {
+		withdrawals.Append(&cltypes.Withdrawal{
+			Amount:    w.Amount,
+			Address:   gointerfaces.ConvertH160toAddress(w.Address),
+			Index:     w.Index,
+			Validator: w.ValidatorIndex,
+		})
+	}
+	block.Withdrawals = withdrawals
+	return block, bundle, blockValue, nil
 }

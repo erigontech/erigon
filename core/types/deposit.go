@@ -1,12 +1,10 @@
 package types
 
 import (
-	"errors"
 	"fmt"
 	"io"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	rlp2 "github.com/ledgerwatch/erigon-lib/rlp"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -118,42 +116,4 @@ func (d *Deposit) DecodeRLP(s *rlp.Stream) error {
 	}
 
 	return s.ListEnd()
-}
-
-func depositsPayloadSize(deposits []*Deposit) (depositsLen int) {
-	for _, deposit := range deposits {
-		depositLen := deposit.EncodingSize()
-		depositsLen += rlp2.ListPrefixLen(depositLen) + depositLen
-	}
-	return
-}
-
-func encodeDeposits(deposits []*Deposit, depositsLen int, w io.Writer, b []byte) error {
-	if err := EncodeStructSizePrefix(depositsLen, w, b); err != nil {
-		return err
-	}
-	for _, deposit := range deposits {
-		if err := deposit.EncodeRLP(w); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func decodeDeposits(s *rlp.Stream, recv *[]*Deposit) (err error) {
-	for err == nil {
-		var deposit Deposit
-		if err = deposit.DecodeRLP(s); err != nil {
-			break
-		}
-		*recv = append(*recv, &deposit)
-	}
-	if !errors.Is(err, rlp.EOL) {
-		return err
-	}
-	// end of Deposits
-	if err = s.ListEnd(); err != nil {
-		return err
-	}
-	return nil
 }
