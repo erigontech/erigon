@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-const dumpSlotFrequency = 32
+const dumpSlotFrequency = 4
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
@@ -232,7 +232,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 	// Execute the state
 	if invalidBlockErr := transition.TransitionState(newState, signedBlock, blockRewardsCollector, fullValidation); invalidBlockErr != nil {
 		// Add block to list of invalid blocks
-		log.Debug("Invalid beacon block", "reason", invalidBlockErr)
+		log.Warn("Invalid beacon block", "slot", block.Slot, "blockRoot", blockRoot, "reason", invalidBlockErr)
 		f.badBlocks.Store(libcommon.Hash(blockRoot), struct{}{})
 		f.currentState = nil
 
@@ -277,7 +277,7 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		BodyRoot:      bodyRoot,
 	})
 
-	if newState.Slot()%f.beaconCfg.SlotsPerEpoch == 0 {
+	if newState.Slot()%dumpSlotFrequency == 0 {
 		if err := f.dumpBeaconStateOnDisk(newState, blockRoot); err != nil {
 			return nil, LogisticError, err
 		}
@@ -331,13 +331,13 @@ func (f *forkGraphDisk) GetState(blockRoot libcommon.Hash, alwaysCopy bool) (*st
 		if !isSegmentPresent {
 			// check if it is in the header
 			bHeader, ok := f.GetHeader(currentIteratorRoot)
-			if ok && bHeader.Slot%f.beaconCfg.SlotsPerEpoch == 0 {
+			if ok && bHeader.Slot%dumpSlotFrequency == 0 {
 				break
 			}
 			log.Debug("Could not retrieve state: Missing header", "missing", currentIteratorRoot)
 			return nil, nil
 		}
-		if block.Block.Slot%f.beaconCfg.SlotsPerEpoch == 0 {
+		if block.Block.Slot%dumpSlotFrequency == 0 {
 			break
 		}
 		blocksInTheWay = append(blocksInTheWay, block)

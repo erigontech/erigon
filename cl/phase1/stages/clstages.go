@@ -238,7 +238,6 @@ func ConsensusClStages(ctx context.Context,
 		}
 
 		return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
-
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -440,7 +439,6 @@ func ConsensusClStages(ctx context.Context,
 							case <-ctx.Done():
 								return ctx.Err()
 							case <-readyTimeout.C:
-								time.Sleep(10 * time.Second)
 								return nil
 							case <-readyInterval.C:
 								ready, err := cfg.executionClient.Ready(ctx)
@@ -713,10 +711,10 @@ func ConsensusClStages(ctx context.Context,
 						finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 						logger.Debug("Caplin is sending forkchoice")
 						// Run forkchoice
-						if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
+						if _, err := cfg.forkChoice.Engine().ForkChoiceUpdate(
 							ctx,
 							cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
-							cfg.forkChoice.GetEth1Hash(headRoot),
+							cfg.forkChoice.GetEth1Hash(headRoot), nil,
 						); err != nil {
 							logger.Warn("Could not set forkchoice", "err", err)
 							return err
