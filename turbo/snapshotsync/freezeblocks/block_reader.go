@@ -1288,13 +1288,15 @@ func (r *BlockReader) EventsById(from uint64, to time.Time, limit int) ([]*heimd
 
 			if event.Time.After(to) {
 				// we return an extra record to signify that we exit because of time and not limit
-				break
+				goto BREAK
 			}
 			if len(result) == limit {
-				break
+				goto BREAK
 			}
 		}
 	}
+
+BREAK:
 	return result, nil
 }
 

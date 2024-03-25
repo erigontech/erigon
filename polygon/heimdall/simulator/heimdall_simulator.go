@@ -109,7 +109,7 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	events, err := h.getEvents(h.ctx, 0, to, limit)
+	events, err := h.getEvents(h.ctx, fromId, to, limit)
 	return events, err
 }
 

@@ -13,7 +13,7 @@ func continueLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit in
 	if len(events) == 0 {
 		return true
 	}
-	if len(events) == limit {
+	if len(events) >= limit {
 		return false
 	}
 
@@ -22,8 +22,7 @@ func continueLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit in
 }
 
 func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	var span []*heimdall.EventRecordWithTime
-	var err error
+	span, err := h.blockReader.EventsById(fromId, to, limit)
 
 	view := h.knownBorSnapshots.View()
 	defer view.Close()
