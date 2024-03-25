@@ -60,15 +60,14 @@ func (d *WebSeeds) getWebDownloadInfo(ctx context.Context, t *torrent.Torrent) (
 
 		if headRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, downloadUrl.String(), nil); err == nil {
 			headResponse, err := http.DefaultClient.Do(headRequest)
-
 			if err != nil {
 				continue
 			}
-
 			headResponse.Body.Close()
 
 			if headResponse.StatusCode != http.StatusOK {
-				d.logger.Warn("[snapshots] webseed HEAD request failed", "url", downloadUrl, "status", headResponse.Status)
+				d.logger.Debug("[snapshots.webseed] getWebDownloadInfo: HEAD request failed",
+					"webseed", webseed.String(), "name", t.Name(), "status", headResponse.Status)
 				continue
 			}
 			if meta, err := getWebpeerTorrentInfo(ctx, downloadUrl); err == nil {
@@ -448,18 +447,18 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	request = request.WithContext(ctx)
 	resp, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.http: %w, url=%s", err, u.String())
+		return nil, fmt.Errorf("webseed.http: make request: %w, url=%s", err, u.String())
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		d.logger.Warn("[snapshots.webseed] manifest retrieval failed, this webseed is not available",
-			"status", resp.Status, "url", u.String())
+		d.logger.Debug("[snapshots.webseed] /manifest.txt retrieval failed, no downloads from this webseed",
+			"webseed", webSeedProviderUrl.String(), "status", resp.Status)
 		return nil, fmt.Errorf("webseed.http: status=%d, url=%s", resp.StatusCode, u.String())
 	}
 
 	b, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("webseed.http: %w, url=%s, ", err, u.String())
+		return nil, fmt.Errorf("webseed.http: read: %w, url=%s, ", err, u.String())
 	}
 
 	response := snaptype.WebSeedsFromProvider{}
@@ -467,7 +466,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	for fi, f := range fileNames {
 		if strings.TrimSpace(f) == "" {
 			if fi != len(fileNames)-1 {
-				fmt.Printf("## Seed %s empty line in manifest.txt at line %d\n", webSeedProviderUrl.String(), fi)
+				d.logger.Debug("[snapshots.webseed] empty line in manifest.txt", "webseed", webSeedProviderUrl.String(), "lineNum", fi)
 			}
 			continue
 		}
@@ -480,6 +479,7 @@ func (d *WebSeeds) retrieveManifest(ctx context.Context, webSeedProviderUrl *url
 	d.logger.Debug("[snapshots.webseed] get from HTTP provider", "urls", len(response), "url", webSeedProviderUrl.EscapedPath())
 	return response, nil
 }
+
 func (d *WebSeeds) readWebSeedsFile(webSeedProviderPath string) (snaptype.WebSeedsFromProvider, error) {
 	_, fileName := filepath.Split(webSeedProviderPath)
 	data, err := os.ReadFile(webSeedProviderPath)
