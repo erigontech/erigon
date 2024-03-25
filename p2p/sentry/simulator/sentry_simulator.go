@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/types"
+	core_snaptype "github.com/ledgerwatch/erigon/core/snaptype"
 	core_types "github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
@@ -418,7 +419,7 @@ func (s *server) getHeader(ctx context.Context, blockNum uint64) (*core_types.He
 			}
 		}
 
-		s.activeSnapshots.ReopenSegments([]snaptype.Type{snaptype.Headers})
+		s.activeSnapshots.ReopenSegments([]snaptype.Type{core_snaptype.Headers})
 
 		header, err = s.blockReader.Header(ctx, nil, common.Hash{}, blockNum)
 
@@ -449,5 +450,5 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segme
 
 	info, _, _ := snaptype.ParseFileName(s.downloader.LocalFsRoot(), fileName)
 
-	return snaptype.Headers.BuildIndexes(ctx, info, nil, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	return core_snaptype.Headers.BuildIndexes(ctx, info, nil, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }

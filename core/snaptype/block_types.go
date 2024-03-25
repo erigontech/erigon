@@ -9,9 +9,12 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
+	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -22,20 +25,31 @@ import (
 	"github.com/ledgerwatch/log/v3"
 )
 
+func init() {
+	ethereumTypes := append(BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
+
+	snapcfg.RegisterKnownTypes(networkname.MainnetChainName, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.SepoliaChainName, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.GoerliChainName, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.GnosisChainName, ethereumTypes)
+	snapcfg.RegisterKnownTypes(networkname.ChiadoChainName, ethereumTypes)
+}
+
 var (
-	Headers = snapType{
-		enum: Enums.Headers,
-		versions: Versions{
+	Headers = snaptype.RegisterType(
+		snaptype.Enums.Headers,
+		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
 		},
-		indexes: []Index{Indexes.HeaderHash},
-		indexBuilder: IndexBuilderFunc(
-			func(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+		nil,
+		[]snaptype.Index{snaptype.Indexes.HeaderHash},
+		snaptype.IndexBuilderFunc(
+			func(ctx context.Context, info snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				hasher := crypto.NewKeccakState()
 				defer cryptopool.ReturnToPoolKeccak256(hasher)
 				var h common.Hash
-				if err := BuildIndex(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -53,20 +67,21 @@ var (
 				}
 				return nil
 			}),
-	}
+	)
 
-	Bodies = snapType{
-		enum: Enums.Bodies,
-		versions: Versions{
+	Bodies = snaptype.RegisterType(
+		snaptype.Enums.Bodies,
+		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
 		},
-		indexes: []Index{Indexes.BodyHash},
-		indexBuilder: IndexBuilderFunc(
-			func(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+		nil,
+		[]snaptype.Index{snaptype.Indexes.BodyHash},
+		snaptype.IndexBuilderFunc(
+			func(ctx context.Context, info snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				num := make([]byte, 8)
 
-				if err := BuildIndex(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
+				if err := snaptype.BuildIndex(ctx, info, info.From, tmpDir, log.LvlDebug, p, func(idx *recsplit.RecSplit, i, offset uint64, _ []byte) error {
 					if p != nil {
 						p.Processed.Add(1)
 					}
@@ -80,17 +95,18 @@ var (
 				}
 				return nil
 			}),
-	}
+	)
 
-	Transactions = snapType{
-		enum: Enums.Transactions,
-		versions: Versions{
+	Transactions = snaptype.RegisterType(
+		snaptype.Enums.Transactions,
+		snaptype.Versions{
 			Current:      1, //2,
 			MinSupported: 1,
 		},
-		indexes: []Index{Indexes.TxnHash, Indexes.TxnHash2BlockNum},
-		indexBuilder: IndexBuilderFunc(
-			func(ctx context.Context, sn FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+		nil,
+		[]snaptype.Index{snaptype.Indexes.TxnHash, snaptype.Indexes.TxnHash2BlockNum},
+		snaptype.IndexBuilderFunc(
+			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				defer func() {
 					if rec := recover(); rec != nil {
 						err = fmt.Errorf("index panic: at=%s, %v, %s", sn.Name(), rec, dbg.Stack())
@@ -146,7 +162,7 @@ var (
 					BucketSize: 2000,
 					LeafSize:   8,
 					TmpDir:     tmpDir,
-					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, Indexes.TxnHash2BlockNum)),
+					IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To, snaptype.Indexes.TxnHash2BlockNum)),
 					BaseDataID: firstBlockNum,
 				}, logger)
 				if err != nil {
@@ -248,9 +264,9 @@ var (
 
 				return nil
 			}),
-	}
+	)
 
-	BlockSnapshotTypes = []Type{Headers, Bodies, Transactions}
+	BlockSnapshotTypes = []snaptype.Type{Headers, Bodies, Transactions}
 )
 
 func txsAmountBasedOnBodiesSnapshots(bodiesSegment *seg.Decompressor, len uint64) (firstTxID uint64, expectedCount int, err error) {

@@ -337,20 +337,11 @@ var knownPreverified = map[string]Preverified{
 	networkname.ChiadoChainName:     Chiado,
 }
 
-var ethereumTypes = append(snaptype.BlockSnapshotTypes, snaptype.CaplinSnapshotTypes...)
-
 func RegisterKnownTypes(networkName string, types []snaptype.Type) {
 	knownTypes[networkName] = types
 }
 
-var knownTypes = map[string][]snaptype.Type{
-	networkname.MainnetChainName: ethereumTypes,
-	// networkname.HoleskyChainName:    HoleskyChainSnapshotCfg,
-	networkname.SepoliaChainName: ethereumTypes,
-	networkname.GoerliChainName:  ethereumTypes,
-	networkname.GnosisChainName:  ethereumTypes,
-	networkname.ChiadoChainName:  ethereumTypes,
-}
+var knownTypes = map[string][]snaptype.Type{}
 
 func Seedable(networkName string, info snaptype.FileInfo) bool {
 	if networkName == "" {

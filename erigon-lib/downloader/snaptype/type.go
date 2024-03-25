@@ -334,12 +334,6 @@ func (ft Enum) String() string {
 
 func (ft Enum) Type() Type {
 	switch ft {
-	case Enums.Headers:
-		return Headers
-	case Enums.Bodies:
-		return Bodies
-	case Enums.Transactions:
-		return Transactions
 	case Enums.BeaconBlocks:
 		return BeaconBlocks
 	case Enums.BlobSidecars:
