@@ -25,7 +25,8 @@ type HeimdallSimulator struct {
 	logger             log.Logger
 	downloader         *TorrentClient
 
-	nextSpan uint64
+	nextSpan                  uint64
+	lastDownloadedBlockNumber uint64
 }
 
 func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger) (HeimdallSimulator, error) {

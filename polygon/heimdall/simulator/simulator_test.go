@@ -23,7 +23,8 @@ func TestSimulatorStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Now(), 1000)
+	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Unix(1623612485, 0), 100)
+	t.Log(len(res))
 	t.Log(res)
 	t.Log(err)
 
