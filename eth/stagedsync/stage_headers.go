@@ -334,6 +334,7 @@ Loop:
 			defer doms.Close()
 
 			allowedUnwindTo, ok, err := tx.(state.HasAggCtx).AggCtx().(*state.AggregatorV3Context).CanUnwindBeforeBlockNum(unwindTo, tx)
+			log.Warn("[dbg] allowed", "allowedUnwindTo", allowedUnwindTo, "ok", ok, "err", err)
 			if err != nil {
 				return err
 			}
