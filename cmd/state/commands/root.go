@@ -6,23 +6,23 @@ import (
 	"os"
 	"path/filepath"
 
-	chain2 "github.com/ledgerwatch/erigon-lib/chain"
-	"github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/spf13/cobra"
 
-	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/logging"
-
+	libchain "github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/params"
+	"github.com/ledgerwatch/erigon/turbo/debug"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 var (
 	genesisPath string
 	genesis     *types.Genesis
-	chainConfig *chain2.Config
+	chainConfig *libchain.Config
 )
 
 func init() {
@@ -39,7 +39,7 @@ var rootCmd = &cobra.Command{
 			genesis = genesisFromFile(genesisPath)
 		}
 		if genesis.Config != nil && genesis.Config.ChainID.Cmp(chainConfig.ChainID) != 0 {
-			utils.Fatalf("provided genesis.json chain configuration is invalid: expected chainId to be %v, got %v",
+			terminate.Fatalf("provided genesis.json chain configuration is invalid: expected chainId to be %v, got %v",
 				chainConfig.ChainID.String(), genesis.Config.ChainID.String())
 		}
 
@@ -55,18 +55,18 @@ var rootCmd = &cobra.Command{
 func genesisFromFile(genesisPath string) *types.Genesis {
 	file, err := os.Open(genesisPath)
 	if err != nil {
-		utils.Fatalf("Failed to read genesis file: %v", err)
+		terminate.Fatalf("Failed to read genesis file: %v", err)
 	}
 	defer file.Close()
 
 	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+		terminate.Fatalf("invalid genesis file: %v", err)
 	}
 	return genesis
 }
 
-func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *chain2.Config) {
+func getChainGenesisAndConfig() (genesis *types.Genesis, chainConfig *libchain.Config) {
 	if chain == "" {
 		genesis, chainConfig = core.MainnetGenesisBlock(), params.MainnetChainConfig
 	} else {

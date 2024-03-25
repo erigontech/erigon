@@ -41,13 +41,13 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	libkzg "github.com/ledgerwatch/erigon-lib/crypto/kzg"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	downloadercfg2 "github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
+	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils/flags"
-	common2 "github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/common"
 	"github.com/ledgerwatch/erigon/common/paths"
 	"github.com/ledgerwatch/erigon/consensus/ethash/ethashcfg"
 	"github.com/ledgerwatch/erigon/core"
@@ -799,9 +799,9 @@ var (
 		Value: true,
 	}
 
-	AstridFlag = cli.BoolFlag{
-		Name:  "astrid",
-		Usage: "Enables astrid",
+	PolygonSyncFlag = cli.BoolFlag{
+		Name:  "polygon.sync",
+		Usage: "Enables the use of the new polygon sync component",
 	}
 
 	ConfigFlag = cli.StringFlag{
@@ -961,7 +961,7 @@ func setNodeKey(ctx *cli.Context, cfg *p2p.Config, datadir string) {
 	config := p2p.NodeKeyConfig{}
 	key, err := config.LoadOrParseOrGenerateAndSave(file, hex, datadir)
 	if err != nil {
-		Fatalf("%v", err)
+		terminate.Fatalf("%v", err)
 	}
 	cfg.PrivateKey = key
 }
@@ -986,7 +986,7 @@ func setBootstrapNodes(ctx *cli.Context, cfg *p2p.Config) {
 
 	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
 	if err != nil {
-		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
+		terminate.Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
 
 	cfg.BootstrapNodes = nodes
@@ -1000,7 +1000,7 @@ func setBootstrapNodesV5(ctx *cli.Context, cfg *p2p.Config) {
 
 	nodes, err := GetBootnodesFromFlags(ctx.String(BootnodesFlag.Name), ctx.String(ChainFlag.Name))
 	if err != nil {
-		Fatalf("Option %s: %v", BootnodesFlag.Name, err)
+		terminate.Fatalf("Option %s: %v", BootnodesFlag.Name, err)
 	}
 
 	cfg.BootstrapNodesV5 = nodes
@@ -1030,7 +1030,7 @@ func setStaticPeers(ctx *cli.Context, cfg *p2p.Config) {
 
 	nodes, err := ParseNodesFromURLs(urls)
 	if err != nil {
-		Fatalf("Option %s: %v", StaticPeersFlag.Name, err)
+		terminate.Fatalf("Option %s: %v", StaticPeersFlag.Name, err)
 	}
 
 	cfg.StaticNodes = nodes
@@ -1044,7 +1044,7 @@ func setTrustedPeers(ctx *cli.Context, cfg *p2p.Config) {
 	urls := libcommon.CliString2Array(ctx.String(TrustedPeersFlag.Name))
 	trustedNodes, err := ParseNodesFromURLs(urls)
 	if err != nil {
-		Fatalf("Option %s: %v", TrustedPeersFlag.Name, err)
+		terminate.Fatalf("Option %s: %v", TrustedPeersFlag.Name, err)
 	}
 
 	cfg.TrustedNodes = append(cfg.TrustedNodes, trustedNodes...)
@@ -1187,7 +1187,7 @@ func setNAT(ctx *cli.Context, cfg *p2p.Config) {
 		natSetting := ctx.String(NATFlag.Name)
 		natif, err := nat.Parse(natSetting)
 		if err != nil {
-			Fatalf("Option %s: %v", NATFlag.Name, err)
+			terminate.Fatalf("Option %s: %v", NATFlag.Name, err)
 		}
 		cfg.NAT = natif
 		cfg.NATSpec = natSetting
@@ -1273,7 +1273,7 @@ func SetP2PConfig(ctx *cli.Context, cfg *p2p.Config, nodeName, datadir string, l
 	if netrestrict := ctx.String(NetrestrictFlag.Name); netrestrict != "" {
 		list, err := netutil.ParseNetlist(netrestrict)
 		if err != nil {
-			Fatalf("Option %q: %v", NetrestrictFlag.Name, err)
+			terminate.Fatalf("Option %q: %v", NetrestrictFlag.Name, err)
 		}
 		cfg.NetRestrict = list
 	}
@@ -1372,7 +1372,7 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 		locals := libcommon.CliString2Array(ctx.String(TxPoolLocalsFlag.Name))
 		for _, account := range locals {
 			if !libcommon.IsHexAddress(account) {
-				Fatalf("Invalid account in --txpool.locals: %s", account)
+				terminate.Fatalf("Invalid account in --txpool.locals: %s", account)
 			} else {
 				cfg.Locals = append(cfg.Locals, libcommon.HexToAddress(account))
 			}
@@ -1426,7 +1426,7 @@ func setTxPool(ctx *cli.Context, fullCfg *ethconfig.Config) {
 	if ctx.IsSet(TxPoolBlobPriceBumpFlag.Name) {
 		fullCfg.TxPool.BlobPriceBump = ctx.Uint64(TxPoolBlobPriceBumpFlag.Name)
 	}
-	cfg.CommitEvery = common2.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
+	cfg.CommitEvery = common.RandomizeDuration(ctx.Duration(TxPoolCommitEveryFlag.Name))
 }
 
 func setEthash(ctx *cli.Context, datadir string, cfg *ethconfig.Config) {
@@ -1495,7 +1495,7 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *params.MiningConfig) {
 
 	// Convert the etherbase into an address and configure it
 	if etherbase == "" {
-		Fatalf("No etherbase configured")
+		terminate.Fatalf("No etherbase configured")
 	}
 	cfg.Etherbase = libcommon.HexToAddress(etherbase)
 }
@@ -1515,7 +1515,7 @@ func setBorConfig(ctx *cli.Context, cfg *ethconfig.Config) {
 	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
 	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
 	cfg.WithHeimdallMilestones = ctx.Bool(WithHeimdallMilestones.Name)
-	cfg.Astrid = ctx.Bool(AstridFlag.Name)
+	cfg.PolygonSync = ctx.Bool(PolygonSyncFlag.Name)
 }
 
 func setMiner(ctx *cli.Context, cfg *params.MiningConfig) {
@@ -1554,15 +1554,15 @@ func setWhitelist(ctx *cli.Context, cfg *ethconfig.Config) {
 	for _, entry := range libcommon.CliString2Array(whitelist) {
 		parts := strings.Split(entry, "=")
 		if len(parts) != 2 {
-			Fatalf("Invalid whitelist entry: %s", entry)
+			terminate.Fatalf("Invalid whitelist entry: %s", entry)
 		}
 		number, err := strconv.ParseUint(parts[0], 0, 64)
 		if err != nil {
-			Fatalf("Invalid whitelist block number %s: %v", parts[0], err)
+			terminate.Fatalf("Invalid whitelist block number %s: %v", parts[0], err)
 		}
 		var hash libcommon.Hash
 		if err = hash.UnmarshalText([]byte(parts[1])); err != nil {
-			Fatalf("Invalid whitelist hash %s: %v", parts[1], err)
+			terminate.Fatalf("Invalid whitelist hash %s: %v", parts[1], err)
 		}
 		cfg.Whitelist[number] = hash
 	}
@@ -1637,7 +1637,7 @@ func CheckExclusive(ctx *cli.Context, args ...interface{}) {
 		}
 	}
 	if len(set) > 1 {
-		Fatalf("Flags %v can't be used at the same time", strings.Join(set, ", "))
+		terminate.Fatalf("Flags %v can't be used at the same time", strings.Join(set, ", "))
 	}
 }
 
@@ -1681,7 +1681,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if err := uploadRate.UnmarshalText([]byte(uploadRateStr)); err != nil {
 			panic(err)
 		}
-		lvl, _, err := downloadercfg2.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
+		lvl, _, err := downloadercfg.Int2LogLevel(ctx.Int(TorrentVerbosityFlag.Name))
 		if err != nil {
 			panic(err)
 		}
@@ -1691,7 +1691,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		if known, ok := snapcfg.KnownWebseeds[chain]; ok {
 			webseedsList = append(webseedsList, known...)
 		}
-		cfg.Downloader, err = downloadercfg2.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name), webseedsList, chain, true)
+		cfg.Downloader, err = downloadercfg.New(cfg.Dirs, version, lvl, downloadRate, uploadRate, ctx.Int(TorrentPortFlag.Name), ctx.Int(TorrentConnsPerFileFlag.Name), ctx.Int(TorrentDownloadSlotsFlag.Name), ctx.StringSlice(TorrentDownloadSlotsFlag.Name), webseedsList, chain, true)
 		if err != nil {
 			panic(err)
 		}
@@ -1753,7 +1753,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		genesis := core.GenesisBlockByChainName(chain)
 		genesisHash := params.GenesisHashByChainName(chain)
 		if (genesis == nil) || (genesisHash == nil) {
-			Fatalf("ChainDB name is not recognized: %s", chain)
+			terminate.Fatalf("ChainDB name is not recognized: %s", chain)
 			return
 		}
 		cfg.Genesis = genesis
@@ -1766,7 +1766,7 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		// Create new developer account or reuse existing one
 		developer := cfg.Miner.Etherbase
 		if developer == (libcommon.Address{}) {
-			Fatalf("Please specify developer account address using --miner.etherbase")
+			terminate.Fatalf("Please specify developer account address using --miner.etherbase")
 		}
 		logger.Info("Using developer account", "address", developer)
 

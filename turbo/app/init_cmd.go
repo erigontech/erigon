@@ -4,15 +4,16 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/turbo/debug"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/node"
+	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
 var initCommand = cli.Command{
@@ -43,18 +44,18 @@ func initGenesis(cliCtx *cli.Context) error {
 	// Make sure we have a valid genesis JSON
 	genesisPath := cliCtx.Args().First()
 	if len(genesisPath) == 0 {
-		utils.Fatalf("Must supply path to genesis JSON file")
+		terminate.Fatalf("Must supply path to genesis JSON file")
 	}
 
 	file, err := os.Open(genesisPath)
 	if err != nil {
-		utils.Fatalf("Failed to read genesis file: %v", err)
+		terminate.Fatalf("Failed to read genesis file: %v", err)
 	}
 	defer file.Close()
 
 	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+		terminate.Fatalf("invalid genesis file: %v", err)
 	}
 
 	// Open and initialise both full and light databases
@@ -63,11 +64,11 @@ func initGenesis(cliCtx *cli.Context) error {
 
 	chaindb, err := node.OpenDatabase(cliCtx.Context, stack.Config(), kv.ChainDB, "", false, logger)
 	if err != nil {
-		utils.Fatalf("Failed to open database: %v", err)
+		terminate.Fatalf("Failed to open database: %v", err)
 	}
 	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "", logger)
 	if err != nil {
-		utils.Fatalf("Failed to write genesis block: %v", err)
+		terminate.Fatalf("Failed to write genesis block: %v", err)
 	}
 	chaindb.Close()
 	logger.Info("Successfully wrote genesis state", "hash", hash.Hash())

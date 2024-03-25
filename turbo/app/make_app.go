@@ -6,16 +6,18 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon/turbo/logging"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
+
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/terminate"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
-	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/debug"
 )
 
@@ -25,7 +27,7 @@ import (
 // * action: the main function for the application. receives `*cli.Context` with parsed command-line flags.
 // * cliFlags: the list of flags `cli.Flag` that the app should set and parse. By default, use `DefaultFlags()`. If you want to specify your own flag, use `append(DefaultFlags(), myFlag)` for this parameter.
 func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
-	app := cli2.NewApp(params.GitCommit, "erigon")
+	app := erigoncli.NewApp(params.GitCommit, "erigon")
 	app.Name = name
 	app.UsageText = app.Name + ` [command] [flags]`
 	app.Action = func(context *cli.Context) error {
@@ -42,7 +44,7 @@ func MakeApp(name string, action cli.ActionFunc, cliFlags []cli.Flag) *cli.App {
 		// handle case: config flag
 		configFilePath := context.String(utils.ConfigFlag.Name)
 		if configFilePath != "" {
-			if err := cli2.SetFlagsFromConfigFile(context, configFilePath); err != nil {
+			if err := erigoncli.SetFlagsFromConfigFile(context, configFilePath); err != nil {
 				log.Error("failed setting config flags from yaml/toml file", "err", err)
 				return err
 			}
@@ -170,7 +172,7 @@ func MakeConfigNodeDefault(cliCtx *cli.Context, logger log.Logger) *node.Node {
 func makeConfigNode(ctx context.Context, config *nodecfg.Config, logger log.Logger) *node.Node {
 	stack, err := node.New(ctx, config, logger)
 	if err != nil {
-		utils.Fatalf("Failed to create Erigon node: %v", err)
+		terminate.Fatalf("Failed to create Erigon node: %v", err)
 	}
 
 	return stack

@@ -4,28 +4,25 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-
-	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
-
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-
-	"github.com/ledgerwatch/erigon/rpc"
-	"github.com/ledgerwatch/erigon/rpc/rpccfg"
-
 	"github.com/c2h5oh/datasize"
-	"github.com/ledgerwatch/erigon-lib/etl"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/pflag"
 	"github.com/urfave/cli/v2"
 
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
+	"github.com/ledgerwatch/erigon-lib/etl"
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
+	"github.com/ledgerwatch/erigon-lib/terminate"
+	"github.com/ledgerwatch/erigon-lib/txpool/txpoolcfg"
 	"github.com/ledgerwatch/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
+	"github.com/ledgerwatch/erigon/rpc"
+	"github.com/ledgerwatch/erigon/rpc/rpccfg"
 )
 
 var (
@@ -261,13 +258,13 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		libcommon.CliString2Array(ctx.String(ExperimentsFlag.Name)),
 	)
 	if err != nil {
-		utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+		terminate.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 	}
 	cfg.Prune = mode
 	if ctx.String(BatchSizeFlag.Name) != "" {
 		err := cfg.BatchSize.UnmarshalText([]byte(ctx.String(BatchSizeFlag.Name)))
 		if err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			terminate.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
 
@@ -276,7 +273,7 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 		size := &sizeVal
 		err := size.UnmarshalText([]byte(ctx.String(EtlBufferSizeFlag.Name)))
 		if err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			terminate.Fatalf("Invalid batchSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
 	}
@@ -285,14 +282,14 @@ func ApplyFlagsForEthConfig(ctx *cli.Context, cfg *ethconfig.Config, logger log.
 	if ctx.String(BodyCacheLimitFlag.Name) != "" {
 		err := cfg.Sync.BodyCacheLimit.UnmarshalText([]byte(ctx.String(BodyCacheLimitFlag.Name)))
 		if err != nil {
-			utils.Fatalf("Invalid bodyCacheLimit provided: %v", err)
+			terminate.Fatalf("Invalid bodyCacheLimit provided: %v", err)
 		}
 	}
 
 	if ctx.String(SyncLoopThrottleFlag.Name) != "" {
 		syncLoopThrottle, err := time.ParseDuration(ctx.String(SyncLoopThrottleFlag.Name))
 		if err != nil {
-			utils.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
+			terminate.Fatalf("Invalid time duration provided in %s: %v", SyncLoopThrottleFlag.Name, err)
 		}
 		cfg.Sync.LoopThrottle = syncLoopThrottle
 	}
@@ -388,14 +385,14 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 
 		mode, err := prune.FromCli(chainId, *v, exactH, exactR, exactT, exactC, beforeH, beforeR, beforeT, beforeC, experiments)
 		if err != nil {
-			utils.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+			terminate.Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
 		}
 		cfg.Prune = mode
 	}
 	if v := f.String(BatchSizeFlag.Name, BatchSizeFlag.Value, BatchSizeFlag.Usage); v != nil {
 		err := cfg.BatchSize.UnmarshalText([]byte(*v))
 		if err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			terminate.Fatalf("Invalid batchSize provided: %v", err)
 		}
 	}
 	if v := f.String(EtlBufferSizeFlag.Name, EtlBufferSizeFlag.Value, EtlBufferSizeFlag.Usage); v != nil {
@@ -403,7 +400,7 @@ func ApplyFlagsForEthConfigCobra(f *pflag.FlagSet, cfg *ethconfig.Config) {
 		size := &sizeVal
 		err := size.UnmarshalText([]byte(*v))
 		if err != nil {
-			utils.Fatalf("Invalid batchSize provided: %v", err)
+			terminate.Fatalf("Invalid batchSize provided: %v", err)
 		}
 		etl.BufferOptimalSize = *size
 	}
@@ -504,12 +501,12 @@ func setEmbeddedRpcDaemon(ctx *cli.Context, cfg *nodecfg.Config, logger log.Logg
 
 	err := c.StateCache.CacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))
 	if err != nil {
-		utils.Fatalf("Invalid state.cache value provided")
+		terminate.Fatalf("Invalid state.cache value provided")
 	}
 
 	err = c.StateCache.CodeCacheSize.UnmarshalText([]byte(ctx.String(utils.StateCacheFlag.Name)))
 	if err != nil {
-		utils.Fatalf("Invalid state.cache value provided")
+		terminate.Fatalf("Invalid state.cache value provided")
 	}
 
 	/*

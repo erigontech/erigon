@@ -33,10 +33,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/common/disk"
-	"github.com/ledgerwatch/erigon-lib/common/mem"
-	"github.com/ledgerwatch/erigon/polygon/astrid"
-
 	"github.com/erigontech/mdbx-go/mdbx"
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/holiman/uint256"
@@ -51,17 +47,19 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadergrpc"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
+	protodownloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/grpcutil"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/remote"
 	rpcsentinel "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	txpool_proto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
+	protosentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	txpoolproto "github.com/ledgerwatch/erigon-lib/gointerfaces/txpool"
 	prototypes "github.com/ledgerwatch/erigon-lib/gointerfaces/types"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/kv/kvcache"
@@ -112,6 +110,7 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/bor/finality/flags"
 	"github.com/ledgerwatch/erigon/polygon/bor/valset"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
+	polygonsync "github.com/ledgerwatch/erigon/polygon/sync"
 	"github.com/ledgerwatch/erigon/rpc"
 	"github.com/ledgerwatch/erigon/turbo/builder"
 	"github.com/ledgerwatch/erigon/turbo/engineapi"
@@ -159,7 +158,7 @@ type Ethereum struct {
 	ethBackendRPC      *privateapi.EthBackendServer
 	engineBackendRPC   *engineapi.EngineServer
 	executionEngine    executionclient.ExecutionEngine
-	miningRPC          txpool_proto.MiningServer
+	miningRPC          txpoolproto.MiningServer
 	stateChangesClient txpool.StateChangesClient
 
 	miningSealingQuit chan struct{}
@@ -179,7 +178,7 @@ type Ethereum struct {
 	syncUnwindOrder    stagedsync.UnwindOrder
 	syncPruneOrder     stagedsync.PruneOrder
 
-	downloaderClient proto_downloader.DownloaderClient
+	downloaderClient protodownloader.DownloaderClient
 
 	notifications      *shards.Notifications
 	unsubscribeEthstat func()
@@ -192,7 +191,7 @@ type Ethereum struct {
 	newTxs                  chan types2.Announcements
 	txPoolFetch             *txpool.Fetch
 	txPoolSend              *txpool.Send
-	txPoolGrpcServer        txpool_proto.TxpoolServer
+	txPoolGrpcServer        txpoolproto.TxpoolServer
 	notifyMiningAboutNewTxs chan struct{}
 	forkValidator           *engine_helpers.ForkValidator
 	downloader              *downloader.Downloader
@@ -592,7 +591,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	config.TxPool.NoGossip = config.DisableTxPoolGossip
-	var miningRPC txpool_proto.MiningServer
+	var miningRPC txpoolproto.MiningServer
 	stateDiffClient := direct.NewStateDiffClientDirect(kvRPC)
 	if config.DeprecatedTxPool.Disable {
 		backend.txPoolGrpcServer = &txpool.GrpcDisabled{}
@@ -779,7 +778,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	if !config.Sync.UseSnapshots && backend.downloaderClient != nil {
 		for _, p := range snaptype.AllTypes {
-			backend.downloaderClient.ProhibitNewDownloads(ctx, &proto_downloader.ProhibitNewDownloadsRequest{
+			backend.downloaderClient.ProhibitNewDownloads(ctx, &protodownloader.ProhibitNewDownloadsRequest{
 				Type: p.String(),
 			})
 		}
@@ -1195,7 +1194,7 @@ func (s *Ethereum) NetPeerCount() (uint64, error) {
 	s.logger.Trace("sentry", "peer count", sentryPc)
 	for _, sc := range s.sentriesClient.Sentries() {
 		ctx := context.Background()
-		reply, err := sc.PeerCount(ctx, &proto_sentry.PeerCountRequest{})
+		reply, err := sc.PeerCount(ctx, &protosentry.PeerCountRequest{})
 		if err != nil {
 			s.logger.Warn("sentry", "err", err)
 			return 0, nil
@@ -1262,9 +1261,9 @@ func (s *Ethereum) setUpSnapDownloader(ctx context.Context, downloaderCfg *downl
 		events := s.notifications.Events
 		events.OnNewSnapshot()
 		if s.downloaderClient != nil {
-			req := &proto_downloader.AddRequest{Items: make([]*proto_downloader.AddItem, 0, len(frozenFileNames))}
+			req := &protodownloader.AddRequest{Items: make([]*protodownloader.AddItem, 0, len(frozenFileNames))}
 			for _, fName := range frozenFileNames {
-				req.Items = append(req.Items, &proto_downloader.AddItem{
+				req.Items = append(req.Items, &protodownloader.AddItem{
 					Path: filepath.Join("history", fName),
 				})
 			}
@@ -1332,7 +1331,7 @@ func (s *Ethereum) Peers(ctx context.Context) (*remote.PeersReply, error) {
 
 func (s *Ethereum) AddPeer(ctx context.Context, req *remote.AddPeerRequest) (*remote.AddPeerReply, error) {
 	for _, sentryClient := range s.sentriesClient.Sentries() {
-		_, err := sentryClient.AddPeer(ctx, &proto_sentry.AddPeerRequest{Url: req.Url})
+		_, err := sentryClient.AddPeer(ctx, &protosentry.AddPeerRequest{Url: req.Url})
 		if err != nil {
 			return nil, fmt.Errorf("ethereum backend MultiClient.AddPeers error: %w", err)
 		}
@@ -1369,16 +1368,16 @@ func (s *Ethereum) Start() error {
 	if params.IsChainPoS(s.chainConfig, currentTDProvider) {
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
-	} else if s.config.Astrid {
-		go astrid.RunBlockConsumer(s.sentryCtx, &astrid.BlockConsumerDependencies{
-			Logger:          s.logger,
-			ChainConfig:     s.chainConfig,
-			Sentries:        s.sentriesClient.Sentries(),
-			MaxPeers:        s.maxPeers,
-			HeimdallUrl:     s.config.HeimdallURL,
-			ExecutionEngine: s.executionEngine,
-			Genesis:         s.genesisBlock,
-		})
+	} else if s.config.PolygonSync {
+		go polygonsync.RunService(s.sentryCtx,
+			s.logger,
+			s.chainConfig,
+			s.sentriesClient.Sentries(),
+			s.maxPeers,
+			s.config.HeimdallURL,
+			s.executionEngine,
+			s.genesisBlock,
+		)
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
 	}
@@ -1489,7 +1488,7 @@ func (s *Ethereum) BlockIO() (services.FullBlockReader, *blockio.BlockWriter) {
 	return s.blockReader, s.blockWriter
 }
 
-func (s *Ethereum) TxpoolServer() txpool_proto.TxpoolServer {
+func (s *Ethereum) TxpoolServer() txpoolproto.TxpoolServer {
 	return s.txPoolGrpcServer
 }
 

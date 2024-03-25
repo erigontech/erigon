@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon/cmd/observer/database"
 	"github.com/ledgerwatch/erigon/cmd/observer/observer"
 	"github.com/ledgerwatch/erigon/cmd/observer/reports"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func mainWithFlags(ctx context.Context, flags observer.CommandFlags, logger log.Logger) error {
@@ -115,6 +116,6 @@ func main() {
 
 	err := command.ExecuteContext(ctx, mainWithFlags)
 	if (err != nil) && !errors.Is(err, context.Canceled) {
-		utils.Fatalf("%v", err)
+		terminate.Fatalf("%v", err)
 	}
 }

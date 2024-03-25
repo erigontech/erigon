@@ -30,21 +30,21 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	common2 "github.com/ledgerwatch/erigon-lib/common/dbg"
-	"github.com/ledgerwatch/erigon-lib/common/hexutility"
-	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon/cmd/utils/flags"
-	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon-lib/chain"
+	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon/cmd/evm/internal/compiler"
-	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/cmd/utils/flags"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/runtime"
 	"github.com/ledgerwatch/erigon/eth/tracers/logger"
@@ -65,11 +65,11 @@ func readGenesis(genesisPath string) *types.Genesis {
 	// Make sure we have a valid genesis JSON
 	//genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
-		utils.Fatalf("Must supply path to genesis JSON file")
+		terminate.Fatalf("Must supply path to genesis JSON file")
 	}
 	file, err := os.Open(genesisPath)
 	if err != nil {
-		utils.Fatalf("Failed to read genesis file: %v", err)
+		terminate.Fatalf("Failed to read genesis file: %v", err)
 	}
 	defer func(file *os.File) {
 		closeErr := file.Close()
@@ -80,7 +80,7 @@ func readGenesis(genesisPath string) *types.Genesis {
 
 	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+		terminate.Fatalf("invalid genesis file: %v", err)
 	}
 	return genesis
 }
@@ -106,11 +106,11 @@ func timedExec(bench bool, execFunc func() ([]byte, uint64, error)) (output []by
 		stats.bytesAllocated = result.AllocedBytesPerOp()
 	} else {
 		var memStatsBefore, memStatsAfter goruntime.MemStats
-		common2.ReadMemStats(&memStatsBefore)
+		dbg.ReadMemStats(&memStatsBefore)
 		startTime := time.Now()
 		output, gasLeft, err = execFunc()
 		stats.time = time.Since(startTime)
-		common2.ReadMemStats(&memStatsAfter)
+		dbg.ReadMemStats(&memStatsAfter)
 		stats.allocs = int64(memStatsAfter.Mallocs - memStatsBefore.Mallocs)
 		stats.bytesAllocated = int64(memStatsAfter.TotalAlloc - memStatsBefore.TotalAlloc)
 	}

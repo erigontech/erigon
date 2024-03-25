@@ -236,7 +236,7 @@ type Config struct {
 	WithoutHeimdall bool
 	// Heimdall services active
 	WithHeimdallMilestones bool
-	Astrid                 bool
+	PolygonSync            bool
 
 	// Ethstats service
 	Ethstats string

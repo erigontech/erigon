@@ -25,18 +25,18 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ledgerwatch/erigon-lib/common"
-
 	"github.com/ledgerwatch/log/v3"
 	"github.com/urfave/cli/v2"
 
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon/accounts/abi"
 	"github.com/ledgerwatch/erigon/accounts/abi/bind"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/common/compiler"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
-	cli2 "github.com/ledgerwatch/erigon/turbo/cli"
+	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 )
 
 var (
@@ -101,7 +101,7 @@ var (
 )
 
 func init() {
-	app = cli2.NewApp(params.GitCommit, "ethereum checkpoint helper tool")
+	app = erigoncli.NewApp(params.GitCommit, "ethereum checkpoint helper tool")
 	app.Flags = []cli.Flag{
 		&abiFlag,
 		&binFlag,
@@ -123,7 +123,7 @@ func init() {
 func abigen(c *cli.Context) error {
 	utils.CheckExclusive(c, &abiFlag, &jsonFlag, &solFlag, &vyFlag) // Only one source can be selected.
 	if c.String(pkgFlag.Name) == "" {
-		utils.Fatalf("No destination package specified (--pkg)")
+		terminate.Fatalf("No destination package specified (--pkg)")
 	}
 	var lang bind.Lang
 	switch c.String(langFlag.Name) {
@@ -133,9 +133,9 @@ func abigen(c *cli.Context) error {
 		lang = bind.LangJava
 	case "objc":
 		lang = bind.LangObjC
-		utils.Fatalf("Objc binding generation is uncompleted")
+		terminate.Fatalf("Objc binding generation is uncompleted")
 	default:
-		utils.Fatalf("Unsupported destination language \"%s\" (--lang)", c.String(langFlag.Name))
+		terminate.Fatalf("Unsupported destination language \"%s\" (--lang)", c.String(langFlag.Name))
 	}
 	// If the entire solidity code was specified, build and bind based on that
 	var (
@@ -159,17 +159,17 @@ func abigen(c *cli.Context) error {
 			abiBytes, err = os.ReadFile(input)
 		}
 		if err != nil {
-			utils.Fatalf("Failed to read input ABI: %v", err)
+			terminate.Fatalf("Failed to read input ABI: %v", err)
 		}
 		abis = append(abis, string(abiBytes))
 
 		var bin []byte
 		if binFile := c.String(binFlag.Name); binFile != "" {
 			if bin, err = os.ReadFile(binFile); err != nil {
-				utils.Fatalf("Failed to read input bytecode: %v", err)
+				terminate.Fatalf("Failed to read input bytecode: %v", err)
 			}
 			if strings.Contains(string(bin), "//") {
-				utils.Fatalf("Contract has additional library references, please use other mode(e.g. --combined-json) to catch library infos")
+				terminate.Fatalf("Contract has additional library references, please use other mode(e.g. --combined-json) to catch library infos")
 			}
 		}
 		bins = append(bins, string(bin))
@@ -192,12 +192,12 @@ func abigen(c *cli.Context) error {
 		case c.IsSet(solFlag.Name):
 			contracts, err = compiler.CompileSolidity(c.String(solcFlag.Name), c.String(solFlag.Name))
 			if err != nil {
-				utils.Fatalf("Failed to build Solidity contract: %v", err)
+				terminate.Fatalf("Failed to build Solidity contract: %v", err)
 			}
 		case c.IsSet(vyFlag.Name):
 			output, err := compiler.CompileVyper(c.String(vyperFlag.Name), c.String(vyFlag.Name))
 			if err != nil {
-				utils.Fatalf("Failed to build Vyper contract: %v", err)
+				terminate.Fatalf("Failed to build Vyper contract: %v", err)
 			}
 			contracts = make(map[string]*compiler.Contract)
 			for n, contract := range output {
@@ -214,11 +214,11 @@ func abigen(c *cli.Context) error {
 		case c.IsSet(jsonFlag.Name):
 			jsonOutput, err := os.ReadFile(c.String(jsonFlag.Name))
 			if err != nil {
-				utils.Fatalf("Failed to read combined-json from compiler: %v", err)
+				terminate.Fatalf("Failed to read combined-json from compiler: %v", err)
 			}
 			contracts, err = compiler.ParseCombinedJSON(jsonOutput, "", "", "", "")
 			if err != nil {
-				utils.Fatalf("Failed to read contract information from json output: %v", err)
+				terminate.Fatalf("Failed to read contract information from json output: %v", err)
 			}
 		}
 		// Gather all non-excluded contract for binding
@@ -228,7 +228,7 @@ func abigen(c *cli.Context) error {
 			}
 			abi, err := json.Marshal(contract.Info.AbiDefinition) // Flatten the compiler parse
 			if err != nil {
-				utils.Fatalf("Failed to parse ABIs from compiler output: %v", err)
+				terminate.Fatalf("Failed to parse ABIs from compiler output: %v", err)
 			}
 			abis = append(abis, string(abi))
 			bins = append(bins, contract.Code)
@@ -255,7 +255,7 @@ func abigen(c *cli.Context) error {
 	// Generate the contract binding
 	code, err := bind.Bind(types, abis, bins, sigs, c.String(pkgFlag.Name), lang, libs, aliases)
 	if err != nil {
-		utils.Fatalf("Failed to generate ABI binding: %v", err)
+		terminate.Fatalf("Failed to generate ABI binding: %v", err)
 	}
 	// Either flush it out to a file or display on the standard output
 	if !c.IsSet(outFlag.Name) {
@@ -263,7 +263,7 @@ func abigen(c *cli.Context) error {
 		return nil
 	}
 	if err := os.WriteFile(c.String(outFlag.Name), []byte(code), 0600); err != nil {
-		utils.Fatalf("Failed to write ABI binding: %v", err)
+		terminate.Fatalf("Failed to write ABI binding: %v", err)
 	}
 	return nil
 }
