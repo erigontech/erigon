@@ -1188,11 +1188,12 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 	}
 
 	if len(state) < 16 {
+		log.Warn("[dbg] zero3?", "bn", blockNum)
 		return 0, 0, nil, nil
 	}
 
 	txNum, blockNum = _decodeTxBlockNums(state)
-	log.Warn("[dbg] zero?", "bn", blockNum)
+	log.Warn("[dbg] zero1?", "bn", blockNum)
 	return blockNum, txNum, state, nil
 }
 
