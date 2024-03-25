@@ -564,14 +564,23 @@ func ConsensusClStages(ctx context.Context,
 										errCh <- err
 										return
 									}
-									blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-									if err != nil {
-										errCh <- err
-										return
-									}
-									if _, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
-										errCh <- err
-										return
+									var inserted uint64
+
+									for inserted != uint64(ids.Len()) {
+										select {
+										case <-ctx.Done():
+											return
+										default:
+										}
+										blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+										if err != nil {
+											errCh <- err
+											return
+										}
+										if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+											errCh <- err
+											return
+										}
 									}
 
 									select {
