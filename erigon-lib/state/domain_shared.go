@@ -1180,9 +1180,10 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(tx kv.Tx, cd *D
 		txn, _ := _decodeTxBlockNums(value)
 		//fmt.Printf("[commitment] Seek found committed txn %d block %d\n", txn, bn)
 		if txn >= sinceTx && txn <= untilTx {
+			log.Warn("[dbg] zero4?", "bn", blockNum)
 			state = value
 		}
-		log.Warn("[dbg] zero4?", "bn", blockNum)
+		log.Warn("[dbg] zero5?", "bn", blockNum)
 
 		return nil
 	}); err != nil {
