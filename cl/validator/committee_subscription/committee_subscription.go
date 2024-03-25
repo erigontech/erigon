@@ -49,7 +49,6 @@ func NewCommitteeSubscribeManagement(
 		genesisConfig: genesisConfig,
 		sentinel:      sentinel,
 		state:         state,
-		//subnets:      make(map[uint64]*subnetSubscription),
 		aggregations:  make(map[string]*aggregationData),
 		validatorSubs: make(map[uint64][]*validatorSub),
 	}
@@ -130,7 +129,7 @@ var (
 	ErrAggregationBitsMismatch  = fmt.Errorf("aggregation bits mismatch committee size")
 )
 
-func (c *CommitteeSubscribeMgmt) checkAttestationData(topic string, att *solid.Attestation) error {
+func (c *CommitteeSubscribeMgmt) checkAttestation(topic string, att *solid.Attestation) error {
 	var (
 		slot           = att.AttestantionData().Slot()
 		committeeIndex = att.AttestantionData().CommitteeIndex()
@@ -197,7 +196,7 @@ func (c *CommitteeSubscribeMgmt) checkAttestationData(topic string, att *solid.A
 }
 
 func (c *CommitteeSubscribeMgmt) OnReceiveAttestation(topic string, att *solid.Attestation) error {
-	if err := c.checkAttestationData(topic, att); err != nil {
+	if err := c.checkAttestation(topic, att); err != nil {
 		return err
 	}
 
@@ -215,24 +214,12 @@ func (c *CommitteeSubscribeMgmt) OnReceiveAttestation(topic string, att *solid.A
 		// no one is interested in this aggregation
 		return nil
 	}
-	bitGroupIdx := -1
-	// check if already have aggregation signature associated with the bit. if not, add it
-	for i := 0; i < len(bits); i++ {
-		if bits[i] == 0 {
-			continue
-		} else if bits[i]|aggrData.bits[i] == aggrData.bits[i] {
-			// already have this bit, skip current attestation
-			return nil
-		} else {
-			// get a new bit
-			bitGroupIdx = i
-			break
-		}
-	}
-	if bitGroupIdx == -1 {
-		// weird case. all bits are 0
-		log.Warn("all bits are 0")
+	// check if this is the first attestation for this aggregation
+	bitGroupIdx, err := findbitGroup(bits, aggrData.bits)
+	if err == errBitExist {
 		return nil
+	} else if err != nil {
+		return err
 	}
 	// aggregate
 	sigBytes := make([]byte, 96)
@@ -253,6 +240,27 @@ func (c *CommitteeSubscribeMgmt) OnReceiveAttestation(topic string, att *solid.A
 	// update aggregation bits
 	aggrData.bits[bitGroupIdx] |= bits[bitGroupIdx]
 	return nil
+}
+
+var (
+	errBitExist = fmt.Errorf("bit already exist")
+)
+
+func findbitGroup(comingBits []byte, aggrBits []byte) (int, error) {
+	for i := 0; i < len(comingBits); i++ {
+		if comingBits[i] == 0 {
+			continue
+		}
+		if comingBits[i]&(comingBits[i]-1) != 0 {
+			return -1, fmt.Errorf("more than one bit set")
+		} else if comingBits[i]|aggrBits[i] == aggrBits[i] {
+			return -1, errBitExist
+		} else {
+			return i, nil
+		}
+	}
+	// weird case. all bits are 0
+	return -1, fmt.Errorf("all bits are 0")
 }
 
 func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
