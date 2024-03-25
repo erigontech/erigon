@@ -523,7 +523,7 @@ func txnExecutor(tx kv.TemporalTx, chainConfig *chain.Config, engine consensus.E
 		ibs:         state.New(stateReader),
 	}
 	if tracer != nil {
-		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer}
+		ie.vmConfig = &vm.Config{Debug: true, Tracer: tracer.Tracer().Hooks}
 	}
 	return ie
 }

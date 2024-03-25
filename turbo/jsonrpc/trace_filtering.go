@@ -772,7 +772,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		ot.idx = []string{fmt.Sprintf("%d-", txIndex)}
 		ot.traceAddr = []int{}
 		vmConfig.Debug = true
-		vmConfig.Tracer = &ot
+		vmConfig.Tracer = ot.Tracer().Hooks
 		ibs := state.New(cachedReader)
 
 		blockCtx := transactions.NewEVMBlockContext(engine, lastHeader, true /* requireCanonical */, dbtx, api._blockReader)
@@ -781,13 +781,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		gp := new(core.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		ibs.SetTxContext(txHash, lastBlockHash, txIndex)
-		ibs.SetLogger(&ot)
+		ibs.SetLogger(ot.Tracer().Hooks)
 
-		ot.CaptureTxStart(evm, txn)
+		ot.Tracer().OnTxStart(evm.GetVMContext(), txn, msg.From())
 		var execResult *core.ExecutionResult
 		execResult, err = core.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */)
 		if err != nil {
-			ot.CaptureTxEnd(nil, err)
+			ot.Tracer().OnTxEnd(nil, err)
 			if first {
 				first = false
 			} else {
@@ -798,7 +798,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteObjectEnd()
 			continue
 		}
-		ot.CaptureTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
+		ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.UsedGas}, nil)
 		traceResult.Output = common.Copy(execResult.ReturnData)
 		if err = ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
 			if first {

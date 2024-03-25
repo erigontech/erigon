@@ -18,15 +18,13 @@ package tracers
 
 import (
 	"encoding/json"
-	"math/big"
 
 	"github.com/holiman/uint256"
-	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
 
 func init() {
@@ -38,59 +36,48 @@ func init() {
 type NoopTracer struct{}
 
 // newNoopTracer returns a new noop tracer.
-func newNoopTracer(ctx *Context, _ json.RawMessage) (Tracer, error) {
-	return &NoopTracer{}, nil
+func newNoopTracer(ctx *Context, _ json.RawMessage) (*Tracer, error) {
+	t := &NoopTracer{}
+	return &Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart:       t.OnTxStart,
+			OnTxEnd:         t.OnTxEnd,
+			OnEnter:         t.OnEnter,
+			OnExit:          t.OnExit,
+			OnOpcode:        t.OnOpcode,
+			OnFault:         t.OnFault,
+			OnGasChange:     t.OnGasChange,
+			OnBalanceChange: t.OnBalanceChange,
+			OnNonceChange:   t.OnNonceChange,
+			OnCodeChange:    t.OnCodeChange,
+			OnStorageChange: t.OnStorageChange,
+			OnLog:           t.OnLog,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}, nil
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *NoopTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (t *NoopTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
 }
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *NoopTracer) CaptureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *NoopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpContext, depth int, err error) {
 }
 
-// CaptureState implements the EVMLogger interface to trace a single step of VM execution.
-func (t *NoopTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
+func (t *NoopTracer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {}
+
+func (t *NoopTracer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
 }
 
-// CaptureFault implements the EVMLogger interface to trace an execution fault.
-func (t *NoopTracer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, _ *vm.ScopeContext, depth int, err error) {
+func (t *NoopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 }
 
-// CaptureKeccakPreimage is called during the KECCAK256 opcode.
-func (t *NoopTracer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
-
-// OnGasChange is called when gas is either consumed or refunded.
-func (t *NoopTracer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
-
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *NoopTracer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (*NoopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from common.Address) {
 }
 
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (t *NoopTracer) CaptureExit(output []byte, gasUsed uint64, err error, reverted bool) {
-}
+func (*NoopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
 
-func (*NoopTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {}
-
-func (*NoopTracer) CaptureTxEnd(receipt *types.Receipt, err error) {}
-
-func (*NoopTracer) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
-}
-
-func (*NoopTracer) OnBlockEnd(err error) {
-}
-
-func (*NoopTracer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
-}
-
-func (*NoopTracer) OnBeaconBlockRootStart(root libcommon.Hash) {}
-
-func (*NoopTracer) OnBeaconBlockRootEnd() {}
-
-func (*NoopTracer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (*NoopTracer) OnBalanceChange(a common.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
 }
 
 func (*NoopTracer) OnNonceChange(a libcommon.Address, prev, new uint64) {}

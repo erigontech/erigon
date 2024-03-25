@@ -20,26 +20,29 @@ import (
 	"hash"
 	"sync"
 
+	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/math"
 	"github.com/ledgerwatch/log/v3"
 
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/vm/stack"
 )
 
 // Config are the configuration options for the Interpreter
 type Config struct {
-	Debug         bool      // Enables debugging
-	Tracer        EVMLogger // Opcode logger
-	NoRecursion   bool      // Disables call, callcode, delegate call and create
-	NoBaseFee     bool      // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
-	SkipAnalysis  bool      // Whether we can skip jumpdest analysis based on the checked history
-	TraceJumpDest bool      // Print transaction hashes where jumpdest analysis was useful
-	NoReceipts    bool      // Do not calculate receipts
-	ReadOnly      bool      // Do no perform any block finalisation
-	StatelessExec bool      // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
-	RestoreState  bool      // Revert all changes made to the state (useful for constant system calls)
+	Debug         bool // Enables debugging
+	Tracer        *tracing.Hooks
+	NoRecursion   bool // Disables call, callcode, delegate call and create
+	NoBaseFee     bool // Forces the EIP-1559 baseFee to 0 (needed for 0 price calls)
+	SkipAnalysis  bool // Whether we can skip jumpdest analysis based on the checked history
+	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
+	NoReceipts    bool // Do not calculate receipts
+	ReadOnly      bool // Do no perform any block finalisation
+	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
+	RestoreState  bool // Revert all changes made to the state (useful for constant system calls)
 
 	ExtraEips []int // Additional EIPS that are to be enabled
 }
@@ -78,6 +81,53 @@ type ScopeContext struct {
 	Memory   *Memory
 	Stack    *stack.Stack
 	Contract *Contract
+}
+
+// MemoryData returns the underlying memory slice. Callers must not modify the contents
+// of the returned data.
+func (ctx *ScopeContext) MemoryData() []byte {
+	if ctx.Memory == nil {
+		return nil
+	}
+	return ctx.Memory.Data()
+}
+
+// MemoryData returns the stack data. Callers must not modify the contents
+// of the returned data.
+func (ctx *ScopeContext) StackData() []uint256.Int {
+	if ctx.Stack == nil {
+		return nil
+	}
+	return ctx.Stack.Data
+}
+
+// Caller returns the current caller.
+func (ctx *ScopeContext) Caller() common.Address {
+	return ctx.Contract.Caller()
+}
+
+// Address returns the address where this scope of execution is taking place.
+func (ctx *ScopeContext) Address() common.Address {
+	return ctx.Contract.Address()
+}
+
+// CallValue returns the value supplied with this call.
+func (ctx *ScopeContext) CallValue() *uint256.Int {
+	return ctx.Contract.Value()
+}
+
+// CallInput returns the input/calldata with this call. Callers must not modify
+// the contents of the returned data.
+func (ctx *ScopeContext) CallInput() []byte {
+	return ctx.Contract.Input
+}
+
+func (ctx *ScopeContext) Code() []byte {
+	return ctx.Contract.Code
+}
+
+func (ctx *ScopeContext) CodeHash() libcommon.Hash {
+	return ctx.Contract.CodeHash
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -226,10 +276,11 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 	defer func() {
 		// first: capture data/memory/state/depth/etc... then clenup them
 		if in.cfg.Tracer != nil && err != nil {
-			if !logged {
-				in.cfg.Tracer.CaptureState(pcCopy, op, gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err)) //nolint:errcheck
-			} else {
-				in.cfg.Tracer.CaptureFault(pcCopy, op, gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
+			if !logged && in.evm.config.Tracer.OnOpcode != nil {
+				in.evm.config.Tracer.OnOpcode(pcCopy, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+			}
+			if logged && in.evm.config.Tracer.OnFault != nil {
+				in.evm.config.Tracer.OnFault(pcCopy, byte(op), gasCopy, cost, callContext, in.depth, VMErrorFromErr(err))
 			}
 		}
 		// this function must execute _after_: the `CaptureState` needs the stacks before
@@ -266,7 +317,7 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 		} else if sLen > operation.maxStack {
 			return nil, &ErrStackOverflow{stackLen: sLen, limit: operation.maxStack}
 		}
-		if !contract.UseGas(cost, in.cfg.Tracer, GasChangeIgnored) {
+		if !contract.UseGas(cost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 			return nil, ErrOutOfGas
 		}
 		if operation.dynamicGas != nil {
@@ -292,21 +343,27 @@ func (in *EVMInterpreter) Run(contract *Contract, input []byte, readOnly bool) (
 			var dynamicCost uint64
 			dynamicCost, err = operation.dynamicGas(in.evm, contract, locStack, mem, memorySize)
 			cost += dynamicCost // for tracing
-			if err != nil || !contract.UseGas(dynamicCost, in.cfg.Tracer, GasChangeIgnored) {
+			if err != nil || !contract.UseGas(dynamicCost, in.cfg.Tracer, tracing.GasChangeIgnored) {
 				return nil, ErrOutOfGas
 			}
 			// Do tracing before memory expansion
 			if in.cfg.Tracer != nil {
-				in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, err) //nolint:errcheck
-				logged = true
+				if in.evm.config.Tracer.OnOpcode != nil {
+					in.evm.config.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+					logged = true
+				}
 			}
 			if memorySize > 0 {
 				mem.Resize(memorySize)
 			}
 		} else if in.cfg.Tracer != nil {
-			in.cfg.Tracer.OnGasChange(gasCopy, gasCopy-cost, GasChangeCallOpCode)
-			in.cfg.Tracer.CaptureState(_pc, op, gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err)) //nolint:errcheck
-			logged = true
+			if in.evm.config.Tracer.OnGasChange != nil {
+				in.evm.config.Tracer.OnGasChange(gasCopy, gasCopy-cost, tracing.GasChangeCallOpCode)
+			}
+			if in.evm.config.Tracer.OnOpcode != nil {
+				in.evm.config.Tracer.OnOpcode(_pc, byte(op), gasCopy, cost, callContext, in.returnData, in.depth, VMErrorFromErr(err))
+				logged = true
+			}
 		}
 		// execute the operation
 		res, err = operation.execute(pc, in, callContext)

@@ -651,7 +651,7 @@ func doRetireCommand(cliCtx *cli.Context) error {
 
 func doUploaderCommand(cliCtx *cli.Context) error {
 	var logger log.Logger
-	var tracer tracers.Tracer
+	var tracer *tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 

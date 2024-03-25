@@ -9,9 +9,8 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
-	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
@@ -21,55 +20,58 @@ func init() {
 
 type Printer struct{}
 
-func newPrinter(ctx *tracers.Context, cfg json.RawMessage) (tracers.Tracer, error) {
-	return &Printer{}, nil
+func newPrinter(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, error) {
+	t := &Printer{}
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart:       t.OnTxStart,
+			OnTxEnd:         t.OnTxEnd,
+			OnEnter:         t.OnEnter,
+			OnExit:          t.OnExit,
+			OnOpcode:        t.OnOpcode,
+			OnFault:         t.OnFault,
+			OnGasChange:     t.OnGasChange,
+			OnBalanceChange: t.OnBalanceChange,
+			OnNonceChange:   t.OnNonceChange,
+			OnCodeChange:    t.OnCodeChange,
+			OnStorageChange: t.OnStorageChange,
+			OnLog:           t.OnLog,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}, nil
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (p *Printer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	fmt.Printf("CaptureStart: from=%v, to=%v, precompile=%v, create=%v, input=%s, gas=%v, value=%v, code=%v\n", from, to, precompile, create, hexutility.Bytes(input), gas, value, hexutility.Bytes(code))
+// OnExit is called after the call finishes to finalize the tracing.
+func (p *Printer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	fmt.Printf("OnExit: output=%s, gasUsed=%v, err=%v\n", hexutility.Bytes(output), gasUsed, err)
 }
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (p *Printer) CaptureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
-	fmt.Printf("CaptureEnd: output=%s, gasUsed=%v, err=%v\n", hexutility.Bytes(output), gasUsed, err)
+// OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
+func (p *Printer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	fmt.Printf("OnOpcode: pc=%v, op=%v, gas=%v, cost=%v, scope=%v, rData=%v, depth=%v, err=%v\n", pc, op, gas, cost, scope, rData, depth, err)
 }
 
-// CaptureState implements the EVMLogger interface to trace a single step of VM execution.
-func (p *Printer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	//fmt.Printf("CaptureState: pc=%v, op=%v, gas=%v, cost=%v, scope=%v, rData=%v, depth=%v, err=%v\n", pc, op, gas, cost, scope, rData, depth, err)
+// OnFault implements the EVMLogger interface to trace an execution fault.
+func (p *Printer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpContext, depth int, err error) {
+	fmt.Printf("OnFault: pc=%v, op=%v, gas=%v, cost=%v, depth=%v, err=%v\n", pc, op, gas, cost, depth, err)
 }
 
-// CaptureFault implements the EVMLogger interface to trace an execution fault.
-func (p *Printer) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, _ *vm.ScopeContext, depth int, err error) {
-	fmt.Printf("CaptureFault: pc=%v, op=%v, gas=%v, cost=%v, depth=%v, err=%v\n", pc, op, gas, cost, depth, err)
+func (p *Printer) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	fmt.Printf("CaptureEnter: depth=%v, typ=%v from=%v, to=%v, input=%s, gas=%v, value=%v\n", depth, typ, from, to, hexutility.Bytes(input), gas, value)
 }
 
-// CaptureKeccakPreimage is called during the KECCAK256 opcode.
-func (p *Printer) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
-
-// CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (p *Printer) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	fmt.Printf("CaptureEnter: typ=%v, from=%v, to=%v, precompile=%v, create=%v, input=%s, gas=%v, value=%v, code=%v\n", typ, from, to, precompile, create, hexutility.Bytes(input), gas, value, hexutility.Bytes(code))
-}
-
-// CaptureExit is called when EVM exits a scope, even if the scope didn't
-// execute any code.
-func (p *Printer) CaptureExit(output []byte, gasUsed uint64, err error, reverted bool) {
-	fmt.Printf("CaptureExit: output=%s, gasUsed=%v, err=%v\n", hexutility.Bytes(output), gasUsed, err)
-}
-
-func (p *Printer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
+func (p *Printer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
 	buf, err := json.Marshal(tx)
 	if err != nil {
 		fmt.Printf("err: %v\n", err)
 		return
 	}
-	fmt.Printf("CaptureTxStart: tx=%s\n", buf)
+	fmt.Printf("OnTxStart: tx=%s\n", buf)
 
 }
 
-func (p *Printer) CaptureTxEnd(receipt *types.Receipt, err error) {
+func (p *Printer) OnTxEnd(receipt *types.Receipt, err error) {
 	if err != nil {
 		fmt.Printf("CaptureTxEnd err: %v\n", err)
 		return
@@ -98,15 +100,7 @@ func (p *Printer) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
 	fmt.Printf("OnGenesisBlock: b=%v, allocLength=%d\n", b.NumberU64(), len(alloc))
 }
 
-func (p *Printer) OnBeaconBlockRootStart(root libcommon.Hash) {
-	fmt.Printf("OnBeaconBlockRootStart: b=%v", root)
-}
-
-func (p *Printer) OnBeaconBlockRootEnd() {
-	fmt.Printf("OnBeaconBlockRootEnd:")
-}
-
-func (p *Printer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (p *Printer) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason tracing.BalanceChangeReason) {
 	fmt.Printf("OnBalanceChange: a=%v, prev=%v, new=%v\n", a, prev, new)
 }
 
@@ -131,7 +125,7 @@ func (p *Printer) OnLog(l *types.Log) {
 	fmt.Printf("OnLog: l=%s\n", buf)
 }
 
-func (p *Printer) OnGasChange(old, new uint64, reason vm.GasChangeReason) {
+func (p *Printer) OnGasChange(old, new uint64, reason tracing.GasChangeReason) {
 	fmt.Printf("OnGasChange: old=%v, new=%v, diff=%v\n", old, new, new-old)
 }
 

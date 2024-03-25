@@ -139,7 +139,7 @@ func (n *devnetNode) EnableMetrics(int) {
 // run configures, creates and serves an erigon node
 func (n *devnetNode) run(ctx *cli.Context) error {
 	var logger log.Logger
-	var tracer tracers.Tracer
+	var tracer *tracers.Tracer
 	var err error
 	var metricsMux *http.ServeMux
 

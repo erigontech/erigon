@@ -26,6 +26,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/params"
@@ -182,9 +183,9 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 			// DELEGATECALL inherits value from parent call
 			v = parent.value
 		}
-		evm.captureBegin(depth == 0, typ, caller.Address(), addr, isPrecompile, input, gas, v, code)
+		evm.captureBegin(depth, typ, caller.Address(), addr, isPrecompile, input, gas, v, code)
 		defer func(startGas uint64) {
-			evm.captureEnd(depth == 0, typ, startGas, leftOverGas, ret, err)
+			evm.captureEnd(depth, typ, startGas, leftOverGas, ret, err)
 		}(gas)
 	}
 
@@ -220,7 +221,7 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 		// This doesn't matter on Mainnet, where all empties are gone at the time of Byzantium,
 		// but is the correct thing to do and matters on other networks, in tests, and potential
 		// future scenarios
-		evm.intraBlockState.AddBalance(addr, u256.Num0, evmtypes.BalanceChangeTouchAccount)
+		evm.intraBlockState.AddBalance(addr, u256.Num0, tracing.BalanceChangeTouchAccount)
 	}
 
 	// It is allowed to call precompiles, even via delegatecall
@@ -260,8 +261,8 @@ func (evm *EVM) call(typ OpCode, caller ContractRef, addr libcommon.Address, inp
 	if err != nil || evm.config.RestoreState {
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
-			if evm.Config().Tracer != nil {
-				evm.Config().Tracer.OnGasChange(gas, 0, GasChangeCallFailedExecution)
+			if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+				evm.Config().Tracer.OnGasChange(gas, 0, tracing.GasChangeCallFailedExecution)
 			}
 			gas = 0
 		}
@@ -325,9 +326,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	depth := evm.interpreter.Depth()
 
 	if evm.Config().Tracer != nil {
-		evm.captureBegin(depth == 0, typ, caller.Address(), address, false, codeAndHash.code, gas, value, nil)
+		evm.captureBegin(depth, typ, caller.Address(), address, false, codeAndHash.code, gas, value, nil)
 		defer func(startGas uint64) {
-			evm.captureEnd(depth == 0, typ, startGas, leftOverGas, ret, err)
+			evm.captureEnd(depth, typ, startGas, leftOverGas, ret, err)
 		}(gas)
 	}
 
@@ -358,8 +359,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	contractHash := evm.intraBlockState.GetCodeHash(address)
 	if evm.intraBlockState.GetNonce(address) != 0 || (contractHash != (libcommon.Hash{}) && contractHash != emptyCodeHash) {
 		err = ErrContractAddressCollision
-		if evm.Config().Tracer != nil {
-			evm.Config().Tracer.OnGasChange(gas, 0, GasChangeCallFailedExecution)
+		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
+			evm.Config().Tracer.OnGasChange(gas, 0, tracing.GasChangeCallFailedExecution)
 		}
 		return nil, libcommon.Address{}, 0, err
 	}
@@ -401,7 +402,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// by the error checking condition below.
 	if err == nil {
 		createDataGas := uint64(len(ret)) * params.CreateDataGas
-		if contract.UseGas(createDataGas, evm.Config().Tracer, GasChangeCallCodeStorage) {
+		if contract.UseGas(createDataGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage) {
 			evm.intraBlockState.SetCode(address, ret)
 		} else if evm.chainRules.IsHomestead {
 			err = ErrCodeStoreOutOfGas
@@ -414,7 +415,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) {
 		evm.intraBlockState.RevertToSnapshot(snapshot)
 		if err != ErrExecutionReverted {
-			contract.UseGas(contract.Gas, evm.Config().Tracer, GasChangeCallFailedExecution)
+			contract.UseGas(contract.Gas, evm.Config().Tracer, tracing.GasChangeCallFailedExecution)
 		}
 	}
 
@@ -466,23 +467,22 @@ func (evm *EVM) IntraBlockState() evmtypes.IntraBlockState {
 	return evm.intraBlockState
 }
 
-func (evm *EVM) captureBegin(isRoot bool, typ OpCode, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, startGas uint64, value *uint256.Int, code []byte) {
+func (evm *EVM) captureBegin(depth int, typ OpCode, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, startGas uint64, value *uint256.Int, code []byte) {
 	tracer := evm.Config().Tracer
 
-	if isRoot {
-		tracer.CaptureStart(from, to, precompile, typ == CREATE || typ == CREATE2, input, startGas, value, code)
-	} else {
-		tracer.CaptureEnter(typ, from, to, precompile, typ == CREATE || typ == CREATE2, input, startGas, value, code)
+	if tracer.OnEnter != nil {
+		tracer.OnEnter(depth, byte(typ), from, to, precompile, input, startGas, value, code)
 	}
-
-	tracer.OnGasChange(0, startGas, GasChangeCallInitialBalance)
+	if tracer.OnGasChange != nil {
+		tracer.OnGasChange(0, startGas, tracing.GasChangeCallInitialBalance)
+	}
 }
 
-func (evm *EVM) captureEnd(isRoot bool, typ OpCode, startGas uint64, leftOverGas uint64, ret []byte, err error) {
+func (evm *EVM) captureEnd(depth int, typ OpCode, startGas uint64, leftOverGas uint64, ret []byte, err error) {
 	tracer := evm.Config().Tracer
 
-	if leftOverGas != 0 {
-		tracer.OnGasChange(leftOverGas, 0, GasChangeCallLeftOverReturned)
+	if leftOverGas != 0 && tracer.OnGasChange != nil {
+		tracer.OnGasChange(leftOverGas, 0, tracing.GasChangeCallLeftOverReturned)
 	}
 
 	var reverted bool
@@ -493,9 +493,21 @@ func (evm *EVM) captureEnd(isRoot bool, typ OpCode, startGas uint64, leftOverGas
 		reverted = false
 	}
 
-	if isRoot {
-		tracer.CaptureEnd(ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
-	} else {
-		tracer.CaptureExit(ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
+	if tracer.OnExit != nil {
+		tracer.OnExit(depth, ret, startGas-leftOverGas, VMErrorFromErr(err), reverted)
+	}
+}
+
+// GetVMContext provides context about the block being executed as well as state
+// to the tracers.
+func (evm *EVM) GetVMContext() *tracing.VMContext {
+	return &tracing.VMContext{
+		Coinbase:        evm.Context.Coinbase,
+		BlockNumber:     evm.Context.BlockNumber,
+		Time:            evm.Context.Time,
+		Random:          evm.Context.PrevRanDao,
+		GasPrice:        evm.TxContext.GasPrice,
+		ChainConfig:     evm.ChainConfig(),
+		IntraBlockState: evm.IntraBlockState(),
 	}
 }

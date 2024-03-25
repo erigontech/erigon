@@ -25,8 +25,8 @@ import (
 	"github.com/holiman/uint256"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/trie"
@@ -225,7 +225,7 @@ func (so *stateObject) SetState(key *libcommon.Hash, value uint256.Int) {
 		key:      *key,
 		prevalue: prev,
 	})
-	if so.db.logger != nil {
+	if so.db.logger != nil && so.db.logger.OnStorageChange != nil {
 		so.db.logger.OnStorageChange(so.address, key, prev, value)
 	}
 	so.setState(key, value)
@@ -273,7 +273,7 @@ func (so *stateObject) printTrie() {
 
 // AddBalance adds amount to so's balance.
 // It is used to add funds to the destination account of a transfer.
-func (so *stateObject) AddBalance(amount *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (so *stateObject) AddBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	// EIP161: We must check emptiness for the objects such that the account
 	// clearing (0,0,0 objects) can take effect.
 	if amount.IsZero() {
@@ -289,19 +289,19 @@ func (so *stateObject) AddBalance(amount *uint256.Int, reason evmtypes.BalanceCh
 
 // SubBalance removes amount from so's balance.
 // It is used to remove funds from the origin account of a transfer.
-func (so *stateObject) SubBalance(amount *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (so *stateObject) SubBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	if amount.IsZero() {
 		return
 	}
 	so.SetBalance(new(uint256.Int).Sub(so.Balance(), amount), reason)
 }
 
-func (so *stateObject) SetBalance(amount *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (so *stateObject) SetBalance(amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	so.db.journal.append(balanceChange{
 		account: &so.address,
 		prev:    so.data.Balance,
 	})
-	if so.db.logger != nil {
+	if so.db.logger != nil && so.db.logger.OnBalanceChange != nil {
 		so.db.logger.OnBalanceChange(so.address, so.Balance(), amount, reason)
 	}
 	so.setBalance(amount)
@@ -351,7 +351,7 @@ func (so *stateObject) SetCode(codeHash libcommon.Hash, code []byte) {
 		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
-	if so.db.logger != nil {
+	if so.db.logger != nil && so.db.logger.OnCodeChange != nil {
 		so.db.logger.OnCodeChange(so.address, so.data.CodeHash, prevcode, codeHash, code)
 	}
 	so.setCode(codeHash, code)
@@ -368,7 +368,7 @@ func (so *stateObject) SetNonce(nonce uint64) {
 		account: &so.address,
 		prev:    so.data.Nonce,
 	})
-	if so.db.logger != nil {
+	if so.db.logger != nil && so.db.logger.OnNonceChange != nil {
 		so.db.logger.OnNonceChange(so.address, so.data.Nonce, nonce)
 	}
 	so.setNonce(nonce)

@@ -8,14 +8,7 @@ import (
 	"github.com/ledgerwatch/erigon/params"
 )
 
-func ApplyBeaconRootEip4788(parentBeaconBlockRoot *libcommon.Hash, syscall consensus.SystemCall, eLogger consensus.EngineLogger) {
-	if eLogger != nil {
-		eLogger.OnBeaconBlockRootStart(*parentBeaconBlockRoot)
-		defer func() {
-			eLogger.OnBeaconBlockRootEnd()
-		}()
-	}
-
+func ApplyBeaconRootEip4788(parentBeaconBlockRoot *libcommon.Hash, syscall consensus.SystemCall) {
 	_, err := syscall(params.BeaconRootsAddress, parentBeaconBlockRoot.Bytes())
 	if err != nil {
 		log.Warn("Failed to call beacon roots contract", "err", err)

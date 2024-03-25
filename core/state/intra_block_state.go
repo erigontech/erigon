@@ -27,9 +27,9 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 	"github.com/ledgerwatch/erigon/common/u256"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/types/accounts"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
 	"github.com/ledgerwatch/erigon/turbo/trie"
 )
@@ -37,20 +37,6 @@ import (
 type revision struct {
 	id           int
 	journalIndex int
-}
-
-// StateLogger is used to collect state update traces from  EVM transaction
-// execution.
-// The following hooks are invoked post execution. I.e. looking up state
-// after the hook should reflect the new value.
-// Note that reference types are actual VM data structures; make copies
-// if you need to retain them beyond the current call.
-type StateLogger interface {
-	OnBalanceChange(addr libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason)
-	OnNonceChange(addr libcommon.Address, prev, new uint64)
-	OnCodeChange(addr libcommon.Address, prevCodeHash libcommon.Hash, prevCode []byte, codeHash libcommon.Hash, code []byte)
-	OnStorageChange(addr libcommon.Address, slot *libcommon.Hash, prev, new uint256.Int)
-	OnLog(log *types.Log)
 }
 
 // SystemAddress - sender address for internal state updates.
@@ -103,7 +89,7 @@ type IntraBlockState struct {
 	validRevisions []revision
 	nextRevisionID int
 	trace          bool
-	logger         StateLogger
+	logger         *tracing.Hooks
 	balanceInc     map[libcommon.Address]*BalanceIncrease // Map of balance increases (without first reading the account)
 }
 
@@ -123,7 +109,7 @@ func New(stateReader StateReader) *IntraBlockState {
 }
 
 // SetLogger sets the logger for account update hooks.
-func (sdb *IntraBlockState) SetLogger(l StateLogger) {
+func (sdb *IntraBlockState) SetLogger(l *tracing.Hooks) {
 	sdb.logger = l
 }
 
@@ -168,7 +154,7 @@ func (sdb *IntraBlockState) AddLog(log2 *types.Log) {
 	log2.BlockHash = sdb.bhash
 	log2.TxIndex = uint(sdb.txIndex)
 	log2.Index = sdb.logSize
-	if sdb.logger != nil {
+	if sdb.logger != nil && sdb.logger.OnLog != nil {
 		sdb.logger.OnLog(log2)
 	}
 	sdb.logs[sdb.thash] = append(sdb.logs[sdb.thash], log2)
@@ -324,7 +310,7 @@ func (sdb *IntraBlockState) HasSelfdestructed(addr libcommon.Address) bool {
 
 // AddBalance adds amount to the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
 	}
@@ -357,7 +343,7 @@ func (sdb *IntraBlockState) AddBalance(addr libcommon.Address, amount *uint256.I
 
 // SubBalance subtracts amount from the account associated with addr.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
 	}
@@ -369,7 +355,7 @@ func (sdb *IntraBlockState) SubBalance(addr libcommon.Address, amount *uint256.I
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
-func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int, reason evmtypes.BalanceChangeReason) {
+func (sdb *IntraBlockState) SetBalance(addr libcommon.Address, amount *uint256.Int, reason tracing.BalanceChangeReason) {
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
 		stateObject.SetBalance(amount, reason)
@@ -444,8 +430,8 @@ func (sdb *IntraBlockState) Selfdestruct(addr libcommon.Address) bool {
 		prevbalance: prevBalance,
 	})
 
-	if sdb.logger != nil && !prevBalance.IsZero() {
-		sdb.logger.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), evmtypes.BalanceDecreaseSelfdestruct)
+	if sdb.logger != nil && sdb.logger.OnBalanceChange != nil && !prevBalance.IsZero() {
+		sdb.logger.OnBalanceChange(addr, &prevBalance, uint256.NewInt(0), tracing.BalanceDecreaseSelfdestruct)
 	}
 
 	stateObject.markSelfdestructed()
@@ -639,12 +625,12 @@ func (sdb *IntraBlockState) GetRefund() uint64 {
 	return sdb.refund
 }
 
-func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, logger StateLogger) error {
+func updateAccount(EIP161Enabled bool, isAura bool, stateWriter StateWriter, addr libcommon.Address, stateObject *stateObject, isDirty bool, logger *tracing.Hooks) error {
 	emptyRemoval := EIP161Enabled && stateObject.empty() && (!isAura || addr != SystemAddress)
 	if stateObject.selfdestructed || (isDirty && emptyRemoval) {
 		// If ether was sent to account post-selfdestruct it is burnt.
-		if logger != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
-			logger.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), evmtypes.BalanceDecreaseSelfdestructBurn)
+		if logger != nil && logger.OnBalanceChange != nil && !stateObject.Balance().IsZero() && stateObject.selfdestructed {
+			logger.OnBalanceChange(stateObject.address, stateObject.Balance(), uint256.NewInt(0), tracing.BalanceDecreaseSelfdestructBurn)
 		}
 
 		if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {

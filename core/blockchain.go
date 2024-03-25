@@ -20,7 +20,6 @@ package core
 import (
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -36,6 +35,7 @@ import (
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/state"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
@@ -55,19 +55,6 @@ const (
 	// See gas_limit in https://github.com/gnosischain/specs/blob/master/execution/withdrawals.md
 	SysCallGasLimit = uint64(30_000_000)
 )
-
-// BlockchainLogger is used to collect traces during chain processing.
-// Please make a copy of the referenced types if you intend to retain them.
-type BlockchainLogger interface {
-	vm.EVMLogger
-	state.StateLogger
-	consensus.EngineLogger
-	// OnBlockStart is called before executing `block`.
-	// `td` is the total difficulty prior to `block`.
-	OnBlockStart(block *types.Block, td *big.Int, finalized *types.Header, safe *types.Header, chainConfig *chain.Config)
-	OnBlockEnd(err error)
-	OnGenesisBlock(genesis *types.Block, alloc types.GenesisAlloc)
-}
 
 type RejectedTx struct {
 	Index int    `json:"index"    gencodec:"required"`
@@ -96,24 +83,14 @@ func ExecuteBlockEphemerally(
 	blockHashFunc func(n uint64) libcommon.Hash,
 	engine consensus.Engine, block *types.Block,
 	stateReader state.StateReader, stateWriter state.WriterWithChangeSets,
-	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (vm.EVMLogger, error),
+	chainReader consensus.ChainReader, getTracer func(txIndex int, txHash libcommon.Hash) (*tracing.Hooks, error),
 	logger log.Logger,
 ) (res *EphemeralExecResult, executeBlockErr error) {
-
-	var bcLogger BlockchainLogger
-	if vmConfig.Tracer != nil {
-		l, ok := vmConfig.Tracer.(BlockchainLogger)
-		if ok {
-			bcLogger = l
-		} else {
-			log.Warn("only extended tracers are supported for live mode")
-		}
-	}
 
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	block.Uncles()
 	ibs := state.New(stateReader)
-	ibs.SetLogger(bcLogger)
+	ibs.SetLogger(vmConfig.Tracer)
 	header := block.Header()
 
 	usedGas := new(uint64)
@@ -127,15 +104,22 @@ func ExecuteBlockEphemerally(
 		receipts    types.Receipts
 	)
 
-	if bcLogger != nil {
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockStart != nil {
 		td := chainReader.GetTd(block.ParentHash(), block.NumberU64()-1)
-		bcLogger.OnBlockStart(block, td, chainReader.CurrentFinalizedHeader(), chainReader.CurrentSafeHeader(), chainConfig)
+		vmConfig.Tracer.OnBlockStart(tracing.BlockEvent{
+			Block:     block,
+			TD:        td,
+			Finalized: chainReader.CurrentFinalizedHeader(),
+			Safe:      chainReader.CurrentSafeHeader(),
+		})
+	}
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnBlockEnd != nil {
 		defer func() {
-			bcLogger.OnBlockEnd(executeBlockErr)
+			vmConfig.Tracer.OnBlockEnd(executeBlockErr)
 		}()
 	}
 
-	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, bcLogger); err != nil {
+	if err := InitializeBlockExecution(engine, chainReader, block.Header(), chainConfig, ibs, logger, vmConfig.Tracer); err != nil {
 		return nil, err
 	}
 
@@ -144,23 +128,24 @@ func ExecuteBlockEphemerally(
 	noop := state.NewNoopWriter()
 	for i, tx := range block.Transactions() {
 		ibs.SetTxContext(tx.Hash(), block.Hash(), i)
-		writeTrace := false
+		// writeTrace := false
 		if vmConfig.Debug && vmConfig.Tracer == nil {
 			tracer, err := getTracer(i, tx.Hash())
 			if err != nil {
 				return nil, fmt.Errorf("could not obtain tracer: %w", err)
 			}
 			vmConfig.Tracer = tracer
-			writeTrace = true
+			// writeTrace = true
 		}
 		receipt, _, err := ApplyTransaction(chainConfig, blockHashFunc, engine, nil, gp, ibs, noop, header, tx, usedGas, usedBlobGas, *vmConfig)
-		if writeTrace {
-			if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
-				ftracer.Flush(tx)
-			}
+		// Todo: check how to implement flushable tracer
+		// if writeTrace {
+		// 	if ftracer, ok := vmConfig.Tracer.(vm.FlushableTracer); ok {
+		// 		ftracer.Flush(tx)
+		// 	}
 
-			vmConfig.Tracer = nil
-		}
+		// 	vmConfig.Tracer = nil
+		// }
 		if err != nil {
 			if !vmConfig.StatelessExec {
 				return nil, fmt.Errorf("could not apply tx %d from block %d [%v]: %w", i, block.NumberU64(), tx.Hash().Hex(), err)
@@ -379,7 +364,7 @@ func FinalizeBlockExecution(
 }
 
 func InitializeBlockExecution(engine consensus.Engine, chain consensus.ChainHeaderReader, header *types.Header,
-	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, bcLogger BlockchainLogger,
+	cc *chain.Config, ibs *state.IntraBlockState, logger log.Logger, bcLogger *tracing.Hooks,
 ) error {
 	engine.Initialize(cc, chain, header, ibs, func(contract libcommon.Address, data []byte, ibState *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 		return SysCallContract(contract, data, cc, ibState, header, engine, constCall)

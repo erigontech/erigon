@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/tracers"
 	"github.com/ledgerwatch/erigon/turbo/debug"
@@ -37,7 +38,7 @@ It expects the genesis file as argument.`,
 // the zero'd block (i.e. genesis) or will fail hard if it can't succeed.
 func initGenesis(cliCtx *cli.Context) error {
 	var logger log.Logger
-	var tracer tracers.Tracer
+	var tracer *tracers.Tracer
 	var err error
 	if logger, tracer, _, err = debug.Setup(cliCtx, true /* rootLogger */); err != nil {
 		return err
@@ -67,7 +68,11 @@ func initGenesis(cliCtx *cli.Context) error {
 	if err != nil {
 		utils.Fatalf("Failed to open database: %v", err)
 	}
-	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "", logger, tracer)
+	var tracingHooks *tracing.Hooks
+	if tracer != nil {
+		tracingHooks = tracer.Hooks
+	}
+	_, hash, err := core.CommitGenesisBlock(chaindb, genesis, "", logger, tracingHooks)
 	if err != nil {
 		utils.Fatalf("Failed to write genesis block: %v", err)
 	}

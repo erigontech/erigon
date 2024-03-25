@@ -18,7 +18,7 @@ import (
 )
 
 type GenericTracer interface {
-	tracers.Tracer
+	Tracer() *tracers.Tracer
 	SetTransaction(tx types.Transaction)
 	Found() bool
 }
@@ -64,7 +64,7 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 
 	ibs := state.New(cachedReader)
-	ibs.SetLogger(tracer)
+	ibs.SetLogger(tracer.Tracer().Hooks)
 
 	getHeader := func(hash common.Hash, number uint64) *types.Header {
 		h, e := api._blockReader.Header(ctx, dbtx, hash, number)
@@ -99,20 +99,20 @@ func (api *OtterscanAPIImpl) genericTracer(dbtx kv.Tx, ctx context.Context, bloc
 		BlockContext := core.NewEVMBlockContext(header, core.GetHashFn(header, getHeader), engine, nil)
 		TxContext := core.NewEVMTxContext(msg)
 
-		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer})
+		vmenv := vm.NewEVM(BlockContext, TxContext, ibs, chainConfig, vm.Config{Debug: true, Tracer: tracer.Tracer().Hooks})
 		if tracer != nil {
-			tracer.CaptureTxStart(vmenv, tx)
+			tracer.Tracer().OnTxStart(vmenv.GetVMContext(), tx, msg.From())
 		}
 		res, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.GetGas()).AddBlobGas(tx.GetBlobGas()), true /* refunds */, false /* gasBailout */)
 		if err != nil {
 			if tracer != nil {
-				tracer.CaptureTxEnd(nil, err)
+				tracer.Tracer().OnTxEnd(nil, err)
 			}
 			return err
 		}
 
 		if tracer != nil {
-			tracer.CaptureTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
+			tracer.Tracer().OnTxEnd(&types.Receipt{GasUsed: res.UsedGas}, nil)
 		}
 
 		_ = ibs.FinalizeTx(rules, cachedWriter)

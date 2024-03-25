@@ -25,6 +25,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/common"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/eth/tracers"
@@ -53,16 +54,23 @@ type fourByteTracer struct {
 	ids               map[string]int      // ids aggregates the 4byte ids found
 	interrupt         uint32              // Atomic flag to signal execution interruption
 	reason            error               // Textual reason for the interruption
-	activePrecompiles []libcommon.Address // Updated on CaptureStart based on given rules
+	activePrecompiles []libcommon.Address // Updated on tx start based on given rules
 }
 
 // newFourByteTracer returns a native go tracer which collects
 // 4 byte-identifiers of a tx, and implements vm.EVMLogger.
-func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (tracers.Tracer, error) {
+func newFourByteTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, error) {
 	t := &fourByteTracer{
 		ids: make(map[string]int),
 	}
-	return t, nil
+	return &tracers.Tracer{
+		Hooks: &tracing.Hooks{
+			OnTxStart: t.OnTxStart,
+			OnEnter:   t.OnEnter,
+		},
+		GetResult: t.GetResult,
+		Stop:      t.Stop,
+	}, nil
 }
 
 // isPrecompiled returns whether the addr is a precompile. Logic borrowed from newJsTracer in eth/tracers/js/tracer.go
@@ -81,22 +89,13 @@ func (t *fourByteTracer) store(id []byte, size int) {
 	t.ids[key] += 1
 }
 
-func (t *fourByteTracer) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
-	rules := env.ChainRules()
+func (t *fourByteTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+	rules := env.ChainConfig.Rules(env.BlockNumber, env.Time)
 	t.activePrecompiles = vm.ActivePrecompiles(rules)
 }
 
-// CaptureStart implements the EVMLogger interface to initialize the tracing operation.
-func (t *fourByteTracer) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	// Save the outer calldata also
-	if len(input) >= 4 {
-		t.store(input[0:4], len(input)-4)
-	}
-}
-
 // CaptureEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *fourByteTracer) CaptureEnter(op vm.OpCode, from libcommon.Address, to libcommon.Address, precompile, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-	// Skip if tracing was interrupted
+func (t *fourByteTracer) OnEnter(depth int, opcode byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) { // Skip if tracing was interrupted
 	if atomic.LoadUint32(&t.interrupt) > 0 {
 		return
 	}
@@ -104,6 +103,7 @@ func (t *fourByteTracer) CaptureEnter(op vm.OpCode, from libcommon.Address, to l
 		return
 	}
 	// primarily we want to avoid CREATE/CREATE2/SELFDESTRUCT
+	op := vm.OpCode(opcode)
 	if op != vm.DELEGATECALL && op != vm.STATICCALL &&
 		op != vm.CALL && op != vm.CALLCODE {
 		return

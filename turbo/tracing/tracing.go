@@ -9,7 +9,7 @@ import (
 
 // SetupTracerCtx performs the tracing setup according to the parameters
 // containted in the given urfave context.
-func SetupTracerCtx(ctx *cli.Context) (tracers.Tracer, error) {
+func SetupTracerCtx(ctx *cli.Context) (*tracers.Tracer, error) {
 	tracerName := ctx.String(TracerFlag.Name)
 	if tracerName == "" {
 		return nil, nil

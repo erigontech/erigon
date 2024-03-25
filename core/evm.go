@@ -27,6 +27,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 )
@@ -127,9 +128,9 @@ func CanTransfer(db evmtypes.IntraBlockState, addr libcommon.Address, amount *ui
 // Transfer subtracts amount from sender and adds amount to recipient using the given Db
 func Transfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Address, amount *uint256.Int, bailout bool) {
 	if !bailout {
-		db.SubBalance(sender, amount, evmtypes.BalanceChangeTransfer)
+		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 	}
-	db.AddBalance(recipient, amount, evmtypes.BalanceChangeTransfer)
+	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 }
 
 // BorTransfer transfer in Bor
@@ -139,9 +140,9 @@ func BorTransfer(db evmtypes.IntraBlockState, sender, recipient libcommon.Addres
 	input2 := db.GetBalance(recipient).Clone()
 
 	if !bailout {
-		db.SubBalance(sender, amount, evmtypes.BalanceChangeTransfer)
+		db.SubBalance(sender, amount, tracing.BalanceChangeTransfer)
 	}
-	db.AddBalance(recipient, amount, evmtypes.BalanceChangeTransfer)
+	db.AddBalance(recipient, amount, tracing.BalanceChangeTransfer)
 
 	// get outputs after
 	output1 := db.GetBalance(sender).Clone()

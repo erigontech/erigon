@@ -17,9 +17,10 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
 	"github.com/ledgerwatch/erigon/common/math"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/core/vm"
-	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
+	"github.com/ledgerwatch/erigon/eth/tracers"
 )
 
 var ErrTraceLimitReached = errors.New("the number of logs reached the specified limit")
@@ -117,7 +118,9 @@ type StructLogger struct {
 	logs    []StructLog
 	output  []byte
 	err     error
-	env     *vm.EVM
+	env     *tracing.VMContext
+
+	usedGas uint64
 }
 
 // NewStructLogger returns a new logger
@@ -131,26 +134,30 @@ func NewStructLogger(cfg *LogConfig) *StructLogger {
 	return logger
 }
 
-func (l *StructLogger) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
-	l.env = env
+func (l *StructLogger) Hooks() *tracing.Hooks {
+	return &tracing.Hooks{
+		OnTxStart: l.OnTxStart,
+		OnTxEnd:   l.OnTxEnd,
+		OnExit:    l.OnExit,
+		OnOpcode:  l.OnOpcode,
+	}
 }
 
-func (l *StructLogger) CaptureTxEnd(receipt *types.Receipt, err error) {}
-
-func (l *StructLogger) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (l *StructLogger) Tracer() *tracers.Tracer {
+	return &tracers.Tracer{
+		Hooks:     l.Hooks(),
+		GetResult: l.GetResult,
+		Stop:      l.Stop,
+	}
 }
 
-// CaptureEnter implements the Tracer interface to initialize the tracing operation for an internal call.
-func (l *StructLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
-}
-
-// CaptureState logs a new structured log message and pushes it out to the environment
+// OnOpcode logs a new structured log message and pushes it out to the environment
 //
-// CaptureState also tracks SLOAD/SSTORE ops to track storage change.
-func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	memory := scope.Memory
-	stack := scope.Stack
-	contract := scope.Contract
+// OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
+func (l *StructLogger) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	op := vm.OpCode(opcode)
+	memory := scope.MemoryData()
+	stack := scope.StackData()
 
 	// check if already accumulated the specified number of logs
 	if l.cfg.Limit != 0 && l.cfg.Limit <= len(l.logs) {
@@ -160,43 +167,46 @@ func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 	// Copy a snapshot of the current memory state to a new buffer
 	var mem []byte
 	if !l.cfg.DisableMemory {
-		mem = make([]byte, len(memory.Data()))
-		copy(mem, memory.Data())
+		mem = make([]byte, len(memory))
+		copy(mem, memory)
 	}
 	// Copy a snapshot of the current stack state to a new buffer
 	var stck []*big.Int
 	if !l.cfg.DisableStack {
-		stck = make([]*big.Int, len(stack.Data))
-		for i, item := range stack.Data {
+		stck = make([]*big.Int, len(stack))
+		for i, item := range stack {
 			stck[i] = new(big.Int).Set(item.ToBig())
 		}
 	}
+
+	contractAddr := scope.Address()
+	stackLen := len(stack)
 	// Copy a snapshot of the current storage to a new container
 	var storage Storage
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract
 		// if not present.
-		if l.storage[contract.Address()] == nil {
-			l.storage[contract.Address()] = make(Storage)
+		if l.storage[contractAddr] == nil {
+			l.storage[contractAddr] = make(Storage)
 		}
 		// capture SLOAD opcodes and record the read entry in the local storage
-		if op == vm.SLOAD && stack.Len() >= 1 {
+		if op == vm.SLOAD && stackLen >= 1 {
 			var (
-				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
+				address = libcommon.Hash(stack[stackLen-1].Bytes32())
 				value   uint256.Int
 			)
-			l.env.IntraBlockState().GetState(contract.Address(), &address, &value)
-			l.storage[contract.Address()][address] = value.Bytes32()
+			l.env.IntraBlockState.GetState(contractAddr, &address, &value)
+			l.storage[contractAddr][address] = value.Bytes32()
 		}
 		// capture SSTORE opcodes and record the written entry in the local storage.
-		if op == vm.SSTORE && stack.Len() >= 2 {
+		if op == vm.SSTORE && stackLen >= 2 {
 			var (
-				value   = libcommon.Hash(stack.Data[stack.Len()-2].Bytes32())
-				address = libcommon.Hash(stack.Data[stack.Len()-1].Bytes32())
+				value   = libcommon.Hash(stack[stackLen-2].Bytes32())
+				address = libcommon.Hash(stack[stackLen-1].Bytes32())
 			)
-			l.storage[contract.Address()][address] = value
+			l.storage[contractAddr][address] = value
 		}
-		storage = l.storage[contract.Address()].Copy()
+		storage = l.storage[contractAddr].Copy()
 	}
 	var rdata []byte
 	if !l.cfg.DisableReturnData {
@@ -204,17 +214,16 @@ func (l *StructLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, s
 		copy(rdata, rData)
 	}
 	// create a new snapshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, rdata, storage, depth, l.env.IntraBlockState().GetRefund(), err}
+	log := StructLog{pc, op, gas, cost, mem, len(memory), stck, rdata, storage, depth, l.env.IntraBlockState.GetRefund(), err}
 	l.logs = append(l.logs, log)
 }
 
-// CaptureFault implements the Tracer interface to trace an execution fault
-// while running an opcode.
-func (l *StructLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
-}
+// OnExit is called after the call finishes to finalize the tracing.
+func (l *StructLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if depth != 0 {
+		return
+	}
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
 	l.output = output
 	l.err = err
 	if l.cfg.Debug {
@@ -225,38 +234,19 @@ func (l *StructLogger) CaptureEnd(output []byte, usedGas uint64, err error, reve
 	}
 }
 
-func (l *StructLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
+func (l *StructLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+	l.env = env
 }
 
-func (l *StructLogger) OnBlockEnd(err error) {
-}
-
-func (l *StructLogger) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
-}
-
-func (l *StructLogger) OnBeaconBlockRootStart(root libcommon.Hash) {}
-
-func (l *StructLogger) OnBeaconBlockRootEnd() {}
-
-func (l *StructLogger) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
-
-func (l *StructLogger) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
-
-func (l *StructLogger) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
-}
-
-func (l *StructLogger) OnNonceChange(a libcommon.Address, prev, new uint64) {}
-
-func (l *StructLogger) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
-}
-
-func (l *StructLogger) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
-}
-
-func (l *StructLogger) OnLog(log *types.Log) {}
-
-// CaptureExit is called after the internal call finishes to finalize the tracing.
-func (l *StructLogger) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
+func (l *StructLogger) OnTxEnd(receipt *types.Receipt, err error) {
+	if err != nil {
+		// Don't override vm error
+		if l.err == nil {
+			l.err = err
+		}
+		return
+	}
+	l.usedGas = receipt.GasUsed
 }
 
 // GetResult returns an empty json object.
@@ -379,7 +369,7 @@ func WriteLogs(writer io.Writer, logs []*types.Log) {
 type mdLogger struct {
 	out io.Writer
 	cfg *LogConfig
-	env *vm.EVM
+	env *tracing.VMContext
 }
 
 // NewMarkdownLogger creates a logger which outputs information in a format adapted
@@ -392,11 +382,19 @@ func NewMarkdownLogger(cfg *LogConfig, writer io.Writer) *mdLogger {
 	return l
 }
 
-func (t *mdLogger) CaptureTxStart(env *vm.EVM, tx types.Transaction) {
-	t.env = env
+func (t *mdLogger) Hooks() *tracing.Hooks {
+	return &tracing.Hooks{
+		OnTxStart: t.OnTxStart,
+		OnEnter:   t.OnEnter,
+		OnExit:    t.OnExit,
+		OnOpcode:  t.OnOpcode,
+		OnFault:   t.OnFault,
+	}
 }
 
-func (t *mdLogger) CaptureTxEnd(receipt *types.Receipt, err error) {}
+func (t *mdLogger) OnTxStart(env *tracing.VMContext, tx types.Transaction, from libcommon.Address) {
+	t.env = env
+}
 
 func (t *mdLogger) captureStartOrEnter(from, to libcommon.Address, create bool, input []byte, gas uint64, value *uint256.Int) {
 	if !create {
@@ -415,80 +413,44 @@ func (t *mdLogger) captureStartOrEnter(from, to libcommon.Address, create bool, 
 `)
 }
 
-func (t *mdLogger) CaptureStart(from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
+func (t *mdLogger) OnEnter(depth int, typ byte, from libcommon.Address, to libcommon.Address, precompile bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+	if depth != 0 {
+		return
+	}
+	create := vm.OpCode(typ) == vm.CREATE
 	t.captureStartOrEnter(from, to, create, input, gas, value)
 }
 
-func (t *mdLogger) CaptureEnter(typ vm.OpCode, from libcommon.Address, to libcommon.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) { //nolint:interfacer
-	t.captureStartOrEnter(from, to, create, input, gas, value)
+func (t *mdLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+	if depth == 0 {
+		fmt.Fprintf(t.out, "\nOutput: `%#x`\nConsumed gas: `%d`\nError: `%v`\n",
+			output, gasUsed, err)
+	}
 }
 
-func (t *mdLogger) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	stack := scope.Stack
-
+// OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
+func (t *mdLogger) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	stack := scope.StackData()
 	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d |", pc, op, cost)
 
 	if !t.cfg.DisableStack {
 		// format stack
 		var a []string
-		for _, elem := range stack.Data {
+		for _, elem := range stack {
 			a = append(a, elem.String())
 		}
 		b := fmt.Sprintf("[%v]", strings.Join(a, ","))
 		fmt.Fprintf(t.out, "%10v |", b)
 	}
-	fmt.Fprintf(t.out, "%10v |", t.env.IntraBlockState().GetRefund())
+	fmt.Fprintf(t.out, "%10v |", t.env.IntraBlockState.GetRefund())
 	fmt.Fprintln(t.out, "")
 	if err != nil {
 		fmt.Fprintf(t.out, "Error: %v\n", err)
 	}
 }
 
-func (t *mdLogger) CaptureFault(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, depth int, err error) {
+func (t *mdLogger) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
-}
-
-func (t *mdLogger) captureEndOrExit(output []byte, usedGas uint64, err error) {
-	fmt.Fprintf(t.out, "\nOutput: `0x%x`\nConsumed gas: `%d`\nError: `%v`\n",
-		output, usedGas, err)
-}
-
-func (t *mdLogger) CaptureEnd(output []byte, usedGas uint64, err error, reverted bool) {
-	t.captureEndOrExit(output, usedGas, err)
-}
-
-func (t *mdLogger) OnBlockStart(b *types.Block, td *big.Int, finalized, safe *types.Header, chainConfig *chain.Config) {
-}
-
-func (t *mdLogger) OnBlockEnd(err error) {
-}
-
-func (t *mdLogger) OnGenesisBlock(b *types.Block, alloc types.GenesisAlloc) {
-}
-
-func (t *mdLogger) OnBeaconBlockRootStart(root libcommon.Hash) {}
-
-func (t *mdLogger) OnBeaconBlockRootEnd() {}
-
-func (t *mdLogger) CaptureKeccakPreimage(hash libcommon.Hash, data []byte) {}
-
-func (t *mdLogger) OnGasChange(old, new uint64, reason vm.GasChangeReason) {}
-
-func (t *mdLogger) OnBalanceChange(a libcommon.Address, prev, new *uint256.Int, reason evmtypes.BalanceChangeReason) {
-}
-
-func (t *mdLogger) OnNonceChange(a libcommon.Address, prev, new uint64) {}
-
-func (t *mdLogger) OnCodeChange(a libcommon.Address, prevCodeHash libcommon.Hash, prev []byte, codeHash libcommon.Hash, code []byte) {
-}
-
-func (t *mdLogger) OnStorageChange(a libcommon.Address, k *libcommon.Hash, prev, new uint256.Int) {
-}
-
-func (t *mdLogger) OnLog(log *types.Log) {}
-
-func (t *mdLogger) CaptureExit(output []byte, usedGas uint64, err error, reverted bool) {
-	t.captureEndOrExit(output, usedGas, err)
 }
 
 // GetResult returns an empty json object.

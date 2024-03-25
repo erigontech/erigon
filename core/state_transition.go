@@ -27,6 +27,7 @@ import (
 	cmath "github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/common/u256"
 	"github.com/ledgerwatch/erigon/consensus/misc"
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/crypto"
@@ -249,8 +250,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 		}
 	}
 
-	if st.evm.Config().Tracer != nil {
-		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), vm.GasChangeTxInitialBalance)
+	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil {
+		st.evm.Config().Tracer.OnGasChange(0, st.msg.Gas(), tracing.GasChangeTxInitialBalance)
 	}
 
 	st.gas += st.msg.Gas()
@@ -258,8 +259,8 @@ func (st *StateTransition) buyGas(gasBailout bool) error {
 
 	if subBalance {
 		// CS TODO: cross check
-		st.state.SubBalance(st.msg.From(), gasVal, evmtypes.BalanceDecreaseGasBuy)
-		st.state.SubBalance(st.msg.From(), blobGasVal, evmtypes.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), gasVal, tracing.BalanceDecreaseGasBuy)
+		st.state.SubBalance(st.msg.From(), blobGasVal, tracing.BalanceDecreaseGasBuy)
 	}
 	return nil
 }
@@ -384,8 +385,8 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 		return nil, fmt.Errorf("%w: have %d, want %d", ErrIntrinsicGas, st.gas, gas)
 	}
 
-	if t := st.evm.Config().Tracer; t != nil {
-		t.OnGasChange(st.gas, st.gas-gas, vm.GasChangeTxIntrinsicGas)
+	if t := st.evm.Config().Tracer; t != nil && t.OnGasChange != nil {
+		t.OnGasChange(st.gas, st.gas-gas, tracing.GasChangeTxIntrinsicGas)
 	}
 	st.gas -= gas
 
@@ -441,12 +442,12 @@ func (st *StateTransition) TransitionDb(refunds bool, gasBailout bool) (*Executi
 	}
 	amount := new(uint256.Int).SetUint64(st.gasUsed())
 	amount.Mul(amount, effectiveTip) // gasUsed * effectiveTip = how much goes to the block producer (miner, validator)
-	st.state.AddBalance(coinbase, amount, evmtypes.BalanceIncreaseRewardTransactionFee)
+	st.state.AddBalance(coinbase, amount, tracing.BalanceIncreaseRewardTransactionFee)
 	if !msg.IsFree() && rules.IsLondon {
 		burntContractAddress := st.evm.ChainConfig().GetBurntContract(st.evm.Context.BlockNumber)
 		if burntContractAddress != nil {
 			burnAmount := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gasUsed()), st.evm.Context.BaseFee)
-			st.state.AddBalance(*burntContractAddress, burnAmount, evmtypes.BalanceChangeUnspecified)
+			st.state.AddBalance(*burntContractAddress, burnAmount, tracing.BalanceChangeUnspecified)
 		}
 	}
 	if st.isBor {
@@ -482,17 +483,17 @@ func (st *StateTransition) refundGas(refundQuotient uint64) {
 		refund = st.state.GetRefund()
 	}
 
-	if st.evm.Config().Tracer != nil && refund > 0 {
-		st.evm.Config().Tracer.OnGasChange(st.gas, st.gas+refund, vm.GasChangeTxRefunds)
+	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil && refund > 0 {
+		st.evm.Config().Tracer.OnGasChange(st.gas, st.gas+refund, tracing.GasChangeTxRefunds)
 	}
 	st.gas += refund
 
 	// Return ETH for remaining gas, exchanged at the original rate.
 	remaining := new(uint256.Int).Mul(new(uint256.Int).SetUint64(st.gas), st.gasPrice)
-	st.state.AddBalance(st.msg.From(), remaining, evmtypes.BalanceIncreaseGasReturn)
+	st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn)
 
-	if st.evm.Config().Tracer != nil && st.gas > 0 {
-		st.evm.Config().Tracer.OnGasChange(st.gas, 0, vm.GasChangeTxLeftOverReturned)
+	if st.evm.Config().Tracer != nil && st.evm.Config().Tracer.OnGasChange != nil && st.gas > 0 {
+		st.evm.Config().Tracer.OnGasChange(st.gas, 0, tracing.GasChangeTxLeftOverReturned)
 	}
 
 	// Also return remaining gas to the block gas counter so it is

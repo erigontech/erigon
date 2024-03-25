@@ -9,6 +9,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
 
+	"github.com/ledgerwatch/erigon/core/tracing"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -55,60 +56,12 @@ type (
 	GetHashFunc func(uint64) common.Hash
 )
 
-// BalanceChangeReason is used to indicate the reason for a balance change, useful
-// for tracing and reporting.
-type BalanceChangeReason byte
-
-const (
-	BalanceChangeUnspecified BalanceChangeReason = 0
-	// Issuance
-	// BalanceIncreaseRewardMineUncle is a reward for mining an uncle block.
-	BalanceIncreaseRewardMineUncle BalanceChangeReason = 1
-	// BalanceIncreaseRewardMineBlock is a reward for mining a block.
-	BalanceIncreaseRewardMineBlock BalanceChangeReason = 2
-	// BalanceIncreaseWithdrawal is ether withdrawn from the beacon chain.
-	BalanceIncreaseWithdrawal BalanceChangeReason = 3
-	// BalanceIncreaseGenesisBalance is ether allocated at the genesis block.
-	BalanceIncreaseGenesisBalance BalanceChangeReason = 4
-
-	// Transaction fees
-	// BalanceIncreaseRewardTransactionFee is the transaction tip increasing block builder's balance.
-	BalanceIncreaseRewardTransactionFee BalanceChangeReason = 5
-	// BalanceDecreaseGasBuy is spent to purchase gas for execution a transaction.
-	// Part of this gas will be burnt as per EIP-1559 rules.
-	BalanceDecreaseGasBuy BalanceChangeReason = 6
-	// BalanceIncreaseGasReturn is ether returned for unused gas at the end of execution.
-	BalanceIncreaseGasReturn BalanceChangeReason = 7
-
-	// DAO fork
-	// BalanceIncreaseDaoContract is ether sent to the DAO refund contract.
-	BalanceIncreaseDaoContract BalanceChangeReason = 8
-	// BalanceDecreaseDaoAccount is ether taken from a DAO account to be moved to the refund contract.
-	BalanceDecreaseDaoAccount BalanceChangeReason = 9
-
-	// BalanceChangeTransfer is ether transfered via a call.
-	// it is a decrease for the sender and an increase for the recipient.
-	BalanceChangeTransfer BalanceChangeReason = 10
-	// BalanceChangeTouchAccount is a transfer of zero value. It is only there to
-	// touch-create an account.
-	BalanceChangeTouchAccount BalanceChangeReason = 11
-
-	// BalanceIncreaseSelfdestruct is added to the recipient as indicated by a selfdestructing account.
-	BalanceIncreaseSelfdestruct BalanceChangeReason = 12
-	// BalanceDecreaseSelfdestruct is deducted from a contract due to self-destruct.
-	BalanceDecreaseSelfdestruct BalanceChangeReason = 13
-	// BalanceDecreaseSelfdestructBurn is ether that is sent to an already self-destructed
-	// account within the same tx (captured at end of tx).
-	// Note it doesn't account for a self-destruct which appoints itself as recipient.
-	BalanceDecreaseSelfdestructBurn BalanceChangeReason = 14
-)
-
 // IntraBlockState is an EVM database for full state querying.
 type IntraBlockState interface {
 	CreateAccount(common.Address, bool)
 
-	SubBalance(common.Address, *uint256.Int, BalanceChangeReason)
-	AddBalance(common.Address, *uint256.Int, BalanceChangeReason)
+	SubBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason)
+	AddBalance(common.Address, *uint256.Int, tracing.BalanceChangeReason)
 	GetBalance(common.Address) *uint256.Int
 
 	GetNonce(common.Address) uint64

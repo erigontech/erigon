@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/erigon/core/vm"
 	"github.com/ledgerwatch/erigon/core/vm/evmtypes"
 	"github.com/ledgerwatch/erigon/eth/tracers"
+	tracerConfig "github.com/ledgerwatch/erigon/eth/tracers/config"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/services"
@@ -27,7 +28,7 @@ func TraceBorStateSyncTxnDebugAPI(
 	ctx context.Context,
 	dbTx kv.Tx,
 	chainConfig *chain.Config,
-	traceConfig *tracers.TraceConfig,
+	traceConfig *tracerConfig.TraceConfig,
 	ibs *state.IntraBlockState,
 	blockReader services.FullBlockReader,
 	blockHash libcommon.Hash,
@@ -74,6 +75,7 @@ func TraceBorStateSyncTxnTraceAPI(
 	blockHash libcommon.Hash,
 	blockNum uint64,
 	blockTime uint64,
+	tracer *tracers.Tracer,
 ) (*core.ExecutionResult, error) {
 	stateSyncEvents, err := blockReader.EventsByBlock(ctx, dbTx, blockHash, blockNum)
 	if err != nil {
@@ -82,7 +84,7 @@ func TraceBorStateSyncTxnTraceAPI(
 
 	stateReceiverContract := libcommon.HexToAddress(chainConfig.Bor.(*borcfg.BorConfig).StateReceiverContract)
 	if vmConfig.Tracer != nil {
-		vmConfig.Tracer = NewBorStateSyncTxnTracer(vmConfig.Tracer, len(stateSyncEvents), stateReceiverContract)
+		vmConfig.Tracer = NewBorStateSyncTxnTracer(tracer, len(stateSyncEvents), stateReceiverContract).Hooks
 	}
 
 	txCtx := initStateSyncTxContext(blockNum, blockHash)
