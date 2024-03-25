@@ -169,7 +169,8 @@ func (f *ForkChoiceStore) verifySignaturesOnAggregate(s *state.CachingBeaconStat
 	return f.verifyAggregateMessageSignature(s, aggregateAndProof, attestingIndicies)
 }
 
-func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, test bool) error {
+// OnAggregateAndProof processes incoming aggregate and proofs. it is called when a new aggregate and proof is received either via gossip or from the Beacon API.
+func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedAggregateAndProof, _ bool) error {
 	if f.canProcessAggregate() {
 		return nil
 	}
@@ -233,7 +234,7 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 		return fmt.Errorf("invalid target block")
 	}
 
-	// Add to some sort of aggregation layer TODO(Giulio2002)
+	// Add to some sort of aggregation layer TODO(Giulio2002/domiwei)
 
 	return nil
 }
