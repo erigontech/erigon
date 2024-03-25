@@ -25,8 +25,8 @@ func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBloc
 		return nil
 	}
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.headHash = libcommon.Hash{}
-	f.mu.Unlock()
 	data := attestation.AttestantionData()
 	if err := f.validateOnAttestation(attestation, fromBlock); err != nil {
 		return err
@@ -87,7 +87,7 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 	}
 	slot := aggregateAndProof.Message.Aggregate.AttestantionData().Slot()
 	selectionProof := aggregateAndProof.Message.SelectionProof
-	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().ValidatorIndex()
+	committeeIndex := aggregateAndProof.Message.Aggregate.AttestantionData().CommitteeIndex()
 	epoch := state.GetEpochAtSlot(f.beaconCfg, slot)
 
 	if err := f.validateOnAttestation(aggregateAndProof.Message.Aggregate, false); err != nil {
@@ -263,8 +263,6 @@ func (f *ForkChoiceStore) setUnequivocating(validatorIndex uint64) {
 }
 
 func (f *ForkChoiceStore) processAttestingIndicies(attestation *solid.Attestation, indicies []uint64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	beaconBlockRoot := attestation.AttestantionData().BeaconBlockRoot()
 	target := attestation.AttestantionData().Target()
 

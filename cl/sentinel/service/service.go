@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/httpreqresp"
 
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentinelrpc "github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -24,6 +24,8 @@ import (
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/peer"
 )
+
+const gracePeerCount = 8
 
 var _ sentinelrpc.SentinelServer = (*SentinelServer)(nil)
 
@@ -99,11 +101,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	default:
 		// check subnets
 		switch {
-		case strings.Contains(msg.Name, gossip.TopicNamePrefixBlobSidecar):
+		case strings.Contains(msg.Name, "blob_sidecar"):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
-			subscription = manager.GetMatchingSubscription(fmt.Sprintf("%s/%d", gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
 		default:
 			return &sentinelrpc.EmptyMessage{}, nil
 		}
@@ -179,6 +181,7 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if err != nil {
 		return nil, err
 	}
+	peerCount := len(s.sentinel.Host().Network().Peers())
 	// set the peer and topic we are requesting
 	httpReq.Header.Set("REQRESP-PEER-ID", pid.String())
 	httpReq.Header.Set("REQRESP-TOPIC", req.Topic)
@@ -193,9 +196,11 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	if resp.StatusCode < 200 || resp.StatusCode > 399 {
 		errBody, _ := io.ReadAll(resp.Body)
 		errorMessage := fmt.Errorf("SentinelHttp: %s", string(errBody))
-		s.sentinel.Peers().RemovePeer(pid)
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
+		if peerCount > gracePeerCount {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, errorMessage
 	}
 	// we should never get an invalid response to this. our responder should always set it on non-error response
@@ -206,15 +211,21 @@ func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sent
 	}
 	// known error codes, just remove the peer
 	if isError == 3 || isError == 2 {
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
+		if peerCount > gracePeerCount {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, fmt.Errorf("peer error code: %d", isError)
 	}
 	// unknown error codes
 	if isError > 3 {
 		s.logger.Debug("peer returned unknown erro", "id", pid.String())
-		s.sentinel.Host().Peerstore().RemovePeer(pid)
-		s.sentinel.Host().Network().ClosePeer(pid)
+		if peerCount > gracePeerCount {
+			s.sentinel.Peers().RemovePeer(pid)
+			s.sentinel.Host().Peerstore().RemovePeer(pid)
+			s.sentinel.Host().Network().ClosePeer(pid)
+		}
 		return nil, fmt.Errorf("peer returned unknown error: %d", isError)
 	}
 	// read the body from the response
@@ -332,6 +343,19 @@ func (s *SentinelServer) ListenToGossip() {
 		}
 		s.mu.RUnlock()
 	}
+}
+
+func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelrpc.RequestSubscribeExpiry) (*sentinelrpc.EmptyMessage, error) {
+	var (
+		topic      = expiryReq.GetTopic()
+		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
+	)
+	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
+	if subs == nil {
+		return nil, fmt.Errorf("no such subscription")
+	}
+	subs.OverwriteSubscriptionExpiry(expiryTime)
+	return &sentinelrpc.EmptyMessage{}, nil
 }
 
 func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {

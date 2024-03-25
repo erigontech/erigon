@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/metrics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -230,6 +231,8 @@ func BodiesForward(
 					u.UnwindTo(blockHeight-1, BadBlock(header.Hash(), fmt.Errorf("Uncle verification failed: %w", err)))
 					return true, nil
 				}
+
+				metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, header.Number.Uint64(), logger)
 
 				// Check existence before write - because WriteRawBody isn't idempotent (it allocates new sequence range for transactions on every call)
 				ok, err := rawdb.WriteRawBodyIfNotExists(tx, header.Hash(), blockHeight, rawBody)

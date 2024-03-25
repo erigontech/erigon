@@ -280,8 +280,7 @@ type Cfg struct {
 }
 
 func (c Cfg) Seedable(info snaptype.FileInfo) bool {
-	mergeLimit := c.MergeLimit(info.From)
-	return info.To-info.From == mergeLimit
+	return info.To-info.From == snaptype.Erigon2MergeLimit || info.To-info.From == snaptype.Erigon2OldMergeLimit
 }
 
 func (c Cfg) MergeLimit(fromBlock uint64) uint64 {

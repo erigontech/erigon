@@ -99,7 +99,6 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-
 func (r *RemoteBlockReader) Snapshots() services.BlockSnapshots    { panic("not implemented") }
 func (r *RemoteBlockReader) BorSnapshots() services.BlockSnapshots { panic("not implemented") }
 func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }

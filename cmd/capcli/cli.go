@@ -578,7 +578,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	downlo, err := downloader.New(ctx, downloaderCfg, dirs, log.Root(), log.LvlInfo, true)
+	downlo, err := downloader.New(ctx, downloaderCfg, log.Root(), log.LvlInfo, true)
 	if err != nil {
 		return err
 	}
@@ -1082,7 +1082,6 @@ func (c *CheckBlobsSnapshots) Run(ctx *Context) error {
 		return err
 	}
 	to := csn.FrozenBlobs()
-	fmt.Println(to)
 
 	for i := beaconConfig.SlotsPerEpoch*beaconConfig.DenebForkEpoch + 1; i < to; i++ {
 		sds, err := csn.ReadBlobSidecars(i)
