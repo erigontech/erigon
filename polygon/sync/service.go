@@ -160,7 +160,8 @@ func RunService(
 		}
 	}
 	if sentry67 == nil {
-		terminate.Gracefully("sentry 67 not found")
+		logger.Error("polygon sync crashed, terminating process", "err", "sentry 67 not found")
+		terminate.TryGracefully(ctx, logger)
 		return
 	}
 
@@ -179,5 +180,6 @@ func RunService(
 		return
 	}
 
-	terminate.Gracefully("polygon sync component crashed - err=%v", err)
+	logger.Error("polygon sync crashed, terminating process", "err", err)
+	terminate.TryGracefully(ctx, logger)
 }

@@ -18,19 +18,19 @@ import (
 	"github.com/ledgerwatch/erigon-lib/direct"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/execution"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon-lib/wrap"
-	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/consensus/merge"
+	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
+	"github.com/ledgerwatch/erigon/turbo/services"
+
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/core"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/debug"
-	"github.com/ledgerwatch/erigon/turbo/execution/eth1/eth1_chain_reader.go"
-	turbonode "github.com/ledgerwatch/erigon/turbo/node"
-	"github.com/ledgerwatch/erigon/turbo/services"
+	turboNode "github.com/ledgerwatch/erigon/turbo/node"
 	"github.com/ledgerwatch/erigon/turbo/stages"
 )
 
@@ -58,15 +58,15 @@ processing will proceed even if an individual RLP-file import failure occurs.`,
 
 func importChain(cliCtx *cli.Context) error {
 	if cliCtx.NArg() < 1 {
-		terminate.Fatalf("This command requires an argument.")
+		utils.Fatalf("This command requires an argument.")
 	}
 	logger, _, err := debug.Setup(cliCtx, true /* rootLogger */)
 	if err != nil {
 		return err
 	}
 
-	nodeCfg := turbonode.NewNodConfigUrfave(cliCtx, logger)
-	ethCfg := turbonode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	nodeCfg := turboNode.NewNodConfigUrfave(cliCtx, logger)
+	ethCfg := turboNode.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
 
 	stack := makeConfigNode(cliCtx.Context, nodeCfg, logger)
 	defer stack.Close()

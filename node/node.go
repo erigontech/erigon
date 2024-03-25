@@ -27,19 +27,21 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/gofrs/flock"
-	"github.com/ledgerwatch/log/v3"
+	"github.com/ledgerwatch/erigon-lib/common/datadir"
 	"golang.org/x/sync/semaphore"
 
-	"github.com/ledgerwatch/erigon-lib/common/datadir"
-	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
-	"github.com/ledgerwatch/erigon-lib/kv/memdb"
-	"github.com/ledgerwatch/erigon-lib/terminate"
-	"github.com/ledgerwatch/erigon/migrations"
+	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/node/nodecfg"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/turbo/debug"
+
+	"github.com/gofrs/flock"
+	"github.com/ledgerwatch/log/v3"
+
+	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon-lib/kv/mdbx"
+	"github.com/ledgerwatch/erigon-lib/kv/memdb"
+	"github.com/ledgerwatch/erigon/migrations"
 )
 
 // Node is a container on which services can be registered.
@@ -410,7 +412,7 @@ func (n *Node) ResolvePath(x string) string {
 
 func StartNode(stack *Node) {
 	if err := stack.Start(); err != nil {
-		terminate.Fatalf("Error starting protocol stack: %v", err)
+		utils.Fatalf("Error starting protocol stack: %v", err)
 	}
 
 	go debug.ListenSignals(stack, stack.logger)
