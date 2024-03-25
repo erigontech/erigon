@@ -427,9 +427,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 		if err != nil {
 			return fmt.Errorf("writing plain state version: %w", err)
 		}
-
-		txc.Tx.Rollback()
+		txc.Tx.Commit()
 		txc.Tx = nil
+
 		if lastExecutedBlock, err := silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, s.BlockNumber+1, to, uint64(cfg.batchSize), true, true, true); err != nil {
 			if errors.Is(err, silkworm.ErrInterrupted) {
 				logger.Warn(fmt.Sprintf("[%s] Execution interrupted", logPrefix), "lastExecutedBlock", lastExecutedBlock, "err", err)
@@ -444,6 +444,8 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 			return err
 		}
+
+		return nil
 	}
 
 	stateStream := cfg.stateStream && to-s.BlockNumber < stateStreamLimit
