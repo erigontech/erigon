@@ -2,6 +2,7 @@ package terminate
 
 import (
 	"context"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -14,6 +15,16 @@ func TryGracefully(ctx context.Context, logger log.Logger) {
 	p, err := process.NewProcess(int32(pid))
 	if err != nil {
 		logger.Error("could not create process instance for current pid", "pid", pid, "err", err)
+		return
+	}
+
+	//goland:noinspection GoBoolExpressions
+	if runtime.GOOS == "windows" {
+		logger.Info("can't terminate process gracefully on windows - killing")
+		if err = p.Kill(); err != nil {
+			logger.Error("could not kill current process", "err", err)
+		}
+
 		return
 	}
 
