@@ -3,6 +3,7 @@ package simulator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -10,6 +11,8 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
+	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
@@ -28,6 +31,8 @@ type HeimdallSimulator struct {
 	nextSpan                  uint64
 	lastDownloadedBlockNumber uint64
 }
+
+type IndexFnType func(context.Context, snaptype.FileInfo, string, *background.Progress, log.Lvl, log.Logger) error
 
 func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger) (HeimdallSimulator, error) {
 	cfg := snapcfg.KnownCfg(chain)
@@ -139,4 +144,26 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 func (h *HeimdallSimulator) Close() {
 	h.activeSnapshots.Close()
 	h.knownSnapshots.Close()
+}
+
+func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblocks.Segment, sType snaptype.Enum, indexFn IndexFnType, reopenType snaptype.Type) error {
+	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), sType)
+
+	h.logger.Warn(fmt.Sprintf("Downloading %s", fileName))
+
+	err := h.downloader.Download(ctx, fileName)
+	if err != nil {
+		return fmt.Errorf("can't download %s: %w", fileName, err)
+	}
+
+	h.logger.Warn(fmt.Sprintf("Indexing %s", fileName))
+
+	info, _, _ := snaptype.ParseFileName(h.downloader.LocalFsRoot(), fileName)
+
+	err = indexFn(ctx, info, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
+	if err != nil {
+		return fmt.Errorf("can't download %s: %w", fileName, err)
+	}
+
+	return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{reopenType}, true)
 }

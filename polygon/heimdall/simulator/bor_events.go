@@ -2,45 +2,23 @@ package simulator
 
 import (
 	"context"
-	"fmt"
 	"time"
-
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
 
-func (h *HeimdallSimulator) downloadEvents(ctx context.Context, spans *freezeblocks.Segment) error {
-	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), snaptype.Enums.BorEvents)
-
-	h.logger.Warn(fmt.Sprintf("Downloading %s", fileName))
-
-	err := h.downloader.Download(ctx, fileName)
-	if err != nil {
-		return fmt.Errorf("can't download %s: %w", fileName, err)
-	}
-
-	h.logger.Warn(fmt.Sprintf("Indexing %s", fileName))
-
-	info, _, _ := snaptype.ParseFileName(h.downloader.LocalFsRoot(), fileName)
-
-	h.logger.Warn(fmt.Sprintf("snapshot from: %d, to: %d", heimdall.SpanIdAt(info.From), heimdall.SpanIdAt(info.To)))
-
-	return freezeblocks.BorEventsIdx(ctx, info, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
-}
-
-func endLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit int) bool {
+func continueLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit int) bool {
 	if len(events) == 0 {
-		return false
+		return true
 	}
 	if len(events) == limit {
-		return true
+		return false
 	}
 
 	last := events[len(events)-1]
-	return last.Time.After(to)
+	return last.Time.Before(to)
 }
 
 func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
@@ -50,15 +28,13 @@ func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to tim
 	view := h.knownBorSnapshots.View()
 	defer view.Close()
 
-	for !endLoop(span, to, limit) && err == nil {
+	for continueLoop(span, to, limit) && err == nil {
 		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
-			if err := h.downloadEvents(ctx, seg); err != nil {
+			if err := h.downloadData(ctx, seg, snaptype.Enums.BorEvents, freezeblocks.BorEventsIdx, snaptype.BorEvents); err != nil {
 				return nil, err
 			}
 		}
 		h.lastDownloadedBlockNumber += 500000
-
-		h.activeBorSnapshots.ReopenSegments([]snaptype.Type{snaptype.BorEvents}, true)
 
 		span, err = h.blockReader.EventsById(fromId, to, limit)
 	}
@@ -66,6 +42,5 @@ func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to tim
 	if len(span) == limit {
 		return span, err
 	}
-
 	return span[:len(span)-1], err
 }

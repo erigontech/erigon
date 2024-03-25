@@ -3,7 +3,6 @@ package simulator_test
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -23,21 +22,21 @@ func TestSimulatorStart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := sim.FetchStateSyncEvents(ctx, 0, time.Unix(1623612485, 0), 100)
-	t.Log(len(res))
-	t.Log(res)
-	t.Log(err)
+	//res, err := sim.FetchStateSyncEvents(ctx, 0, time.Unix(1623612485, 0), 100)
+	//t.Log(len(res))
+	//t.Log(res)
+	//t.Log(err)
 
 	//res, err = sim.FetchStateSyncEvents(ctx, 0, time.Now(), 2)
 	//t.Log(res)
 	//t.Log(err)
 	//
-	//span, err := sim.FetchLatestSpan(ctx)
-	//if err != nil {
-	//	t.Fatal(err)
-	//}
-	//
-	//t.Log(span)
+	span, err := sim.FetchLatestSpan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log(span)
 	//
 	//span, err = sim.FetchLatestSpan(ctx)
 	//if err != nil {
