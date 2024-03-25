@@ -131,7 +131,7 @@ func CheckpointIdAt(ctx context.Context, db kv.RoDB, block uint64) (CheckpointId
 		}
 
 		if k == nil {
-			return fmt.Errorf("%d: %w", block)
+			return fmt.Errorf("%d: %w", block, ErrCheckpointNotFound)
 		}
 
 		id = binary.BigEndian.Uint64(v)
