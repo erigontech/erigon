@@ -385,7 +385,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	quit := ctx.Done()
 	useExternalTx := txc.Tx != nil
-
 	if !useExternalTx {
 		txc.Tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
@@ -417,35 +416,6 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 
 	if to > s.BlockNumber+16 {
 		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
-	}
-
-	if !useExternalTx && cfg.silkworm != nil {
-		log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
-
-		//  update plain state version so the cache can be notified that the state has moved on
-		_, err = rawdb.IncrementStateVersion(txc.Tx)
-		if err != nil {
-			return fmt.Errorf("writing plain state version: %w", err)
-		}
-		txc.Tx.Commit()
-		txc.Tx = nil
-
-		if lastExecutedBlock, err := silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, s.BlockNumber+1, to, uint64(cfg.batchSize), true, true, true); err != nil {
-			if errors.Is(err, silkworm.ErrInterrupted) {
-				logger.Warn(fmt.Sprintf("[%s] Execution interrupted", logPrefix), "lastExecutedBlock", lastExecutedBlock, "err", err)
-				// Remount the termination signal
-				p, err := os.FindProcess(os.Getpid())
-				if err != nil {
-					return err
-				}
-				p.Signal(os.Interrupt)
-				return nil
-			}
-
-			return err
-		}
-
-		return nil
 	}
 
 	stateStream := cfg.stateStream && to-s.BlockNumber < stateStreamLimit
@@ -519,16 +489,15 @@ Loop:
 
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
-			var lastExecutedBlock uint64
 			if useExternalTx {
-				lastExecutedBlock, err = silkworm.ExecuteBlocksEphemeral(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+				blockNum, err = silkworm.ExecuteBlocksEphemeral(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
 			} else {
 				// In case of internal tx we close it (no changes, commit not needed): Silkworm will use its own internal tx
 				txc.Tx.Rollback()
 				txc.Tx = nil
 
 				log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
-				lastExecutedBlock, err = silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+				blockNum, err = silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
 
 				var txErr error
 				if txc.Tx, txErr = cfg.db.BeginRw(context.Background()); txErr != nil {
@@ -541,11 +510,9 @@ Loop:
 				batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 			}
 
+			// In case of any error we need to increment to have the failed block number
 			if err != nil {
-				// In case of any error we need to increment to have the failed block number
-				blockNum = lastExecutedBlock
-			} else {
-				blockNum = lastExecutedBlock + 1
+				blockNum++
 			}
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
@@ -639,7 +606,6 @@ Loop:
 		if err = txc.Tx.Commit(); err != nil {
 			return err
 		}
-		txc.Tx = nil
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
