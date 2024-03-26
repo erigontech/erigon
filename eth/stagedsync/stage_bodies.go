@@ -12,6 +12,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/metrics"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -124,6 +125,11 @@ func BodiesForward(
 		timeout = 1
 	} else {
 		// Do not print logs for short periods
+		diagnostics.Send(diagnostics.BodiesProcessingUpdate{
+			From: bodyProgress,
+			To:   headerProgress,
+		})
+
 		logger.Info(fmt.Sprintf("[%s] Processing bodies...", logPrefix), "from", bodyProgress, "to", headerProgress)
 	}
 	logEvery := time.NewTicker(logInterval)
@@ -323,6 +329,14 @@ func BodiesForward(
 	if bodyProgress > s.BlockNumber+16 {
 		blocks := bodyProgress - s.BlockNumber
 		secs := time.Since(startTime).Seconds()
+
+		diagnostics.Send(diagnostics.BodiesProcessedUpdate{
+			HighestBlock: bodyProgress,
+			Blocks:       blocks,
+			TimeElapsed:  secs,
+			BlkPerSec:    float64(blocks) / secs,
+		})
+
 		logger.Info(fmt.Sprintf("[%s] Processed", logPrefix), "highest", bodyProgress,
 			"blocks", blocks, "in", secs, "blk/sec", uint64(float64(blocks)/secs))
 	}
@@ -340,6 +354,19 @@ func logDownloadingBodies(logPrefix string, committed, remaining uint64, totalDe
 
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
+
+	diagnostics.Send(diagnostics.BodiesDownloadBlockUpdate{
+		BlockNumber:    committed,
+		DeliveryPerSec: uint64(speed),
+		WastedPerSec:   uint64(wastedSpeed),
+		Remaining:      remaining,
+		Delivered:      totalDelivered,
+		BlockPerSec:    totalDelivered / uint64(logInterval/time.Second),
+		Cache:          uint64(bodyCacheSize),
+		Alloc:          m.Alloc,
+		Sys:            m.Sys,
+	})
+
 	logger.Info(fmt.Sprintf("[%s] Downloading block bodies", logPrefix),
 		"block_num", committed,
 		"delivery/sec", libcommon.ByteCount(uint64(speed)),
@@ -357,6 +384,14 @@ func logWritingBodies(logPrefix string, committed, headerProgress uint64, logger
 	var m runtime.MemStats
 	dbg.ReadMemStats(&m)
 	remaining := headerProgress - committed
+
+	diagnostics.Send(diagnostics.BodiesWriteBlockUpdate{
+		BlockNumber: committed,
+		Remaining:   remaining,
+		Alloc:       m.Alloc,
+		Sys:         m.Sys,
+	})
+
 	logger.Info(fmt.Sprintf("[%s] Writing block bodies", logPrefix),
 		"block_num", committed,
 		"remaining", remaining,
