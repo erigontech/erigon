@@ -171,10 +171,10 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 			return nil, err
 		}
 
-		var globalExitRoots []*dstypes.GerUpdate
+		var globalExitRoots []dstypes.GerUpdate
 
 		if gersInBetween != nil {
-			globalExitRoots = append(globalExitRoots, gersInBetween...)
+			globalExitRoots = append(globalExitRoots, *gersInBetween...)
 		}
 
 		blockGer, err := hermezDb.GetBlockGlobalExitRoot(blockNum)
@@ -188,7 +188,7 @@ func (g *Generator) GenerateWitness(tx kv.Tx, ctx context.Context, startBlock, e
 				GlobalExitRoot: blockGer,
 				Timestamp:      block.Header().Time,
 			}
-			globalExitRoots = append(globalExitRoots, &blockGerUpdate)
+			globalExitRoots = append(globalExitRoots, blockGerUpdate)
 		}
 
 		for _, ger := range globalExitRoots {

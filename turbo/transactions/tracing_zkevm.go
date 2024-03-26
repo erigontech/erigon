@@ -109,7 +109,7 @@ func ComputeTxEnv_ZkEvm(ctx context.Context, engine consensus.EngineReader, bloc
 	}
 
 	parentHash := block.ParentHash()
-	statedb.SyncerPreExecuteStateSet(cfg, BlockContext.BlockNumber, BlockContext.Time, &parentHash, &blockGer, &l1BlockHash, &gersInBetween)
+	statedb.SyncerPreExecuteStateSet(cfg, BlockContext.BlockNumber, BlockContext.Time, &parentHash, &blockGer, &l1BlockHash, gersInBetween)
 	///////////////////////////////////////////
 	// [zkevm] finish set preexecution state //
 	///////////////////////////////////////////

@@ -468,12 +468,19 @@ func getStreamBytes(
 ) ([]byte, error) {
 	streamServer := server.NewDataStreamServer(nil, chainId, server.ExecutorOperationMode)
 	var streamBytes []byte
+	reader := hermez_db.NewHermezDbReader(tx)
 	for _, blockNumber := range blockNumbers {
 		block, err := rawdb.ReadBlockByNumber(tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
-		sBytes, err := streamServer.CreateAndBuildStreamEntryBytes(block, hDb, lastBlock, batchNumber, true)
+
+		gersInBetween, err := reader.GetBatchGlobalExitRoots(blockNumber-1, blockNumber)
+		if err != nil {
+			return nil, err
+		}
+
+		sBytes, err := streamServer.CreateAndBuildStreamEntryBytes(block, hDb, lastBlock, batchNumber, true, gersInBetween)
 		if err != nil {
 			return nil, err
 		}

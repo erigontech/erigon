@@ -26,7 +26,7 @@ type ReadOnlyHermezDb interface {
 	GetEffectiveGasPricePercentage(txHash libcommon.Hash) (uint8, error)
 	GetStateRoot(l2BlockNo uint64) (libcommon.Hash, error)
 	GetBatchNoByL2Block(l2BlockNo uint64) (uint64, error)
-	GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) ([]*dstypes.GerUpdate, error)
+	GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) (*[]dstypes.GerUpdate, error)
 	GetBlockGlobalExitRoot(l2BlockNo uint64) (libcommon.Hash, error)
 	GetBlockL1BlockHash(l2BlockNo uint64) (libcommon.Hash, error)
 	GetGerForL1BlockHash(l1BlockHash libcommon.Hash) (libcommon.Hash, error)
@@ -69,7 +69,7 @@ func (sdb *IntraBlockState) PreExecuteStateSet(chainConfig *chain.Config, blockN
 	}
 }
 
-func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, prevBlockHash, blockGer, l1BlockHash *libcommon.Hash, gerUpdates *[]*dstypes.GerUpdate) {
+func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, blockNumber uint64, blockTimestamp uint64, prevBlockHash, blockGer, l1BlockHash *libcommon.Hash, gerUpdates *[]dstypes.GerUpdate) {
 	if !sdb.Exist(ADDRESS_SCALABLE_L2) {
 		// create account if not exists
 		sdb.CreateAccount(ADDRESS_SCALABLE_L2, true)
@@ -99,14 +99,12 @@ func (sdb *IntraBlockState) SyncerPreExecuteStateSet(chainConfig *chain.Config, 
 				GlobalExitRoot: *blockGer,
 				Timestamp:      blockTimestamp,
 			}
-			*gerUpdates = append(*gerUpdates, &blockGerUpdate)
+			*gerUpdates = append(*gerUpdates, blockGerUpdate)
 		}
 
 		for _, ger := range *gerUpdates {
 			//save ger
-			if ger != nil {
-				sdb.WriteGlobalExitRootTimestamp(ger.GlobalExitRoot, ger.Timestamp)
-			}
+			sdb.WriteGlobalExitRootTimestamp(ger.GlobalExitRoot, ger.Timestamp)
 		}
 
 	}

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 
-	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/log/v3"
 
@@ -34,6 +33,7 @@ type IL1Syncer interface {
 	GetLogsChan() chan ethTypes.Log
 	GetProgressMessageChan() chan string
 
+	GetBlock(number uint64) (*ethTypes.Block, error)
 	Run(lastCheckedBlock uint64)
 }
 
@@ -113,12 +113,12 @@ Loop:
 		case l := <-logsChan:
 			info, batchLogType := parseLogType(cfg.zkCfg.L1RollupId, &l)
 			switch batchLogType {
-			case batchLogSequence:
+			case logSequence:
 				if err := hermezDb.WriteSequence(info.L1BlockNo, info.BatchNo, info.L1TxHash, info.StateRoot); err != nil {
 					return fmt.Errorf("failed to write batch info, %w", err)
 				}
 				newSequencesCount++
-			case batchLogVerify:
+			case logVerify:
 				if info.BatchNo > highestVerification.BatchNo {
 					highestVerification = info
 				}
@@ -126,7 +126,7 @@ Loop:
 					return fmt.Errorf("failed to write verification for block %d, %w", info.L1BlockNo, err)
 				}
 				newVerificationsCount++
-			case batchLogIncompatible:
+			case logIncompatible:
 				continue
 			default:
 				log.Warn("L1 Syncer unknown topic", "topic", l.Topics[0])
@@ -176,44 +176,45 @@ Loop:
 	return nil
 }
 
-type BatchLogType uint64
+type BatchLogType byte
 
 var (
-	batchLogUnknown      BatchLogType = 0
-	batchLogSequence     BatchLogType = 1
-	batchLogVerify       BatchLogType = 2
-	batchLogIncompatible BatchLogType = 100
+	logUnknown  BatchLogType = 0
+	logSequence BatchLogType = 1
+	logVerify   BatchLogType = 2
+
+	logIncompatible BatchLogType = 100
 )
 
 func parseLogType(l1RollupId uint64, log *ethTypes.Log) (l1BatchInfo types.L1BatchInfo, batchLogType BatchLogType) {
 	bigRollupId := new(big.Int).SetUint64(l1RollupId)
-	isRollupIdMatching := log.Topics[1] == libcommon.BigToHash(bigRollupId)
+	isRollupIdMatching := log.Topics[1] == common.BigToHash(bigRollupId)
 
 	var batchNum uint64
 	var stateRoot, l1InfoRoot common.Hash
 
 	switch log.Topics[0] {
 	case contracts.SequencedBatchTopicPreEtrog:
-		batchLogType = batchLogSequence
+		batchLogType = logSequence
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 	case contracts.SequencedBatchTopicEtrog:
-		batchLogType = batchLogSequence
+		batchLogType = logSequence
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 		l1InfoRoot = common.BytesToHash(log.Data[:32])
 	case contracts.VerificationTopicPreEtrog:
-		batchLogType = batchLogVerify
+		batchLogType = logVerify
 		batchNum = new(big.Int).SetBytes(log.Topics[1].Bytes()).Uint64()
 		stateRoot = common.BytesToHash(log.Data[:32])
 	case contracts.VerificationTopicEtrog:
 		if isRollupIdMatching {
-			batchLogType = batchLogVerify
+			batchLogType = logVerify
 			batchNum = common.BytesToHash(log.Data[:32]).Big().Uint64()
 			stateRoot = common.BytesToHash(log.Data[32:64])
 		} else {
-			batchLogType = batchLogIncompatible
+			batchLogType = logIncompatible
 		}
 	default:
-		batchLogType = batchLogUnknown
+		batchLogType = logUnknown
 		batchNum = 0
 	}
 

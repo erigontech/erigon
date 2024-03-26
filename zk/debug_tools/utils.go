@@ -334,6 +334,7 @@ func GetConf() (RpcConfig, error) {
 
 type RpcConfig struct {
 	Url          string `yaml:"url"`
+	Datastream   string `yaml:"datastream"`
 	DumpFileName string `yaml:"dumpFileName"`
 	Block        int64  `yaml:"block"`
 }

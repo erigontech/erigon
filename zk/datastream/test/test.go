@@ -25,7 +25,7 @@ func main() {
 	}
 
 	// create bookmark
-	bookmark := types.NewL2BlockBookmark(1378348)
+	bookmark := types.NewL2BlockBookmark(0)
 
 	// Read all entries from server
 	blocksRead, _, _, entriesReadAmount, err := c.ReadEntries(bookmark, 1)

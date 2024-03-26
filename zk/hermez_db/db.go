@@ -494,14 +494,14 @@ func (db *HermezDb) WriteBatchGlobalExitRoot(batchNumber uint64, ger dstypes.Ger
 	return db.tx.Put(GLOBAL_EXIT_ROOTS_BATCHES, Uint64ToBytes(batchNumber), ger.EncodeToBytes())
 }
 
-func (db *HermezDbReader) GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) ([]*dstypes.GerUpdate, error) {
+func (db *HermezDbReader) GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint64) (*[]dstypes.GerUpdate, error) {
 	c, err := db.tx.Cursor(GLOBAL_EXIT_ROOTS_BATCHES)
 	if err != nil {
 		return nil, err
 	}
 	defer c.Close()
 
-	var gers []*dstypes.GerUpdate
+	var gers []dstypes.GerUpdate
 	var k, v []byte
 
 	for k, v, err = c.First(); k != nil; k, v, err = c.Next() {
@@ -514,11 +514,11 @@ func (db *HermezDbReader) GetBatchGlobalExitRoots(fromBatchNum, toBatchNum uint6
 			if err != nil {
 				return nil, err
 			}
-			gers = append(gers, gerUpdate)
+			gers = append(gers, *gerUpdate)
 		}
 	}
 
-	return gers, err
+	return &gers, err
 }
 
 func (db *HermezDbReader) GetBatchGlobalExitRoot(batchNum uint64) (*dstypes.GerUpdate, error) {

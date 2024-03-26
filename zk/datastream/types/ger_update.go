@@ -26,6 +26,17 @@ type GerUpdate struct {
 	StateRoot      common.Hash    // 32 bytes
 }
 
+func (g *GerUpdate) EntryType() EntryType {
+	return EntryTypeGerUpdate
+}
+
+func (g *GerUpdate) Bytes(bigEndian bool) []byte {
+	if bigEndian {
+		return g.EncodeToBytesBigEndian()
+	}
+	return g.EncodeToBytes()
+}
+
 func (g *GerUpdate) EncodeToBytes() []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.LittleEndian, g.BatchNumber)

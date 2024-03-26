@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"fmt"
+
 	"github.com/iden3/go-iden3-crypto/keccak256"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
@@ -12,7 +13,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/zk/contracts"
 	"github.com/ledgerwatch/erigon/zk/hermez_db"
-	"github.com/ledgerwatch/erigon/zk/syncer"
 	"github.com/ledgerwatch/erigon/zk/types"
 	"github.com/ledgerwatch/log/v3"
 )
@@ -20,10 +20,10 @@ import (
 type L1SequencerSyncCfg struct {
 	db     kv.RwDB
 	zkCfg  *ethconfig.Zk
-	syncer *syncer.L1Syncer
+	syncer IL1Syncer
 }
 
-func StageL1SequencerSyncCfg(db kv.RwDB, zkCfg *ethconfig.Zk, sync *syncer.L1Syncer) L1SequencerSyncCfg {
+func StageL1SequencerSyncCfg(db kv.RwDB, zkCfg *ethconfig.Zk, sync IL1Syncer) L1SequencerSyncCfg {
 	return L1SequencerSyncCfg{
 		db:     db,
 		zkCfg:  zkCfg,
@@ -81,13 +81,13 @@ Loop:
 		case l := <-logChan:
 			switch l.Topics[0] {
 			case contracts.UpdateL1InfoTreeTopic:
-				latestUpdate, err = handleL1InfoTreeUpdate(cfg, hermezDb, l, latestUpdate, found)
+				latestUpdate, err = HandleL1InfoTreeUpdate(cfg.syncer, hermezDb, l, latestUpdate, found)
 				if err != nil {
 					return err
 				}
 				found = true
 			case contracts.InitialSequenceBatchesTopic:
-				if err := handleInitialSequenceBatches(cfg, hermezDb, l); err != nil {
+				if err := HandleInitialSequenceBatches(cfg.syncer, hermezDb, l); err != nil {
 					return err
 				}
 				// todo: [zkevm] handle the writing of this information for use in execution
@@ -118,8 +118,8 @@ Loop:
 	return nil
 }
 
-func handleL1InfoTreeUpdate(
-	cfg L1SequencerSyncCfg,
+func HandleL1InfoTreeUpdate(
+	syncer IL1Syncer,
 	hermezDb *hermez_db.HermezDb,
 	l ethTypes.Log,
 	latestUpdate *types.L1InfoTreeUpdate,
@@ -149,7 +149,7 @@ func handleL1InfoTreeUpdate(
 
 	// now we need the block timestamp and the parent hash information for the block tied
 	// to this event
-	block, err := cfg.syncer.GetBlock(l.BlockNumber)
+	block, err := syncer.GetBlock(l.BlockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -171,12 +171,12 @@ const (
 	injectedBatchSequencerEndByte        = 96
 )
 
-func handleInitialSequenceBatches(
-	cfg L1SequencerSyncCfg,
+func HandleInitialSequenceBatches(
+	syncer IL1Syncer,
 	db *hermez_db.HermezDb,
 	l ethTypes.Log,
 ) error {
-	l1Block, err := cfg.syncer.GetBlock(l.BlockNumber)
+	l1Block, err := syncer.GetBlock(l.BlockNumber)
 	if err != nil {
 		return err
 	}
