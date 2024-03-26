@@ -2167,7 +2167,6 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 			}
 		}
 
-		//TODO: remove whitelist check - Erigon may send us new seedable files
 		mi := t.Metainfo()
 		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
 			d.logger.Warn("[snapshots] create torrent file", "err", err)
