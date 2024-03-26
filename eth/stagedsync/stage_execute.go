@@ -384,9 +384,9 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 	}
 
 	quit := ctx.Done()
-	useInternalTx := txc.Tx == nil
+	useExternalTx := txc.Tx != nil
 
-	if useInternalTx {
+	if !useExternalTx {
 		txc.Tx, err = cfg.db.BeginRw(context.Background())
 		if err != nil {
 			return err
@@ -419,7 +419,7 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 		logger.Info(fmt.Sprintf("[%s] Blocks execution", logPrefix), "from", s.BlockNumber, "to", to)
 	}
 
-	if useInternalTx && cfg.silkworm != nil {
+	if !useExternalTx && cfg.silkworm != nil {
 		log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
 
 		//  update plain state version so the cache can be notified that the state has moved on
@@ -519,10 +519,33 @@ Loop:
 
 		_, isMemoryMutation := txc.Tx.(*membatchwithdb.MemoryMutation)
 		if cfg.silkworm != nil && !isMemoryMutation {
-			blockNum, err = silkworm.ExecuteBlocksEphemeral(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			var lastExecutedBlock uint64
+			if useExternalTx {
+				lastExecutedBlock, err = silkworm.ExecuteBlocksEphemeral(cfg.silkworm, txc.Tx, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+			} else {
+				// In case of internal tx we close it (no changes, commit not needed): Silkworm will use its own internal tx
+				txc.Tx.Rollback()
+				txc.Tx = nil
+
+				log.Info("Using Silkworm to commit full range", "fromBlock", s.BlockNumber+1, "toBlock", to)
+				lastExecutedBlock, err = silkworm.ExecuteBlocksPerpetual(cfg.silkworm, cfg.db, cfg.chainConfig.ChainID, blockNum, to, uint64(cfg.batchSize), writeChangeSets, writeReceipts, writeCallTraces)
+
+				var txErr error
+				if txc.Tx, txErr = cfg.db.BeginRw(context.Background()); txErr != nil {
+					return txErr
+				}
+				defer txc.Tx.Rollback()
+
+				// Recreate memory batch because underlying tx has changed
+				batch.Close()
+				batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
+			}
+
 			if err != nil {
 				// In case of any error we need to increment to have the failed block number
-				blockNum++
+				blockNum = lastExecutedBlock
+			} else {
+				blockNum = lastExecutedBlock + 1
 			}
 		} else {
 			err = executeBlock(block, txc.Tx, batch, cfg, *cfg.vmConfig, writeChangeSets, writeReceipts, writeCallTraces, stateStream, logger)
@@ -572,7 +595,7 @@ Loop:
 			if err = s.Update(txc.Tx, stageProgress); err != nil {
 				return err
 			}
-			if useInternalTx {
+			if !useExternalTx {
 				if err = txc.Tx.Commit(); err != nil {
 					return err
 				}
@@ -583,7 +606,7 @@ Loop:
 				// TODO: This creates stacked up deferrals
 				defer txc.Tx.Rollback()
 			}
-			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum, "time", time.Since(commitTime), "commitedToDb", useInternalTx)
+			logger.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState, "block", blockNum, "time", time.Since(commitTime), "committedToDb", !useExternalTx)
 			currentStateGas = 0
 			batch = membatch.NewHashBatch(txc.Tx, quit, cfg.dirs.Tmp, logger)
 		}
@@ -612,10 +635,11 @@ Loop:
 		return fmt.Errorf("writing plain state version: %w", err)
 	}
 
-	if useInternalTx {
+	if !useExternalTx {
 		if err = txc.Tx.Commit(); err != nil {
 			return err
 		}
+		txc.Tx = nil
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Completed on", logPrefix), "block", stageProgress)
