@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"errors"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
 	"github.com/ledgerwatch/log/v3"
@@ -10,7 +9,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/direct"
-	"github.com/ledgerwatch/erigon-lib/terminate"
 	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
@@ -140,46 +138,4 @@ func (s *service) Run(ctx context.Context) error {
 	}
 
 	return ctx.Err()
-}
-
-func RunService(
-	ctx context.Context,
-	logger log.Logger,
-	chainConfig *chain.Config,
-	sentries []direct.SentryClient,
-	maxPeers int,
-	heimdallUrl string,
-	executionEngine executionclient.ExecutionEngine,
-	genesis *types.Block,
-) {
-	var sentry67 direct.SentryClient
-	for _, sentryClient := range sentries {
-		if sentryClient.Protocol() == direct.ETH67 {
-			sentry67 = sentryClient
-			break
-		}
-	}
-	if sentry67 == nil {
-		logger.Error("polygon sync crashed, terminating process", "err", "sentry 67 not found")
-		terminate.TryGracefully(ctx, logger)
-		return
-	}
-
-	sync := NewService(
-		logger,
-		chainConfig,
-		sentry67,
-		maxPeers,
-		heimdallUrl,
-		executionEngine,
-		genesis,
-	)
-
-	err := sync.Run(ctx)
-	if err == nil || errors.Is(err, context.Canceled) {
-		return
-	}
-
-	logger.Error("polygon sync crashed, terminating process", "err", err)
-	terminate.TryGracefully(ctx, logger)
 }

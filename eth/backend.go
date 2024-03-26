@@ -66,6 +66,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/kv/kvcfg"
 	"github.com/ledgerwatch/erigon-lib/kv/remotedbserver"
 	libstate "github.com/ledgerwatch/erigon-lib/state"
+	"github.com/ledgerwatch/erigon-lib/terminate"
 	"github.com/ledgerwatch/erigon-lib/txpool"
 	"github.com/ledgerwatch/erigon-lib/txpool/txpooluitl"
 	types2 "github.com/ledgerwatch/erigon-lib/types"
@@ -157,7 +158,6 @@ type Ethereum struct {
 
 	ethBackendRPC      *privateapi.EthBackendServer
 	engineBackendRPC   *engineapi.EngineServer
-	executionEngine    executionclient.ExecutionEngine
 	miningRPC          txpoolproto.MiningServer
 	stateChangesClient txpool.StateChangesClient
 
@@ -165,12 +165,10 @@ type Ethereum struct {
 	pendingBlocks     chan *types.Block
 	minedBlocks       chan *types.Block
 
-	// downloader fields
 	sentryCtx      context.Context
 	sentryCancel   context.CancelFunc
 	sentriesClient *sentry_multi_client.MultiClient
 	sentryServers  []*sentry.GrpcServer
-	maxPeers       int
 
 	stagedSync         *stagedsync.Sync
 	pipelineStagedSync *stagedsync.Sync
@@ -208,6 +206,8 @@ type Ethereum struct {
 	silkworm                 *silkworm.Silkworm
 	silkwormRPCDaemonService *silkworm.RpcDaemonService
 	silkwormSentryService    *silkworm.SentryService
+
+	polygonSyncService polygonsync.Service
 }
 
 func splitAddrIntoHostAndPort(addr string) (host string, port int, err error) {
@@ -355,7 +355,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	p2pConfig := stack.Config().P2P
-	backend.maxPeers = p2pConfig.MaxPeers
 	var sentries []direct.SentryClient
 	if len(p2pConfig.SentryAddr) > 0 {
 		for _, addr := range p2pConfig.SentryAddr {
@@ -802,6 +801,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		config.Miner.EnabledPOS)
 	backend.engineBackendRPC = engineBackendRPC
 
+	var executionEngine executionclient.ExecutionEngine
 	// Gnosis has too few blocks on his network for phase2 to work. Once we have proper snapshot automation, it can go back to normal.
 	if config.NetworkID == uint64(clparams.GnosisNetwork) || config.NetworkID == uint64(clparams.HoleskyNetwork) || config.NetworkID == uint64(clparams.GoerliNetwork) {
 		// Read the jwt secret
@@ -809,12 +809,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if err != nil {
 			return nil, err
 		}
-		backend.executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
+		executionEngine, err = executionclient.NewExecutionClientRPC(jwtSecret, stack.Config().Http.AuthRpcHTTPListenAddress, stack.Config().Http.AuthRpcPort)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		backend.executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
+		executionEngine, err = executionclient.NewExecutionClientDirect(eth1_chain_reader.NewChainReaderEth1(chainConfig, executionRpc, 1000))
 		if err != nil {
 			return nil, err
 		}
@@ -837,18 +837,45 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			pruneBlobDistance = math.MaxUint64
 		}
 
-		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, genesisCfg, dirs.CaplinIndexing, dirs.CaplinBlobs, backend.executionEngine, false, pruneBlobDistance)
+		indiciesDB, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, db_config.DefaultDatabaseConfiguration, beaconCfg, genesisCfg, dirs.CaplinIndexing, dirs.CaplinBlobs, executionEngine, false, pruneBlobDistance)
 		if err != nil {
 			return nil, err
 		}
 
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, beaconCfg, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinPhase1(ctx, backend.executionEngine, config, networkCfg, beaconCfg, genesisCfg, state, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds); err != nil {
+			if err := caplin1.RunCaplinPhase1(ctx, executionEngine, config, networkCfg, beaconCfg, genesisCfg, state, dirs, config.BeaconRouter, eth1Getter, backend.downloaderClient, config.CaplinConfig.Backfilling, config.CaplinConfig.BlobBackfilling, config.CaplinConfig.Archive, indiciesDB, blobStorage, creds); err != nil {
 				logger.Error("could not start caplin", "err", err)
 			}
 			ctxCancel()
 		}()
+	}
+
+	if config.PolygonSync {
+		// TODO - pending sentry multi client refactor
+		//      - sentry multi client should conform to the SentryClient interface and internally
+		//        multiplex
+		//      - for now we just use 1 sentry for eth67
+		var sentry67 direct.SentryClient
+		for _, sentryClient := range sentries {
+			if sentryClient.Protocol() == direct.ETH67 {
+				sentry67 = sentryClient
+				break
+			}
+		}
+		if sentry67 == nil {
+			return nil, errors.New("sentry 67 for polygon sync not found")
+		}
+
+		backend.polygonSyncService = polygonsync.NewService(
+			logger,
+			chainConfig,
+			sentry67,
+			p2pConfig.MaxPeers,
+			config.HeimdallURL,
+			executionEngine,
+			genesis,
+		)
 	}
 
 	return backend, nil
@@ -1369,15 +1396,14 @@ func (s *Ethereum) Start() error {
 		s.waitForStageLoopStop = nil // TODO: Ethereum.Stop should wait for execution_server shutdown
 		go s.eth1ExecutionServer.Start(s.sentryCtx)
 	} else if s.config.PolygonSync {
-		go polygonsync.RunService(s.sentryCtx,
-			s.logger,
-			s.chainConfig,
-			s.sentriesClient.Sentries(),
-			s.maxPeers,
-			s.config.HeimdallURL,
-			s.executionEngine,
-			s.genesisBlock,
-		)
+		go func() {
+			ctx := s.sentryCtx
+			err := s.polygonSyncService.Run(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
+				s.logger.Error("polygon sync crashed, terminating process", "err", err)
+				terminate.TryGracefully(ctx, s.logger)
+			}
+		}()
 	} else {
 		go stages2.StageLoop(s.sentryCtx, s.chainDB, s.stagedSync, s.sentriesClient.Hd, s.waitForStageLoopStop, s.config.Sync.LoopThrottle, s.logger, s.blockReader, hook, s.config.ForcePartialCommit)
 	}
