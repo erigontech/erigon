@@ -2170,12 +2170,10 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-t.GotInfo():
 		}
 
-		if !d.snapshotLock.Downloads.Contains(name) {
-			mi := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
-				d.logger.Warn("[snapshots] create torrent file", "err", err)
-				return
-			}
+		mi := t.Metainfo()
+		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
+			d.logger.Warn("[snapshots] create torrent file", "err", err)
+			return
 		}
 
 		urls, ok := d.webseeds.ByFileName(t.Name())
