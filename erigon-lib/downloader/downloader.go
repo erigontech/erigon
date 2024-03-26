@@ -38,6 +38,7 @@ import (
 
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/metainfo"
+	pp "github.com/anacrolix/torrent/peer_protocol"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/anacrolix/torrent/types/infohash"
 	"github.com/c2h5oh/datasize"
@@ -1413,7 +1414,7 @@ func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *web
 		return session, fmt.Errorf("can't get torrent spec for %s from info: %w", t.Info().Name, err)
 	}
 
-	spec.ChunkSize = downloadercfg.DefaultNetworkChunkSize
+	spec.ChunkSize = pp.Integer(downloadercfg.DefaultNetworkChunkSize)
 	spec.DisallowDataDownload = true
 
 	info, _, ok := snaptype.ParseFileName(d.SnapDir(), name)

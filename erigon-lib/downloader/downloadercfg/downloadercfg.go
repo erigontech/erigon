@@ -31,6 +31,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/datadir"
+	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/time/rate"
@@ -42,8 +43,10 @@ import (
 const DefaultPieceSize = 2 * 1024 * 1024
 
 // DefaultNetworkChunkSize - how much data request per 1 network call to peer.
+// `256 * 1024` is home-routers-friendly value
+// `2 * 1024 * 1024` is webseed-friendly value (webseed implementation is not feature-complete yet in lib and increase of net chunk improving speed)
 // default: 16Kb
-const DefaultNetworkChunkSize = 256 * 1024
+var DefaultNetworkChunkSize = dbg.EnvInt("DOWNLOADER_NET_CHUNK_KB", 2*1024) * 1024
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
