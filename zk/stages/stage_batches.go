@@ -21,9 +21,9 @@ import (
 	"github.com/ledgerwatch/erigon/zk/sequencer"
 	txtype "github.com/ledgerwatch/erigon/zk/tx"
 
+	"github.com/ledgerwatch/erigon/chain"
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/log/v3"
-	"github.com/ledgerwatch/erigon/chain"
 )
 
 const (
@@ -567,15 +567,15 @@ func PruneBatchesStage(s *stagedsync.PruneState, tx kv.RwTx, cfg BatchesCfg, ctx
 }
 
 func getGasLimit(forkId uint16) uint64 {
-	switch forkId {
-	case 8:
+	if forkId >= 8 {
 		return forkId8BlockGasLimit
-	case 7:
-		return forkId8BlockGasLimit
-		// return ForkId7BlockGasLimit
-	default:
-		return preForkId7BlockGasLimit
 	}
+
+	if forkId == 7 {
+		return forkId7BlockGasLimit
+	}
+
+	return preForkId7BlockGasLimit
 }
 
 // writeL2Block writes L2Block to ErigonDb and HermezDb
