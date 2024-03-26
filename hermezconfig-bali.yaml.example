@@ -1,5 +1,5 @@
 datadir: /home/erigon/.local/share/erigon
-chain: hermez-cardona-internal
+chain: hermez-bali
 http: true
 private.api.addr: localhost:9092
 zkevm.l2-chain-id: 2440

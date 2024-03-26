@@ -5,7 +5,7 @@ const (
 	HermezMainnetShadowforkChainName = "hermez-mainnet-shadowfork"
 	HermezLocalDevnetChainName       = "hermez-dev"
 	HermezCardonaChainName           = "hermez-cardona"
-	HermezCardonaInternalChainName   = "hermez-cardona-internal"
+	HermezBaliChainName              = "hermez-bali"
 	X1TestnetChainName               = "x1-testnet"
 	HermezEtrogChainName             = "hermez-etrog"
 )
@@ -16,6 +16,6 @@ var Zkevm = []string{
 	HermezLocalDevnetChainName,
 	HermezEtrogChainName,
 	HermezCardonaChainName,
-	HermezCardonaInternalChainName,
+	HermezBaliChainName,
 	X1TestnetChainName,
 }

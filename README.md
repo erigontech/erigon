@@ -100,7 +100,7 @@ NETWORK=mainnet L1_RPC_URL=https://rpc.eth.gateway.fm docker-compose -f docker-c
 ```
 - Cardona:
 ```
-NETWORK=cardona-internal L1_RPC_URL=https://rpc.sepolia.org docker-compose -f docker-compose-example.yml up -d
+NETWORK=cardona L1_RPC_URL=https://rpc.sepolia.org docker-compose -f docker-compose-example.yml up -d
 ```
 
 ### Config

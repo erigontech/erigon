@@ -147,7 +147,7 @@ var (
 
 	HermezCardonaChainConfig = readChainSpec("chainspecs/hermez-cardona.json")
 
-	HermezCardonaInternalChainConfig = readChainSpec("chainspecs/hermez-cardona-internal.json")
+	HermezBaliChainConfig = readChainSpec("chainspecs/hermez-bali.json")
 
 	X1TestnetChainConfig = readChainSpec("chainspecs/x1-testnet.json")
 
@@ -241,8 +241,8 @@ func ChainConfigByChainName(chain string) *chain.Config {
 		return HermezEtrogChainConfig
 	case networkname.HermezCardonaChainName:
 		return HermezCardonaChainConfig
-	case networkname.HermezCardonaInternalChainName:
-		return HermezCardonaInternalChainConfig
+	case networkname.HermezBaliChainName:
+		return HermezBaliChainConfig
 	case networkname.X1TestnetChainName:
 		return X1TestnetChainConfig
 	default:
@@ -280,7 +280,7 @@ func GenesisHashByChainName(chain string) *libcommon.Hash {
 		return &HermezEtrogGenesisHash
 	case networkname.HermezCardonaChainName:
 		return &HermezCardonaGenesisHash
-	case networkname.HermezCardonaInternalChainName:
+	case networkname.HermezBaliChainName:
 		return &HermezCardonaInternalGenesisHash
 	case networkname.X1TestnetChainName:
 		return &X1TestnetGenesisHash
@@ -318,7 +318,7 @@ func ChainConfigByGenesisHash(genesisHash libcommon.Hash) *chain.Config {
 	case genesisHash == HermezCardonaGenesisHash:
 		return HermezCardonaChainConfig
 	case genesisHash == HermezCardonaInternalGenesisHash:
-		return HermezCardonaInternalChainConfig
+		return HermezBaliChainConfig
 	default:
 		panic(fmt.Sprintf("Unknown genesis hash: %s", genesisHash.Hex()))
 		return nil

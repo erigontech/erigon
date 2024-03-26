@@ -14,7 +14,7 @@ var chainIds = []uint64{
 var chainIdToName = map[uint64]string{
 	195:    networkname.X1TestnetChainName,
 	1101:   networkname.HermezMainnetChainName,
-	2440:   networkname.HermezCardonaInternalChainName,
+	2440:   networkname.HermezBaliChainName,
 	2442:   networkname.HermezCardonaChainName,
 	10010:  networkname.HermezEtrogChainName,
 	999999: networkname.HermezLocalDevnetChainName,

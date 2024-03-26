@@ -52,11 +52,11 @@ func HermezCardonaGenesisBlock() *types.Genesis {
 
 func HermezCardonaInternalGenesisBlock() *types.Genesis {
 	return &types.Genesis{
-		Config:     params.HermezCardonaInternalChainConfig,
+		Config:     params.HermezBaliChainConfig,
 		Timestamp:  1701336708,
 		GasLimit:   0x0,
 		Difficulty: big.NewInt(0x0),
-		Alloc:      readPrealloc("allocs/hermez-cardona-internal.json"),
+		Alloc:      readPrealloc("allocs/hermez-bali.json"),
 	}
 }
 
