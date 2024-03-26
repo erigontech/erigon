@@ -1748,10 +1748,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 
 						if fi, err := os.Stat(filepath.Join(d.SnapDir(), t.Name())); err == nil {
 							if torrentComplete = (fi.Size() == *info.Length); torrentComplete {
-								infoRead := t.Stats().BytesReadData
-								if updateStats || infoRead.Int64() == 0 {
-									stats.BytesCompleted += uint64(*info.Length)
-								}
+								//infoRead := t.Stats().BytesReadData
+								//if updateStats || infoRead.Int64() == 0 {
+								//	stats.BytesCompleted += uint64(*info.Length)
+								//}
 								dbComplete++
 								progress = float32(100)
 							}
