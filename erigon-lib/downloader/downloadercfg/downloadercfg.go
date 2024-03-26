@@ -46,7 +46,7 @@ const DefaultPieceSize = 2 * 1024 * 1024
 // `256 * 1024` is home-routers-friendly value
 // `2 * 1024 * 1024` is webseed-friendly value (webseed implementation is not feature-complete yet in lib and increase of net chunk improving speed)
 // default: 16Kb
-var DefaultNetworkChunkSize = dbg.EnvInt("DOWNLOADER_NET_CHUNK_KB", 2*1024) * 1024
+var DefaultNetworkChunkSize = dbg.EnvInt("DOWNLOADER_NET_CHUNK_KB", 256) * 1024
 
 type Cfg struct {
 	ClientConfig  *torrent.ClientConfig
