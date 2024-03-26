@@ -577,8 +577,10 @@ func getGasLimit(forkId uint16) uint64 {
 		return forkId8BlockGasLimit
 	}
 
+	// [hack] the rpc returns forkid8 value, but forkid7 is used in execution
 	if forkId == 7 {
-		return forkId7BlockGasLimit
+		return forkId8BlockGasLimit
+		// return forkId7BlockGasLimit
 	}
 
 	return preForkId7BlockGasLimit
