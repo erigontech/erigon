@@ -1007,7 +1007,7 @@ func (d *Downloader) mainLoop(silent bool) error {
 
 				switch {
 				case len(t.PeerConns()) > 0:
-					d.logger.Debug("[snapshots] Downloading from torrent", "file", t.Name(), "peers", len(t.PeerConns()))
+					d.logger.Debug("[snapshots] Downloading from BitTorrent", "file", t.Name(), "peers", len(t.PeerConns()))
 					delete(waiting, t.Name())
 					d.torrentDownload(t, downloadComplete, sem)
 				case len(t.WebseedPeerConns()) > 0:
