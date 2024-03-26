@@ -542,6 +542,10 @@ func (m *Message) SetGasPrice(gasPrice *uint256.Int) {
 	m.gasPrice.Set(gasPrice)
 }
 
+func (m *Message) SetFeeCap(feeCap *uint256.Int) {
+	m.feeCap.Set(feeCap)
+}
+
 func (m Message) EffectiveGasPricePercentage() uint8 { return m.effectiveGasPricePercentage }
 
 func DecodeSSZ(data []byte, dest codec.Deserializable) error {

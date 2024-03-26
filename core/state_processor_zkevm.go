@@ -48,6 +48,7 @@ func applyTransaction_zkevm(config *chain.Config, engine consensus.EngineReader,
 	// apply effective gas percentage here, so it is actual for all further calculations
 	if evm.ChainRules().IsForkID5Dragonfruit {
 		msg.SetGasPrice(CalculateEffectiveGas(msg.GasPrice(), effectiveGasPricePercentage))
+		msg.SetFeeCap(CalculateEffectiveGas(msg.FeeCap(), effectiveGasPricePercentage))
 	}
 
 	if msg.FeeCap().IsZero() && engine != nil {

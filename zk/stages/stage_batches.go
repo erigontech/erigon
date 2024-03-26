@@ -30,6 +30,7 @@ const (
 	preForkId7BlockGasLimit = 30_000_000
 	forkId7BlockGasLimit    = 18446744073709551615 // 0xffffffffffffffff
 	forkId8BlockGasLimit    = 1125899906842624     // 0x4000000000000
+	HIGHEST_KNOWN_FORK      = 9
 )
 
 type ErigonDb interface {
@@ -186,6 +187,11 @@ func SpawnStageBatches(
 			// skip if we already have this block
 			if l2Block.L2BlockNumber < lastBlockHeight+1 {
 				continue
+			}
+
+			if l2Block.ForkId > HIGHEST_KNOWN_FORK {
+				message := fmt.Sprintf("unsupported fork id %v received from the data stream", l2Block.ForkId)
+				panic(message)
 			}
 
 			// update forkid
