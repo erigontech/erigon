@@ -172,7 +172,7 @@ func NewRecSplit(args RecSplitArgs, logger log.Logger) (*RecSplit, error) {
 		//   - indexing done in background or in many workers (building many indices in-parallel)
 		//   - `recsplit` has 2 etl collectors
 		//   - `rescplit` building is cpu-intencive and bottleneck is not in etl loading
-		rs.etlBufLimit = etl.BufferOptimalSize / 8
+		rs.etlBufLimit = etl.BufferOptimalSize / 4
 	}
 	rs.bucketCollector = etl.NewCollector(RecSplitLogPrefix+" "+fname, rs.tmpDir, etl.NewSortableBuffer(rs.etlBufLimit), logger)
 	rs.bucketCollector.LogLvl(log.LvlDebug)
