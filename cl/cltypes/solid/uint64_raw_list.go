@@ -158,7 +158,7 @@ func (arr *RawUint64List) MarshalJSON() ([]byte, error) {
 	// convert it to a list of strings
 	strs := make([]string, len(arr.u))
 	for i, v := range arr.u {
-		strs[i] = strconv.FormatInt(int64(v), 10)
+		strs[i] = strconv.FormatUint(v, 10)
 	}
 	return json.Marshal(strs)
 }
