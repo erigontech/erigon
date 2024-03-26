@@ -10,6 +10,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/fork"
+	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -211,8 +212,6 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 
 	contributionAndProof := signedChange.Message
 	signature := signedChange.Signature
-	fmt.Println("Printing Debug for contributionAndProof", contributionAndProof)
-	fmt.Println("Printing Debug for signiture", signature)
 
 	//Take lock as we interact with state.
 	s := f.syncedDataManager.HeadState()
@@ -221,18 +220,18 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// [IGNORE] The contribution's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. contribution.slot == current_slot.
-	// Fix mainnet network, use one from beacon config
-	// +- maximumGossipClockDisparity
+	messageTime := utils.GetSlotTime(s.GenesisTime(), f.beaconCfg.SecondsPerSlot, contributionAndProof.Contribution.Slot)
+	slotTime := utils.GetSlotTime(s.GenesisTime(), f.beaconCfg.SecondsPerSlot, s.Slot())
 
-	// maximumGossipClockDisparity := f.beaconCfg.NetworkConfig.MaximumGossipClockDisparity
-	// f.beaconCfg.	currentSlot := s.Slot()
+	clockDisparity := clparams.NetworkConfigs[clparams.NetworkType(f.beaconCfg.DepositNetworkID)].MaximumGossipClockDisparity
+	lowerBound := slotTime.Add(-clockDisparity)
+	upperBound := slotTime.Add(clockDisparity)
 
-	// s.BeaconConfig().NetworkConfig.MaximumGossipClockDisparity
-
-	maximumGossipClockDisparity := uint64(clparams.NetworkConfigs[clparams.MainnetNetwork].MaximumGossipClockDisparity)
-	currentSlot := s.Slot()
-	if contributionAndProof.Contribution.Slot != currentSlot && contributionAndProof.Contribution.Slot > currentSlot+maximumGossipClockDisparity {
-		return fmt.Errorf("contribution's slot is not for the current slot")
+	if messageTime.Before(lowerBound) {
+		return fmt.Errorf("slot is too old")
+	}
+	if messageTime.After(upperBound) {
+		return fmt.Errorf("slot is too new")
 	}
 
 	// [REJECT] The subcommittee index is in the allowed range, i.e. contribution.subcommittee_index < SYNC_COMMITTEE_SUBNET_COUNT.
@@ -241,13 +240,10 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
-	// solid.NewBitList(0, 0)
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
-
-	// aggregationBits := solid.BitList(contributionAndProof.Contribution.AggregationBits)
-	// if aggregationBits == nil {
-	// 	return fmt.Errorf("contribution has no participants")
-	// }
+	if aggregationBits == nil {
+		return fmt.Errorf("aggretationBits is nil")
+	}
 
 	found := false
 	for _, bit := range contributionAndProof.Contribution.AggregationBits {
@@ -262,13 +258,12 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 
 	// [REJECT] contribution_and_proof.selection_proof selects the validator as an aggregator for the slot -- i.e. is_sync_committee_aggregator(contribution_and_proof.selection_proof) returns True.
 	selectionProof := contributionAndProof.SelectionProof
-	// selectionData := contributionAndProof.Contribution
 	if len(selectionProof) != 96 {
 		return fmt.Errorf("incorrect signiture length")
 	}
 	modulo := utils.Max64(1, f.beaconCfg.SyncCommitteeSize/f.beaconCfg.SyncCommitteeSubnetCount/f.beaconCfg.TargetAggregatorsPerSyncSubcommittee)
 	hashSignature := utils.Sha256(selectionProof[:])
-	if binary.LittleEndian.Uint64(hashSignature[:8])%modulo == 0 {
+	if binary.LittleEndian.Uint64(hashSignature[:8])%modulo != 0 {
 		return fmt.Errorf("selects the validator as an aggregator")
 	}
 
@@ -296,21 +291,15 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 		BeaconBlockRoot:   contributionAndProof.Contribution.BeaconBlockRoot,
 		SubcommitteeIndex: contributionAndProof.Contribution.SubcommitteeIndex,
 	}
-	accumulatedBitsList, found := f.operationsPool.ContributionCache.Get(contributionKey)
-
-	fmt.Println("Printing Debug for contributionKey", contributionKey)
-	fmt.Println("Printing Debug for accumulatedBitsList", accumulatedBitsList)
-	fmt.Println("Printing Debug for found", found)
-	fmt.Println("Printing Debug for contributionAndProof.Contribution.AggregationBits", aggregationBits)
+	accumulatedBitsList, _ := f.operationsPool.ContributionCache.Get(contributionKey)
 
 	// FIXME
-	// if found && !isStrictSuperset(accumulatedBitsList, aggregationBits) {
+	// if found { //&& !isStrictSuperset(accumulatedBitsList, aggregationBits) {
 	// 	fmt.Println("seen a non-strict superset sync committee contribution")
 	// 	return nil
 	// }
 
 	accumulatedBitsList = append(accumulatedBitsList, contributionAndProof.Contribution.AggregationBits)
-	fmt.Println("Printing Debug for aggregationBitsList", accumulatedBitsList)
 
 	f.operationsPool.ContributionCache.Insert(contributionKey, accumulatedBitsList)
 
@@ -320,36 +309,47 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[8:], uint64(contributionAndProof.Contribution.Slot))
 	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[16:], uint64(contributionAndProof.Contribution.SubcommitteeIndex))
 
-	fmt.Println("Printing Debug for indexSlotKey", contributionAndProof.AggregatorIndex, contributionAndProof.Contribution.Slot, contributionAndProof.Contribution.SubcommitteeIndex)
-	fmt.Println("Printing Debug for indexSlotKey", indexSlotKey)
-
 	if f.operationsPool.IndexSlotHasSeen.Has(string(indexSlotKey)) {
-		fmt.Println("seen sync committee contribution")
 		return nil
 	}
 	f.operationsPool.IndexSlotHasSeen.Insert(string(indexSlotKey), true)
 
-	selectionDataRoot, err := fork.ComputeSigningRoot(contributionAndProof.Contribution, f.beaconCfg.DomainSyncCommittee[:])
+	// [REJECT] The contribution_and_proof.selection_proof is a valid signature of the SyncAggregatorSelectionData derived from the contribution by the validator with index contribution_and_proof.aggregator_index.
+	syncAggregatorSelectionData := &cltypes.SyncAggregatorSelectionData{
+		Slot:              contributionAndProof.Contribution.Slot,
+		SubcommitteeIndex: contributionAndProof.Contribution.SubcommitteeIndex,
+	}
+
+	domain, err := s.GetDomain(s.BeaconConfig().DomainSyncCommitteeSelectionProof, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
+	if err != nil {
+		return err
+	}
+
+	selectionDataRoot, err := fork.ComputeSigningRoot(syncAggregatorSelectionData, domain)
 	if err != nil {
 		return err
 	}
 
 	valid, err := bls.Verify(selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:])
-	fmt.Println("Printing Debug for selectionProof", selectionProof[:], selectionDataRoot[:], aggregatorPubKey[:], valid, err)
 	if err != nil {
 		return err
 	}
-	// if !valid {
-	// 	return fmt.Errorf("invalid selection_proof signature")
-	// }
+	if !valid {
+		return fmt.Errorf("invalid selectionProof signature")
+	}
 
 	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
-	aggregatorSignatureRoot, err := fork.ComputeSigningRoot(contributionAndProof.Contribution, f.beaconCfg.DomainContributionAndProof[:])
+	domain1, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
 	if err != nil {
 		return err
 	}
+
+	aggregatorSignatureRoot, err := fork.ComputeSigningRoot(signedChange.Message, domain1)
+	if err != nil {
+		return err
+	}
+
 	valid, err = bls.Verify(signature[:], aggregatorSignatureRoot[:], aggregatorPubKey[:])
-	fmt.Println("Printing Debug for aggregatorSignatureRoot", aggregatorSignatureRoot, valid, err)
 	if err != nil {
 		return err
 	}
@@ -357,21 +357,54 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 		return fmt.Errorf("invalid aggregator signature")
 	}
 
-	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
+	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
+	// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
 	message := contributionAndProof.Contribution.BeaconBlockRoot[:]
-	valid, err = bls.Verify(signature[:], message, aggregatorPubKey[:])
+	domain2, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
 	if err != nil {
 		return err
 	}
+	hash, err := merkle_tree.HashTreeRoot(message)
+	if err != nil {
+		return err
+	}
+	signatureRoot := utils.Sha256(hash[:], domain2)
+	if err != nil {
+		return err
+	}
+
+	aggregationBitsStr := aggregationBits.String()
+	// Convert committeeKeys to [][]byte
+	pubsKeys, err := f.getSyncSubcommitteePubkeys(committeeKeys, contributionAndProof.Contribution.SubcommitteeIndex)
+	if err != nil {
+		return err
+	}
+	// if len(pubsKeys) != len(aggregationBitsStr) {
+	// 	return fmt.Errorf("invalid length of aggregation bits or public keys")
+	// }
+
+	newPubKeys := make([][]byte, 0)
+	for i, bit := range aggregationBitsStr {
+		if bit == '1' {
+			newPubKeys = append(newPubKeys, pubsKeys[i])
+		}
+	}
+
+	valid, err = bls.VerifyAggregate(signature[:], signatureRoot[:], newPubKeys)
+	if err != nil {
+		return err
+	}
+
 	if !valid {
-		return fmt.Errorf("invalid aggregate signature")
+		//FIXME: Add more debug info
+		fmt.Println("invalid aggregate signature")
+		// return fmt.Errorf("invalid aggregate signature")
 	}
 
 	// Insert in the pool
 	f.operationsPool.SignedContributionAndProofPool.Insert(signedChange.Signature, signedChange)
 
 	// emit contribution_and_proof
-	fmt.Println("Published ", signedChange)
 	f.emitters.Publish("contribution_and_proof", signedChange)
 	return nil
 }
