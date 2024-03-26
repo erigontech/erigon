@@ -154,12 +154,18 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		BeaconConfig:  beaconConfig,
 		TmpDir:        dirs.Tmp,
 		EnableBlocks:  true,
-	}, rcsn, blobStorage, indexDB, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
-		ForkDigest:     forkDigest,
-		FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
-		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
-		HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
-		HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
+		Network:   "tcp",
+		Addr:      fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
+		Creds:     creds,
+		Validator: config.BeaconRouter.Validator,
+		InitialStatus: &cltypes.Status{
+			ForkDigest:     forkDigest,
+			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
+			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+		},
 	}, forkChoice, logger)
 	if err != nil {
 		return err
@@ -179,7 +185,6 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 				case <-ctx.Done():
 					return
 				}
-
 			}
 		}()
 	}
