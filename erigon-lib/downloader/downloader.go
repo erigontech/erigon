@@ -1717,8 +1717,7 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 			bytesCompleted = t.Length()
 			delete(downloading, torrentName)
 		} else {
-			bytesRead := t.Stats().BytesReadData
-			bytesCompleted = bytesRead.Int64()
+			bytesCompleted = t.BytesCompleted()
 		}
 		progress := float32(float64(100) * (float64(bytesCompleted) / float64(tLen)))
 		stats.BytesCompleted += uint64(bytesCompleted)
