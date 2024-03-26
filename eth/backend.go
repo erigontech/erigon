@@ -327,6 +327,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	logger.Info("Initialised chain configuration", "config", chainConfig, "genesis", genesis.Hash())
+	if dbg.OnlyCreateDB {
+		logger.Info("done")
+		os.Exit(1)
+	}
 
 	// Check if we have an already initialized chain and fall back to
 	// that if so. Otherwise we need to generate a new genesis spec.
