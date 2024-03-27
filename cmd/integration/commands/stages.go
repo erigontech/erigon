@@ -1613,16 +1613,12 @@ func newSync(ctx context.Context, db kv.RwDB, miningConfig *params.MiningConfig,
 	blockReader, blockWriter := blocksIO(db, logger)
 	engine, heimdallClient := initConsensusEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 
-	statusDataProvider, err := sentry.NewStatusDataProvider(
-		ctx,
+	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
 		chainConfig,
 		genesisBlock,
 		chainConfig.ChainID.Uint64(),
 	)
-	if err != nil {
-		panic(err)
-	}
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 

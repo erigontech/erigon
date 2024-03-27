@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sync"
 
 	"github.com/holiman/uint256"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -27,32 +26,21 @@ type ChainHead struct {
 }
 
 type StatusDataProvider struct {
-	ChainHead
-
 	db kv.RoDB
 
 	networkId   uint64
 	genesisHash libcommon.Hash
 	heightForks []uint64
 	timeForks   []uint64
-
-	lock sync.RWMutex
 }
 
 func NewStatusDataProvider(
-	ctx context.Context,
 	db kv.RoDB,
 	chainConfig *chain.Config,
 	genesis *types.Block,
 	networkId uint64,
-) (*StatusDataProvider, error) {
-	chainHead, err := ReadChainHead(ctx, db)
-	if err != nil {
-		return nil, err
-	}
-
+) *StatusDataProvider {
 	s := &StatusDataProvider{
-		ChainHead:   chainHead,
 		db:          db,
 		networkId:   networkId,
 		genesisHash: genesis.Hash(),
@@ -60,20 +48,17 @@ func NewStatusDataProvider(
 
 	s.heightForks, s.timeForks = forkid.GatherForks(chainConfig, genesis.Time())
 
-	return s, nil
+	return s
 }
 
-func (s *StatusDataProvider) MakeStatusData() *proto_sentry.StatusData {
-	s.lock.RLock()
-	defer s.lock.RUnlock()
-
-	return &proto_sentry.StatusData{
+func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentry.StatusData {
+	return &sentry.StatusData{
 		NetworkId:       s.networkId,
-		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(s.HeadTd),
-		BestHash:        gointerfaces.ConvertHashToH256(s.HeadHash),
-		MaxBlockHeight:  s.HeadHeight,
-		MaxBlockTime:    s.HeadTime,
-		ForkData: &proto_sentry.Forks{
+		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(head.HeadTd),
+		BestHash:        gointerfaces.ConvertHashToH256(head.HeadHash),
+		MaxBlockHeight:  head.HeadHeight,
+		MaxBlockTime:    head.HeadTime,
+		ForkData: &sentry.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
 			HeightForks: s.heightForks,
 			TimeForks:   s.timeForks,
@@ -81,25 +66,12 @@ func (s *StatusDataProvider) MakeStatusData() *proto_sentry.StatusData {
 	}
 }
 
-func (s *StatusDataProvider) setHead(chainHead ChainHead) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-
-	s.ChainHead = chainHead
-}
-
-func (s *StatusDataProvider) RefreshHead(ctx context.Context) error {
+func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentry.StatusData, error) {
 	chainHead, err := ReadChainHead(ctx, s.db)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	s.setHead(chainHead)
-	return nil
-}
-
-func (s *StatusDataProvider) RefreshStatusData(ctx context.Context) (*proto_sentry.StatusData, error) {
-	err := s.RefreshHead(ctx)
-	return s.MakeStatusData(), err
+	return s.makeStatusData(chainHead), err
 }
 
 func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
