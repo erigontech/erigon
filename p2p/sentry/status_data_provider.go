@@ -11,7 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
+	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/core/forkid"
 	"github.com/ledgerwatch/erigon/core/rawdb"
@@ -51,14 +51,14 @@ func NewStatusDataProvider(
 	return s
 }
 
-func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentry.StatusData {
-	return &sentry.StatusData{
+func (s *StatusDataProvider) makeStatusData(head ChainHead) *proto_sentry.StatusData {
+	return &proto_sentry.StatusData{
 		NetworkId:       s.networkId,
 		TotalDifficulty: gointerfaces.ConvertUint256IntToH256(head.HeadTd),
 		BestHash:        gointerfaces.ConvertHashToH256(head.HeadHash),
 		MaxBlockHeight:  head.HeadHeight,
 		MaxBlockTime:    head.HeadTime,
-		ForkData: &sentry.Forks{
+		ForkData: &proto_sentry.Forks{
 			Genesis:     gointerfaces.ConvertHashToH256(s.genesisHash),
 			HeightForks: s.heightForks,
 			TimeForks:   s.timeForks,
@@ -66,7 +66,7 @@ func (s *StatusDataProvider) makeStatusData(head ChainHead) *sentry.StatusData {
 	}
 }
 
-func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*sentry.StatusData, error) {
+func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.StatusData, error) {
 	chainHead, err := ReadChainHead(ctx, s.db)
 	if err != nil {
 		return nil, err
