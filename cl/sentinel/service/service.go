@@ -50,7 +50,7 @@ func NewSentinelServer(ctx context.Context, sentinel *sentinel.Sentinel, logger 
 }
 
 // extractBlobSideCarIndex takes a topic and extract the blob sidecar
-func extractBlobSideCarIndex(topic string) int {
+func extractSubnetIndex(topic string) int {
 	// e.g /eth2/d31f6191/blob_sidecar_3/ssz_snappy, we want to extract 3
 	// split them by /
 	parts := strings.Split(topic, "/")
@@ -106,6 +106,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
 			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+		case strings.Contains(msg.Name, "sync_committee_"):
+			if msg.SubnetId == nil {
+				return nil, fmt.Errorf("subnetId is required for sync_committee")
+			}
+			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixSyncCommittee, *msg.SubnetId))
 		default:
 			return &sentinelrpc.EmptyMessage{}, nil
 		}
@@ -395,9 +400,9 @@ func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {
 	} else if strings.Contains(topic, string(gossip.TopicNameSyncCommitteeContributionAndProof)) {
 		s.gossipNotifier.notify(gossip.TopicNameSyncCommitteeContributionAndProof, data, string(textPid))
 	} else if gossip.IsTopicBlobSidecar(topic) {
-
-		// extract the index
-		s.gossipNotifier.notifyBlob(data, string(textPid), extractBlobSideCarIndex(topic))
+		s.gossipNotifier.notifyBlob(data, string(textPid), extractSubnetIndex(topic))
+	} else if gossip.IsTopicSyncCommittee(topic) {
+		s.gossipNotifier.notifySyncCommittee(data, string(textPid), extractSubnetIndex(topic))
 	}
 	return nil
 }

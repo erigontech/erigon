@@ -59,6 +59,22 @@ func (g *gossipNotifier) notifyBlob(data []byte, pid string, blobIndex int) {
 	}
 }
 
+func (g *gossipNotifier) notifySyncCommittee(data []byte, pid string, subnetIndex int) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	for _, ch := range g.notifiers {
+		sbI := new(uint64)
+		*sbI = uint64(subnetIndex)
+		ch <- gossipObject{
+			data:     data,
+			t:        gossip.TopicNameSyncCommittee(subnetIndex),
+			pid:      pid,
+			subnetId: sbI,
+		}
+	}
+}
+
 func (g *gossipNotifier) addSubscriber() (chan gossipObject, int, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

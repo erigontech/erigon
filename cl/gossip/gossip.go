@@ -26,6 +26,14 @@ func TopicNameBlobSidecar(d int) string {
 	return fmt.Sprintf(TopicNamePrefixBlobSidecar, d)
 }
 
+func TopicNameBeaconAttestation(d int) string {
+	return fmt.Sprintf(TopicNamePrefixBeaconAttestation, d)
+}
+
+func TopicNameSyncCommittee(d int) string {
+	return fmt.Sprintf(TopicNamePrefixSyncCommittee, d)
+}
+
 func IsTopicBlobSidecar(d string) bool {
 	return strings.Contains(d, "blob_sidecar_")
 }
