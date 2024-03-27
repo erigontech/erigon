@@ -8,6 +8,10 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 )
 
+var (
+	blsAggregate = bls.AggregateSignatures
+)
+
 type aggregationPoolImpl struct {
 	aggregatesLock sync.RWMutex
 	aggregates     map[[32]byte][]*attestation
@@ -40,9 +44,10 @@ func (a *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 				att:      inAtt,
 			},
 		}
+		return nil
 	}
 
-	// NOTE: naively merge attestation for each existing attestation in the pool,
+	// NOTE: naive merge attestation for each existing attestation in the pool,
 	// but it's not optimal. it's kind of a maximum coverage problem.
 	mergeCount := 0
 	after := []*attestation{}
@@ -54,7 +59,7 @@ func (a *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			after = append(after, curAtt)
 		} else {
 			// merge attestation
-			mergedAtt, err := mergeAttestationWithoutOverlap(inAtt, curAtt.att)
+			mergedAtt, err := mergeAttestationNoOverlap(inAtt, curAtt.att)
 			if err != nil {
 				return err
 			}
@@ -76,14 +81,12 @@ func (a *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	return nil
 }
 
-func mergeAttestationWithoutOverlap(a, b *solid.Attestation) (*solid.Attestation, error) {
-	merge := a
+func mergeAttestationNoOverlap(a, b *solid.Attestation) (*solid.Attestation, error) {
 	// merge bit
 	newBits := make([]byte, len(a.AggregationBits()))
 	for i := range a.AggregationBits() {
 		newBits[i] = a.AggregationBits()[i] | b.AggregationBits()[i]
 	}
-	merge.SetAggregationBits(newBits)
 	// merge sig
 	aSig := a.Signature()
 	bSig := b.Signature()
@@ -91,13 +94,20 @@ func mergeAttestationWithoutOverlap(a, b *solid.Attestation) (*solid.Attestation
 	sig2 := make([]byte, len(bSig))
 	copy(sig1, aSig[:])
 	copy(sig2, bSig[:])
-	mergedSig, err := bls.AggregateSignatures([][]byte{sig1, sig2})
+	mergedSig, err := blsAggregate([][]byte{sig1, sig2})
 	if err != nil {
 		return nil, err
 	}
+	if len(mergedSig) > 96 {
+		return nil, fmt.Errorf("merged signature is too long")
+	}
 	var mergedResult [96]byte
-	copy(mergedResult[:], mergedSig[:96])
-	merge.SetSignature(mergedResult)
+	copy(mergedResult[:], mergedSig[:])
+	merge := solid.NewAttestionFromParameters(
+		newBits,
+		a.AttestantionData(),
+		mergedResult,
+	)
 	return merge, nil
 }
 
