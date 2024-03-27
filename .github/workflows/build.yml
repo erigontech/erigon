@@ -6,8 +6,11 @@ on:
       - 'v*'
   release:
     types: [published]
-
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Custom Docker Tag (leave blank to use the branch name or commit SHA)'
+        required: false
 
 env:
   DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -33,6 +36,31 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
+      - name: Prepare
+        id: prep
+        run: |
+          BRANCH_NAME=$(echo ${GITHUB_REF#refs/heads/} | sed 's/[^a-zA-Z0-9._-]/-/g')
+          SHORT_SHA=$(echo ${{ github.sha }} | head -c 7)
+          echo "BRANCH_NAME=${BRANCH_NAME}" >> $GITHUB_ENV
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_ENV
+          TAG=${{ github.event.inputs.tag }}
+          if [[ -z "$TAG" ]]; then
+            if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+              TAG=$BRANCH_NAME-$SHORT_SHA
+            elif [[ "${{ github.event_name }}" == "push" ]]; then
+              TAG=$SHORT_SHA
+            elif [[ "${{ github.event_name }}" == "release" ]]; then
+              TAG=${{ github.event.release.tag_name }}
+            fi
+          fi
+          echo ::set-output name=version::$TAG
+          # Determine if latest tag should be applied
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "LATEST_TAG=false" >> $GITHUB_ENV
+          else
+            echo "LATEST_TAG=true" >> $GITHUB_ENV
+          fi
+
       - name: Build and Push Docker Image
         uses: docker/build-push-action@v5
         with:
@@ -41,6 +69,5 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.IMAGE_NAME }}:${{ github.event.release.tag_name }}
-            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ steps.prep.outputs.version }}
+            ${{ env.LATEST_TAG == 'true' && format('{0}:latest', env.IMAGE_NAME) || '' }}
