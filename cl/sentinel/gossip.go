@@ -377,6 +377,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
 		}
 	}()
+	fmt.Println("AF")
 	for {
 		select {
 		case <-ctx.Done():
@@ -395,6 +396,7 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			if msg.ReceivedFrom == s.host {
 				continue
 			}
+			fmt.Println(topicName)
 			s.ch <- &GossipMessage{
 				From:      msg.ReceivedFrom,
 				TopicName: topicName,
