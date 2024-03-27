@@ -299,7 +299,7 @@ func addCumulativeGaps(h uint64, logGaps map[uint64]int) []uint64 {
 	}
 	cumulativeGaps := make([]uint64, h)
 	for idx, gap := range logGaps {
-		if idx + 1 < h {
+		if idx+1 < h {
 			cumulativeGaps[idx+1] = uint64(gap) // Next index of the last failed index
 		}
 	}
