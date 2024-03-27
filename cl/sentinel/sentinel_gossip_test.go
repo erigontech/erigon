@@ -56,16 +56,17 @@ func TestSentinelGossipOnHardFork(t *testing.T) {
 	require.NoError(t, sentinel2.Start())
 	h2 := sentinel2.host
 
-	sub1, err := sentinel1.SubscribeGossip(BeaconBlockSsz)
+	sub1, err := sentinel1.SubscribeGossip(BeaconBlockSsz, time.Unix(0, math.MaxInt64))
 	require.NoError(t, err)
 	defer sub1.Close()
 
-	require.NoError(t, sub1.Listen())
+	sub1.Listen()
 
-	sub2, err := sentinel2.SubscribeGossip(BeaconBlockSsz)
+	sub2, err := sentinel2.SubscribeGossip(BeaconBlockSsz, time.Unix(0, math.MaxInt64))
 	require.NoError(t, err)
 	defer sub2.Close()
-	require.NoError(t, sub2.Listen())
+	sub2.Listen()
+	time.Sleep(200 * time.Millisecond)
 
 	err = h.Connect(ctx, peer.AddrInfo{
 		ID:    h2.ID(),
