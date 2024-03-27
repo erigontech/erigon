@@ -410,6 +410,10 @@ func SpawnExecuteBlocksStage(s *StageState, u Unwinder, txc wrap.TxContainer, to
 		to = cmp.Min(prevStageProgress, toBlock)
 	}
 
+	if cfg.syncCfg.LoopBlockLimit > 0 {
+		to = s.BlockNumber + uint64(cfg.syncCfg.LoopBlockLimit)
+	}
+
 	if to <= s.BlockNumber {
 		return nil
 	}

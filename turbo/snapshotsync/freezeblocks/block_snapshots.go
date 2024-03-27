@@ -388,16 +388,24 @@ func (s *RoSnapshots) EnableMadvNormal() *RoSnapshots {
 }
 
 func (s *RoSnapshots) idxAvailability() uint64 {
-	max := make([]uint64, len(s.Types()))
+	max := make([]uint64, 0, len(s.Types()))
 	i := 0
 	s.segments.Scan(func(segtype snaptype.Enum, value *segments) bool {
 		if !s.HasType(segtype.Type()) {
 			return true
 		}
+
+		if len(value.segments) == 0 {
+			return true
+		}
+
+		max = append(max, 0)
+
 		for _, seg := range value.segments {
 			if !seg.IsIndexed() {
 				break
 			}
+
 			max[i] = seg.to - 1
 		}
 

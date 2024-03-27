@@ -29,6 +29,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
 
@@ -105,7 +106,7 @@ func TestCallTracerNativeWithLog(t *testing.T) {
 
 func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 	isLegacy := strings.HasSuffix(dirPath, "_legacy")
-	files, err := os.ReadDir(filepath.Join("testdata", dirPath))
+	files, err := dir.ReadDir(filepath.Join("testdata", dirPath))
 	if err != nil {
 		t.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}
@@ -207,7 +208,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 }
 
 func BenchmarkTracers(b *testing.B) {
-	files, err := os.ReadDir(filepath.Join("testdata", "call_tracer"))
+	files, err := dir.ReadDir(filepath.Join("testdata", "call_tracer"))
 	if err != nil {
 		b.Fatalf("failed to retrieve tracer test suite: %v", err)
 	}

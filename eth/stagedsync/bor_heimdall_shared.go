@@ -116,7 +116,7 @@ func fetchAndWriteHeimdallSpan(
 	return spanID, nil
 }
 
-func fetchRequiredHeimdallCheckpointsIfNeeded(
+func fetchAndWriteHeimdallCheckpointsIfNeeded(
 	ctx context.Context,
 	toBlockNum uint64,
 	tx kv.RwTx,
@@ -151,12 +151,31 @@ func fetchRequiredHeimdallCheckpointsIfNeeded(
 
 	logger.Info(fmt.Sprintf("[%s] Processing checkpoints...", logPrefix), "from", lastId+1, "to", toBlockNum)
 
+	logTimer := time.NewTicker(logInterval)
+	defer logTimer.Stop()
+
+	var lastBlockNum uint64
+
 	for checkpointId := lastId + 1; lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() < toBlockNum; checkpointId++ {
 		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, checkpointId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
 			return 0, err
 		}
 
 		lastId = checkpointId
+
+		select {
+		default:
+		case <-logTimer.C:
+			if lastCheckpoint != nil {
+				lastBlockNum = lastCheckpoint.EndBlock().Uint64()
+			}
+
+			logger.Info(
+				fmt.Sprintf("[%s] Checkpoint Progress", logPrefix),
+				"progress", lastBlockNum,
+				"lastCheckpointId", lastId,
+			)
+		}
 	}
 
 	return lastId, err
@@ -196,7 +215,7 @@ func fetchAndWriteHeimdallCheckpoint(
 	return checkpointId, response, nil
 }
 
-func fetchRequiredHeimdallMilestonesIfNeeded(
+func fetchAndWriteHeimdallMilestonesIfNeeded(
 	ctx context.Context,
 	toBlockNum uint64,
 	tx kv.RwTx,
@@ -391,7 +410,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 
 	from = lastStateSyncEventID + 1
 
-	logger.Debug(
+	logger.Trace(
 		fmt.Sprintf("[%s] Fetching state updates from Heimdall", logPrefix),
 		"fromID", from,
 		"to", to.Format(time.RFC3339),
