@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
+	"github.com/ledgerwatch/erigon/cl/aggregation"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -16,7 +16,6 @@ import (
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
-	"github.com/ledgerwatch/log/v3"
 )
 
 type CommitteeSubscribeMgmt struct {
@@ -27,10 +26,9 @@ type CommitteeSubscribeMgmt struct {
 	sentinel      sentinel.SentinelClient
 	state         *state.CachingBeaconState
 	// subscriptions
-	aggregationMutex   sync.RWMutex
-	aggregations       map[string]*aggregationData // map from slot:committeeIndex to aggregate data
+	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
-	validatorSubs      map[uint64][]*validatorSub // map from validator index to subscription details
+	validatorSubs      map[uint64]map[uint64]*validatorSub // slot -> committeeIndex -> validatorSub
 }
 
 func NewCommitteeSubscribeManagement(
@@ -41,74 +39,61 @@ func NewCommitteeSubscribeManagement(
 	genesisConfig *clparams.GenesisConfig,
 	sentinel sentinel.SentinelClient,
 	state *state.CachingBeaconState,
+	aggregationPool aggregation.AggregationPool,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
-		indiciesDB:    indiciesDB,
-		beaconConfig:  beaconConfig,
-		netConfig:     netConfig,
-		genesisConfig: genesisConfig,
-		sentinel:      sentinel,
-		state:         state,
-		aggregations:  make(map[string]*aggregationData),
-		validatorSubs: make(map[uint64][]*validatorSub),
+		indiciesDB:      indiciesDB,
+		beaconConfig:    beaconConfig,
+		netConfig:       netConfig,
+		genesisConfig:   genesisConfig,
+		sentinel:        sentinel,
+		state:           state,
+		aggregationPool: aggregationPool,
+		validatorSubs:   make(map[uint64]map[uint64]*validatorSub),
 	}
 	c.sweepByStaleSlots(ctx)
 	return c
 }
 
-type aggregationData struct {
-	subnetId       uint64
-	slot           uint64
-	committeeIndex uint64
-	signature      []byte
-	bits           []byte
-}
-
 type validatorSub struct {
-	subnetId       uint64
-	slot           uint64
-	committeeIndex uint64
-}
-
-func toAggregationId(slot, committeeIndex uint64) string {
-	return fmt.Sprintf("%d:%d", slot, committeeIndex)
+	subnetId      uint64
+	aggregate     bool
+	validatorIdxs map[uint64]struct{}
 }
 
 func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context, p *cltypes.BeaconCommitteeSubscription) error {
-	subnetId, err := c.computeSubnetId(p.Slot, p.CommitteeIndex)
+	var (
+		slot   = p.Slot
+		cIndex = p.CommitteeIndex
+		vIndex = p.ValidatorIndex
+	)
+
+	subnetId, err := c.computeSubnetId(slot, cIndex)
 	if err != nil {
 		return err
 	}
-	// 1. add validator to subscription
+	// add validator to subscription
 	c.validatorSubsMutex.Lock()
-	if _, exist := c.validatorSubs[p.ValidatorIndex]; !exist {
-		c.validatorSubs[p.ValidatorIndex] = make([]*validatorSub, 0)
+	if _, ok := c.validatorSubs[slot]; !ok {
+		c.validatorSubs[slot] = make(map[uint64]*validatorSub)
 	}
-	c.validatorSubs[p.ValidatorIndex] = append(c.validatorSubs[p.ValidatorIndex],
-		&validatorSub{
-			subnetId:       subnetId,
-			slot:           p.Slot,
-			committeeIndex: p.CommitteeIndex,
-		})
+	if _, ok := c.validatorSubs[slot][cIndex]; !ok {
+		c.validatorSubs[slot][cIndex] = &validatorSub{
+			subnetId:  subnetId,
+			aggregate: p.IsAggregator,
+			validatorIdxs: map[uint64]struct{}{
+				vIndex: {},
+			},
+		}
+	} else {
+		if p.IsAggregator {
+			c.validatorSubs[slot][cIndex].aggregate = true
+		}
+		c.validatorSubs[slot][cIndex].validatorIdxs[vIndex] = struct{}{}
+	}
 	c.validatorSubsMutex.Unlock()
 
-	// 2. if aggregator, add to aggregation collection
-	if p.IsAggregator {
-		c.aggregationMutex.Lock()
-		aggrId := toAggregationId(p.Slot, p.CommitteeIndex)
-		if _, exist := c.aggregations[aggrId]; !exist {
-			c.aggregations[aggrId] = &aggregationData{
-				subnetId:       subnetId,
-				slot:           p.Slot,
-				committeeIndex: p.CommitteeIndex,
-				signature:      nil,
-				bits:           make([]byte, c.beaconConfig.MaxValidatorsPerCommittee/8),
-			}
-		}
-		c.aggregationMutex.Unlock()
-	}
-
-	// 3. set sentinel gossip expiration by subnet id
+	// set sentinel gossip expiration by subnet id
 	request := sentinel.RequestSubscribeExpiry{
 		Topic:          gossip.TopicNameBeaconAttestation(subnetId),
 		ExpiryUnixSecs: uint64(time.Now().Add(24 * time.Hour).Unix()), // temporarily set to 24 hours
@@ -203,100 +188,23 @@ func (c *CommitteeSubscribeMgmt) OnReceiveAttestation(topic string, att *solid.A
 	var (
 		slot           = att.AttestantionData().Slot()
 		committeeIndex = att.AttestantionData().CommitteeIndex()
-		sig            = att.Signature()
-		bits           = att.AggregationBits()
-		aggrId         = toAggregationId(slot, committeeIndex)
 	)
-	c.aggregationMutex.Lock()
-	defer c.aggregationMutex.Unlock()
-	aggrData, exist := c.aggregations[aggrId]
-	if !exist {
-		// no one is interested in this aggregation
-		return nil
-	}
-	// check if this is the first attestation for this aggregation
-	bitGroupIdx, err := findbitGroup(bits, aggrData.bits)
-	if err == errBitExist {
-		return nil
-	} else if err != nil {
-		return err
-	}
-	// aggregate
-	sigBytes := make([]byte, 96)
-	copy(sigBytes, sig[:])
-	if aggrData != nil {
-		aggrSig, err := bls.AggregateSignatures([][]byte{
-			aggrData.signature,
-			sigBytes,
-		})
-		if err != nil {
-			log.Error("aggregate signature failed", "err", err)
-			return err
+	c.validatorSubsMutex.RLock()
+	defer c.validatorSubsMutex.RUnlock()
+	if subs, ok := c.validatorSubs[slot]; ok {
+		if sub, ok := subs[committeeIndex]; ok && sub.aggregate {
+			// aggregate attestation
+			if err := c.aggregationPool.AddAttestation(att); err != nil {
+				return err
+			}
 		}
-		aggrData.signature = aggrSig
-	} else {
-		aggrData.signature = sigBytes
 	}
-	// update aggregation bits
-	aggrData.bits[bitGroupIdx] |= bits[bitGroupIdx]
 	return nil
-}
-
-var (
-	errBitExist = fmt.Errorf("bit already exist")
-)
-
-func findbitGroup(comingBits []byte, aggrBits []byte) (int, error) {
-	for i := 0; i < len(comingBits); i++ {
-		if comingBits[i] == 0 {
-			continue
-		}
-		if comingBits[i]&(comingBits[i]-1) != 0 {
-			return -1, fmt.Errorf("more than one bit set")
-		} else if comingBits[i]|aggrBits[i] == aggrBits[i] {
-			return -1, errBitExist
-		} else {
-			return i, nil
-		}
-	}
-	// weird case. all bits are 0
-	return -1, fmt.Errorf("all bits are 0")
 }
 
 func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 	slotIsStale := func(curSlot, targetSlot uint64) bool {
 		return curSlot-targetSlot > c.netConfig.AttestationPropagationSlotRange
-	}
-
-	// sweep subscriptions
-	sweepValidatorSubscriptions := func(curSlot uint64) {
-		c.validatorSubsMutex.Lock()
-		defer c.validatorSubsMutex.Unlock()
-		for idx, subs := range c.validatorSubs {
-			liveSubs := make([]*validatorSub, 0)
-			for i := 0; i < len(subs); i++ {
-				if !slotIsStale(curSlot, subs[i].slot) {
-					// keep this subscription
-					liveSubs = append(liveSubs, subs[i])
-				}
-			}
-			if len(liveSubs) == 0 {
-				// no live subscription, delete this validator index
-				delete(c.validatorSubs, idx)
-			} else {
-				c.validatorSubs[idx] = liveSubs
-			}
-		}
-	}
-	// sweep aggregations
-	sweepAggregations := func(curSlot uint64) {
-		c.aggregationMutex.Lock()
-		defer c.aggregationMutex.Unlock()
-		for id, aggrData := range c.aggregations {
-			if slotIsStale(curSlot, aggrData.slot) {
-				delete(c.aggregations, id)
-			}
-		}
 	}
 	// sweep every minute
 	ticker := time.NewTicker(time.Minute)
@@ -307,8 +215,13 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 			return
 		case <-ticker.C:
 			curSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
-			sweepValidatorSubscriptions(curSlot)
-			sweepAggregations(curSlot)
+			c.validatorSubsMutex.Lock()
+			for slot := range c.validatorSubs {
+				if slotIsStale(curSlot, slot) {
+					delete(c.validatorSubs, slot)
+				}
+			}
+			c.validatorSubsMutex.Unlock()
 		}
 	}
 }
