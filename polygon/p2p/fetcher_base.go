@@ -8,9 +8,9 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/ledgerwatch/log/v3"
-	"modernc.org/mathutil"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 )
@@ -90,7 +90,7 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	headers := make([]*types.Header, 0, amount)
 	for chunkNum := uint64(0); chunkNum < numChunks; chunkNum++ {
 		chunkStart := start + chunkNum*eth.MaxHeadersServe
-		chunkEnd := mathutil.MinUint64(end, chunkStart+eth.MaxHeadersServe)
+		chunkEnd := cmp.Min(end, chunkStart+eth.MaxHeadersServe)
 		headersChunk, err := fetchWithRetry(f.config, func() ([]*types.Header, error) {
 			return f.fetchHeaders(ctx, chunkStart, chunkEnd, peerId)
 		})
