@@ -121,7 +121,7 @@ func mergeAttestationNoOverlap(a, b *solid.Attestation) (*solid.Attestation, err
 		return nil, fmt.Errorf("merged signature is too long")
 	}
 	var mergedResult [96]byte
-	copy(mergedResult[:], mergedSig[:])
+	copy(mergedResult[:], mergedSig)
 	merge := solid.NewAttestionFromParameters(
 		newBits,
 		a.AttestantionData(),
