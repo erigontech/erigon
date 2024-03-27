@@ -156,9 +156,8 @@ func SentryReconnectAndPumpStreamLoop[TMessage interface{}](
 		statusData, err := statusDataFactory(ctx)
 		if err != nil {
 			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
-			if statusData == nil {
-				panic("statusData is nil")
-			}
+			time.Sleep(time.Second)
+			continue
 		}
 
 		if _, err := sentry.SetStatus(ctx, statusData); err != nil {
@@ -778,7 +777,7 @@ func (cs *MultiClient) HandlePeerEvent(ctx context.Context, event *proto_sentry.
 }
 
 func (cs *MultiClient) makeStatusData(ctx context.Context) (*proto_sentry.StatusData, error) {
-	return cs.statusDataProvider.RefreshStatusData(ctx)
+	return cs.statusDataProvider.GetStatusData(ctx)
 }
 
 func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRemote, error) {

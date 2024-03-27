@@ -365,16 +365,12 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 	}
 	forkValidator := engine_helpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
 
-	statusDataProvider, err := sentry.NewStatusDataProvider(
-		ctx,
+	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
 		mock.ChainConfig,
 		mock.Genesis,
 		mock.ChainConfig.ChainID.Uint64(),
 	)
-	if err != nil {
-		panic(err)
-	}
 
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 

@@ -34,5 +34,6 @@ func Setup(ctx *cli.Context, metricsMux *http.ServeMux, node *node.ErigonNode) {
 	SetupBootnodesAccess(debugMux, node)
 	SetupStagesAccess(debugMux, diagnostic)
 	SetupMemAccess(debugMux)
+	SetupBodiesAccess(debugMux, diagnostic)
 
 }

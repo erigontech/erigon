@@ -44,7 +44,7 @@ func NewService(
 	storage := NewStorage(logger, execution, maxPeers)
 	headersVerifier := VerifyAccumulatedHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.RefreshStatusData)
+	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallUrl, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
 	blockDownloader := NewBlockDownloader(

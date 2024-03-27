@@ -29,7 +29,7 @@ func Epoch(b abstract.BeaconStateBasic) uint64 {
 	return GetEpochAtSlot(b.BeaconConfig(), b.Slot())
 }
 
-func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, slot, committeeIndex uint64, slotSignature libcommon.Bytes96) bool {
+func IsAggregator(cfg *clparams.BeaconChainConfig, committeeLength, committeeIndex uint64, slotSignature libcommon.Bytes96) bool {
 	modulo := utils.Max64(1, committeeLength/cfg.TargetAggregatorsPerCommittee)
 	hashSlotSignatue := utils.Sha256(slotSignature[:])
 	return binary.LittleEndian.Uint64(hashSlotSignatue[:8])%modulo == 0
