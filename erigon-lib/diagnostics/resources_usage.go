@@ -15,9 +15,9 @@ func (d *DiagnosticClient) GetResourcesUsage() ResourcesUsage {
 	d.resourcesUsageMutex.Lock()
 	defer d.resourcesUsageMutex.Unlock()
 
-	copy := d.resourcesUsage
+	returnObj := d.resourcesUsage
 	d.resourcesUsage = ResourcesUsage{}
-	return copy
+	return returnObj
 }
 
 func (d *DiagnosticClient) runMemoryStatsListener() {
