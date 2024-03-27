@@ -41,6 +41,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
+	"golang.org/x/sys/windows"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -1509,6 +1510,9 @@ func RemoveContents(dir string) error {
 	defer d.Close()
 	names, err := d.Readdirnames(-1)
 	if err != nil {
+		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+			return nil
+		}
 		return err
 	}
 	for _, name := range names {

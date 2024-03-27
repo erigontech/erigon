@@ -241,8 +241,8 @@ func Segments(dir string) (res []FileInfo, err error) {
 	return FilesWithExt(dir, ".seg")
 }
 
-func TmpFiles(dir string) (res []string, err error) {
-	files, err := os.ReadDir(dir)
+func TmpFiles(name string) (res []string, err error) {
+	files, err := dir.ReadDir(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []string{}, nil
@@ -258,14 +258,14 @@ func TmpFiles(dir string) (res []string, err error) {
 			continue
 		}
 
-		res = append(res, filepath.Join(dir, f.Name()))
+		res = append(res, filepath.Join(name, f.Name()))
 	}
 	return res, nil
 }
 
 // ParseDir - reading dir (
-func ParseDir(dir string) (res []FileInfo, err error) {
-	files, err := os.ReadDir(dir)
+func ParseDir(name string) (res []FileInfo, err error) {
+	files, err := dir.ReadDir(name)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return []FileInfo{}, nil
@@ -282,7 +282,7 @@ func ParseDir(dir string) (res []FileInfo, err error) {
 			continue
 		}
 
-		meta, _, ok := ParseFileName(dir, f.Name())
+		meta, _, ok := ParseFileName(name, f.Name())
 		if !ok {
 			continue
 		}

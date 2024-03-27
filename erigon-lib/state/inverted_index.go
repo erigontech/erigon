@@ -116,7 +116,7 @@ func NewInvertedIndex(
 }
 
 func (ii *InvertedIndex) fileNamesOnDisk() ([]string, error) {
-	files, err := os.ReadDir(ii.dir)
+	files, err := dir.ReadDir(ii.dir)
 	if err != nil {
 		return nil, err
 	}

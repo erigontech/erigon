@@ -17,10 +17,12 @@
 package dir
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sys/windows"
 )
 
 func MustExist(path ...string) {
@@ -91,7 +93,7 @@ func Recreate(dir string) {
 }
 
 func HasFileOfType(dir, ext string) bool {
-	files, err := os.ReadDir(dir)
+	files, err := ReadDir(dir)
 	if err != nil {
 		return false
 	}
@@ -122,11 +124,26 @@ func DeleteFiles(dirs ...string) error {
 	return g.Wait()
 }
 
+func ReadDir(name string) ([]os.DirEntry, error) {
+	files, err := os.ReadDir(name)
+	if err != nil {
+		// some windows remote drived return this error
+		// when they are empty - should really be handled
+		// in os.ReadDir but is not
+		// - looks likey fixed in go 1.22
+		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
+			return nil, nil
+		}
+	}
+	return files, err
+}
+
 func ListFiles(dir string, extensions ...string) (paths []string, err error) {
-	files, err := os.ReadDir(dir)
+	files, err := ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
+
 	paths = make([]string, 0, len(files))
 	for _, f := range files {
 		if f.IsDir() && !f.Type().IsRegular() {
