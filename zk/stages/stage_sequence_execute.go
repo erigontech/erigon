@@ -326,7 +326,7 @@ LOOP:
 	}
 
 	parentRoot := parentBlock.Root()
-	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs); err != nil {
+	if err = handleStateForNewBlockStarting(cfg.chainConfig, nextBlockNum, newBlockTimestamp, &parentRoot, l1TreeUpdate, ibs, hermezDb); err != nil {
 		return err
 	}
 
@@ -416,7 +416,7 @@ func processInjectedInitialBatch(
 	header.Time = injected.Timestamp
 
 	parentRoot := parentBlock.Root()
-	if err = handleStateForNewBlockStarting(cfg.chainConfig, 1, injected.Timestamp, &parentRoot, fakeL1TreeUpdate, ibs); err != nil {
+	if err = handleStateForNewBlockStarting(cfg.chainConfig, 1, injected.Timestamp, &parentRoot, fakeL1TreeUpdate, ibs, hermezDb); err != nil {
 		return err
 	}
 
@@ -634,6 +634,7 @@ func handleStateForNewBlockStarting(
 	stateRoot *common.Hash,
 	l1info *zktypes.L1InfoTreeUpdate,
 	ibs *state.IntraBlockState,
+	hermezDb *hermez_db.HermezDb,
 ) error {
 	ibs.PreExecuteStateSet(chainConfig, blockNumber, timestamp, stateRoot)
 
@@ -644,6 +645,14 @@ func handleStateForNewBlockStarting(
 		if l1BlockHash == (common.Hash{}) {
 			// not in the contract so let's write it!
 			ibs.WriteGerManagerL1BlockHash(l1info.GER, l1info.ParentHash)
+
+			// store it so we can retrieve for the data stream
+			if err := hermezDb.WriteBlockGlobalExitRoot(blockNumber, l1info.GER); err != nil {
+				return err
+			}
+			if err := hermezDb.WriteBlockL1BlockHash(blockNumber, l1info.ParentHash); err != nil {
+				return err
+			}
 		}
 	}
 

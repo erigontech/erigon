@@ -214,3 +214,7 @@ func (p *TxPool) best(n uint16, txs *types.TxsRlp, tx kv.Tx, onTopOf, availableG
 	}
 	return true, count, nil
 }
+
+func (p *TxPool) ForceUpdateLatestBlock(blockNumber uint64) {
+	p.lastSeenBlock.Store(blockNumber)
+}

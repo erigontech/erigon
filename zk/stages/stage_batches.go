@@ -65,6 +65,7 @@ type HermezDb interface {
 	DeleteL1BlockHashGers(l1BlockHashes *[]common.Hash) error
 	WriteBatchGlobalExitRoot(batchNumber uint64, ger types.GerUpdate) error
 	WriteIntermediateTxStateRoot(l2BlockNumber uint64, txHash common.Hash, rpcRoot common.Hash) error
+	WriteBlockL1InfoTreeIndex(blockNumber uint64, l1Index uint64) error
 }
 
 type DatastreamClient interface {
@@ -158,6 +159,7 @@ func SpawnStageBatches(
 
 	highestSeenBatchNo := uint64(0)
 	highestHashableL2BlockNo := uint64(0)
+	highestL1InfoTreeIndex := uint32(0)
 
 	lastForkId64, err := stages.GetStageProgress(tx, stages.ForkId)
 	lastForkId := uint16(lastForkId64)
@@ -225,6 +227,11 @@ func SpawnStageBatches(
 			// store our finalized state if this batch matches the highest verified batch number on the L1
 			if l2Block.BatchNumber == highestVerifiedBatch {
 				rawdb.WriteForkchoiceFinalized(tx, l2Block.L2Blockhash)
+			}
+
+			// make sure to capture the l1 info tree index changes so we can store progress
+			if l2Block.L1InfoTreeIndex > highestL1InfoTreeIndex {
+				highestL1InfoTreeIndex = l2Block.L1InfoTreeIndex
 			}
 
 			if lastHash != emptyHash {
@@ -311,6 +318,10 @@ func SpawnStageBatches(
 	// store the highest seen forkid
 	if err := stages.SaveStageProgress(tx, stages.ForkId, uint64(lastForkId)); err != nil {
 		return fmt.Errorf("save stage progress error: %v", err)
+	}
+
+	if err := stages.SaveStageProgress(tx, stages.HighestUsedL1InfoIndex, uint64(highestL1InfoTreeIndex)); err != nil {
+		return err
 	}
 
 	// stop printing blocks written progress routine
@@ -461,6 +472,10 @@ func UnwindBatchesStage(u *stagedsync.UnwindState, tx kv.RwTx, cfg BatchesCfg, c
 	}
 
 	if err := hermezDb.DeleteBlockL1BlockHashes(fromBlock, toBlock); err != nil {
+		return fmt.Errorf("delete block l1 block hashes error: %v", err)
+	}
+
+	if err := hermezDb.DeleteBlockL1InfoTreeIndexes(fromBlock, toBlock); err != nil {
 		return fmt.Errorf("delete block l1 block hashes error: %v", err)
 	}
 	///////////////////////////////////////////////////////
@@ -657,6 +672,12 @@ func writeL2Block(eriDb ErigonDb, hermezDb HermezDb, l2Block *types.FullL2Block)
 					return fmt.Errorf("write ger for l1 block hash error: %v", err)
 				}
 			}
+		}
+	}
+
+	if l2Block.L1InfoTreeIndex != 0 {
+		if err = hermezDb.WriteBlockL1InfoTreeIndex(l2Block.L2BlockNumber, uint64(l2Block.L1InfoTreeIndex)); err != nil {
+			return err
 		}
 	}
 

@@ -563,6 +563,10 @@ func (db *HermezDb) DeleteBlockL1BlockHashes(fromBlockNum, toBlockNum uint64) er
 	return db.deleteFromBucketWithUintKeysRange(BLOCK_L1_BLOCK_HASHES, fromBlockNum, toBlockNum)
 }
 
+func (db *HermezDb) DeleteBlockL1InfoTreeIndexes(fromBlockNum, toBlockNum uint64) error {
+	return db.deleteFromBucketWithUintKeysRange(BLOCK_L1_INFO_TREE_INDEX, fromBlockNum, toBlockNum)
+}
+
 // from and to are inclusive
 func (db *HermezDb) DeleteBlockBatches(fromBlockNum, toBlockNum uint64) error {
 	return db.deleteFromBucketWithUintKeysRange(BLOCKBATCHES, fromBlockNum, toBlockNum)

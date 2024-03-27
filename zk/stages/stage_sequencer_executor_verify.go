@@ -56,6 +56,35 @@ func SpawnSequencerExecutorVerifyStage(
 		return err
 	}
 
+	// progress here is at the block level
+	intersProgress, err := stages.GetStageProgress(tx, stages.IntermediateHashes)
+	if err != nil {
+		return err
+	}
+
+	// we need to get the batch number for the latest block, so we can search for new batches to send for
+	// verification
+	intersBatch, err := hermezDb.GetBatchNoByL2Block(intersProgress)
+	if err != nil {
+		return err
+	}
+
+	// we could be running in a state with no executors so we need instant response that we are in an
+	// ok state to save lag in the data stream !!Dragons: there will be no witnesses stored running in
+	// this mode of operation
+	canVerify := cfg.verifier.HasExecutors()
+	if !canVerify {
+		if err = stages.SaveStageProgress(tx, stages.SequenceExecutorVerify, intersBatch); err != nil {
+			return err
+		}
+		if freshTx {
+			if err = tx.Commit(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	// get the latest responses from the verifier then sort them, so we can make sure we're handling verifications
 	// in order
 	responses := cfg.verifier.GetAllResponses()
@@ -94,19 +123,6 @@ func SpawnSequencerExecutorVerifyStage(
 		// now let the verifier know we have got this message, so it can release it
 		cfg.verifier.RemoveResponse(response.BatchNumber)
 		progress = response.BatchNumber
-	}
-
-	// progress here is at the block level
-	intersProgress, err := stages.GetStageProgress(tx, stages.IntermediateHashes)
-	if err != nil {
-		return err
-	}
-
-	// we need to get the batch number for the latest block, so we can search for new batches to send for
-	// verification
-	intersBatch, err := hermezDb.GetBatchNoByL2Block(intersProgress)
-	if err != nil {
-		return err
 	}
 
 	// send off the new batches to the verifier to be processed

@@ -287,3 +287,7 @@ func (v *LegacyExecutorVerifier) RemoveResponse(batchNumber uint64) {
 	}
 	v.responses = result
 }
+
+func (v *LegacyExecutorVerifier) HasExecutors() bool {
+	return len(v.executors) > 0
+}

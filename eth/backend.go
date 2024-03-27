@@ -703,6 +703,11 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 
+	executionProgress, err := stages.GetStageProgress(tx, stages.Execution)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -783,6 +788,10 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 			)
 
 			verifier.StartWork()
+
+			// we need to make sure the pool is always aware of the latest block for when
+			// we switch context from being an RPC node to a sequencer
+			backend.txPool2.ForceUpdateLatestBlock(executionProgress)
 
 			backend.syncStages = stages2.NewSequencerZkStages(
 				backend.sentryCtx,

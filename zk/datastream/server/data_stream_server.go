@@ -174,7 +174,12 @@ func (srv *DataStreamServer) CreateStreamEntries(
 		return nil, err
 	}
 
-	blockStart := srv.CreateBlockStartEntry(block, batchNumber, uint16(fork), ger, uint32(deltaTimestamp), uint32(0), l1BlockHash)
+	l1InfoIndex, err := reader.GetBlockL1InfoTreeIndex(blockNum)
+	if err != nil {
+		return nil, err
+	}
+
+	blockStart := srv.CreateBlockStartEntry(block, batchNumber, uint16(fork), ger, uint32(deltaTimestamp), uint32(l1InfoIndex), l1BlockHash)
 	entries[index] = blockStart
 	index++
 
