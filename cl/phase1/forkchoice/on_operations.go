@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon/cl/clparams"
@@ -241,13 +242,15 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 
 	// [REJECT] The contribution has participants -- that is, any(contribution.aggregation_bits).
 	aggregationBits := contributionAndProof.Contribution.AggregationBits
+
 	if aggregationBits == nil {
 		return fmt.Errorf("aggretationBits is nil")
 	}
 
 	found := false
 	for _, bit := range contributionAndProof.Contribution.AggregationBits {
-		if bit != 0 {
+		count := bits.OnesCount8(bit)
+		if count != 0 {
 			found = true
 			break
 		}
@@ -274,34 +277,23 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	if err != nil {
 		return err
 	}
+
+	subcommiteePubsKeys, err := f.getSyncSubcommitteePubkeys(committeeKeys, contributionAndProof.Contribution.SubcommitteeIndex)
+	if err != nil {
+		return err
+	}
+	fmt.Println("pubsKeysLens", len(subcommiteePubsKeys))
+
 	inSubcommittee := false
-	for _, pubKey := range committeeKeys {
+	for _, pubKey := range subcommiteePubsKeys {
 		if bytes.Equal(pubKey[:], aggregatorPubKey[:]) {
 			inSubcommittee = true
 			break
 		}
 	}
 	if !inSubcommittee {
-		return fmt.Errorf("aggregator's validator index is not in subcommittee")
+		return fmt.Errorf("aggregator's validator index is not in subcommittee1111")
 	}
-
-	// [IGNORE] A valid sync committee contribution with equal slot, beacon_block_root and subcommittee_index whose aggregation_bits is non-strict superset has not already been seen.
-	contributionKey := cltypes.ContributionKey{
-		Slot:              contributionAndProof.Contribution.Slot,
-		BeaconBlockRoot:   contributionAndProof.Contribution.BeaconBlockRoot,
-		SubcommitteeIndex: contributionAndProof.Contribution.SubcommitteeIndex,
-	}
-	accumulatedBitsList, _ := f.operationsPool.ContributionCache.Get(contributionKey)
-
-	// FIXME
-	// if found { //&& !isStrictSuperset(accumulatedBitsList, aggregationBits) {
-	// 	fmt.Println("seen a non-strict superset sync committee contribution")
-	// 	return nil
-	// }
-
-	accumulatedBitsList = append(accumulatedBitsList, contributionAndProof.Contribution.AggregationBits)
-
-	f.operationsPool.ContributionCache.Insert(contributionKey, accumulatedBitsList)
 
 	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
 	indexSlotKey := make([]byte, 24)
@@ -339,12 +331,12 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	}
 
 	// [REJECT] The aggregator signature, signed_contribution_and_proof.signature, is valid.
-	domain1, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
+	domain, err = s.GetDomain(s.BeaconConfig().DomainContributionAndProof, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
 	if err != nil {
 		return err
 	}
 
-	aggregatorSignatureRoot, err := fork.ComputeSigningRoot(signedChange.Message, domain1)
+	aggregatorSignatureRoot, err := fork.ComputeSigningRoot(signedChange.Message, domain)
 	if err != nil {
 		return err
 	}
@@ -360,7 +352,7 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	// [REJECT] The aggregate signature is valid for the message beacon_block_root and aggregate pubkey derived
 	// from the participation info in aggregation_bits for the subcommittee specified by the contribution.subcommittee_index.
 	message := contributionAndProof.Contribution.BeaconBlockRoot[:]
-	domain2, err := s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
+	domain, err = s.GetDomain(s.BeaconConfig().DomainSyncCommittee, state.GetEpochAtSlot(s.BeaconConfig(), contributionAndProof.Contribution.Slot))
 	if err != nil {
 		return err
 	}
@@ -368,29 +360,17 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	if err != nil {
 		return err
 	}
-	signatureRoot := utils.Sha256(hash[:], domain2)
+
+	signatureRoot := utils.Sha256(hash[:], domain)
 	if err != nil {
 		return err
 	}
 
-	aggregationBitsStr := aggregationBits.String()
-	// Convert committeeKeys to [][]byte
-	pubsKeys, err := f.getSyncSubcommitteePubkeys(committeeKeys, contributionAndProof.Contribution.SubcommitteeIndex)
-	if err != nil {
-		return err
-	}
-	// if len(pubsKeys) != len(aggregationBitsStr) {
-	// 	return fmt.Errorf("invalid length of aggregation bits or public keys")
-	// }
-
-	newPubKeys := make([][]byte, 0)
-	for i, bit := range aggregationBitsStr {
-		if bit == '1' {
-			newPubKeys = append(newPubKeys, pubsKeys[i])
-		}
+	if len(subcommiteePubsKeys) != utils.GetBitlistLength(aggregationBits)+1 {
+		return fmt.Errorf("invalid length of aggregation bits or public keys")
 	}
 
-	valid, err = bls.VerifyAggregate(signature[:], signatureRoot[:], newPubKeys)
+	valid, err = bls.VerifyAggregate(signature[:], signatureRoot[:], subcommiteePubsKeys)
 	if err != nil {
 		return err
 	}

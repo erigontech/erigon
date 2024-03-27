@@ -143,29 +143,6 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	return checkpointState, nil
 }
 
-func isStrictSuperset(a [][]byte, b []byte) bool {
-	for _, item := range a {
-		if len(item) != len(b) {
-			continue
-		}
-		isSuperset := true
-		fmt.Println("item", item)
-		fmt.Println("b", b)
-		for i := range item {
-			if b[i] & ^item[i] != 0 {
-				isSuperset = false
-				break
-			}
-		}
-
-		if isSuperset {
-			fmt.Println("isSuperset", isSuperset)
-			return true
-		}
-	}
-	return false
-}
-
 func (f *ForkChoiceStore) getSyncSubcommitteePubkeys(pubkeys []libcommon.Bytes48, subcommitteeIndex uint64) ([][]byte, error) {
 	var syncSubcommitteePubkeys [][]byte
 	subcommitteeSize := f.beaconCfg.SyncCommitteeSize / f.beaconCfg.SyncCommitteeSubnetCount
