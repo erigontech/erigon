@@ -282,11 +282,10 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	if err != nil {
 		return err
 	}
-	fmt.Println("pubsKeysLens", len(subcommiteePubsKeys))
 
 	inSubcommittee := false
 	for _, pubKey := range subcommiteePubsKeys {
-		if bytes.Equal(pubKey[:], aggregatorPubKey[:]) {
+		if bytes.Equal(pubKey, aggregatorPubKey[:]) {
 			inSubcommittee = true
 			break
 		}
@@ -297,9 +296,9 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 
 	// [IGNORE] The sync committee contribution is the first valid contribution received for the aggregator with index contribution_and_proof.aggregator_index for the slot contribution.slot and subcommittee index contribution.subcommittee_index (this requires maintaining a cache of size SYNC_COMMITTEE_SIZE for this topic that can be flushed after each slot).
 	indexSlotKey := make([]byte, 24)
-	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[0:], uint64(contributionAndProof.AggregatorIndex))
-	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[8:], uint64(contributionAndProof.Contribution.Slot))
-	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[16:], uint64(contributionAndProof.Contribution.SubcommitteeIndex))
+	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[0:], contributionAndProof.AggregatorIndex)
+	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[8:], contributionAndProof.Contribution.Slot)
+	indexSlotKey = binary.BigEndian.AppendUint64(indexSlotKey[16:], contributionAndProof.Contribution.SubcommitteeIndex)
 
 	if f.operationsPool.IndexSlotHasSeen.Has(string(indexSlotKey)) {
 		return nil
