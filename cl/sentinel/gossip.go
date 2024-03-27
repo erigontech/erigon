@@ -192,6 +192,7 @@ func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts
 		host:         s.host.ID(),
 		ctx:          s.ctx,
 		expiration:   exp,
+		s:            s,
 	}
 	path := fmt.Sprintf("/eth2/%x/%s/%s", digest, topic.Name, topic.CodecStr)
 	sub.topic, err = s.pubsub.Join(path, opts...)
@@ -292,6 +293,8 @@ type GossipSubscription struct {
 	cf context.CancelFunc
 	rf pubsub.RelayCancelFunc
 
+	s *Sentinel
+
 	stopCh    chan struct{}
 	closeOnce sync.Once
 }
@@ -315,6 +318,7 @@ func (sub *GossipSubscription) Listen() {
 					sub.topic.Close()
 					sub.subscribed.Store(false)
 					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.gossip_topic.Name)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, false)
 					continue
 				}
 				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
@@ -329,6 +333,7 @@ func (sub *GossipSubscription) Listen() {
 					sctx, sub.cf = context.WithCancel(sub.ctx)
 					go sub.run(sctx, sub.sub, sub.sub.Topic())
 					sub.subscribed.Store(true)
+					sub.s.updateENROnSubscription(sub.gossip_topic.Name, true)
 					log.Info("[Gossip] Subscribed to topic", "topic", sub.gossip_topic.Name)
 				}
 			}
@@ -377,7 +382,6 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			log.Error("[Sentinel Gossip] Message Handler Crashed", "err", r)
 		}
 	}()
-	fmt.Println("AF")
 	for {
 		select {
 		case <-ctx.Done():
@@ -396,7 +400,6 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 			if msg.ReceivedFrom == s.host {
 				continue
 			}
-			fmt.Println(topicName)
 			s.ch <- &GossipMessage{
 				From:      msg.ReceivedFrom,
 				TopicName: topicName,

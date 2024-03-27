@@ -16,10 +16,14 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/p2p/enode"
+	"github.com/ledgerwatch/erigon/p2p/enr"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -113,4 +117,58 @@ func (s *Sentinel) oneEpochDuration() time.Duration {
 // the cap for `inMesh` time scoring.
 func (s *Sentinel) inMeshCap() float64 {
 	return float64((3600 * time.Second) / s.oneSlotDuration())
+}
+
+// updateENRAttSubnets calls the ENR to notify other peers their attnets preferences.
+func (s *Sentinel) updateENRAttSubnets(subnetIndex int, on bool) {
+	var subnetField []byte
+	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField)); err != nil {
+		return
+	}
+	subnetField = common.Copy(subnetField)
+	if len(subnetField) <= subnetIndex/8 {
+		return
+	}
+	if on {
+		subnetField[subnetIndex/8] |= 1 << (subnetIndex % 8)
+	} else {
+		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
+	}
+	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, subnetField))
+}
+
+// updateENRSyncNets calls the ENR to notify other peers their attnets preferences.
+func (s *Sentinel) updateENRSyncNets(subnetIndex int, on bool) {
+	var subnetField []byte
+	if err := s.listener.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, subnetField)); err != nil {
+		return
+	}
+	subnetField = common.Copy(subnetField)
+	if len(subnetField) <= subnetIndex/8 {
+		return
+	}
+	if on {
+		subnetField[subnetIndex/8] |= 1 << (subnetIndex % 8)
+	} else {
+		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
+	}
+	s.listener.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, subnetField))
+}
+
+// updateENROnSubscription updates the ENR based on the subscription status to subnets/syncnets.
+func (s *Sentinel) updateENROnSubscription(topicName string, subscribe bool) {
+	s.metadataLock.Lock()
+	defer s.metadataLock.Unlock()
+	for i := 0; i < int(s.cfg.NetworkConfig.AttestationSubnetCount); i++ {
+		if strings.Contains(topicName, fmt.Sprintf(gossip.TopicNamePrefixBeaconAttestation, i)) {
+			s.updateENRAttSubnets(i, subscribe)
+			return
+		}
+	}
+	for i := 0; i < int(s.cfg.BeaconConfig.SyncCommitteeSubnetCount); i++ {
+		if strings.Contains(topicName, fmt.Sprintf(gossip.TopicNamePrefixSyncCommittee, i)) {
+			s.updateENRSyncNets(i, subscribe)
+			return
+		}
+	}
 }
