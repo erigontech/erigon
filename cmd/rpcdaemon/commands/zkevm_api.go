@@ -665,6 +665,7 @@ func convertBlockToRpcBlock(
 
 	if full {
 		for idx, tx := range orig.Transactions() {
+			gasPrice := tx.GetPrice()
 			v, r, s := tx.RawSignatureValues()
 			var sender common.Address
 			if len(senders) > idx {
@@ -676,12 +677,12 @@ func convertBlockToRpcBlock(
 			}
 			var receipt *types.Receipt
 			if len(receipts) > idx {
-				receipt = convertReceipt(receipts[idx], sender, tx.GetTo(), tx.GetPrice(), effectiveGasPricePercentage)
+				receipt = convertReceipt(receipts[idx], sender, tx.GetTo(), gasPrice, effectiveGasPricePercentage)
 			}
 
 			tran := types.Transaction{
 				Nonce:       types.ArgUint64(tx.GetNonce()),
-				GasPrice:    types.ArgBig(*tx.GetPrice().ToBig()),
+				GasPrice:    types.ArgBig(*gasPrice.ToBig()),
 				Gas:         types.ArgUint64(tx.GetGas()),
 				To:          tx.GetTo(),
 				Value:       types.ArgBig(*tx.GetValue().ToBig()),
@@ -732,13 +733,12 @@ func convertReceipt(
 
 	var effectiveGasPrice *types.ArgBig
 	if gasPrice != nil {
-		gas := core.CalculateEffectiveGas(gasPrice, effectiveGasPricePercentage)
+		gas := core.CalculateEffectiveGas(gasPrice.Clone(), effectiveGasPricePercentage)
 		asBig := types.ArgBig(*gas.ToBig())
 		effectiveGasPrice = &asBig
 	}
 
 	return &types.Receipt{
-		Root:              common.BytesToHash(r.PostState),
 		CumulativeGasUsed: types.ArgUint64(r.CumulativeGasUsed),
 		LogsBloom:         eritypes.CreateBloom(eritypes.Receipts{r}),
 		Logs:              logs,
