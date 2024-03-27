@@ -77,7 +77,6 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
-	fmt.Println(data.Name)
 
 	// Depending on the type of the received data, we create an instance of a specific type that implements the ObjectSSZ interface,
 	// then attempts to deserialize the received data into it.
