@@ -20,9 +20,9 @@ import (
 // Methods of sentry called by Core
 
 func (cs *MultiClient) SetStatus(ctx context.Context) {
-	statusMsg, err := cs.statusDataProvider.RefreshStatusData(ctx)
+	statusMsg, err := cs.statusDataProvider.GetStatusData(ctx)
 	if err != nil {
-		cs.logger.Error("MultiClient.SetStatus: RefreshStatusData error", "err", err)
+		cs.logger.Error("MultiClient.SetStatus: GetStatusData error", "err", err)
 		return
 	}
 

@@ -549,16 +549,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 	backend.forkValidator = engine_helpers.NewForkValidator(ctx, currentBlockNumber, inMemoryExecution, tmpdir, backend.blockReader)
 
-	statusDataProvider, err := sentry.NewStatusDataProvider(
-		ctx,
+	statusDataProvider := sentry.NewStatusDataProvider(
 		chainKv,
 		chainConfig,
 		genesis,
 		backend.config.NetworkID,
 	)
-	if err != nil {
-		return nil, err
-	}
 
 	// limit "new block" broadcasts to at most 10 random peers at time
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 10 }
