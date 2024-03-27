@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/eth/stagedsync"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/polygon/bor/borcfg"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
@@ -36,13 +37,14 @@ func NewService(
 	heimdallURL string,
 	engine execution_client.ExecutionEngine,
 	sentryClient direct.SentryClient,
+	statusDataProvider *sentry.StatusDataProvider,
 	logger log.Logger,
 ) Service {
 	execution := NewExecutionClient(engine)
 	storage := NewStorage(execution, maxPeers)
 	headersVerifier := VerifyAccumulatedHeaders
 	blocksVerifier := VerifyBlocks
-	p2pService := p2p.NewService(maxPeers, logger, sentryClient)
+	p2pService := p2p.NewService(maxPeers, logger, sentryClient, statusDataProvider.GetStatusData)
 	heimdallClient := heimdall.NewHeimdallClient(heimdallURL, logger)
 	heimdallService := heimdall.NewHeimdallNoStore(heimdallClient, logger)
 	blockDownloader := NewBlockDownloader(
