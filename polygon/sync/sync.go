@@ -209,6 +209,8 @@ func (s *Sync) onNewBlockHashesEvent(
 //
 
 func (s *Sync) Run(ctx context.Context) error {
+	s.logger.Info("running sync component")
+
 	tip, err := s.execution.CurrentHeader(ctx)
 	if err != nil {
 		return err

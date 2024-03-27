@@ -65,6 +65,9 @@ func (h *heimdallImpl) LastCheckpointId(ctx context.Context, store CheckpointSto
 }
 
 func (h *heimdallImpl) FetchCheckpointsFromBlock(ctx context.Context, store CheckpointStore, startBlock uint64) (Waypoints, error) {
+	h.logger.Info("fetching checkpoints from block", "start", startBlock)
+	startFetchTime := time.Now()
+
 	count, _, err := h.LastCheckpointId(ctx, store)
 
 	if err != nil {
@@ -100,6 +103,14 @@ func (h *heimdallImpl) FetchCheckpointsFromBlock(ctx context.Context, store Chec
 	}
 
 	common.SliceReverse(checkpoints)
+
+	h.logger.Info(
+		"finished fetching checkpoints from block",
+		"start", startBlock,
+		"count", len(checkpoints),
+		"time", time.Since(startFetchTime),
+	)
+
 	return checkpoints, nil
 }
 

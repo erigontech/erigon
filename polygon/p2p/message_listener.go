@@ -79,6 +79,8 @@ type messageListener struct {
 }
 
 func (ml *messageListener) Run(ctx context.Context) {
+	ml.logger.Info("running p2p message listener component")
+
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
 		ml.listenPeerEvents,
