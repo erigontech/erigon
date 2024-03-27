@@ -31,17 +31,28 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	chainConfig := fromdb.ChainConfig(br.db)
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, br.workers
 
-	blockFrom, blockTo, ok := CanRetire(maxBlockNum, minBlockNum, snaptype.Enums.Headers, br.chainConfig)
-	if ok {
-		if has, err := br.dbHasEnoughDataForBorRetire(ctx); err != nil {
-			return false, err
-		} else if !has {
-			return false, nil
+	blocksRetired := false
+
+	for _, snaptype := range blockReader.BorSnapshots().Types() {
+		minSnapNum := minBlockNum
+
+		if available := blockReader.BorSnapshots().(*BorRoSnapshots).blocksAvailable(snaptype, false); available < minBlockNum {
+			minSnapNum = available
 		}
 
-		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapNum, snaptype.Enum(), br.chainConfig)
 
-		for _, snaptype := range blockReader.BorSnapshots().Types() {
+		if ok {
+			blocksRetired = true
+
+			if has, err := br.dbHasEnoughDataForBorRetire(ctx); err != nil {
+				return false, err
+			} else if !has {
+				return false, nil
+			}
+
+			logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "type", snaptype, "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
+
 			for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig) {
 				end := chooseSegmentEnd(i, blockTo, snaptype.Enum(), chainConfig)
 				if _, err := snaptype.ExtractRange(ctx, snaptype.FileInfo(snapshots.Dir(), i, end), nil, db, chainConfig, tmpDir, workers, lvl, logger); err != nil {
@@ -49,9 +60,11 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 				}
 			}
 		}
+	}
 
+	if blocksRetired {
 		if err := snapshots.ReopenFolder(); err != nil {
-			return ok, fmt.Errorf("reopen: %w", err)
+			return blocksRetired, fmt.Errorf("reopen: %w", err)
 		}
 		snapshots.LogStat("bor:retire")
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
@@ -65,9 +78,9 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
 	}
 	if len(rangesToMerge) == 0 {
-		return ok, nil
+		return blocksRetired, nil
 	}
-	ok = true // have something to merge
+	blocksRetired = true // have something to merge
 	onMerge := func(r Range) error {
 		if notifier != nil && !reflect.ValueOf(notifier).IsNil() { // notify about new snapshots of any size
 			notifier.OnNewSnapshot()
@@ -87,9 +100,9 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	err := merger.Merge(ctx, &snapshots.RoSnapshots, bor_snaptype.BorSnapshotTypes, rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, onDelete)
 
 	if err != nil {
-		return ok, err
+		return blocksRetired, err
 	}
-	return ok, nil
+	return blocksRetired, nil
 }
 
 // Bor Events
