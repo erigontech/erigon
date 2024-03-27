@@ -314,6 +314,7 @@ func (sub *GossipSubscription) Listen() {
 					}
 					sub.topic.Close()
 					sub.subscribed.Store(false)
+					log.Info("[Gossip] Unsubscribed from topic", "topic", sub.gossip_topic.Name)
 					continue
 				}
 				if !sub.subscribed.Load() && time.Now().Before(expirationTime) {
@@ -328,6 +329,7 @@ func (sub *GossipSubscription) Listen() {
 					sctx, sub.cf = context.WithCancel(sub.ctx)
 					go sub.run(sctx, sub.sub, sub.sub.Topic())
 					sub.subscribed.Store(true)
+					log.Info("[Gossip] Subscribed to topic", "topic", sub.gossip_topic.Name)
 				}
 			}
 		}
@@ -335,7 +337,7 @@ func (sub *GossipSubscription) Listen() {
 }
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
-	if expiry.Before(sub.expiration.Load().(time.Time)) {
+	if expiry.After(sub.expiration.Load().(time.Time)) {
 		sub.expiration.Store(expiry)
 	}
 }

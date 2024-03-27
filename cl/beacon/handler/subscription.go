@@ -17,6 +17,8 @@ type ValidatorSyncCommitteeSubscriptionsRequest struct {
 	ValidatorIndex        uint64   `json:"validator_index,string"`
 	SyncCommitteeIndicies []string `json:"sync_committee_indices"`
 	UntilEpoch            uint64   `json:"until_epoch,string"`
+
+	DEBUG bool `json:"DEBUG,omitempty"`
 }
 
 func parseStringifiedSyncCommitteeIndicies(syncCommitteeIndicies []string) ([]uint64, error) {
@@ -58,11 +60,19 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		subnets, err := network.ComputeSubnetsForSyncCommittee(headState, syncCommitteeIndicies, subRequest.ValidatorIndex)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+		var subnets []uint64
+		if subRequest.DEBUG {
+			for i := 0; i < int(a.beaconChainCfg.SyncCommitteeSubnetCount); i++ {
+				subnets = append(subnets, uint64(i))
+			}
+		} else {
+			subnets, err = network.ComputeSubnetsForSyncCommittee(headState, syncCommitteeIndicies, subRequest.ValidatorIndex)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
 		}
+
 		// subscribe to subnets
 		for _, subnet := range subnets {
 			if _, err := a.sentinel.SetSubscribeExpiry(r.Context(), &sentinel.RequestSubscribeExpiry{
@@ -74,5 +84,5 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 			}
 		}
 	}
-
+	w.WriteHeader(http.StatusOK)
 }

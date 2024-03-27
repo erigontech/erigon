@@ -193,7 +193,7 @@ func (a *ApiHandler) init() {
 					r.Get("/aggregate_attestation", http.NotFound)
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
 					r.Post("/beacon_committee_subscriptions", http.NotFound)
-					r.Post("/sync_committee_subscriptions", http.NotFound)
+					r.Post("/sync_committee_subscriptions", a.PostEthV1ValidatorSyncCommitteeSubscriptions)
 					r.Get("/sync_committee_contribution", http.NotFound)
 					r.Post("/contribution_and_proofs", http.NotFound)
 					r.Post("/prepare_beacon_proposer", a.PostEthV1ValidatorPrepareBeaconProposal)

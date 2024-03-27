@@ -29,3 +29,7 @@ func TopicNameBlobSidecar(d int) string {
 func IsTopicBlobSidecar(d string) bool {
 	return strings.Contains(d, "blob_sidecar_")
 }
+
+func IsTopicSyncCommittee(d string) bool {
+	return strings.Contains(d, "sync_committee_")
+}
