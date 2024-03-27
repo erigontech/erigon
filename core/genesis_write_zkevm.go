@@ -70,6 +70,16 @@ func HermezLocalDevnetGenesisBlock() *types.Genesis {
 	}
 }
 
+func HermezESTestGenesisBlock() *types.Genesis {
+	return &types.Genesis{
+		Config:     params.HermezESTestChainConfig,
+		Timestamp:  1710763452,
+		GasLimit:   0x0,
+		Difficulty: big.NewInt(0x0),
+		Alloc:      readPrealloc("allocs/hermez-estest.json"),
+	}
+}
+
 func X1TestnetGenesisBlock() *types.Genesis {
 	return &types.Genesis{
 		Config:     params.X1TestnetChainConfig,

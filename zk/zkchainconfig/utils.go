@@ -18,6 +18,7 @@ var chainIdToName = map[uint64]string{
 	2442:   networkname.HermezCardonaChainName,
 	10010:  networkname.HermezEtrogChainName,
 	999999: networkname.HermezLocalDevnetChainName,
+	123:    networkname.HermezESTestChainName,
 }
 
 func IsZk(chainId uint64) bool {
