@@ -3,6 +3,7 @@ package cltypes
 import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
@@ -145,4 +146,35 @@ func (agg *SyncContribution) EncodingSizeSSZ() int {
 func (agg *SyncContribution) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(agg.SyncCommiteeBits[:], agg.SyncCommiteeSignature[:])
 
+}
+
+type SyncCommitteeMessage struct {
+	Slot            uint64            `json:"slot,string"`
+	BeaconBlockRoot libcommon.Hash    `json:"beacon_block_root"`
+	ValidatorIndex  uint64            `json:"validator_index,string"`
+	Signature       libcommon.Bytes96 `json:"signature"`
+}
+
+func (a *SyncCommitteeMessage) EncodeSSZ(dst []byte) ([]byte, error) {
+	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+}
+
+func (a *SyncCommitteeMessage) DecodeSSZ(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+}
+
+func (a *SyncCommitteeMessage) EncodingSizeSSZ() int {
+	return 144
+}
+
+func (a *SyncCommitteeMessage) HashSSZ() ([32]byte, error) {
+	return merkle_tree.HashTreeRoot(&a.Slot, a.BeaconBlockRoot[:], &a.ValidatorIndex, a.Signature[:])
+}
+
+func (a *SyncCommitteeMessage) Static() bool {
+	return true
+}
+
+func (*SyncCommitteeMessage) Clone() clonable.Clonable {
+	return &SyncCommitteeMessage{}
 }

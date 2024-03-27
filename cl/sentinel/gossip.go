@@ -335,7 +335,9 @@ func (sub *GossipSubscription) Listen() {
 }
 
 func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
-	sub.expiration.Store(expiry)
+	if expiry.Before(sub.expiration.Load().(time.Time)) {
+		sub.expiration.Store(expiry)
+	}
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
