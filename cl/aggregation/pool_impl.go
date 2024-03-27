@@ -47,40 +47,6 @@ func NewAggregationPool(
 	return p
 }
 
-func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			p.aggregatesLock.Lock()
-			toRemoves := make([][32]byte, 0)
-			for hashRoot := range p.aggregates {
-				if len(p.aggregates[hashRoot]) == 0 {
-					toRemoves = append(toRemoves, hashRoot)
-					continue
-				} else {
-					slot := p.aggregates[hashRoot][0].att.AttestantionData().Slot()
-					if p.slotIsStale(slot) {
-						toRemoves = append(toRemoves, hashRoot)
-					}
-				}
-			}
-			// remove stale attestation
-			for _, hashRoot := range toRemoves {
-				delete(p.aggregates, hashRoot)
-			}
-			p.aggregatesLock.Unlock()
-		}
-	}
-}
-
-func (p *aggregationPoolImpl) slotIsStale(targetSlot uint64) bool {
-	curSlot := utils.GetCurrentSlot(p.genesisConfig.GenesisTime, p.beaconConfig.SecondsPerSlot)
-	return curSlot-targetSlot > p.netConfig.AttestationPropagationSlotRange
-}
-
 func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	// use hash of attestation data as key
 	hashRoot, err := inAtt.AttestantionData().HashSSZ()
@@ -204,4 +170,38 @@ func (p *aggregationPoolImpl) GetAggregatationByRoot(root [32]byte) *solid.Attes
 		}
 	}
 	return maxAtt
+}
+
+func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.aggregatesLock.Lock()
+			toRemoves := make([][32]byte, 0)
+			for hashRoot := range p.aggregates {
+				if len(p.aggregates[hashRoot]) == 0 {
+					toRemoves = append(toRemoves, hashRoot)
+					continue
+				} else {
+					slot := p.aggregates[hashRoot][0].att.AttestantionData().Slot()
+					if p.slotIsStale(slot) {
+						toRemoves = append(toRemoves, hashRoot)
+					}
+				}
+			}
+			// remove stale attestation
+			for _, hashRoot := range toRemoves {
+				delete(p.aggregates, hashRoot)
+			}
+			p.aggregatesLock.Unlock()
+		}
+	}
+}
+
+func (p *aggregationPoolImpl) slotIsStale(targetSlot uint64) bool {
+	curSlot := utils.GetCurrentSlot(p.genesisConfig.GenesisTime, p.beaconConfig.SecondsPerSlot)
+	return curSlot-targetSlot > p.netConfig.AttestationPropagationSlotRange
 }
