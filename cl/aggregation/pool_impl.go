@@ -1,11 +1,15 @@
 package aggregation
 
 import (
+	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 var (
@@ -13,15 +17,12 @@ var (
 )
 
 type aggregationPoolImpl struct {
+	// config
+	genesisConfig  *clparams.GenesisConfig
+	beaconConfig   *clparams.BeaconChainConfig
+	netConfig      *clparams.NetworkConfig
 	aggregatesLock sync.RWMutex
 	aggregates     map[[32]byte][]*attestation
-}
-
-func NewAggregationPool() AggregationPool {
-	return &aggregationPoolImpl{
-		aggregatesLock: sync.RWMutex{},
-		aggregates:     make(map[[32]byte][]*attestation),
-	}
 }
 
 type attestation struct {
@@ -29,16 +30,68 @@ type attestation struct {
 	att      *solid.Attestation
 }
 
-func (a *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
-	key, err := inAtt.AttestantionData().HashSSZ()
+func NewAggregationPool(
+	ctx context.Context,
+	genesisConfig *clparams.GenesisConfig,
+	beaconConfig *clparams.BeaconChainConfig,
+	netConfig *clparams.NetworkConfig,
+) AggregationPool {
+	p := &aggregationPoolImpl{
+		genesisConfig:  genesisConfig,
+		beaconConfig:   beaconConfig,
+		netConfig:      netConfig,
+		aggregatesLock: sync.RWMutex{},
+		aggregates:     make(map[[32]byte][]*attestation),
+	}
+	go p.sweepStaleAtt(ctx)
+	return p
+}
+
+func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.aggregatesLock.Lock()
+			toRemoves := make([][32]byte, 0)
+			for hashRoot := range p.aggregates {
+				if len(p.aggregates[hashRoot]) == 0 {
+					toRemoves = append(toRemoves, hashRoot)
+					continue
+				} else {
+					slot := p.aggregates[hashRoot][0].att.AttestantionData().Slot()
+					if p.slotIsStale(slot) {
+						toRemoves = append(toRemoves, hashRoot)
+					}
+				}
+			}
+			// remove stale attestation
+			for _, hashRoot := range toRemoves {
+				delete(p.aggregates, hashRoot)
+			}
+			p.aggregatesLock.Unlock()
+		}
+	}
+}
+
+func (p *aggregationPoolImpl) slotIsStale(targetSlot uint64) bool {
+	curSlot := utils.GetCurrentSlot(p.genesisConfig.GenesisTime, p.beaconConfig.SecondsPerSlot)
+	return curSlot-targetSlot > p.netConfig.AttestationPropagationSlotRange
+}
+
+func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
+	// use hash of attestation data as key
+	hashRoot, err := inAtt.AttestantionData().HashSSZ()
 	if err != nil {
 		return err
 	}
 
-	a.aggregatesLock.Lock()
-	defer a.aggregatesLock.Unlock()
-	if _, ok := a.aggregates[key]; !ok {
-		a.aggregates[key] = []*attestation{
+	p.aggregatesLock.Lock()
+	defer p.aggregatesLock.Unlock()
+	if _, ok := p.aggregates[hashRoot]; !ok {
+		p.aggregates[hashRoot] = []*attestation{
 			{
 				bitCount: countBit(inAtt),
 				att:      inAtt,
@@ -51,7 +104,7 @@ func (a *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	// but it's not optimal. it's kind of a maximum coverage problem.
 	mergeCount := 0
 	after := []*attestation{}
-	for _, curAtt := range a.aggregates[key] {
+	for _, curAtt := range p.aggregates[hashRoot] {
 		if overlap, err := checkOverlap(inAtt.AggregationBits(), curAtt.att.AggregationBits()); err != nil {
 			return err
 		} else if overlap {
@@ -77,7 +130,7 @@ func (a *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			att:      inAtt,
 		})
 	}
-	a.aggregates[key] = after
+	p.aggregates[hashRoot] = after
 	return nil
 }
 
@@ -133,10 +186,10 @@ func countBit(att *solid.Attestation) int {
 	return count
 }
 
-func (a *aggregationPoolImpl) GetAggregatationByRoot(root [32]byte) *solid.Attestation {
-	a.aggregatesLock.RLock()
-	defer a.aggregatesLock.RUnlock()
-	atts, ok := a.aggregates[root]
+func (p *aggregationPoolImpl) GetAggregatationByRoot(root [32]byte) *solid.Attestation {
+	p.aggregatesLock.RLock()
+	defer p.aggregatesLock.RUnlock()
+	atts, ok := p.aggregates[root]
 	if !ok || atts == nil {
 		return nil
 	}

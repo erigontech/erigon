@@ -1,6 +1,7 @@
 package aggregation
 
 import (
+	"context"
 	"log"
 	"testing"
 
@@ -120,7 +121,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 
 	for _, tc := range testcases {
 		log.Printf("test case: %s", tc.name)
-		pool := NewAggregationPool()
+		pool := NewAggregationPool(context.Background(), nil, nil, nil)
 		for _, att := range tc.atts {
 			pool.AddAttestation(att)
 		}
