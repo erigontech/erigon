@@ -79,6 +79,8 @@ type IntraBlockState interface {
 	GetCommittedState(libcommon.Address, *libcommon.Hash, *uint256.Int)
 	GetState(address libcommon.Address, slot *libcommon.Hash, outValue *uint256.Int)
 	SetState(libcommon.Address, *libcommon.Hash, uint256.Int)
+	HasLiveAccount(addr libcommon.Address) bool
+	HasLiveState(addr libcommon.Address, key *libcommon.Hash) bool
 
 	Selfdestruct(libcommon.Address) bool
 	HasSelfdestructed(libcommon.Address) bool

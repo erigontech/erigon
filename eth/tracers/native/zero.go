@@ -90,7 +90,8 @@ func (t *zeroTracer) CaptureTxStart(gasLimit uint64) {
 
 // CaptureState implements the EVMLogger interface to trace a single step of VM execution.
 func (t *zeroTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, scope *vm.ScopeContext, rData []byte, depth int, err error) {
-	if err != nil {
+	// Only continue if the error is nil or if the error is out of gas and the opcode is SSTORE, CALL, or SELFDESTRUCT
+	if !(err == nil || (err == vm.ErrOutOfGas && (op == vm.SSTORE || op == vm.CALL || op == vm.SELFDESTRUCT))) {
 		return
 	}
 
@@ -107,16 +108,42 @@ func (t *zeroTracer) CaptureState(pc uint64, op vm.OpCode, gas, cost uint64, sco
 	switch {
 	case stackLen >= 1 && op == vm.SLOAD:
 		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
+		t.addAccountToTrace(caller)
 		t.addSLOADToAccount(caller, slot)
 	case stackLen >= 1 && op == vm.SSTORE:
 		slot := libcommon.Hash(stackData[stackLen-1].Bytes32())
+
+		// If the SSTORE is out of gas and the slot is in live state, we will add the slot to account read
+		if err == vm.ErrOutOfGas {
+			if t.env.IntraBlockState().HasLiveState(caller, &slot) {
+				t.addAccountToTrace(caller)
+				t.addSLOADToAccount(caller, slot)
+			}
+			return
+		}
+		t.addAccountToTrace(caller)
 		t.addSSTOREToAccount(caller, slot, stackData[stackLen-2].Clone())
 	case stackLen >= 1 && (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT):
 		addr := libcommon.Address(stackData[stackLen-1].Bytes20())
+
+		if err == vm.ErrOutOfGas && op == vm.SELFDESTRUCT {
+			if t.env.IntraBlockState().HasLiveAccount(addr) {
+				t.addAccountToTrace(addr)
+			}
+			return
+		}
 		t.addAccountToTrace(addr)
 		t.addOpCodeToAccount(addr, op)
 	case stackLen >= 5 && (op == vm.DELEGATECALL || op == vm.CALL || op == vm.STATICCALL || op == vm.CALLCODE):
 		addr := libcommon.Address(stackData[stackLen-2].Bytes20())
+
+		// If the call is out of gas, we will add account but not the opcode
+		if err == vm.ErrOutOfGas && op == vm.CALL {
+			if t.env.IntraBlockState().HasLiveAccount(addr) {
+				t.addAccountToTrace(addr)
+			}
+			return
+		}
 		t.addAccountToTrace(addr)
 		t.addOpCodeToAccount(addr, op)
 	case op == vm.CREATE:
@@ -170,6 +197,7 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 
 	for addr := range t.tx.Traces {
 		trace := t.tx.Traces[addr]
+		hasLiveAccount := t.env.IntraBlockState().HasLiveAccount(addr)
 		newBalance := t.env.IntraBlockState().GetBalance(addr)
 		newNonce := uint256.NewInt(t.env.IntraBlockState().GetNonce(addr))
 		codeHash := t.env.IntraBlockState().GetCodeHash(addr)
@@ -188,7 +216,7 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 			trace.Nonce = nil
 		}
 
-		if len(trace.StorageReadMap) > 0 {
+		if len(trace.StorageReadMap) > 0 && hasLiveAccount {
 			trace.StorageRead = make([]libcommon.Hash, 0, len(trace.StorageReadMap))
 			for k := range trace.StorageReadMap {
 				trace.StorageRead = append(trace.StorageRead, k)
@@ -197,7 +225,7 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 			trace.StorageRead = nil
 		}
 
-		if len(trace.StorageWritten) == 0 {
+		if len(trace.StorageWritten) == 0 || !hasLiveAccount {
 			trace.StorageWritten = nil
 		} else {
 			// A slot write could be reverted if the transaction is reverted. We will need to read the value from the statedb again to get the correct value.
@@ -228,17 +256,23 @@ func (t *zeroTracer) CaptureTxEnd(restGas uint64) {
 
 		// We don't need to provide the actual bytecode UNLESS the opcode is the following:
 		// DELEGATECALL, CALL, STATICCALL, CALLCODE, EXTCODECOPY, EXTCODEHASH, EXTCODESIZE
-		if trace.CodeUsage != nil && trace.CodeUsage.Read != nil && t.addrOpCodes[addr] != nil {
-			opCodes := []vm.OpCode{vm.DELEGATECALL, vm.CALL, vm.STATICCALL, vm.CALLCODE, vm.EXTCODECOPY,
-				vm.EXTCODEHASH, vm.EXTCODESIZE}
-			keep := false
-			for _, opCode := range opCodes {
-				if _, ok := t.addrOpCodes[addr][opCode]; ok {
-					keep = true
-					break
+		if trace.CodeUsage != nil && trace.CodeUsage.Read != nil {
+			if t.addrOpCodes[addr] != nil {
+				// We don't need to provide the actual bytecode UNLESS the opcode is the following:
+				// DELEGATECALL, CALL, STATICCALL, CALLCODE, EXTCODECOPY, EXTCODEHASH, EXTCODESIZE
+				opCodes := []vm.OpCode{vm.DELEGATECALL, vm.CALL, vm.STATICCALL, vm.CALLCODE, vm.EXTCODECOPY,
+					vm.EXTCODEHASH, vm.EXTCODESIZE}
+				keep := false
+				for _, opCode := range opCodes {
+					if _, ok := t.addrOpCodes[addr][opCode]; ok {
+						keep = true
+						break
+					}
 				}
-			}
-			if !keep {
+				if !keep {
+					trace.CodeUsage = nil
+				}
+			} else {
 				trace.CodeUsage = nil
 			}
 		}
