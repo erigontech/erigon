@@ -19,27 +19,35 @@ import (
 	"github.com/ledgerwatch/erigon/turbo/stages/mock"
 )
 
-func TestBodiesCanonical(t *testing.T) {
-	require := require.New(t)
-	m := mock.Mock(t)
-	db := m.DB
-	tx, err := db.BeginRw(m.Ctx)
-	require.NoError(err)
-	defer tx.Rollback()
-	m.HistoryV3 = true
-	_, bw := m.BlocksIO()
+func testingHeaderBody(t *testing.T) (h *types.Header, b *types.RawBody) {
+	t.Helper()
 
 	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
 	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
-	require.NoError(err)
+	err := txn.MarshalBinary(buf)
+	require.NoError(t, err)
 	rlpTxn := buf.Bytes()
+
+	b = &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
+	h = &types.Header{}
+	return h, b
+}
+
+func TestBodiesCanonical(t *testing.T) {
+	m := mock.Mock(t)
+	tx, err := m.DB.BeginRw(m.Ctx)
+	require := require.New(t)
+	require.NoError(err)
+	defer tx.Rollback()
+	m.HistoryV3 = true
+
+	_, bw := m.BlocksIO()
 
 	logEvery := time.NewTicker(time.Second)
 	defer logEvery.Stop()
 
-	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
-	h := &types.Header{}
+	h, b := testingHeaderBody(t)
+
 	for i := uint64(1); i <= 10; i++ {
 		if i == 3 {
 			// if latest block is <=1, append delta check is disabled, so no sense to test it here.
@@ -79,17 +87,11 @@ func TestBodiesUnwind(t *testing.T) {
 	defer tx.Rollback()
 	_, bw := m.BlocksIO()
 
-	txn := &types.DynamicFeeTransaction{Tip: u256.N1, FeeCap: u256.N1, ChainID: u256.N1, CommonTx: types.CommonTx{Value: u256.N1, Gas: 1, Nonce: 1}}
-	buf := bytes.NewBuffer(nil)
-	err = txn.MarshalBinary(buf)
-	require.NoError(err)
-	rlpTxn := buf.Bytes()
+	h, b := testingHeaderBody(t)
 
 	logEvery := time.NewTicker(time.Second)
 	defer logEvery.Stop()
 
-	b := &types.RawBody{Transactions: [][]byte{rlpTxn, rlpTxn, rlpTxn}}
-	h := &types.Header{}
 	for i := uint64(1); i <= 10; i++ {
 		h.Number = big.NewInt(int64(i))
 		hash := h.Hash()
