@@ -19,6 +19,7 @@ import (
 	erigonapp "github.com/ledgerwatch/erigon/turbo/app"
 	erigoncli "github.com/ledgerwatch/erigon/turbo/cli"
 	"github.com/ledgerwatch/erigon/turbo/node"
+	"github.com/ledgerwatch/erigon/turbo/logging"
 )
 
 func main() {
@@ -51,6 +52,8 @@ func runErigon(cliCtx *cli.Context) error {
 			return fmt.Errorf("failed setting config flags from yaml/toml file: %v", err)
 		}
 	}
+
+	logging.SetupLoggerCtx("cdk-erigon", cliCtx)
 
 	// initializing the node and providing the current git commit there
 	log.Info("Build info", "git_branch", params.GitBranch, "git_tag", params.GitTag, "git_commit", params.GitCommit)
