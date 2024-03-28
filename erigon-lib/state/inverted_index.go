@@ -726,14 +726,8 @@ func (it *FrozenInvertedIdxIter) Close() {
 }
 
 func (it *FrozenInvertedIdxIter) advance() {
-	if it.orderAscend {
-		if it.hasNext {
-			it.advanceInFiles()
-		}
-	} else {
-		if it.hasNext {
-			it.advanceInFiles()
-		}
+	if it.hasNext {
+		it.advanceInFiles()
 	}
 }
 

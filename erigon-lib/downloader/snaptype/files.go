@@ -289,18 +289,20 @@ func ParseDir(name string) (res []FileInfo, err error) {
 		res = append(res, meta)
 	}
 	slices.SortFunc(res, func(i, j FileInfo) int {
-		if i.Version != j.Version {
+		switch {
+		case i.Version != j.Version:
 			return cmp.Compare(i.Version, j.Version)
-		}
-		if i.From != j.From {
+
+		case i.From != j.From:
 			return cmp.Compare(i.From, j.From)
-		}
-		if i.To != j.To {
+
+		case i.To != j.To:
 			return cmp.Compare(i.To, j.To)
-		}
-		if i.Type.Enum() != j.Type.Enum() {
+
+		case i.Type.Enum() != j.Type.Enum():
 			return cmp.Compare(i.Type.Enum(), j.Type.Enum())
 		}
+
 		return cmp.Compare(i.Ext, j.Ext)
 	})
 

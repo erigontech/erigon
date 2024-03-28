@@ -537,7 +537,7 @@ func persistValidatorSets(
 		}
 
 		logger.Debug(
-			fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix),
+			fmt.Sprintf("[%s] Stored proposer snapshot to disk (persist)", logPrefix),
 			"number", snap.Number,
 			"hash", snap.Hash,
 		)
@@ -631,7 +631,8 @@ func initValidatorSets(
 				if err := snap.Store(snapDb); err != nil {
 					return nil, fmt.Errorf("snap.Store (0): %w", err)
 				}
-				logger.Debug(fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix), "number", 0, "hash", hash)
+
+				logger.Debug(fmt.Sprintf("[%s] Stored proposer snapshot to disk (init)", logPrefix), "number", 0, "hash", hash)
 			}
 
 			parentHeader = zeroHeader
@@ -689,7 +690,7 @@ func initValidatorSets(
 				lastPersistedBlockNum = snap.Number
 
 				logger.Trace(
-					fmt.Sprintf("[%s] Stored proposer snapshot to disk", logPrefix),
+					fmt.Sprintf("[%s] Stored proposer snapshot to disk (init loop)", logPrefix),
 					"number", snap.Number,
 					"hash", snap.Hash,
 				)
