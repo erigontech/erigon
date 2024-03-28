@@ -2,11 +2,13 @@ package execution_client
 
 import (
 	"context"
+	"math/big"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_types"
 )
 
 var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
@@ -15,7 +17,7 @@ var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context dead
 // It pretty much mimics engine API.
 type ExecutionEngine interface {
 	NewPayload(ctx context.Context, payload *cltypes.Eth1Block, beaconParentRoot *libcommon.Hash, versionedHashes []libcommon.Hash) (bool, error)
-	ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash) error
+	ForkChoiceUpdate(ctx context.Context, finalized libcommon.Hash, head libcommon.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error)
 	SupportInsertion() bool
 	InsertBlocks(ctx context.Context, blocks []*types.Block, wait bool) error
 	InsertBlock(ctx context.Context, block *types.Block) error
@@ -28,4 +30,6 @@ type ExecutionEngine interface {
 	HasBlock(ctx context.Context, hash libcommon.Hash) (bool, error)
 	// Snapshots
 	FrozenBlocks(ctx context.Context) uint64
+	// Block production
+	GetAssembledBlock(ctx context.Context, id []byte) (*cltypes.Eth1Block, *engine_types.BlobsBundleV1, *big.Int, error)
 }

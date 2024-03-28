@@ -96,6 +96,7 @@ type Downloader struct {
 type webDownloadInfo struct {
 	url     *url.URL
 	length  int64
+	md5     string
 	torrent *torrent.Torrent
 }
 
@@ -118,7 +119,7 @@ type AggStats struct {
 	LocalFileHashTime          time.Duration
 }
 
-func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger log.Logger, verbosity log.Lvl, discover bool) (*Downloader, error) {
+func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger, verbosity log.Lvl, discover bool) (*Downloader, error) {
 	db, c, m, torrentClient, err := openClient(ctx, cfg.Dirs.Downloader, cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("openClient: %w", err)
@@ -139,7 +140,6 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 	var stats AggStats
 
 	lock, err := getSnapshotLock(ctx, cfg, db, &stats, mutex, logger)
-
 	if err != nil {
 		return nil, fmt.Errorf("can't initialize snapshot lock: %w", err)
 	}
@@ -152,7 +152,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		torrentClient:       torrentClient,
 		lock:                mutex,
 		stats:               stats,
-		webseeds:            &WebSeeds{logger: logger, verbosity: verbosity, downloadTorrentFile: cfg.DownloadTorrentFilesFromWebseed, torrentsWhitelist: lock.Downloads},
+		webseeds:            NewWebSeeds(cfg.WebSeedUrls, verbosity, logger),
 		logger:              logger,
 		verbosity:           verbosity,
 		torrentFiles:        &TorrentFiles{dir: cfg.Dirs.Snap},
@@ -162,13 +162,13 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, dirs datadir.Dirs, logger 
 		downloading:         map[string]struct{}{},
 		webseedsDiscover:    discover,
 	}
+	d.webseeds.SetTorrent(d.torrentFiles, lock.Downloads, cfg.DownloadTorrentFilesFromWebseed)
 
 	if cfg.ClientConfig.DownloadRateLimiter != nil {
 		downloadLimit := cfg.ClientConfig.DownloadRateLimiter.Limit()
 		d.downloadLimit = &downloadLimit
 	}
 
-	d.webseeds.torrentFiles = d.torrentFiles
 	d.ctx, d.stopMainLoop = context.WithCancel(ctx)
 
 	if cfg.AddTorrentsFromDisk {
@@ -343,7 +343,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 		Chain: cfg.ChainName,
 	}
 
-	files, err := seedableFiles(cfg.Dirs, cfg.ChainName)
+	files, err := SeedableFiles(cfg.Dirs, cfg.ChainName)
 	if err != nil {
 		return nil, err
 	}
@@ -429,7 +429,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 				if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 					downloadMap.Set(fileInfo.Name(), preverified)
 				} else {
-					logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+					logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 					// TODO: check if it has an index - if not use the known hash and delete the file
 					downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 				}
@@ -461,7 +461,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 					if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 						downloadMap.Set(preverified.Name, preverified)
 					} else {
-						logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+						logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 						// TODO: check if it has an index - if not use the known hash and delete the file
 						downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 					}
@@ -490,7 +490,7 @@ func initSnapshotLock(ctx context.Context, cfg *downloadercfg.Cfg, db kv.RoDB, s
 						if hash := hex.EncodeToString(hashBytes); preverified.Hash == hash {
 							downloadMap.Set(preverified.Name, preverified)
 						} else {
-							logger.Warn("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
+							logger.Debug("[downloader] local file hash does not match known", "file", fileInfo.Name(), "local", hash, "known", preverified.Hash)
 							// TODO: check if it has an index - if not use the known hash and delete the file
 							downloadMap.Set(fileInfo.Name(), snapcfg.PreverifiedItem{Name: fileInfo.Name(), Hash: hash})
 						}
@@ -657,8 +657,9 @@ func (d *Downloader) mainLoop(silent bool) error {
 		d.wg.Add(1)
 		go func() {
 			defer d.wg.Done()
-			d.webseeds.Discover(d.ctx, d.cfg.WebSeedUrls, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
 			// webseeds.Discover may create new .torrent files on disk
+			d.webseeds.Discover(d.ctx, d.cfg.WebSeedFiles, d.cfg.Dirs.Snap)
+			// apply webseeds to existing torrents
 			if err := d.addTorrentFilesFromDisk(true); err != nil && !errors.Is(err, context.Canceled) {
 				d.logger.Warn("[snapshots] addTorrentFilesFromDisk", "err", err)
 			}
@@ -1273,8 +1274,6 @@ func (d *Downloader) checkComplete(name string) (bool, int64, *time.Time) {
 }
 
 func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []*seedHash, error) {
-	torrentHash := t.InfoHash()
-
 	d.lock.RLock()
 	info, ok := d.webDownloadInfo[t.Name()]
 	d.lock.RUnlock()
@@ -1283,46 +1282,16 @@ func (d *Downloader) getWebDownloadInfo(t *torrent.Torrent) (webDownloadInfo, []
 		return info, nil, nil
 	}
 
-	seedHashMismatches := make([]*seedHash, 0, len(d.cfg.WebSeedUrls))
-
-	for _, webseed := range d.cfg.WebSeedUrls {
-		downloadUrl := webseed.JoinPath(t.Name())
-
-		if headRequest, err := http.NewRequestWithContext(d.ctx, "HEAD", downloadUrl.String(), nil); err == nil {
-			headResponse, err := http.DefaultClient.Do(headRequest)
-
-			if err != nil {
-				continue
-			}
-
-			headResponse.Body.Close()
-
-			if headResponse.StatusCode == http.StatusOK {
-				if meta, err := getWebpeerTorrentInfo(d.ctx, downloadUrl); err == nil {
-					if bytes.Equal(torrentHash.Bytes(), meta.HashInfoBytes().Bytes()) {
-						// TODO check the torrent's hash matches this hash
-						return webDownloadInfo{
-							url:     downloadUrl,
-							length:  headResponse.ContentLength,
-							torrent: t,
-						}, seedHashMismatches, nil
-					} else {
-						hash := meta.HashInfoBytes()
-						seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed, hash: &hash})
-						continue
-					}
-				}
-			}
-		}
-
-		seedHashMismatches = append(seedHashMismatches, &seedHash{url: webseed})
+	// todo this function does not exit on first matched webseed hash, could make unexpected results
+	infos, seedHashMismatches, err := d.webseeds.getWebDownloadInfo(d.ctx, t)
+	if err != nil || len(infos) == 0 {
+		return webDownloadInfo{}, seedHashMismatches, fmt.Errorf("can't find download info: %w", err)
 	}
-
-	return webDownloadInfo{}, seedHashMismatches, fmt.Errorf("can't find download info")
+	return infos[0], seedHashMismatches, nil
 }
 
 func getWebpeerTorrentInfo(ctx context.Context, downloadUrl *url.URL) (*metainfo.MetaInfo, error) {
-	torrentRequest, err := http.NewRequestWithContext(ctx, "GET", downloadUrl.String()+".torrent", nil)
+	torrentRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadUrl.String()+".torrent", nil)
 
 	if err != nil {
 		return nil, err
@@ -1400,6 +1369,10 @@ func (d *Downloader) torrentDownload(t *torrent.Torrent, statusChan chan downloa
 }
 
 func (d *Downloader) webDownload(peerUrls []*url.URL, t *torrent.Torrent, i *webDownloadInfo, statusChan chan downloadStatus, sem *semaphore.Weighted) (*RCloneSession, error) {
+	if d.webDownloadClient == nil {
+		return nil, fmt.Errorf("webdownload client not enabled")
+	}
+
 	peerUrl, err := selectDownloadPeer(d.ctx, peerUrls, t)
 
 	if err != nil {
@@ -1880,7 +1853,10 @@ func (d *Downloader) ReCalcStats(interval time.Duration) {
 	}
 
 	if len(downloading) > 0 {
-		webTransfers += int32(len(downloading))
+		if d.webDownloadClient != nil {
+			webTransfers += int32(len(downloading))
+		}
+
 		stats.Completed = false
 	}
 
@@ -2133,8 +2109,12 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	if d.alreadyHaveThisName(name) || !IsSnapNameAllowed(name) {
 		return nil
 	}
+	isProhibited, err := d.torrentFiles.newDownloadsAreProhibited(name)
+	if err != nil {
+		return err
+	}
 
-	if d.torrentFiles.newDownloadsAreProhibited() && !d.torrentFiles.Exists(name) {
+	if isProhibited && !d.torrentFiles.Exists(name) {
 		return nil
 	}
 
@@ -2161,14 +2141,36 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 		case <-ctx.Done():
 			return
 		case <-t.GotInfo():
-		}
+		case <-time.After(30 * time.Second): //fallback to r2
+			// TOOD: handle errors
+			// TOOD: add `d.webseeds.Complete` chan - to prevent race - Discover is also async
+			// TOOD: maybe run it in goroutine and return channel - to select with p2p
 
-		if !d.snapshotLock.Downloads.Contains(name) {
-			mi := t.Metainfo()
-			if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
-				d.logger.Warn("[snapshots] create torrent file", "err", err)
+			ok, err := d.webseeds.DownloadAndSaveTorrentFile(ctx, name)
+			if ok && err == nil {
+				ts, err := d.torrentFiles.LoadByPath(filepath.Join(d.SnapDir(), name+".torrent"))
+				if err != nil {
+					return
+				}
+				_, _, err = addTorrentFile(ctx, ts, d.torrentClient, d.db, d.webseeds)
+				if err != nil {
+					return
+				}
 				return
 			}
+
+			// wait for p2p
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.GotInfo():
+			}
+		}
+
+		mi := t.Metainfo()
+		if err := CreateTorrentFileIfNotExists(d.SnapDir(), t.Info(), &mi, d.torrentFiles); err != nil {
+			d.logger.Warn("[snapshots] create torrent file", "err", err)
+			return
 		}
 
 		urls, ok := d.webseeds.ByFileName(t.Name())
@@ -2180,7 +2182,7 @@ func (d *Downloader) AddMagnetLink(ctx context.Context, infoHash metainfo.Hash, 
 	return nil
 }
 
-func seedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
+func SeedableFiles(dirs datadir.Dirs, chainName string) ([]string, error) {
 	files, err := seedableSegmentFiles(dirs.Snap, chainName)
 	if err != nil {
 		return nil, fmt.Errorf("seedableSegmentFiles: %w", err)

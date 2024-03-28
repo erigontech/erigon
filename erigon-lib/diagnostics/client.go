@@ -11,13 +11,17 @@ type DiagnosticClient struct {
 	metricsMux  *http.ServeMux
 	dataDirPath string
 
-	syncStats        SyncStatistics
-	snapshotFileList SnapshoFilesList
-	mu               sync.Mutex
-	headerMutex      sync.Mutex
-	hardwareInfo     HardwareInfo
-	peersSyncMap     sync.Map
-	headers          Headers
+	syncStats           SyncStatistics
+	snapshotFileList    SnapshoFilesList
+	mu                  sync.Mutex
+	headerMutex         sync.Mutex
+	hardwareInfo        HardwareInfo
+	peersSyncMap        sync.Map
+	headers             Headers
+	bodies              BodiesInfo
+	bodiesMutex         sync.Mutex
+	resourcesUsage      ResourcesUsage
+	resourcesUsageMutex sync.Mutex
 }
 
 func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {
@@ -27,18 +31,25 @@ func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *Diagnos
 		syncStats:        SyncStatistics{},
 		hardwareInfo:     HardwareInfo{},
 		snapshotFileList: SnapshoFilesList{},
+		bodies:           BodiesInfo{},
+		resourcesUsage: ResourcesUsage{
+			MemoryUsage: []MemoryStats{},
+		},
 	}
 }
 
 func (d *DiagnosticClient) Setup() {
+
 	rootCtx, _ := common.RootContext()
 
 	d.setupSnapshotDiagnostics(rootCtx)
 	d.setupStagesDiagnostics(rootCtx)
-	d.setupSysInfoDiagnostics(rootCtx)
+	d.setupSysInfoDiagnostics()
 	d.setupNetworkDiagnostics(rootCtx)
 	d.setupBlockExecutionDiagnostics(rootCtx)
 	d.setupHeadersDiagnostics(rootCtx)
+	d.setupBodiesDiagnostics(rootCtx)
+	d.setupResourcesUsageDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
 }

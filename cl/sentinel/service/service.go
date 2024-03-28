@@ -101,11 +101,11 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 	default:
 		// check subnets
 		switch {
-		case strings.Contains(msg.Name, gossip.TopicNamePrefixBlobSidecar):
+		case strings.Contains(msg.Name, "blob_sidecar"):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
-			subscription = manager.GetMatchingSubscription(fmt.Sprintf("%s/%d", gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
+			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
 		default:
 			return &sentinelrpc.EmptyMessage{}, nil
 		}
@@ -343,6 +343,19 @@ func (s *SentinelServer) ListenToGossip() {
 		}
 		s.mu.RUnlock()
 	}
+}
+
+func (s *SentinelServer) SetSubscribeExpiry(ctx context.Context, expiryReq *sentinelrpc.RequestSubscribeExpiry) (*sentinelrpc.EmptyMessage, error) {
+	var (
+		topic      = expiryReq.GetTopic()
+		expiryTime = time.Unix(int64(expiryReq.GetExpiryUnixSecs()), 0)
+	)
+	subs := s.sentinel.GossipManager().GetMatchingSubscription(topic)
+	if subs == nil {
+		return nil, fmt.Errorf("no such subscription")
+	}
+	subs.OverwriteSubscriptionExpiry(expiryTime)
+	return &sentinelrpc.EmptyMessage{}, nil
 }
 
 func (s *SentinelServer) handleGossipPacket(pkt *sentinel.GossipMessage) error {

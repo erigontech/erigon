@@ -40,7 +40,7 @@ func (c Checkpoint) MarshalJSON() ([]byte, error) {
 	}{Epoch: c.Epoch(), Root: c.BlockRoot()})
 }
 
-func (c Checkpoint) UnmarshalJSON(buf []byte) error {
+func (c *Checkpoint) UnmarshalJSON(buf []byte) error {
 	var tmp struct {
 		Epoch uint64         `json:"epoch,string"`
 		Root  libcommon.Hash `json:"root"`
