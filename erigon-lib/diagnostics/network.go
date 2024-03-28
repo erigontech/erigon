@@ -3,20 +3,17 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (d *DiagnosticClient) setupNetworkDiagnostics() {
-	d.runCollectPeersStatistics()
+func (d *DiagnosticClient) setupNetworkDiagnostics(rootCtx context.Context) {
+	d.runCollectPeersStatistics(rootCtx)
 }
 
-func (d *DiagnosticClient) runCollectPeersStatistics() {
+func (d *DiagnosticClient) runCollectPeersStatistics(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[PeerStatisticMsgUpdate](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(PeerStatisticMsgUpdate{}), log.Root())
 		for {

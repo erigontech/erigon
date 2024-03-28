@@ -1,13 +1,15 @@
 package diagnostics
 
 import (
+	"context"
+
 	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 )
 
-func (d *DiagnosticClient) setupSysInfoDiagnostics() {
+func (d *DiagnosticClient) setupSysInfoDiagnostics(rootCtx context.Context) {
 	sysInfo := GetSysInfo(d.dataDirPath)
 
 	d.mu.Lock()

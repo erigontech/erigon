@@ -3,21 +3,18 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (d *DiagnosticClient) setupStagesDiagnostics() {
-	d.runCurrentSyncStageListener()
-	d.runSyncStagesListListener()
+func (d *DiagnosticClient) setupStagesDiagnostics(rootCtx context.Context) {
+	d.runCurrentSyncStageListener(rootCtx)
+	d.runSyncStagesListListener(rootCtx)
 }
 
-func (d *DiagnosticClient) runSyncStagesListListener() {
+func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[SyncStagesList](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(SyncStagesList{}), log.Root())
 		for {
@@ -35,12 +32,10 @@ func (d *DiagnosticClient) runSyncStagesListListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runCurrentSyncStageListener() {
+func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[CurrentSyncStage](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(CurrentSyncStage{}), log.Root())
 		for {

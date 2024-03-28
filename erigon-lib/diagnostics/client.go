@@ -3,6 +3,8 @@ package diagnostics
 import (
 	"net/http"
 	"sync"
+
+	"github.com/ledgerwatch/erigon-lib/common"
 )
 
 type DiagnosticClient struct {
@@ -29,12 +31,14 @@ func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *Diagnos
 }
 
 func (d *DiagnosticClient) Setup() {
-	d.setupSnapshotDiagnostics()
-	d.setupStagesDiagnostics()
-	d.setupSysInfoDiagnostics()
-	d.setupNetworkDiagnostics()
-	d.setupBlockExecutionDiagnostics()
-	d.setupHeadersDiagnostics()
+	rootCtx, _ := common.RootContext()
+
+	d.setupSnapshotDiagnostics(rootCtx)
+	d.setupStagesDiagnostics(rootCtx)
+	d.setupSysInfoDiagnostics(rootCtx)
+	d.setupNetworkDiagnostics(rootCtx)
+	d.setupBlockExecutionDiagnostics(rootCtx)
+	d.setupHeadersDiagnostics(rootCtx)
 
 	//d.logDiagMsgs()
 }

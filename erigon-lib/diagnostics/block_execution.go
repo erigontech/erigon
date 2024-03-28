@@ -3,20 +3,17 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (d *DiagnosticClient) setupBlockExecutionDiagnostics() {
-	d.runBlockExecutionListener()
+func (d *DiagnosticClient) setupBlockExecutionDiagnostics(rootCtx context.Context) {
+	d.runBlockExecutionListener(rootCtx)
 }
 
-func (d *DiagnosticClient) runBlockExecutionListener() {
+func (d *DiagnosticClient) runBlockExecutionListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[BlockExecutionStatistics](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(BlockExecutionStatistics{}), log.Root())
 		for {

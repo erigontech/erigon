@@ -2,28 +2,26 @@ package diagnostics
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (d *DiagnosticClient) setupHeadersDiagnostics() {
-	d.runHeadersWaitingListener()
-	d.runWriteHeadersListener()
-	d.runCanonicalMarkerListener()
-	d.runProcessedListener()
+func (d *DiagnosticClient) setupHeadersDiagnostics(rootCtx context.Context) {
+	d.runHeadersWaitingListener(rootCtx)
+	d.runWriteHeadersListener(rootCtx)
+	d.runCanonicalMarkerListener(rootCtx)
+	d.runProcessedListener(rootCtx)
 }
 
 func (d *DiagnosticClient) GetHeaders() Headers {
 	return d.headers
 }
 
-func (d *DiagnosticClient) runHeadersWaitingListener() {
+func (d *DiagnosticClient) runHeadersWaitingListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[HeadersWaitingUpdate](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(HeadersWaitingUpdate{}), log.Root())
 		for {
@@ -42,12 +40,10 @@ func (d *DiagnosticClient) runHeadersWaitingListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runWriteHeadersListener() {
+func (d *DiagnosticClient) runWriteHeadersListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[BlockHeadersUpdate](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(BlockHeadersUpdate{}), log.Root())
 		for {
@@ -56,7 +52,7 @@ func (d *DiagnosticClient) runWriteHeadersListener() {
 				cancel()
 				return
 			case info := <-ch:
-				d.headerMutex.Lock()
+				d.headerMutex.Lock()s
 				d.headers.WriteHeaders = info
 				d.headerMutex.Unlock()
 
@@ -66,12 +62,10 @@ func (d *DiagnosticClient) runWriteHeadersListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runCanonicalMarkerListener() {
+func (d *DiagnosticClient) runCanonicalMarkerListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[HeaderCanonicalMarkerUpdate](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(HeaderCanonicalMarkerUpdate{}), log.Root())
 		for {
@@ -90,12 +84,10 @@ func (d *DiagnosticClient) runCanonicalMarkerListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runProcessedListener() {
+func (d *DiagnosticClient) runProcessedListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[HeadersProcessedUpdate](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(HeadersProcessedUpdate{}), log.Root())
 		for {

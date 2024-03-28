@@ -3,24 +3,21 @@ package diagnostics
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/log/v3"
 )
 
-func (d *DiagnosticClient) setupSnapshotDiagnostics() {
-	d.runSnapshotListener()
-	d.runSegmentDownloadingListener()
-	d.runSegmentIndexingListener()
-	d.runSegmentIndexingFinishedListener()
-	d.runSnapshotFilesListListener()
+func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
+	d.runSnapshotListener(rootCtx)
+	d.runSegmentDownloadingListener(rootCtx)
+	d.runSegmentIndexingListener(rootCtx)
+	d.runSegmentIndexingFinishedListener(rootCtx)
+	d.runSnapshotFilesListListener(rootCtx)
 }
 
-func (d *DiagnosticClient) runSnapshotListener() {
+func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[SnapshotDownloadStatistics](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(SnapshotDownloadStatistics{}), log.Root())
 		for {
@@ -53,12 +50,11 @@ func (d *DiagnosticClient) runSnapshotListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runSegmentDownloadingListener() {
+func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[SegmentDownloadStatistics](context.Background(), 1)
 		defer cancel()
 
-		rootCtx, _ := common.RootContext()
 		StartProviders(ctx, TypeOf(SegmentDownloadStatistics{}), log.Root())
 		for {
 			select {
@@ -78,12 +74,10 @@ func (d *DiagnosticClient) runSegmentDownloadingListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runSegmentIndexingListener() {
+func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[SnapshotIndexingStatistics](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(SnapshotIndexingStatistics{}), log.Root())
 		for {
@@ -98,12 +92,10 @@ func (d *DiagnosticClient) runSegmentIndexingListener() {
 	}()
 }
 
-func (d *DiagnosticClient) runSegmentIndexingFinishedListener() {
+func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[SnapshotSegmentIndexingFinishedUpdate](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(SnapshotSegmentIndexingFinishedUpdate{}), log.Root())
 		for {
@@ -162,12 +154,10 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 	d.syncStats.SnapshotIndexing.TimeElapsed = upd.TimeElapsed
 }
 
-func (d *DiagnosticClient) runSnapshotFilesListListener() {
+func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
 	go func() {
 		ctx, ch, cancel := Context[SnapshoFilesList](context.Background(), 1)
 		defer cancel()
-
-		rootCtx, _ := common.RootContext()
 
 		StartProviders(ctx, TypeOf(SnapshoFilesList{}), log.Root())
 		for {
