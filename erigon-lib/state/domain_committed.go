@@ -414,6 +414,11 @@ func (dc *DomainContext) lookupByShortenedKey(shortKey []byte, txFrom uint64, tx
 	return fullKey, true
 }
 
+//func (dc *DomainContext) SqueezeExistingCommitmentFile() {
+//	dc.commitmentValTransformDomain()
+//
+//}
+
 // commitmentValTransform parses the value of the commitment record to extract references
 // to accounts and storage items, then looks them up in the new, merged files, and replaces them with
 // the updated references

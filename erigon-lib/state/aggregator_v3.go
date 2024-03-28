@@ -17,10 +17,13 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon-lib/seg"
 	math2 "math"
 	"os"
 	"path/filepath"
@@ -106,6 +109,8 @@ type AggregatorV3 struct {
 
 type OnFreezeFunc func(frozenFileNames []string)
 
+const AggregatorV3SqueezeCommitmentValues = true
+
 func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uint64, db kv.RoDB, logger log.Logger) (*AggregatorV3, error) {
 	tmpdir := dirs.Tmp
 	salt, err := getStateIndicesSalt(dirs.Snap)
@@ -129,7 +134,7 @@ func NewAggregatorV3(ctx context.Context, dirs datadir.Dirs, aggregationStep uin
 		collateAndBuildWorkers: 1,
 		mergeWorkers:           1,
 
-		commitmentValuesTransform: true,
+		commitmentValuesTransform: AggregatorV3SqueezeCommitmentValues,
 	}
 	cfg := domainCfg{
 		hist: histCfg{
@@ -1249,6 +1254,162 @@ func (mf MergedFilesV3) Close() {
 			}
 		}
 	}
+}
+
+// SqueezeCommitmentFiles should be called only when NO EXECUTION is running.
+// Removes commitment files and suppose following aggregator shutdown and restart  (to integrate new files and rebuild indexes)
+func (ac *AggregatorV3Context) SqueezeCommitmentFiles() error {
+	if !ac.a.commitmentValuesTransform {
+		return nil
+	}
+
+	commitment := ac.d[kv.CommitmentDomain]
+	accounts := ac.d[kv.AccountsDomain]
+	storage := ac.d[kv.StorageDomain]
+
+	// oh, again accessing domain.files directly, again and again..
+	accountFiles := accounts.d.files.Items()
+	storageFiles := storage.d.files.Items()
+	commitFiles := commitment.d.files.Items()
+
+	getSizeDelta := func(a, b string) (datasize.ByteSize, float32, error) {
+		ai, err := os.Stat(a)
+		if err != nil {
+			return 0, 0, err
+		}
+		bi, err := os.Stat(b)
+		if err != nil {
+			return 0, 0, err
+		}
+		return datasize.ByteSize(ai.Size()) - datasize.ByteSize(bi.Size()), 100.0 * (float32(ai.Size()-bi.Size()) / float32(ai.Size())), nil
+	}
+
+	var (
+		obsoleteFiles  []string
+		temporalFiles  []string
+		processedFiles int
+		ai, si         int
+		sizeDelta      = datasize.B
+		sqExt          = ".squeezed"
+	)
+
+	for ci := 0; ci < len(commitFiles); ci++ {
+		cf := commitFiles[ci]
+		for ai = 0; ai < len(accountFiles); ai++ {
+			if accountFiles[ai].startTxNum == cf.startTxNum && accountFiles[ai].endTxNum == cf.endTxNum {
+				break
+			}
+		}
+		for si = 0; si < len(storageFiles); si++ {
+			if storageFiles[si].startTxNum == cf.startTxNum && storageFiles[si].endTxNum == cf.endTxNum {
+				break
+			}
+		}
+		if ai == len(accountFiles) || si == len(storageFiles) {
+			log.Info("SqueezeCommitmentFiles: commitment file has no corresponding account or storage file", "commitment", cf.decompressor.FileName())
+			continue
+		}
+		af, sf := accountFiles[ai], storageFiles[si]
+
+		err := func() error {
+			log.Info("SqueezeCommitmentFiles: file start", "original", cf.decompressor.FileName(),
+				"progress", fmt.Sprintf("%d/%d", ci+1, len(accountFiles)))
+
+			originalPath := cf.decompressor.FilePath()
+			squeezedTmpPath := originalPath + sqExt + ".tmp"
+			squeezedCompr, err := seg.NewCompressor(context.Background(), "squeeze", squeezedTmpPath, ac.a.dirs.Tmp,
+				seg.MinPatternScore, commitment.d.compressWorkers, log.LvlTrace, commitment.d.logger)
+
+			if err != nil {
+				return err
+			}
+			defer squeezedCompr.Close()
+
+			reader := NewArchiveGetter(cf.decompressor.MakeGetter(), commitment.d.compression)
+			reader.Reset(0)
+
+			writer := NewArchiveWriter(squeezedCompr, commitment.d.compression)
+			vt := commitment.commitmentValTransformDomain(accounts, storage, af, sf)
+
+			for reader.HasNext() {
+				k, _ := reader.Next(nil)
+				v, _ := reader.Next(nil)
+
+				if k == nil {
+					// nil keys are not supported for domains
+					continue
+				}
+
+				if !bytes.Equal(k, keyCommitmentState) {
+					v, err = vt(v, af.startTxNum, af.endTxNum)
+					if err != nil {
+						return fmt.Errorf("failed to transform commitment value: %w", err)
+					}
+				}
+				if err = writer.AddWord(k); err != nil {
+					return fmt.Errorf("write key word: %w", err)
+				}
+				if err = writer.AddWord(v); err != nil {
+					return fmt.Errorf("write value word: %w", err)
+				}
+			}
+
+			if err = writer.Compress(); err != nil {
+				return err
+			}
+			writer.Close()
+
+			squeezedPath := originalPath + sqExt
+			if err = os.Rename(squeezedTmpPath, squeezedPath); err != nil {
+				return err
+			}
+			temporalFiles = append(temporalFiles, squeezedPath)
+
+			delta, deltaP, err := getSizeDelta(originalPath, squeezedPath)
+			if err != nil {
+				return err
+			}
+			sizeDelta += delta
+
+			log.Info("SqueezeCommitmentFiles: file done", "original", filepath.Base(originalPath),
+				"sizeDelta", fmt.Sprintf("%s (%.1f%%)", delta.HR(), deltaP))
+
+			fromStep, toStep := af.startTxNum/ac.a.StepSize(), af.endTxNum/ac.a.StepSize()
+
+			// need to remove all indexes for commitment file as well
+			obsoleteFiles = append(obsoleteFiles,
+				originalPath,
+				commitment.d.kvBtFilePath(fromStep, toStep),
+				commitment.d.kvAccessorFilePath(fromStep, toStep),
+				commitment.d.kvExistenceIdxFilePath(fromStep, toStep),
+			)
+			processedFiles++
+			return nil
+		}()
+		if err != nil {
+			return fmt.Errorf("failed to squeeze commitment file %q: %w", cf.decompressor.FileName(), err)
+		}
+	}
+
+	log.Info("SqueezeCommitmentFiles: squeezed files has been produced, removing obsolete files",
+		"toRemove", len(obsoleteFiles), "processed", fmt.Sprintf("%d/%d", processedFiles, len(commitFiles)))
+	for _, path := range obsoleteFiles {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		log.Debug("SqueezeCommitmentFiles: obsolete file removal", "path", path)
+	}
+	log.Info("SqueezeCommitmentFiles: indices removed, renaming temporal files ")
+
+	for _, path := range temporalFiles {
+		if err := os.Rename(path, strings.TrimSuffix(path, sqExt)); err != nil {
+			return err
+		}
+		log.Debug("SqueezeCommitmentFiles: temporal file renaming", "path", path)
+	}
+	log.Info("SqueezeCommitmentFiles: done", "sizeDelta", sizeDelta.HR(), "files", len(accountFiles))
+
+	return nil
 }
 
 func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedStaticFilesV3, r RangesV3) (MergedFilesV3, error) {
