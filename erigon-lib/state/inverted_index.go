@@ -589,6 +589,8 @@ func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *inverted
 	}
 	w.indexKeys.LogLvl(log.LvlTrace)
 	w.index.LogLvl(log.LvlTrace)
+	w.indexKeys.Ba(log.LvlTrace)
+	w.index.LogLvl(log.LvlTrace)
 	return w
 }
 
@@ -1145,14 +1147,8 @@ func (it *FrozenInvertedIdxIter) Close() {
 }
 
 func (it *FrozenInvertedIdxIter) advance() {
-	if it.orderAscend {
-		if it.hasNext {
-			it.advanceInFiles()
-		}
-	} else {
-		if it.hasNext {
-			it.advanceInFiles()
-		}
+	if it.hasNext {
+		it.advanceInFiles()
 	}
 }
 
@@ -1375,14 +1371,8 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 }
 
 func (it *RecentInvertedIdxIter) advance() {
-	if it.orderAscend {
-		if it.hasNext {
-			it.advanceInDB()
-		}
-	} else {
-		if it.hasNext {
-			it.advanceInDB()
-		}
+	if it.hasNext {
+		it.advanceInDB()
 	}
 }
 

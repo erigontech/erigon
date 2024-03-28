@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/ledgerwatch/erigon-lib/common/disk"
+	"github.com/ledgerwatch/erigon-lib/common/mem"
 	"github.com/ledgerwatch/erigon/cl/phase1/forkchoice"
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
@@ -46,6 +48,11 @@ func runSentinelNode(cliCtx *cli.Context) error {
 	}
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(cfg.LogLvl), log.StderrHandler))
 	log.Info("[Sentinel] running sentinel with configuration", "cfg", cfg)
+
+	// setup periodic logging and prometheus updates
+	go mem.LogMemStats(cliCtx.Context, log.Root())
+	go disk.UpdateDiskStats(cliCtx.Context, log.Root())
+
 	_, err = service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:         cfg.Addr,
 		Port:           int(cfg.Port),
@@ -56,7 +63,7 @@ func runSentinelNode(cliCtx *cli.Context) error {
 		NoDiscovery:    cfg.NoDiscovery,
 		LocalDiscovery: cfg.LocalDiscovery,
 		EnableBlocks:   false,
-	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, nil, nil, forkchoice.NewForkChoiceStorageMock(), log.Root())
+	}, nil, nil, nil, &service.ServerConfig{Network: cfg.ServerProtocol, Addr: cfg.ServerAddr}, forkchoice.NewForkChoiceStorageMock(), log.Root())
 	if err != nil {
 		log.Error("[Sentinel] Could not start sentinel", "err", err)
 		return err

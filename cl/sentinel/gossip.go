@@ -305,6 +305,7 @@ func (sub *GossipSubscription) Listen() {
 			case <-sub.ctx.Done():
 				return
 			case <-checkingInterval.C:
+
 				expirationTime := sub.expiration.Load().(time.Time)
 				if sub.subscribed.Load() && time.Now().After(expirationTime) {
 					sub.stopCh <- struct{}{}

@@ -9,11 +9,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon/core/types"
+	"github.com/ledgerwatch/erigon/eth/ethconfig/estimate"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
@@ -21,6 +24,9 @@ import (
 const (
 	blockDownloaderLogPrefix      = "BlockDownloader"
 	notEnoughPeersBackOffDuration = time.Minute
+
+	// conservative over-estimation: 1 MB block size x 1024 blocks per waypoint
+	blockDownloaderEstimatedRamPerWorker = estimate.EstimatedRamPerWorker(1 * datasize.GB)
 )
 
 type BlockDownloader interface {
@@ -44,6 +50,7 @@ func NewBlockDownloader(
 		blocksVerifier,
 		storage,
 		notEnoughPeersBackOffDuration,
+		blockDownloaderEstimatedRamPerWorker.WorkersByRAMOnly(),
 	)
 }
 
@@ -55,6 +62,7 @@ func newBlockDownloader(
 	blocksVerifier BlocksVerifier,
 	storage Storage,
 	notEnoughPeersBackOffDuration time.Duration,
+	maxWorkers int,
 ) *blockDownloader {
 	return &blockDownloader{
 		logger:                        logger,
@@ -64,6 +72,7 @@ func newBlockDownloader(
 		blocksVerifier:                blocksVerifier,
 		storage:                       storage,
 		notEnoughPeersBackOffDuration: notEnoughPeersBackOffDuration,
+		maxWorkers:                    maxWorkers,
 	}
 }
 
@@ -75,6 +84,7 @@ type blockDownloader struct {
 	blocksVerifier                BlocksVerifier
 	storage                       Storage
 	notEnoughPeersBackOffDuration time.Duration
+	maxWorkers                    int
 }
 
 func (d *blockDownloader) DownloadBlocksUsingCheckpoints(ctx context.Context, start uint64) (*types.Header, error) {
@@ -123,11 +133,8 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 			continue
 		}
 
-		peerCount := len(peers)
-		waypointsBatch := waypoints
-		if len(waypointsBatch) > peerCount {
-			waypointsBatch = waypointsBatch[:peerCount]
-		}
+		numWorkers := cmp.Min(cmp.Min(d.maxWorkers, len(peers)), len(waypoints))
+		waypointsBatch := waypoints[:numWorkers]
 
 		d.logger.Info(
 			fmt.Sprintf("[%s] downloading blocks", blockDownloaderLogPrefix),
@@ -135,21 +142,10 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 			"startBlockNum", waypointsBatch[0].StartBlock(),
 			"endBlockNum", waypointsBatch[len(waypointsBatch)-1].EndBlock(),
 			"kind", reflect.TypeOf(waypointsBatch[0]),
-			"peerCount", peerCount,
+			"peerCount", len(peers),
+			"maxWorkers", d.maxWorkers,
 		)
 
-		//
-		// TODO (for discussion and subsequent PRs)
-		//      we may 1) need ETL or 2) limit level of parallelism to fit in RAM reasonably
-		//      if we have 50 peers => that is 50 goroutine parallelism
-		//      => 50 checkpoints => 1024 blocks each in the worst case
-		//      => 512 KB per block in the worst case => 25 GB needed in the worst case
-		//      Option 1) introduces additional ETL IO but leverages higher throughput by downloading
-		//                from more peers in parallel
-		//      Option 2) would not introduce additional IO however would utilise less throughput since
-		//                it will be downloading from say 16 peers in parallel instead of from say 60
-		//                (maybe 16 peers in parallel is still quite performant?)
-		//
 		blockBatches := make([][]*types.Block, len(waypointsBatch))
 		maxWaypointLength := float64(0)
 		wg := sync.WaitGroup{}
@@ -185,7 +181,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		}
 
 		wg.Wait()
-		blocks := make([]*types.Block, 0, int(maxWaypointLength)*peerCount)
+		blocks := make([]*types.Block, 0, int(maxWaypointLength)*len(waypointsBatch))
 		gapIndex := -1
 		for i, blockBatch := range blockBatches {
 			if len(blockBatch) == 0 {

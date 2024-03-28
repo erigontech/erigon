@@ -151,10 +151,9 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 			return err
 		}
 	case gossip.TopicNameBeaconAggregateAndProof:
-		return nil
-	// if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
-	// 	return err
-	// } Uncomment when fixed.
+		if err := operationsContract[*cltypes.SignedAggregateAndProof](ctx, g, l, data, int(version), "aggregate and proof", g.forkChoice.OnAggregateAndProof); err != nil {
+			return err
+		}
 	default:
 		switch {
 		case gossip.IsTopicBlobSidecar(data.Name):
@@ -229,6 +228,12 @@ func (g *GossipManager) Start(ctx context.Context) {
 				err := g.onRecv(ctx, data, l)
 				if err != nil {
 					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
+				}
+				// gives some breathing to the cpu
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(20 * time.Millisecond):
 				}
 			}
 		}
