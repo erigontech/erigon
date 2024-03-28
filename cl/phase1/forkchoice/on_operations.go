@@ -288,7 +288,7 @@ func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessa
 		return err
 	}
 	f.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
-	f.cleanupOldSyncCommitteeMessages()
+	f.cleanupOldSyncCommitteeMessages() // cleanup old messages
 	// Aggregate
 	return nil
 }

@@ -65,7 +65,7 @@ func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
-var syncCommitteeAggregationBitsSize = 8
+var SyncCommitteeAggregationBitsSize = 8
 
 type Contribution struct {
 	Slot              uint64           `json:"slot,string"`
@@ -76,7 +76,7 @@ type Contribution struct {
 
 func (a *Contribution) EncodeSSZ(dst []byte) ([]byte, error) {
 	if len(a.AggregationBits) == 0 {
-		a.AggregationBits = make([]byte, syncCommitteeAggregationBitsSize)
+		a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
 	}
 	return ssz2.MarshalSSZ(dst, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
 }
@@ -85,8 +85,14 @@ func (a *Contribution) Static() bool {
 	return true
 }
 
+func (a *Contribution) Copy() *Contribution {
+	ret := *a
+	ret.AggregationBits = append([]byte{}, a.AggregationBits...)
+	return &ret
+}
+
 func (a *Contribution) DecodeSSZ(buf []byte, version int) error {
-	a.AggregationBits = make([]byte, syncCommitteeAggregationBitsSize)
+	a.AggregationBits = make([]byte, SyncCommitteeAggregationBitsSize)
 	return ssz2.UnmarshalSSZ(buf, version, &a.Slot, a.BeaconBlockRoot[:], &a.SubcommitteeIndex, []byte(a.AggregationBits))
 }
 
