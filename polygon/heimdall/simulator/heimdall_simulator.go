@@ -2,11 +2,13 @@ package simulator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/exp/slices"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -20,8 +22,6 @@ import (
 
 type HeimdallSimulator struct {
 	ctx                context.Context
-	knownSnapshots     *freezeblocks.RoSnapshots
-	activeSnapshots    *freezeblocks.RoSnapshots
 	knownBorSnapshots  *freezeblocks.BorRoSnapshots
 	activeBorSnapshots *freezeblocks.BorRoSnapshots
 	blockReader        *freezeblocks.BlockReader
@@ -37,7 +37,6 @@ type IndexFnType func(context.Context, snaptype.FileInfo, string, *background.Pr
 func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger) (HeimdallSimulator, error) {
 	cfg := snapcfg.KnownCfg(chain)
 
-	knownSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, snapshotLocation, 0, logger)
 	knownBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapshotLocation, 0, logger)
 
 	files := make([]string, 0, len(cfg.Preverified))
@@ -46,15 +45,13 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		files = append(files, item.Name)
 	}
 
-	knownSnapshots.InitSegments(files)
-	knownBorSnapshots.InitSegments(files)
-
-	activeSnapshots := freezeblocks.NewRoSnapshots(ethconfig.Defaults.Snapshot, snapshotLocation, 0, logger)
-	activeBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapshotLocation, 0, logger)
-
-	if err := activeSnapshots.ReopenFolder(); err != nil {
+	err := knownBorSnapshots.InitSegments(files)
+	if err != nil {
 		return HeimdallSimulator{}, err
 	}
+
+	activeBorSnapshots := freezeblocks.NewBorRoSnapshots(ethconfig.Defaults.Snapshot, snapshotLocation, 0, logger)
+
 	if err := activeBorSnapshots.ReopenFolder(); err != nil {
 		return HeimdallSimulator{}, err
 	}
@@ -65,15 +62,14 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 	}
 
 	s := HeimdallSimulator{
-		ctx:                ctx,
-		knownSnapshots:     knownSnapshots,
-		activeSnapshots:    activeSnapshots,
-		knownBorSnapshots:  knownBorSnapshots,
-		activeBorSnapshots: activeBorSnapshots,
-		blockReader:        freezeblocks.NewBlockReader(activeSnapshots, activeBorSnapshots),
-		logger:             logger,
-		downloader:         downloader,
-		nextSpan:           0,
+		ctx:                       ctx,
+		knownBorSnapshots:         knownBorSnapshots,
+		activeBorSnapshots:        activeBorSnapshots,
+		blockReader:               freezeblocks.NewBlockReader(nil, activeBorSnapshots),
+		logger:                    logger,
+		downloader:                downloader,
+		nextSpan:                  5000,
+		lastDownloadedBlockNumber: 0,
 	}
 
 	go func() {
@@ -142,12 +138,16 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 }
 
 func (h *HeimdallSimulator) Close() {
-	h.activeSnapshots.Close()
-	h.knownSnapshots.Close()
+	h.activeBorSnapshots.Close()
+	h.knownBorSnapshots.Close()
 }
 
 func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblocks.Segment, sType snaptype.Type, indexFn IndexFnType) error {
 	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), sType.Enum())
+
+	if slices.Contains(h.activeBorSnapshots.Files(), fileName) {
+		return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{sType}, true)
+	}
 
 	h.logger.Warn(fmt.Sprintf("Downloading %s", fileName))
 
@@ -166,4 +166,73 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 	}
 
 	return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{sType}, true)
+}
+
+func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdall.Span, error) {
+	span, err := h.blockReader.Span(ctx, nil, spanId)
+	if span != nil && err == nil {
+		var s heimdall.Span
+		if err = json.Unmarshal(span, &s); err != nil {
+			return heimdall.Span{}, err
+		}
+		return s, err
+	}
+
+	if span == nil {
+		view := h.knownBorSnapshots.View()
+		defer view.Close()
+
+		if seg, ok := view.SpansSegment(spanId); ok {
+			if err := h.downloadData(ctx, seg, snaptype.BorSpans, freezeblocks.BorSpansIdx); err != nil {
+				return heimdall.Span{}, err
+			}
+		}
+
+		span, err = h.blockReader.Span(ctx, nil, spanId)
+		if err != nil {
+			return heimdall.Span{}, err
+		}
+	}
+
+	var s heimdall.Span
+	if err := json.Unmarshal(span, &s); err != nil {
+		return heimdall.Span{}, err
+	}
+
+	return s, nil
+}
+
+func continueLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit int) bool {
+	if len(events) == 0 {
+		return true
+	}
+	if len(events) == limit {
+		return false
+	}
+
+	last := events[len(events)-1]
+	return last.Time.Before(to)
+}
+
+func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+	events, err := h.blockReader.EventsById(fromId, to, limit)
+
+	view := h.knownBorSnapshots.View()
+	defer view.Close()
+
+	for continueLoop(events, to, limit) && err == nil {
+		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
+			if err := h.downloadData(ctx, seg, snaptype.BorEvents, freezeblocks.BorEventsIdx); err != nil {
+				return nil, err
+			}
+		}
+		h.lastDownloadedBlockNumber += 500000
+
+		events, err = h.blockReader.EventsById(fromId, to, limit)
+	}
+
+	if len(events) == limit {
+		return events, err
+	}
+	return events[:len(events)-1], err
 }

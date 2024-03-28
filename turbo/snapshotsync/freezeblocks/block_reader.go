@@ -362,7 +362,7 @@ func (r *BlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockHei
 	defer view.Close()
 	seg, ok := view.HeadersSegment(blockHeight)
 	if !ok {
-		return nil, errors.New("segment not found")
+		return
 	}
 
 	h, _, err = r.headerFromSnapshot(blockHeight, seg, nil)
