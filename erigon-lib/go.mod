@@ -4,8 +4,8 @@ go 1.21.7
 
 require (
 	github.com/erigontech/mdbx-go v0.37.3-0.20240307041505-8334f1d73b4f
-	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240308094307-c6e8da7d58f6
-	github.com/ledgerwatch/interfaces v0.0.0-20240221123532-43e494b675be
+	github.com/ledgerwatch/erigon-snapshot v1.3.1-0.20240322034325-cf43fd82e1a7
+	github.com/ledgerwatch/interfaces v0.0.0-20240320062914-b57f05746087
 	github.com/ledgerwatch/log/v3 v3.9.0
 	github.com/ledgerwatch/secp256k1 v1.0.0
 )
@@ -15,7 +15,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.21.0
 	github.com/anacrolix/go-libutp v1.3.1
 	github.com/anacrolix/log v0.14.6-0.20231202035202-ed7a02cad0b4
-	github.com/anacrolix/torrent v1.55.0
+	github.com/anacrolix/torrent v1.54.1
 	github.com/c2h5oh/datasize v0.0.0-20220606134207-859f65c6625b
 	github.com/containerd/cgroups/v3 v3.0.3
 	github.com/crate-crypto/go-kzg-4844 v0.7.0

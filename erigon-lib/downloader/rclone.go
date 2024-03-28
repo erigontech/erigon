@@ -92,9 +92,10 @@ func (c *RCloneClient) start(logger log.Logger) error {
 	rclone, _ := exec.LookPath("rclone")
 
 	if len(rclone) == 0 {
-		logger.Warn("[rclone] Uploading disabled: rclone not found in PATH")
 		return fmt.Errorf("rclone not found in PATH")
 	}
+
+	logger.Info("[downloader] rclone found in PATH: enhanced upload/download enabled")
 
 	if p, err := freePort(); err == nil {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -107,10 +108,10 @@ func (c *RCloneClient) start(logger log.Logger) error {
 
 		if err := c.rclone.Start(); err != nil {
 			cancel()
-			logger.Warn("[rclone] Uploading disabled: rclone didn't start", "err", err)
+			logger.Warn("[downloader] Uploading disabled: rclone didn't start", "err", err)
 			return fmt.Errorf("rclone didn't start: %w", err)
 		} else {
-			logger.Info("[rclone] rclone started", "addr", addr)
+			logger.Info("[downloader] rclone started", "addr", addr)
 		}
 
 		go func() {
@@ -331,7 +332,7 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 				argsJson = string(bytes)
 			}
 
-			u.logger.Warn("[rclone] cmd failed", "path", path, "args", argsJson, "status", response.Status, "err", responseBody.Error)
+			u.logger.Warn("[downloader] rclone cmd failed", "path", path, "args", argsJson, "status", response.Status, "err", responseBody.Error)
 			return nil, fmt.Errorf("cmd: %s failed: %s: %s", path, response.Status, responseBody.Error)
 		}
 
@@ -341,7 +342,7 @@ func (u *RCloneClient) cmd(ctx context.Context, path string, args interface{}) (
 			argsJson = string(bytes)
 		}
 
-		u.logger.Warn("[rclone] cmd failed", "path", path, "args", argsJson, "status", response.Status)
+		u.logger.Warn("[downloader] rclone cmd failed", "path", path, "args", argsJson, "status", response.Status)
 		return nil, fmt.Errorf("cmd: %s failed: %s", path, response.Status)
 	}
 

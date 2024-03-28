@@ -48,6 +48,9 @@ func FileExist(path string) bool {
 	if err != nil && os.IsNotExist(err) {
 		return false
 	}
+	if fi == nil {
+		return false
+	}
 	if !fi.Mode().IsRegular() {
 		return false
 	}
@@ -57,6 +60,9 @@ func FileExist(path string) bool {
 func FileNonZero(path string) bool {
 	fi, err := os.Stat(path)
 	if err != nil && os.IsNotExist(err) {
+		return false
+	}
+	if fi == nil {
 		return false
 	}
 	if !fi.Mode().IsRegular() {

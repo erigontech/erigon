@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/RoaringBitmap/roaring/roaring64"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	btree2 "github.com/tidwall/btree"
 	"golang.org/x/sync/errgroup"
 
@@ -528,6 +529,7 @@ func (hc *HistoryContext) newWriter(tmpdir string, discard bool) *historyBuffere
 		ii: hc.ic.newWriter(tmpdir, discard),
 	}
 	w.historyVals.LogLvl(log.LvlTrace)
+	w.historyVals.SortAndFlushInBackground(true)
 	return w
 }
 
@@ -1024,8 +1026,7 @@ func (hc *HistoryContext) statelessIdxReader(i int) *recsplit.IndexReader {
 }
 
 func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx := hc.ic.CanPruneFrom(tx)
-	maxIdxTx := hc.ic.highestTxNum(tx)
+	minIdxTx, maxIdxTx := hc.ic.smallestTxNum(tx), hc.ic.highestTxNum(tx)
 	//defer func() {
 	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepTxInDB=%d; result %t\n",
 	//		hc.h.filenameBase, untilTx, hc.h.dontProduceFiles, txTo, minIdxTx, maxIdxTx, hc.h.keepTxInDB, minIdxTx < txTo)
@@ -1037,13 +1038,37 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 		}
 		txTo = min(maxIdxTx-hc.h.keepTxInDB, untilTx) // bound pruning
 	} else {
-		canPruneIdx := hc.ic.CanPruneUntil(tx, untilTx)
+		canPruneIdx := hc.ic.CanPrune(tx)
 		if !canPruneIdx {
 			return false, 0
 		}
 		txTo = min(hc.maxTxNumInFiles(false), untilTx)
 	}
+
+	switch hc.h.filenameBase {
+	case "accounts":
+		mxPrunableHAcc.Set(float64(txTo - minIdxTx))
+	case "storage":
+		mxPrunableHSto.Set(float64(txTo - minIdxTx))
+	case "code":
+		mxPrunableHCode.Set(float64(txTo - minIdxTx))
+	case "commitment":
+		mxPrunableHComm.Set(float64(txTo - minIdxTx))
+	}
 	return minIdxTx < txTo, txTo
+}
+
+func (hc *HistoryContext) Warmup(ctx context.Context) (cleanup func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := &errgroup.Group{}
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, hc.h.db, hc.h.historyValsTable, log.LvlDebug, 4)
+		return nil
+	})
+	return func() {
+		cancel()
+		_ = wg.Wait()
+	}
 }
 
 // Prune [txFrom; txTo)
@@ -1051,7 +1076,7 @@ func (hc *HistoryContext) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txT
 // `useProgress` flag to restore and update prune progress.
 //   - E.g. Unwind can't use progress, because it's not linear
 //     and will wrongly update progress of steps cleaning and could end up with inconsistent history.
-func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
+func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo, limit uint64, forced, withWarmup bool, logEvery *time.Ticker) (*InvertedIndexPruneStat, error) {
 	//fmt.Printf(" pruneH[%s] %t, %d-%d\n", hc.h.filenameBase, hc.CanPruneUntil(rwTx), txFrom, txTo)
 	if !forced {
 		var can bool
@@ -1108,7 +1133,12 @@ func (hc *HistoryContext) Prune(ctx context.Context, rwTx kv.RwTx, txFrom, txTo,
 		forced = true // or index.CanPrune will return false cuz no snapshots made
 	}
 
-	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, pruneValue)
+	if withWarmup {
+		cleanup := hc.Warmup(ctx)
+		defer cleanup()
+	}
+
+	return hc.ic.Prune(ctx, rwTx, txFrom, txTo, limit, logEvery, forced, withWarmup, pruneValue)
 }
 
 func (hc *HistoryContext) Close() {

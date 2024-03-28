@@ -155,6 +155,74 @@ type CPUInfo struct {
 	Mhz       float64 `json:"mhz"`
 }
 
+type BlockHeadersUpdate struct {
+	CurrentBlockNumber  uint64  `json:"blockNumber"`
+	PreviousBlockNumber uint64  `json:"previousBlockNumber"`
+	Speed               float64 `json:"speed"`
+	Alloc               uint64  `json:"alloc"`
+	Sys                 uint64  `json:"sys"`
+	InvalidHeaders      int     `json:"invalidHeaders"`
+	RejectedBadHeaders  int     `json:"rejectedBadHeaders"`
+}
+
+type BodiesInfo struct {
+	BlockDownload BodiesDownloadBlockUpdate `json:"blockDownload"`
+	BlockWrite    BodiesWriteBlockUpdate    `json:"blockWrite"`
+	Processed     BodiesProcessedUpdate     `json:"processed"`
+	Processing    BodiesProcessingUpdate    `json:"processing"`
+}
+
+type BodiesDownloadBlockUpdate struct {
+	BlockNumber    uint64 `json:"blockNumber"`
+	DeliveryPerSec uint64 `json:"deliveryPerSec"`
+	WastedPerSec   uint64 `json:"wastedPerSec"`
+	Remaining      uint64 `json:"remaining"`
+	Delivered      uint64 `json:"delivered"`
+	BlockPerSec    uint64 `json:"blockPerSec"`
+	Cache          uint64 `json:"cache"`
+	Alloc          uint64 `json:"alloc"`
+	Sys            uint64 `json:"sys"`
+}
+
+type BodiesWriteBlockUpdate struct {
+	BlockNumber uint64 `json:"blockNumber"`
+	Remaining   uint64 `json:"remaining"`
+	Alloc       uint64 `json:"alloc"`
+	Sys         uint64 `json:"sys"`
+}
+
+type BodiesProcessedUpdate struct {
+	HighestBlock uint64  `json:"highestBlock"`
+	Blocks       uint64  `json:"blocks"`
+	TimeElapsed  float64 `json:"timeElapsed"`
+	BlkPerSec    float64 `json:"blkPerSec"`
+}
+
+type BodiesProcessingUpdate struct {
+	From uint64 `json:"from"`
+	To   uint64 `json:"to"`
+}
+
+func (ti BodiesProcessingUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BodiesProcessedUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BodiesWriteBlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BodiesDownloadBlockUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
+func (ti BlockHeadersUpdate) Type() Type {
+	return TypeOf(ti)
+}
+
 func (ti SnapshoFilesList) Type() Type {
 	return TypeOf(ti)
 }

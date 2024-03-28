@@ -1,10 +1,43 @@
 package diagnostics
 
 import (
+	"github.com/ledgerwatch/erigon-lib/diskutils"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/mem"
 )
+
+func (d *DiagnosticClient) setupSysInfoDiagnostics() {
+	sysInfo := GetSysInfo(d.dataDirPath)
+
+	d.mu.Lock()
+	d.hardwareInfo = sysInfo
+	d.mu.Unlock()
+}
+
+func (d *DiagnosticClient) HardwareInfo() HardwareInfo {
+	return d.hardwareInfo
+}
+
+func findNodeDisk(dirPath string) string {
+	mountPoint := diskutils.MountPointForDirPath(dirPath)
+
+	return mountPoint
+}
+
+func GetSysInfo(dirPath string) HardwareInfo {
+	nodeDisk := findNodeDisk(dirPath)
+
+	ramInfo := GetRAMInfo()
+	diskInfo := GetDiskInfo(nodeDisk)
+	cpuInfo := GetCPUInfo()
+
+	return HardwareInfo{
+		RAM:  ramInfo,
+		Disk: diskInfo,
+		CPU:  cpuInfo,
+	}
+}
 
 func GetRAMInfo() RAMInfo {
 	totalRAM := uint64(0)

@@ -411,7 +411,8 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	}
 
 	pruneTo := cfg.prune.Receipts.PruneTo(s.ForwardProgress)
-	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
+	// s.PruneProgress
+	if err = pruneLogIndex(logPrefix, tx, cfg.tmpdir, s.PruneProgress, pruneTo, ctx, logger, cfg.noPruneContracts); err != nil {
 		return err
 	}
 	if err = s.Done(tx); err != nil {
@@ -426,7 +427,7 @@ func PruneLogIndex(s *PruneState, tx kv.RwTx, cfg LogIndexCfg, ctx context.Conte
 	return nil
 }
 
-func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, ctx context.Context, logger log.Logger, noPruneContracts map[libcommon.Address]bool) error {
+func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneFrom, pruneTo uint64, ctx context.Context, logger log.Logger, noPruneContracts map[libcommon.Address]bool) error {
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
@@ -444,7 +445,7 @@ func pruneLogIndex(logPrefix string, tx kv.RwTx, tmpDir string, pruneTo uint64, 
 		}
 		defer c.Close()
 
-		for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		for k, v, err := c.Seek(dbutils.LogKey(pruneFrom, 0)); k != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}

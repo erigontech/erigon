@@ -33,6 +33,7 @@ import (
 	"time"
 
 	bloomfilter "github.com/holiman/bloomfilter/v2"
+	"github.com/ledgerwatch/erigon-lib/kv/backup"
 	"github.com/ledgerwatch/erigon-lib/recsplit/eliasfano32"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
@@ -59,6 +60,14 @@ var (
 	//LatestStateReadGrindNotFound = metrics.GetOrCreateSummary(`latest_state_read{type="grind",found="no"}`)  //nolint
 	//LatestStateReadCold          = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="yes"}`)  //nolint
 	//LatestStateReadColdNotFound  = metrics.GetOrCreateSummary(`latest_state_read{type="cold",found="no"}`)   //nolint
+	mxPrunableDAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="account"}`)
+	mxPrunableDSto  = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
+	mxPrunableDCode = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
+	mxPrunableDComm = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
+	mxPrunableHAcc  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
+	mxPrunableHSto  = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
+	mxPrunableHCode = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
+	mxPrunableHComm = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="commitment"}`)
 
 	mxRunningMerges        = metrics.GetOrCreateGauge("domain_running_merges")
 	mxRunningFilesBuilding = metrics.GetOrCreateGauge("domain_running_files_building")
@@ -732,6 +741,8 @@ func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedW
 	}
 	w.keys.LogLvl(log.LvlTrace)
 	w.values.LogLvl(log.LvlTrace)
+	w.keys.SortAndFlushInBackground(true)
+	w.values.SortAndFlushInBackground(true)
 	return w
 }
 
@@ -1558,7 +1569,7 @@ func (dc *DomainContext) Unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUn
 
 	logEvery := time.NewTicker(time.Second * 30)
 	defer logEvery.Stop()
-	if _, err := dc.hc.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
+	if _, err := dc.hc.Prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, false, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dc.d.filenameBase, txNumUnwindTo, step, err)
 	}
 	return restored.Flush(ctx, rwTx)
@@ -2011,8 +2022,20 @@ func (dc *DomainContext) canPruneDomainTables(tx kv.Tx, untilTx uint64) (can boo
 		untilStep = (untilTx - 1) / dc.d.aggregationStep
 	}
 	sm := dc.smallestStepForPruning(tx)
-	//fmt.Printf("smallestToPrune[%s] %d snaps %d\n", dc.d.filenameBase, sm, maxStepToPrune)
-	return sm <= maxStepToPrune && sm <= untilStep && untilStep <= maxStepToPrune, maxStepToPrune
+
+	delta := float64(max(maxStepToPrune, sm) - min(maxStepToPrune, sm)) // maxStep could be 0
+	switch dc.d.filenameBase {
+	case "account":
+		mxPrunableDAcc.Set(delta)
+	case "storage":
+		mxPrunableDSto.Set(delta)
+	case "code":
+		mxPrunableDCode.Set(delta)
+	case "commitment":
+		mxPrunableDComm.Set(delta)
+	}
+	//fmt.Printf("smallestToPrune[%s] minInDB %d inFiles %d until %d\n", dc.d.filenameBase, sm, maxStepToPrune, untilStep)
+	return sm <= min(maxStepToPrune, untilStep), maxStepToPrune
 }
 
 func (dc *DomainContext) smallestStepForPruning(tx kv.Tx) uint64 {
@@ -2100,13 +2123,30 @@ func (dc *DomainPruneStat) Accumulate(other *DomainPruneStat) {
 
 // history prunes keys in range [txFrom; txTo), domain prunes any records with rStep <= step.
 // In case of context cancellation pruning stops and returns error, but simply could be started again straight away.
-func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
+func (dc *DomainContext) Warmup(ctx context.Context) (cleanup func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	wg := &errgroup.Group{}
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, dc.d.db, dc.d.keysTable, log.LvlDebug, 4)
+		return nil
+	})
+	wg.Go(func() error {
+		backup.WarmupTable(ctx, dc.d.db, dc.d.valsTable, log.LvlDebug, 4)
+		return nil
+	})
+	return func() {
+		cancel()
+		_ = wg.Wait()
+	}
+}
+
+func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, txTo, limit uint64, withWarmup bool, logEvery *time.Ticker) (stat *DomainPruneStat, err error) {
 	if limit == 0 {
 		limit = math.MaxUint64
 	}
 
 	stat = &DomainPruneStat{MinStep: math.MaxUint64}
-	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, logEvery); err != nil {
+	if stat.History, err = dc.hc.Prune(ctx, rwTx, txFrom, txTo, limit, false, withWarmup, logEvery); err != nil {
 		return nil, fmt.Errorf("prune history at step %d [%d, %d): %w", step, txFrom, txTo, err)
 	}
 	canPrune, maxPrunableStep := dc.canPruneDomainTables(rwTx, txTo)
@@ -2120,6 +2160,11 @@ func (dc *DomainContext) Prune(ctx context.Context, rwTx kv.RwTx, step, txFrom, 
 	st := time.Now()
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
+
+	if withWarmup {
+		cleanup := dc.Warmup(ctx)
+		defer cleanup()
+	}
 
 	keysCursorForDeletes, err := rwTx.RwCursorDupSort(dc.d.keysTable)
 	if err != nil {

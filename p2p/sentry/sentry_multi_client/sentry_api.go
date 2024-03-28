@@ -4,11 +4,11 @@ import (
 	"context"
 	"math/rand"
 
-	"github.com/holiman/uint256"
+	"google.golang.org/grpc"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	proto_sentry "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
-	"google.golang.org/grpc"
 
 	"github.com/ledgerwatch/erigon/eth/protocols/eth"
 	"github.com/ledgerwatch/erigon/p2p/sentry"
@@ -19,14 +19,13 @@ import (
 
 // Methods of sentry called by Core
 
-func (cs *MultiClient) UpdateHead(ctx context.Context, height, time uint64, hash libcommon.Hash, td *uint256.Int) {
-	cs.lock.Lock()
-	defer cs.lock.Unlock()
-	cs.headHeight = height
-	cs.headTime = time
-	cs.headHash = hash
-	cs.headTd = td
-	statusMsg := cs.makeStatusData()
+func (cs *MultiClient) SetStatus(ctx context.Context) {
+	statusMsg, err := cs.statusDataProvider.GetStatusData(ctx)
+	if err != nil {
+		cs.logger.Error("MultiClient.SetStatus: GetStatusData error", "err", err)
+		return
+	}
+
 	for _, sentry := range cs.sentries {
 		if !sentry.Ready() {
 			continue

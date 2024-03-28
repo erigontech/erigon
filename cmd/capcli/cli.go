@@ -19,12 +19,14 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 
 	lg "github.com/anacrolix/log"
+
 	"github.com/ledgerwatch/erigon-lib/direct"
 	downloader3 "github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/metrics"
 	state2 "github.com/ledgerwatch/erigon-lib/state"
 
 	"github.com/c2h5oh/datasize"
+
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/downloader"
 
@@ -59,10 +61,11 @@ import (
 	"github.com/ledgerwatch/erigon/cl/transition/machine"
 	"github.com/ledgerwatch/erigon/cl/utils"
 
-	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/log/v3"
 	"github.com/spf13/afero"
 	"google.golang.org/grpc"
+
+	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 )
 
 var CLI struct {
@@ -578,7 +581,7 @@ func (d *DownloadSnapshots) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	downlo, err := downloader.New(ctx, downloaderCfg, dirs, log.Root(), log.LvlInfo, true)
+	downlo, err := downloader.New(ctx, downloaderCfg, log.Root(), log.LvlInfo, true)
 	if err != nil {
 		return err
 	}

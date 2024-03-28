@@ -377,6 +377,9 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		s := a.syncedData.HeadState()
+		if s == nil {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("node is not synced"))
+		}
 		if s.ValidatorLength() <= int(validatorIndex) {
 			return newBeaconResponse([]int{}).WithFinalized(false), nil
 		}

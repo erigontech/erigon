@@ -30,6 +30,7 @@ const (
 	Execution_GetTD_FullMethodName               = "/execution.Execution/GetTD"
 	Execution_GetHeader_FullMethodName           = "/execution.Execution/GetHeader"
 	Execution_GetBody_FullMethodName             = "/execution.Execution/GetBody"
+	Execution_HasBlock_FullMethodName            = "/execution.Execution/HasBlock"
 	Execution_GetBodiesByRange_FullMethodName    = "/execution.Execution/GetBodiesByRange"
 	Execution_GetBodiesByHashes_FullMethodName   = "/execution.Execution/GetBodiesByHashes"
 	Execution_IsCanonicalHash_FullMethodName     = "/execution.Execution/IsCanonicalHash"
@@ -57,6 +58,7 @@ type ExecutionClient interface {
 	GetTD(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetTDResponse, error)
 	GetHeader(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetHeaderResponse, error)
 	GetBody(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*GetBodyResponse, error)
+	HasBlock(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*HasBlockResponse, error)
 	// Ranges
 	GetBodiesByRange(ctx context.Context, in *GetBodiesByRangeRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
 	GetBodiesByHashes(ctx context.Context, in *GetBodiesByHashesRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error)
@@ -160,6 +162,15 @@ func (c *executionClient) GetBody(ctx context.Context, in *GetSegmentRequest, op
 	return out, nil
 }
 
+func (c *executionClient) HasBlock(ctx context.Context, in *GetSegmentRequest, opts ...grpc.CallOption) (*HasBlockResponse, error) {
+	out := new(HasBlockResponse)
+	err := c.cc.Invoke(ctx, Execution_HasBlock_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *executionClient) GetBodiesByRange(ctx context.Context, in *GetBodiesByRangeRequest, opts ...grpc.CallOption) (*GetBodiesBatchResponse, error) {
 	out := new(GetBodiesBatchResponse)
 	err := c.cc.Invoke(ctx, Execution_GetBodiesByRange_FullMethodName, in, out, opts...)
@@ -241,6 +252,7 @@ type ExecutionServer interface {
 	GetTD(context.Context, *GetSegmentRequest) (*GetTDResponse, error)
 	GetHeader(context.Context, *GetSegmentRequest) (*GetHeaderResponse, error)
 	GetBody(context.Context, *GetSegmentRequest) (*GetBodyResponse, error)
+	HasBlock(context.Context, *GetSegmentRequest) (*HasBlockResponse, error)
 	// Ranges
 	GetBodiesByRange(context.Context, *GetBodiesByRangeRequest) (*GetBodiesBatchResponse, error)
 	GetBodiesByHashes(context.Context, *GetBodiesByHashesRequest) (*GetBodiesBatchResponse, error)
@@ -286,6 +298,9 @@ func (UnimplementedExecutionServer) GetHeader(context.Context, *GetSegmentReques
 }
 func (UnimplementedExecutionServer) GetBody(context.Context, *GetSegmentRequest) (*GetBodyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBody not implemented")
+}
+func (UnimplementedExecutionServer) HasBlock(context.Context, *GetSegmentRequest) (*HasBlockResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method HasBlock not implemented")
 }
 func (UnimplementedExecutionServer) GetBodiesByRange(context.Context, *GetBodiesByRangeRequest) (*GetBodiesBatchResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetBodiesByRange not implemented")
@@ -483,6 +498,24 @@ func _Execution_GetBody_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Execution_HasBlock_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSegmentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ExecutionServer).HasBlock(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Execution_HasBlock_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ExecutionServer).HasBlock(ctx, req.(*GetSegmentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Execution_GetBodiesByRange_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetBodiesByRangeRequest)
 	if err := dec(in); err != nil {
@@ -651,6 +684,10 @@ var Execution_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetBody",
 			Handler:    _Execution_GetBody_Handler,
+		},
+		{
+			MethodName: "HasBlock",
+			Handler:    _Execution_HasBlock_Handler,
 		},
 		{
 			MethodName: "GetBodiesByRange",

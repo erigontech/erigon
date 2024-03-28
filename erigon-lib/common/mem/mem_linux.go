@@ -4,6 +4,7 @@ package mem
 
 import (
 	"os"
+	"reflect"
 
 	"github.com/shirou/gopsutil/v3/process"
 
@@ -35,7 +36,19 @@ func ReadVirtualMemStats() (process.MemoryMapsStat, error) {
 		return process.MemoryMapsStat{}, err
 	}
 
-	return (*memoryMaps)[0], nil
+	m := (*memoryMaps)[0]
+
+	// convert from kilobytes to bytes
+	val := reflect.ValueOf(&m).Elem()
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+
+		if field.Kind() == reflect.Uint64 {
+			field.SetUint(field.Interface().(uint64) * 1024)
+		}
+	}
+
+	return m, nil
 }
 
 func UpdatePrometheusVirtualMemStats(p process.MemoryMapsStat) {

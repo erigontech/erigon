@@ -7,6 +7,8 @@ import (
 	"math/big"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/exp/maps"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/length"
@@ -17,7 +19,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/turbo/adapter"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"golang.org/x/exp/maps"
 )
 
 // UpdateFromDb reads the state of the database and refreshes the state of the body download
@@ -63,7 +64,7 @@ func (bd *BodyDownload) UpdateFromDb(db kv.Tx) (headHeight, headTime uint64, hea
 	headTime = 0
 	headHeader, err := bd.br.Header(context.Background(), db, headHash, headHeight)
 	if err != nil {
-		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading total difficulty for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
+		return 0, 0, libcommon.Hash{}, nil, fmt.Errorf("reading header for head height %d and hash %x: %d, %w", headHeight, headHash, headTd, err)
 	}
 	if headHeader != nil {
 		headTime = headHeader.Time

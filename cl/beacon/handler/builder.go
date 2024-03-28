@@ -46,7 +46,7 @@ func (a *ApiHandler) GetEth1V1BuilderStatesExpectedWithdrawals(w http.ResponseWr
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, fmt.Errorf("beacon node is syncing"))
 	}
 	if root == headRoot {
-		return newBeaconResponse(state.ExpectedWithdrawals(a.syncedData.HeadState())).WithFinalized(false), nil
+		return newBeaconResponse(state.ExpectedWithdrawals(a.syncedData.HeadState(), state.Epoch(a.syncedData.HeadState()))).WithFinalized(false), nil
 	}
 	lookAhead := 1024
 	for currSlot := *slot + 1; currSlot < *slot+uint64(lookAhead); currSlot++ {

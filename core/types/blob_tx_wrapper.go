@@ -368,12 +368,12 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 
 // We deliberately encode only the transaction payload because the only case we need to serialize
 // blobs/commitments/proofs is when we reply to GetPooledTransactions (and that's handled by the txpool).
-func (txw BlobTxWrapper) EncodingSize() int {
+func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)
 }
-func (txw BlobTxWrapper) EncodeRLP(w io.Writer) error {
+func (txw *BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
 }

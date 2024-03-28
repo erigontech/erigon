@@ -55,6 +55,7 @@ import (
 	"github.com/ledgerwatch/erigon/eth/stagedsync/stages"
 	"github.com/ledgerwatch/erigon/ethdb/prune"
 	"github.com/ledgerwatch/erigon/p2p"
+	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/erigon/polygon/bor"
@@ -94,7 +95,6 @@ type MockSentry struct {
 	Genesis              *types.Block
 	SentryClient         direct.SentryClient
 	PeerId               *ptypes.H512
-	UpdateHead           func(Ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int)
 	streams              map[proto_sentry.MessageId][]proto_sentry.Sentry_MessagesServer
 	sentMessages         []*proto_sentry.OutboundMessageData
 	StreamWg             sync.WaitGroup
@@ -279,8 +279,6 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			Accumulator:          shards.NewAccumulator(),
 			StateChangesConsumer: erigonGrpcServeer,
 		},
-		UpdateHead: func(Ctx context.Context, headHeight, headTime uint64, hash libcommon.Hash, td *uint256.Int) {
-		},
 		PeerId:         gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots: allSnapshots,
 		BlockReader:    freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots),
@@ -355,7 +353,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 			dirs, notifications, mock.BlockReader, blockWriter, mock.agg, nil, terseLogger)
 		chainReader := consensuschain.NewReader(mock.ChainConfig, txc.Tx, mock.BlockReader, logger)
 		// We start the mining step
-		if err := stages2.StateStep(ctx, chainReader, mock.Engine, txc, blockWriter, stateSync, mock.sentriesClient.Bd, header, body, unwindPoint, headersChain, bodiesChain, histV3); err != nil {
+		if err := stages2.StateStep(ctx, chainReader, mock.Engine, txc, stateSync, header, body, unwindPoint, headersChain, bodiesChain, histV3); err != nil {
 			logger.Warn("Could not validate block", "err", err)
 			return err
 		}
@@ -374,23 +372,26 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		return nil
 	}
 	forkValidator := engine_helpers.NewForkValidator(ctx, 1, inMemoryExecution, dirs.Tmp, mock.BlockReader)
-	networkID := uint64(1)
+
+	statusDataProvider := sentry.NewStatusDataProvider(
+		db,
+		mock.ChainConfig,
+		mock.Genesis,
+		mock.ChainConfig.ChainID.Uint64(),
+	)
+
 	maxBlockBroadcastPeers := func(header *types.Header) uint { return 0 }
 
 	mock.sentriesClient, err = sentry_multi_client.NewMultiClient(
 		mock.DB,
-		"mock",
 		mock.ChainConfig,
-		mock.Genesis.Hash(),
-		mock.Genesis.Time(),
 		mock.Engine,
-		networkID,
 		sentries,
 		cfg.Sync,
 		mock.BlockReader,
 		blockBufferSize,
+		statusDataProvider,
 		false,
-		forkValidator,
 		maxBlockBroadcastPeers,
 		logger,
 	)
@@ -446,7 +447,7 @@ func MockWithEverything(tb testing.TB, gspec *types.Genesis, key *ecdsa.PrivateK
 		cfg.Sync,
 		stagedsync.DefaultStages(mock.Ctx,
 			stagedsync.StageSnapshotsCfg(mock.DB, *mock.ChainConfig, cfg.Sync, dirs, blockRetire, snapshotsDownloader, mock.BlockReader, mock.Notifications, mock.HistoryV3, mock.agg, false, false, nil),
-			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.HistoryV3, mock.Notifications, engine_helpers.NewForkValidatorMock(1, histV3), nil),
+			stagedsync.StageHeadersCfg(mock.DB, mock.sentriesClient.Hd, mock.sentriesClient.Bd, *mock.ChainConfig, cfg.Sync, sendHeaderRequest, propagateNewBlockHashes, penalize, cfg.BatchSize, false, mock.BlockReader, blockWriter, dirs.Tmp, mock.HistoryV3, mock.Notifications, nil),
 			stagedsync.StageBorHeimdallCfg(mock.DB, snapDb, stagedsync.MiningState{}, *mock.ChainConfig, nil /* heimdallClient */, mock.BlockReader, nil, nil, nil, recents, signatures),
 			stagedsync.StageBlockHashesCfg(mock.DB, mock.Dirs.Tmp, mock.ChainConfig, blockWriter),
 			stagedsync.StageBodiesCfg(mock.DB, mock.sentriesClient.Bd, sendBodyRequest, penalize, blockPropagator, cfg.Sync.BodyDownloadTimeoutSeconds, *mock.ChainConfig, mock.BlockReader, cfg.HistoryV3, blockWriter, nil),
@@ -689,7 +690,7 @@ func (ms *MockSentry) insertPoWBlocks(chain *core.ChainPack) error {
 		ms.ReceiveWg.Add(1)
 	}
 	initialCycle := MockInsertAsInitialCycle
-	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, ms.UpdateHead)
+	hook := stages2.NewHook(ms.Ctx, ms.DB, ms.Notifications, ms.Sync, ms.BlockReader, ms.ChainConfig, ms.Log, nil)
 
 	if err = stages2.StageLoopIteration(ms.Ctx, ms.DB, wrap.TxContainer{}, ms.Sync, initialCycle, ms.Log, ms.BlockReader, hook); err != nil {
 		return err

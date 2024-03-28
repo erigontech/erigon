@@ -138,6 +138,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerExtraDataFlag,
 	&utils.MinerNoVerfiyFlag,
 	&utils.MinerSigningKeyFileFlag,
+	&utils.MinerRecommitIntervalFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,

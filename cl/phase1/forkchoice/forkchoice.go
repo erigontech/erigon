@@ -89,9 +89,9 @@ type ForkChoiceStore struct {
 	unrealizedFinalizedCheckpoint atomic.Value
 
 	proposerBoostRoot atomic.Value
-	// attestations that are not yet processed
-	attestationSet sync.Map
-	blocksSet      sync.Map // blocks that are not yet processed
+	// messages that are not yet processed but can be processable in the future.
+	aggregatesSet sync.Map
+	blocksSet     sync.Map // blocks that are not yet processed
 	// head data
 	headHash              libcommon.Hash
 	headSlot              uint64

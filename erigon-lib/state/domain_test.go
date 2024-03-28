@@ -77,7 +77,7 @@ func testDbAndDomainOfStep(t *testing.T, aggStep uint64, logger log.Logger) (kv.
 	salt := uint32(1)
 	cfg := domainCfg{
 		hist: histCfg{
-			iiCfg:             iiCfg{salt: &salt, dirs: dirs},
+			iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
 			withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: true,
 		}}
 	d, err := NewDomain(cfg, aggStep, kv.AccountsDomain.String(), keysTable, valsTable, historyKeysTable, historyValsTable, indexTable, logger)
@@ -382,7 +382,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, p2, v)
 
-	_, err = dc.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, logEvery)
+	_, err = dc.Prune(ctx, tx, 0, 0, 16, math.MaxUint64, false, logEvery)
 	require.NoError(t, err)
 
 	isEmpty, err := d.isEmpty(tx)
@@ -559,7 +559,7 @@ func TestIterationMultistep(t *testing.T) {
 			d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 
 			dc := d.MakeContext()
-			_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+			_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
 			dc.Close()
 			require.NoError(t, err)
 		}()
@@ -617,7 +617,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 		d.integrateFiles(sf, step*d.aggregationStep, (step+1)*d.aggregationStep)
 
 		dc := d.MakeContext()
-		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, logEvery)
+		_, err = dc.Prune(ctx, tx, step, step*d.aggregationStep, (step+1)*d.aggregationStep, math.MaxUint64, false, logEvery)
 		dc.Close()
 		require.NoError(t, err)
 	}
@@ -651,7 +651,7 @@ func collateAndMerge(t *testing.T, db kv.RwDB, tx kv.RwTx, d *Domain, txs uint64
 	}
 }
 
-func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
+func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64, prune bool) {
 	t.Helper()
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -665,11 +665,13 @@ func collateAndMergeOnce(t *testing.T, d *Domain, tx kv.RwTx, step uint64) {
 	require.NoError(t, err)
 	d.integrateFiles(sf, txFrom, txTo)
 
-	dc := d.MakeContext()
-	stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
-	dc.Close()
-	require.NoError(t, err)
-	t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
+	if prune {
+		dc := d.MakeContext()
+		stat, err := dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, false, logEvery)
+		t.Logf("prune stat: %s  (%d-%d)", stat, txFrom, txTo)
+		require.NoError(t, err)
+		dc.Close()
+	}
 
 	maxEndTxNum := d.endTxNumMinimax()
 	maxSpan := d.aggregationStep * StepsInColdFile
@@ -896,7 +898,7 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 			err = writer.Flush(ctx, tx)
 			require.NoError(t, err)
 
-			collateAndMergeOnce(t, d, tx, step)
+			collateAndMergeOnce(t, d, tx, step, true)
 		}
 	}
 	err = writer.Flush(ctx, tx)
@@ -1278,7 +1280,7 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 
 		logEvery := time.NewTicker(time.Second * 30)
 
-		_, err = dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, logEvery)
+		_, err = dc.Prune(ctx, tx, step, txFrom, txTo, math.MaxUint64, false, logEvery)
 		require.NoError(t, err)
 
 		ranges := dc.findMergeRange(txFrom, txTo)
@@ -1516,6 +1518,101 @@ func TestDomain_GetAfterAggregation(t *testing.T) {
 	}
 }
 
+func TestDomain_CanPruneAfterAggregation(t *testing.T) {
+	aggStep := uint64(25)
+	db, d := testDbAndDomainOfStep(t, aggStep, log.New())
+	defer db.Close()
+	defer d.Close()
+
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	d.historyLargeValues = false
+	d.History.compression = CompressKeys | CompressVals
+	d.compression = CompressKeys | CompressVals
+	d.withExistenceIndex = true
+
+	dc := d.MakeContext()
+	defer dc.Close()
+	writer := dc.NewWriter()
+	defer writer.close()
+
+	keySize1 := uint64(length.Addr)
+	keySize2 := uint64(length.Addr + length.Hash)
+	totalTx := uint64(5000)
+	keyTxsLimit := uint64(50)
+	keyLimit := uint64(200)
+
+	// put some kvs
+	data := generateTestData(t, keySize1, keySize2, totalTx, keyTxsLimit, keyLimit)
+	for key, updates := range data {
+		p := []byte{}
+		for i := 0; i < len(updates); i++ {
+			writer.SetTxNum(updates[i].txNum)
+			writer.PutWithPrev([]byte(key), nil, updates[i].value, p, 0)
+			p = common.Copy(updates[i].value)
+		}
+	}
+	writer.SetTxNum(totalTx)
+
+	err = writer.Flush(context.Background(), tx)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	tx, err = db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	dc.Close()
+
+	stepToPrune := uint64(2)
+	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+
+	dc = d.MakeContext()
+	can, untilStep := dc.canPruneDomainTables(tx, aggStep)
+	defer dc.Close()
+	require.Falsef(t, can, "those step is already pruned")
+	require.EqualValues(t, stepToPrune, untilStep)
+
+	stepToPrune = 3
+	collateAndMergeOnce(t, d, tx, stepToPrune, false)
+
+	// refresh file list
+	dc = d.MakeContext()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune)
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	dc.Close()
+
+	stepToPrune = 30
+	collateAndMergeOnce(t, d, tx, stepToPrune, true)
+
+	dc = d.MakeContext()
+	can, untilStep = dc.canPruneDomainTables(tx, aggStep*stepToPrune)
+	require.False(t, can, "lattter step is not yet pruned")
+	require.EqualValues(t, stepToPrune, untilStep)
+	dc.Close()
+
+	stepToPrune = 35
+	collateAndMergeOnce(t, d, tx, stepToPrune, false)
+
+	dc = d.MakeContext()
+	t.Logf("pruning step %d", stepToPrune)
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune)
+	require.True(t, can, "third step is not yet pruned")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+
+	can, untilStep = dc.canPruneDomainTables(tx, 1+aggStep*stepToPrune+(aggStep/2))
+	require.True(t, can, "third step is not yet pruned, we are checking for a half-step after it and still have something to prune")
+	require.LessOrEqual(t, stepToPrune, untilStep)
+	dc.Close()
+}
+
 func TestDomain_PruneAfterAggregation(t *testing.T) {
 	db, d := testDbAndDomainOfStep(t, 25, log.New())
 	defer db.Close()
@@ -1746,7 +1843,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 	defer dc.Close()
 
 	ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*1)
-	_, err = dc.Prune(ct, rwTx, 0, 0, aggStep, math.MaxUint64, time.NewTicker(time.Second))
+	_, err = dc.Prune(ct, rwTx, 0, 0, aggStep, math.MaxUint64, false, time.NewTicker(time.Second))
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	cancel()
 
@@ -1768,7 +1865,7 @@ func TestDomain_PruneProgress(t *testing.T) {
 		// step changing should not affect pruning. Prune should finish step 0 first.
 		i++
 		ct, cancel := context.WithTimeout(context.Background(), time.Millisecond*2)
-		_, err = dc.Prune(ct, rwTx, step, step*aggStep, (aggStep*step)+1, math.MaxUint64, time.NewTicker(time.Second))
+		_, err = dc.Prune(ct, rwTx, step, step*aggStep, (aggStep*step)+1, math.MaxUint64, false, time.NewTicker(time.Second))
 		if err != nil {
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 		} else {
@@ -2111,7 +2208,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		ctx := context.Background()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		_, err = dc.hc.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, time.NewTicker(time.Second))
+		_, err = dc.hc.Prune(ctx, tx, pruneFrom, pruneTo, math.MaxUint64, true, false, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)
@@ -2123,7 +2220,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 		ctx := context.Background()
 		tx, err := db.BeginRw(ctx)
 		require.NoError(t, err)
-		_, err = dc.Prune(ctx, tx, step, pruneFrom, pruneTo, math.MaxUint64, time.NewTicker(time.Second))
+		_, err = dc.Prune(ctx, tx, step, pruneFrom, pruneTo, math.MaxUint64, false, time.NewTicker(time.Second))
 		require.NoError(t, err)
 		err = tx.Commit()
 		require.NoError(t, err)

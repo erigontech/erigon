@@ -15,6 +15,7 @@ import (
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon-lib/diagnostics"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/state"
 	"github.com/ledgerwatch/erigon/core/rawdb/blockio"
@@ -25,7 +26,6 @@ import (
 	"github.com/ledgerwatch/erigon/core/rawdb"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/rlp"
-	"github.com/ledgerwatch/erigon/turbo/engineapi/engine_helpers"
 	"github.com/ledgerwatch/erigon/turbo/services"
 	"github.com/ledgerwatch/erigon/turbo/shards"
 	"github.com/ledgerwatch/erigon/turbo/stages/bodydownload"
@@ -51,7 +51,6 @@ type HeadersCfg struct {
 
 	blockReader   services.FullBlockReader
 	blockWriter   *blockio.BlockWriter
-	forkValidator *engine_helpers.ForkValidator
 	notifications *shards.Notifications
 
 	syncConfig     ethconfig.Sync
@@ -74,7 +73,6 @@ func StageHeadersCfg(
 	tmpdir string,
 	historyV3 bool,
 	notifications *shards.Notifications,
-	forkValidator *engine_helpers.ForkValidator,
 	loopBreakCheck func(int) bool) HeadersCfg {
 	return HeadersCfg{
 		db:                db,
@@ -91,7 +89,6 @@ func StageHeadersCfg(
 		noP2PDiscovery:    noP2PDiscovery,
 		blockReader:       blockReader,
 		blockWriter:       blockWriter,
-		forkValidator:     forkValidator,
 		notifications:     notifications,
 		loopBreakCheck:    loopBreakCheck,
 	}
@@ -561,6 +558,16 @@ func logProgressHeaders(
 		"invalidHeaders", stats.InvalidHeaders,
 		"rejectedBadHeaders", stats.RejectedBadHeaders,
 	)
+
+	diagnostics.Send(diagnostics.BlockHeadersUpdate{
+		CurrentBlockNumber:  now,
+		PreviousBlockNumber: prev,
+		Speed:               speed,
+		Alloc:               m.Alloc,
+		Sys:                 m.Sys,
+		InvalidHeaders:      stats.InvalidHeaders,
+		RejectedBadHeaders:  stats.RejectedBadHeaders,
+	})
 
 	return now
 }

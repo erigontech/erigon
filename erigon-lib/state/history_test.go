@@ -72,7 +72,7 @@ func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.Rw
 	//TODO: tests will fail if set histCfg.compression = CompressKeys | CompressValues
 	salt := uint32(1)
 	cfg := histCfg{
-		iiCfg:             iiCfg{salt: &salt, dirs: dirs},
+		iiCfg:             iiCfg{salt: &salt, dirs: dirs, db: db},
 		withLocalityIndex: false, withExistenceIndex: false, compression: CompressNone, historyLargeValues: largeValues,
 	}
 	h, err := NewHistory(cfg, 16, "hist", keysTable, indexTable, valsTable, nil, logger)
@@ -253,7 +253,7 @@ func TestHistoryAfterPrune(t *testing.T) {
 		hc.Close()
 
 		hc = h.MakeContext()
-		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, logEvery)
+		_, err = hc.Prune(ctx, tx, 0, 16, math.MaxUint64, false, false, logEvery)
 		hc.Close()
 
 		require.NoError(err)
@@ -355,7 +355,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			} else {
 				require.Truef(t, cp, "step %d should be prunable", i)
 			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			require.NoError(t, err)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -391,7 +391,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			} else {
 				require.Truef(t, cp, "step %d should be prunable", i)
 			}
-			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			require.NoError(t, err)
 			if i >= stepsTotal-stepKeepInDB {
 				require.Falsef(t, cp, "step %d should be NOT prunable", i)
@@ -510,7 +510,7 @@ func TestHistoryHistory(t *testing.T) {
 				h.integrateFiles(sf, step*h.aggregationStep, (step+1)*h.aggregationStep)
 
 				hc := h.MakeContext()
-				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+				_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 				hc.Close()
 				require.NoError(err)
 			}()
@@ -549,7 +549,7 @@ func collateAndMergeHistory(tb testing.TB, db kv.RwDB, h *History, txs uint64, d
 
 		if doPrune {
 			hc := h.MakeContext()
-			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, logEvery)
+			_, err = hc.Prune(ctx, tx, step*h.aggregationStep, (step+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			hc.Close()
 			require.NoError(err)
 		}
