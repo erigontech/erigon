@@ -1264,16 +1264,13 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 
 	ac.a.logger.Info(fmt.Sprintf("[snapshots] merge state %s", r.String()))
 
-	var accStorageMerged *sync.WaitGroup
-	if ac.a.commitmentValuesTransform {
-		accStorageMerged = new(sync.WaitGroup)
-	}
+	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range ac.d {
 		id := id
 		if r.d[id].any() {
 			kid := kv.Domain(id)
-			if kid == kv.AccountsDomain || kid == kv.StorageDomain {
+			if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
 				accStorageMerged.Add(1)
 			}
 
@@ -1291,13 +1288,15 @@ func (ac *AggregatorV3Context) mergeFiles(ctx context.Context, files SelectedSta
 				}
 
 				mf.d[id], mf.dIdx[id], mf.dHist[id], err = ac.d[id].mergeFiles(ctx, files.d[id], files.dIdx[id], files.dHist[id], r.d[id], vt, ac.a.ps)
-				if ac.a.commitmentValuesTransform && (kid == kv.AccountsDomain || kid == kv.StorageDomain) {
-					accStorageMerged.Done()
-				}
-				if ac.a.commitmentValuesTransform && err == nil && kid == kv.CommitmentDomain {
-					ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
-					ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
-					ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
+				if ac.a.commitmentValuesTransform {
+					if kid == kv.AccountsDomain || kid == kv.StorageDomain {
+						accStorageMerged.Done()
+					}
+					if err == nil && kid == kv.CommitmentDomain {
+						ac.a.d[kv.AccountsDomain].restrictSubsetFileDeletions = false
+						ac.a.d[kv.StorageDomain].restrictSubsetFileDeletions = false
+						ac.a.d[kv.CommitmentDomain].restrictSubsetFileDeletions = false
+					}
 				}
 				return err
 			})
