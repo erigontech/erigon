@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/arc/v2"
-	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
@@ -236,11 +234,11 @@ type Hook struct {
 	chainConfig   *chain.Config
 	logger        log.Logger
 	blockReader   services.FullBlockReader
-	updateHead    func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)
+	updateHead    func(ctx context.Context)
 	db            kv.RoDB
 }
 
-func NewHook(ctx context.Context, db kv.RoDB, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context, headHeight uint64, headTime uint64, hash libcommon.Hash, td *uint256.Int)) *Hook {
+func NewHook(ctx context.Context, db kv.RoDB, notifications *shards.Notifications, sync *stagedsync.Sync, blockReader services.FullBlockReader, chainConfig *chain.Config, logger log.Logger, updateHead func(ctx context.Context)) *Hook {
 	return &Hook{ctx: ctx, db: db, notifications: notifications, sync: sync, blockReader: blockReader, chainConfig: chainConfig, logger: logger, updateHead: updateHead}
 }
 func (h *Hook) beforeRun(tx kv.Tx, inSync bool) error {
@@ -267,64 +265,44 @@ func (h *Hook) AfterRun(tx kv.Tx, finishProgressBefore uint64) error {
 	return h.afterRun(tx, finishProgressBefore)
 }
 func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
-	notifications := h.notifications
-	blockReader := h.blockReader
-	// -- send notifications START
-	//TODO: can this 2 headers be 1
-	var headHeader, currentHeader *types.Header
-
 	// Update sentry status for peers to see our sync status
-	var headTd *big.Int
-	var plainStateVersion, finalizedBlock uint64
-	head, err := stages.GetStageProgress(tx, stages.Headers)
-	if err != nil {
-		return err
+	if h.updateHead != nil {
+		h.updateHead(h.ctx)
 	}
-	headHash, err := rawdb.ReadCanonicalHash(tx, head)
-	if err != nil {
-		return err
+	if h.notifications != nil {
+		return h.sendNotifications(h.notifications, tx, finishProgressBefore)
 	}
-	if headTd, err = rawdb.ReadTd(tx, headHash, head); err != nil {
-		return err
-	}
-	headHeader = rawdb.ReadHeader(tx, headHash, head)
-	currentHeader = rawdb.ReadCurrentHeader(tx)
-	finalizedHeaderHash := rawdb.ReadForkchoiceFinalized(tx)
-	if fb := rawdb.ReadHeaderNumber(tx, finalizedHeaderHash); fb != nil {
-		finalizedBlock = *fb
-	}
+	return nil
+}
+func (h *Hook) sendNotifications(notifications *shards.Notifications, tx kv.Tx, finishProgressBefore uint64) error {
 	// update the accumulator with a new plain state version so the cache can be notified that
 	// state has moved on
-	if plainStateVersion, err = rawdb.GetStateVersion(tx); err != nil {
-		return err
-	}
-	if notifications != nil && notifications.Accumulator != nil {
+	if notifications.Accumulator != nil {
+		plainStateVersion, err := rawdb.GetStateVersion(tx)
+		if err != nil {
+			return err
+		}
+
 		notifications.Accumulator.SetStateID(plainStateVersion)
 	}
 
-	if headTd != nil && headHeader != nil {
-		headTd256, overflow := uint256.FromBig(headTd)
-		if overflow {
-			return fmt.Errorf("headTds higher than 2^256-1")
-		}
-		h.updateHead(h.ctx, head, headHeader.Time, headHash, headTd256)
-	}
-
-	if notifications != nil && notifications.Events != nil {
+	if notifications.Events != nil {
 		finishStageAfterSync, err := stages.GetStageProgress(tx, stages.Finish)
 		if err != nil {
 			return err
 		}
-		if err = stagedsync.NotifyNewHeaders(h.ctx, finishProgressBefore, finishStageAfterSync, h.sync.PrevUnwindPoint(), notifications.Events, tx, h.logger, blockReader); err != nil {
+		if err = stagedsync.NotifyNewHeaders(h.ctx, finishProgressBefore, finishStageAfterSync, h.sync.PrevUnwindPoint(), notifications.Events, tx, h.logger, h.blockReader); err != nil {
 			return nil
 		}
 	}
-	if notifications != nil && notifications.Accumulator != nil && currentHeader != nil {
 
-		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
+	currentHeader := rawdb.ReadCurrentHeader(tx)
+	if (notifications.Accumulator != nil) && (currentHeader != nil) {
 		if currentHeader.Number.Uint64() == 0 {
 			notifications.Accumulator.StartChange(0, currentHeader.Hash(), nil, false)
 		}
+
+		pendingBaseFee := misc.CalcBaseFee(h.chainConfig, currentHeader)
 		pendingBlobFee := h.chainConfig.GetMinBlobGasPrice()
 		if currentHeader.ExcessBlobGas != nil {
 			excessBlobGas := misc.CalcExcessBlobGas(h.chainConfig, currentHeader)
@@ -335,10 +313,14 @@ func (h *Hook) afterRun(tx kv.Tx, finishProgressBefore uint64) error {
 			pendingBlobFee = f.Uint64()
 		}
 
+		var finalizedBlock uint64
+		if fb := rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)); fb != nil {
+			finalizedBlock = *fb
+		}
+
 		//h.logger.Debug("[hook] Sending state changes", "currentBlock", currentHeader.Number.Uint64(), "finalizedBlock", finalizedBlock)
 		notifications.Accumulator.SendAndReset(h.ctx, notifications.StateChangesConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}
-	// -- send notifications END
 	return nil
 }
 
