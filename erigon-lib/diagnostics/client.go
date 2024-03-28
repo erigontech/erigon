@@ -9,13 +9,15 @@ type DiagnosticClient struct {
 	metricsMux  *http.ServeMux
 	dataDirPath string
 
-	syncStats        SyncStatistics
-	snapshotFileList SnapshoFilesList
-	mu               sync.Mutex
-	hardwareInfo     HardwareInfo
-	peersSyncMap     sync.Map
-	bodies           BodiesInfo
-	bodiesMutex      sync.Mutex
+	syncStats           SyncStatistics
+	snapshotFileList    SnapshoFilesList
+	mu                  sync.Mutex
+	hardwareInfo        HardwareInfo
+	peersSyncMap        sync.Map
+	bodies              BodiesInfo
+	bodiesMutex         sync.Mutex
+	resourcesUsage      ResourcesUsage
+	resourcesUsageMutex sync.Mutex
 }
 
 func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *DiagnosticClient {
@@ -25,6 +27,10 @@ func NewDiagnosticClient(metricsMux *http.ServeMux, dataDirPath string) *Diagnos
 		syncStats:        SyncStatistics{},
 		hardwareInfo:     HardwareInfo{},
 		snapshotFileList: SnapshoFilesList{},
+		bodies:           BodiesInfo{},
+		resourcesUsage: ResourcesUsage{
+			MemoryUsage: []MemoryStats{},
+		},
 	}
 }
 
@@ -35,6 +41,7 @@ func (d *DiagnosticClient) Setup() {
 	d.setupNetworkDiagnostics()
 	d.setupBlockExecutionDiagnostics()
 	d.setupBodiesDiagnostics()
+	d.setupResourcesUsageDiagnostics()
 
 	//d.logDiagMsgs()
 }

@@ -55,7 +55,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "range", fmt.Sprintf("%dk-%dk", blockFrom/1000, blockTo/1000))
-		if err := DumpBorBlocks(ctx, blockFrom, blockTo, chainConfig, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
+		if err := DumpBorBlocks(ctx, blockFrom, blockTo, chainConfig, snapshots.Salt, tmpDir, snapshots.Dir(), db, workers, lvl, logger, blockReader); err != nil {
 			return ok, fmt.Errorf("DumpBorBlocks: %w", err)
 		}
 		if err := snapshots.ReopenFolder(); err != nil {
@@ -67,7 +67,7 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 		}
 	}
 
-	merger := NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
+	merger := NewMerger(snapshots.Salt, tmpDir, workers, lvl, db, chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(), snapshots.BlocksAvailable())
 	if len(rangesToMerge) > 0 {
 		logger.Log(lvl, "[bor snapshots] Retire Bor Blocks", "rangesToMerge", Ranges(rangesToMerge))
@@ -100,9 +100,9 @@ func (br *BlockRetire) retireBorBlocks(ctx context.Context, minBlockNum uint64, 
 	return ok, nil
 }
 
-func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *chain.Config, salt uint32, tmpDir, snapDir string, chainDB kv.RoDB, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, chainConfig) {
-		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), tmpDir, snapDir, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
+		if err := dumpBorBlocksRange(ctx, i, chooseSegmentEnd(i, blockTo, chainConfig), salt, tmpDir, snapDir, chainDB, chainConfig, workers, lvl, logger, blockReader); err != nil {
 			return err
 		}
 	}
@@ -110,14 +110,14 @@ func DumpBorBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *
 	return nil
 }
 
-func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
+func dumpBorBlocksRange(ctx context.Context, blockFrom, blockTo uint64, salt uint32, tmpDir, snapDir string, chainDB kv.RoDB, chainConfig *chain.Config, workers int, lvl log.Lvl, logger log.Logger, blockReader services.FullBlockReader) error {
 
-	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err := dumpRange(ctx, snaptype.BorEvents.FileInfo(snapDir, blockFrom, blockTo), salt,
 		DumpBorEvents, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
 
-	if _, err := dumpRange(ctx, snaptype.BorSpans.FileInfo(snapDir, blockFrom, blockTo),
+	if _, err := dumpRange(ctx, snaptype.BorSpans.FileInfo(snapDir, blockFrom, blockTo), salt,
 		DumpBorSpans, nil, chainDB, chainConfig, tmpDir, workers, lvl, logger); err != nil {
 		return err
 	}
@@ -248,7 +248,7 @@ func DumpBorSpans(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, bl
 	return spanTo, nil
 }
 
-func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
@@ -291,6 +291,7 @@ func BorEventsIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *b
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), snaptype.IdxFileName(sn.Version, sn.From, sn.To, snaptype.BorEvents.String())),
 		BaseDataID: baseEventId,
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return err
@@ -333,7 +334,7 @@ RETRY:
 	return nil
 }
 
-func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
@@ -356,6 +357,7 @@ func BorSpansIdx(ctx context.Context, sn snaptype.FileInfo, tmpDir string, p *ba
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 		BaseDataID: uint64(baseSpanId),
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return err
