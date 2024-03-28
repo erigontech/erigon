@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
@@ -35,24 +34,21 @@ type Fetcher interface {
 
 func NewFetcher(
 	config FetcherConfig,
-	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) Fetcher {
-	return newFetcher(config, logger, messageListener, messageSender, requestIdGenerator)
+	return newFetcher(config, messageListener, messageSender, requestIdGenerator)
 }
 
 func newFetcher(
 	config FetcherConfig,
-	logger log.Logger,
 	messageListener MessageListener,
 	messageSender MessageSender,
 	requestIdGenerator RequestIdGenerator,
 ) *fetcher {
 	return &fetcher{
 		config:             config,
-		logger:             logger,
 		messageListener:    messageListener,
 		messageSender:      messageSender,
 		requestIdGenerator: requestIdGenerator,
@@ -61,7 +57,6 @@ func newFetcher(
 
 type fetcher struct {
 	config             FetcherConfig
-	logger             log.Logger
 	messageListener    MessageListener
 	messageSender      MessageSender
 	requestIdGenerator RequestIdGenerator

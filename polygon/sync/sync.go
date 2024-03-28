@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -10,6 +11,10 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
+
+func syncLogPrefix(message string) string {
+	return fmt.Sprintf("[sync] %s", message)
+}
 
 type Sync struct {
 	storage          Storage
@@ -79,7 +84,7 @@ func (s *Sync) onMilestoneEvent(
 	}
 
 	s.logger.Debug(
-		"sync.Sync.onMilestoneEvent: local chain tip does not match the milestone, unwinding to the previous verified milestone",
+		syncLogPrefix("onMilestoneEvent: local chain tip does not match the milestone, unwinding to the previous verified milestone"),
 		"err", err,
 	)
 
@@ -128,19 +133,25 @@ func (s *Sync) onNewBlockEvent(
 		newBlocks, err = s.p2pService.FetchBlocks(ctx, rootNum, newBlockHeaderNum+1, event.PeerId)
 		if err != nil {
 			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) || errors.Is(err, p2p.ErrEmptyBody) {
-				s.logger.Debug("sync.Sync.onNewBlockEvent: failed to fetch complete blocks, ignoring event",
-					"err", err, "peerId", event.PeerId, "lastBlockNum", newBlockHeaderNum)
+				s.logger.Debug(
+					syncLogPrefix("onNewBlockEvent: failed to fetch complete blocks, ignoring event"),
+					"err", err,
+					"peerId", event.PeerId,
+					"lastBlockNum", newBlockHeaderNum,
+				)
+
 				return nil
 			}
+
 			return err
 		}
 	}
 
 	if err := s.blocksVerifier(newBlocks); err != nil {
-		s.logger.Debug("sync.Sync.onNewBlockEvent: invalid new block event from peer, penalizing and ignoring", "err", err)
+		s.logger.Debug(syncLogPrefix("onNewBlockEvent: invalid new block event from peer, penalizing and ignoring"), "err", err)
 
 		if err = s.p2pService.Penalize(ctx, event.PeerId); err != nil {
-			s.logger.Debug("sync.Sync.onNewBlockEvent: issue with penalizing peer", "err", err)
+			s.logger.Debug(syncLogPrefix("onNewBlockEvent: issue with penalizing peer"), "err", err)
 		}
 
 		return nil
@@ -153,11 +164,11 @@ func (s *Sync) onNewBlockEvent(
 
 	oldTip := ccBuilder.Tip()
 	if err = ccBuilder.Connect(newHeaders); err != nil {
-		s.logger.Debug("sync.Sync.onNewBlockEvent: couldn't connect a header to the local chain tip, ignoring", "err", err)
+		s.logger.Debug(syncLogPrefix("onNewBlockEvent: couldn't connect a header to the local chain tip, ignoring"), "err", err)
 		return nil
 	}
-	newTip := ccBuilder.Tip()
 
+	newTip := ccBuilder.Tip()
 	if newTip != oldTip {
 		if err = s.execution.InsertBlocks(ctx, newBlocks); err != nil {
 			return err
@@ -184,10 +195,16 @@ func (s *Sync) onNewBlockHashesEvent(
 		newBlocks, err := s.p2pService.FetchBlocks(ctx, headerHashNum.Number, headerHashNum.Number+1, event.PeerId)
 		if err != nil {
 			if (p2p.ErrIncompleteHeaders{}).Is(err) || (p2p.ErrMissingBodies{}).Is(err) || errors.Is(err, p2p.ErrEmptyBody) {
-				s.logger.Debug("sync.Sync.onNewBlockHashesEvent: failed to fetch complete blocks, ignoring event",
-					"err", err, "peerId", event.PeerId, "lastBlockNum", headerHashNum.Number)
+				s.logger.Debug(
+					syncLogPrefix("onNewBlockHashesEvent: failed to fetch complete blocks, ignoring event"),
+					"err", err,
+					"peerId", event.PeerId,
+					"lastBlockNum", headerHashNum.Number,
+				)
+
 				continue
 			}
+
 			return err
 		}
 
@@ -209,7 +226,7 @@ func (s *Sync) onNewBlockHashesEvent(
 //
 
 func (s *Sync) Run(ctx context.Context) error {
-	s.logger.Info("running sync component")
+	s.logger.Info(syncLogPrefix("running sync component"))
 
 	tip, err := s.execution.CurrentHeader(ctx)
 	if err != nil {

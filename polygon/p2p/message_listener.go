@@ -34,6 +34,10 @@ type MessageListener interface {
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
+func messageListenerLogPrefix(message string) string {
+	return fmt.Sprintf("[p2p.message.listener] %s", message)
+}
+
 func NewMessageListener(
 	logger log.Logger,
 	sentryClient direct.SentryClient,
@@ -79,7 +83,7 @@ type messageListener struct {
 }
 
 func (ml *messageListener) Run(ctx context.Context) {
-	ml.logger.Info("running p2p message listener component")
+	ml.logger.Info(messageListenerLogPrefix("running p2p message listener component"))
 
 	backgroundLoops := []func(ctx context.Context){
 		ml.listenInboundMessages,
@@ -240,7 +244,7 @@ func notifyInboundMessageObservers[TPacket any](
 	var decodedData TPacket
 	if err := rlp.DecodeBytes(message.Data, &decodedData); err != nil {
 		if rlp.IsInvalidRLPError(err) {
-			logger.Debug("penalizing peer - invalid rlp", "peerId", peerId, "err", err)
+			logger.Debug(messageListenerLogPrefix("penalizing peer - invalid rlp"), "peerId", peerId, "err", err)
 
 			if penalizeErr := peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 				err = fmt.Errorf("%w: %w", penalizeErr, err)

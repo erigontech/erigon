@@ -56,7 +56,11 @@ func (pf *penalizingFetcher) maybePenalize(ctx context.Context, peerId *PeerId, 
 	}
 
 	if shouldPenalize {
-		pf.logger.Debug("penalizing peer - penalize-able fetcher issue", "peerId", peerId, "err", err)
+		pf.logger.Debug(
+			"[p2p.penalizing.fetcher] penalizing peer - penalize-able fetcher issue",
+			"peerId", peerId,
+			"err", err,
+		)
 
 		if penalizeErr := pf.peerPenalizer.Penalize(ctx, peerId); penalizeErr != nil {
 			err = fmt.Errorf("%w: %w", penalizeErr, err)

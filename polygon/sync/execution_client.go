@@ -3,7 +3,7 @@ package sync
 import (
 	"context"
 
-	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
+	executionclient "github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/core/types"
 )
 
@@ -14,10 +14,10 @@ type ExecutionClient interface {
 }
 
 type executionClient struct {
-	engine execution_client.ExecutionEngine
+	engine executionclient.ExecutionEngine
 }
 
-func NewExecutionClient(engine execution_client.ExecutionEngine) ExecutionClient {
+func NewExecutionClient(engine executionclient.ExecutionEngine) ExecutionClient {
 	return &executionClient{engine}
 }
 

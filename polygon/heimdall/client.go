@@ -139,7 +139,7 @@ func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to tim
 			if errors.Is(err, ErrNoResponse) {
 				// for more info check https://github.com/maticnetwork/heimdall/pull/993
 				c.logger.Warn(
-					"[bor.heimdall] check heimdall logs to see if it is in sync - no response when querying state sync events",
+					heimdallLogPrefix("check heimdall logs to see if it is in sync - no response when querying state sync events"),
 					"path", url.Path,
 					"queryParams", url.RawQuery,
 				)
@@ -372,7 +372,7 @@ func FetchWithRetryEx[T any](
 		// yet in heimdall. E.g. when the hard fork hasn't hit yet but heimdall
 		// is upgraded.
 		if errors.Is(err, ErrServiceUnavailable) {
-			client.logger.Debug("[bor.heimdall] service unavailable at the moment", "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
+			client.logger.Debug(heimdallLogPrefix("service unavailable at the moment"), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
 			return nil, err
 		}
 
@@ -380,14 +380,14 @@ func FetchWithRetryEx[T any](
 			return nil, err
 		}
 
-		client.logger.Warn("[bor.heimdall] an error while fetching", "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
+		client.logger.Warn(heimdallLogPrefix("an error while fetching"), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt, "err", err)
 
 		select {
 		case <-ctx.Done():
-			client.logger.Debug("[bor.heimdall] request canceled", "reason", ctx.Err(), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt)
+			client.logger.Debug(heimdallLogPrefix("request canceled"), "reason", ctx.Err(), "path", url.Path, "queryParams", url.RawQuery, "attempt", attempt)
 			return nil, ctx.Err()
 		case <-client.closeCh:
-			client.logger.Debug("[bor.heimdall] shutdown detected, terminating request", "path", url.Path, "queryParams", url.RawQuery)
+			client.logger.Debug(heimdallLogPrefix("shutdown detected, terminating request"), "path", url.Path, "queryParams", url.RawQuery)
 			return nil, ErrShutdownDetected
 		case <-ticker.C:
 			// retry
@@ -499,7 +499,7 @@ func internalFetch(ctx context.Context, client HttpClient, u *url.URL, logger lo
 		return nil, err
 	}
 
-	logger.Debug("[bor.heimdall] http client get request", "uri", u.RequestURI())
+	logger.Debug(heimdallLogPrefix("http client get request"), "uri", u.RequestURI())
 
 	res, err := client.Do(req)
 	if err != nil {
