@@ -64,7 +64,7 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 			var e1 rawdbv3.ErrTxNumsAppendWithGap
 			if ok := errors.As(err, &e1); ok {
 				// try again starting from latest available  block
-				return rawdb.AppendCanonicalTxNums(tx, e1.LastBlock())
+				return rawdb.AppendCanonicalTxNums(tx, e1.LastBlock()+1)
 			}
 			return err
 		}
