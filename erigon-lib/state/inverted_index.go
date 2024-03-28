@@ -589,8 +589,8 @@ func (ic *InvertedIndexContext) newWriter(tmpdir string, discard bool) *inverted
 	}
 	w.indexKeys.LogLvl(log.LvlTrace)
 	w.index.LogLvl(log.LvlTrace)
-	w.indexKeys.Ba(log.LvlTrace)
-	w.index.LogLvl(log.LvlTrace)
+	w.indexKeys.SortAndFlushInBackground(true)
+	w.index.SortAndFlushInBackground(true)
 	return w
 }
 

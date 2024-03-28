@@ -741,6 +741,8 @@ func (dc *DomainContext) newWriter(tmpdir string, discard bool) *domainBufferedW
 	}
 	w.keys.LogLvl(log.LvlTrace)
 	w.values.LogLvl(log.LvlTrace)
+	w.keys.SortAndFlushInBackground(true)
+	w.values.SortAndFlushInBackground(true)
 	return w
 }
 
