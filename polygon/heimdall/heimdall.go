@@ -3,7 +3,6 @@ package heimdall
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/ledgerwatch/log/v3"
@@ -37,10 +36,6 @@ type Heimdall interface {
 var ErrIncompleteMilestoneRange = errors.New("milestone range doesn't contain the start block")
 var ErrIncompleteCheckpointRange = errors.New("checkpoint range doesn't contain the start block")
 var ErrIncompleteSpanRange = errors.New("span range doesn't contain the start block")
-
-func heimdallLogPrefix(message string) string {
-	return fmt.Sprintf("[bor.heimdall] %s", message)
-}
 
 type heimdall struct {
 	client    HeimdallClient

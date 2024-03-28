@@ -3,7 +3,6 @@ package sync
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/ledgerwatch/log/v3"
 
@@ -11,10 +10,6 @@ import (
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/polygon/p2p"
 )
-
-func syncLogPrefix(message string) string {
-	return fmt.Sprintf("[sync] %s", message)
-}
 
 type Sync struct {
 	storage          Storage

@@ -34,10 +34,6 @@ type MessageListener interface {
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
-func messageListenerLogPrefix(message string) string {
-	return fmt.Sprintf("[p2p.message.listener] %s", message)
-}
-
 func NewMessageListener(
 	logger log.Logger,
 	sentryClient direct.SentryClient,
@@ -267,4 +263,8 @@ func notifyObservers[TMessage any](observers map[uint64]MessageObserver[TMessage
 	for _, observer := range observers {
 		go observer(message)
 	}
+}
+
+func messageListenerLogPrefix(message string) string {
+	return fmt.Sprintf("[p2p.message.listener] %s", message)
 }
