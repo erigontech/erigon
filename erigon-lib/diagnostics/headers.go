@@ -2,7 +2,6 @@ package diagnostics
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/log/v3"
 )
@@ -52,7 +51,7 @@ func (d *DiagnosticClient) runWriteHeadersListener(rootCtx context.Context) {
 				cancel()
 				return
 			case info := <-ch:
-				d.headerMutex.Lock()s
+				d.headerMutex.Lock()
 				d.headers.WriteHeaders = info
 				d.headerMutex.Unlock()
 
