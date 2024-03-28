@@ -205,8 +205,9 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 
 			log.Debug("Received blob sidecar via gossip", "index", *data.SubnetId, "size", datasize.ByteSize(len(blobSideCar.Blob)))
 		case gossip.IsTopicSyncCommittee(data.Name):
-			// actually do correct handling, will keep the println for now...
-			fmt.Println("AAA")
+			if err := operationsContract[*cltypes.SyncCommitteeMessage](ctx, g, l, data, int(version), "sync committee message", g.forkChoice.OnSyncCommitteeMessage); err != nil {
+				return err
+			}
 		default:
 		}
 	}

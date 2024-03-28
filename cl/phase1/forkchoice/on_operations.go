@@ -216,3 +216,7 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedChange *cltypes.Sig
 	f.emitters.Publish("contribution_and_proof", signedChange)
 	return nil
 }
+
+func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, test bool) error {
+	return nil // TODO(Giulio2002): implement this
+}
