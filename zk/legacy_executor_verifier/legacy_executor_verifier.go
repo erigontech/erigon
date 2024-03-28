@@ -46,11 +46,11 @@ type WitnessGenerator interface {
 }
 
 type LegacyExecutorVerifier struct {
-	db            kv.RwDB
-	cfg           ethconfig.Zk
-	executors     []ILegacyExecutor
-	executorLocks []*sync.Mutex
-	available     *sync.Cond
+	db                 kv.RwDB
+	cfg                ethconfig.Zk
+	executors          []ILegacyExecutor
+	executorNumberLock *sync.Mutex
+	executorNumber     int
 
 	requestChan   chan *VerifierRequest
 	responseChan  chan *VerifierResponse
@@ -79,21 +79,20 @@ func NewLegacyExecutorVerifier(
 
 	streamServer := server.NewDataStreamServer(nil, chainCfg.ChainID.Uint64(), server.ExecutorOperationMode)
 
-	availableLock := sync.Mutex{}
 	verifier := &LegacyExecutorVerifier{
-		cfg:              cfg,
-		executors:        executors,
-		db:               db,
-		executorLocks:    executorLocks,
-		available:        sync.NewCond(&availableLock),
-		requestChan:      make(chan *VerifierRequest, maximumInflightRequests),
-		responseChan:     make(chan *VerifierResponse, maximumInflightRequests),
-		responses:        make([]*VerifierResponse, 0),
-		responseMutex:    &sync.Mutex{},
-		quit:             make(chan struct{}),
-		streamServer:     streamServer,
-		witnessGenerator: witnessGenerator,
-		l1Syncer:         l1Syncer,
+		cfg:                cfg,
+		executors:          executors,
+		db:                 db,
+		executorNumberLock: &sync.Mutex{},
+		executorNumber:     0,
+		requestChan:        make(chan *VerifierRequest, maximumInflightRequests),
+		responseChan:       make(chan *VerifierResponse, maximumInflightRequests),
+		responses:          make([]*VerifierResponse, 0),
+		responseMutex:      &sync.Mutex{},
+		quit:               make(chan struct{}),
+		streamServer:       streamServer,
+		witnessGenerator:   witnessGenerator,
+		l1Syncer:           l1Syncer,
 	}
 
 	return verifier
@@ -139,8 +138,13 @@ func (v *LegacyExecutorVerifier) handleRequest(ctx context.Context, request *Ver
 		return nil
 	}
 
-	// todo [zkevm] for now just using one executor but we need to use more
-	execer := v.executors[0]
+	v.executorNumberLock.Lock()
+	v.executorNumber++
+	if v.executorNumber >= len(v.executors) {
+		v.executorNumber = 0
+	}
+	v.executorNumberLock.Unlock()
+	execer := v.executors[v.executorNumber]
 
 	// mapmutation has some issue with us not having a quit channel on the context call to `Done` so
 	// here we're creating a cancelable context and just deferring the cancel
