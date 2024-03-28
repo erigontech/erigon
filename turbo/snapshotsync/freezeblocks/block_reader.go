@@ -1253,7 +1253,7 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	return result, nil
 }
 
-func (r *BlockReader) EventsById(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
+func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) []*heimdall.EventRecordWithTime {
 	view := r.borSn.View()
 	defer view.Close()
 
@@ -1297,7 +1297,7 @@ func (r *BlockReader) EventsById(from uint64, to time.Time, limit int) ([]*heimd
 	}
 
 BREAK:
-	return result, nil
+	return result
 }
 
 func (r *BlockReader) LastEventId(_ context.Context, tx kv.Tx) (uint64, bool, error) {

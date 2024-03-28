@@ -105,8 +105,8 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	events, err := h.getEvents(h.ctx, fromId, to, limit)
-	return events, err
+	events := h.getEvents(h.ctx, fromId, to, limit)
+	return events, nil
 }
 
 func (h *HeimdallSimulator) FetchCheckpoint(ctx context.Context, number int64) (*heimdall.Checkpoint, error) {
@@ -214,25 +214,25 @@ func continueLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit in
 	return last.Time.Before(to)
 }
 
-func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	events, err := h.blockReader.EventsById(fromId, to, limit)
+func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to time.Time, limit int) []*heimdall.EventRecordWithTime {
+	events := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
 
 	view := h.knownBorSnapshots.View()
 	defer view.Close()
 
-	for continueLoop(events, to, limit) && err == nil {
+	for continueLoop(events, to, limit) {
 		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
 			if err := h.downloadData(ctx, seg, snaptype.BorEvents, freezeblocks.BorEventsIdx); err != nil {
-				return nil, err
+				return nil
 			}
 		}
 		h.lastDownloadedBlockNumber += 500000
 
-		events, err = h.blockReader.EventsById(fromId, to, limit)
+		events = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
 	}
 
 	if len(events) == limit {
-		return events, err
+		return events
 	}
-	return events[:len(events)-1], err
+	return events[:len(events)-1]
 }
