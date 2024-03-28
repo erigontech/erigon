@@ -55,6 +55,12 @@ type ForkNode struct {
 	ExecutionBlock libcommon.Hash `json:"execution_block_hash"`
 }
 
+type seenSyncCommitteeMessage struct {
+	subnet         uint64
+	slot           uint64
+	validatorIndex uint64
+}
+
 type checkpointComparable string
 
 const (
@@ -128,6 +134,9 @@ type ForkChoiceStore struct {
 	participation *lru.Cache[uint64, *solid.BitList] // epoch -> [partecipation]
 
 	mu sync.RWMutex
+	// sync committees messages processing
+	seenSyncCommitteeMessages map[seenSyncCommitteeMessage]struct{}
+	muSyncCommitteeMessages   sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
 
@@ -223,29 +232,30 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 	headSet := make(map[libcommon.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		forkGraph:             forkGraph,
-		equivocatingIndicies:  make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:        make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		eth2Roots:             eth2Roots,
-		engine:                engine,
-		operationsPool:        operationsPool,
-		anchorPublicKeys:      anchorPublicKeys,
-		beaconCfg:             anchorState.BeaconConfig(),
-		preverifiedSizes:      preverifiedSizes,
-		finalityCheckpoints:   finalityCheckpoints,
-		totalActiveBalances:   totalActiveBalances,
-		randaoMixesLists:      randaoMixesLists,
-		randaoDeltas:          randaoDeltas,
-		headSet:               headSet,
-		weights:               make(map[libcommon.Hash]uint64),
-		participation:         participation,
-		emitters:              emitters,
-		genesisTime:           anchorState.GenesisTime(),
-		syncedDataManager:     syncedDataManager,
-		nextBlockProposers:    nextBlockProposers,
-		genesisValidatorsRoot: anchorState.GenesisValidatorsRoot(),
-		hotSidecars:           make(map[libcommon.Hash][]*cltypes.BlobSidecar),
-		blobStorage:           blobStorage,
+		forkGraph:                 forkGraph,
+		equivocatingIndicies:      make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:            make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		eth2Roots:                 eth2Roots,
+		engine:                    engine,
+		operationsPool:            operationsPool,
+		anchorPublicKeys:          anchorPublicKeys,
+		beaconCfg:                 anchorState.BeaconConfig(),
+		preverifiedSizes:          preverifiedSizes,
+		finalityCheckpoints:       finalityCheckpoints,
+		totalActiveBalances:       totalActiveBalances,
+		randaoMixesLists:          randaoMixesLists,
+		randaoDeltas:              randaoDeltas,
+		headSet:                   headSet,
+		weights:                   make(map[libcommon.Hash]uint64),
+		participation:             participation,
+		emitters:                  emitters,
+		genesisTime:               anchorState.GenesisTime(),
+		syncedDataManager:         syncedDataManager,
+		nextBlockProposers:        nextBlockProposers,
+		genesisValidatorsRoot:     anchorState.GenesisValidatorsRoot(),
+		hotSidecars:               make(map[libcommon.Hash][]*cltypes.BlobSidecar),
+		blobStorage:               blobStorage,
+		seenSyncCommitteeMessages: make(map[seenSyncCommitteeMessage]struct{}),
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())

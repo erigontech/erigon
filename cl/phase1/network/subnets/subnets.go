@@ -1,4 +1,4 @@
-package network
+package subnets
 
 import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
@@ -23,7 +23,7 @@ import (
 
 // ComputeSubnetsForSyncCommittee is used by the ValidatorClient to determine which subnets a validator should be subscribed to for sync committees.
 // the function takes an extra syncCommitteeIndicies parameter to adapt to the Beacon API specs.
-func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, syncCommitteeIndicies []uint64, validatorIndex uint64) (subnets []uint64, err error) {
+func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, validatorIndex uint64) (subnets []uint64, err error) {
 	cfg := s.BeaconConfig()
 	var syncCommittee *solid.SyncCommittee
 	if cfg.SyncCommitteePeriod(s.Slot()) == cfg.SyncCommitteePeriod(s.Slot()+1) {
@@ -41,7 +41,7 @@ func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, syncCommitteeIn
 	alreadySeenSubnetIndex := make(map[uint64]struct{})
 
 	committee := syncCommittee.GetCommittee()
-	for _, index := range syncCommitteeIndicies {
+	for index := uint64(0); index < uint64(len(committee)); index++ {
 		subnetIdx := uint64(index) / cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
 		if _, ok := alreadySeenSubnetIndex[subnetIdx]; ok {
 			continue
