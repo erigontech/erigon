@@ -52,3 +52,8 @@ type StateSyncEventsResponse struct {
 	Height string                 `json:"height"`
 	Result []*EventRecordWithTime `json:"result"`
 }
+
+type StateSyncEventResponse struct {
+	Height string              `json:"height"`
+	Result EventRecordWithTime `json:"result"`
+}

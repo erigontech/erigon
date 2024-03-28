@@ -56,6 +56,10 @@ func (h test_heimdall) FetchStateSyncEvents(ctx context.Context, fromID uint64, 
 	return nil, nil
 }
 
+func (h *test_heimdall) FetchStateSyncEvent(ctx context.Context, id uint64) (*heimdall.EventRecordWithTime, error) {
+	return nil, nil
+}
+
 func (h *test_heimdall) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
 
 	if span, ok := h.spans[heimdall.SpanId(spanID)]; ok {

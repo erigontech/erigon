@@ -154,9 +154,15 @@ func fetchAndWriteHeimdallCheckpointsIfNeeded(
 	logTimer := time.NewTicker(logInterval)
 	defer logTimer.Stop()
 
+	count, err := cfg.heimdallClient.FetchCheckpointCount(ctx)
+
+	if err != nil {
+		return 0, err
+	}
+
 	var lastBlockNum uint64
 
-	for checkpointId := lastId + 1; lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() < toBlockNum; checkpointId++ {
+	for checkpointId := lastId + 1; checkpointId <= uint64(count) && (lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() < toBlockNum); checkpointId++ {
 		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, checkpointId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
 			return 0, err
 		}
@@ -282,13 +288,9 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 		lastId = lastActive - 1
 	}
 
-	for milestoneId := lastId + 1; lastMilestone == nil || lastMilestone.EndBlock().Uint64() < toBlockNum; milestoneId++ {
+	for milestoneId := lastId + 1; lastId <= uint64(count) && (lastMilestone == nil || lastMilestone.EndBlock().Uint64() < toBlockNum); milestoneId++ {
 		if _, lastMilestone, err = fetchAndWriteHeimdallMilestone(ctx, milestoneId, uint64(count), tx, cfg.heimdallClient, logPrefix, logger); err != nil {
 			return 0, err
-		}
-
-		if lastMilestone == nil && toBlockNum/12 < milestoneId {
-			break
 		}
 
 		lastId = milestoneId
@@ -417,6 +419,7 @@ func fetchAndWriteHeimdallStateSyncEvents(
 	)
 
 	eventRecords, err := heimdallClient.FetchStateSyncEvents(ctx, from, fetchTo, fetchLimit)
+
 	if err != nil {
 		return lastStateSyncEventID, 0, time.Since(fetchStart), err
 	}
