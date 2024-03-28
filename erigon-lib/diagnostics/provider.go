@@ -140,10 +140,10 @@ func startProvider(ctx context.Context, infoType Type, provider Provider, logger
 	}
 }
 
-func Send[I Info](info I) (err error) {
+func Send[I Info](info I) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("diagnostic Send panic recovered: %v, stack: %s", r, dbg.Stack())
+			log.Debug("diagnostic Send panic recovered: %v, stack: %s", r, dbg.Stack())
 		}
 	}()
 
@@ -153,10 +153,10 @@ func Send[I Info](info I) (err error) {
 		if !errors.Is(ctx.Err(), context.Canceled) {
 			// drop the diagnostic message if there is
 			// no active diagnostic context for the type
-			return nil
+			return
 		}
 
-		return ctx.Err()
+		log.Debug("diagnostic Send: context canceled error", ctx.Err())
 	}
 
 	cval := ctx.Value(ckChan)
@@ -171,10 +171,8 @@ func Send[I Info](info I) (err error) {
 			}
 		}
 	} else {
-		return fmt.Errorf("unexpected channel type: %T", cval)
+		log.Debug("unexpected channel type: %T", cval)
 	}
-
-	return nil
 }
 
 func Context[I Info](ctx context.Context, buffer int) (context.Context, <-chan I, context.CancelFunc) {
