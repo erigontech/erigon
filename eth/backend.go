@@ -33,6 +33,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/common/disk"
 	"github.com/ledgerwatch/erigon-lib/common/mem"
 
@@ -41,7 +42,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/exp/slices"
-	"golang.org/x/sys/windows"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -1497,26 +1497,23 @@ func (s *Ethereum) ExecutionModule() *eth1.EthereumExecutionModule {
 }
 
 // RemoveContents is like os.RemoveAll, but preserve dir itself
-func RemoveContents(dir string) error {
-	d, err := os.Open(dir)
+func RemoveContents(dirname string) error {
+	d, err := os.Open(dirname)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			// ignore due to windows
-			_ = os.MkdirAll(dir, 0o755)
+			_ = os.MkdirAll(dirname, 0o755)
 			return nil
 		}
 		return err
 	}
 	defer d.Close()
-	names, err := d.Readdirnames(-1)
+	files, err := dir.ReadDir(dirname)
 	if err != nil {
-		if errors.Is(err, windows.ERROR_NO_MORE_FILES) {
-			return nil
-		}
 		return err
 	}
-	for _, name := range names {
-		err = os.RemoveAll(filepath.Join(dir, name))
+	for _, file := range files {
+		err = os.RemoveAll(filepath.Join(dirname, file.Name()))
 		if err != nil {
 			return err
 		}
