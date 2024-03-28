@@ -139,13 +139,14 @@ func (api *ZkEvmAPIImpl) IsBlockVirtualized(ctx context.Context, blockNumber rpc
 		return false, err
 	}
 
-	latestSequencedBatch, err := getLatestSequencedBatchNo(tx)
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	latestSequencedBatch, err := hermezDb.GetLatestSequence()
 	if err != nil {
 		return false, err
 	}
 
 	// if the batch is lower than the latest sequenced then it must be virtualized
-	return batchNum <= latestSequencedBatch, nil
+	return batchNum <= latestSequencedBatch.BatchNo, nil
 }
 
 // BatchNumberByBlockNumber returns the batch number of the block
@@ -190,14 +191,15 @@ func (api *ZkEvmAPIImpl) VirtualBatchNumber(ctx context.Context) (hexutil.Uint64
 	}
 	defer tx.Rollback()
 
-	latestSequencedBatch, err := getLatestSequencedBatchNo(tx)
+	hermezDb := hermez_db.NewHermezDbReader(tx)
+	latestSequencedBatch, err := hermezDb.GetLatestSequence()
 	if err != nil {
-		return 0, err
+		return hexutil.Uint64(0), err
 	}
 
 	// todo: what if this number is the same as the last verified batch number?  do we return 0?
 
-	return hexutil.Uint64(latestSequencedBatch), nil
+	return hexutil.Uint64(latestSequencedBatch.BatchNo), nil
 }
 
 // VerifiedBatchNumber returns the latest verified batch number
@@ -579,36 +581,6 @@ func getBatchNoByL2Block(tx kv.Tx, l2BlockNo uint64) (uint64, error) {
 	}
 
 	return hermez_db.BytesToUint64(v), nil
-}
-
-func getLatestSequencedBatchNo(tx kv.Tx) (uint64, error) {
-	c, err := tx.Cursor(hermez_db.L1SEQUENCES)
-	if err != nil {
-		return 0, err
-	}
-	defer c.Close()
-
-	var batchNo uint64
-	var k []byte
-	for k, _, err = c.Last(); k != nil; k, _, err = c.Prev() {
-		if err != nil {
-			return 0, err
-		}
-
-		if k == nil {
-			continue
-		}
-
-		_, batch, err := hermez_db.SplitKey(k)
-		if err != nil {
-			return 0, err
-		}
-
-		batchNo = batch
-		break
-	}
-
-	return batchNo, nil
 }
 
 func getGlobalExitRoot(tx kv.Tx, l2Block uint64) (common.Hash, error) {

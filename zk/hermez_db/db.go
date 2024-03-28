@@ -299,25 +299,34 @@ func (db *HermezDbReader) getLatest(table string) (*types.L1BatchInfo, error) {
 	}
 	defer c.Close()
 
-	k, v, err := c.Last()
-	if err != nil {
-		return nil, err
+	var l1BlockNo, batchNo uint64
+	var value []byte
+	for k, v, err := c.First(); k != nil; k, v, err = c.Next() {
+		if err != nil {
+			return nil, err
+		}
+
+		tmpL1BlockNo, tmpBatchNo, err := SplitKey(k)
+		if err != nil {
+			return nil, err
+		}
+
+		if tmpBatchNo > batchNo {
+			l1BlockNo = tmpL1BlockNo
+			batchNo = tmpBatchNo
+			value = v
+		}
 	}
 
-	l1BlockNo, batchNo, err := SplitKey(k)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(v) != 96 && len(v) != 64 {
+	if len(value) != 96 && len(value) != 64 {
 		return nil, fmt.Errorf("invalid hash length")
 	}
 
-	l1TxHash := common.BytesToHash(v[:32])
-	stateRoot := common.BytesToHash(v[32:64])
+	l1TxHash := common.BytesToHash(value[:32])
+	stateRoot := common.BytesToHash(value[32:64])
 	var l1InfoRoot common.Hash
-	if len(v) > 64 {
-		l1InfoRoot = common.BytesToHash(v[64:])
+	if len(value) > 64 {
+		l1InfoRoot = common.BytesToHash(value[64:])
 	}
 
 	return &types.L1BatchInfo{
