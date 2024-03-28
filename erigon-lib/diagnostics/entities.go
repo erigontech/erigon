@@ -16,6 +16,8 @@
 
 package diagnostics
 
+import "time"
+
 type PeerStatisticsGetter interface {
 	GetPeersStatistics() map[string]*PeerStatistics
 }
@@ -201,6 +203,22 @@ type BodiesProcessedUpdate struct {
 type BodiesProcessingUpdate struct {
 	From uint64 `json:"from"`
 	To   uint64 `json:"to"`
+}
+
+type ResourcesUsage struct {
+	MemoryUsage []MemoryStats `json:"memoryUsage"`
+}
+
+type MemoryStats struct {
+	Alloc       uint64 `json:"alloc"`
+	Sys         uint64 `json:"sys"`
+	OtherFields []interface{}
+	Timestamp   time.Time `json:"timestamp"`
+	StageIndex  int       `json:"stageIndex"`
+}
+
+func (ti MemoryStats) Type() Type {
+	return TypeOf(ti)
 }
 
 func (ti BodiesProcessingUpdate) Type() Type {
