@@ -386,19 +386,11 @@ func TestHistoryCanPrune(t *testing.T) {
 
 			cp, untilTx := hc.canPruneUntil(rwTx, (i+1)*h.aggregationStep)
 			require.GreaterOrEqual(t, h.aggregationStep*(stepsTotal-stepKeepInDB), untilTx) // we can prune until the last step
-			if i >= stepsTotal-stepKeepInDB {
-				require.Falsef(t, cp, "step %d should be NOT prunable", i)
-			} else {
-				require.Truef(t, cp, "step %d should be prunable", i)
-			}
+			require.Falsef(t, cp, "step %d should be NOT prunable, no history written => nothing to prune", i)
 			stat, err := hc.Prune(context.Background(), rwTx, i*h.aggregationStep, (i+1)*h.aggregationStep, math.MaxUint64, false, false, logEvery)
 			require.NoError(t, err)
-			if i >= stepsTotal-stepKeepInDB {
-				require.Falsef(t, cp, "step %d should be NOT prunable", i)
-			} else {
-				require.NotNilf(t, stat, "step %d should be pruned and prune stat available", i)
-				require.Truef(t, cp, "step %d should be pruned", i)
-			}
+			require.Falsef(t, cp, "step %d should be NOT prunable, no history written => nothing to prune", i)
+			require.Nilf(t, stat, "step %d should be NOT pruned, stat should be nil", i)
 		}
 	})
 }
