@@ -74,10 +74,13 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.S
 	return s.makeStatusData(chainHead), err
 }
 
+var ErrNoChainHead = errors.New("ReadChainHead: ReadCurrentHeader error")
+
 func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeader(tx)
+
 	if header == nil {
-		return ChainHead{}, errors.New("ReadChainHead: ReadCurrentHeader error")
+		return ChainHead{}, ErrNoChainHead
 	}
 
 	height := header.Number.Uint64()
