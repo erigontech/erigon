@@ -1,4 +1,4 @@
-package simulator
+package simulator_torrent
 
 import (
 	"context"
@@ -12,6 +12,10 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
+	"github.com/ledgerwatch/erigon/cmd/utils"
+	"github.com/ledgerwatch/erigon/p2p/nat"
+	"github.com/ledgerwatch/erigon/params"
 	"github.com/ledgerwatch/log/v3"
 	"golang.org/x/sync/errgroup"
 
@@ -21,10 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader"
 	"github.com/ledgerwatch/erigon-lib/downloader/downloadercfg"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
-	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
-	"github.com/ledgerwatch/erigon/cmd/utils"
-	"github.com/ledgerwatch/erigon/p2p/nat"
-	"github.com/ledgerwatch/erigon/params"
 )
 
 // The code in this file is taken from cmd/snapshots - which is yet to be merged
@@ -32,7 +32,7 @@ import (
 
 type TorrentClient struct {
 	*torrent.Client
-	cfg   *torrent.ClientConfig
+	Cfg   *torrent.ClientConfig
 	items map[string]snapcfg.PreverifiedItem
 }
 
@@ -120,7 +120,7 @@ func NewTorrentClient(ctx context.Context, chain string, torrentDir string, logg
 }
 
 func (s *TorrentClient) LocalFsRoot() string {
-	return s.cfg.DataDir
+	return s.Cfg.DataDir
 }
 
 func (s *TorrentClient) Download(ctx context.Context, files ...string) error {

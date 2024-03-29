@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
+	"github.com/ledgerwatch/erigon-lib/downloader/simulator_torrent"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces"
 	sentry_if "github.com/ledgerwatch/erigon-lib/gointerfaces/sentry"
@@ -35,7 +36,7 @@ type server struct {
 	knownSnapshots   *freezeblocks.RoSnapshots
 	activeSnapshots  *freezeblocks.RoSnapshots
 	blockReader      *freezeblocks.BlockReader
-	downloader       *TorrentClient
+	downloader       *simulator_torrent.TorrentClient
 }
 
 func newPeer(name string, caps []p2p.Cap) (*p2p.Peer, error) {
@@ -87,7 +88,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 		return nil, err
 	}
 
-	downloader, err := NewTorrentClient(ctx, chain, snapshotLocation, logger)
+	downloader, err := simulator_torrent.NewTorrentClient(ctx, chain, snapshotLocation, logger)
 
 	if err != nil {
 		return nil, err
@@ -114,7 +115,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 
 func (s *server) Close() {
 	s.downloader.Close()
-	if closer, ok := s.downloader.cfg.DefaultStorage.(interface{ Close() error }); ok {
+	if closer, ok := s.downloader.Cfg.DefaultStorage.(interface{ Close() error }); ok {
 		closer.Close()
 	}
 	s.activeSnapshots.Close()

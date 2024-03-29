@@ -13,6 +13,7 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/background"
+	"github.com/ledgerwatch/erigon-lib/downloader/simulator_torrent"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
@@ -25,7 +26,7 @@ type HeimdallSimulator struct {
 	activeBorSnapshots *freezeblocks.BorRoSnapshots
 	blockReader        *freezeblocks.BlockReader
 	logger             log.Logger
-	downloader         *TorrentClient
+	downloader         *simulator_torrent.TorrentClient
 
 	lastDownloadedBlockNumber uint64
 }
@@ -54,7 +55,7 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		return HeimdallSimulator{}, err
 	}
 
-	downloader, err := NewTorrentClient(ctx, chain, snapshotLocation, logger)
+	downloader, err := simulator_torrent.NewTorrentClient(ctx, chain, snapshotLocation, logger)
 	if err != nil {
 		return HeimdallSimulator{}, err
 	}
