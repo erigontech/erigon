@@ -446,6 +446,8 @@ func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessa
 		slot:           msg.Slot,
 		validatorIndex: msg.ValidatorIndex,
 	}
+	fmt.Println(subnets)
+	fmt.Println(msg.ValidatorIndex)
 	if !slices.Contains(subnets, subnetID) {
 		return fmt.Errorf("validator is not into any subnet %d", subnetID)
 	}
