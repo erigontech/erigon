@@ -2,15 +2,20 @@ package snaptype
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/rand"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
 	"github.com/ledgerwatch/erigon-lib/common/background"
 	"github.com/ledgerwatch/erigon-lib/common/dbg"
+	"github.com/ledgerwatch/erigon-lib/common/dir"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon-lib/recsplit"
 	"github.com/ledgerwatch/erigon-lib/seg"
@@ -59,13 +64,52 @@ func (f RangeExtractorFunc) Extract(ctx context.Context, blockFrom, blockTo uint
 }
 
 type IndexBuilder interface {
-	Build(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
+	Build(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
 }
 
-type IndexBuilderFunc func(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
+type IndexBuilderFunc func(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error
 
-func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	return f(ctx, info, chainConfig, tmpDir, p, lvl, logger)
+func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return f(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
+}
+
+var saltMap = map[string]uint32{}
+var saltLock sync.RWMutex
+
+// GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
+// if db is Read-Only (for example remote RPCDaemon or utilities) - we will not create new indices -
+// and existing indices have salt in metadata.
+func GetIndexSalt(baseDir string) (uint32, error) {
+	saltLock.RLock()
+	salt, ok := saltMap[baseDir]
+	saltLock.RUnlock()
+
+	if ok {
+		return salt, nil
+	}
+
+	fpath := filepath.Join(baseDir, "salt-blocks.txt")
+	if !dir.FileExist(fpath) {
+		dir.MustExist(baseDir)
+
+		saltBytes := make([]byte, 4)
+		binary.BigEndian.PutUint32(saltBytes, rand.Uint32())
+		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
+			return 0, err
+		}
+	}
+	saltBytes, err := os.ReadFile(fpath)
+	if err != nil {
+		return 0, err
+	}
+
+	salt = binary.BigEndian.Uint32(saltBytes)
+
+	saltLock.Lock()
+	saltMap[baseDir] = salt
+	saltLock.Unlock()
+
+	return salt, nil
 }
 
 type Index int
@@ -223,7 +267,13 @@ func (s snapType) Indexes() []Index {
 }
 
 func (s snapType) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	return s.indexBuilder.Build(ctx, info, chainConfig, tmpDir, p, lvl, logger)
+	salt, err := GetIndexSalt(info.Dir())
+
+	if err != nil {
+		return err
+	}
+
+	return s.indexBuilder.Build(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
 func (s snapType) HasIndexFiles(info FileInfo, logger log.Logger) bool {
@@ -356,8 +406,8 @@ func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 	return e.Type().HasIndexFiles(info, logger)
 }
 
-func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	return e.Type().BuildIndexes(ctx, info, chainConfig, tmpDir, p, lvl, logger)
+func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return e.Type().BuildIndexes(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
 func ParseEnum(s string) (Enum, bool) {
@@ -386,7 +436,7 @@ func ParseEnum(s string) (Enum, bool) {
 }
 
 // Idx - iterate over segment and building .idx file
-func BuildIndex(ctx context.Context, info FileInfo, firstDataId uint64, tmpDir string, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
+func BuildIndex(ctx context.Context, info FileInfo, salt uint32, firstDataId uint64, tmpDir string, lvl log.Lvl, p *background.Progress, walker func(idx *recsplit.RecSplit, i, offset uint64, word []byte) error, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("index panic: at=%s, %v, %s", info.Name(), rec, dbg.Stack())
@@ -415,6 +465,7 @@ func BuildIndex(ctx context.Context, info FileInfo, firstDataId uint64, tmpDir s
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(info.Dir(), info.Type.IdxFileName(info.Version, info.From, info.To)),
 		BaseDataID: firstDataId,
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return err
@@ -423,33 +474,37 @@ func BuildIndex(ctx context.Context, info FileInfo, firstDataId uint64, tmpDir s
 
 	defer d.EnableMadvNormal().DisableReadAhead()
 
-RETRY:
-	g := d.MakeGetter()
-	var i, offset, nextPos uint64
-	word := make([]byte, 0, 4096)
-	for g.HasNext() {
-		word, nextPos = g.Next(word[:0])
-		if err := walker(rs, i, offset, word); err != nil {
+	for {
+		g := d.MakeGetter()
+		var i, offset, nextPos uint64
+		word := make([]byte, 0, 4096)
+
+		for g.HasNext() {
+			word, nextPos = g.Next(word[:0])
+			if err := walker(rs, i, offset, word); err != nil {
+				return err
+			}
+			i++
+			offset = nextPos
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+		}
+
+		if err = rs.Build(ctx); err != nil {
+			if errors.Is(err, recsplit.ErrCollision) {
+				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+				rs.ResetNextSalt()
+				continue
+			}
 			return err
 		}
-		i++
-		offset = nextPos
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
+		return nil
 	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
-	return nil
 }
 
 func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, firstKey FirstKeyGetter, chainDB kv.RoDB, chainConfig *chain.Config, tmpDir string, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
