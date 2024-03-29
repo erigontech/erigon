@@ -184,10 +184,10 @@ Loop:
 		if shouldUpdateProgress {
 			log.Info("Committed State", "gas reached", currentStateGas, "gasTarget", gasState)
 			currentStateGas = 0
-			if err = batch.Commit(); err != nil {
+			if err = s.Update(batch, stageProgress); err != nil {
 				return err
 			}
-			if err = s.Update(tx, stageProgress); err != nil {
+			if err = batch.Commit(); err != nil {
 				return err
 			}
 			if !useExternalTx {
@@ -223,10 +223,6 @@ Loop:
 			gas = 0
 			tx.CollectMetrics()
 			Metrics[stages.Execution].Set(blockNum)
-		}
-		//[hack] if we sync to the tip we get wrong block hashes sometimes
-		if stageProgress%3000000 == 0 {
-			break
 		}
 	}
 
