@@ -72,7 +72,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	alreadyContain := false
 	after := []*attestation{}
 	for _, curAtt := range p.aggregates[hashRoot] {
-		if contains(curAtt.att.AggregationBits(), inAtt.AggregationBits()) {
+		if isSubset(curAtt.att.AggregationBits(), inAtt.AggregationBits()) {
 			// in this case, the new attestation is already contained in the existing attestation, so do not need
 			// to add it again no matter it's merged or not.
 			alreadyContain = true
@@ -139,7 +139,7 @@ func mergeAttestationNoOverlap(a, b *solid.Attestation) (*solid.Attestation, err
 	return merge, nil
 }
 
-func contains(a, b []byte) bool {
+func isSubset(a, b []byte) bool {
 	if len(a) != len(b) {
 		return false
 	}
