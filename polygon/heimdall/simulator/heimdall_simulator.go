@@ -13,9 +13,9 @@ import (
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common/background"
-	"github.com/ledgerwatch/erigon-lib/downloader/simulator_torrent"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
+	"github.com/ledgerwatch/erigon/p2p/sentry/simulator"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -26,7 +26,8 @@ type HeimdallSimulator struct {
 	activeBorSnapshots *freezeblocks.BorRoSnapshots
 	blockReader        *freezeblocks.BlockReader
 	logger             log.Logger
-	downloader         *simulator_torrent.TorrentClient
+	downloader         *simulator.TorrentClient
+	chain              string
 
 	lastDownloadedBlockNumber uint64
 }
@@ -55,7 +56,7 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		return HeimdallSimulator{}, err
 	}
 
-	downloader, err := simulator_torrent.NewTorrentClient(ctx, chain, snapshotLocation, logger)
+	downloader, err := simulator.NewTorrentClient(ctx, chain, snapshotLocation, logger)
 	if err != nil {
 		return HeimdallSimulator{}, err
 	}
@@ -151,9 +152,6 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 
 func (h *HeimdallSimulator) Close() {
 	h.downloader.Close()
-	if closer, ok := h.downloader.Cfg.DefaultStorage.(interface{ Close() error }); ok {
-		_ = closer.Close()
-	}
 
 	h.activeBorSnapshots.Close()
 	h.knownBorSnapshots.Close()

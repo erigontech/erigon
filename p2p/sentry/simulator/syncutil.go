@@ -1,4 +1,4 @@
-package simulator_torrent
+package simulator
 
 import (
 	"context"
@@ -12,12 +12,13 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
 	"github.com/c2h5oh/datasize"
+	"github.com/ledgerwatch/log/v3"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/ledgerwatch/erigon/cmd/downloader/downloadernat"
 	"github.com/ledgerwatch/erigon/cmd/utils"
 	"github.com/ledgerwatch/erigon/p2p/nat"
 	"github.com/ledgerwatch/erigon/params"
-	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
@@ -28,7 +29,7 @@ import (
 )
 
 // The code in this file is taken from cmd/snapshots - which is yet to be merged
-// to devel - once tthat is done this file can be removed
+// to devel - once that is done this file can be removed
 
 type TorrentClient struct {
 	*torrent.Client
