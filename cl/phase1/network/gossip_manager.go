@@ -232,6 +232,7 @@ func (g *GossipManager) Start(ctx context.Context) {
 	operationsCh := make(chan *sentinel.GossipData, 1<<16)
 	blobsCh := make(chan *sentinel.GossipData, 1<<16)
 	blocksCh := make(chan *sentinel.GossipData, 1<<16)
+	syncCommitteesCh := make(chan *sentinel.GossipData, 1<<16)
 	defer close(operationsCh)
 	defer close(blobsCh)
 	defer close(blocksCh)
@@ -288,6 +289,21 @@ func (g *GossipManager) Start(ctx context.Context) {
 		}
 	}()
 
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case data := <-syncCommitteesCh:
+				l := log.Ctx{}
+				err := g.onRecv(ctx, data, l)
+				if err != nil {
+					log.Warn("[Beacon Gossip] Recoverable Error", "err", err)
+				}
+			}
+		}
+	}()
+
 Reconnect:
 	for {
 		select {
@@ -312,10 +328,10 @@ Reconnect:
 				continue Reconnect
 			}
 
-			if data.Name == gossip.TopicNameBeaconBlock {
+			if data.Name == gossip.TopicNameBeaconBlock || gossip.IsTopicBlobSidecar(data.Name) {
 				blocksCh <- data
-			} else if gossip.IsTopicBlobSidecar(data.Name) {
-				blobsCh <- data
+			} else if gossip.IsTopicSyncCommittee(data.Name) || data.Name == gossip.TopicNameSyncCommitteeContributionAndProof {
+				syncCommitteesCh <- data
 			} else {
 				operationsCh <- data
 			}
