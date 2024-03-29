@@ -23,6 +23,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
 	"github.com/ledgerwatch/erigon/cl/utils"
+	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
@@ -144,6 +145,8 @@ type ForkChoiceStore struct {
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
 
+	syncContributionPool sync_contribution_pool.SyncContributionPool
+
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
 }
@@ -159,7 +162,9 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine,
+	operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters,
+	syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage, syncContributionPool sync_contribution_pool.SyncContributionPool) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -256,6 +261,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		hotSidecars:               make(map[libcommon.Hash][]*cltypes.BlobSidecar),
 		blobStorage:               blobStorage,
 		seenSyncCommitteeMessages: make(map[seenSyncCommitteeMessage]struct{}),
+		syncContributionPool:      syncContributionPool,
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())

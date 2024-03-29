@@ -460,6 +460,6 @@ func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessa
 	}
 	f.seenSyncCommitteeMessages[seenSyncCommitteeMessageIdentifier] = struct{}{}
 	f.cleanupOldSyncCommitteeMessages() // cleanup old messages
-	// Aggregate
-	return nil
+	// Aggregate the message
+	return f.syncContributionPool.AddSyncCommitteeMessage(headState, subnetID, msg)
 }

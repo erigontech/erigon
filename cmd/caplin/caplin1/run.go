@@ -25,6 +25,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/sentinel"
 	"github.com/ledgerwatch/erigon/cl/sentinel/service"
 	"github.com/ledgerwatch/erigon/cl/validator/attestation_producer"
+	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 	"github.com/ledgerwatch/erigon/cl/validator/validator_params"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/params"
@@ -125,8 +126,9 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	fcuFs := afero.NewBasePathFs(afero.NewOsFs(), caplinFcuPath)
 	syncedDataManager := synced_data.NewSyncedDataManager(true, beaconConfig)
 
+	syncContributionPool := sync_contribution_pool.NewSyncContributionPool()
 	emitters := beaconevents.NewEmitters()
-	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager, blobStorage)
+	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager, blobStorage, syncContributionPool)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
