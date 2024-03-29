@@ -1,7 +1,6 @@
 package sync_contribution_pool
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/Giulio2002/bls"
@@ -131,7 +130,6 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 	startSubCommittee := subCommittee * subCommitteeSize
 	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
 		if committee[i] == publicKey { // turn on this bit
-			fmt.Println("Turning on bit", i-startSubCommittee, subCommitteeSize)
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
 		}
 	}
