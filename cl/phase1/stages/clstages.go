@@ -238,7 +238,6 @@ func ConsensusClStages(ctx context.Context,
 		}
 
 		return cfg.forkChoice.OnBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability)
-
 	}
 
 	// TODO: this is an ugly hack, but it works! Basically, we want shared state in the clstages.
@@ -440,7 +439,6 @@ func ConsensusClStages(ctx context.Context,
 							case <-ctx.Done():
 								return ctx.Err()
 							case <-readyTimeout.C:
-								time.Sleep(10 * time.Second)
 								return nil
 							case <-readyInterval.C:
 								ready, err := cfg.executionClient.Ready(ctx)
@@ -564,14 +562,23 @@ func ConsensusClStages(ctx context.Context,
 										errCh <- err
 										return
 									}
-									blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-									if err != nil {
-										errCh <- err
-										return
-									}
-									if _, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
-										errCh <- err
-										return
+									var inserted uint64
+
+									for inserted != uint64(ids.Len()) {
+										select {
+										case <-ctx.Done():
+											return
+										default:
+										}
+										blobs, err := network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
+										if err != nil {
+											errCh <- err
+											return
+										}
+										if _, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, forkchoice.VerifyHeaderSignatureAgainstForkChoiceStoreFunction(cfg.forkChoice, cfg.beaconCfg, cfg.genesisCfg.GenesisValidatorRoot)); err != nil {
+											errCh <- err
+											return
+										}
 									}
 
 									select {
@@ -704,10 +711,10 @@ func ConsensusClStages(ctx context.Context,
 						finalizedCheckpoint := cfg.forkChoice.FinalizedCheckpoint()
 						logger.Debug("Caplin is sending forkchoice")
 						// Run forkchoice
-						if err := cfg.forkChoice.Engine().ForkChoiceUpdate(
+						if _, err := cfg.forkChoice.Engine().ForkChoiceUpdate(
 							ctx,
 							cfg.forkChoice.GetEth1Hash(finalizedCheckpoint.BlockRoot()),
-							cfg.forkChoice.GetEth1Hash(headRoot),
+							cfg.forkChoice.GetEth1Hash(headRoot), nil,
 						); err != nil {
 							logger.Warn("Could not set forkchoice", "err", err)
 							return err

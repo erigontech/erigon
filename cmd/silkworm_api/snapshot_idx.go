@@ -68,6 +68,7 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 	g.SetLimit(workers)
 
 	dirs := datadir.New(dataDir)
+	salt := freezeblocks.GetIndicesSalt(dirs.Snap)
 
 	chainDB := mdbx.NewMDBX(logger).Path(dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
@@ -96,21 +97,21 @@ func buildIndex(cliCtx *cli.Context, dataDir string, snapshotPaths []string, min
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.HeadersIdx(ctx, segment, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.HeadersIdx(ctx, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		case snaptype.Enums.Bodies:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.BodiesIdx(ctx, segment, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.BodiesIdx(ctx, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		case snaptype.Enums.Transactions:
 			g.Go(func() error {
 				jobProgress := &background.Progress{}
 				ps.Add(jobProgress)
 				defer ps.Delete(jobProgress)
-				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment, dirs.Tmp, jobProgress, logLevel, logger)
+				return freezeblocks.TransactionsIdx(ctx, chainConfig, segment, salt, dirs.Tmp, jobProgress, logLevel, logger)
 			})
 		}
 	}

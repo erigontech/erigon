@@ -110,7 +110,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 
 	logger := log.New("app", "caplin")
 
-	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs.Snap, logger)
+	csn := freezeblocks.NewCaplinSnapshots(ethconfig.BlocksFreezing{}, beaconConfig, dirs, logger)
 	rcsn := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
 
 	pool := pool.NewOperationsPool(beaconConfig)
@@ -154,12 +154,18 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		BeaconConfig:  beaconConfig,
 		TmpDir:        dirs.Tmp,
 		EnableBlocks:  true,
-	}, rcsn, blobStorage, indexDB, &service.ServerConfig{Network: "tcp", Addr: fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort)}, creds, &cltypes.Status{
-		ForkDigest:     forkDigest,
-		FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
-		FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
-		HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
-		HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+	}, rcsn, blobStorage, indexDB, &service.ServerConfig{
+		Network:   "tcp",
+		Addr:      fmt.Sprintf("%s:%d", config.SentinelAddr, config.SentinelPort),
+		Creds:     creds,
+		Validator: config.BeaconRouter.Validator,
+		InitialStatus: &cltypes.Status{
+			ForkDigest:     forkDigest,
+			FinalizedRoot:  state.FinalizedCheckpoint().BlockRoot(),
+			FinalizedEpoch: state.FinalizedCheckpoint().Epoch(),
+			HeadSlot:       state.FinalizedCheckpoint().Epoch() * beaconConfig.SlotsPerEpoch,
+			HeadRoot:       state.FinalizedCheckpoint().BlockRoot(),
+		},
 	}, forkChoice, logger)
 	if err != nil {
 		return err
@@ -179,7 +185,6 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 				case <-ctx.Done():
 					return
 				}
-
 			}
 		}()
 	}
@@ -250,7 +255,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState)
 	validatorParameters := validator_params.NewValidatorParams()
 	if cfg.Active {
-		apiHandler := handler.NewApiHandler(logger, genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &cfg, emitters, blobStorage, csn, validatorParameters, attestationProducer)
+		apiHandler := handler.NewApiHandler(logger, genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &cfg, emitters, blobStorage, csn, validatorParameters, attestationProducer, engine)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
 		}, cfg)

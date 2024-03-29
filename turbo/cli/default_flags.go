@@ -139,6 +139,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.MinerExtraDataFlag,
 	&utils.MinerNoVerfiyFlag,
 	&utils.MinerSigningKeyFileFlag,
+	&utils.MinerRecommitIntervalFlag,
 	&utils.SentryAddrFlag,
 	&utils.SentryLogPeerInfoFlag,
 	&utils.DownloaderAddrFlag,
@@ -154,7 +155,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BorBlockSizeFlag,
 	&utils.WithHeimdallMilestones,
 	&utils.EthStatsURLFlag,
-	&utils.OverrideCancunFlag,
+	&utils.OverridePragueFlag,
 
 	&utils.LightClientDiscoveryAddrFlag,
 	&utils.LightClientDiscoveryPortFlag,
