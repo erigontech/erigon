@@ -1253,7 +1253,8 @@ func (r *BlockReader) EventsByBlock(ctx context.Context, tx kv.Tx, hash common.H
 	return result, nil
 }
 
-func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) []*heimdall.EventRecordWithTime {
+// EventsByIdFromSnapshot returns the list of records limited by time, or the number of records along with a bool value to signify if the records were limited by time
+func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, bool) {
 	view := r.borSn.View()
 	defer view.Close()
 
@@ -1261,6 +1262,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 	var buf []byte
 	var result []*heimdall.EventRecordWithTime
 	stateContract := bor.GenesisContractStateReceiverABI()
+	maxTime := false
 
 	for _, sn := range segments {
 		idxBorTxnHash := sn.Index()
@@ -1283,13 +1285,12 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 			if event.ID < from {
 				continue
 			}
+			if event.Time.After(to) {
+				goto BREAK
+			}
 
 			result = append(result, event)
 
-			if event.Time.After(to) {
-				// we return an extra record to signify that we exit because of time and not limit
-				goto BREAK
-			}
 			if len(result) == limit {
 				goto BREAK
 			}
@@ -1297,7 +1298,7 @@ func (r *BlockReader) EventsByIdFromSnapshot(from uint64, to time.Time, limit in
 	}
 
 BREAK:
-	return result
+	return result, maxTime
 }
 
 func (r *BlockReader) LastEventId(_ context.Context, tx kv.Tx) (uint64, bool, error) {

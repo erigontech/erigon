@@ -3,7 +3,6 @@ package simulator
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -28,7 +27,6 @@ type HeimdallSimulator struct {
 	logger             log.Logger
 	downloader         *TorrentClient
 
-	nextSpan                  uint64
 	lastDownloadedBlockNumber uint64
 }
 
@@ -68,7 +66,6 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 		blockReader:               freezeblocks.NewBlockReader(nil, activeBorSnapshots),
 		logger:                    logger,
 		downloader:                downloader,
-		nextSpan:                  5000,
 		lastDownloadedBlockNumber: 0,
 	}
 
@@ -80,22 +77,21 @@ func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, log
 	return s, nil
 }
 
-// FetchLatestSpan gets the next span from the snapshot
 func (h *HeimdallSimulator) FetchLatestSpan(ctx context.Context) (*heimdall.Span, error) {
-	span, err := h.getSpan(h.ctx, h.nextSpan)
+	latestSpan, _, err := h.blockReader.LastSpanId(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	h.nextSpan++
+	span, err := h.getSpan(h.ctx, latestSpan)
+	if err != nil {
+		return nil, err
+	}
+
 	return &span, nil
 }
 
 func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heimdall.Span, error) {
-	if spanID > h.nextSpan-1 {
-		return nil, errors.New("span not found")
-	}
-
 	span, err := h.getSpan(h.ctx, spanID)
 	if err != nil {
 		return nil, err
@@ -105,7 +101,22 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	events := h.getEvents(h.ctx, fromId, to, limit)
+	events, maxTime := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+
+	view := h.knownBorSnapshots.View()
+	defer view.Close()
+
+	for !maxTime && len(events) != limit {
+		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
+			if err := h.downloadData(ctx, seg, snaptype.BorEvents, freezeblocks.BorEventsIdx); err != nil {
+				return nil, err
+			}
+		}
+		h.lastDownloadedBlockNumber += 500000
+
+		events, maxTime = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+	}
+
 	return events, nil
 }
 
@@ -200,39 +211,4 @@ func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdal
 	}
 
 	return s, nil
-}
-
-func continueLoop(events []*heimdall.EventRecordWithTime, to time.Time, limit int) bool {
-	if len(events) == 0 {
-		return true
-	}
-	if len(events) == limit {
-		return false
-	}
-
-	last := events[len(events)-1]
-	return last.Time.Before(to)
-}
-
-func (h *HeimdallSimulator) getEvents(ctx context.Context, fromId uint64, to time.Time, limit int) []*heimdall.EventRecordWithTime {
-	events := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
-
-	view := h.knownBorSnapshots.View()
-	defer view.Close()
-
-	for continueLoop(events, to, limit) {
-		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
-			if err := h.downloadData(ctx, seg, snaptype.BorEvents, freezeblocks.BorEventsIdx); err != nil {
-				return nil
-			}
-		}
-		h.lastDownloadedBlockNumber += 500000
-
-		events = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
-	}
-
-	if len(events) == limit {
-		return events
-	}
-	return events[:len(events)-1]
 }
