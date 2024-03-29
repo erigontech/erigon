@@ -166,14 +166,14 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 		return h.activeBorSnapshots.ReopenSegments([]snaptype.Type{sType}, true)
 	}
 
-	h.logger.Warn(fmt.Sprintf("Downloading %s", fileName))
+	h.logger.Info(fmt.Sprintf("Downloading %s", fileName))
 
 	err := h.downloader.Download(ctx, fileName)
 	if err != nil {
 		return fmt.Errorf("can't download %s: %w", fileName, err)
 	}
 
-	h.logger.Warn(fmt.Sprintf("Indexing %s", fileName))
+	h.logger.Info(fmt.Sprintf("Indexing %s", fileName))
 
 	info, _, _ := snaptype.ParseFileName(h.downloader.LocalFsRoot(), fileName)
 
