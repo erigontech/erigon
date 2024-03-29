@@ -450,5 +450,6 @@ func (s *server) downloadHeaders(ctx context.Context, header *freezeblocks.Segme
 
 	info, _, _ := snaptype.ParseFileName(s.downloader.LocalFsRoot(), fileName)
 
-	return core_snaptype.Headers.BuildIndexes(ctx, info, nil, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
+	salt := freezeblocks.GetIndicesSalt(s.downloader.LocalFsRoot())
+	return core_snaptype.Headers.BuildIndexes(ctx, info, salt, nil, s.downloader.LocalFsRoot(), nil, log.LvlDebug, s.logger)
 }

@@ -167,7 +167,7 @@ func BuildTorrentFilesIfNeed(ctx context.Context, dirs datadir.Dirs, torrentFile
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 
-	files, err := seedableFiles(dirs, chain)
+	files, err := SeedableFiles(dirs, chain)
 	if err != nil {
 		return err
 	}

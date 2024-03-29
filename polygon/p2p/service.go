@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/log/v3"
 
 	"github.com/ledgerwatch/erigon-lib/direct"
+	sentrymulticlient "github.com/ledgerwatch/erigon/p2p/sentry/sentry_multi_client"
 )
 
 //go:generate mockgen -source=./service.go -destination=./service_mock.go -package=p2p . Service
@@ -18,14 +19,19 @@ type Service interface {
 	MaxPeers() int
 }
 
-func NewService(maxPeers int, logger log.Logger, sentryClient direct.SentryClient) Service {
+func NewService(
+	maxPeers int,
+	logger log.Logger,
+	sentryClient direct.SentryClient,
+	statusDataFactory sentrymulticlient.StatusDataFactory,
+) Service {
 	fetcherConfig := FetcherConfig{
 		responseTimeout: 5 * time.Second,
 		retryBackOff:    10 * time.Second,
 		maxRetries:      2,
 	}
 
-	return newService(maxPeers, fetcherConfig, logger, sentryClient, rand.Uint64)
+	return newService(maxPeers, fetcherConfig, logger, sentryClient, statusDataFactory, rand.Uint64)
 }
 
 func newService(
@@ -33,11 +39,12 @@ func newService(
 	fetcherConfig FetcherConfig,
 	logger log.Logger,
 	sentryClient direct.SentryClient,
+	statusDataFactory sentrymulticlient.StatusDataFactory,
 	requestIdGenerator RequestIdGenerator,
 ) *service {
 	peerTracker := NewPeerTracker()
 	peerPenalizer := NewPeerPenalizer(sentryClient)
-	messageListener := NewMessageListener(logger, sentryClient, peerPenalizer)
+	messageListener := NewMessageListener(logger, sentryClient, statusDataFactory, peerPenalizer)
 	messageListener.RegisterPeerEventObserver(NewPeerEventObserver(peerTracker))
 	messageSender := NewMessageSender(sentryClient)
 	fetcher := NewFetcher(fetcherConfig, logger, messageListener, messageSender, requestIdGenerator)

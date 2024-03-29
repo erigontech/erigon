@@ -305,6 +305,7 @@ func (sub *GossipSubscription) Listen() {
 			case <-sub.ctx.Done():
 				return
 			case <-checkingInterval.C:
+
 				expirationTime := sub.expiration.Load().(time.Time)
 				if sub.subscribed.Load() && time.Now().After(expirationTime) {
 					sub.stopCh <- struct{}{}
@@ -386,9 +387,6 @@ func (s *GossipSubscription) run(ctx context.Context, sub *pubsub.Subscription, 
 				}
 				log.Warn("[Sentinel] fail to decode gossip packet", "err", err, "topicName", topicName)
 				return
-			}
-			if msg.Topic != nil {
-				fmt.Println(*msg.Topic)
 			}
 			if msg.ReceivedFrom == s.host {
 				continue

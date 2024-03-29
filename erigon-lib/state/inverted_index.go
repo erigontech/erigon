@@ -936,14 +936,8 @@ func (it *RecentInvertedIdxIter) advanceInDB() {
 }
 
 func (it *RecentInvertedIdxIter) advance() {
-	if it.orderAscend {
-		if it.hasNext {
-			it.advanceInDB()
-		}
-	} else {
-		if it.hasNext {
-			it.advanceInDB()
-		}
+	if it.hasNext {
+		it.advanceInDB()
 	}
 }
 
