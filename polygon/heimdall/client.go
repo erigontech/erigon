@@ -184,6 +184,10 @@ func (c *Client) FetchStateSyncEvent(ctx context.Context, id uint64) (*EventReco
 	response, err := FetchWithRetry[StateSyncEventResponse](ctx, c, url)
 
 	if err != nil {
+		if strings.Contains(err.Error(), "could not get state record; No record found") {
+			return nil, ErrEventRecordNotFound
+		}
+
 		return nil, err
 	}
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -341,6 +342,13 @@ func BorHeimdallForward(
 				if nextEventRecord == nil || nextEventRecord.ID <= lastStateSyncEventID {
 					if eventRecord, err := cfg.heimdallClient.FetchStateSyncEvent(ctx, lastStateSyncEventID+1); err == nil {
 						nextEventRecord = eventRecord
+					} else {
+						if errors.Is(err, heimdall.ErrEventRecordNotFound) {
+							headNumber = blockNum
+							break
+						}
+
+						return err
 					}
 				}
 			}
