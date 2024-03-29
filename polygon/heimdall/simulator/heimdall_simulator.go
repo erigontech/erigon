@@ -27,7 +27,6 @@ type HeimdallSimulator struct {
 	blockReader        *freezeblocks.BlockReader
 	logger             log.Logger
 	downloader         *simulator.TorrentClient
-	chain              string
 
 	lastDownloadedBlockNumber uint64
 }
