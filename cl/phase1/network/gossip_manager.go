@@ -249,12 +249,6 @@ func (g *GossipManager) Start(ctx context.Context) {
 				if err != nil {
 					log.Debug("[Beacon Gossip] Recoverable Error", "err", err)
 				}
-				// gives some breathing to the cpu
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(20 * time.Millisecond):
-				}
 			}
 		}
 	}()
