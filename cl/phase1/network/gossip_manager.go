@@ -215,6 +215,8 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				return err
 			}
 			if err := g.forkChoice.OnSyncCommitteeMessage(msg, *data.SubnetId); err != nil {
+				g.sentinel.BanPeer(ctx, data.Peer)
+				l["at"] = "decoding sync committee message"
 				return err
 			}
 		default:
