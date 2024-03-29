@@ -69,9 +69,18 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	// NOTE: naive merge attestation for each existing attestation in the pool,
 	// but it's not optimal. it's kind of a maximum coverage problem.
 	mergeCount := 0
+	alreadyContain := false
 	after := []*attestation{}
 	for _, curAtt := range p.aggregates[hashRoot] {
-		if overlap, err := checkOverlap(inAtt.AggregationBits(), curAtt.att.AggregationBits()); err != nil {
+		if contains(curAtt.att.AggregationBits(), inAtt.AggregationBits()) {
+			// in this case, the new attestation is already contained in the existing attestation, so do not need
+			// to add it again no matter it's merged or not.
+			alreadyContain = true
+			after = append(after, curAtt)
+			continue
+		}
+
+		if overlap, err := checkOverlap(curAtt.att.AggregationBits(), inAtt.AggregationBits()); err != nil {
 			return err
 		} else if overlap {
 			// do nothing but just append the original attestation
@@ -89,8 +98,8 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			mergeCount++
 		}
 	}
-	if mergeCount == 0 {
-		// no merge happened, just append the new attestation
+	if mergeCount == 0 && !alreadyContain {
+		// no merge and no contain, add new attestation
 		after = append(after, &attestation{
 			bitCount: countBit(inAtt),
 			att:      inAtt,
@@ -128,6 +137,19 @@ func mergeAttestationNoOverlap(a, b *solid.Attestation) (*solid.Attestation, err
 		mergedResult,
 	)
 	return merge, nil
+}
+
+func contains(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	count := 0
+	for i := range a {
+		if a[i]&b[i] == b[i] {
+			count++
+		}
+	}
+	return count == len(b)
 }
 
 func checkOverlap(a, b []byte) (bool, error) {

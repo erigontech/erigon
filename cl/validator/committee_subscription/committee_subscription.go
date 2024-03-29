@@ -9,11 +9,11 @@ import (
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/cl/aggregation"
+	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/gossip"
-	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
@@ -25,6 +25,7 @@ type CommitteeSubscribeMgmt struct {
 	netConfig     *clparams.NetworkConfig
 	sentinel      sentinel.SentinelClient
 	state         *state.CachingBeaconState
+	syncedData    *synced_data.SyncedDataManager
 	// subscriptions
 	aggregationPool    aggregation.AggregationPool
 	validatorSubsMutex sync.RWMutex
@@ -40,6 +41,7 @@ func NewCommitteeSubscribeManagement(
 	sentinel sentinel.SentinelClient,
 	state *state.CachingBeaconState,
 	aggregationPool aggregation.AggregationPool,
+	syncedData *synced_data.SyncedDataManager,
 ) *CommitteeSubscribeMgmt {
 	c := &CommitteeSubscribeMgmt{
 		indiciesDB:      indiciesDB,
@@ -49,6 +51,7 @@ func NewCommitteeSubscribeManagement(
 		sentinel:        sentinel,
 		state:           state,
 		aggregationPool: aggregationPool,
+		syncedData:      syncedData,
 		validatorSubs:   make(map[uint64]map[uint64]*validatorSub),
 	}
 	c.sweepByStaleSlots(ctx)
@@ -68,10 +71,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 		vIndex = p.ValidatorIndex
 	)
 
-	subnetId, err := c.computeSubnetId(slot, cIndex)
-	if err != nil {
-		return err
-	}
+	subnetId := c.computeSubnetId(slot, cIndex)
 	// add validator to subscription
 	c.validatorSubsMutex.Lock()
 	if _, ok := c.validatorSubs[slot]; !ok {
@@ -122,18 +122,12 @@ func (c *CommitteeSubscribeMgmt) checkAttestation(topic string, att *solid.Attes
 		bits           = att.AggregationBits()
 	)
 	// [REJECT] The committee index is within the expected range
-	committeeCount, err := c.computeCommitteePerSlot(slot)
-	if err != nil {
-		return err
-	}
+	committeeCount := c.computeCommitteePerSlot(slot)
 	if committeeIndex >= committeeCount {
 		return ErrCommitteeIndexOutOfRange
 	}
 	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
-	subnetId, err := c.computeSubnetId(slot, committeeIndex)
-	if err != nil {
-		return err
-	}
+	subnetId := c.computeSubnetId(slot, committeeIndex)
 	topicSubnetId, err := gossip.SubnetIdFromTopicBeaconAttestation(topic)
 	if err != nil {
 		return err
@@ -164,14 +158,14 @@ func (c *CommitteeSubscribeMgmt) checkAttestation(topic string, att *solid.Attes
 		return ErrExactlyOneBitSet
 	}
 	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
-	if len(bits)*8 != int(committeeCount) {
+	if len(bits)*8 < int(committeeCount) {
 		return ErrAggregationBitsMismatch
 	}
 	// todo ...
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
 	// [REJECT] The signature of attestation is valid.
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
-	// (a client MAY queue attestations for processing once block is retrieved).
+	// (a client MAY queue attestations for processing once block is retrieved).  // this case will be handled by the aggregation pool
 	// [REJECT] The block being voted for (attestation.data.beacon_block_root) passes validation.
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
@@ -226,36 +220,17 @@ func (c *CommitteeSubscribeMgmt) sweepByStaleSlots(ctx context.Context) {
 	}
 }
 
-func (c *CommitteeSubscribeMgmt) computeSubnetId(slot uint64, committeeIndex uint64) (uint64, error) {
-	committeePerSlot, err := c.computeCommitteePerSlot(slot)
-	if err != nil {
-		return 0, err
-	}
+func (c *CommitteeSubscribeMgmt) computeSubnetId(slot uint64, committeeIndex uint64) uint64 {
+	committeePerSlot := c.computeCommitteePerSlot(slot)
 	// slots_since_epoch_start = uint64(slot % SLOTS_PER_EPOCH)
 	// committees_since_epoch_start = committees_per_slot * slots_since_epoch_start
 	// return SubnetID((committees_since_epoch_start + committee_index) % ATTESTATION_SUBNET_COUNT)
 	slotsSinceEpochStart := slot % c.beaconConfig.SlotsPerEpoch
 	committeesSinceEpochStart := committeePerSlot * slotsSinceEpochStart
-	return (committeesSinceEpochStart + committeeIndex) % c.netConfig.AttestationSubnetCount, nil
+	return (committeesSinceEpochStart + committeeIndex) % c.netConfig.AttestationSubnetCount
 }
 
-func (c *CommitteeSubscribeMgmt) computeCommitteePerSlot(slot uint64) (uint64, error) {
-	tx, err := c.indiciesDB.BeginRo(context.Background())
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	activeIndicies, err := state_accessors.ReadActiveIndicies(tx, slot)
-	if err != nil {
-		return 0, err
-	}
-	cfg := c.beaconConfig
-	committeePerSlot := uint64(len(activeIndicies)) / cfg.SlotsPerEpoch / cfg.TargetCommitteeSize
-	if cfg.MaxCommitteesPerSlot < committeePerSlot {
-		committeePerSlot = cfg.MaxCommitteesPerSlot
-	}
-	if committeePerSlot < 1 {
-		committeePerSlot = 1
-	}
-	return committeePerSlot, nil
+func (c *CommitteeSubscribeMgmt) computeCommitteePerSlot(slot uint64) uint64 {
+	epoch := slot / c.beaconConfig.SlotsPerEpoch
+	return c.syncedData.HeadState().CommitteeCount(epoch)
 }
