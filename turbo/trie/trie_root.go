@@ -5,16 +5,16 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/erigon-lib/common/hexutil"
-	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 	"math/bits"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
-	"github.com/ledgerwatch/erigon-lib/common/length"
+	"github.com/ledgerwatch/erigon-lib/common/hexutil"
 	length2 "github.com/ledgerwatch/erigon-lib/common/length"
 	"github.com/ledgerwatch/erigon-lib/kv"
-	"github.com/ledgerwatch/log/v3"
+	dbutils2 "github.com/ledgerwatch/erigon-lib/kv/dbutils"
 
 	"github.com/ledgerwatch/erigon/core/types/accounts"
 	"github.com/ledgerwatch/erigon/turbo/rlphacks"
@@ -548,16 +548,16 @@ func (r *RootHashAggregator) genStructStorage() error {
 	}
 	var wantProof func(_ []byte) *proofElement
 	if r.proofRetainer != nil {
-		var fullKey [2 * (length.Hash + length.Incarnation + length.Hash)]byte
+		var fullKey [2 * (length2.Hash + length2.Incarnation + length2.Hash)]byte
 		for i, b := range r.currAccK {
 			fullKey[i*2] = b / 16
 			fullKey[i*2+1] = b % 16
 		}
 		for i, b := range binary.BigEndian.AppendUint64(nil, r.a.Incarnation) {
-			fullKey[2*length.Hash+i*2] = b / 16
-			fullKey[2*length.Hash+i*2+1] = b % 16
+			fullKey[2*length2.Hash+i*2] = b / 16
+			fullKey[2*length2.Hash+i*2+1] = b % 16
 		}
-		baseKeyLen := 2 * (length.Hash + length.Incarnation)
+		baseKeyLen := 2 * (length2.Hash + length2.Incarnation)
 		wantProof = func(prefix []byte) *proofElement {
 			copy(fullKey[baseKeyLen:], prefix)
 			return r.proofRetainer.ProofElement(fullKey[:baseKeyLen+len(prefix)])
@@ -1134,23 +1134,7 @@ func (c *StorageTrieCursor) _consume() (bool, error) {
 }
 
 func (c *StorageTrieCursor) _seek(seek, withinPrefix []byte) (bool, error) {
-	var k, v []byte
-	var err error
-	if len(seek) == 40 {
-		k, v, err = c.c.Seek(seek)
-	} else {
-		// optimistic .Next call, can use result in 2 cases:
-		// - no child found, means: len(k) <= c.lvl
-		// - looking for first child, means: c.childID[c.lvl] <= int8(bits.TrailingZeros16(c.hasTree[c.lvl]))
-		// otherwise do .Seek call
-		//k, v, err = c.c.Next()
-		//if err != nil {
-		//	return false, err
-		//}
-		//if len(k) > c.lvl && c.childID[c.lvl] > int8(bits.TrailingZeros16(c.hasTree[c.lvl])) {
-		k, v, err = c.c.Seek(seek)
-		//}
-	}
+	k, v, err := c.c.Seek(seek)
 	if err != nil {
 		return false, err
 	}

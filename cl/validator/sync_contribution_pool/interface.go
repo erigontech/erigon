@@ -12,7 +12,7 @@ type SyncContributionPool interface {
 	// AddSyncContribution adds a sync committee contribution to the pool.
 	AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error
 	// AddSyncCommitteeMessage aggretates a sync committee message to a contribution to the pool.
-	AddSyncCommitteeMessage(headState *state.CachingBeaconState, message *cltypes.SyncCommitteeMessage) error
+	AddSyncCommitteeMessage(headState *state.CachingBeaconState, subCommitee uint64, message *cltypes.SyncCommitteeMessage) error
 
 	// GetSyncContribution retrieves a sync contribution from the pool.
 	GetSyncContribution(slot, subcommitteeIndex uint64, beaconBlockRoot common.Hash) *cltypes.Contribution

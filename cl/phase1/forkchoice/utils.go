@@ -142,3 +142,17 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	f.checkpointStates.Store(checkpointComparable(checkpoint), checkpointState)
 	return checkpointState, nil
 }
+
+func (f *ForkChoiceStore) getSyncSubcommitteePubkeys(pubkeys []libcommon.Bytes48, subcommitteeIndex uint64) ([][]byte, error) {
+	var syncSubcommitteePubkeys [][]byte
+	subcommitteeSize := f.beaconCfg.SyncCommitteeSize / f.beaconCfg.SyncCommitteeSubnetCount
+	left := subcommitteeIndex * subcommitteeSize
+	right := left + subcommitteeSize
+	if right > uint64(len(pubkeys)) {
+		return nil, fmt.Errorf("getSyncSubcommitteePubkeys: index out of range")
+	}
+	for i := left; i < right; i++ {
+		syncSubcommitteePubkeys = append(syncSubcommitteePubkeys, pubkeys[i][:])
+	}
+	return syncSubcommitteePubkeys, nil
+}

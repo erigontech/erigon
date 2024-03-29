@@ -3,9 +3,12 @@ package sync_contribution_pool
 import (
 	"sync"
 
+	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/cltypes"
+	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/phase1/core/state"
+	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
 type syncContributionKey struct {
@@ -27,6 +30,15 @@ func NewSyncContributionPool() SyncContributionPool {
 	}
 }
 
+func getSyncCommitteeFromState(s *state.CachingBeaconState) *solid.SyncCommittee {
+	cfg := s.BeaconConfig()
+	if cfg.SyncCommitteePeriod(s.Slot()) == cfg.SyncCommitteePeriod(s.Slot()+1) {
+		return s.CurrentSyncCommittee()
+	}
+	return s.NextSyncCommittee()
+
+}
+
 func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -42,12 +54,7 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 	}
 
 	// Make a copy.
-	s.syncContributionPool[key] = &cltypes.Contribution{
-		Slot:              contribution.Slot,
-		SubcommitteeIndex: contribution.SubcommitteeIndex,
-		BeaconBlockRoot:   contribution.BeaconBlockRoot,
-		AggregationBits:   common.Copy(contribution.AggregationBits),
-	}
+	s.syncContributionPool[key] = contribution.Copy()
 	s.cleanupOldContributions(headState)
 	return nil
 }
@@ -71,14 +78,13 @@ func (s *syncContributionPoolImpl) GetSyncContribution(slot, subcommitteeIndex u
 			SubcommitteeIndex: subcommitteeIndex,
 			BeaconBlockRoot:   beaconBlockRoot,
 			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+			Signature:         bls.InfiniteSignature,
 		}
 	}
 	return contribution.Copy()
 }
 
 func (s *syncContributionPoolImpl) cleanupOldContributions(headState *state.CachingBeaconState) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	for key := range s.syncContributionPool {
 		if headState.Slot() != key.slot {
@@ -91,6 +97,8 @@ func (s *syncContributionPoolImpl) cleanupOldContributions(headState *state.Cach
 func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.CachingBeaconState, subCommittee uint64, message *cltypes.SyncCommitteeMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	cfg := headState.BeaconConfig()
 
 	key := syncContributionKey{
 		slot:              message.Slot,
@@ -106,9 +114,35 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 			SubcommitteeIndex: subCommittee,
 			BeaconBlockRoot:   message.BeaconBlockRoot,
 			AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+			Signature:         bls.InfiniteSignature,
 		}
 	}
 	// We use the a copy of this contribution
 	contribution = contribution.Copy() // make a copy
+	// First we find the aggregation bits to which this validator needs to be turned on.
+	publicKey, err := headState.ValidatorPublicKey(int(message.ValidatorIndex))
+	if err != nil {
+		return err
+	}
 
+	committee := getSyncCommitteeFromState(headState).GetCommittee()
+	subCommitteeSize := cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount
+	startSubCommittee := subCommittee * subCommitteeSize
+	for i := startSubCommittee; i < startSubCommittee+subCommitteeSize; i++ {
+		if committee[i] == publicKey { // turn on this bit
+			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
+		}
+	}
+	// Compute the aggregated signature.
+	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
+		contribution.Signature[:],
+		message.Signature[:],
+	})
+	if err != nil {
+		return err
+	}
+	copy(contribution.Signature[:], aggregatedSignature)
+	s.syncContributionPool[key] = contribution
+	s.cleanupOldContributions(headState)
+	return nil
 }
