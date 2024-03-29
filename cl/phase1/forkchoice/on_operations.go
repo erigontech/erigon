@@ -429,6 +429,7 @@ func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessa
 	if f.syncedDataManager.Syncing() {
 		return nil
 	}
+	fmt.Println("recv")
 	headState := f.syncedDataManager.HeadState()
 	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
 	if !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), f.beaconCfg.SecondsPerSlot, msg.Slot) {
