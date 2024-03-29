@@ -219,6 +219,9 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding sync committee message"
 				return err
 			}
+			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {
+				log.Debug("failed publish gossip", "err", err)
+			}
 		default:
 		}
 	}
