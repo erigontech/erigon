@@ -432,6 +432,7 @@ func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessa
 	headState := f.syncedDataManager.HeadState()
 	// [IGNORE] The message's slot is for the current slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance), i.e. sync_committee_message.slot == current_slot.
 	if !utils.IsCurrentSlotWithMaximumClockDisparity(headState.GenesisTime(), f.beaconCfg.SecondsPerSlot, msg.Slot) {
+		fmt.Println("max clock disparity")
 		return nil
 	}
 
@@ -446,8 +447,7 @@ func (f *ForkChoiceStore) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessa
 		slot:           msg.Slot,
 		validatorIndex: msg.ValidatorIndex,
 	}
-	fmt.Println(subnets)
-	fmt.Println(msg.ValidatorIndex)
+
 	if !slices.Contains(subnets, subnetID) {
 		return fmt.Errorf("validator is not into any subnet %d", subnetID)
 	}
