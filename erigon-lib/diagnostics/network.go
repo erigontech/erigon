@@ -12,14 +12,13 @@ func (d *DiagnosticClient) setupNetworkDiagnostics(rootCtx context.Context) {
 
 func (d *DiagnosticClient) runCollectPeersStatistics(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[PeerStatisticMsgUpdate](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[PeerStatisticMsgUpdate](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(PeerStatisticMsgUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				if value, ok := d.peersSyncMap.Load(info.PeerID); ok {

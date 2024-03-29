@@ -13,14 +13,13 @@ func (d *DiagnosticClient) setupStagesDiagnostics(rootCtx context.Context) {
 
 func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[SyncStagesList](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[SyncStagesList](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(SyncStagesList{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.mu.Lock()
@@ -34,14 +33,13 @@ func (d *DiagnosticClient) runSyncStagesListListener(rootCtx context.Context) {
 
 func (d *DiagnosticClient) runCurrentSyncStageListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[CurrentSyncStage](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[CurrentSyncStage](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(CurrentSyncStage{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.mu.Lock()

@@ -21,14 +21,13 @@ func (d *DiagnosticClient) GetResourcesUsage() ResourcesUsage {
 
 func (d *DiagnosticClient) runMemoryStatsListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[MemoryStats](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[MemoryStats](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(MemoryStats{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.resourcesUsageMutex.Lock()

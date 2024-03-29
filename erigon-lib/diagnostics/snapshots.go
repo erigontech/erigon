@@ -16,14 +16,13 @@ func (d *DiagnosticClient) setupSnapshotDiagnostics(rootCtx context.Context) {
 
 func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[SnapshotDownloadStatistics](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[SnapshotDownloadStatistics](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(SnapshotDownloadStatistics{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.mu.Lock()
@@ -52,14 +51,13 @@ func (d *DiagnosticClient) runSnapshotListener(rootCtx context.Context) {
 
 func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[SegmentDownloadStatistics](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[SegmentDownloadStatistics](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(SegmentDownloadStatistics{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.mu.Lock()
@@ -76,14 +74,13 @@ func (d *DiagnosticClient) runSegmentDownloadingListener(rootCtx context.Context
 
 func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[SnapshotIndexingStatistics](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[SnapshotIndexingStatistics](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(SnapshotIndexingStatistics{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.addOrUpdateSegmentIndexingState(info)
@@ -94,14 +91,13 @@ func (d *DiagnosticClient) runSegmentIndexingListener(rootCtx context.Context) {
 
 func (d *DiagnosticClient) runSegmentIndexingFinishedListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[SnapshotSegmentIndexingFinishedUpdate](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[SnapshotSegmentIndexingFinishedUpdate](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(SnapshotSegmentIndexingFinishedUpdate{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.mu.Lock()
@@ -156,14 +152,13 @@ func (d *DiagnosticClient) addOrUpdateSegmentIndexingState(upd SnapshotIndexingS
 
 func (d *DiagnosticClient) runSnapshotFilesListListener(rootCtx context.Context) {
 	go func() {
-		ctx, ch, cancel := Context[SnapshoFilesList](context.Background(), 1)
-		defer cancel()
+		ctx, ch, closeChannel := Context[SnapshoFilesList](rootCtx, 1)
+		defer closeChannel()
 
 		StartProviders(ctx, TypeOf(SnapshoFilesList{}), log.Root())
 		for {
 			select {
 			case <-rootCtx.Done():
-				cancel()
 				return
 			case info := <-ch:
 				d.mu.Lock()
