@@ -84,7 +84,7 @@ type CaplinSnapshots struct {
 //   - gaps are not allowed
 //   - segment have [from:to) semantic
 func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, logger log.Logger) *CaplinSnapshots {
-	return &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, BeaconBlocks: &segments{}, BlobSidecars: &segments{}, logger: logger, beaconCfg: beaconCfg, Salt: GetIndicesSalt(dirs.Snap)}
+	return &CaplinSnapshots{dir: dirs.Snap, tmpdir: dirs.Tmp, cfg: cfg, BeaconBlocks: &segments{}, BlobSidecars: &segments{}, logger: logger, beaconCfg: beaconCfg}
 }
 
 func (s *CaplinSnapshots) IndicesMax() uint64  { return s.idxMax.Load() }
@@ -469,8 +469,8 @@ func dumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 
 func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
 
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
-		blocksPerFile := snapcfg.MergeLimit("", i)
+	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.Enums.BeaconBlocks, nil) {
+		blocksPerFile := snapcfg.MergeLimit("", snaptype.Enums.BeaconBlocks, i)
 
 		if toSlot-i < blocksPerFile {
 			break
@@ -485,8 +485,8 @@ func DumpBeaconBlocks(ctx context.Context, db kv.RoDB, fromSlot, toSlot uint64, 
 }
 
 func DumpBlobsSidecar(ctx context.Context, blobStorage blob_storage.BlobStorage, db kv.RoDB, fromSlot, toSlot uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger) error {
-	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, nil) {
-		blocksPerFile := snapcfg.MergeLimit("", i)
+	for i := fromSlot; i < toSlot; i = chooseSegmentEnd(i, toSlot, snaptype.Enums.BlobSidecars, nil) {
+		blocksPerFile := snapcfg.MergeLimit("", snaptype.Enums.BlobSidecars, i)
 
 		if toSlot-i < blocksPerFile {
 			break

@@ -110,7 +110,7 @@ var (
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorTxnHash},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				defer func() {
 					if rec := recover(); rec != nil {
 						err = fmt.Errorf("BorEventsIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
@@ -160,39 +160,41 @@ var (
 				rs.LogLvl(log.LvlDebug)
 
 				defer d.EnableMadvNormal().DisableReadAhead()
-			RETRY:
-				g.Reset(0)
-				first = true
-				var i, offset, nextPos uint64
-				for g.HasNext() {
-					word, nextPos = g.Next(word[:0])
-					i++
-					if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
-						if err = rs.AddKey(word[:length.Hash], offset); err != nil {
-							return err
-						}
-						copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
-					}
-					if first {
-						first = false
-					}
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
-					offset = nextPos
-				}
-				if err = rs.Build(ctx); err != nil {
-					if errors.Is(err, recsplit.ErrCollision) {
-						logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-						rs.ResetNextSalt()
-						goto RETRY
-					}
-					return err
-				}
 
-				return nil
+				for {
+					g.Reset(0)
+					first = true
+					var i, offset, nextPos uint64
+					for g.HasNext() {
+						word, nextPos = g.Next(word[:0])
+						i++
+						if first || !bytes.Equal(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum]) {
+							if err = rs.AddKey(word[:length.Hash], offset); err != nil {
+								return err
+							}
+							copy(blockNumBuf[:], word[length.Hash:length.Hash+length.BlockNum])
+						}
+						if first {
+							first = false
+						}
+						select {
+						case <-ctx.Done():
+							return ctx.Err()
+						default:
+						}
+						offset = nextPos
+					}
+					if err = rs.Build(ctx); err != nil {
+						if errors.Is(err, recsplit.ErrCollision) {
+							logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+							rs.ResetNextSalt()
+							continue
+						}
+						return err
+					}
+
+					return nil
+				}
 			}))
 
 	BorSpans = snaptype.RegisterType(
@@ -209,7 +211,7 @@ var (
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorSpanId},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
 
 				if err != nil {
@@ -219,7 +221,7 @@ var (
 
 				baseSpanId := uint64(heimdall.SpanIdAt(sn.From))
 
-				return buildValueIndex(ctx, sn, d, baseSpanId, chainConfig, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, sn, salt, d, baseSpanId, chainConfig, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -253,7 +255,7 @@ var (
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorCheckpointId},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
 
 				if err != nil {
@@ -268,7 +270,7 @@ var (
 					return err
 				}
 
-				return buildValueIndex(ctx, sn, d, uint64(firstCheckpoint.Id), chainConfig, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, sn, salt, d, uint64(firstCheckpoint.Id), chainConfig, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -306,7 +308,7 @@ var (
 			}),
 		[]snaptype.Index{snaptype.Indexes.BorMilestoneId},
 		snaptype.IndexBuilderFunc(
-			func(ctx context.Context, sn snaptype.FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+			func(ctx context.Context, sn snaptype.FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 				d, err := seg.NewDecompressor(sn.Path)
 
 				if err != nil {
@@ -329,7 +331,7 @@ var (
 					}
 				}
 
-				return buildValueIndex(ctx, sn, d, firstMilestoneId, chainConfig, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, sn, salt, d, firstMilestoneId, chainConfig, tmpDir, p, lvl, logger)
 			}),
 	)
 
@@ -368,7 +370,7 @@ func extractValueRange(ctx context.Context, table string, valueFrom, valueTo uin
 	return valueTo, nil
 }
 
-func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, d *seg.Decompressor, baseId uint64, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
+func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, salt uint32, d *seg.Decompressor, baseId uint64, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("BorSpansIdx: at=%d-%d, %v, %s", sn.From, sn.To, rec, dbg.Stack())
@@ -383,6 +385,7 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, d *seg.Decompres
 		TmpDir:     tmpDir,
 		IndexFile:  filepath.Join(sn.Dir(), sn.Type.IdxFileName(sn.Version, sn.From, sn.To)),
 		BaseDataID: uint64(baseId),
+		Salt:       salt,
 	}, logger)
 	if err != nil {
 		return err
@@ -390,35 +393,36 @@ func buildValueIndex(ctx context.Context, sn snaptype.FileInfo, d *seg.Decompres
 	rs.LogLvl(log.LvlDebug)
 
 	defer d.EnableMadvNormal().DisableReadAhead()
-RETRY:
 
-	g := d.MakeGetter()
-	var i, offset, nextPos uint64
-	var key [8]byte
-	for g.HasNext() {
-		nextPos, _ = g.Skip()
-		binary.BigEndian.PutUint64(key[:], i)
-		i++
-		if err = rs.AddKey(key[:], offset); err != nil {
+	for {
+		g := d.MakeGetter()
+		var i, offset, nextPos uint64
+		var key [8]byte
+		for g.HasNext() {
+			nextPos, _ = g.Skip()
+			binary.BigEndian.PutUint64(key[:], i)
+			i++
+			if err = rs.AddKey(key[:], offset); err != nil {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+			offset = nextPos
+		}
+		if err = rs.Build(ctx); err != nil {
+			if errors.Is(err, recsplit.ErrCollision) {
+				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
+				rs.ResetNextSalt()
+				continue
+			}
 			return err
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-		offset = nextPos
-	}
-	if err = rs.Build(ctx); err != nil {
-		if errors.Is(err, recsplit.ErrCollision) {
-			logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-			rs.ResetNextSalt()
-			goto RETRY
-		}
-		return err
-	}
 
-	return nil
+		return nil
+	}
 }
 
 func extractEventRange(startEventId, endEventId uint64, tx kv.Tx, blockNum uint64, blockHash common.Hash, collect func([]byte) error) error {

@@ -406,8 +406,8 @@ func (e Enum) HasIndexFiles(info FileInfo, logger log.Logger) bool {
 	return e.Type().HasIndexFiles(info, logger)
 }
 
-func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, salt uint32, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
-	return e.Type().BuildIndexes(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
+func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
+	return e.Type().BuildIndexes(ctx, info, chainConfig, tmpDir, p, lvl, logger)
 }
 
 func ParseEnum(s string) (Enum, bool) {
