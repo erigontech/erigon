@@ -67,7 +67,7 @@ func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(a.Message, a.Signature[:])
 }
 
-var SyncCommitteeAggregationBitsSize = 8
+var SyncCommitteeAggregationBitsSize = 16
 
 type Contribution struct {
 	Slot              uint64            `json:"slot,string"`
