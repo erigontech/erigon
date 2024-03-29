@@ -31,7 +31,7 @@ type HeimdallSimulator struct {
 	lastDownloadedBlockNumber uint64
 }
 
-type IndexFnType func(context.Context, snaptype.FileInfo, string, *background.Progress, log.Lvl, log.Logger) error
+type IndexFnType func(context.Context, snaptype.FileInfo, uint32, string, *background.Progress, log.Lvl, log.Logger) error
 
 func NewHeimdall(ctx context.Context, chain string, snapshotLocation string, logger log.Logger) (HeimdallSimulator, error) {
 	cfg := snapcfg.KnownCfg(chain)
@@ -177,7 +177,7 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 
 	info, _, _ := snaptype.ParseFileName(h.downloader.LocalFsRoot(), fileName)
 
-	err = indexFn(ctx, info, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
+	err = indexFn(ctx, info, h.activeBorSnapshots.Salt, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
 	if err != nil {
 		return fmt.Errorf("can't download %s: %w", fileName, err)
 	}
