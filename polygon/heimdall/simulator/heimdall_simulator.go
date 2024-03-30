@@ -102,7 +102,10 @@ func (h *HeimdallSimulator) FetchSpan(ctx context.Context, spanID uint64) (*heim
 }
 
 func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uint64, to time.Time, limit int) ([]*heimdall.EventRecordWithTime, error) {
-	events, maxTime := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+	events, maxTime, err := h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+	if err != nil {
+		return nil, err
+	}
 
 	view := h.knownBorSnapshots.View()
 	defer view.Close()
@@ -115,7 +118,10 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uin
 		}
 		h.lastDownloadedBlockNumber += 500000
 
-		events, maxTime = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+		events, maxTime, err = h.blockReader.EventsByIdFromSnapshot(fromId, to, limit)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return events, nil

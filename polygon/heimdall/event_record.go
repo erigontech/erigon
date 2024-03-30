@@ -2,6 +2,7 @@ package heimdall
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -52,7 +53,7 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 	}
 }
 
-func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue) *EventRecordWithTime {
+func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue) (*EventRecordWithTime, error) {
 	commitStateInputs := stateContract.Methods["commitState"].Inputs
 	methodId := stateContract.Methods["commitState"].ID
 
@@ -62,13 +63,15 @@ func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue)
 
 		if len(args) == 2 {
 			var eventRecord EventRecord
-			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err == nil {
-				return &EventRecordWithTime{EventRecord: eventRecord, Time: t}
+			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err != nil {
+				return nil, err
 			}
+
+			return &EventRecordWithTime{EventRecord: eventRecord, Time: t}, nil
 		}
 	}
 
-	return nil
+	return nil, errors.New("no valid record")
 }
 
 type StateSyncEventsResponse struct {

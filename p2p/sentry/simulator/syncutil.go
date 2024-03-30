@@ -33,7 +33,7 @@ import (
 
 type TorrentClient struct {
 	*torrent.Client
-	Cfg   *torrent.ClientConfig
+	cfg   *torrent.ClientConfig
 	items map[string]snapcfg.PreverifiedItem
 }
 
@@ -121,7 +121,7 @@ func NewTorrentClient(ctx context.Context, chain string, torrentDir string, logg
 }
 
 func (s *TorrentClient) LocalFsRoot() string {
-	return s.Cfg.DataDir
+	return s.cfg.DataDir
 }
 
 func (s *TorrentClient) Download(ctx context.Context, files ...string) error {
