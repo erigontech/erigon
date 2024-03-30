@@ -12,6 +12,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/ledgerwatch/log/v3"
+
 	"github.com/ledgerwatch/erigon-lib/chain"
 	common2 "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/background"
@@ -28,7 +30,6 @@ import (
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/services"
-	"github.com/ledgerwatch/log/v3"
 )
 
 func (br *BlockRetire) dbHasEnoughDataForBorRetire(ctx context.Context) (bool, error) {
@@ -485,7 +486,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), snaptype.BorSnapshotTypes)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), snaptype.BorSnapshotTypes, false)
 	if err != nil {
 		return err
 	}
@@ -526,6 +527,7 @@ func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
 	return v.base.Segment(snaptype.BorEvents, blockNum)
 }
 
-func (v *BorView) SpansSegment(blockNum uint64) (*Segment, bool) {
+func (v *BorView) SpansSegment(spanId uint64) (*Segment, bool) {
+	blockNum := heimdall.SpanEndBlockNum(heimdall.SpanId(spanId))
 	return v.base.Segment(snaptype.BorSpans, blockNum)
 }

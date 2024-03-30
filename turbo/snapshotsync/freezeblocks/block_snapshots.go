@@ -615,11 +615,11 @@ func (s *RoSnapshots) Ranges() []Range {
 func (s *RoSnapshots) OptimisticalyReopenFolder()           { _ = s.ReopenFolder() }
 func (s *RoSnapshots) OptimisticalyReopenWithDB(db kv.RoDB) { _ = s.ReopenWithDB(db) }
 func (s *RoSnapshots) ReopenFolder() error {
-	return s.ReopenSegments(s.Types())
+	return s.ReopenSegments(s.Types(), false)
 }
 
-func (s *RoSnapshots) ReopenSegments(types []snaptype.Type) error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types)
+func (s *RoSnapshots) ReopenSegments(types []snaptype.Type, allowGaps bool) error {
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), types, allowGaps)
 
 	if err != nil {
 		return err
@@ -1044,10 +1044,10 @@ func SegmentsCaplin(dir string, minBlock uint64) (res []snaptype.FileInfo, missi
 }
 
 func Segments(dir string, minBlock uint64) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
-	return typedSegments(dir, minBlock, snaptype.BlockSnapshotTypes)
+	return typedSegments(dir, minBlock, snaptype.BlockSnapshotTypes, false)
 }
 
-func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
+func typedSegments(dir string, minBlock uint64, types []snaptype.Type, allowGaps bool) (res []snaptype.FileInfo, missingSnapshots []Range, err error) {
 	segmentsTypeCheck := func(dir string, in []snaptype.FileInfo) (res []snaptype.FileInfo) {
 		return typeOfSegmentsMustExist(dir, in, types)
 	}
@@ -1068,7 +1068,12 @@ func typedSegments(dir string, minBlock uint64, types []snaptype.Type) (res []sn
 				}
 				l = append(l, f)
 			}
-			l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+
+			if allowGaps {
+				l = noOverlaps(segmentsTypeCheck(dir, l))
+			} else {
+				l, m = noGaps(noOverlaps(segmentsTypeCheck(dir, l)), minBlock)
+			}
 			if len(m) > 0 {
 				lst := m[len(m)-1]
 				log.Debug("[snapshots] see gap", "type", segType, "from", lst.from)
