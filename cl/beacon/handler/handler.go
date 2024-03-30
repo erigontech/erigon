@@ -201,7 +201,7 @@ func (a *ApiHandler) init() {
 					r.Post("/beacon_committee_subscriptions", http.NotFound)
 					r.Post("/sync_committee_subscriptions", a.PostEthV1ValidatorSyncCommitteeSubscriptions)
 					r.Get("/sync_committee_contribution", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorSyncCommitteeContribution))
-					r.Post("/contribution_and_proofs", http.NotFound)
+					r.Post("/contribution_and_proofs", a.PostEthV1ValidatorContributionsAndProofs)
 					r.Post("/prepare_beacon_proposer", a.PostEthV1ValidatorPrepareBeaconProposal)
 					r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 				})

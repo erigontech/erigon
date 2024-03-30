@@ -12,6 +12,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/ledgerwatch/erigon/cl/persistence/state"
+	"github.com/ledgerwatch/log/v3"
 )
 
 type syncDutyResponse struct {
@@ -80,6 +81,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		case referencePeriod+1 == period:
 			nextSyncCommittee, err = state_accessors.ReadNextSyncCommittee(tx, roundedSlotToPeriod)
 		default:
+			log.Warn("could not find sync committee for epoch", "epoch", epoch, "referencePeriod", referencePeriod, "period", period)
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))
 		}
 		if err != nil {
