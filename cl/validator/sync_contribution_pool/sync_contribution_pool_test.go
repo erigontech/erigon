@@ -63,5 +63,7 @@ func TestSyncContributionPool(t *testing.T) {
 	require.NoError(t, pool.AddSyncContribution(s, contribution))
 
 	contribution2 := pool.GetSyncContribution(0, 1, testHash)
+	require.Equal(t, contribution2.Signature, contribution.Signature)
 	require.Equal(t, contribution, contribution2)
+
 }

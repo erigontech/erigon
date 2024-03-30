@@ -368,7 +368,9 @@ func (f *ForkChoiceStore) OnSignedContributionAndProof(signedContribution *cltyp
 
 	// emit contribution_and_proof
 	f.emitters.Publish("contribution_and_proof", signedContribution)
-	return nil
+	// add the contribution to the pool
+	return f.syncContributionPool.AddSyncContribution(headState, contributionAndProof.Contribution)
+
 }
 
 func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltypes.SyncCommitteeMessage) error {
