@@ -12,7 +12,6 @@ import (
 	proto_downloader "github.com/ledgerwatch/erigon-lib/gointerfaces/downloader"
 	"github.com/ledgerwatch/erigon/cl/antiquary"
 	"github.com/ledgerwatch/erigon/cl/beacon"
-	"github.com/ledgerwatch/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/ledgerwatch/erigon/cl/beacon/beaconevents"
 	"github.com/ledgerwatch/erigon/cl/beacon/handler"
 	"github.com/ledgerwatch/erigon/cl/beacon/synced_data"
@@ -104,7 +103,7 @@ func OpenCaplinDatabase(ctx context.Context,
 }
 
 func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngine, config *ethconfig.Config, networkConfig *clparams.NetworkConfig,
-	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState, dirs datadir.Dirs, cfg beacon_router_configuration.RouterConfiguration, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
+	beaconConfig *clparams.BeaconChainConfig, genesisConfig *clparams.GenesisConfig, state *state.CachingBeaconState, dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader proto_downloader.DownloaderClient, backfilling, blobBackfilling bool, states bool, indexDB kv.RwDB, blobStorage blob_storage.BlobStorage, creds credentials.TransportCredentials) error {
 	ctx, cn := context.WithCancel(ctx)
 	defer cn()
@@ -128,7 +127,7 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 
 	syncContributionPool := sync_contribution_pool.NewSyncContributionPool()
 	emitters := beaconevents.NewEmitters()
-	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, cfg), emitters, syncedDataManager, blobStorage, syncContributionPool)
+	forkChoice, err := forkchoice.NewForkChoiceStore(state, engine, pool, fork_graph.NewForkGraphDisk(state, fcuFs, config.BeaconRouter), emitters, syncedDataManager, blobStorage, syncContributionPool)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
 		return err
@@ -146,6 +145,8 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 	if err != nil {
 		return err
 	}
+
+	fmt.Println(config.BeaconRouter.Validator)
 
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        config.LightClientDiscoveryAddr,
@@ -256,12 +257,12 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 
 	statesReader := historical_states_reader.NewHistoricalStatesReader(beaconConfig, rcsn, vTables, genesisState)
 	validatorParameters := validator_params.NewValidatorParams()
-	if cfg.Active {
-		apiHandler := handler.NewApiHandler(logger, genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &cfg, emitters, blobStorage, csn, validatorParameters, attestationProducer, engine)
+	if config.BeaconRouter.Active {
+		apiHandler := handler.NewApiHandler(logger, genesisConfig, beaconConfig, indexDB, forkChoice, pool, rcsn, syncedDataManager, statesReader, sentinel, params.GitTag, &config.BeaconRouter, emitters, blobStorage, csn, validatorParameters, attestationProducer, engine, syncContributionPool)
 		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
 			ArchiveApi: apiHandler,
-		}, cfg)
-		log.Info("Beacon API started", "addr", cfg.Address)
+		}, config.BeaconRouter)
+		log.Info("Beacon API started", "addr", config.BeaconRouter.Address)
 	}
 
 	forkChoice.StartJobsRTT(ctx)

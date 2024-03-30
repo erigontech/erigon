@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/gointerfaces/sentinel"
+	"github.com/ledgerwatch/erigon/cl/beacon/beaconhttp"
 	"github.com/ledgerwatch/erigon/cl/gossip"
 	"github.com/ledgerwatch/erigon/cl/phase1/network/subnets"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -68,4 +71,43 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 		}
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+func parseSyncCommitteeContribution(r *http.Request) (slot, subcommitteeIndex uint64, beaconBlockRoot common.Hash, err error) {
+	slotStr := r.URL.Query().Get("slot")
+	subCommitteeIndexStr := r.URL.Query().Get("subcommittee_index")
+	blockRootStr := r.URL.Query().Get("beacon_block_root")
+	// check if they required fields are present
+	if slotStr == "" {
+		err = fmt.Errorf("slot as query param is required")
+		return
+	}
+	if subCommitteeIndexStr == "" {
+		err = fmt.Errorf("subcommittee_index as query param is required")
+		return
+	}
+	if blockRootStr == "" {
+		err = fmt.Errorf("beacon_block_root as query param is required")
+		return
+	}
+	slot, err = strconv.ParseUint(slotStr, 10, 64)
+	if err != nil {
+		err = fmt.Errorf("could not parse slot: %w", err)
+		return
+	}
+	subcommitteeIndex, err = strconv.ParseUint(subCommitteeIndexStr, 10, 64)
+	if err != nil {
+		err = fmt.Errorf("could not parse subcommittee_index: %w", err)
+		return
+	}
+	beaconBlockRoot = common.HexToHash(blockRootStr)
+	return
+}
+
+func (a *ApiHandler) GetEthV1ValidatorSyncCommitteeContribution(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	slot, subCommitteeIndex, beaconBlockRoot, err := parseSyncCommitteeContribution(r)
+	if err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	return newBeaconResponse(a.syncMessagePool.GetSyncContribution(slot, subCommitteeIndex, beaconBlockRoot)), nil
 }

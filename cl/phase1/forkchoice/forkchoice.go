@@ -31,20 +31,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )
 
-// Schema
-/*
-{
-      "slot": "1",
-      "block_root": "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
-      "parent_root": "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
-      "justified_epoch": "1",
-      "finalized_epoch": "1",
-      "weight": "1",
-      "validity": "valid",
-      "execution_block_hash": "0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
-      "extra_data": {}
-    }
-*/
+// ForkNode is a struct that represents a node in the fork choice tree.
 type ForkNode struct {
 	Slot           uint64         `json:"slot,string"`
 	BlockRoot      libcommon.Hash `json:"block_root"`
@@ -60,6 +47,12 @@ type seenSyncCommitteeMessage struct {
 	subnet         uint64
 	slot           uint64
 	validatorIndex uint64
+}
+
+type seenSyncCommitteeContribution struct {
+	aggregatorIndex   uint64
+	slot              uint64
+	subCommitteeIndex uint64
 }
 
 type checkpointComparable string
@@ -136,8 +129,10 @@ type ForkChoiceStore struct {
 
 	mu sync.RWMutex
 	// sync committees messages processing
-	seenSyncCommitteeMessages map[seenSyncCommitteeMessage]struct{}
-	muSyncCommitteeMessages   sync.Mutex
+	seenSyncCommitteeMessages      map[seenSyncCommitteeMessage]struct{}
+	seenSyncCommitteeContributions map[seenSyncCommitteeContribution]struct{}
+	muSyncCommitteeMessages        sync.Mutex
+	muSyncContribution             sync.Mutex
 	// EL
 	engine execution_client.ExecutionEngine
 
@@ -237,31 +232,32 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 	headSet := make(map[libcommon.Hash]struct{})
 	headSet[anchorRoot] = struct{}{}
 	f := &ForkChoiceStore{
-		forkGraph:                 forkGraph,
-		equivocatingIndicies:      make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		latestMessages:            make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
-		eth2Roots:                 eth2Roots,
-		engine:                    engine,
-		operationsPool:            operationsPool,
-		anchorPublicKeys:          anchorPublicKeys,
-		beaconCfg:                 anchorState.BeaconConfig(),
-		preverifiedSizes:          preverifiedSizes,
-		finalityCheckpoints:       finalityCheckpoints,
-		totalActiveBalances:       totalActiveBalances,
-		randaoMixesLists:          randaoMixesLists,
-		randaoDeltas:              randaoDeltas,
-		headSet:                   headSet,
-		weights:                   make(map[libcommon.Hash]uint64),
-		participation:             participation,
-		emitters:                  emitters,
-		genesisTime:               anchorState.GenesisTime(),
-		syncedDataManager:         syncedDataManager,
-		nextBlockProposers:        nextBlockProposers,
-		genesisValidatorsRoot:     anchorState.GenesisValidatorsRoot(),
-		hotSidecars:               make(map[libcommon.Hash][]*cltypes.BlobSidecar),
-		blobStorage:               blobStorage,
-		seenSyncCommitteeMessages: make(map[seenSyncCommitteeMessage]struct{}),
-		syncContributionPool:      syncContributionPool,
+		forkGraph:                      forkGraph,
+		equivocatingIndicies:           make([]byte, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		latestMessages:                 make([]LatestMessage, anchorState.ValidatorLength(), anchorState.ValidatorLength()*2),
+		eth2Roots:                      eth2Roots,
+		engine:                         engine,
+		operationsPool:                 operationsPool,
+		anchorPublicKeys:               anchorPublicKeys,
+		beaconCfg:                      anchorState.BeaconConfig(),
+		preverifiedSizes:               preverifiedSizes,
+		finalityCheckpoints:            finalityCheckpoints,
+		totalActiveBalances:            totalActiveBalances,
+		randaoMixesLists:               randaoMixesLists,
+		randaoDeltas:                   randaoDeltas,
+		headSet:                        headSet,
+		weights:                        make(map[libcommon.Hash]uint64),
+		participation:                  participation,
+		emitters:                       emitters,
+		genesisTime:                    anchorState.GenesisTime(),
+		syncedDataManager:              syncedDataManager,
+		nextBlockProposers:             nextBlockProposers,
+		genesisValidatorsRoot:          anchorState.GenesisValidatorsRoot(),
+		hotSidecars:                    make(map[libcommon.Hash][]*cltypes.BlobSidecar),
+		blobStorage:                    blobStorage,
+		seenSyncCommitteeMessages:      make(map[seenSyncCommitteeMessage]struct{}),
+		syncContributionPool:           syncContributionPool,
+		seenSyncCommitteeContributions: make(map[seenSyncCommitteeContribution]struct{}),
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint.Copy())
 	f.finalizedCheckpoint.Store(anchorCheckpoint.Copy())

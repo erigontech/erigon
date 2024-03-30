@@ -115,3 +115,8 @@ func ReverseOfByteSlice(b []byte) (out []byte) {
 func FlipBitOn(b []byte, i int) {
 	b[i/8] |= 1 << (i % 8)
 }
+
+func IsBitOn(b []byte, idx int) bool {
+	i := uint8(1 << (idx % 8))
+	return b[idx/8]&i == i
+}

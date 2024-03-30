@@ -106,7 +106,7 @@ func (s *SentinelServer) PublishGossip(_ context.Context, msg *sentinelrpc.Gossi
 				return nil, fmt.Errorf("subnetId is required for blob sidecar")
 			}
 			subscription = manager.GetMatchingSubscription(fmt.Sprintf(gossip.TopicNamePrefixBlobSidecar, *msg.SubnetId))
-		case strings.Contains(msg.Name, "sync_committee_"):
+		case strings.Contains(msg.Name, "sync_committee_") && !strings.Contains(msg.Name, gossip.TopicNameSyncCommitteeContributionAndProof):
 			if msg.SubnetId == nil {
 				return nil, fmt.Errorf("subnetId is required for sync_committee")
 			}
