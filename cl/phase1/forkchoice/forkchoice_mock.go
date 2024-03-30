@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/erigon/cl/phase1/execution_client"
 	"github.com/ledgerwatch/erigon/cl/pool"
 	"github.com/ledgerwatch/erigon/cl/transition/impl/eth2"
+	"github.com/ledgerwatch/erigon/cl/validator/sync_contribution_pool"
 )
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
@@ -39,6 +40,7 @@ type ForkChoiceStorageMock struct {
 	LightClientBootstraps     map[common.Hash]*cltypes.LightClientBootstrap
 	NewestLCUpdate            *cltypes.LightClientUpdate
 	LCUpdates                 map[uint64]*cltypes.LightClientUpdate
+	SyncContributionPool      sync_contribution_pool.SyncContributionPool
 
 	Pool pool.OperationsPool
 }
@@ -62,6 +64,7 @@ func NewForkChoiceStorageMock() *ForkChoiceStorageMock {
 		GetFinalityCheckpointsVal: make(map[common.Hash][3]solid.Checkpoint),
 		LightClientBootstraps:     make(map[common.Hash]*cltypes.LightClientBootstrap),
 		LCUpdates:                 make(map[uint64]*cltypes.LightClientUpdate),
+		SyncContributionPool:      sync_contribution_pool.NewSyncContributionPoolMock(),
 	}
 }
 
@@ -241,5 +244,11 @@ func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Has
 }
 
 func (f *ForkChoiceStorageMock) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error {
-	panic("implement me")
+	f.SyncContributionPool.AddSyncCommitteeMessage(nil, 0, msg)
+	return nil
+}
+
+func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
+	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
+	return nil
 }

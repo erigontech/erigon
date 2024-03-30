@@ -1,7 +1,6 @@
 package sync_contribution_pool
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/Giulio2002/bls"
@@ -57,7 +56,6 @@ func TestSyncContributionPool(t *testing.T) {
 
 	contribution := pool.GetSyncContribution(0, 0, testHash)
 	require.NotEqual(t, contribution.Signature, common.Bytes96(bls.InfiniteSignature))
-	fmt.Println(contribution.AggregationBits[0], 0x7) // first 3 bits should be on.
 
 	contribution.SubcommitteeIndex = 1
 	require.NoError(t, pool.AddSyncContribution(s, contribution))

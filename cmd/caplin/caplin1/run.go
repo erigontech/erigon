@@ -146,8 +146,6 @@ func RunCaplinPhase1(ctx context.Context, engine execution_client.ExecutionEngin
 		return err
 	}
 
-	fmt.Println(config.BeaconRouter.Validator)
-
 	sentinel, err := service.StartSentinelService(&sentinel.SentinelConfig{
 		IpAddr:        config.LightClientDiscoveryAddr,
 		Port:          int(config.LightClientDiscoveryPort),

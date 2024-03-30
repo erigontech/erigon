@@ -68,7 +68,6 @@ func createSentinel(cfg *sentinel.SentinelConfig, blockReader freezeblocks.Beaco
 		////sentinel.LightClientOptimisticUpdateSsz,
 	}
 	if validatorTopics {
-		fmt.Println("a")
 		gossipTopics = append(gossipTopics, sentinel.SyncCommitteeContributionAndProofSsz, sentinel.BeaconAggregateAndProofSsz)
 	}
 	gossipTopics = append(gossipTopics, generateSubnetsTopics(gossip.TopicNamePrefixBlobSidecar, int(cfg.BeaconConfig.MaxBlobsPerBlock))...)

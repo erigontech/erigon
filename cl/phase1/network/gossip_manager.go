@@ -68,12 +68,12 @@ func operationsContract[T ssz.EncodableSSZ](ctx context.Context, g *GossipManage
 }
 
 func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l log.Ctx) (err error) {
-	// defer func() {
-	// 	r := recover()
-	// 	if r != nil {
-	// 		err = fmt.Errorf("%v", r)
-	// 	}
-	// }()
+	defer func() {
+		r := recover()
+		if r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
 
 	currentEpoch := utils.GetCurrentEpoch(g.genesisConfig.GenesisTime, g.beaconConfig.SecondsPerSlot, g.beaconConfig.SlotsPerEpoch)
 	version := g.beaconConfig.GetCurrentStateVersion(currentEpoch)
