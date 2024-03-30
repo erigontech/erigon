@@ -156,7 +156,7 @@ func (h *HeimdallSimulator) FetchMilestoneID(ctx context.Context, milestoneID st
 }
 
 func (h *HeimdallSimulator) Close() {
-	h.downloader.Close()
+	_ = h.downloader.Close()
 
 	h.activeBorSnapshots.Close()
 	h.knownBorSnapshots.Close()
