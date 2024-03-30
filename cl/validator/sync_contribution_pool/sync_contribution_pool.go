@@ -48,13 +48,35 @@ func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingB
 		subcommitteeIndex: contribution.SubcommitteeIndex,
 		beaconBlockRoot:   contribution.BeaconBlockRoot,
 	}
-
-	if _, ok := s.syncContributionPool[key]; ok {
-		return nil
+	baseContribution := &cltypes.Contribution{
+		Slot:              contribution.Slot,
+		SubcommitteeIndex: contribution.SubcommitteeIndex,
+		BeaconBlockRoot:   contribution.BeaconBlockRoot,
+		AggregationBits:   make([]byte, cltypes.SyncCommitteeAggregationBitsSize),
+		Signature:         bls.InfiniteSignature,
 	}
 
+	if val, ok := s.syncContributionPool[key]; ok {
+		baseContribution = val.Copy()
+	}
+	// Time to aggregate the giga aggregatable.
+	if utils.IsSupersetBitlist(contribution.AggregationBits, baseContribution.AggregationBits) {
+		return nil // Skip it if it is just a superset.
+	}
+	// Aggregate the bits.
+	utils.MergeBitlists(baseContribution.AggregationBits, contribution.AggregationBits)
+	// Aggregate the signature.
+	aggregatedSignature, err := bls.AggregateSignatures([][]byte{
+		baseContribution.Signature[:],
+		contribution.Signature[:],
+	})
+	if err != nil {
+		return err
+	}
+	copy(baseContribution.Signature[:], aggregatedSignature)
+
 	// Make a copy.
-	s.syncContributionPool[key] = contribution.Copy()
+	s.syncContributionPool[key] = baseContribution.Copy()
 	s.cleanupOldContributions(headState)
 	return nil
 }
