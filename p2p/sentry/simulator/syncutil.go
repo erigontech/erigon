@@ -124,6 +124,17 @@ func (s *TorrentClient) LocalFsRoot() string {
 	return s.cfg.DataDir
 }
 
+func (s *TorrentClient) Close() error {
+	if closer, ok := s.cfg.DefaultStorage.(interface{ Close() error }); ok {
+		err := closer.Close()
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (s *TorrentClient) Download(ctx context.Context, files ...string) error {
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(len(files))

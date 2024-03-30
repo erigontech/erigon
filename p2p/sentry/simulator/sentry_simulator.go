@@ -113,10 +113,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 }
 
 func (s *server) Close() {
-	s.downloader.Close()
-	if closer, ok := s.downloader.Cfg.DefaultStorage.(interface{ Close() error }); ok {
-		closer.Close()
-	}
+	_ = s.downloader.Close()
 	s.activeSnapshots.Close()
 }
 
