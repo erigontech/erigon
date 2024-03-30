@@ -16,7 +16,7 @@ import (
 type syncDutyResponse struct {
 	Pubkey                         libcommon.Bytes48 `json:"pubkey"`
 	ValidatorIndex                 uint64            `json:"validator_index,string"`
-	ValidatorSyncCommitteeIndicies []string          `json:"validator_sync_committee_indicies"`
+	ValidatorSyncCommitteeIndicies []string          `json:"validator_sync_committee_indices"`
 }
 
 func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
