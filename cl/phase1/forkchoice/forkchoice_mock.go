@@ -239,3 +239,7 @@ func (f *ForkChoiceStorageMock) GetCurrentPartecipationIndicies(blockRoot libcom
 func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(blockRoot libcommon.Hash, idx uint64) (libcommon.Bytes48, error) {
 	panic("implement me")
 }
+
+func (f *ForkChoiceStorageMock) OnSyncCommitteeMessage(msg *cltypes.SyncCommitteeMessage, subnetID uint64) error {
+	panic("implement me")
+}
