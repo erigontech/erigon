@@ -387,8 +387,8 @@ func (f *ForkChoiceStore) GetFinalityCheckpoints(blockRoot libcommon.Hash) (bool
 	return false, solid.Checkpoint{}, solid.Checkpoint{}, solid.Checkpoint{}
 }
 
-func (f *ForkChoiceStore) GetSyncCommittees(blockRoot libcommon.Hash) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
-	return f.forkGraph.GetSyncCommittees(blockRoot)
+func (f *ForkChoiceStore) GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool) {
+	return f.forkGraph.GetSyncCommittees(period)
 }
 
 func (f *ForkChoiceStore) BlockRewards(root libcommon.Hash) (*eth2.BlockRewardsCollector, bool) {
