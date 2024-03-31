@@ -23,7 +23,7 @@ import (
 	"github.com/spf13/afero"
 )
 
-const dumpSlotFrequency = 17
+const dumpSlotFrequency = 4
 
 type syncCommittees struct {
 	currentSyncCommittee *solid.SyncCommittee
