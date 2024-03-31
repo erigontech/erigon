@@ -233,19 +233,25 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				checkpointFrom, err := heimdall.CheckpointIdAt(ctx, db, blockFrom)
+				var checkpointTo, checkpointFrom heimdall.CheckpointId
 
-				if err != nil {
-					return 0, err
-				}
+				err := db.View(ctx, func(tx kv.Tx) (err error) {
+					checkpointFrom, err = heimdall.CheckpointIdAt(tx, blockFrom)
 
-				if blockFrom > 0 {
-					if prevTo, err := heimdall.CheckpointIdAt(ctx, db, blockFrom-1); err == nil && prevTo == checkpointFrom {
-						checkpointFrom++
+					if err != nil {
+						return err
 					}
-				}
 
-				checkpointTo, err := heimdall.CheckpointIdAt(ctx, db, blockTo)
+					if blockFrom > 0 {
+						if prevTo, err := heimdall.CheckpointIdAt(tx, blockFrom-1); err == nil && prevTo == checkpointFrom {
+							checkpointFrom++
+						}
+					}
+
+					checkpointTo, err = heimdall.CheckpointIdAt(tx, blockTo)
+
+					return err
+				})
 
 				if err != nil {
 					return 0, err
@@ -282,26 +288,36 @@ var (
 		},
 		snaptype.RangeExtractorFunc(
 			func(ctx context.Context, blockFrom, blockTo uint64, firstKeyGetter snaptype.FirstKeyGetter, db kv.RoDB, chainConfig *chain.Config, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-				milestoneFrom, err := heimdall.MilestoneIdAt(ctx, db, blockFrom)
+				var milestoneFrom, milestoneTo heimdall.MilestoneId
 
-				if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
-					return 0, err
-				}
+				err := db.View(ctx, func(tx kv.Tx) (err error) {
+					milestoneFrom, err = heimdall.MilestoneIdAt(tx, blockFrom)
 
-				if milestoneFrom > 0 && blockFrom > 0 {
-					if prevTo, err := heimdall.MilestoneIdAt(ctx, db, blockFrom-1); err == nil && prevTo == milestoneFrom {
-						milestoneFrom++
+					if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+						return err
 					}
-				}
 
-				milestoneTo, err := heimdall.MilestoneIdAt(ctx, db, blockTo)
+					if milestoneFrom > 0 && blockFrom > 0 {
+						if prevTo, err := heimdall.MilestoneIdAt(tx, blockFrom-1); err == nil && prevTo == milestoneFrom {
+							milestoneFrom++
+						}
+					}
 
-				if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+					milestoneTo, err = heimdall.MilestoneIdAt(tx, blockTo)
+
+					if err != nil && !errors.Is(err, heimdall.ErrMilestoneNotFound) {
+						return err
+					}
+
+					if milestoneTo < milestoneFrom {
+						return fmt.Errorf("end milestone: %d before start milestone: %d", milestoneTo, milestoneFrom)
+					}
+
+					return nil
+				})
+
+				if err != nil {
 					return 0, err
-				}
-
-				if milestoneTo < milestoneFrom {
-					return 0, fmt.Errorf("end milestone: %d before start milestone: %d", milestoneTo, milestoneFrom)
 				}
 
 				return extractValueRange(ctx, kv.BorMilestones, uint64(milestoneFrom), uint64(milestoneTo), db, chainConfig, collect, workers, lvl, logger)

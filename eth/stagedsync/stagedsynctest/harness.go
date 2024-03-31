@@ -61,6 +61,7 @@ func InitHarness(ctx context.Context, t *testing.T, cfg HarnessCfg) Harness {
 		nil, // recent bor snapshots cached
 		nil, // signatures lru cache
 		false,
+		nil,
 	)
 	stateSyncStages := stagedsync.DefaultStages(
 		ctx,

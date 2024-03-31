@@ -1,7 +1,6 @@
 package heimdall
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -111,33 +110,29 @@ type CheckpointCountResponse struct {
 
 var ErrCheckpointNotFound = fmt.Errorf("checkpoint not found")
 
-func CheckpointIdAt(ctx context.Context, db kv.RoDB, block uint64) (CheckpointId, error) {
+func CheckpointIdAt(tx kv.Tx, block uint64) (CheckpointId, error) {
 	var id uint64
 
-	err := db.View(ctx, func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.BorCheckpointEnds)
+	c, err := tx.Cursor(kv.BorCheckpointEnds)
 
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return 0, err
+	}
 
-		var blockNumBuf [8]byte
-		binary.BigEndian.PutUint64(blockNumBuf[:], block)
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], block)
 
-		k, v, err := c.Seek(blockNumBuf[:])
+	k, v, err := c.Seek(blockNumBuf[:])
 
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return 0, err
+	}
 
-		if k == nil {
-			return fmt.Errorf("%d: %w", block, ErrCheckpointNotFound)
-		}
+	if k == nil {
+		return 0, fmt.Errorf("%d: %w", block, ErrCheckpointNotFound)
+	}
 
-		id = binary.BigEndian.Uint64(v)
-
-		return nil
-	})
+	id = binary.BigEndian.Uint64(v)
 
 	return CheckpointId(id), err
 }

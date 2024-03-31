@@ -1,7 +1,6 @@
 package heimdall
 
 import (
-	"context"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -141,33 +140,29 @@ type MilestoneIDResponse struct {
 
 var ErrMilestoneNotFound = fmt.Errorf("milestone not found")
 
-func MilestoneIdAt(ctx context.Context, db kv.RoDB, block uint64) (MilestoneId, error) {
+func MilestoneIdAt(tx kv.Tx, block uint64) (MilestoneId, error) {
 	var id uint64
 
-	err := db.View(ctx, func(tx kv.Tx) error {
-		c, err := tx.Cursor(kv.BorMilestoneEnds)
+	c, err := tx.Cursor(kv.BorMilestoneEnds)
 
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return 0, err
+	}
 
-		var blockNumBuf [8]byte
-		binary.BigEndian.PutUint64(blockNumBuf[:], block)
+	var blockNumBuf [8]byte
+	binary.BigEndian.PutUint64(blockNumBuf[:], block)
 
-		k, v, err := c.Seek(blockNumBuf[:])
+	k, v, err := c.Seek(blockNumBuf[:])
 
-		if err != nil {
-			return err
-		}
+	if err != nil {
+		return 0, err
+	}
 
-		if k == nil {
-			return fmt.Errorf("%d: %w", block, ErrMilestoneNotFound)
-		}
+	if k == nil {
+		return 0, fmt.Errorf("%d: %w", block, ErrMilestoneNotFound)
+	}
 
-		id = binary.BigEndian.Uint64(v)
-
-		return nil
-	})
+	id = binary.BigEndian.Uint64(v)
 
 	return MilestoneId(id), err
 }

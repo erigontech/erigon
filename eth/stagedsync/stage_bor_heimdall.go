@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -55,6 +56,7 @@ type BorHeimdallCfg struct {
 	recents          *lru.ARCCache[libcommon.Hash, *bor.Snapshot]
 	signatures       *lru.ARCCache[libcommon.Hash, libcommon.Address]
 	recordWaypoints  bool
+	unwindTypes      []string
 }
 
 func StageBorHeimdallCfg(
@@ -70,6 +72,7 @@ func StageBorHeimdallCfg(
 	recents *lru.ARCCache[libcommon.Hash, *bor.Snapshot],
 	signatures *lru.ARCCache[libcommon.Hash, libcommon.Address],
 	recordWaypoints bool,
+	unwindTypes []string,
 ) BorHeimdallCfg {
 	var borConfig *borcfg.BorConfig
 	if chainConfig.Bor != nil {
@@ -91,6 +94,7 @@ func StageBorHeimdallCfg(
 		recents:          recents,
 		signatures:       signatures,
 		recordWaypoints:  recordWaypoints,
+		unwindTypes:      unwindTypes,
 	}
 }
 
@@ -319,20 +323,25 @@ func BorHeimdallForward(
 
 		var callTime time.Duration
 
+		var endStateSyncEventId uint64
+
 		if nextEventRecord == nil || header.Time > uint64(nextEventRecord.Time.Unix()) {
 			var records int
-			lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
-				ctx,
-				header,
-				tx,
-				cfg,
-				s.LogPrefix(),
-				logger,
-				lastStateSyncEventID,
-			)
 
-			if err != nil {
-				return err
+			if lastStateSyncEventID != endStateSyncEventId {
+				lastStateSyncEventID, records, callTime, err = fetchRequiredHeimdallStateSyncEventsIfNeeded(
+					ctx,
+					header,
+					tx,
+					cfg,
+					s.LogPrefix(),
+					logger,
+					lastStateSyncEventID,
+				)
+
+				if err != nil {
+					return err
+				}
 			}
 
 			if records != 0 {
@@ -342,13 +351,13 @@ func BorHeimdallForward(
 				if nextEventRecord == nil || nextEventRecord.ID <= lastStateSyncEventID {
 					if eventRecord, err := cfg.heimdallClient.FetchStateSyncEvent(ctx, lastStateSyncEventID+1); err == nil {
 						nextEventRecord = eventRecord
+						endStateSyncEventId = 0
 					} else {
-						if errors.Is(err, heimdall.ErrEventRecordNotFound) {
-							headNumber = blockNum
-							break
+						if !errors.Is(err, heimdall.ErrEventRecordNotFound) {
+							return err
 						}
 
-						return err
+						endStateSyncEventId = lastStateSyncEventID
 					}
 				}
 			}
@@ -781,28 +790,39 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		defer tx.Rollback()
 	}
 
-	cursor, err := tx.RwCursor(kv.BorEventNums)
-	if err != nil {
-		return err
-	}
-
-	defer cursor.Close()
-
-	var blockNumBuf [8]byte
-	binary.BigEndian.PutUint64(blockNumBuf[:], u.UnwindPoint+1)
-	k, v, err := cursor.Seek(blockNumBuf[:])
-	if err != nil {
-		return err
-	}
-	if k != nil {
-		// v is the encoding of the first eventId to be removed
-		eventCursor, err := tx.RwCursor(kv.BorEvents)
+	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "events") {
+		cursor, err := tx.RwCursor(kv.BorEventNums)
 		if err != nil {
 			return err
 		}
-		defer eventCursor.Close()
-		for v, _, err = eventCursor.Seek(v); err == nil && v != nil; v, _, err = eventCursor.Next() {
-			if err = eventCursor.DeleteCurrent(); err != nil {
+
+		defer cursor.Close()
+
+		var blockNumBuf [8]byte
+		binary.BigEndian.PutUint64(blockNumBuf[:], u.UnwindPoint+1)
+		k, v, err := cursor.Seek(blockNumBuf[:])
+		if err != nil {
+			return err
+		}
+		if k != nil {
+			// v is the encoding of the first eventId to be removed
+			eventCursor, err := tx.RwCursor(kv.BorEvents)
+			if err != nil {
+				return err
+			}
+			defer eventCursor.Close()
+			for v, _, err = eventCursor.Seek(v); err == nil && v != nil; v, _, err = eventCursor.Next() {
+				if err = eventCursor.DeleteCurrent(); err != nil {
+					return err
+				}
+			}
+			if err != nil {
+				return err
+			}
+		}
+
+		for ; err == nil && k != nil; k, _, err = cursor.Next() {
+			if err = cursor.DeleteCurrent(); err != nil {
 				return err
 			}
 		}
@@ -811,28 +831,57 @@ func BorHeimdallUnwind(u *UnwindState, ctx context.Context, _ *StageState, tx kv
 		}
 	}
 
-	for ; err == nil && k != nil; k, _, err = cursor.Next() {
-		if err = cursor.DeleteCurrent(); err != nil {
+	// Removing spans
+	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "spans") {
+		spanCursor, err := tx.RwCursor(kv.BorSpans)
+		if err != nil {
 			return err
 		}
-	}
-	if err != nil {
-		return err
+
+		defer spanCursor.Close()
+		lastSpanToKeep := heimdall.SpanIdAt(u.UnwindPoint)
+		var spanIdBytes [8]byte
+		binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
+		for k, _, err := spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
+			if err = spanCursor.DeleteCurrent(); err != nil {
+				return err
+			}
+		}
 	}
 
-	// Removing spans
-	spanCursor, err := tx.RwCursor(kv.BorSpans)
-	if err != nil {
-		return err
-	}
-
-	defer spanCursor.Close()
-	lastSpanToKeep := heimdall.SpanIdAt(u.UnwindPoint)
-	var spanIdBytes [8]byte
-	binary.BigEndian.PutUint64(spanIdBytes[:], uint64(lastSpanToKeep+1))
-	for k, _, err = spanCursor.Seek(spanIdBytes[:]); err == nil && k != nil; k, _, err = spanCursor.Next() {
-		if err = spanCursor.DeleteCurrent(); err != nil {
+	// Removing checkpoints
+	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "checkpoints") {
+		checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
+		if err != nil {
 			return err
+		}
+
+		defer checkpointCursor.Close()
+		lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, u.UnwindPoint)
+		var checkpointIdBytes [8]byte
+		binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
+		for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
+			if err = checkpointCursor.DeleteCurrent(); err != nil {
+				return err
+			}
+		}
+	}
+
+	// Removing milestones
+	if len(cfg.unwindTypes) == 0 || slices.Contains(cfg.unwindTypes, "milestones") {
+		milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
+		if err != nil {
+			return err
+		}
+
+		defer milestoneCursor.Close()
+		lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, u.UnwindPoint)
+		var milestoneIdBytes [8]byte
+		binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
+		for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
+			if err = milestoneCursor.DeleteCurrent(); err != nil {
+				return err
+			}
 		}
 	}
 

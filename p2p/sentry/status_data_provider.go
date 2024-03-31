@@ -74,7 +74,7 @@ func (s *StatusDataProvider) GetStatusData(ctx context.Context) (*proto_sentry.S
 	return s.makeStatusData(chainHead), err
 }
 
-var ErrNoChainHead = errors.New("ReadChainHead: ReadCurrentHeader error")
+var ErrNoChainHead = errors.New("can't read chain head: nil current header")
 
 func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeader(tx)
@@ -93,7 +93,7 @@ func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 
 	td, err := rawdb.ReadTd(tx, hash, height)
 	if err != nil {
-		return ChainHead{}, fmt.Errorf("ReadChainHead: ReadTd error at height %d and hash %s: %w", height, hash, err)
+		return ChainHead{}, fmt.Errorf("can't read chain head: can't read td at height %d and hash %s: %w", height, hash, err)
 	}
 	if td == nil {
 		td = new(big.Int)
@@ -101,7 +101,7 @@ func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 	td256 := new(uint256.Int)
 	overflow := td256.SetFromBig(td)
 	if overflow {
-		return ChainHead{}, fmt.Errorf("ReadChainHead: total difficulty higher than 2^256-1")
+		return ChainHead{}, fmt.Errorf("can't read chain head: total difficulty higher than 2^256-1")
 	}
 
 	return ChainHead{height, time, hash, td256}, nil
