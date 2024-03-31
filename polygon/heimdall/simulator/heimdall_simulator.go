@@ -16,6 +16,7 @@ import (
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
 	"github.com/ledgerwatch/erigon/eth/ethconfig"
 	"github.com/ledgerwatch/erigon/p2p/sentry/simulator"
+	bor_snaptype "github.com/ledgerwatch/erigon/polygon/bor/snaptype"
 	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
 )
@@ -112,7 +113,7 @@ func (h *HeimdallSimulator) FetchStateSyncEvents(ctx context.Context, fromId uin
 
 	for !maxTime && len(events) != limit {
 		if seg, ok := view.EventsSegment(h.lastDownloadedBlockNumber); ok {
-			if err := h.downloadData(ctx, seg, snaptype.BorEvents, freezeblocks.BorEventsIdx); err != nil {
+			if err := h.downloadData(ctx, seg, bor_snaptype.BorEvents); err != nil {
 				return nil, err
 			}
 		}
@@ -162,7 +163,7 @@ func (h *HeimdallSimulator) Close() {
 	h.knownBorSnapshots.Close()
 }
 
-func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblocks.Segment, sType snaptype.Type, indexFn IndexFnType) error {
+func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblocks.Segment, sType snaptype.Type) error {
 	fileName := snaptype.SegmentFileName(1, spans.From(), spans.To(), sType.Enum())
 
 	if slices.Contains(h.activeBorSnapshots.Files(), fileName) {
@@ -180,7 +181,8 @@ func (h *HeimdallSimulator) downloadData(ctx context.Context, spans *freezeblock
 
 	info, _, _ := snaptype.ParseFileName(h.downloader.LocalFsRoot(), fileName)
 
-	err = indexFn(ctx, info, h.activeBorSnapshots.Salt, h.downloader.LocalFsRoot(), nil, log.LvlWarn, h.logger)
+	err = sType.BuildIndexes(ctx, info, nil, h.downloader.LocalFsRoot(), nil, log.LvlDebug, h.logger)
+
 	if err != nil {
 		return fmt.Errorf("can't download %s: %w", fileName, err)
 	}
@@ -202,8 +204,10 @@ func (h *HeimdallSimulator) getSpan(ctx context.Context, spanId uint64) (heimdal
 		view := h.knownBorSnapshots.View()
 		defer view.Close()
 
-		if seg, ok := view.SpansSegment(spanId); ok {
-			if err := h.downloadData(ctx, seg, snaptype.BorSpans, freezeblocks.BorSpansIdx); err != nil {
+		blockNum := heimdall.SpanEndBlockNum(heimdall.SpanId(spanId))
+
+		if seg, ok := view.SpansSegment(blockNum); ok {
+			if err := h.downloadData(ctx, seg, bor_snaptype.BorSpans); err != nil {
 				return heimdall.Span{}, err
 			}
 		}
