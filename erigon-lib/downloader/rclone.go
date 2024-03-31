@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,7 +22,6 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/exp/slices"
 	"golang.org/x/time/rate"
 
 	"github.com/c2h5oh/datasize"

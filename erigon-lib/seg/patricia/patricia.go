@@ -19,9 +19,8 @@ package patricia
 import (
 	"fmt"
 	"math/bits"
+	"slices"
 	"strings"
-
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common/cmp"
 	"github.com/ledgerwatch/erigon-lib/seg/sais"

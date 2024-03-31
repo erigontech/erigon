@@ -3,11 +3,11 @@ package forkchoice
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/log/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"

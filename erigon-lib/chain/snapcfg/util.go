@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -14,7 +15,6 @@ import (
 	"github.com/ledgerwatch/erigon-snapshot/webseed"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
 )
 
 var (

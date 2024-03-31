@@ -3,10 +3,10 @@ package commitment
 import (
 	"encoding/hex"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon-lib/common/length"
 )

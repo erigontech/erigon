@@ -25,6 +25,7 @@ import (
 	"math"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -32,7 +33,6 @@ import (
 	"github.com/RoaringBitmap/roaring/roaring64"
 	"github.com/ledgerwatch/log/v3"
 	btree2 "github.com/tidwall/btree"
-	"golang.org/x/exp/slices"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/common"
