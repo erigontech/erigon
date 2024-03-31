@@ -250,7 +250,7 @@ type Config struct {
 	SentinelAddr                string
 	SentinelPort                uint64
 
-	OverrideCancunTime *big.Int `toml:",omitempty"`
+	OverridePragueTime *big.Int `toml:",omitempty"`
 
 	ForcePartialCommit bool
 

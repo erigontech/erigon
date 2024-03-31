@@ -5,6 +5,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/ledgerwatch/log/v3"
+	"google.golang.org/protobuf/types/known/emptypb"
+
 	"github.com/ledgerwatch/erigon-lib/chain/snapcfg"
 	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/downloader/snaptype"
@@ -22,8 +25,6 @@ import (
 	"github.com/ledgerwatch/erigon/p2p/sentry"
 	"github.com/ledgerwatch/erigon/rlp"
 	"github.com/ledgerwatch/erigon/turbo/snapshotsync/freezeblocks"
-	"github.com/ledgerwatch/log/v3"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 type server struct {
@@ -113,10 +114,7 @@ func NewSentry(ctx context.Context, chain string, snapshotLocation string, peerC
 }
 
 func (s *server) Close() {
-	s.downloader.Close()
-	if closer, ok := s.downloader.cfg.DefaultStorage.(interface{ Close() error }); ok {
-		closer.Close()
-	}
+	_ = s.downloader.Close()
 	s.activeSnapshots.Close()
 }
 
@@ -419,7 +417,7 @@ func (s *server) getHeader(ctx context.Context, blockNum uint64) (*core_types.He
 			}
 		}
 
-		s.activeSnapshots.ReopenSegments([]snaptype.Type{core_snaptype.Headers})
+		s.activeSnapshots.ReopenSegments([]snaptype.Type{core_snaptype.Headers}, true)
 
 		header, err = s.blockReader.Header(ctx, nil, common.Hash{}, blockNum)
 

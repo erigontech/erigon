@@ -195,7 +195,7 @@ func removeBorOverlaps(dir string, active []snaptype.FileInfo, max uint64) {
 }
 
 func (s *BorRoSnapshots) ReopenFolder() error {
-	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), bor_snaptype.BorSnapshotTypes)
+	files, _, err := typedSegments(s.dir, s.segmentsMin.Load(), bor_snaptype.BorSnapshotTypes, false)
 	if err != nil {
 		return err
 	}

@@ -1,6 +1,7 @@
 package cltypes
 
 import (
+	"github.com/ledgerwatch/erigon-lib/types/clonable"
 	"github.com/ledgerwatch/erigon/cl/merkle_tree"
 	ssz2 "github.com/ledgerwatch/erigon/cl/ssz"
 )
@@ -37,4 +38,11 @@ func (f *SyncAggregatorSelectionData) EncodingSizeSSZ() int {
 
 func (f *SyncAggregatorSelectionData) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(f.Slot, f.SubcommitteeIndex)
+}
+
+func (f *SyncAggregatorSelectionData) Clone() clonable.Clonable {
+	return &SyncAggregatorSelectionData{
+		Slot:              f.Slot,
+		SubcommitteeIndex: f.SubcommitteeIndex,
+	}
 }
