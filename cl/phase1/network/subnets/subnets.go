@@ -42,7 +42,7 @@ func ComputeSubnetsForSyncCommittee(s *state.CachingBeaconState, validatorIndex 
 
 	committee := syncCommittee.GetCommittee()
 	for index := uint64(0); index < uint64(len(committee)); index++ {
-		subnetIdx := uint64(index) / (cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount)
+		subnetIdx := index / (cfg.SyncCommitteeSize / cfg.SyncCommitteeSubnetCount)
 		if _, ok := alreadySeenSubnetIndex[subnetIdx]; ok {
 			continue
 		}

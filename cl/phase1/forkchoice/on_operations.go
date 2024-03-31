@@ -400,6 +400,10 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 func verifyAggregatorSignatureForSyncContribution(s *state.CachingBeaconState, signedContributionAndProof *cltypes.SignedContributionAndProof) error {
 	contribution := signedContributionAndProof.Message.Contribution
 	domain, err := s.GetDomain(s.BeaconConfig().DomainContributionAndProof, contribution.Slot/s.BeaconConfig().SlotsPerEpoch)
+	if err != nil {
+		return err
+	}
+
 	signingRoot, err := fork.ComputeSigningRoot(signedContributionAndProof.Message, domain)
 	if err != nil {
 		return err

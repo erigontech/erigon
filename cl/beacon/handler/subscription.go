@@ -41,7 +41,7 @@ func (a *ApiHandler) PostEthV1ValidatorSyncCommitteeSubscriptions(w http.Respons
 	var err error
 	// process each sub request
 	for _, subRequest := range req {
-		expiry := utils.GetSlotTime(headState.GenesisTime(), a.beaconChainCfg.SecondsPerSlot, subRequest.UntilEpoch*uint64(a.beaconChainCfg.SlotsPerEpoch))
+		expiry := utils.GetSlotTime(headState.GenesisTime(), a.beaconChainCfg.SecondsPerSlot, subRequest.UntilEpoch*a.beaconChainCfg.SlotsPerEpoch)
 		if expiry.Before(time.Now()) {
 			continue
 		}
