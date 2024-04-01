@@ -285,11 +285,11 @@ func (f *fetcher) validateBodies(bodies []*types.RawBody, headers []*types.Heade
 		}
 	}
 
-	for _, body := range bodies {
-		if len(body.Transactions) == 0 && len(body.Withdrawals) == 0 && len(body.Uncles) == 0 {
-			return ErrEmptyBody
-		}
-	}
+	//for _, body := range bodies {
+	//	if len(body.Transactions) == 0 && len(body.Withdrawals) == 0 && len(body.Uncles) == 0 {
+	//		return ErrEmptyBody
+	//	}
+	//}
 
 	return nil
 }
