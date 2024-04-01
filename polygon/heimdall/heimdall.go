@@ -77,6 +77,7 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 	defer timer.Stop()
 
 	var checkpoints []Waypoint
+	var endBlock uint64
 	for i := count; i >= 1; i-- {
 		select {
 		case <-timer.C:
@@ -107,6 +108,7 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 
 		for _, c := range c {
 			checkpoints = append(checkpoints, c)
+			endBlock = c.EndBlock().Uint64()
 		}
 
 		// the checkpoint contains the start block
@@ -119,8 +121,9 @@ func (h *heimdall) FetchCheckpointsFromBlock(ctx context.Context, store Checkpoi
 
 	h.logger.Info(
 		heimdallLogPrefix("finished fetching checkpoints from block"),
-		"start", startBlock,
 		"count", len(checkpoints),
+		"start", startBlock,
+		"end", endBlock,
 		"time", time.Since(startFetchTime),
 	)
 
@@ -198,6 +201,7 @@ func (h *heimdall) FetchMilestonesFromBlock(ctx context.Context, store Milestone
 	defer timer.Stop()
 
 	var milestones Waypoints
+	var endBlock uint64
 	for i := last; i >= 1; i-- {
 		select {
 		case <-timer.C:
@@ -228,6 +232,7 @@ func (h *heimdall) FetchMilestonesFromBlock(ctx context.Context, store Milestone
 
 		for _, m := range m {
 			milestones = append(milestones, m)
+			endBlock = m.EndBlock().Uint64()
 		}
 
 		// the checkpoint contains the start block
@@ -240,8 +245,9 @@ func (h *heimdall) FetchMilestonesFromBlock(ctx context.Context, store Milestone
 
 	h.logger.Info(
 		heimdallLogPrefix("finished fetching milestones from block"),
-		"start", startBlock,
 		"count", len(milestones),
+		"start", startBlock,
+		"end", endBlock,
 		"time", time.Since(startFetchTime),
 	)
 

@@ -114,6 +114,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		"waypointsLen", len(waypoints),
 		"start", waypoints[0].StartBlock().Uint64(),
 		"end", waypoints[len(waypoints)-1].EndBlock().Uint64(),
+		"kind", reflect.TypeOf(waypoints[0]),
 	)
 
 	// waypoint rootHash->[blocks part of waypoint]
