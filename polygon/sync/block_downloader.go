@@ -121,6 +121,13 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 	var lastBlock *types.Block
 	lastBlockNum := waypoints[len(waypoints)-1].EndBlock().Uint64()
 	for len(waypoints) > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+			// carry-on
+		}
+
 		endBlockNum := waypoints[len(waypoints)-1].EndBlock().Uint64()
 		peers := d.p2pService.ListPeersMayHaveBlockNum(endBlockNum)
 		if len(peers) == 0 {
