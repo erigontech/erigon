@@ -36,7 +36,7 @@ func TryGracefully(ctx context.Context, logger log.Logger) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
-			logger.Info("sending interrupt signal to current process", "attempt", 1)
+			logger.Info("sending interrupt signal to current process", "attempt", attempt)
 			if err = p.SendSignal(syscall.SIGINT); err != nil {
 				logger.Error("could not send interrupt signal to current process", "err", err)
 			}
