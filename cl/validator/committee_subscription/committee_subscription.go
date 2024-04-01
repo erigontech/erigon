@@ -18,6 +18,16 @@ import (
 	"github.com/ledgerwatch/erigon/cl/utils"
 )
 
+var (
+	ErrIgnore                   = fmt.Errorf("ignore")
+	ErrCommitteeIndexOutOfRange = fmt.Errorf("committee index out of range")
+	ErrWrongSubnet              = fmt.Errorf("attestation is for the wrong subnet")
+	ErrNotInPropagationRange    = fmt.Errorf("attestation is not in propagation range. %w", ErrIgnore)
+	ErrEpochMismatch            = fmt.Errorf("epoch mismatch")
+	ErrExactlyOneBitSet         = fmt.Errorf("exactly one aggregation bit should be set")
+	ErrAggregationBitsMismatch  = fmt.Errorf("aggregation bits mismatch committee size")
+)
+
 type CommitteeSubscribeMgmt struct {
 	indiciesDB    kv.RoDB
 	genesisConfig *clparams.GenesisConfig
@@ -103,16 +113,6 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	}
 	return nil
 }
-
-var (
-	ErrIgnore                   = fmt.Errorf("ignore")
-	ErrCommitteeIndexOutOfRange = fmt.Errorf("committee index out of range")
-	ErrWrongSubnet              = fmt.Errorf("attestation is for the wrong subnet")
-	ErrNotInPropagationRange    = fmt.Errorf("attestation is not in propagation range. %w", ErrIgnore)
-	ErrEpochMismatch            = fmt.Errorf("epoch mismatch")
-	ErrExactlyOneBitSet         = fmt.Errorf("exactly one aggregation bit should be set")
-	ErrAggregationBitsMismatch  = fmt.Errorf("aggregation bits mismatch committee size")
-)
 
 func (c *CommitteeSubscribeMgmt) checkAttestation(topic string, att *solid.Attestation) error {
 	var (

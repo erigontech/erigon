@@ -86,16 +86,17 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			expect:   att1_1,
 		},
 		{
-			name: "overlap, retrun the one with more bits",
+			name: "att1_2 is a super set of att1_1. skip att1_1",
 			atts: []*solid.Attestation{
-				att1_1,
 				att1_2,
+				att1_1,
 				att2_1, // none of its business
 			},
 			hashRoot: attData1Root,
 			expect:   att1_2,
 		},
 		{
+<<<<<<< HEAD
 			name: "attestation was contained by another attestation. Skip it",
 			atts: []*solid.Attestation{
 				att1_1,
@@ -107,29 +108,21 @@ func (t *PoolTestSuite) TestAddAttestation() {
 		},
 		{
 			name: "att1_3 merge with att1_1 and att1_2 respectively",
+=======
+			name: "merge att1_2, att1_3, att1_4",
+>>>>>>> f6ea92414d (update aggregation)
 			atts: []*solid.Attestation{
-				att1_1,
-				att1_2,
-				att1_3,
-				att2_1, // none of its business
-			},
-			hashRoot: attData1Root,
-			expect: solid.NewAttestionFromParameters(
-				[]byte{0b00001111, 0, 0, 0}, // merge of att1_2 and att1_3
-				attData1,
-				mockAggrResult),
-		},
-		{
-			name: "more merge",
-			atts: []*solid.Attestation{
-				att1_1,
 				att1_2,
 				att1_3,
 				att1_4,
 			},
 			hashRoot: attData1Root,
 			expect: solid.NewAttestionFromParameters(
+<<<<<<< HEAD
 				[]byte{0b10111111, 0, 0, 0}, // merge of att1_1, att1_3 and att1_4
+=======
+				[]byte{0b00111111, 0, 0, 0}, // merge of att1_2, att1_3 and att1_4
+>>>>>>> f6ea92414d (update aggregation)
 				attData1,
 				mockAggrResult),
 		},

@@ -237,7 +237,7 @@ func (a *ApiHandler) init() {
 					r.Get("/attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorAttestationData))
 					r.Get("/aggregate_attestation", http.NotFound)
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof)
-					r.Post("/beacon_committee_subscriptions", a.postBeaconCommitteeSubscriptions)
+					r.Post("/beacon_committee_subscriptions", a.EthV1ValidatorBeaconCommitteeSubscription)
 					r.Post("/sync_committee_subscriptions", http.NotFound)
 					r.Get("/sync_committee_contribution", http.NotFound)
 					r.Post("/contribution_and_proofs", http.NotFound)

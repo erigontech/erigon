@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Giulio2002/bls"
+	"github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon/cl/clparams"
 	"github.com/ledgerwatch/erigon/cl/cltypes/solid"
 	"github.com/ledgerwatch/erigon/cl/utils"
@@ -22,12 +23,7 @@ type aggregationPoolImpl struct {
 	beaconConfig   *clparams.BeaconChainConfig
 	netConfig      *clparams.NetworkConfig
 	aggregatesLock sync.RWMutex
-	aggregates     map[[32]byte][]*attestation
-}
-
-type attestation struct {
-	bitCount int
-	att      *solid.Attestation
+	aggregates     map[common.Hash]*solid.Attestation
 }
 
 func NewAggregationPool(
@@ -41,7 +37,7 @@ func NewAggregationPool(
 		beaconConfig:   beaconConfig,
 		netConfig:      netConfig,
 		aggregatesLock: sync.RWMutex{},
-		aggregates:     make(map[[32]byte][]*attestation),
+		aggregates:     make(map[common.Hash]*solid.Attestation),
 	}
 	go p.sweepStaleAtt(ctx)
 	return p
@@ -56,16 +52,13 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 
 	p.aggregatesLock.Lock()
 	defer p.aggregatesLock.Unlock()
-	if _, ok := p.aggregates[hashRoot]; !ok {
-		p.aggregates[hashRoot] = []*attestation{
-			{
-				bitCount: countBit(inAtt),
-				att:      inAtt,
-			},
-		}
+	att, ok := p.aggregates[hashRoot]
+	if !ok {
+		p.aggregates[hashRoot] = inAtt.Clone().(*solid.Attestation)
 		return nil
 	}
 
+<<<<<<< HEAD
 	// NOTE: naive merge attestation for each existing attestation in the pool,
 	// but it's not optimal. it's kind of a maximum coverage problem.
 	mergeCount := 0
@@ -104,11 +97,42 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			bitCount: countBit(inAtt),
 			att:      inAtt,
 		})
+=======
+	if utils.IsSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
+		// no need to merge the same signatures
+		return nil
 	}
-	p.aggregates[hashRoot] = after
+
+	// merge signature
+	baseSig := att.Signature()
+	inSig := inAtt.Signature()
+	merged, err := blsAggregate([][]byte{baseSig[:], inSig[:]})
+	if err != nil {
+		return err
+>>>>>>> f6ea92414d (update aggregation)
+	}
+	if len(merged) > 96 {
+		return fmt.Errorf("merged signature is too long")
+	}
+	var mergedSig [96]byte
+	copy(mergedSig[:], merged)
+
+	// merge aggregation bits
+	mergedBits := make([]byte, len(att.AggregationBits()))
+	for i := range att.AggregationBits() {
+		mergedBits[i] = att.AggregationBits()[i] | inAtt.AggregationBits()[i]
+	}
+
+	// update attestation
+	p.aggregates[hashRoot] = solid.NewAttestionFromParameters(
+		mergedBits,
+		inAtt.AttestantionData(),
+		mergedSig,
+	)
 	return nil
 }
 
+<<<<<<< HEAD
 func mergeAttestationNoOverlap(a, b *solid.Attestation) (*solid.Attestation, error) {
 	// merge bit
 	newBits := make([]byte, len(a.AggregationBits()))
@@ -175,23 +199,16 @@ func countBit(att *solid.Attestation) int {
 }
 
 func (p *aggregationPoolImpl) GetAggregatationByRoot(root [32]byte) *solid.Attestation {
+=======
+func (p *aggregationPoolImpl) GetAggregatationByRoot(root common.Hash) *solid.Attestation {
+>>>>>>> f6ea92414d (update aggregation)
 	p.aggregatesLock.RLock()
 	defer p.aggregatesLock.RUnlock()
-	atts, ok := p.aggregates[root]
-	if !ok || atts == nil {
+	att := p.aggregates[root]
+	if att == nil {
 		return nil
 	}
-
-	// find the attestation with the most bits set
-	maxBits := 0
-	var maxAtt *solid.Attestation
-	for _, att := range atts {
-		if att.bitCount > maxBits {
-			maxBits = att.bitCount
-			maxAtt = att.att
-		}
-	}
-	return maxAtt
+	return att.Clone().(*solid.Attestation)
 }
 
 func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
@@ -204,14 +221,9 @@ func (p *aggregationPoolImpl) sweepStaleAtt(ctx context.Context) {
 			p.aggregatesLock.Lock()
 			toRemoves := make([][32]byte, 0)
 			for hashRoot := range p.aggregates {
-				if len(p.aggregates[hashRoot]) == 0 {
+				att := p.aggregates[hashRoot]
+				if p.slotIsStale(att.AttestantionData().Slot()) {
 					toRemoves = append(toRemoves, hashRoot)
-					continue
-				} else {
-					slot := p.aggregates[hashRoot][0].att.AttestantionData().Slot()
-					if p.slotIsStale(slot) {
-						toRemoves = append(toRemoves, hashRoot)
-					}
 				}
 			}
 			// remove stale attestation
