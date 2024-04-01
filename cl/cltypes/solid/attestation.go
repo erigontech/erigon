@@ -173,8 +173,10 @@ func (a *Attestation) HashSSZ() (o [32]byte, err error) {
 func (a *Attestation) Clone() clonable.Clonable {
 	var staticBuffer [attestationStaticBufferSize]byte
 	copy(staticBuffer[:], a.staticBuffer[:])
+	bitsBuffer := make([]byte, len(a.aggregationBitsBuffer))
+	copy(bitsBuffer, a.aggregationBitsBuffer)
 	return &Attestation{
-		aggregationBitsBuffer: a.aggregationBitsBuffer[:],
+		aggregationBitsBuffer: bitsBuffer,
 		staticBuffer:          staticBuffer,
 	}
 }
