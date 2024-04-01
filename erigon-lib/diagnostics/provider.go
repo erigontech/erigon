@@ -150,9 +150,7 @@ func Send[I Info](info I) {
 	ctx := info.Type().Context()
 
 	if ctx.Err() != nil {
-		if !errors.Is(ctx.Err(), context.Canceled) {
-			// drop the diagnostic message if there is
-			// no active diagnostic context for the type
+		if errors.Is(ctx.Err(), context.Canceled) {
 			return
 		}
 

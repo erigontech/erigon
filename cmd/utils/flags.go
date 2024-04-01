@@ -108,9 +108,9 @@ var (
 		Name:  "whitelist",
 		Usage: "Comma separated block number-to-hash mappings to enforce (<number>=<hash>)",
 	}
-	OverrideCancunFlag = flags.BigFlag{
-		Name:  "override.cancun",
-		Usage: "Manually specify the Cancun fork time, overriding the bundled setting",
+	OverridePragueFlag = flags.BigFlag{
+		Name:  "override.prague",
+		Usage: "Manually specify the Prague fork time, overriding the bundled setting",
 	}
 	TrustedSetupFile = cli.StringFlag{
 		Name:  "trusted-setup-file",
@@ -1778,9 +1778,8 @@ func SetEthConfig(ctx *cli.Context, nodeConfig *nodecfg.Config, cfg *ethconfig.C
 		}
 	}
 
-	if ctx.IsSet(OverrideCancunFlag.Name) {
-		cfg.OverrideCancunTime = flags.GlobalBig(ctx, OverrideCancunFlag.Name)
-		cfg.TxPool.OverrideCancunTime = cfg.OverrideCancunTime
+	if ctx.IsSet(OverridePragueFlag.Name) {
+		cfg.OverridePragueTime = flags.GlobalBig(ctx, OverridePragueFlag.Name)
 	}
 
 	if ctx.IsSet(InternalConsensusFlag.Name) && clparams.EmbeddedSupported(cfg.NetworkID) {
