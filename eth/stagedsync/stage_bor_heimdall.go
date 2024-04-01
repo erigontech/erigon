@@ -377,18 +377,16 @@ func BorHeimdallForward(
 						endStateSyncEventId = 0
 					} else {
 						if !errors.Is(err, heimdall.ErrEventRecordNotFound) {
-							if cfg.chainConfig.ChainName == networkname.MumbaiChainName && lastStateSyncEventID == 276850 {
-								lastMumbaiEventRecord = &heimdall.EventRecordWithTime{
-									EventRecord: heimdall.EventRecord{
-										ID: 276851,
-									},
-									Time: time.Unix(math.MaxInt64, 0),
-								}
-
-								break
-							}
-
 							return err
+						}
+
+						if cfg.chainConfig.ChainName == networkname.MumbaiChainName && lastStateSyncEventID == 276850 {
+							lastMumbaiEventRecord = &heimdall.EventRecordWithTime{
+								EventRecord: heimdall.EventRecord{
+									ID: 276851,
+								},
+								Time: time.Unix(math.MaxInt64, 0),
+							}
 						}
 
 						endStateSyncEventId = lastStateSyncEventID
