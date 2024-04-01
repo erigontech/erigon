@@ -279,7 +279,7 @@ func (f *ForkChoiceStore) updateChildren(parentSlot uint64, parent, child libcom
 	if ok {
 		c = cI.(childrens)
 	}
-	c.parentSlot = parentSlot // can be innacurate.
+	c.parentSlot = parentSlot // can be inaccurate.
 	if slices.Contains(c.childrenHashes, child) {
 		return
 	}

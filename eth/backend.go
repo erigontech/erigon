@@ -291,7 +291,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			genesisSpec = nil
 		}
 		var genesisErr error
-		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverrideCancunTime, tmpdir, logger)
+		chainConfig, genesis, genesisErr = core.WriteGenesisBlock(tx, genesisSpec, config.OverridePragueTime, tmpdir, logger)
 		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
 			return genesisErr
 		}
@@ -859,22 +859,22 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		// TODO - pending sentry multi client refactor
 		//      - sentry multi client should conform to the SentryClient interface and internally
 		//        multiplex
-		//      - for now we just use 1 sentry for eth67
-		var sentry67 direct.SentryClient
-		for _, sentryClient := range sentries {
-			if sentryClient.Protocol() == direct.ETH67 {
-				sentry67 = sentryClient
+		//      - for now we just use 1 sentry
+		var sentryClient direct.SentryClient
+		for _, client := range sentries {
+			if client.Protocol() == direct.ETH68 {
+				sentryClient = client
 				break
 			}
 		}
-		if sentry67 == nil {
-			return nil, errors.New("sentry 67 for polygon sync not found")
+		if sentryClient == nil {
+			return nil, errors.New("nil sentryClient for polygon sync")
 		}
 
 		backend.polygonSyncService = polygonsync.NewService(
 			logger,
 			chainConfig,
-			sentry67,
+			sentryClient,
 			p2pConfig.MaxPeers,
 			statusDataProvider,
 			config.HeimdallURL,

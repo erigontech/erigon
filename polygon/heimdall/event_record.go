@@ -1,11 +1,16 @@
 package heimdall
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
+	"math/big"
 	"time"
 
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/common/hexutility"
+	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/rlp"
 )
 
 // EventRecord represents state record
@@ -46,6 +51,27 @@ func (e *EventRecordWithTime) BuildEventRecord() *EventRecord {
 		LogIndex: e.LogIndex,
 		ChainID:  e.ChainID,
 	}
+}
+
+func UnpackEventRecordWithTime(stateContract abi.ABI, encodedEvent rlp.RawValue) (*EventRecordWithTime, error) {
+	commitStateInputs := stateContract.Methods["commitState"].Inputs
+	methodId := stateContract.Methods["commitState"].ID
+
+	if bytes.Equal(methodId, encodedEvent[0:4]) {
+		t := time.Unix((&big.Int{}).SetBytes(encodedEvent[4:36]).Int64(), 0)
+		args, _ := commitStateInputs.Unpack(encodedEvent[4:])
+
+		if len(args) == 2 {
+			var eventRecord EventRecord
+			if err := rlp.DecodeBytes(args[1].([]byte), &eventRecord); err != nil {
+				return nil, err
+			}
+
+			return &EventRecordWithTime{EventRecord: eventRecord, Time: t}, nil
+		}
+	}
+
+	return nil, errors.New("no valid record")
 }
 
 type StateSyncEventsResponse struct {
