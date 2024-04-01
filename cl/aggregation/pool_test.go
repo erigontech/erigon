@@ -96,21 +96,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			expect:   att1_2,
 		},
 		{
-<<<<<<< HEAD
-			name: "attestation was contained by another attestation. Skip it",
-			atts: []*solid.Attestation{
-				att1_1,
-				att1_2,
-				att1_0,
-			},
-			hashRoot: attData1Root,
-			expect:   att1_2,
-		},
-		{
-			name: "att1_3 merge with att1_1 and att1_2 respectively",
-=======
 			name: "merge att1_2, att1_3, att1_4",
->>>>>>> f6ea92414d (update aggregation)
 			atts: []*solid.Attestation{
 				att1_2,
 				att1_3,
@@ -118,11 +104,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			},
 			hashRoot: attData1Root,
 			expect: solid.NewAttestionFromParameters(
-<<<<<<< HEAD
-				[]byte{0b10111111, 0, 0, 0}, // merge of att1_1, att1_3 and att1_4
-=======
 				[]byte{0b00111111, 0, 0, 0}, // merge of att1_2, att1_3 and att1_4
->>>>>>> f6ea92414d (update aggregation)
 				attData1,
 				mockAggrResult),
 		},
