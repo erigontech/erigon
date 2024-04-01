@@ -16,10 +16,12 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/ledgerwatch/erigon-lib/chain"
+	"github.com/ledgerwatch/erigon-lib/chain/networkname"
 	"github.com/ledgerwatch/erigon-lib/common"
 	libcommon "github.com/ledgerwatch/erigon-lib/common"
 	"github.com/ledgerwatch/erigon-lib/kv"
 	"github.com/ledgerwatch/erigon/accounts/abi"
+	"github.com/ledgerwatch/erigon/common/math"
 	"github.com/ledgerwatch/erigon/consensus"
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/dataflow"
@@ -97,6 +99,8 @@ func StageBorHeimdallCfg(
 		unwindTypes:      unwindTypes,
 	}
 }
+
+var lastMumbaiEventRecord *heimdall.EventRecordWithTime
 
 func BorHeimdallForward(
 	s *StageState,
@@ -176,6 +180,7 @@ func BorHeimdallForward(
 	var fetchTime time.Duration
 	var snapTime time.Duration
 	var snapInitTime time.Duration
+	var syncEventTime time.Duration
 
 	var eventRecords int
 
@@ -186,7 +191,11 @@ func BorHeimdallForward(
 
 	var lastCheckpointId, lastMilestoneId uint64
 
+	var waypointTime time.Duration
+
 	if cfg.recordWaypoints {
+		waypointStart := time.Now()
+
 		lastCheckpointId, err = fetchAndWriteHeimdallCheckpointsIfNeeded(ctx, headNumber, tx, cfg, s.LogPrefix(), logger)
 		if err != nil {
 			return err
@@ -196,6 +205,8 @@ func BorHeimdallForward(
 		if err != nil {
 			return err
 		}
+
+		waypointTime = waypointTime + time.Since(waypointStart)
 	}
 
 	lastStateSyncEventID, _, err := cfg.blockReader.LastEventId(ctx, tx)
@@ -223,9 +234,11 @@ func BorHeimdallForward(
 				"lastMilestoneId", lastMilestoneId,
 				"lastStateSyncEventID", lastStateSyncEventID,
 				"total records", eventRecords,
-				"sync-events", fetchTime,
+				"sync-events", syncEventTime,
+				"sync-event-fetch", fetchTime,
 				"snaps", snapTime,
 				"snap-init", snapInitTime,
+				"waypoints", waypointTime,
 				"process time", time.Since(processStart),
 			)
 		}
@@ -321,9 +334,19 @@ func BorHeimdallForward(
 
 		snapTime = snapTime + time.Since(snapStart)
 
+		syncEventStart := time.Now()
 		var callTime time.Duration
 
 		var endStateSyncEventId uint64
+
+		// mumbai event records have stopped being produced as of march 2024
+		// as part of the goerli decom - so there is no point trying to
+		// fetch them
+		if cfg.chainConfig.ChainName == networkname.MumbaiChainName {
+			if nextEventRecord == nil {
+				nextEventRecord = lastMumbaiEventRecord
+			}
+		}
 
 		if nextEventRecord == nil || header.Time > uint64(nextEventRecord.Time.Unix()) {
 			var records int
@@ -354,6 +377,17 @@ func BorHeimdallForward(
 						endStateSyncEventId = 0
 					} else {
 						if !errors.Is(err, heimdall.ErrEventRecordNotFound) {
+							if cfg.chainConfig.ChainName == networkname.MumbaiChainName && lastStateSyncEventID == 276850 {
+								lastMumbaiEventRecord = &heimdall.EventRecordWithTime{
+									EventRecord: heimdall.EventRecord{
+										ID: 276851,
+									},
+									Time: time.Unix(math.MaxInt64, 0),
+								}
+
+								break
+							}
+
 							return err
 						}
 
@@ -364,6 +398,7 @@ func BorHeimdallForward(
 		}
 
 		fetchTime += callTime
+		syncEventTime = syncEventTime + time.Since(syncEventStart)
 
 		if cfg.loopBreakCheck != nil && cfg.loopBreakCheck(int(blockNum-lastBlockNum)) {
 			headNumber = blockNum
@@ -385,10 +420,15 @@ func BorHeimdallForward(
 		fmt.Sprintf("[%s] Sync events processed", s.LogPrefix()),
 		"progress", blockNum-1,
 		"lastSpanID", lastSpanID,
+		"lastSpanID", lastSpanID,
+		"lastCheckpointId", lastCheckpointId,
+		"lastMilestoneId", lastMilestoneId,
 		"lastStateSyncEventID", lastStateSyncEventID,
 		"total records", eventRecords,
+		"sync event time", syncEventTime,
 		"fetch time", fetchTime,
 		"snap time", snapTime,
+		"waypoint time", waypointTime,
 		"process time", time.Since(processStart),
 	)
 

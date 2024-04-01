@@ -229,8 +229,10 @@ func (v *BorView) Close() {
 	v.base.Close()
 }
 
-func (v *BorView) Events() []*Segment { return v.base.Segments(bor_snaptype.BorEvents) }
-func (v *BorView) Spans() []*Segment  { return v.base.Segments(bor_snaptype.BorSpans) }
+func (v *BorView) Events() []*Segment      { return v.base.Segments(bor_snaptype.BorEvents) }
+func (v *BorView) Spans() []*Segment       { return v.base.Segments(bor_snaptype.BorSpans) }
+func (v *BorView) Checkpoints() []*Segment { return v.base.Segments(bor_snaptype.BorCheckpoints) }
+func (v *BorView) Milestones() []*Segment  { return v.base.Segments(bor_snaptype.BorMilestones) }
 
 func (v *BorView) EventsSegment(blockNum uint64) (*Segment, bool) {
 	return v.base.Segment(bor_snaptype.BorEvents, blockNum)

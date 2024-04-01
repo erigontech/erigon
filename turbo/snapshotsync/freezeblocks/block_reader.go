@@ -1530,7 +1530,15 @@ func (r *BlockReader) Milestone(ctx context.Context, tx kv.Getter, milestoneId u
 }
 
 func (r *BlockReader) LastCheckpointId(ctx context.Context, tx kv.Tx) (uint64, bool, error) {
-	return lastId(ctx, tx, kv.BorCheckpoints)
+	lastCheckpointId, ok, err := lastId(ctx, tx, kv.BorCheckpoints)
+
+	snapshotLastCheckpointId := r.LastFrozenCheckpointId()
+
+	if snapshotLastCheckpointId > lastCheckpointId {
+		return snapshotLastCheckpointId, true, nil
+	}
+
+	return lastCheckpointId, ok, err
 }
 
 func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId uint64) ([]byte, error) {
@@ -1542,11 +1550,58 @@ func (r *BlockReader) Checkpoint(ctx context.Context, tx kv.Getter, checkpointId
 		return nil, err
 	}
 
-	if v == nil {
-		return nil, fmt.Errorf("milestone %d not found (db)", checkpointId)
+	if v != nil {
+		return common.Copy(v), nil
 	}
 
-	return common.Copy(v), nil
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Checkpoints()
+	for i := len(segments) - 1; i >= 0; i-- {
+		sn := segments[i]
+		index := sn.Index()
+
+		if index == nil || index.KeyCount() == 0 || checkpointId < index.BaseDataID() {
+			continue
+		}
+
+		offset := index.OrdinalLookup(checkpointId - index.BaseDataID())
+		gg := sn.MakeGetter()
+		gg.Reset(offset)
+		result, _ := gg.Next(nil)
+		return common.Copy(result), nil
+	}
+
+	return nil, fmt.Errorf("checkpoint %d not found (db)", checkpointId)
+}
+
+func (r *BlockReader) LastFrozenCheckpointId() uint64 {
+	if r.borSn == nil {
+		return 0
+	}
+
+	view := r.borSn.View()
+	defer view.Close()
+	segments := view.Checkpoints()
+	if len(segments) == 0 {
+		return 0
+	}
+	// find the last segment which has a built index
+	var lastSegment *Segment
+	for i := len(segments) - 1; i >= 0; i-- {
+		if segments[i].Index() != nil {
+			lastSegment = segments[i]
+			break
+		}
+	}
+
+	if lastSegment == nil {
+		return 0
+	}
+
+	index := lastSegment.Index()
+
+	return index.BaseDataID() + index.KeyCount() - 1
 }
 
 // ---- Data Integrity part ----

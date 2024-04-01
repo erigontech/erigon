@@ -40,6 +40,7 @@ import (
 
 	"github.com/ledgerwatch/erigon/core/types"
 	"github.com/ledgerwatch/erigon/ethdb/cbor"
+	"github.com/ledgerwatch/erigon/polygon/heimdall"
 	"github.com/ledgerwatch/erigon/rlp"
 )
 
@@ -1126,6 +1127,48 @@ func PruneBorBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int, SpanIdAt 
 		}
 		counter--
 	}
+
+	checkpointCursor, err := tx.RwCursor(kv.BorCheckpoints)
+	if err != nil {
+		return err
+	}
+
+	defer checkpointCursor.Close()
+	lastCheckpointToKeep, err := heimdall.CheckpointIdAt(tx, blockTo)
+
+	if err != nil {
+		return err
+	}
+
+	var checkpointIdBytes [8]byte
+	binary.BigEndian.PutUint64(checkpointIdBytes[:], uint64(lastCheckpointToKeep+1))
+	for k, _, err := checkpointCursor.Seek(checkpointIdBytes[:]); err == nil && k != nil; k, _, err = checkpointCursor.Next() {
+		if err = checkpointCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
+	milestoneCursor, err := tx.RwCursor(kv.BorMilestones)
+
+	if err != nil {
+		return err
+	}
+
+	defer milestoneCursor.Close()
+	lastMilestoneToKeep, err := heimdall.MilestoneIdAt(tx, blockTo)
+
+	if err != nil {
+		return err
+	}
+
+	var milestoneIdBytes [8]byte
+	binary.BigEndian.PutUint64(milestoneIdBytes[:], uint64(lastMilestoneToKeep+1))
+	for k, _, err := milestoneCursor.Seek(milestoneIdBytes[:]); err == nil && k != nil; k, _, err = milestoneCursor.Next() {
+		if err = milestoneCursor.DeleteCurrent(); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

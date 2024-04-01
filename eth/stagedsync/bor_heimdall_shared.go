@@ -277,10 +277,12 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 				if !errors.Is(err, heimdall.ErrNotInMilestoneList) {
 					return lastId, err
 				}
+
+				lastActive++
+				continue
 			}
 
-			lastActive++
-			continue
+			break
 		}
 
 		if lastMilestone == nil || toBlockNum < lastMilestone.StartBlock().Uint64() {
@@ -290,9 +292,13 @@ func fetchAndWriteHeimdallMilestonesIfNeeded(
 		lastId = lastActive - 1
 	}
 
-	for milestoneId := lastId + 1; lastId <= uint64(count) && (lastMilestone == nil || lastMilestone.EndBlock().Uint64() < toBlockNum); milestoneId++ {
+	for milestoneId := lastId + 1; milestoneId <= uint64(count) && (lastMilestone == nil || lastMilestone.EndBlock().Uint64() < toBlockNum); milestoneId++ {
 		if _, lastMilestone, err = fetchAndWriteHeimdallMilestone(ctx, milestoneId, uint64(count), tx, cfg.heimdallClient, logPrefix, logger); err != nil {
-			return 0, err
+			if !errors.Is(err, heimdall.ErrNotInMilestoneList) {
+				return 0, err
+			}
+
+			return lastId, nil
 		}
 
 		lastId = milestoneId

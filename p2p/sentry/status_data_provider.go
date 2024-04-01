@@ -80,7 +80,16 @@ func ReadChainHeadWithTx(tx kv.Tx) (ChainHead, error) {
 	header := rawdb.ReadCurrentHeader(tx)
 
 	if header == nil {
-		return ChainHead{}, ErrNoChainHead
+		headBlock := rawdb.ReadHeadBlockHash(tx)
+		headNumber := rawdb.ReadHeaderNumber(tx, headBlock)
+
+		if headNumber != nil {
+			header = rawdb.ReadHeader(tx, headBlock, *headNumber)
+		}
+
+		if header == nil {
+			return ChainHead{}, ErrNoChainHead
+		}
 	}
 
 	height := header.Number.Uint64()

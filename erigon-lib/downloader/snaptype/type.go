@@ -522,7 +522,7 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, fir
 	}, workers, lvl, logger)
 
 	if err != nil {
-		return lastKeyValue, fmt.Errorf("DumpBodies: %w", err)
+		return lastKeyValue, fmt.Errorf("ExtractRange: %w", err)
 	}
 
 	ext := filepath.Ext(f.Name())

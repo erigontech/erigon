@@ -242,13 +242,20 @@ var (
 						return err
 					}
 
+					checkpointTo, err = heimdall.CheckpointIdAt(tx, blockTo)
+
 					if blockFrom > 0 {
-						if prevTo, err := heimdall.CheckpointIdAt(tx, blockFrom-1); err == nil && prevTo == checkpointFrom {
-							checkpointFrom++
+						if prevTo, err := heimdall.CheckpointIdAt(tx, blockFrom-1); err == nil {
+							if prevTo == checkpointFrom {
+								if prevTo == checkpointTo {
+									checkpointFrom = 0
+									checkpointTo = 0
+								} else {
+									checkpointFrom++
+								}
+							}
 						}
 					}
-
-					checkpointTo, err = heimdall.CheckpointIdAt(tx, blockTo)
 
 					return err
 				})
@@ -269,14 +276,22 @@ var (
 				}
 				defer d.Close()
 
-				buf, _ := d.MakeGetter().Next(nil)
-				var firstCheckpoint heimdall.Checkpoint
+				gg := d.MakeGetter()
 
-				if err = json.Unmarshal(buf, &firstCheckpoint); err != nil {
-					return err
+				var firstCheckpointId uint64
+
+				if gg.HasNext() {
+					buf, _ := d.MakeGetter().Next(nil)
+					var firstCheckpoint heimdall.Checkpoint
+
+					if err = json.Unmarshal(buf, &firstCheckpoint); err != nil {
+						return err
+					}
+
+					firstCheckpointId = uint64(firstCheckpoint.Id)
 				}
 
-				return buildValueIndex(ctx, sn, salt, d, uint64(firstCheckpoint.Id), chainConfig, tmpDir, p, lvl, logger)
+				return buildValueIndex(ctx, sn, salt, d, firstCheckpointId, chainConfig, tmpDir, p, lvl, logger)
 			}),
 	)
 
