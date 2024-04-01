@@ -109,6 +109,13 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		return nil, nil
 	}
 
+	d.logger.Info(
+		syncLogPrefix("downloading blocks using waypoints"),
+		"waypointsLen", len(waypoints),
+		"start", waypoints[0].StartBlock().Uint64(),
+		"end", waypoints[len(waypoints)-1].EndBlock().Uint64(),
+	)
+
 	// waypoint rootHash->[blocks part of waypoint]
 	waypointBlocksMemo, err := lru.New[common.Hash, []*types.Block](d.p2pService.MaxPeers())
 	if err != nil {
@@ -241,6 +248,8 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 			lastBlock = blocks[len(blocks)-1]
 		}
 	}
+
+	d.logger.Info(syncLogPrefix("finished downloading blocks using waypoints"))
 
 	return lastBlock.Header(), nil
 }
