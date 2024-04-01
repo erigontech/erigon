@@ -7,6 +7,7 @@ import (
 
 	"github.com/Giulio2002/bls"
 	"github.com/ledgerwatch/log/v3"
+	"github.com/pkg/errors"
 	"golang.org/x/exp/slices"
 
 	"github.com/ledgerwatch/erigon/cl/cltypes"
@@ -239,7 +240,10 @@ func (f *ForkChoiceStore) OnAggregateAndProof(aggregateAndProof *cltypes.SignedA
 		return fmt.Errorf("invalid target block")
 	}
 
-	// Add to some sort of aggregation layer TODO(Giulio2002/domiwei)
+	// Add to aggregation pool
+	if err := f.aggregationPool.AddAttestation(aggregateAndProof.Message.Aggregate); err != nil {
+		return errors.WithMessagef(err, "failed to add attestation to pool")
+	}
 
 	return nil
 }
@@ -492,12 +496,14 @@ func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.At
 	}
 
 	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
+
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
 	// (a client MAY queue attestations for processing once block is retrieved).
 	if _, ok := f.forkGraph.GetHeader(root); !ok {
 		return fmt.Errorf("block not found %w", ErrIgnore)
 	}
 	// [REJECT] The block being voted for (attestation.data.beacon_block_root) passes validation.
+
 	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
 	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
 	if f.Ancestor(root, f.computeStartSlotAtEpoch(epoch)) != att.AttestantionData().Target().BlockRoot() {

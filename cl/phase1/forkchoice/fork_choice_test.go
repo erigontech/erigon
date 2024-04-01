@@ -62,7 +62,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchorStateEncoded, int(clparams.AltairVersion)))
 	pool := pool.NewOperationsPool(&clparams.MainnetBeaconConfig)
 	emitters := beaconevents.NewEmitters()
-	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil, nil)
+	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}), emitters, sd, nil, nil, nil)
 	require.NoError(t, err)
 	// first steps
 	store.OnTick(0)
@@ -144,7 +144,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	sd := synced_data.NewSyncedDataManager(true, &clparams.MainnetBeaconConfig)
 	store, err := forkchoice.NewForkChoiceStore(anchorState, nil, pool, fork_graph.NewForkGraphDisk(anchorState, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
 		Beacon: true,
-	}), emitters, sd, nil, nil)
+	}), emitters, sd, nil, nil, nil)
 	store.OnTick(2000)
 	require.NoError(t, err)
 	for _, block := range blocks {

@@ -228,7 +228,7 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
 			}
-			// check if someone wants to aggregate
+			// check if it needs to be aggregated
 			if err := g.committeeSub.CheckAggregateAttestation(att); err != nil {
 				log.Debug("failed to check aggregate attestation", "err", err)
 			}
