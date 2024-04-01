@@ -2093,7 +2093,7 @@ func TestEIP2718Transition(t *testing.T) {
 
 // TestEIP1559Transition tests the following:
 //
-//  1. A tranaction whose feeCap is greater than the baseFee is valid.
+//  1. A transaction whose feeCap is greater than the baseFee is valid.
 //  2. Gas accounting for access lists on EIP-1559 transactions is correct.
 //  3. Only the transaction's tip will be received by the coinbase.
 //  4. The transaction sender pays for both the tip and baseFee.
