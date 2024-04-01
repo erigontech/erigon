@@ -145,8 +145,8 @@ type CreateNewTorrentClientConfig struct {
 	TempDir      string
 }
 
-func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error) {
-	conf := CreateNewTorrentClientConfig{
+func NewTorrentClientConfigFromCobra(cliCtx *cli.Context, chain string) CreateNewTorrentClientConfig {
+	return CreateNewTorrentClientConfig{
 		Chain:        chain,
 		WebSeeds:     cliCtx.String(utils.WebSeedsFlag.Name),
 		DownloadRate: cliCtx.String(utils.TorrentDownloadRateFlag.Name),
@@ -160,12 +160,10 @@ func NewTorrentClient(cliCtx *cli.Context, chain string) (*TorrentClient, error)
 		Logger:       Logger(cliCtx.Context),
 		TempDir:      TempDir(cliCtx.Context),
 	}
-
-	return newTorrentClient(conf)
 }
 
-func NewDefaultTorrentClient(chain string, torrentDir string, logger log.Logger) (*TorrentClient, error) {
-	conf := CreateNewTorrentClientConfig{
+func NewDefaultTorrentClientConfig(chain string, torrentDir string, logger log.Logger) CreateNewTorrentClientConfig {
+	return CreateNewTorrentClientConfig{
 		Chain:        chain,
 		WebSeeds:     utils.WebSeedsFlag.Value,
 		DownloadRate: utils.TorrentDownloadRateFlag.Value,
@@ -179,11 +177,9 @@ func NewDefaultTorrentClient(chain string, torrentDir string, logger log.Logger)
 		Logger:       logger,
 		TempDir:      torrentDir,
 	}
-
-	return newTorrentClient(conf)
 }
 
-func newTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
+func NewTorrentClient(config CreateNewTorrentClientConfig) (*TorrentClient, error) {
 	logger := config.Logger
 	tempDir := config.TempDir
 
