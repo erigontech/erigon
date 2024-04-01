@@ -149,8 +149,6 @@ func fetchAndWriteHeimdallCheckpointsIfNeeded(
 		lastCheckpoint = &checkpoint
 	}
 
-	logger.Info(fmt.Sprintf("[%s] Processing checkpoints...", logPrefix), "from", lastId+1, "to", toBlockNum)
-
 	logTimer := time.NewTicker(logInterval)
 	defer logTimer.Stop()
 
@@ -160,11 +158,17 @@ func fetchAndWriteHeimdallCheckpointsIfNeeded(
 		return 0, err
 	}
 
+	logger.Info(fmt.Sprintf("[%s] Processing checkpoints...", logPrefix), "from", lastId+1, "to", toBlockNum, "count", count)
+
 	var lastBlockNum uint64
 
 	for checkpointId := lastId + 1; checkpointId <= uint64(count) && (lastCheckpoint == nil || lastCheckpoint.EndBlock().Uint64() < toBlockNum); checkpointId++ {
 		if _, lastCheckpoint, err = fetchAndWriteHeimdallCheckpoint(ctx, checkpointId, tx, cfg.heimdallClient, logPrefix, logger); err != nil {
-			return 0, err
+			if !errors.Is(err, heimdall.ErrNotInCheckpointList) {
+				return 0, err
+			}
+
+			return lastId, err
 		}
 
 		lastId = checkpointId
