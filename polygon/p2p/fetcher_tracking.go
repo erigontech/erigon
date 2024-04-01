@@ -40,7 +40,7 @@ func (tf *trackingFetcher) FetchHeaders(ctx context.Context, start uint64, end u
 	return res, nil
 }
 
-func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
+func (tf *trackingFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.RawBody, error) {
 	bodies, err := tf.Fetcher.FetchBodies(ctx, headers, peerId)
 	if err != nil {
 		var errMissingBodies *ErrMissingBodies

@@ -296,7 +296,15 @@ func (d *blockDownloader) fetchVerifiedBlocks(
 	// 4. Assemble blocks
 	blocks := make([]*types.Block, len(headers))
 	for i, header := range headers {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+		rawBlock := types.RawBlock{
+			Header: header,
+			Body:   bodies[i],
+		}
+
+		blocks[i], err = rawBlock.AsBlock()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// 5. Verify blocks

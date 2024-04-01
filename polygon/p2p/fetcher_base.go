@@ -26,7 +26,7 @@ type Fetcher interface {
 	// FetchHeaders fetches [start,end) headers from a peer. Blocks until data is received.
 	FetchHeaders(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Header, error)
 	// FetchBodies fetches block bodies for the given headers from a peer. Blocks until data is received.
-	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error)
+	FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.RawBody, error)
 	// FetchBlocks fetches headers and bodies for a given [start, end) range from a peer and
 	// assembles them into blocks. Blocks until data is received.
 	FetchBlocks(ctx context.Context, start uint64, end uint64, peerId *PeerId) ([]*types.Block, error)
@@ -103,8 +103,8 @@ func (f *fetcher) FetchHeaders(ctx context.Context, start uint64, end uint64, pe
 	return headers, nil
 }
 
-func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
-	var bodies []*types.Body
+func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.RawBody, error) {
+	var bodies []*types.RawBody
 
 	for len(headers) > 0 {
 		// Note: we always request MaxBodiesServe for optimal response sizes (fully utilising the 2 MB soft limit).
@@ -118,7 +118,7 @@ func (f *fetcher) FetchBodies(ctx context.Context, headers []*types.Header, peer
 			headersChunk = headers
 		}
 
-		bodiesChunk, err := fetchWithRetry(f.config, func() ([]*types.Body, error) {
+		bodiesChunk, err := fetchWithRetry(f.config, func() ([]*types.RawBody, error) {
 			return f.fetchBodies(ctx, headersChunk, peerId)
 		})
 		if err != nil {
@@ -148,7 +148,15 @@ func (f *fetcher) FetchBlocks(ctx context.Context, start, end uint64, peerId *Pe
 
 	blocks := make([]*types.Block, len(headers))
 	for i, header := range headers {
-		blocks[i] = types.NewBlockFromNetwork(header, bodies[i])
+		rawBlock := types.RawBlock{
+			Header: header,
+			Body:   bodies[i],
+		}
+
+		blocks[i], err = rawBlock.AsBlock()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return blocks, nil
@@ -224,13 +232,13 @@ func (f *fetcher) validateHeadersResponse(headers []*types.Header, start, amount
 	return nil
 }
 
-func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
+func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.RawBody, error) {
 	// cleanup for the chan message observer
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	messages := make(chan *DecodedInboundMessage[*eth.BlockBodiesPacket66])
-	observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
+	messages := make(chan *DecodedInboundMessage[*eth.BlockRawBodiesPacket66])
+	observer := func(message *DecodedInboundMessage[*eth.BlockRawBodiesPacket66]) {
 		select {
 		case <-ctx.Done():
 			return
@@ -261,14 +269,14 @@ func (f *fetcher) fetchBodies(ctx context.Context, headers []*types.Header, peer
 		return nil, err
 	}
 
-	if err := f.validateBodies(message.BlockBodiesPacket, headers); err != nil {
+	if err := f.validateBodies(message.BlockRawBodiesPacket, headers); err != nil {
 		return nil, err
 	}
 
-	return message.BlockBodiesPacket, nil
+	return message.BlockRawBodiesPacket, nil
 }
 
-func (f *fetcher) validateBodies(bodies []*types.Body, headers []*types.Header) error {
+func (f *fetcher) validateBodies(bodies []*types.RawBody, headers []*types.Header) error {
 	if len(bodies) > len(headers) {
 		return &ErrTooManyBodies{
 			requested: len(headers),
@@ -339,8 +347,8 @@ func filterBlockHeaders(peerId *PeerId, requestId uint64) func(*DecodedInboundMe
 	}
 }
 
-func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
-	return func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) bool {
+func filterBlockBodies(peerId *PeerId, requestId uint64) func(*DecodedInboundMessage[*eth.BlockRawBodiesPacket66]) bool {
+	return func(message *DecodedInboundMessage[*eth.BlockRawBodiesPacket66]) bool {
 		return filter(peerId, message.PeerId, requestId, message.Decoded.RequestId)
 	}
 }
