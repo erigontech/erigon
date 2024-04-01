@@ -59,7 +59,7 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 	}
 
 	if utils.IsSupersetBitlist(att.AggregationBits(), inAtt.AggregationBits()) {
-		// no need to merge the same signatures
+		// no need to merge existing signatures
 		return nil
 	}
 
