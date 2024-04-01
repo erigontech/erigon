@@ -414,7 +414,7 @@ func (h *heimdall) pollSpans(ctx context.Context, store SpanStore, tip SpanId, c
 		latestSpan, err := h.client.FetchLatestSpan(ctx)
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpanCount failed, continuing polling"),
+				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpanCount failed"),
 				"err", err,
 			)
 
@@ -431,7 +431,7 @@ func (h *heimdall) pollSpans(ctx context.Context, store SpanStore, tip SpanId, c
 		m, err := h.FetchSpans(ctx, store, tip+1, latestSpan.Id)
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpan failed, continuing polling"),
+				heimdallLogPrefix("heimdall.OnSpanEvent FetchSpan failed"),
 				"err", err,
 			)
 
@@ -468,7 +468,7 @@ func (h *heimdall) pollCheckpoints(ctx context.Context, store CheckpointStore, t
 		count, err := h.client.FetchCheckpointCount(ctx)
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("OnCheckpointEvent.OnCheckpointEvent FetchCheckpointCount failed, continuing polling"),
+				heimdallLogPrefix("OnCheckpointEvent.OnCheckpointEvent FetchCheckpointCount failed"),
 				"err", err,
 			)
 
@@ -485,7 +485,7 @@ func (h *heimdall) pollCheckpoints(ctx context.Context, store CheckpointStore, t
 		m, err := h.FetchCheckpoints(ctx, store, tip+1, CheckpointId(count))
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnCheckpointEvent FetchCheckpoints failed, continuing polling"),
+				heimdallLogPrefix("heimdall.OnCheckpointEvent FetchCheckpoints failed"),
 				"err", err,
 			)
 
@@ -522,7 +522,7 @@ func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip
 		count, err := h.client.FetchMilestoneCount(ctx)
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestoneCount failed, continuing polling"),
+				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestoneCount failed"),
 				"err", err,
 			)
 
@@ -539,7 +539,7 @@ func (h *heimdall) pollMilestones(ctx context.Context, store MilestoneStore, tip
 		m, err := h.FetchMilestones(ctx, store, tip+1, MilestoneId(count))
 		if err != nil {
 			h.logger.Warn(
-				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestone failed, continuing polling"),
+				heimdallLogPrefix("heimdall.OnMilestoneEvent FetchMilestone failed"),
 				"err", err,
 			)
 
