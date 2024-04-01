@@ -30,7 +30,7 @@ type MessageListener interface {
 	RegisterNewBlockObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]) UnregisterFunc
 	RegisterNewBlockHashesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]) UnregisterFunc
 	RegisterBlockHeadersObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]) UnregisterFunc
-	RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockRawBodiesPacket66]]) UnregisterFunc
+	RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc
 	RegisterPeerEventObserver(observer MessageObserver[*sentry.PeerEvent]) UnregisterFunc
 }
 
@@ -57,7 +57,7 @@ func newMessageListener(
 		newBlockObservers:       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{},
 		newBlockHashesObservers: map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{},
 		blockHeadersObservers:   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{},
-		blockBodiesObservers:    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockRawBodiesPacket66]]{},
+		blockBodiesObservers:    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{},
 		peerEventObservers:      map[uint64]MessageObserver[*sentry.PeerEvent]{},
 	}
 }
@@ -73,7 +73,7 @@ type messageListener struct {
 	newBlockObservers       map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]
 	newBlockHashesObservers map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]
 	blockHeadersObservers   map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]
-	blockBodiesObservers    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockRawBodiesPacket66]]
+	blockBodiesObservers    map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]
 	peerEventObservers      map[uint64]MessageObserver[*sentry.PeerEvent]
 	stopWg                  sync.WaitGroup
 }
@@ -101,7 +101,7 @@ func (ml *messageListener) Run(ctx context.Context) {
 	ml.newBlockObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockPacket]]{}
 	ml.newBlockHashesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.NewBlockHashesPacket]]{}
 	ml.blockHeadersObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockHeadersPacket66]]{}
-	ml.blockBodiesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockRawBodiesPacket66]]{}
+	ml.blockBodiesObservers = map[uint64]MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]{}
 	ml.peerEventObservers = map[uint64]MessageObserver[*sentry.PeerEvent]{}
 }
 
@@ -117,7 +117,7 @@ func (ml *messageListener) RegisterBlockHeadersObserver(observer MessageObserver
 	return registerObserver(ml, ml.blockHeadersObservers, observer)
 }
 
-func (ml *messageListener) RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockRawBodiesPacket66]]) UnregisterFunc {
+func (ml *messageListener) RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
 	return registerObserver(ml, ml.blockBodiesObservers, observer)
 }
 

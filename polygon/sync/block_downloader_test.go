@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -155,32 +154,25 @@ func (hdt blockDownloaderTest) defaultFetchHeadersMock() fetchHeadersMock {
 	}
 }
 
-type fetchBodiesMock func(context.Context, []*types.Header, *p2p.PeerId) ([]*types.RawBody, error)
+type fetchBodiesMock func(context.Context, []*types.Header, *p2p.PeerId) ([]*types.Body, error)
 
 func (hdt blockDownloaderTest) defaultFetchBodiesMock() fetchBodiesMock {
-	return func(ctx context.Context, headers []*types.Header, _ *p2p.PeerId) ([]*types.RawBody, error) {
-		bodies := make([]*types.RawBody, len(headers))
+	return func(ctx context.Context, headers []*types.Header, _ *p2p.PeerId) ([]*types.Body, error) {
+		bodies := make([]*types.Body, len(headers))
 		for i := range headers {
-			transaction := types.NewEIP1559Transaction(
-				*uint256.NewInt(1),
-				1,
-				common.BigToAddress(big.NewInt(123)),
-				uint256.NewInt(55),
-				0,
-				uint256.NewInt(666),
-				uint256.NewInt(777),
-				uint256.NewInt(888),
-				nil,
-			)
-
-			var buf bytes.Buffer
-			if err := transaction.MarshalBinary(&buf); err != nil {
-				return nil, err
-			}
-
-			bodies[i] = &types.RawBody{
-				Transactions: [][]byte{
-					buf.Bytes(),
+			bodies[i] = &types.Body{
+				Transactions: []types.Transaction{
+					types.NewEIP1559Transaction(
+						*uint256.NewInt(1),
+						1,
+						common.BigToAddress(big.NewInt(123)),
+						uint256.NewInt(55),
+						0,
+						uint256.NewInt(666),
+						uint256.NewInt(777),
+						uint256.NewInt(888),
+						nil,
+					),
 				},
 			}
 		}
@@ -466,7 +458,7 @@ func TestBlockDownloaderDownloadBlocksWhenMissingBodiesThenPenalizePeerAndReDown
 		Times(1)
 	test.p2pService.EXPECT().
 		FetchBodies(gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId) ([]*types.RawBody, error) {
+		DoAndReturn(func(ctx context.Context, headers []*types.Header, peerId *p2p.PeerId) ([]*types.Body, error) {
 			if peerId.Equal(p2p.PeerIdFromUint64(2)) {
 				return nil, p2p.NewErrMissingBodies(headers)
 			}

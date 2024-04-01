@@ -975,6 +975,17 @@ func NewBlockWithHeader(header *Header) *Block {
 	return &Block{header: CopyHeader(header)}
 }
 
+// NewBlockFromNetwork like NewBlock but used to create Block object when assembled from devp2p network messages
+// when there is no reason to copy parts, or re-calculate headers fields.
+func NewBlockFromNetwork(header *Header, body *Body) *Block {
+	return &Block{
+		header:       header,
+		transactions: body.Transactions,
+		uncles:       body.Uncles,
+		withdrawals:  body.Withdrawals,
+	}
+}
+
 // CopyHeader creates a deep copy of a block header to prevent side effects from
 // modifying a header variable.
 func CopyHeader(h *Header) *Header {

@@ -82,10 +82,10 @@ func (mr *MockServiceMockRecorder) FetchBlocks(ctx, start, end, peerId any) *gom
 }
 
 // FetchBodies mocks base method.
-func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.RawBody, error) {
+func (m *MockService) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId) ([]*types.Body, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "FetchBodies", ctx, headers, peerId)
-	ret0, _ := ret[0].([]*types.RawBody)
+	ret0, _ := ret[0].([]*types.Body)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -178,7 +178,7 @@ func (mr *MockServiceMockRecorder) Penalize(ctx, peerId any) *gomock.Call {
 }
 
 // RegisterBlockBodiesObserver mocks base method.
-func (m *MockService) RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockRawBodiesPacket66]]) UnregisterFunc {
+func (m *MockService) RegisterBlockBodiesObserver(observer MessageObserver[*DecodedInboundMessage[*eth.BlockBodiesPacket66]]) UnregisterFunc {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RegisterBlockBodiesObserver", observer)
 	ret0, _ := ret[0].(UnregisterFunc)

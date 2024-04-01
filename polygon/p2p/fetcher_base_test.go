@@ -525,7 +525,7 @@ func newFetcherTest(t *testing.T, requestIdGenerator RequestIdGenerator) *fetche
 	messageListenerTest := newMessageListenerTest(t)
 	messageListener := messageListenerTest.messageListener
 	messageSender := NewMessageSender(messageListenerTest.sentryClient)
-	fetcher := newFetcher(fetcherConfig, messageListener, messageSender, requestIdGenerator)
+	fetcher := newFetcher(fetcherConfig, messageListenerTest.logger, messageListener, messageSender, requestIdGenerator)
 	return &fetcherTest{
 		messageListenerTest:         messageListenerTest,
 		fetcher:                     fetcher,

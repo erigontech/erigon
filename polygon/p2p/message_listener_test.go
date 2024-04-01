@@ -1,7 +1,6 @@
 package p2p
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"math/big"
@@ -153,10 +152,10 @@ func TestMessageListenerRegisterBlockBodiesObserver(t *testing.T) {
 	test.mockSentryStreams()
 	test.run(func(ctx context.Context, t *testing.T) {
 		var done atomic.Bool
-		observer := func(message *DecodedInboundMessage[*eth.BlockRawBodiesPacket66]) {
+		observer := func(message *DecodedInboundMessage[*eth.BlockBodiesPacket66]) {
 			require.Equal(t, peerId, message.PeerId)
 			require.Equal(t, uint64(23), message.Decoded.RequestId)
-			require.Len(t, message.Decoded.BlockRawBodiesPacket, 1)
+			require.Len(t, message.Decoded.BlockBodiesPacket, 1)
 			done.Store(true)
 		}
 
@@ -436,28 +435,10 @@ func newMockNewBlockHashesPacketBytes(t *testing.T) []byte {
 }
 
 func newMockBlockBodiesPacketBytes(t *testing.T, requestId uint64, bodies ...*types.Body) []byte {
-	rawBodies := make([]*types.RawBody, len(bodies))
-	for i, body := range bodies {
-		marshalledTransactions := make([][]byte, len(body.Transactions))
-		for j, transaction := range body.Transactions {
-			var buf bytes.Buffer
-			err := transaction.MarshalBinary(&buf)
-			require.NoError(t, err)
-			marshalledTransactions[j] = buf.Bytes()
-		}
-
-		rawBodies[i] = &types.RawBody{
-			Transactions: marshalledTransactions,
-			Uncles:       body.Uncles,
-			Withdrawals:  body.Withdrawals,
-		}
+	newBlockHashesPacket := eth.BlockBodiesPacket66{
+		RequestId:         requestId,
+		BlockBodiesPacket: bodies,
 	}
-
-	newBlockHashesPacket := eth.BlockRawBodiesPacket66{
-		RequestId:            requestId,
-		BlockRawBodiesPacket: rawBodies,
-	}
-
 	newBlockHashesPacketBytes, err := rlp.EncodeToBytes(&newBlockHashesPacket)
 	require.NoError(t, err)
 	return newBlockHashesPacketBytes
