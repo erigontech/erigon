@@ -132,6 +132,8 @@ func (c *Client) FetchStateSyncEvents(ctx context.Context, fromID uint64, to tim
 			return nil, err
 		}
 
+		c.logger.Debug("[bor.heimdall] Fetching state sync events", "queryParams", url.RawQuery)
+
 		ctx = withRequestType(ctx, stateSyncRequest)
 
 		response, err := FetchWithRetry[StateSyncEventsResponse](ctx, c, url, c.logger)
@@ -499,7 +501,7 @@ func internalFetch(ctx context.Context, client HttpClient, u *url.URL, logger lo
 		return nil, err
 	}
 
-	logger.Debug(heimdallLogPrefix("http client get request"), "uri", u.RequestURI())
+	logger.Trace(heimdallLogPrefix("http client get request"), "uri", u.RequestURI())
 
 	res, err := client.Do(req)
 	if err != nil {
