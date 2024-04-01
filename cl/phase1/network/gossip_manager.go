@@ -220,13 +220,17 @@ func (g *GossipManager) onRecv(ctx context.Context, data *sentinel.GossipData, l
 				l["at"] = "decoding attestation"
 				return err
 			}
-			if err := g.committeeSub.OnReceiveAttestation(data.Name, att); err != nil {
-				log.Debug("failed to process attestation", "err", err)
-				if errors.Is(err, committee_subscription.ErrIgnore) {
+			if err := g.forkChoice.OnCheckReceivedAttestation(data.Name, att); err != nil {
+				log.Debug("failed to check attestation", "err", err)
+				if errors.Is(err, forkchoice.ErrIgnore) {
 					return nil
 				}
 				g.sentinel.BanPeer(ctx, data.Peer)
 				return err
+			}
+			// check if someone wants to aggregate
+			if err := g.committeeSub.CheckAggregateAttestation(att); err != nil {
+				log.Debug("failed to check aggregate attestation", "err", err)
 			}
 			// publish
 			if _, err := g.sentinel.PublishGossip(ctx, data); err != nil {

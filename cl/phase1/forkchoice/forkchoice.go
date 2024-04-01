@@ -134,6 +134,7 @@ type ForkChoiceStore struct {
 	// operations pool
 	operationsPool pool.OperationsPool
 	beaconCfg      *clparams.BeaconChainConfig
+	netCfg         *clparams.NetworkConfig
 
 	emitters *beaconevents.Emitters
 	synced   atomic.Bool
@@ -150,7 +151,7 @@ type childrens struct {
 }
 
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
-func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage) (*ForkChoiceStore, error) {
+func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution_client.ExecutionEngine, operationsPool pool.OperationsPool, forkGraph fork_graph.ForkGraph, emitters *beaconevents.Emitters, syncedDataManager *synced_data.SyncedDataManager, blobStorage blob_storage.BlobStorage, netCfg *clparams.NetworkConfig) (*ForkChoiceStore, error) {
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
 		return nil, err
@@ -231,6 +232,7 @@ func NewForkChoiceStore(anchorState *state2.CachingBeaconState, engine execution
 		operationsPool:        operationsPool,
 		anchorPublicKeys:      anchorPublicKeys,
 		beaconCfg:             anchorState.BeaconConfig(),
+		netCfg:                netCfg,
 		preverifiedSizes:      preverifiedSizes,
 		finalityCheckpoints:   finalityCheckpoints,
 		totalActiveBalances:   totalActiveBalances,

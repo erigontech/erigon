@@ -114,71 +114,7 @@ func (c *CommitteeSubscribeMgmt) AddAttestationSubscription(ctx context.Context,
 	return nil
 }
 
-func (c *CommitteeSubscribeMgmt) checkAttestation(topic string, att *solid.Attestation) error {
-	var (
-		slot           = att.AttestantionData().Slot()
-		committeeIndex = att.AttestantionData().CommitteeIndex()
-		epoch          = att.AttestantionData().Target().Epoch()
-		bits           = att.AggregationBits()
-	)
-	// [REJECT] The committee index is within the expected range
-	committeeCount := c.computeCommitteePerSlot(slot)
-	if committeeIndex >= committeeCount {
-		return ErrCommitteeIndexOutOfRange
-	}
-	// [REJECT] The attestation is for the correct subnet -- i.e. compute_subnet_for_attestation(committees_per_slot, attestation.data.slot, index) == subnet_id
-	subnetId := c.computeSubnetId(slot, committeeIndex)
-	topicSubnetId, err := gossip.SubnetIdFromTopicBeaconAttestation(topic)
-	if err != nil {
-		return err
-	}
-	if subnetId != topicSubnetId {
-		return ErrWrongSubnet
-	}
-	// [IGNORE] attestation.data.slot is within the last ATTESTATION_PROPAGATION_SLOT_RANGE slots (within a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) --
-	// i.e. attestation.data.slot + ATTESTATION_PROPAGATION_SLOT_RANGE >= current_slot >= attestation.data.slot (a client MAY queue future attestations for processing at the appropriate slot).
-	currentSlot := utils.GetCurrentSlot(c.genesisConfig.GenesisTime, c.beaconConfig.SecondsPerSlot)
-	if currentSlot < slot || currentSlot > slot+c.netConfig.AttestationPropagationSlotRange {
-		return ErrNotInPropagationRange
-	}
-	// [REJECT] The attestation's epoch matches its target -- i.e. attestation.data.target.epoch == compute_epoch_at_slot(attestation.data.slot)
-	if epoch != slot/c.beaconConfig.SlotsPerEpoch {
-		return ErrEpochMismatch
-	}
-	//[REJECT] The attestation is unaggregated -- that is, it has exactly one participating validator (len([bit for bit in aggregation_bits if bit]) == 1, i.e. exactly 1 bit is set).
-	emptyCount := 0
-	for i := 0; i < len(bits); i++ {
-		if bits[i] == 0 {
-			emptyCount++
-		} else if bits[i]&(bits[i]-1) != 0 {
-			return ErrExactlyOneBitSet
-		}
-	}
-	if emptyCount != len(bits)-1 {
-		return ErrExactlyOneBitSet
-	}
-	// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
-	if len(bits)*8 < int(committeeCount) {
-		return ErrAggregationBitsMismatch
-	}
-	// todo ...
-	// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-	// [REJECT] The signature of attestation is valid.
-	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
-	// (a client MAY queue attestations for processing once block is retrieved).  // this case will be handled by the aggregation pool
-	// [REJECT] The block being voted for (attestation.data.beacon_block_root) passes validation.
-	// [REJECT] The attestation's target block is an ancestor of the block named in the LMD vote -- i.e.
-	// get_checkpoint_block(store, attestation.data.beacon_block_root, attestation.data.target.epoch) == attestation.data.target.root
-	// [IGNORE] The current finalized_checkpoint is an ancestor of the block defined by attestation.data.beacon_block_root --
-	// i.e. get_checkpoint_block(store, attestation.data.beacon_block_root, store.finalized_checkpoint.epoch) == store.finalized_checkpoint.root
-	return nil
-}
-
-func (c *CommitteeSubscribeMgmt) OnReceiveAttestation(topic string, att *solid.Attestation) error {
-	if err := c.checkAttestation(topic, att); err != nil {
-		return err
-	}
-
+func (c *CommitteeSubscribeMgmt) CheckAggregateAttestation(att *solid.Attestation) error {
 	var (
 		slot           = att.AttestantionData().Slot()
 		committeeIndex = att.AttestantionData().CommitteeIndex()
