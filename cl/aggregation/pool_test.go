@@ -16,13 +16,8 @@ var (
 		solid.NewCheckpointFromParameters([32]byte{0}, 4))
 	attData1Root, _ = attData1.HashSSZ()
 
-	att1_0 = solid.NewAttestionFromParameters(
-		[]byte{0b00000001, 0, 0, 0},
-		attData1,
-		[96]byte{'s', 't', 'u', 'v', 'w', 'x'},
-	)
 	att1_1 = solid.NewAttestionFromParameters(
-		[]byte{0b10000001, 0, 0, 0},
+		[]byte{0b00000001, 0, 0, 0},
 		attData1,
 		[96]byte{'a', 'b', 'c', 'd', 'e', 'f'},
 	)
@@ -32,7 +27,7 @@ var (
 		[96]byte{'d', 'e', 'f', 'g', 'h', 'i'},
 	)
 	att1_3 = solid.NewAttestionFromParameters(
-		[]byte{0b00000100, 0, 0, 0},
+		[]byte{0b00000100, 0b00000011, 0, 0},
 		attData1,
 		[96]byte{'g', 'h', 'i', 'j', 'k', 'l'},
 	)
@@ -104,7 +99,7 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			},
 			hashRoot: attData1Root,
 			expect: solid.NewAttestionFromParameters(
-				[]byte{0b00111111, 0, 0, 0}, // merge of att1_2, att1_3 and att1_4
+				[]byte{0b00111111, 0b00000011, 0, 0}, // merge of att1_2, att1_3 and att1_4
 				attData1,
 				mockAggrResult),
 		},
