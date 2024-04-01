@@ -125,7 +125,7 @@ func (d *blockDownloader) downloadBlocksUsingWaypoints(ctx context.Context, wayp
 		peers := d.p2pService.ListPeersMayHaveBlockNum(endBlockNum)
 		if len(peers) == 0 {
 			d.logger.Warn(
-				syncLogPrefix("can't use any peers to sync, will try again"),
+				syncLogPrefix("can't use any peers to download blocks, will try again in a bit"),
 				"start", waypoints[0].StartBlock(),
 				"end", endBlockNum,
 				"sleepSeconds", d.notEnoughPeersBackOffDuration.Seconds(),
