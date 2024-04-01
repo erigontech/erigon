@@ -25,6 +25,10 @@ const (
 	maxBlockJobLifetime       = 36 * time.Second // 3 mainnet slots
 )
 
+var (
+	ErrIgnore = fmt.Errorf("ignore")
+)
+
 // OnAttestation processes incoming attestations.
 func (f *ForkChoiceStore) OnAttestation(attestation *solid.Attestation, fromBlock bool, insert bool) error {
 	if !f.synced.Load() {
@@ -437,10 +441,6 @@ func (f *ForkChoiceStore) validateTargetEpochAgainstCurrentTime(attestation *sol
 	}
 	return fmt.Errorf("verification of attestation against current time failed")
 }
-
-var (
-	ErrIgnore = fmt.Errorf("ignore")
-)
 
 func (f *ForkChoiceStore) OnCheckReceivedAttestation(topic string, att *solid.Attestation) error {
 	var (
