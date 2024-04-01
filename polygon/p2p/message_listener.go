@@ -232,7 +232,7 @@ func notifyInboundMessageObservers[TPacket any](
 	ctx context.Context,
 	logger log.Logger,
 	peerPenalizer PeerPenalizer,
-	observers map[uint64]MessageObserver[*DecodedInboundMessage[TPacket]],
+	observers map[uint64]MessageObserver[*DecodedInboundMessage[*TPacket]],
 	message *sentry.InboundMessage,
 ) error {
 	peerId := PeerIdFromH512(message.PeerId)
@@ -250,9 +250,9 @@ func notifyInboundMessageObservers[TPacket any](
 		return err
 	}
 
-	notifyObservers(observers, &DecodedInboundMessage[TPacket]{
+	notifyObservers(observers, &DecodedInboundMessage[*TPacket]{
 		InboundMessage: message,
-		Decoded:        decodedData,
+		Decoded:        &decodedData,
 		PeerId:         peerId,
 	})
 

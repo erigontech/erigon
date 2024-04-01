@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -330,7 +331,7 @@ func awaitResponse[TPacket any](
 		select {
 		case <-ctx.Done():
 			var nilPacket TPacket
-			return nilPacket, fmt.Errorf("await response interrupted: %w", ctx.Err())
+			return nilPacket, fmt.Errorf("await %s response interrupted: %w", reflect.TypeOf(nilPacket), ctx.Err())
 		case message := <-messages:
 			if filter(message) {
 				continue
